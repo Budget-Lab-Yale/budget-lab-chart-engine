@@ -12,6 +12,7 @@ import { validateSpec, validateChartData, validateChart } from "../spec/validate
 import { loadData } from "../data/load";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
 import { CHART_CSS } from "../embed/styles";
+import { createServer, findCharts } from "./serve";
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
 
@@ -28,6 +29,7 @@ function usageText(): string {
     "Commands:",
     "  validate <spec.yaml>             schema + cross-reference + CSV validation",
     "  render   <spec.yaml> [-o <out.html>]  render to a self-contained HTML file",
+    "  serve    [dir] [--port <n>]      local review gallery (default port 5173)",
     "",
     "Options:",
     "  -h, --help   show this help",
@@ -268,6 +270,74 @@ export async function main(argv: string[]): Promise<number> {
       console.error(result.message);
     }
     return result.exitCode;
+  }
+
+  if (cmd === "serve") {
+    const { positionals, values } = parseArgs({
+      args: argv.slice(3),
+      options: {
+        port: { type: "string" },
+      },
+      allowPositionals: true,
+    });
+
+    const rootDir = resolve(positionals[0] ?? process.cwd());
+    const port = values.port !== undefined ? parseInt(values.port, 10) : 5173;
+
+    if (Number.isNaN(port) || port < 1 || port > 65535) {
+      console.error(`tbl-chart serve: invalid port ${JSON.stringify(values.port)}`);
+      return 1;
+    }
+
+    // Read the pre-built live bundle from disk relative to this module.
+    const liveBundlePath = fileURLToPath(new URL("../embed/live.js", import.meta.url));
+    let liveBundleJs: string;
+    try {
+      liveBundleJs = await readFile(liveBundlePath, "utf8");
+    } catch (err) {
+      console.error(
+        `tbl-chart serve: cannot read live bundle at ${liveBundlePath}.\n` +
+          `Run \`npm run build\` first.\n` +
+          `(${(err as Error).message})`,
+      );
+      return 1;
+    }
+
+    const charts = findCharts(rootDir);
+    const server = createServer({ rootDir, liveBundleJs, css: CHART_CSS });
+
+    await new Promise<void>((resolvePromise, reject) => {
+      server.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "EADDRINUSE") {
+          console.error(
+            `tbl-chart serve: port ${port} is already in use.\n` +
+              `Try a different port with --port <n>.`,
+          );
+        } else {
+          console.error(`tbl-chart serve: server error: ${err.message}`);
+        }
+        reject(err);
+      });
+
+      server.listen(port, () => {
+        console.log(
+          `Serving ${charts.length} chart${charts.length === 1 ? "" : "s"} from ${rootDir} at http://localhost:${port}`,
+        );
+        resolvePromise();
+      });
+    }).catch(() => {
+      return;
+    });
+
+    // If server failed to start, error was already printed above; return non-zero.
+    if (!server.listening) return 1;
+
+    // Keep the process alive until interrupted.
+    await new Promise<void>(() => {
+      // Intentionally never resolves — server runs until SIGINT/SIGTERM.
+    });
+
+    return 0;
   }
 
   console.error(`tbl-chart: unknown command '${cmd}'\n`);
