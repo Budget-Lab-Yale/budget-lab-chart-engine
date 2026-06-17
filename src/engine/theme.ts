@@ -1,0 +1,36 @@
+// Engine theme: the layout/typography constants the chart primitives read, with all
+// COLOR values sourced from the generated Style-Guide tokens (theme/tokens.ts). The
+// non-color constants (font stack, type sizes, stroke widths, margins) are the
+// engine's own layout decisions and live here, not in colors.json.
+import { tokens } from "../theme/tokens";
+
+export const TBL = {
+  // Figtree is the house typeface; the rest are load-failure fallbacks.
+  font: 'Figtree, "Source Sans 3", system-ui, -apple-system, "Segoe UI", Arial, sans-serif',
+  color: {
+    text: tokens.structural.text_body,
+    heading: tokens.structural.text_heading,
+    muted: tokens.structural.text_muted,
+    axis: tokens.structural.text_axis,
+    gridline: tokens.structural.gridline,
+    axisStroke: tokens.structural.axis_stroke,
+    annotationDim: tokens.structural.annotation_dim,
+    bgSubtle: tokens.structural.bg_subtle,
+    border: tokens.structural.border,
+    navy: tokens.brand.navy,
+    blue: tokens.brand.blue,
+  },
+  size: {
+    axis: 10.5, // tick labels
+    legend: 12,
+    annotation: 11,
+  },
+  strokeWidth: { solid: 2, dashed: 2 },
+  dashArray: "5 3",
+} as const;
+
+// marginLeft holds a "label column": y-tick labels sit at svg x=0 (sharing the left
+// edge with title/subtitle above) and the plot area starts at x=marginLeft. marginRight
+// reserves room for the rightmost x-tick label so it isn't clipped.
+export const TBL_MARGIN_LEFT = 44;
+export const TBL_MARGIN_RIGHT = 16;

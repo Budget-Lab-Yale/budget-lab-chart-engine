@@ -1,7 +1,12 @@
-# Vendored libraries are not authored here — keep them out of language stats
+# Vendored libraries are not authored here — keep them out of language stats and
+# leave their bytes exactly as vendored (no EOL normalization).
 src/engine/vendor/** linguist-vendored
+src/engine/vendor/** -text
 # Normalize line endings for source
 *.ts text eol=lf
 *.mjs text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+# Golden fixtures + data: pin LF so the snapshot comparison is byte-stable cross-platform
+*.svg text eol=lf
+*.csv text eol=lf
