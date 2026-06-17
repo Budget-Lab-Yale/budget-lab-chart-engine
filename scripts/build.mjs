@@ -62,4 +62,33 @@ await build({
   outfile: "dist/embed/live.js",
 });
 
+// Embed helpers as separate Node entries: used by the snapshot selftest script
+// to build standalone HTML without duplicating the full CLI bundle import path.
+await build({
+  ...common,
+  platform: "node",
+  packages: "external",
+  entryPoints: [
+    "src/embed/bundle-standalone.ts",
+    "src/embed/styles.ts",
+  ],
+  outdir: "dist",
+  outbase: "src",
+});
+
+// Snapshot utilities: Node library entries used by the selftest script and
+// potentially by other tooling. Built for Node with deps external (playwright,
+// pngjs, pixelmatch resolved from node_modules at runtime).
+await build({
+  ...common,
+  platform: "node",
+  packages: "external",
+  entryPoints: [
+    "src/snapshot/render-png.ts",
+    "src/snapshot/compare.ts",
+  ],
+  outdir: "dist",
+  outbase: "src",
+});
+
 console.log(`built ${pkg.name}@${version}`);

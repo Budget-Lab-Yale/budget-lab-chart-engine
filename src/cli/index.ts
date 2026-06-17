@@ -1,9 +1,10 @@
 // tbl-chart CLI entry point.
-// Exported functions (runValidate, runRender) are unit-testable — they accept
+// Exported functions (runValidate, runRender, runSnapshot) are unit-testable — they accept
 // injected bundle/css and return {exitCode, message} rather than side-effecting.
 // main() wires them to real disk I/O and process.exit.
 
 import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,6 +14,8 @@ import { loadData } from "../data/load";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
 import { CHART_CSS } from "../embed/styles";
 import { createServer, findCharts } from "./serve";
+import { renderChartPng } from "../snapshot/render-png";
+import { comparePng } from "../snapshot/compare";
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
 
@@ -30,6 +33,8 @@ function usageText(): string {
     "  validate <spec.yaml>             schema + cross-reference + CSV validation",
     "  render   <spec.yaml> [-o <out.html>]  render to a self-contained HTML file",
     "  serve    [dir] [--port <n>]      local review gallery (default port 5173)",
+    "  snapshot <spec.yaml> [--baseline <path>] [--update]",
+    "                                   compare or update a PNG baseline snapshot",
     "",
     "Options:",
     "  -h, --help   show this help",
@@ -198,6 +203,152 @@ export async function runRender(
 }
 
 // ---------------------------------------------------------------------------
+// runSnapshot
+// ---------------------------------------------------------------------------
+
+export interface SnapshotOptions {
+  /** Path to the baseline PNG. Defaults to <specDir>/baseline.png */
+  baselinePath?: string;
+  /** When true, write the rendered PNG to baselinePath and return success. */
+  update?: boolean;
+  /** Pre-built browser IIFE bundle contents. Injected so tests can pass a stub. */
+  liveBundleJs: string;
+  /** CSS string. Injected so tests can pass a stub. */
+  css: string;
+}
+
+export interface SnapshotResult {
+  exitCode: number;
+  message: string;
+}
+
+/**
+ * Run `tbl-chart snapshot <specPath> [--baseline <path>] [--update]`.
+ * Renders the chart to PNG via headless Chromium.
+ * --update: writes the PNG as the new baseline.
+ * Without --update: compares against the existing baseline.
+ * Returns {exitCode, message} — caller is responsible for printing and exiting.
+ */
+export async function runSnapshot(
+  specPath: string,
+  opts: SnapshotOptions,
+): Promise<SnapshotResult> {
+  const absSpecPath = resolve(specPath);
+  const specDir = dirname(absSpecPath);
+
+  // Parse and validate the spec.
+  let specText: string;
+  try {
+    specText = await readFile(absSpecPath, "utf8");
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message: `cannot read file: ${absSpecPath}: ${(err as NodeJS.ErrnoException).message}`,
+    };
+  }
+
+  let spec: unknown;
+  try {
+    spec = parseYaml(specText);
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message: `${absSpecPath}: YAML parse error: ${(err as Error).message}`,
+    };
+  }
+
+  const structural = validateSpec(spec);
+  if (!structural.valid) {
+    const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+    return { exitCode: 1, message: lines };
+  }
+
+  let rows: TidyRow[];
+  try {
+    rows = await loadData((spec as ChartSpec).data, { baseDir: specDir });
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+    };
+  }
+
+  const result = validateChart(spec, rows);
+  if (!result.valid) {
+    const lines = result.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+    return { exitCode: 1, message: lines };
+  }
+
+  const typedSpec = spec as ChartSpec;
+  const html = buildStandaloneHtml({
+    spec: typedSpec,
+    rows,
+    liveBundleJs: opts.liveBundleJs,
+    css: opts.css,
+  });
+
+  // Render to PNG via headless browser.
+  let pngBuffer: Buffer;
+  try {
+    pngBuffer = await renderChartPng(html);
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message: `snapshot render failed: ${(err as Error).message}`,
+    };
+  }
+
+  const baselinePath = opts.baselinePath
+    ? resolve(opts.baselinePath)
+    : resolve(specDir, "baseline.png");
+
+  // --update mode: write the PNG and exit.
+  if (opts.update) {
+    try {
+      await writeFile(baselinePath, pngBuffer);
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `cannot write baseline: ${baselinePath}: ${(err as NodeJS.ErrnoException).message}`,
+      };
+    }
+    return { exitCode: 0, message: `Updated baseline ${baselinePath}` };
+  }
+
+  // Compare mode: baseline must exist.
+  if (!existsSync(baselinePath)) {
+    return {
+      exitCode: 1,
+      message:
+        `baseline not found: ${baselinePath}\n` +
+        `Run with --update to create it.`,
+    };
+  }
+
+  let baselineBuffer: Buffer;
+  try {
+    baselineBuffer = await readFile(baselinePath);
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message: `cannot read baseline: ${baselinePath}: ${(err as NodeJS.ErrnoException).message}`,
+    };
+  }
+
+  const diffOutPath = baselinePath.replace(/\.png$/i, ".diff.png");
+  const cmp = comparePng(pngBuffer, baselineBuffer, { diffOutPath });
+
+  if (cmp.match) {
+    return { exitCode: 0, message: `Snapshot OK` };
+  }
+
+  return {
+    exitCode: 1,
+    message: `Snapshot DIFFERS: ${cmp.diffPixels} px (wrote ${diffOutPath})`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -338,6 +489,50 @@ export async function main(argv: string[]): Promise<number> {
     });
 
     return 0;
+  }
+
+  if (cmd === "snapshot") {
+    const { positionals, values } = parseArgs({
+      args: argv.slice(3),
+      options: {
+        baseline: { type: "string" },
+        update: { type: "boolean" },
+      },
+      allowPositionals: true,
+    });
+    const specPath = positionals[0];
+    if (!specPath) {
+      console.error("tbl-chart snapshot: missing <spec.yaml> argument\n");
+      console.error(usageText());
+      return 1;
+    }
+
+    // Read the pre-built live bundle from disk relative to this module.
+    const liveBundlePath = fileURLToPath(new URL("../embed/live.js", import.meta.url));
+    let liveBundleJs: string;
+    try {
+      liveBundleJs = await readFile(liveBundlePath, "utf8");
+    } catch (err) {
+      console.error(
+        `tbl-chart snapshot: cannot read live bundle at ${liveBundlePath}.\n` +
+          `Run \`npm run build\` first.\n` +
+          `(${(err as Error).message})`,
+      );
+      return 1;
+    }
+
+    const result = await runSnapshot(specPath, {
+      baselinePath: values.baseline,
+      update: values.update ?? false,
+      liveBundleJs,
+      css: CHART_CSS,
+    });
+    if (result.exitCode === 0) {
+      console.log(result.message);
+    } else {
+      console.error(result.message);
+    }
+    return result.exitCode;
   }
 
   console.error(`tbl-chart: unknown command '${cmd}'\n`);
