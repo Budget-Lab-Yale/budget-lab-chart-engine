@@ -8,3 +8,5 @@ export interface TidyRow {
   value: string;
   [column: string]: string;
 }
+
+export { parseCsv, rowsToCsv, loadData, freezeRemote } from "./load.js";
