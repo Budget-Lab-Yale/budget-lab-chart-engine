@@ -4,10 +4,11 @@ The Budget Lab chart engine: a config-driven, Style-Guide-themed engine for buil
 interactive charts that are tested and locked before release, then embedded in publications.
 
 Extracted and generalized from the AI Labor Market Tracker's renderer (Observable Plot + D3).
-This repo is **the tool**; chart content lives in a separate archive repo (`tbl-charts`) that
-pins a version of this engine.
+This repo is **the tool**; chart content lives in a separate archive repo (`budget-lab-charts`)
+that pins a version of this engine.
 
-> Status: scaffolding. See the implementation plan for the full design.
+> Status: v0.1.0 — engine + data layer + validator + CLI (`validate`/`render`/`serve`/`snapshot`)
+> implemented and tested. Distributed via git tag (see Install).
 
 ## What's here
 
@@ -18,7 +19,8 @@ pins a version of this engine.
 | `src/spec/` | `ChartSpec` type + ajv schema + validation (one chart = one spec). |
 | `src/theme/` | `tokens.ts`, **generated** from the Style-Guide `palette/colors.json` (single source of truth). |
 | `src/embed/` | Web component + iframe page (shared versioned engine bundle) + standalone/PNG/SVG export. |
-| `src/cli/` | `tbl-chart` CLI: `new`, `validate`, `render`, `snapshot`, `build`, `catalog`, `serve`. |
+| `src/cli/` | `tbl-chart` CLI: `validate`, `render`, `serve`, `snapshot` (implemented); `new`, `catalog` (planned). |
+| `src/snapshot/` | Headless-Chromium PNG render + pixel-diff harness (the visual locking gate). |
 | `scripts/` | `sync-theme.mjs` (colors.json → tokens.ts), `build.mjs` (esbuild). |
 | `style-guide/` | Git submodule → `Budget-Lab-Yale/Style-Guide` at a pinned SHA (added during setup). |
 
@@ -28,12 +30,50 @@ Node + TypeScript, esbuild (build), vitest (tests), ajv (schema), Playwright (sn
 with the snapshot harness). Observable Plot + D3 are vendored under `src/engine/vendor/` and
 shipped as part of the engine bundle (zero runtime npm deps in the browser output).
 
+## Install (as a dependency)
+
+Distributed by **git tag** — no registry / `write:packages` needed. The `prepare` script
+builds `dist/` on install (the committed `tokens.ts` + vendored Plot/D3 mean no submodule init
+is required):
+
+```sh
+npm install github:Budget-Lab-Yale/budget-lab-chart-engine#v0.1.0
+```
+
+The archive repo (`budget-lab-charts`) pins a specific tag this way.
+
+```js
+import { renderChart } from "budget-lab-chart-engine";          // pure engine (browser-safe)
+import { validateChart } from "budget-lab-chart-engine/spec";    // ajv validation (Node)
+import { loadData }     from "budget-lab-chart-engine/data";      // CSV/remote → tidy rows (Node)
+```
+
+## Use (CLI)
+
+```sh
+tbl-chart validate <chart.yaml>            # structural + cross-ref + CSV checks
+tbl-chart render   <chart.yaml> -o out.html # self-contained interactive chart
+tbl-chart serve    [dir] [--port 5173]      # local review gallery of every chart.yaml under dir
+tbl-chart snapshot <chart.yaml> [--update]  # headless-Chromium PNG vs baseline (visual lock)
+```
+
 ## Develop
 
 ```sh
 npm install
-npm run sync-theme   # regenerate src/theme/tokens.ts from the Style-Guide submodule
+npm run sync-theme       # regenerate src/theme/tokens.ts + TOKENS_CSS from the Style-Guide submodule
 npm run typecheck
-npm test
+npm test                 # vitest (browser-free)
 npm run build
+npm run snapshot:selftest # Chromium determinism check (requires `npx playwright install chromium`)
 ```
+
+## Releasing
+
+Bump `version` in `package.json`, commit, then tag and push:
+
+```sh
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+Consumers install that tag; the `prepare` script rebuilds `dist/` from the tagged sources.
