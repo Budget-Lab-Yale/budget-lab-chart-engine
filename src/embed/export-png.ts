@@ -8,13 +8,18 @@ import { TBL } from "../engine/theme.js";
 import { LOGO_DATA_URL, FIGTREE_FONT_FACE, LOGO_ASPECT } from "./assets.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const XLINK_NS = "http://www.w3.org/1999/xlink";
 
-// Layout constants — fixed 720-wide content area, matching the live render default.
-const W = 720;
-const MARGIN = 32;
-const INNER_W = W - MARGIN * 2;
-const LOGO_W = 130;
-const LOGO_H = LOGO_W / LOGO_ASPECT;
+// Layout tokens — match the AI Labor Market Tracker export exactly: a fixed 1000×750
+// content frame (→ 2000×1500 PNG at SCALE 2), so every export shares one 4:3 frame and
+// the chart fills whatever height the chrome leaves.
+const W = 1000;
+const H = 750;
+const MARGIN = 40; // outer padding (all sides)
+const INNER_W = W - MARGIN * 2; // 920
+const LOGO_W = 150;
+const LOGO_H = LOGO_W / LOGO_ASPECT; // 37.5 (logo viewBox is 216×54 = 4:1)
+const LOGO_BASELINE_FRAC = 0.87; // wordmark baseline within the logo box
 const SCALE = 2;
 
 // Typography weights (matching styles.ts Figtree weight scale)
@@ -173,19 +178,15 @@ function drawLegend(
 
 /**
  * Build a self-contained export SVG for the given chart spec and data rows.
- * Pure — no canvas, no async, no external resources.
- * The returned SVGSVGElement can be serialized and rasterized.
+ * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame, matching
+ * the AILMT export. The chart fills the height left after the title/subtitle/legend chrome.
+ * NOTE: the eyebrow is intentionally NOT drawn in the export (matches AILMT — the figure
+ * number belongs to the publication context, not the standalone image).
  */
-export function buildExportSvg(
-  spec: ChartSpec,
-  rows: TidyRow[],
-  opts: { width?: number } = {},
-): SVGSVGElement {
-  const contentW = opts.width ?? W;
-  const innerW = contentW - MARGIN * 2;
-
-  // Pre-render at a dummy height to get legend items and axis title.
-  const meta = renderChart(spec, rows, { width: innerW });
+export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement {
+  // Pre-render to read legend items + axis title (rendered for real again below at the
+  // computed height).
+  const meta = renderChart(spec, rows, { width: INNER_W });
   const legendItems = meta.legendItems ?? [];
   const xAxisTitle = meta.xAxisTitle ?? "";
 
@@ -194,138 +195,79 @@ export function buildExportSvg(
   const note = spec.note ?? "";
   const source = spec.source ?? "";
 
-  // -- Measure top chrome to compute chart height --
-
-  const titleFont = `${W_BOLD} 22px ${FONT}`;
-  const titleLines = wrapText(title, titleFont, innerW - LOGO_W - 24);
-  const titleFirstBaseline = MARGIN + 22;
-  // Each title line uses lineHeight 28
-  let cursor =
-    titleFirstBaseline + Math.max(0, titleLines.length - 1) * 28;
-
-  if (subtitle) {
-    cursor += 24 + Math.max(0, wrapText(subtitle, `${W_SEMI} 14px ${FONT}`, innerW).length - 1) * 19;
-  }
-  if (legendItems.length) {
-    cursor += 26; // legend offset
-  }
-  const chartTop = cursor + 14;
-
-  // Bottom chrome
-  const noteLines = note
-    ? wrapText(note, `${W_BODY} 11px ${FONT}`, innerW)
-    : [];
-  let bottomH = 0;
-  if (xAxisTitle) bottomH += 14;
-  if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
-  if (source) bottomH += note ? 15 : 18;
-  bottomH += MARGIN - 15;
-
-  const TOTAL_H = 750;
-  const chartHeight = Math.max(160, TOTAL_H - chartTop - bottomH);
-
-  // --- Build the SVG DOM ---
-
   const root = svgEl("svg", {
     xmlns: SVG_NS,
-    width: contentW,
-    height: TOTAL_H,
+    "xmlns:xlink": XLINK_NS,
+    width: W,
+    height: H,
   }) as SVGSVGElement;
 
-  // Embedded font face
   const defs = svgEl("defs");
   const style = svgEl("style");
   style.textContent = FIGTREE_FONT_FACE;
   defs.appendChild(style);
   root.appendChild(defs);
+  root.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: H, fill: "#FFFFFF" }));
 
-  // White background
-  root.appendChild(
-    svgEl("rect", {
-      x: 0,
-      y: 0,
-      width: contentW,
-      height: TOTAL_H,
-      fill: "#FFFFFF",
-    }),
-  );
-
-  // Eyebrow
-  if (spec.eyebrow) {
-    root.appendChild(
-      textEl(MARGIN, titleFirstBaseline - 30, spec.eyebrow.toUpperCase(), {
-        size: 11,
-        weight: W_BODY,
-        fill: MUTED,
-      }),
-    );
-  }
-
-  // Title lines
-  drawLines(root, titleLines, MARGIN, titleFirstBaseline, 28, {
+  // --- top chrome: title (+ logo), subtitle, legend ---
+  const titleFirstBaseline = MARGIN + 22;
+  const titleLines = wrapText(title, `${W_BOLD} 22px ${FONT}`, INNER_W - LOGO_W - 24);
+  let cursor = drawLines(root, titleLines, MARGIN, titleFirstBaseline, 28, {
     size: 22,
     weight: W_BOLD,
     fill: NAVY,
   });
 
-  // Logo — top-right, baseline aligned with first title line
-  const logoY = titleFirstBaseline - LOGO_H * 0.87;
+  // Logo: right edge flush with the content-right bound; baseline shared with the title's
+  // first line. Set both href and xlink:href so it rasterizes across browsers.
+  const logoY = titleFirstBaseline - LOGO_H * LOGO_BASELINE_FRAC;
   const logoEl = svgEl("image", {
-    x: contentW - MARGIN - LOGO_W,
+    x: W - MARGIN - LOGO_W,
     y: logoY,
     width: LOGO_W,
     height: LOGO_H,
     href: LOGO_DATA_URL,
   });
+  logoEl.setAttributeNS(XLINK_NS, "href", LOGO_DATA_URL);
   root.appendChild(logoEl);
 
-  // Subtitle
   if (subtitle) {
-    cursor = drawLines(
-      root,
-      wrapText(subtitle, `${W_SEMI} 14px ${FONT}`, innerW),
-      MARGIN,
-      titleFirstBaseline + titleLines.length * 28 - 28 + 24,
-      19,
-      { size: 14, weight: W_SEMI, fill: MUTED },
-    );
+    cursor = drawLines(root, wrapText(subtitle, `${W_SEMI} 14px ${FONT}`, INNER_W), MARGIN, cursor + 24, 19, {
+      size: 14,
+      weight: W_SEMI,
+      fill: MUTED,
+    });
   }
-
-  // Legend
   if (legendItems.length) {
-    drawLegend(root, legendItems, chartTop - 14 - 26 + 26);
+    cursor = drawLegend(root, legendItems, cursor + 26);
   }
+  const chartTop = cursor + 14;
 
-  // Chart SVG — rendered at the precise height left after chrome
-  const { svg: chartSvg } = renderChart(spec, rows, {
-    width: innerW,
-    height: chartHeight,
-  });
+  // Reserve the bottom-chrome height so the chart fills the rest (total == H).
+  const noteLines = note ? wrapText(note, `${W_BODY} 11px ${FONT}`, INNER_W) : [];
+  let bottomH = 0;
+  if (xAxisTitle) bottomH += 14;
+  if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
+  if (source) bottomH += note ? 15 : 18;
+  bottomH += MARGIN - 15; // bottom padding
+  const chartHeight = Math.max(160, H - chartTop - bottomH);
+
+  // Chart, sized to fill.
+  const { svg: chartSvg } = renderChart(spec, rows, { width: INNER_W, height: chartHeight });
   chartSvg.setAttribute("x", String(MARGIN));
   chartSvg.setAttribute("y", String(chartTop));
-  chartSvg.setAttribute("width", String(innerW));
+  chartSvg.setAttribute("width", String(INNER_W));
   chartSvg.setAttribute("height", String(chartHeight));
   root.appendChild(chartSvg);
 
-  // Bottom chrome
+  // --- bottom chrome: x-axis title, note, source ---
   let by = chartTop + chartHeight;
   if (xAxisTitle) {
     by += 14;
-    root.appendChild(
-      textEl(contentW / 2, by, xAxisTitle, {
-        size: 12,
-        weight: W_BODY,
-        fill: AXIS,
-        anchor: "middle",
-      }),
-    );
+    root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_BODY, fill: AXIS, anchor: "middle" }));
   }
   if (noteLines.length) {
-    by = drawLines(root, noteLines, MARGIN, by + 18, 15, {
-      size: 11,
-      weight: W_BODY,
-      fill: MUTED,
-    });
+    by = drawLines(root, noteLines, MARGIN, by + 18, 15, { size: 11, weight: W_BODY, fill: MUTED });
   }
   if (source) {
     by += note ? 15 : 18;
@@ -345,7 +287,7 @@ export function buildExportSvg(
     root.appendChild(g);
   }
 
-  return root as SVGSVGElement;
+  return root;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,8 +350,8 @@ export async function exportChartPng(
   opts: { filename?: string } = {},
 ): Promise<void> {
   const svgElement = buildExportSvg(spec, rows);
-  const width = parseInt(svgElement.getAttribute("width") ?? "720", 10);
-  const height = parseInt(svgElement.getAttribute("height") ?? "750", 10);
+  const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
+  const height = parseInt(svgElement.getAttribute("height") ?? String(H), 10);
   const blob = await rasterize(svgElement, width, height);
   const filename =
     opts.filename ??

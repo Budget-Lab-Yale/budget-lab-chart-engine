@@ -61,4 +61,15 @@ describe("buildExportSvg — composition", () => {
     const svg = buildExportSvg(SPEC, ROWS);
     expect(svg.textContent).toContain("Test Source");
   });
+
+  it("uses a fixed 1000x750 (4:3) frame, matching AILMT", () => {
+    const svg = buildExportSvg(SPEC, ROWS);
+    expect(svg.getAttribute("width")).toBe("1000");
+    expect(svg.getAttribute("height")).toBe("750");
+  });
+
+  it("omits the eyebrow / figure number from the export", () => {
+    const svg = buildExportSvg({ ...SPEC, eyebrow: "Figure 9" }, ROWS);
+    expect(svg.textContent ?? "").not.toContain("Figure 9");
+  });
 });
