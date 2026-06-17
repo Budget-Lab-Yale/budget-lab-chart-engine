@@ -1,4 +1,4 @@
-# tbl-chart-engine
+# budget-lab-chart-engine
 
 The Budget Lab chart engine: a config-driven, Style-Guide-themed engine for building
 interactive charts that are tested and locked before release, then embedded in publications.

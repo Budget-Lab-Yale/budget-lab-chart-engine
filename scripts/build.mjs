@@ -36,4 +36,4 @@ await build({
   outbase: "src",
 });
 
-console.log(`built tbl-chart-engine@${version}`);
+console.log(`built ${pkg.name}@${version}`);
