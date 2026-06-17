@@ -116,6 +116,9 @@ body {
   gap: 2px 4px;
   margin: 0 0 8px;
   padding: 0;
+  /* Reserve the reset button's height (22px) so the row doesn't grow — and shove the
+     chart down ~1px — when the reset toggles in on the first pin. */
+  min-height: 22px;
 }
 .tbl-legend-item {
   appearance: none;

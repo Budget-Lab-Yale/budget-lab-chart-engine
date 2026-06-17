@@ -24,6 +24,12 @@ describe("CSS token fidelity (matches the Style-Guide, not approximations)", () 
     expect(CHART_CSS).toContain(".figure-supertitle");
     expect(CHART_CSS).toMatch(/text-transform:\s*uppercase/);
   });
+
+  it("reserves the legend reset button's height so pinning doesn't shift the chart", () => {
+    // .tbl-legend must carry a min-height matching the reset button (22px), else the row
+    // grows ~1px when the reset toggles in on the first pin.
+    expect(CHART_CSS).toMatch(/\.tbl-legend\s*\{[^}]*min-height:\s*22px/);
+  });
 });
 
 describe("standalone HTML font loading", () => {
