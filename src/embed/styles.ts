@@ -1,0 +1,264 @@
+// Chart-relevant CSS ported from the AI Labor Market Tracker's styles.css.
+// Includes only the rules required to render the MVP classes:
+//   figure-card, figure-title, figure-subtitle, figure-canvas, figure-legend-slot,
+//   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix,
+//   tbl-legend / tbl-legend-item / tbl-legend-swatch (.is-dashed) / tbl-legend-reset /
+//   tbl-legend-reset-icon / .is-pinned, tbl-dimmed,
+//   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch (.is-dashed) /
+//   tbl-tooltip-label / tbl-tooltip-value.
+// Base font/color variables and body defaults are included so the standalone HTML
+// renders correctly without any external stylesheet.
+// Intentionally omitted: scroll wrapper, y-axis overlay, downloads, selectors,
+// tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
+
+export const CHART_CSS: string = `
+/* =========================================================================
+ * Typography — Figtree weight scale and font variables.
+ * ========================================================================= */
+:root {
+  --tbl-font-sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --tbl-font-sans-compact: 'Figtree', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+
+  /* Figtree weight scale */
+  --tw-body:   500;
+  --tw-medium: 600;
+  --tw-semi:   700;
+  --tw-bold:   800;
+
+  /* Structural color tokens (fallback values matching the Style-Guide palette) */
+  --tbl-text-body:    #2E3044;
+  --tbl-text-heading: #1A1A2E;
+  --tbl-text-muted:   #6B7280;
+  --tbl-text-axis:    #6B7280;
+  --tbl-bg:           #ffffff;
+  --tbl-bg-subtle:    #F7F8FA;
+  --tbl-border:       #E2E5EB;
+  --tbl-navy:         #1A1A2E;
+  --tbl-blue:         #0072B2;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--tbl-font-sans);
+  font-weight: var(--tw-body);
+  color: var(--tbl-text-body);
+  background: var(--tbl-bg);
+  line-height: 1.5;
+}
+
+/* =========================================================================
+ * Figure card
+ * ========================================================================= */
+.figure-card {
+  margin-bottom: 28px;
+}
+.figure-card:last-child { margin-bottom: 0; }
+
+.figure-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: var(--tw-bold);
+  color: var(--tbl-navy);
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+}
+
+.figure-subtitle {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: var(--tw-semi);
+  color: var(--tbl-text-muted);
+}
+
+/* =========================================================================
+ * Legend slot + canvas
+ * ========================================================================= */
+.figure-legend-slot { width: 100%; }
+
+.figure-canvas {
+  width: 100%;
+  position: relative;
+}
+.figure-canvas svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* =========================================================================
+ * Meta / source line
+ * ========================================================================= */
+.figure-meta {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--tbl-text-muted);
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.figure-meta-text { flex: 1 1 auto; min-width: 0; }
+.figure-meta .figure-note { margin: 0 0 4px; }
+.figure-meta .figure-source { margin: 0; }
+.figure-meta .figure-source-prefix { font-weight: var(--tw-semi); }
+
+/* =========================================================================
+ * Legend
+ * ========================================================================= */
+.tbl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.tbl-legend-item {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 8px 3px 6px;
+  margin: 0;
+  font: var(--tw-body) 12px/1.2 var(--tbl-font-sans-compact, var(--tbl-font-sans));
+  color: var(--tbl-text-body);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  border-radius: 4px;
+  box-shadow: inset 0 -2px 0 transparent;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.tbl-legend-item:hover,
+.tbl-legend-item:focus-visible {
+  background: var(--tbl-bg-subtle);
+  color: var(--tbl-text-heading);
+  outline: none;
+}
+.tbl-legend-item.is-pinned {
+  color: var(--tbl-text-heading);
+  background: var(--tbl-bg-subtle);
+  box-shadow: inset 0 -1px 0 var(--legend-color, var(--tbl-navy));
+}
+.tbl-legend-swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: 1px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.tbl-legend-swatch.is-dashed {
+  background: linear-gradient(
+    to right,
+    var(--swatch-color, currentColor) 0 25%,
+    transparent          25% 37.5%,
+    var(--swatch-color, currentColor) 37.5% 62.5%,
+    transparent          62.5% 75%,
+    var(--swatch-color, currentColor) 75% 100%
+  );
+  border: 0;
+  height: 2px;
+}
+
+/* =========================================================================
+ * Legend reset button
+ * ========================================================================= */
+.tbl-legend-reset {
+  appearance: none;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--tbl-border);
+  background: var(--tbl-bg);
+  color: var(--tbl-text-muted);
+  margin: 0 6px 0 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  font-family: 'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+.tbl-legend-reset-icon {
+  display: block;
+  transform: translateY(-2px);
+  line-height: 1;
+}
+.tbl-legend-reset[hidden] { display: none; }
+.tbl-legend-reset:hover,
+.tbl-legend-reset:focus-visible {
+  background: var(--tbl-navy);
+  color: #fff;
+  border-color: var(--tbl-navy);
+  outline: none;
+}
+
+/* =========================================================================
+ * Hover-to-dim
+ * ========================================================================= */
+.figure-canvas svg path[data-series] {
+  transition: opacity 120ms linear;
+}
+.figure-canvas svg path.tbl-dimmed {
+  opacity: 0.15;
+}
+
+/* =========================================================================
+ * Crosshair tooltip — frosted glass
+ * ========================================================================= */
+.tbl-tooltip {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--tbl-text-heading, #1A1A2E);
+  font: var(--tw-body) 12px/1.35 var(--tbl-font-sans);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(200, 205, 215, 0.7);
+  white-space: nowrap;
+  z-index: 9999;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+          backdrop-filter: blur(20px) saturate(160%);
+  transition: opacity 80ms linear;
+  max-width: 320px;
+}
+.tbl-tooltip-head {
+  margin-bottom: 4px;
+  font-weight: var(--tw-bold);
+}
+.tbl-tooltip-label { font-weight: var(--tw-body); }
+.tbl-tooltip-value { font-weight: var(--tw-bold); }
+.tbl-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.tbl-tooltip-row:last-child { margin-bottom: 0; }
+.tbl-tooltip-swatch {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 18px;
+  height: 3px;
+  border-radius: 1px;
+}
+.tbl-tooltip-swatch.is-dashed {
+  background: linear-gradient(
+    to right,
+    var(--swatch-color, currentColor) 0 25%,
+    transparent          25% 37.5%,
+    var(--swatch-color, currentColor) 37.5% 62.5%,
+    transparent          62.5% 75%,
+    var(--swatch-color, currentColor) 75% 100%
+  );
+  height: 2px;
+}
+`;

@@ -1,0 +1,75 @@
+// Pure HTML builder: assembles a self-contained standalone HTML file from a
+// pre-built browser bundle, CSS, and chart spec + data. No esbuild dependency
+// at runtime — the caller passes the already-bundled JS as a string.
+import type { ChartSpec } from "../spec/types";
+import type { TidyRow } from "../data/index";
+
+export interface StandaloneInput {
+  spec: ChartSpec;
+  rows: TidyRow[];
+  /** The pre-built browser IIFE bundle (dist/embed/live.js contents). */
+  liveBundleJs: string;
+  css: string;
+  /** Optional page title; falls back to spec.title. */
+  title?: string;
+}
+
+/**
+ * Guard against `</script>` injection in JSON embedded in a <script> tag.
+ * Replace `<` with its HTML entity throughout the serialized JSON.
+ * (A full serialization-safe approach; sufficient for our use case.)
+ */
+function safeJsonForScript(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+/**
+ * Build a complete self-contained HTML document string.
+ *
+ * The document:
+ * - Loads Figtree from Google Fonts.
+ * - Inlines the CHART_CSS.
+ * - Inlines the browser IIFE bundle (which exports BudgetLabChart.mountChart).
+ * - Calls mountChart with the serialized spec and rows.
+ */
+export function buildStandaloneHtml(input: StandaloneInput): string {
+  const { spec, rows, liveBundleJs, css, title } = input;
+  const pageTitle = title ?? spec.title ?? "Chart";
+
+  const specJson = safeJsonForScript(spec);
+  const rowsJson = safeJsonForScript(rows);
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtmlAttr(pageTitle)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+${css}
+</style>
+</head>
+<body>
+<div id="chart" style="max-width:760px;margin:32px auto;padding:0 16px"></div>
+<script>
+${liveBundleJs}
+</script>
+<script>
+BudgetLabChart.mountChart(document.getElementById("chart"), {
+  spec: ${specJson},
+  rows: ${rowsJson}
+});
+</script>
+</body>
+</html>`;
+}
+
+/** Escape a value for safe use in an HTML attribute (title). */
+function escapeHtmlAttr(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string,
+  );
+}

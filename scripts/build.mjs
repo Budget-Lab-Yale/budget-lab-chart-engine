@@ -49,4 +49,17 @@ await build({
   outbase: "src",
 });
 
+// Live embed bundle: self-contained browser IIFE. Bundles the engine + all vendored
+// Plot/D3 so the standalone HTML needs no network request for JS. The entry sets
+// globalThis.BudgetLabChart = { mountChart }.
+await build({
+  ...common,
+  format: "iife",
+  platform: "browser",
+  bundle: true,
+  globalName: "BudgetLabChart",
+  entryPoints: ["src/embed/standalone-entry.ts"],
+  outfile: "dist/embed/live.js",
+});
+
 console.log(`built ${pkg.name}@${version}`);
