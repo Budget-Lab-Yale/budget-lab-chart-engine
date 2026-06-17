@@ -1,0 +1,12 @@
+chartType: line
+title: Proportion of Workers in Occupations Augmented by AI by Duration of Unemployment
+subtitle: Percent. Three-month moving average.
+source: CPS, Anthropic, The Budget Lab analysis
+note: Occupations are considered augmented if more than half of AI usage indicates task augmentation.
+xAxisType: temporal
+series_order:
+  - "<5 Weeks"
+  - "5-14 Weeks"
+  - "15-26 Weeks"
+  - "27+ Weeks"
+data: data.csv

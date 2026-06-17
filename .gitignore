@@ -7,3 +7,5 @@ coverage/
 test-results/
 playwright-report/
 .vitest/
+# agent worktrees
+.claude/

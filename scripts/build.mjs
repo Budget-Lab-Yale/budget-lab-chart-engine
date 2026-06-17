@@ -28,14 +28,23 @@ await build({
   banner: { js: "#!/usr/bin/env node" },
 });
 
-// Library entry points consumed via package `exports`. ajv (the validator's dependency)
-// stays external — it's an authoring/CLI concern, not part of the self-contained browser
-// engine bundle (src/engine vendors Plot/D3 and pulls in no npm deps). Node consumers get
-// ajv from the package's dependencies; a browser consumer of ./spec bundles it themselves.
+// Engine entry: the browser artifact. Self-contained (vendors Plot/D3, zero npm/node deps)
+// and platform-neutral so it runs anywhere.
 await build({
   ...common,
-  external: ["ajv"],
-  entryPoints: ["src/engine/index.ts", "src/spec/index.ts", "src/data/index.ts"],
+  entryPoints: ["src/engine/index.ts"],
+  outdir: "dist",
+  outbase: "src",
+});
+
+// Spec + data entries: Node library entries. The validator depends on ajv and the data
+// loader on node built-ins (fs/path) — both are authoring/CLI concerns, not part of the
+// browser engine bundle. Built for Node with deps + builtins external (resolved at runtime).
+await build({
+  ...common,
+  platform: "node",
+  packages: "external",
+  entryPoints: ["src/spec/index.ts", "src/data/index.ts"],
   outdir: "dist",
   outbase: "src",
 });
