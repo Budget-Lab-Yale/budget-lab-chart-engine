@@ -105,7 +105,10 @@ describe("mountChart", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: minimalSpec, rows: SINGLE_SERIES_ROWS });
     expect(container.querySelector(".figure-subtitle")).toBeNull();
-    expect(container.querySelector(".figure-meta")).toBeNull();
+    // The source line now always renders — it holds the Data/Image download buttons even
+    // when there is no note or source.
+    expect(container.querySelector(".figure-meta")).not.toBeNull();
+    expect(container.querySelectorAll(".figure-download-btn").length).toBe(2);
   });
 
   it("accepts custom width and height options", () => {

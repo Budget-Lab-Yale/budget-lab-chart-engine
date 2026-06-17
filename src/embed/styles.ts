@@ -1,4 +1,4 @@
-// Chart-relevant CSS ported from the AI Labor Market Tracker's styles.css.
+﻿// Chart-relevant CSS ported from the AI Labor Market Tracker's styles.css.
 // Includes only the rules required to render the MVP classes:
 //   figure-card, figure-title, figure-subtitle, figure-canvas, figure-legend-slot,
 //   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix,
@@ -18,7 +18,7 @@ import { TOKENS_CSS } from "../theme/tokens";
 // the font stack + Figtree weight scale (not in colors.json) are defined here.
 const RULES = `
 /* =========================================================================
- * Typography — Figtree weight scale and font variables.
+ * Typography â€” Figtree weight scale and font variables.
  * ========================================================================= */
 :root {
   --tbl-font-sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
@@ -116,8 +116,8 @@ body {
   gap: 2px 4px;
   margin: 0 0 8px;
   padding: 0;
-  /* Reserve the reset button's height (22px) so the row doesn't grow — and shove the
-     chart down ~1px — when the reset toggles in on the first pin. */
+  /* Reserve the reset button's height (22px) so the row doesn't grow â€” and shove the
+     chart down ~1px â€” when the reset toggles in on the first pin. */
   min-height: 22px;
 }
 .tbl-legend-item {
@@ -216,7 +216,7 @@ body {
 }
 
 /* =========================================================================
- * Crosshair tooltip — frosted glass
+ * Crosshair tooltip â€” frosted glass
  * ========================================================================= */
 .tbl-tooltip {
   position: fixed;
@@ -267,6 +267,71 @@ body {
   );
   height: 2px;
 }
+
+/* =========================================================================
+ * Figure header — flex row with title-text left, logo right
+ * ========================================================================= */
+.figure-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 0;
+}
+.figure-header-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* =========================================================================
+ * Logo
+ * ========================================================================= */
+.figure-logo {
+  flex-shrink: 0;
+  width: 130px;
+  height: auto;
+  margin-top: 4px;
+}
+.figure-logo svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* =========================================================================
+ * Download buttons — ported from tracker styles.css
+ * ========================================================================= */
+.figure-downloads {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.figure-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: var(--tw-medium) 12px/1 var(--tbl-font-sans);
+  color: var(--tbl-text-muted);
+  background: transparent;
+  border: 1px solid var(--tbl-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.figure-download-btn:hover,
+.figure-download-btn:focus-visible {
+  border-color: var(--tbl-navy);
+  color: #fff;
+  background: var(--tbl-navy);
+  outline: none;
+}
+.figure-download-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.figure-download-btn svg { display: block; flex-shrink: 0; }
 `;
 
 /** Self-contained chart CSS: the Style-Guide color tokens (generated) followed by the

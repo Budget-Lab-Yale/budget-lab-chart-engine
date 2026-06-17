@@ -3,14 +3,17 @@
 // crosshair, source line, and makeResponsive. No resize re-render — the SVG is
 // made responsive via viewBox scaling. Mirror of createChartController / buildCard
 // in the tracker's charts.js, minus the scroll wrapper, sticky y-axis overlay,
-// download buttons, selectors/variants, and x-axis-title overlay.
-import type { ChartSpec } from "../spec/types";
-import type { TidyRow } from "../data/index";
-import { renderChart } from "./index";
-import { renderLegend } from "./legend";
-import { attachCrosshair } from "./crosshair";
-import { renderSourceLine } from "./source-line";
-import { makeResponsive } from "./axes";
+// selectors/variants, and x-axis-title overlay.
+import type { ChartSpec } from "../spec/types.js";
+import type { TidyRow } from "../data/index.js";
+import { renderChart } from "./index.js";
+import { renderLegend } from "./legend.js";
+import { attachCrosshair } from "./crosshair.js";
+import { renderSourceLine } from "./source-line.js";
+import { makeResponsive } from "./axes.js";
+import { rowsToCsvBrowser } from "../data/csv-browser.js";
+import { LOGO_SVG } from "../embed/assets.js";
+import { exportChartPng } from "../embed/export-png.js";
 
 export interface MountOptions {
   spec: ChartSpec;
@@ -25,16 +28,36 @@ function formatValue(v: number, units: string): string {
   return `${v.toFixed(2)}${units}`;
 }
 
+// Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
+// Ported from the tracker's charts.js DOWNLOAD_ICON constant.
+const DOWNLOAD_ICON =
+  '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">' +
+  '<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
+  'stroke-linejoin="round" d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10"/></svg>';
+
+/** Convert a chart title to a kebab-case filename slug. */
+function titleToSlug(title: string | undefined): string {
+  if (!title) return "chart";
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 /**
  * Mount a fully interactive chart card into `container`.
  *
  * Card structure (mirrors tracker's buildCard + createChartController):
  *   div.figure-card
- *     h3.figure-title        (if spec.title)
- *     p.figure-subtitle      (if spec.subtitle)
+ *     div.figure-header
+ *       div.figure-header-text
+ *         div.figure-supertitle  (if spec.eyebrow)
+ *         h3.figure-title        (if spec.title)
+ *         p.figure-subtitle      (if spec.subtitle)
+ *       svg.figure-logo          (inline TBL logo)
  *     div.figure-legend-slot
- *     div.figure-canvas      ← SVG goes here
- *   div.figure-meta          (note + source, via renderSourceLine)
+ *     div.figure-canvas          ← SVG goes here
+ *   div.figure-meta              (note + source + download buttons, via renderSourceLine)
  */
 export function mountChart(container: HTMLElement, opts: MountOptions): void {
   const { spec, rows, width = 720, height = 400 } = opts;
@@ -43,27 +66,44 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
   const card = container.ownerDocument.createElement("div");
   card.className = "figure-card";
 
+  // Header row: text (eyebrow + title + subtitle) on the left, logo on the right.
+  const header = container.ownerDocument.createElement("div");
+  header.className = "figure-header";
+
+  const headerText = container.ownerDocument.createElement("div");
+  headerText.className = "figure-header-text";
+
   // Eyebrow (e.g. "Figure 1") above the title, if the spec carries one.
   if (spec.eyebrow) {
     const eyebrow = container.ownerDocument.createElement("div");
     eyebrow.className = "figure-supertitle";
     eyebrow.textContent = spec.eyebrow;
-    card.appendChild(eyebrow);
+    headerText.appendChild(eyebrow);
   }
 
   if (spec.title) {
     const h = container.ownerDocument.createElement("h3");
     h.className = "figure-title";
     h.textContent = spec.title;
-    card.appendChild(h);
+    headerText.appendChild(h);
   }
 
   if (spec.subtitle) {
     const s = container.ownerDocument.createElement("p");
     s.className = "figure-subtitle";
     s.textContent = spec.subtitle;
-    card.appendChild(s);
+    headerText.appendChild(s);
   }
+
+  header.appendChild(headerText);
+
+  // Logo — inline SVG so no external request is needed.
+  const logoWrapper = container.ownerDocument.createElement("div");
+  logoWrapper.className = "figure-logo";
+  logoWrapper.innerHTML = LOGO_SVG;
+  header.appendChild(logoWrapper);
+
+  card.appendChild(header);
 
   const legendSlot = container.ownerDocument.createElement("div");
   legendSlot.className = "figure-legend-slot";
@@ -116,6 +156,73 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
     seriesOrder,
   });
 
-  // Note + source line appended to the card (after the canvas).
-  renderSourceLine(card, { note: spec.note, source: spec.source });
+  // --- Download buttons ---
+  const doc = container.ownerDocument;
+  const downloads = doc.createElement("div");
+  downloads.className = "figure-downloads";
+
+  // Data (CSV) download button
+  const dataBtn = doc.createElement("button");
+  dataBtn.type = "button";
+  dataBtn.className = "figure-download-btn";
+  dataBtn.setAttribute("aria-label", "Download data (CSV)");
+  dataBtn.innerHTML = `${DOWNLOAD_ICON}<span>Data</span>`;
+  const dataLabel = dataBtn.querySelector("span")!;
+  dataBtn.addEventListener("click", () => {
+    const original = dataLabel.textContent ?? "Data";
+    dataBtn.disabled = true;
+    try {
+      const csv = rowsToCsvBrowser(rows);
+      const slug = titleToSlug(spec.title);
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = doc.createElement("a");
+      a.href = url;
+      a.download = `${slug}.csv`;
+      doc.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      console.error("Data download failed:", err);
+      dataLabel.textContent = "Failed";
+      setTimeout(() => {
+        dataLabel.textContent = original;
+        dataBtn.disabled = false;
+      }, 2000);
+      return;
+    }
+    dataBtn.disabled = false;
+  });
+  downloads.appendChild(dataBtn);
+
+  // Image (PNG) download button
+  const imgBtn = doc.createElement("button");
+  imgBtn.type = "button";
+  imgBtn.className = "figure-download-btn";
+  imgBtn.setAttribute("aria-label", "Download image (PNG)");
+  imgBtn.innerHTML = `${DOWNLOAD_ICON}<span>Image</span>`;
+  const imgLabel = imgBtn.querySelector("span")!;
+  imgBtn.addEventListener("click", async () => {
+    const original = imgLabel.textContent ?? "Image";
+    imgBtn.disabled = true;
+    imgLabel.textContent = "…";
+    try {
+      await exportChartPng(spec, rows);
+    } catch (err) {
+      console.error("Image export failed:", err);
+      imgLabel.textContent = "Failed";
+      setTimeout(() => {
+        imgLabel.textContent = original;
+        imgBtn.disabled = false;
+      }, 2000);
+      return;
+    }
+    imgLabel.textContent = original;
+    imgBtn.disabled = false;
+  });
+  downloads.appendChild(imgBtn);
+
+  // Note + source line appended to the card (after the canvas), with download buttons.
+  renderSourceLine(card, { note: spec.note, source: spec.source, actions: downloads });
 }
