@@ -186,6 +186,14 @@ export function rowsToCsv(rows: TidyRow[]): string {
 // loadData
 // ---------------------------------------------------------------------------
 
+/** Throw a pointed error on a non-2xx remote response, so an HTTP error page is never
+ * silently parsed as data (and never frozen as a "snapshot"). */
+function assertOk(resp: { ok: boolean; status: number; statusText: string }, url: string): void {
+  if (!resp.ok) {
+    throw new Error(`loadData: HTTP ${resp.status} ${resp.statusText} fetching ${url}`);
+  }
+}
+
 /** Coerce an unknown value to a non-null string. */
 function coerceString(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -218,12 +226,14 @@ export async function loadData(
   // Remote source (url)
   if (resolved.format === "csv") {
     const resp = await fetchFn(resolved.url);
+    assertOk(resp, resolved.url);
     const text = await resp.text();
     return parseCsv(text);
   }
 
   // format === "json"
   const resp = await fetchFn(resolved.url);
+  assertOk(resp, resolved.url);
   const data = (await resp.json()) as unknown;
 
   if (!Array.isArray(data)) {

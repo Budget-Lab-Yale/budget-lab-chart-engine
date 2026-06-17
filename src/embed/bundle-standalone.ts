@@ -39,6 +39,13 @@ export function buildStandaloneHtml(input: StandaloneInput): string {
   const specJson = safeJsonForScript(spec);
   const rowsJson = safeJsonForScript(rows);
 
+  // Neutralize any literal `</script` inside the bundle so it can't close the inline
+  // <script> tag. The bundle is trusted, self-generated esbuild output (no source literal
+  // contains `</script` today), but a future vendored dep could — this is a cheap guard
+  // with no runtime effect: in valid JS, `</script` only ever occurs inside a string or
+  // regex literal, where `<\/script` is equivalent.
+  const safeBundle = liveBundleJs.replace(/<\/script/gi, "<\\/script");
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -55,7 +62,7 @@ ${css}
 <body>
 <div id="chart" style="max-width:760px;margin:32px auto;padding:0 16px"></div>
 <script>
-${liveBundleJs}
+${safeBundle}
 </script>
 <script>
 BudgetLabChart.mountChart(document.getElementById("chart"), {

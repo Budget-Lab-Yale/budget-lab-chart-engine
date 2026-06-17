@@ -190,7 +190,7 @@ describe("loadData – remote CSV via fetchImpl", () => {
   it("fetches, parses, and returns rows", async () => {
     const fakeCsv = "time,series,value\n2021-01,a,1.0\n2021-02,b,2.0\n";
     const fetchImpl = async (_url: Parameters<typeof fetch>[0]): Promise<Response> =>
-      ({ text: async () => fakeCsv, json: async () => [] } as unknown as Response);
+      ({ text: async () => fakeCsv, json: async () => [], ok: true, status: 200, statusText: "OK" } as unknown as Response);
 
     const rows = await loadData(
       { url: "https://example.com/data.csv", format: "csv" },
@@ -212,7 +212,7 @@ describe("loadData – remote JSON via fetchImpl", () => {
       { date: "2021-02", category: "b", amount: 2.0, extra: "y" },
     ];
     const fetchImpl = async (_url: Parameters<typeof fetch>[0]): Promise<Response> =>
-      ({ text: async () => "", json: async () => data } as unknown as Response);
+      ({ text: async () => "", json: async () => data, ok: true, status: 200, statusText: "OK" } as unknown as Response);
 
     const rows = await loadData(
       {
@@ -232,7 +232,7 @@ describe("loadData – remote JSON via fetchImpl", () => {
       { time: "2021-01", series: "a", value: "1.0", note: "ok" },
     ];
     const fetchImpl = async (_url: Parameters<typeof fetch>[0]): Promise<Response> =>
-      ({ text: async () => "", json: async () => data } as unknown as Response);
+      ({ text: async () => "", json: async () => data, ok: true, status: 200, statusText: "OK" } as unknown as Response);
 
     const rows = await loadData(
       { url: "https://example.com/data.json", format: "json" },
@@ -244,7 +244,7 @@ describe("loadData – remote JSON via fetchImpl", () => {
 
   it("throws when the JSON response is not an array", async () => {
     const fetchImpl = async (_url: Parameters<typeof fetch>[0]): Promise<Response> =>
-      ({ text: async () => "", json: async () => ({ not: "array" }) } as unknown as Response);
+      ({ text: async () => "", json: async () => ({ not: "array" }), ok: true, status: 200, statusText: "OK" } as unknown as Response);
 
     await expect(
       loadData({ url: "https://example.com/data.json", format: "json" }, { fetchImpl }),
@@ -276,7 +276,7 @@ describe("freezeRemote", () => {
     ];
     const fakeCsv = rowsToCsv(sourceRows);
     const fetchImpl = async (_url: Parameters<typeof fetch>[0]): Promise<Response> =>
-      ({ text: async () => fakeCsv, json: async () => [] } as unknown as Response);
+      ({ text: async () => fakeCsv, json: async () => [], ok: true, status: 200, statusText: "OK" } as unknown as Response);
 
     const destPath = join(tmpdir(), `freeze-test-${Date.now()}.csv`);
     tempFiles.push(destPath);
@@ -298,7 +298,7 @@ describe("freezeRemote", () => {
   it("creates parent directories when they do not exist", async () => {
     const fakeCsv = "time,series,value\n2021-01,a,1.0\n";
     const fetchImpl = async (_url: Parameters<typeof fetch>[0]): Promise<Response> =>
-      ({ text: async () => fakeCsv, json: async () => [] } as unknown as Response);
+      ({ text: async () => fakeCsv, json: async () => [], ok: true, status: 200, statusText: "OK" } as unknown as Response);
 
     const destPath = join(tmpdir(), `freeze-subdir-${Date.now()}`, "nested", "out.csv");
     tempFiles.push(destPath);

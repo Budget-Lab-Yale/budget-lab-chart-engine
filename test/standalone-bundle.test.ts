@@ -46,4 +46,17 @@ describe("standalone HTML", () => {
     expect(chart?.querySelectorAll("svg path[data-series]").length).toBe(2);
     expect(doc.querySelector(".figure-title")?.textContent).toBe("Bundle smoke");
   });
+
+  it("neutralizes a literal </script> inside the inlined bundle", () => {
+    const html = buildStandaloneHtml({
+      spec: SPEC,
+      rows: ROWS,
+      liveBundleJs: 'var x="</script><b>pwn</b>";',
+      css: "",
+    });
+    // The bundle's `</script` is escaped to `<\/script` (harmless in a JS string literal),
+    // so it cannot prematurely close the inline <script> tag.
+    expect(html).toContain('var x="<\\/script>');
+    expect(html).not.toContain('var x="</script>');
+  });
 });
