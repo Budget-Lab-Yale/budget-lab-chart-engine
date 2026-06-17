@@ -321,37 +321,32 @@ body {
    lets the logo sit on the title's first-line baseline. The eyebrow sits above this row and
    the subtitle below it (both full width). */
 .figure-titlebar {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
+  position: relative;
 }
 .figure-titlebar .figure-title {
-  flex: 1 1 auto;
-  min-width: 0;
+  /* Reserve space on the right for the absolutely-positioned logo (130px + ~16px gap) so
+     the title text wraps before it. */
+  padding-right: 146px;
 }
 
 /* =========================================================================
  * Logo
  * ========================================================================= */
 .figure-logo {
-  flex: 0 0 auto;
-  width: 130px;
-  /* Zero-height baseline anchor: via the titlebar's align-items:baseline this box sits AT
-     the title's first-line baseline and adds NO row height, so the (taller) logo can't push
-     the title down and open a gap below the eyebrow. The svg hangs from it, overflowing up. */
-  height: 0;
-  position: relative;
-}
-.figure-logo svg {
   position: absolute;
   right: 0;
-  /* Put the svg's bottom 4.2px below the baseline so the wordmark baseline (~0.13×height =
-     4.2px above the svg bottom) lands exactly on the title's first-line baseline — the same
-     placement the PNG export computes (logoY = titleBaseline − 0.87×logoHeight). */
-  bottom: -4.2px;
+  /* Lift the logo so its wordmark baseline (~0.87 down the 4:1 box ≈ 28.3px at 130px wide)
+     lands on the title's first-line baseline (~17px below the titlebar top for the 18px/1.25
+     title): top = 17 − 28.3 ≈ −11.3px. Absolute + inside the relative titlebar, so it adds
+     no row height (no eyebrow gap) and its bottom (≈21px) stays within the title's first line
+     — nothing overflows downward, so no Firefox clip. */
+  top: -11.3px;
+  width: 130px;
+}
+.figure-logo svg {
+  display: block;
   width: 100%;
   height: auto;
-  display: block;
 }
 
 /* =========================================================================
