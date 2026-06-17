@@ -9,3 +9,8 @@ playwright-report/
 .vitest/
 # agent worktrees
 .claude/
+# vitest globalSetup build artifacts
+test/.tmp/
+# generated chart artifacts
+examples/**/*.html
+*.frozen.csv
