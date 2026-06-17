@@ -105,7 +105,7 @@ const png1 = await renderChartPng(html);
 console.log("Rendering chart (pass 2)...");
 const png2 = await renderChartPng(html);
 
-const result = comparePng(png1, png2);
+const result = await comparePng(png1, png2);
 
 if (result.diffPixels === 0) {
   console.log(`PASS: render is deterministic (diffPixels=0, totalPixels=${result.totalPixels})`);

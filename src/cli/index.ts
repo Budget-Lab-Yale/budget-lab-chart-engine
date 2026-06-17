@@ -336,7 +336,7 @@ export async function runSnapshot(
   }
 
   const diffOutPath = baselinePath.replace(/\.png$/i, ".diff.png");
-  const cmp = comparePng(pngBuffer, baselineBuffer, { diffOutPath });
+  const cmp = await comparePng(pngBuffer, baselineBuffer, { diffOutPath });
 
   if (cmp.match) {
     return { exitCode: 0, message: `Snapshot OK` };

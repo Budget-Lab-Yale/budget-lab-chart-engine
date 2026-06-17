@@ -1,9 +1,12 @@
 // PNG comparison utility for chart snapshot tests.
 // Uses pngjs to decode PNG buffers and pixelmatch to count differing pixels.
 
-import { PNG } from "pngjs";
-import pixelmatch from "pixelmatch";
 import { writeFileSync } from "node:fs";
+
+// pngjs + pixelmatch are imported DYNAMICALLY (inside the function), not at the top — they
+// are optional, snapshot-only deps. A static import would be hoisted by esbuild to the top
+// of the CLI bundle and break `tbl-chart` for consumers that don't have them installed.
+// (This makes comparePng async.)
 
 export interface CompareResult {
   match: boolean;
@@ -21,12 +24,15 @@ export interface CompareResult {
  * If the images have different dimensions, match is false and diffPixels
  * equals totalPixels (width * height of the actual image).
  */
-export function comparePng(
+export async function comparePng(
   actual: Buffer,
   baseline: Buffer,
   opts?: { threshold?: number; diffOutPath?: string },
-): CompareResult {
+): Promise<CompareResult> {
   const threshold = opts?.threshold ?? 0.1;
+
+  const { PNG } = await import("pngjs");
+  const { default: pixelmatch } = await import("pixelmatch");
 
   const actualPng = PNG.sync.read(actual);
   const baselinePng = PNG.sync.read(baseline);

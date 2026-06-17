@@ -2,7 +2,10 @@
 // Launches Chromium via Playwright, loads a self-contained chart HTML, and
 // screenshots the #chart element (or full page if absent) as a PNG Buffer.
 
-import { chromium } from "playwright";
+// playwright is imported DYNAMICALLY (inside the function), not at the top. esbuild hoists
+// static external imports to the top of any bundle that includes this module — which would
+// make the whole `tbl-chart` CLI fail to load for consumers that don't have playwright (an
+// optional, snapshot-only dependency). A dynamic import stays dynamic in the bundle.
 
 export interface RenderPngOptions {
   width?: number;
@@ -24,6 +27,7 @@ export async function renderChartPng(
   const height = opts?.height ?? 480;
   const deviceScaleFactor = opts?.deviceScaleFactor ?? 2;
 
+  const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({
