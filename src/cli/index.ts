@@ -6,7 +6,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData, validateChart } from "../spec/validate";
 import { loadData } from "../data/load";
@@ -141,6 +141,12 @@ export async function runRender(
   const absSpecPath = resolve(specPath);
   const specText = await readTextFile(absSpecPath);
   const spec = parseYamlSpec(specText, absSpecPath);
+
+  const structural = validateSpec(spec);
+  if (!structural.valid) {
+    const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+    return { exitCode: 1, message: lines };
+  }
 
   const baseDir = dirname(absSpecPath);
   let rows: TidyRow[];
@@ -278,9 +284,7 @@ export async function main(argv: string[]): Promise<number> {
 // process.argv[1] resolves to the same path (after normalization).
 const isMain =
   process.argv[1] !== undefined &&
-  fileURLToPath(import.meta.url).endsWith(
-    process.argv[1].replace(/\\/g, "/").replace(/^.*[\\/]/, ""),
-  );
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
   main(process.argv).then(
