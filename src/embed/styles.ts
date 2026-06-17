@@ -11,7 +11,12 @@
 // Intentionally omitted: scroll wrapper, y-axis overlay, downloads, selectors,
 // tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
 
-export const CHART_CSS: string = `
+import { TOKENS_CSS } from "../theme/tokens";
+
+// Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated
+// verbatim from the Style-Guide palette so the HTML/CSS matches the SVG side exactly. Only
+// the font stack + Figtree weight scale (not in colors.json) are defined here.
+const RULES = `
 /* =========================================================================
  * Typography — Figtree weight scale and font variables.
  * ========================================================================= */
@@ -24,17 +29,6 @@ export const CHART_CSS: string = `
   --tw-medium: 600;
   --tw-semi:   700;
   --tw-bold:   800;
-
-  /* Structural color tokens (fallback values matching the Style-Guide palette) */
-  --tbl-text-body:    #2E3044;
-  --tbl-text-heading: #1A1A2E;
-  --tbl-text-muted:   #6B7280;
-  --tbl-text-axis:    #6B7280;
-  --tbl-bg:           #ffffff;
-  --tbl-bg-subtle:    #F7F8FA;
-  --tbl-border:       #E2E5EB;
-  --tbl-navy:         #1A1A2E;
-  --tbl-blue:         #0072B2;
 }
 
 * { box-sizing: border-box; }
@@ -54,6 +48,15 @@ body {
   margin-bottom: 28px;
 }
 .figure-card:last-child { margin-bottom: 0; }
+
+/* Eyebrow above the title (e.g. "Figure 1"). Ported from the tracker's figure-supertitle. */
+.figure-supertitle {
+  font: var(--tw-body) 11px/1.2 var(--tbl-font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--tbl-text-muted);
+  margin: 0 0 8px;
+}
 
 .figure-title {
   margin: 0 0 4px;
@@ -262,3 +265,7 @@ body {
   height: 2px;
 }
 `;
+
+/** Self-contained chart CSS: the Style-Guide color tokens (generated) followed by the
+ * font scale + chart-chrome rules. */
+export const CHART_CSS: string = `${TOKENS_CSS}\n${RULES}`;

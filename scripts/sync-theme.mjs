@@ -29,6 +29,25 @@ if (!existsSync(colorsPath)) {
 }
 
 const colors = JSON.parse(readFileSync(colorsPath, "utf8"));
+
+// The Style-Guide also ships palette/colors.css — the canonical `:root` block of
+// `--tbl-*` CSS custom properties (brand, categorical, tonal scales, structural, text).
+// We emit it verbatim as TOKENS_CSS so the engine's HTML/CSS output uses the EXACT same
+// color values as the SVG side (and the tracker), instead of hand-written approximations.
+const cssPath = colorsPath.replace(/colors\.json$/, "colors.css");
+let tokensCss = "";
+if (existsSync(cssPath)) {
+  const cssText = readFileSync(cssPath, "utf8");
+  const rootMatch = /:root\s*\{[^}]*\}/.exec(cssText);
+  if (!rootMatch) {
+    console.error(`sync-theme: no :root block found in ${cssPath}`);
+    process.exit(1);
+  }
+  tokensCss = rootMatch[0];
+} else {
+  console.error(`sync-theme: colors.css not found at ${cssPath} (needed for CSS tokens)`);
+  process.exit(1);
+}
 const outPath = fileURLToPath(new URL("src/theme/tokens.ts", repoRoot));
 
 // Tier ladder, lightest → darkest (Tailwind convention). The light tier is two
@@ -110,7 +129,11 @@ const banner =
 
 const body =
   `export const tokens = ${JSON.stringify(tokens, null, 2)} as const;\n` +
-  `export type Tokens = typeof tokens;\n`;
+  `export type Tokens = typeof tokens;\n\n` +
+  `// The Style-Guide's canonical \`:root\` block of --tbl-* CSS custom properties, emitted\n` +
+  `// verbatim from palette/colors.css. The engine's CSS/HTML output prepends this so its\n` +
+  `// colors match the SVG side and the tracker exactly.\n` +
+  `export const TOKENS_CSS = ${JSON.stringify(tokensCss)};\n`;
 
 writeFileSync(outPath, banner + "\n" + body, "utf8");
 console.log(`sync-theme: wrote ${outPath}`);

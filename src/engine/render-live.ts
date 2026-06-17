@@ -43,6 +43,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
   const card = container.ownerDocument.createElement("div");
   card.className = "figure-card";
 
+  // Eyebrow (e.g. "Figure 1") above the title, if the spec carries one.
+  if (spec.eyebrow) {
+    const eyebrow = container.ownerDocument.createElement("div");
+    eyebrow.className = "figure-supertitle";
+    eyebrow.textContent = spec.eyebrow;
+    card.appendChild(eyebrow);
+  }
+
   if (spec.title) {
     const h = container.ownerDocument.createElement("h3");
     h.className = "figure-title";

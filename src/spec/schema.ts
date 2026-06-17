@@ -101,6 +101,7 @@ export const CHART_SPEC_SCHEMA = {
     chartType: { type: "string", enum: ["line"] },
 
     // Text
+    eyebrow: { type: "string" },
     title: { type: "string", minLength: 1 },
     subtitle: { type: "string" },
     source: { type: "string" },

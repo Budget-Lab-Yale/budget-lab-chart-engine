@@ -18,6 +18,7 @@ import type { TidyRow } from "../src/data/index";
 
 const SPEC: ChartSpec = {
   chartType: "line",
+  eyebrow: "Figure 1",
   title: "Bundle smoke",
   xAxisType: "temporal",
   series_order: ["a", "b"],
@@ -45,6 +46,7 @@ describe("standalone HTML", () => {
     expect(chart?.querySelectorAll(".tbl-legend .tbl-legend-item").length).toBe(2);
     expect(chart?.querySelectorAll("svg path[data-series]").length).toBe(2);
     expect(doc.querySelector(".figure-title")?.textContent).toBe("Bundle smoke");
+    expect(chart?.querySelector(".figure-supertitle")?.textContent).toBe("Figure 1");
   });
 
   it("neutralizes a literal </script> inside the inlined bundle", () => {
