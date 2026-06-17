@@ -272,14 +272,17 @@ body {
  * Figure header — flex row with title-text left, logo right
  * ========================================================================= */
 .figure-header {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
   margin-bottom: 0;
 }
-.figure-header-text {
+/* Title row: the title fills the width and pushes the logo to the right; baseline alignment
+   lets the logo sit on the title's first-line baseline. The eyebrow sits above this row and
+   the subtitle below it (both full width). */
+.figure-titlebar {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.figure-titlebar .figure-title {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -288,10 +291,13 @@ body {
  * Logo
  * ========================================================================= */
 .figure-logo {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   width: 130px;
-  height: auto;
-  margin-top: 4px;
+  /* align-items:baseline lands the logo box's BOTTOM on the title's first-line baseline.
+     The wordmark baseline sits ~0.87 down the 4:1 logo box, so nudge the logo DOWN by the
+     0.13×height descender space (height = 130/4 = 32.5px → ~4.2px) to put the wordmark
+     baseline on the title baseline — mirroring the PNG export's logo placement. */
+  transform: translateY(4.2px);
 }
 .figure-logo svg {
   display: block;

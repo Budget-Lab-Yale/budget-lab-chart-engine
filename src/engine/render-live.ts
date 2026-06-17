@@ -66,42 +66,45 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
   const card = container.ownerDocument.createElement("div");
   card.className = "figure-card";
 
-  // Header row: text (eyebrow + title + subtitle) on the left, logo on the right.
+  // Header: eyebrow (full width) above a title row; the title row holds the title on the
+  // left and the logo top-right, with the logo's wordmark baseline aligned to the title's
+  // first-line baseline (see .figure-titlebar / .figure-logo in styles.ts). Subtitle below.
   const header = container.ownerDocument.createElement("div");
   header.className = "figure-header";
 
-  const headerText = container.ownerDocument.createElement("div");
-  headerText.className = "figure-header-text";
-
-  // Eyebrow (e.g. "Figure 1") above the title, if the spec carries one.
+  // Eyebrow (e.g. "Figure 1") above the title row, if the spec carries one.
   if (spec.eyebrow) {
     const eyebrow = container.ownerDocument.createElement("div");
     eyebrow.className = "figure-supertitle";
     eyebrow.textContent = spec.eyebrow;
-    headerText.appendChild(eyebrow);
+    header.appendChild(eyebrow);
   }
+
+  // Title row: title (left) + logo (right), baseline-aligned.
+  const titlebar = container.ownerDocument.createElement("div");
+  titlebar.className = "figure-titlebar";
 
   if (spec.title) {
     const h = container.ownerDocument.createElement("h3");
     h.className = "figure-title";
     h.textContent = spec.title;
-    headerText.appendChild(h);
+    titlebar.appendChild(h);
   }
-
-  if (spec.subtitle) {
-    const s = container.ownerDocument.createElement("p");
-    s.className = "figure-subtitle";
-    s.textContent = spec.subtitle;
-    headerText.appendChild(s);
-  }
-
-  header.appendChild(headerText);
 
   // Logo — inline SVG so no external request is needed.
   const logoWrapper = container.ownerDocument.createElement("div");
   logoWrapper.className = "figure-logo";
   logoWrapper.innerHTML = LOGO_SVG;
-  header.appendChild(logoWrapper);
+  titlebar.appendChild(logoWrapper);
+
+  header.appendChild(titlebar);
+
+  if (spec.subtitle) {
+    const s = container.ownerDocument.createElement("p");
+    s.className = "figure-subtitle";
+    s.textContent = spec.subtitle;
+    header.appendChild(s);
+  }
 
   card.appendChild(header);
 
