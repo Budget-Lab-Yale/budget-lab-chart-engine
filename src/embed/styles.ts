@@ -293,16 +293,22 @@ body {
 .figure-logo {
   flex: 0 0 auto;
   width: 130px;
-  /* align-items:baseline lands the logo box's BOTTOM on the title's first-line baseline.
-     The wordmark baseline sits ~0.87 down the 4:1 logo box, so nudge the logo DOWN by the
-     0.13×height descender space (height = 130/4 = 32.5px → ~4.2px) to put the wordmark
-     baseline on the title baseline — mirroring the PNG export's logo placement. */
-  transform: translateY(4.2px);
+  /* Zero-height baseline anchor: via the titlebar's align-items:baseline this box sits AT
+     the title's first-line baseline and adds NO row height, so the (taller) logo can't push
+     the title down and open a gap below the eyebrow. The svg hangs from it, overflowing up. */
+  height: 0;
+  position: relative;
 }
 .figure-logo svg {
-  display: block;
+  position: absolute;
+  right: 0;
+  /* Put the svg's bottom 4.2px below the baseline so the wordmark baseline (~0.13×height =
+     4.2px above the svg bottom) lands exactly on the title's first-line baseline — the same
+     placement the PNG export computes (logoY = titleBaseline − 0.87×logoHeight). */
+  bottom: -4.2px;
   width: 100%;
   height: auto;
+  display: block;
 }
 
 /* =========================================================================
