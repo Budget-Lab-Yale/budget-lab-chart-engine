@@ -79,14 +79,53 @@ body {
  * ========================================================================= */
 .figure-legend-slot { width: 100%; }
 
+/* Scroll wrapper isolates horizontal overflow to the chart region, so the title/subtitle/
+   source above and below keep wrapping to the card width. */
+.figure-canvas-scroll {
+  width: 100%;
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .figure-canvas {
   width: 100%;
   position: relative;
 }
+/* Native px: the SVG is re-rendered at the container width and keeps that exact width; below
+   the min width it overflows into the scroll wrapper rather than being CSS-scaled down. */
 .figure-canvas svg {
   display: block;
-  max-width: 100%;
-  height: auto;
+  max-width: none;
+}
+
+/* Sticky y-axis overlay — floating value labels pinned at the left during horizontal scroll
+   (the controller translateX's it by scrollLeft). */
+.figure-y-axis-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.figure-y-axis-overlay span {
+  position: absolute;
+  left: 0;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 1px 4px;
+  border-radius: 6px;
+  font: var(--tw-body) 10.5px/1 var(--tbl-font-sans);
+  color: var(--tbl-text-axis);
+  white-space: nowrap;
+}
+
+/* X-axis title — sticky + centered in the visible viewport regardless of horizontal scroll. */
+.figure-x-axis-title {
+  position: sticky;
+  left: 0;
+  margin: 6px 0 0;
+  font: var(--tw-body) 11.5px/1.3 var(--tbl-font-sans);
+  color: var(--tbl-text-axis);
+  text-align: center;
 }
 
 /* =========================================================================

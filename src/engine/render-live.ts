@@ -1,16 +1,15 @@
-// Live-render layer: mounts a fully interactive chart card into a container element.
-// Wires the pure engine (renderChart) to the DOM-only live primitives: legend,
-// crosshair, source line, and makeResponsive. No resize re-render — the SVG is
-// made responsive via viewBox scaling. Mirror of createChartController / buildCard
-// in the tracker's charts.js, minus the scroll wrapper, sticky y-axis overlay,
-// selectors/variants, and x-axis-title overlay.
+// Live-render layer: mounts a fully interactive chart card into a container element and
+// wires the pure engine (renderChart) to the DOM-only live primitives (legend, crosshair,
+// source line). Scaling is copied from the tracker's createChartController: the chart is
+// RE-RENDERED at the container's width (the x-axis compresses; height stays fixed) down to a
+// minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
+// overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart } from "./index.js";
 import { renderLegend } from "./legend.js";
 import { attachCrosshair } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
-import { makeResponsive } from "./axes.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
@@ -18,9 +17,17 @@ import { exportChartPng } from "../embed/export-png.js";
 export interface MountOptions {
   spec: ChartSpec;
   rows: TidyRow[];
+  /** Initial render width (used before the container is measured). */
   width?: number;
   height?: number;
 }
+
+// Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
+// tracker's mobile/stacked-header breakpoint). Height is held constant as the width changes.
+const MIN_CHART_WIDTH = 390;
+const FIXED_CHART_HEIGHT = 400;
+
+type OverlayEl = HTMLElement & { _ro?: ResizeObserver };
 
 /** Format a numeric value for tooltip display. */
 function formatValue(v: number, units: string): string {
@@ -29,7 +36,6 @@ function formatValue(v: number, units: string): string {
 }
 
 // Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
-// Ported from the tracker's charts.js DOWNLOAD_ICON constant.
 const DOWNLOAD_ICON =
   '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">' +
   '<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
@@ -38,150 +44,81 @@ const DOWNLOAD_ICON =
 /** Convert a chart title to a kebab-case filename slug. */
 function titleToSlug(title: string | undefined): string {
   if (!title) return "chart";
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-/**
- * Mount a fully interactive chart card into `container`.
- *
- * Card structure (mirrors tracker's buildCard + createChartController):
- *   div.figure-card
- *     div.figure-header
- *       div.figure-header-text
- *         div.figure-supertitle  (if spec.eyebrow)
- *         h3.figure-title        (if spec.title)
- *         p.figure-subtitle      (if spec.subtitle)
- *       svg.figure-logo          (inline TBL logo)
- *     div.figure-legend-slot
- *     div.figure-canvas          ← SVG goes here
- *   div.figure-meta              (note + source + download buttons, via renderSourceLine)
- */
-export function mountChart(container: HTMLElement, opts: MountOptions): void {
-  const { spec, rows, width = 720, height = 400 } = opts;
+// Sticky y-axis: the SVG's y-tick labels scroll off-screen when the chart overflows
+// horizontally. Hide them and recreate each as a floating span (with a semi-transparent
+// pill) pinned at the left; the controller translateX's the overlay by scrollLeft so the
+// labels stay put. The gridlines/zero baseline stay in the SVG (visible across the chart),
+// so we get frozen-y-axis behavior without rebuilding any SVG primitive in HTML.
+function attachYAxisOverlay(canvasScroll: HTMLElement, svg: SVGSVGElement): OverlayEl | null {
+  const textEls = Array.from(svg.querySelectorAll<SVGTextElement>("g.tbl-y-tick-label text"));
+  if (!textEls.length) return null;
 
-  // Build the card DOM.
-  const card = container.ownerDocument.createElement("div");
-  card.className = "figure-card";
-
-  // Header: eyebrow (full width) above a title row; the title row holds the title on the
-  // left and the logo top-right, with the logo's wordmark baseline aligned to the title's
-  // first-line baseline (see .figure-titlebar / .figure-logo in styles.ts). Subtitle below.
-  const header = container.ownerDocument.createElement("div");
-  header.className = "figure-header";
-
-  // Eyebrow (e.g. "Figure 1") above the title row, if the spec carries one.
-  if (spec.eyebrow) {
-    const eyebrow = container.ownerDocument.createElement("div");
-    eyebrow.className = "figure-supertitle";
-    eyebrow.textContent = spec.eyebrow;
-    header.appendChild(eyebrow);
-  }
-
-  // Title row: title (left) + logo (right), baseline-aligned.
-  const titlebar = container.ownerDocument.createElement("div");
-  titlebar.className = "figure-titlebar";
-
-  if (spec.title) {
-    const h = container.ownerDocument.createElement("h3");
-    h.className = "figure-title";
-    h.textContent = spec.title;
-    titlebar.appendChild(h);
-  }
-
-  // Logo — inline SVG so no external request is needed.
-  const logoWrapper = container.ownerDocument.createElement("div");
-  logoWrapper.className = "figure-logo";
-  logoWrapper.innerHTML = LOGO_SVG;
-  titlebar.appendChild(logoWrapper);
-
-  header.appendChild(titlebar);
-
-  if (spec.subtitle) {
-    const s = container.ownerDocument.createElement("p");
-    s.className = "figure-subtitle";
-    s.textContent = spec.subtitle;
-    header.appendChild(s);
-  }
-
-  card.appendChild(header);
-
-  const legendSlot = container.ownerDocument.createElement("div");
-  legendSlot.className = "figure-legend-slot";
-  card.appendChild(legendSlot);
-
-  const canvas = container.ownerDocument.createElement("div");
-  canvas.className = "figure-canvas";
-  card.appendChild(canvas);
-
-  container.appendChild(card);
-
-  // Render the chart — no `document` option, engine uses global (browser / jsdom).
-  const {
-    svg,
-    legendItems,
-    seriesLabels,
-    seriesOrder,
-    dashedNames,
-    colors,
-    units,
-    dataInScope,
-    tooltipXParse,
-    tooltipXFormat,
-  } = renderChart(spec, rows, { width, height });
-
-  // Make the SVG responsive (viewBox-based scaling).
-  makeResponsive(svg);
-  canvas.appendChild(svg);
-
-  // Legend: only when 2+ series or any series has a style override.
-  if (legendItems !== null) {
-    renderLegend(legendSlot, legendItems, { svg });
-  }
-
-  // Crosshair tooltip.
-  attachCrosshair(svg, {
-    rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
-    xField: "time",
-    yField: "value",
-    seriesField: "series",
-    // tooltipXParse is typed (v: string) => number in the engine but crosshair
-    // declares (v: unknown) => number; widen via cast since the values are always
-    // strings at runtime.
-    xParse: tooltipXParse as ((v: unknown) => number) | undefined,
-    xFormat: tooltipXFormat,
-    yFormat: (v) => formatValue(v, units),
-    colors,
-    dashedSeries: dashedNames,
-    seriesLabels,
-    seriesOrder,
+  const doc = canvasScroll.ownerDocument;
+  const overlay = doc.createElement("div") as OverlayEl;
+  overlay.className = "figure-y-axis-overlay";
+  const pairs = textEls.map((textEl) => {
+    const span = doc.createElement("span");
+    span.textContent = textEl.textContent;
+    overlay.appendChild(span);
+    return { textEl, span };
   });
+  textEls.forEach((el) => { el.style.visibility = "hidden"; });
+  canvasScroll.appendChild(overlay);
 
-  // --- Download buttons ---
-  const doc = container.ownerDocument;
+  const reposition = (): void => {
+    const svgRect = svg.getBoundingClientRect();
+    const scrollRect = canvasScroll.getBoundingClientRect();
+    if (!svgRect.height) return;
+    overlay.style.height = `${svgRect.height}px`;
+    for (const { textEl, span } of pairs) {
+      const r = textEl.getBoundingClientRect();
+      span.style.top = `${r.top - scrollRect.top}px`;
+    }
+  };
+  reposition();
+  // ResizeObserver keeps the spans aligned as fonts load / the box re-lays-out. Guard for
+  // environments without it (e.g. jsdom): the one-time reposition above still runs.
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(reposition);
+    ro.observe(svg);
+    overlay._ro = ro;
+  }
+  return overlay;
+}
+
+/** X-axis title below the chart, sized to the visible viewport (sticky + centered in CSS). */
+function appendXAxisTitle(canvasScroll: HTMLElement, axisTitle: string | null): void {
+  if (!axisTitle) return;
+  const el = canvasScroll.ownerDocument.createElement("div");
+  el.className = "figure-x-axis-title";
+  el.textContent = axisTitle;
+  canvasScroll.appendChild(el);
+}
+
+/** Data (CSV) + Image (PNG) download buttons for the source line. */
+function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): HTMLElement {
   const downloads = doc.createElement("div");
   downloads.className = "figure-downloads";
 
-  // Data (CSV) download button
   const dataBtn = doc.createElement("button");
   dataBtn.type = "button";
   dataBtn.className = "figure-download-btn";
   dataBtn.setAttribute("aria-label", "Download data (CSV)");
   dataBtn.innerHTML = `${DOWNLOAD_ICON}<span>Data</span>`;
-  const dataLabel = dataBtn.querySelector("span")!;
+  const dataLabel = dataBtn.querySelector("span") as HTMLSpanElement;
   dataBtn.addEventListener("click", () => {
     const original = dataLabel.textContent ?? "Data";
     dataBtn.disabled = true;
     try {
       const csv = rowsToCsvBrowser(rows);
-      const slug = titleToSlug(spec.title);
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = doc.createElement("a");
       a.href = url;
-      a.download = `${slug}.csv`;
+      a.download = `${titleToSlug(spec.title)}.csv`;
       doc.body.appendChild(a);
       a.click();
       a.remove();
@@ -189,23 +126,19 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
     } catch (err) {
       console.error("Data download failed:", err);
       dataLabel.textContent = "Failed";
-      setTimeout(() => {
-        dataLabel.textContent = original;
-        dataBtn.disabled = false;
-      }, 2000);
+      setTimeout(() => { dataLabel.textContent = original; dataBtn.disabled = false; }, 2000);
       return;
     }
     dataBtn.disabled = false;
   });
   downloads.appendChild(dataBtn);
 
-  // Image (PNG) download button
   const imgBtn = doc.createElement("button");
   imgBtn.type = "button";
   imgBtn.className = "figure-download-btn";
   imgBtn.setAttribute("aria-label", "Download image (PNG)");
   imgBtn.innerHTML = `${DOWNLOAD_ICON}<span>Image</span>`;
-  const imgLabel = imgBtn.querySelector("span")!;
+  const imgLabel = imgBtn.querySelector("span") as HTMLSpanElement;
   imgBtn.addEventListener("click", async () => {
     const original = imgLabel.textContent ?? "Image";
     imgBtn.disabled = true;
@@ -215,10 +148,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
     } catch (err) {
       console.error("Image export failed:", err);
       imgLabel.textContent = "Failed";
-      setTimeout(() => {
-        imgLabel.textContent = original;
-        imgBtn.disabled = false;
-      }, 2000);
+      setTimeout(() => { imgLabel.textContent = original; imgBtn.disabled = false; }, 2000);
       return;
     }
     imgLabel.textContent = original;
@@ -226,6 +156,165 @@ export function mountChart(container: HTMLElement, opts: MountOptions): void {
   });
   downloads.appendChild(imgBtn);
 
-  // Note + source line appended to the card (after the canvas), with download buttons.
-  renderSourceLine(card, { note: spec.note, source: spec.source, actions: downloads });
+  return downloads;
+}
+
+/**
+ * Mount a fully interactive chart card into `container`. Returns a teardown() that
+ * disconnects the resize/scroll observers.
+ *
+ * Card structure (mirrors the tracker's buildCard + createChartController):
+ *   div.figure-card
+ *     div.figure-header            eyebrow + (title | logo) + subtitle
+ *     div.figure-legend-slot
+ *     div.figure-canvas-scroll     horizontal scroll wrapper (+ sticky y-axis overlay)
+ *       div.figure-canvas          ← the re-rendered SVG goes here
+ *     div.figure-meta              note + source + Data/Image download buttons
+ */
+export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
+  const { spec, rows, width: initialWidth, height = FIXED_CHART_HEIGHT } = opts;
+  const doc = container.ownerDocument;
+
+  const card = doc.createElement("div");
+  card.className = "figure-card";
+
+  // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle below.
+  const header = doc.createElement("div");
+  header.className = "figure-header";
+  if (spec.eyebrow) {
+    const eyebrow = doc.createElement("div");
+    eyebrow.className = "figure-supertitle";
+    eyebrow.textContent = spec.eyebrow;
+    header.appendChild(eyebrow);
+  }
+  const titlebar = doc.createElement("div");
+  titlebar.className = "figure-titlebar";
+  if (spec.title) {
+    const h = doc.createElement("h3");
+    h.className = "figure-title";
+    h.textContent = spec.title;
+    titlebar.appendChild(h);
+  }
+  const logoWrapper = doc.createElement("div");
+  logoWrapper.className = "figure-logo";
+  logoWrapper.innerHTML = LOGO_SVG;
+  titlebar.appendChild(logoWrapper);
+  header.appendChild(titlebar);
+  if (spec.subtitle) {
+    const s = doc.createElement("p");
+    s.className = "figure-subtitle";
+    s.textContent = spec.subtitle;
+    header.appendChild(s);
+  }
+  card.appendChild(header);
+
+  const legendSlot = doc.createElement("div");
+  legendSlot.className = "figure-legend-slot";
+  card.appendChild(legendSlot);
+
+  // Scroll wrapper isolates horizontal overflow to the chart region; the canvas holds the
+  // native-px SVG (which overflows below MIN_CHART_WIDTH).
+  const canvasScroll = doc.createElement("div");
+  canvasScroll.className = "figure-canvas-scroll";
+  const canvas = doc.createElement("div");
+  canvas.className = "figure-canvas";
+  canvasScroll.appendChild(canvas);
+  card.appendChild(canvasScroll);
+
+  renderSourceLine(card, {
+    note: spec.note,
+    source: spec.source,
+    actions: buildDownloadActions(doc, spec, rows),
+  });
+
+  container.appendChild(card);
+
+  // --- chart controller: re-render at the container width on resize ---
+  let lastWidth = -1;
+  let currentOverlay: OverlayEl | null = null;
+  let xTitleAdded = false;
+
+  const draw = (availWidth: number): void => {
+    const target = Math.max(MIN_CHART_WIDTH, Math.round(availWidth));
+    if (target === lastWidth) return;
+    lastWidth = target;
+
+    let built;
+    try {
+      built = renderChart(spec, rows, { width: target, height });
+    } catch (e) {
+      canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      return;
+    }
+    const {
+      svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, units,
+      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat,
+    } = built;
+
+    // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
+    // overflows into the scroll wrapper below the floor instead of being CSS-scaled down.
+    canvas.replaceChildren(svg);
+
+    if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
+
+    if (legendItems) {
+      legendSlot.replaceChildren();
+      renderLegend(legendSlot, legendItems, { svg });
+    }
+
+    attachCrosshair(svg, {
+      rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
+      xField: "time",
+      yField: "value",
+      seriesField: "series",
+      xParse: tooltipXParse as ((v: unknown) => number) | undefined,
+      xFormat: tooltipXFormat,
+      yFormat: (v) => formatValue(v, units),
+      colors,
+      dashedSeries: dashedNames,
+      seriesLabels,
+      seriesOrder,
+    });
+
+    currentOverlay?._ro?.disconnect();
+    currentOverlay?.remove();
+    currentOverlay = attachYAxisOverlay(canvasScroll, svg);
+  };
+
+  draw(canvasScroll.clientWidth || initialWidth || 720);
+
+  // Single persistent scrollLeft → translateX for the sticky y-axis overlay.
+  let scrollRaf: number | null = null;
+  const onScroll = (): void => {
+    if (scrollRaf !== null) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = null;
+      if (currentOverlay) currentOverlay.style.transform = `translateX(${canvasScroll.scrollLeft}px)`;
+    });
+  };
+  canvasScroll.addEventListener("scroll", onScroll);
+
+  // Re-render on width change. Observe canvasScroll (the outer box): its width is set by the
+  // layout column and is unaffected by the inner SVG widening, so there's no feedback loop.
+  // Guard for environments without ResizeObserver (e.g. jsdom): the initial draw still ran.
+  let resizeRaf: number | null = null;
+  let ro: ResizeObserver | undefined;
+  if (typeof ResizeObserver !== "undefined") {
+    ro = new ResizeObserver(() => {
+      if (resizeRaf !== null) return;
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = null;
+        draw(canvasScroll.clientWidth);
+      });
+    });
+    ro.observe(canvasScroll);
+  }
+
+  return () => {
+    ro?.disconnect();
+    if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+    if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
+    canvasScroll.removeEventListener("scroll", onScroll);
+    currentOverlay?._ro?.disconnect();
+  };
 }
