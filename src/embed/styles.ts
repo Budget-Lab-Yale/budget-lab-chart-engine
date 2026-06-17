@@ -46,6 +46,10 @@ body {
  * ========================================================================= */
 .figure-card {
   margin-bottom: 28px;
+  /* Query container so narrow-width rules (e.g. stacking the download buttons) respond to
+     the CHART CARD's own width, not the page viewport — correct for an embed of any size,
+     unlike AILMT's viewport media query (which keyed on its full sidebar+main layout). */
+  container-type: inline-size;
 }
 .figure-card:last-child { margin-bottom: 0; }
 
@@ -383,6 +387,16 @@ body {
   cursor: default;
 }
 .figure-download-btn svg { display: block; flex-shrink: 0; }
+
+/* =========================================================================
+ * Responsive — stack the Data/Image buttons when the chart card itself is narrow.
+ * Container query (keyed on the card width), so it's correct regardless of the embed's
+ * page context. ~520px ≈ AILMT's chart-area width when it stacked (880px viewport − 280px
+ * sidebar − gaps/padding).
+ * ========================================================================= */
+@container (max-width: 520px) {
+  .figure-downloads { flex-direction: column; }
+}
 `;
 
 /** Self-contained chart CSS: the Style-Guide color tokens (generated) followed by the
