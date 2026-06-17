@@ -1,0 +1,97 @@
+// The single contract for one chart. The ajv JSON-schema (schema.ts) and the engine
+// both derive from this. One chart = one spec (no figure/tracker/nav wrapper).
+//
+// Ported and reduced from the AI Labor Market Tracker's chart-block schema
+// (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
+// `chartType` is a union so adding bar/etc. later is additive.
+
+export type ChartType = "line";
+
+export type XAxisType = "numeric" | "temporal" | "quarterly";
+
+/** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
+export type ColorRef = string;
+
+export interface XAxisMarker {
+  x: string;
+  label?: string;
+  style?: "dashed" | "solid";
+  color?: ColorRef;
+  strokeWidth?: number;
+}
+
+export interface XAxisPolicy {
+  /** Numeric axis only: extend the visible domain to include 0. */
+  anchorAtZero?: boolean;
+  /** Vertical reference lines (e.g. a treatment date). */
+  markers?: XAxisMarker[];
+}
+
+export interface YAxisPolicy {
+  min?: number;
+  max?: number;
+  includeZero?: boolean;
+  tickCount?: number;
+  /** When data exceeds `max`, round the ceiling up to the next multiple of `step`. */
+  autoWiden?: { step: number };
+}
+
+export interface ConfidenceBand {
+  /** Data key the band wraps. */
+  series: string;
+  /** CSV column holding the lower bound. */
+  lower: string;
+  /** CSV column holding the upper bound. */
+  upper: string;
+}
+
+export interface SeriesStyle {
+  dashed?: boolean;
+}
+
+/** Where a chart's data comes from. A bare string is sugar for `{ file }`. */
+export type DataSource =
+  | string
+  | { file: string }
+  | {
+      url: string;
+      format: "csv" | "json";
+      /** For arbitrary JSON: map source fields onto the tidy long shape. */
+      map?: { timeField: string; seriesField: string; valueField: string };
+    };
+
+export interface ChartSpec {
+  chartType: ChartType;
+
+  // Text
+  title: string;
+  subtitle?: string;
+  source?: string;
+  note?: string;
+  x_axis_title?: string;
+
+  // Axes
+  xAxisType: XAxisType;
+  xAxisPolicy?: XAxisPolicy;
+  yAxisPolicy?: YAxisPolicy;
+
+  // Series
+  series_field?: string;
+  /** Render order; also an inclusion filter when set. */
+  series_order?: string[];
+  series_colors?: Record<string, ColorRef>;
+  series_styles?: Record<string, SeriesStyle>;
+  /** Short data key → display label for legend/tooltip. */
+  series_labels?: Record<string, string>;
+
+  confidence_bands?: ConfidenceBand[];
+
+  // Data
+  data: DataSource;
+
+  // Provenance / locking
+  /** Engine release that rendered/approved this chart (inherited from article.yaml). */
+  engineVersion?: string;
+  /** Catalog facets. */
+  tags?: string[];
+}
