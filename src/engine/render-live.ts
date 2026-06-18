@@ -6,6 +6,7 @@
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
+import type { LegendItem } from "./index.js";
 import { renderChart } from "./index.js";
 import { renderLegend } from "./legend.js";
 import { attachCrosshair } from "./crosshair.js";
@@ -26,6 +27,41 @@ export interface MountOptions {
 // tracker's mobile/stacked-header breakpoint). Height is held constant as the width changes.
 const MIN_CHART_WIDTH = 390;
 const FIXED_CHART_HEIGHT = 400;
+
+// Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px
+// Figtree; the exact value is tunable in the visual pass. The chart area is computed as
+// (outerContainerWidth − LEGEND_COLUMN_WIDTH − LEGEND_GAP) so the ResizeObserver observes
+// the OUTER card (stable), not the canvas box (which would shrink as the legend takes space →
+// feedback loop).
+const LEGEND_COLUMN_WIDTH = 160;
+const LEGEND_GAP = 16;
+
+// When the card is too narrow to fit both the chart floor and the legend column, fall back to
+// the top legend so the chart remains usable.
+const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGEND_GAP;
+
+/**
+ * Resolve the effective legend position for this chart.
+ *
+ * Rule (per Style-Guide §8.2/§8.3):
+ *   - Explicit `spec.legendPosition` always wins.
+ *   - Otherwise: "right" when chartType === "stacked" AND seriesCount >= 5; "top" otherwise.
+ *   - Diverging detection (any negative _y) could also trigger "right", but series count ≥ 5
+ *     covers the main case cleanly; diverging-specific ordering is a visual-pass refinement.
+ *
+ * The fallback to "top" when the card is too narrow is enforced in mountChart (not here),
+ * after the card width is known.
+ */
+function resolveLegendPosition(
+  spec: ChartSpec,
+  seriesCount: number,
+): "top" | "right" {
+  if (spec.legendPosition === "top" || spec.legendPosition === "right") {
+    return spec.legendPosition;
+  }
+  if (spec.chartType === "stacked" && seriesCount >= 5) return "right";
+  return "top";
+}
 
 type OverlayEl = HTMLElement & { _ro?: ResizeObserver };
 
@@ -163,13 +199,31 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): 
  * Mount a fully interactive chart card into `container`. Returns a teardown() that
  * disconnects the resize/scroll observers.
  *
- * Card structure (mirrors the tracker's buildCard + createChartController):
+ * Card structure (top-legend variant — default for line/bar and stacked with <5 series):
  *   div.figure-card
  *     div.figure-header            eyebrow + (title | logo) + subtitle
- *     div.figure-legend-slot
+ *     div.figure-legend-slot       (top-legend lives here)
  *     div.figure-canvas-scroll     horizontal scroll wrapper (+ sticky y-axis overlay)
  *       div.figure-canvas          ← the re-rendered SVG goes here
  *     div.figure-meta              note + source + Data/Image download buttons
+ *
+ * Card structure (right-legend variant — stacked ≥5 series or explicit legendPosition:"right"):
+ *   div.figure-card
+ *     div.figure-header
+ *     div.figure-body--legend-right  (flex row: canvas-side left, legend-column right)
+ *       div.figure-canvas-scroll
+ *         div.figure-canvas
+ *       div.figure-legend-slot--right
+ *         div.tbl-legend.tbl-legend--vertical
+ *     div.figure-meta
+ *
+ * No-feedback-loop width computation for right-legend:
+ *   The ResizeObserver watches the OUTER card element (whose width is set by the layout
+ *   column — stable). The chart width is computed as:
+ *     cardWidth − LEGEND_COLUMN_WIDTH − LEGEND_GAP
+ *   This means the legend column taking space does NOT narrow the observed element, so
+ *   there is no resize feedback loop. (Same discipline as the existing canvasScroll
+ *   observer for the SVG-widening case.)
  */
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   const { spec, rows, width: initialWidth, height = FIXED_CHART_HEIGHT } = opts;
@@ -208,6 +262,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   }
   card.appendChild(header);
 
+  // Legend slot above the canvas (used for top-legend; hidden/empty for right-legend).
   const legendSlot = doc.createElement("div");
   legendSlot.className = "figure-legend-slot";
   card.appendChild(legendSlot);
@@ -233,10 +288,35 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let lastWidth = -1;
   let currentOverlay: OverlayEl | null = null;
   let xTitleAdded = false;
+  // Right-legend slot — created lazily when the right-legend layout is activated.
+  let rightLegendSlot: HTMLElement | null = null;
+  // Track the current effective legendPosition so we can rebuild layout on first call.
+  let currentLegendPos: "top" | "right" | null = null;
 
-  const draw = (availWidth: number): void => {
-    const target = Math.max(MIN_CHART_WIDTH, Math.round(availWidth));
-    if (target === lastWidth) return;
+  /**
+   * Order legendItems for the right-legend column:
+   *   - Series rows in REVERSED declaration order (top-of-stack first, matching visual stack).
+   *   - nonInteractive rows (e.g. Total) moved to the END in their original relative order.
+   *
+   * Note: for diverging stacks the ideal order interleaves positives top-down then negatives;
+   * this reversed-series-then-total approximation is correct for the all-positive case and is a
+   * good visual approximation for diverging. Exact diverging interleaving can be refined in the
+   * visual pass.
+   */
+  function orderForRightLegend(items: LegendItem[]): LegendItem[] {
+    const series = items.filter((i) => !i.nonInteractive);
+    const extras = items.filter((i) => i.nonInteractive);
+    return [...[...series].reverse(), ...extras];
+  }
+
+  const draw = (outerWidth: number, legendPos: "top" | "right"): void => {
+    // For right-legend, the chart width is computed from the OUTER card width (stable),
+    // not from canvasScroll (which would shrink as the legend takes space → feedback loop).
+    const chartAvail = legendPos === "right"
+      ? outerWidth - LEGEND_COLUMN_WIDTH - LEGEND_GAP
+      : outerWidth;
+    const target = Math.max(MIN_CHART_WIDTH, Math.round(chartAvail));
+    if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
 
     let built;
@@ -257,10 +337,40 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
+    // --- Legend layout ---
     if (legendItems) {
-      legendSlot.replaceChildren();
-      renderLegend(legendSlot, legendItems, { svg });
+      if (legendPos === "right") {
+        // Activate the right-legend layout on first use (or if switching from top).
+        if (currentLegendPos !== "right") {
+          // Move canvasScroll into the body wrapper.
+          const bodyWrapper = doc.createElement("div");
+          bodyWrapper.className = "figure-body--legend-right";
+          card.insertBefore(bodyWrapper, canvasScroll);
+          card.removeChild(canvasScroll);
+          bodyWrapper.appendChild(canvasScroll);
+          // Create the right legend slot inside the body wrapper.
+          rightLegendSlot = doc.createElement("div");
+          rightLegendSlot.className = "figure-legend-slot--right";
+          bodyWrapper.appendChild(rightLegendSlot);
+          // Top legend slot stays in the DOM but is now empty (no content added).
+        }
+        // Render the right-side vertical legend with reversed series order.
+        const orderedItems = orderForRightLegend(legendItems);
+        rightLegendSlot!.replaceChildren();
+        renderLegend(rightLegendSlot!, orderedItems, { svg });
+        // Add vertical class to the rendered legend element.
+        const legendEl = rightLegendSlot!.querySelector(".tbl-legend");
+        if (legendEl) legendEl.classList.add("tbl-legend--vertical");
+        // Ensure top legend slot stays empty.
+        legendSlot.replaceChildren();
+      } else {
+        // Top legend (default behavior — unchanged).
+        legendSlot.replaceChildren();
+        renderLegend(legendSlot, legendItems, { svg });
+      }
     }
+
+    currentLegendPos = legendPos;
 
     attachCrosshair(svg, {
       rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -281,7 +391,28 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     currentOverlay = attachYAxisOverlay(canvasScroll, svg);
   };
 
-  draw(canvasScroll.clientWidth || initialWidth || 720);
+  // Initial draw: we don't know the series count yet, so render first to get legendItems,
+  // then resolve legendPosition from the result. Use initialWidth or a fallback for the
+  // very first render (before the ResizeObserver fires).
+  const initialCardWidth = card.clientWidth || initialWidth || 720;
+  // Quick pre-render to detect series count (width doesn't matter for position resolution).
+  let prelimSeriesCount = 1;
+  try {
+    const prelim = renderChart(spec, rows, { width: initialCardWidth, height });
+    prelimSeriesCount = (prelim.legendItems ?? []).filter((i) => !i.nonInteractive).length;
+  } catch {
+    // Ignore — draw() will surface the error.
+  }
+  // Fall back to top if the card is too narrow for the right-legend column.
+  const resolvedPos = (): "top" | "right" => {
+    const pos = resolveLegendPosition(spec, prelimSeriesCount);
+    if (pos === "right" && (card.clientWidth || initialWidth || 720) < LEGEND_RIGHT_MIN_CARD_WIDTH) {
+      return "top";
+    }
+    return pos;
+  };
+
+  draw(initialCardWidth, resolvedPos());
 
   // Single persistent scrollLeft → translateX for the sticky y-axis overlay.
   let scrollRaf: number | null = null;
@@ -294,8 +425,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   };
   canvasScroll.addEventListener("scroll", onScroll);
 
-  // Re-render on width change. Observe canvasScroll (the outer box): its width is set by the
-  // layout column and is unaffected by the inner SVG widening, so there's no feedback loop.
+  // Re-render on width change. For right-legend, observe the OUTER card (stable width set by
+  // layout column, unaffected by inner SVG widening → no feedback loop). For top-legend,
+  // canvasScroll is equivalent, but we observe card uniformly so the legendPos computation
+  // always has access to the full outer width.
   // Guard for environments without ResizeObserver (e.g. jsdom): the initial draw still ran.
   let resizeRaf: number | null = null;
   let ro: ResizeObserver | undefined;
@@ -304,10 +437,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       if (resizeRaf !== null) return;
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
-        draw(canvasScroll.clientWidth);
+        const cardW = card.clientWidth;
+        const pos = resolveLegendPosition(spec, prelimSeriesCount);
+        const effectivePos: "top" | "right" =
+          pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
+        draw(cardW, effectivePos);
       });
     });
-    ro.observe(canvasScroll);
+    ro.observe(card);
   }
 
   return () => {

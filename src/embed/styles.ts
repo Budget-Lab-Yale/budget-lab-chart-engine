@@ -83,6 +83,38 @@ body {
  * ========================================================================= */
 .figure-legend-slot { width: 100%; }
 
+/* Right-legend layout: flex row containing the scroll wrapper (left) and the vertical
+   legend column (right). The chart area gets a reduced width so the legend column has
+   space — no layout feedback loop because the width computation is based on the OUTER
+   card element, not this flex child. */
+.figure-body--legend-right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+}
+/* The canvas scroll wrapper stretches to fill the remaining flex space. */
+.figure-body--legend-right .figure-canvas-scroll {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* Right legend column: fixed width matching LEGEND_COLUMN_WIDTH in render-live.ts (160px).
+   Centered vertically on the chart area. ~22px row gaps per Style-Guide §8.2. */
+.figure-legend-slot--right {
+  flex: 0 0 160px;
+  width: 160px;
+  align-self: center;
+}
+/* Vertical legend: items stacked in a column with consistent row spacing. */
+.tbl-legend--vertical {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0 0;
+  row-gap: 4px;
+  margin: 0;
+  min-height: 0;
+}
+
 /* Scroll wrapper isolates horizontal overflow to the chart region, so the title/subtitle/
    source above and below keep wrapping to the card width. */
 .figure-canvas-scroll {

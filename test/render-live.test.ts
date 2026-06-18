@@ -233,6 +233,144 @@ describe("buildStandaloneHtml", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Right-side legend layout tests (A9)
+
+describe("right-side legend layout", () => {
+  // A stacked chart with ≥5 series — should default to right-legend.
+  const FIVE_SERIES_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Five series stacked",
+    subtitle: "Percent",
+    xAxisType: "categorical",
+    series_order: ["S1", "S2", "S3", "S4", "S5"],
+    data: "inline",
+  };
+  const FIVE_SERIES_ROWS: TidyRow[] = [
+    { time: "A", series: "S1", value: "1" },
+    { time: "A", series: "S2", value: "2" },
+    { time: "A", series: "S3", value: "1" },
+    { time: "A", series: "S4", value: "2" },
+    { time: "A", series: "S5", value: "1" },
+    { time: "B", series: "S1", value: "1" },
+    { time: "B", series: "S2", value: "2" },
+    { time: "B", series: "S3", value: "1" },
+    { time: "B", series: "S4", value: "2" },
+    { time: "B", series: "S5", value: "1" },
+  ];
+
+  // A stacked chart with explicit legendPosition:"right".
+  const EXPLICIT_RIGHT_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Explicit right legend",
+    subtitle: "Percent",
+    xAxisType: "categorical",
+    series_order: ["Alpha", "Beta"],
+    legendPosition: "right",
+    data: "inline",
+  };
+  const EXPLICIT_RIGHT_ROWS: TidyRow[] = [
+    { time: "X", series: "Alpha", value: "3" },
+    { time: "X", series: "Beta",  value: "2" },
+    { time: "Y", series: "Alpha", value: "4" },
+    { time: "Y", series: "Beta",  value: "1" },
+  ];
+
+  it("stacked chart with ≥5 series mounts with .figure-body--legend-right wrapper", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    expect(container.querySelector(".figure-body--legend-right")).not.toBeNull();
+  });
+
+  it("stacked chart with ≥5 series places legend in .figure-legend-slot--right", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    const rightSlot = container.querySelector(".figure-legend-slot--right");
+    expect(rightSlot).not.toBeNull();
+    expect(rightSlot?.querySelector(".tbl-legend")).not.toBeNull();
+  });
+
+  it("stacked chart with ≥5 series: .tbl-legend carries .tbl-legend--vertical", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    const legend = container.querySelector(".figure-legend-slot--right .tbl-legend");
+    expect(legend?.classList.contains("tbl-legend--vertical")).toBe(true);
+  });
+
+  it("explicit legendPosition:'right' activates right-legend layout for a 2-series chart", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: EXPLICIT_RIGHT_SPEC, rows: EXPLICIT_RIGHT_ROWS, width: 800 });
+    expect(container.querySelector(".figure-body--legend-right")).not.toBeNull();
+    expect(container.querySelector(".figure-legend-slot--right .tbl-legend")).not.toBeNull();
+  });
+
+  it("right-legend: series rows are in reversed order (top-of-stack first), Total last", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    const rightSlot = container.querySelector(".figure-legend-slot--right")!;
+    const items = rightSlot.querySelectorAll(".tbl-legend-item");
+    const labels = Array.from(items).map((el) => (el as HTMLElement).textContent?.trim());
+    // Series in FIVE_SERIES_SPEC are S1–S5; reversed = S5, S4, S3, S2, S1.
+    expect(labels[0]).toContain("S5");
+    expect(labels[1]).toContain("S4");
+    expect(labels[labels.length - 1]).not.toContain("Total"); // no Total row for all-positive 5-series
+    // First item should be S5 (last in series_order = top of stack = first in right legend)
+    expect(labels[0]).toContain("S5");
+    expect(labels[labels.length - 1]).toContain("S1");
+  });
+
+  it("line chart with no explicit position still uses top legend (unchanged)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS });
+    // No right-legend wrapper.
+    expect(container.querySelector(".figure-body--legend-right")).toBeNull();
+    // Legend should be in the top slot (.figure-legend-slot), not .figure-legend-slot--right.
+    const topSlot = container.querySelector(".figure-legend-slot");
+    expect(topSlot?.querySelector(".tbl-legend")).not.toBeNull();
+  });
+
+  it("line chart with explicit legendPosition:'top' uses top legend", () => {
+    const spec: ChartSpec = { ...MULTI_SERIES_SPEC, legendPosition: "top" };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: MULTI_SERIES_ROWS });
+    expect(container.querySelector(".figure-body--legend-right")).toBeNull();
+  });
+
+  it("stacked chart with <5 series and no explicit position uses top legend", () => {
+    const spec: ChartSpec = {
+      chartType: "stacked",
+      title: "Small stacked",
+      subtitle: "Percent",
+      xAxisType: "categorical",
+      series_order: ["P", "Q"],
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { time: "A", series: "P", value: "1" },
+      { time: "A", series: "Q", value: "2" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows, width: 800 });
+    expect(container.querySelector(".figure-body--legend-right")).toBeNull();
+  });
+
+  it("right-legend: top .figure-legend-slot is empty (legend moved to right column)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    const topSlot = container.querySelector(".figure-legend-slot");
+    // The top slot should have no .tbl-legend child.
+    expect(topSlot?.querySelector(".tbl-legend")).toBeNull();
+  });
+
+  it("right-legend: interactive buttons and hover/pin still present (not regressed)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    const rightSlot = container.querySelector(".figure-legend-slot--right")!;
+    const buttons = rightSlot.querySelectorAll("button.tbl-legend-item[data-series]");
+    expect(buttons.length).toBe(5); // 5 interactive series
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Legend swatch shape tests (A8)
 
 describe("legend swatch shapes", () => {
