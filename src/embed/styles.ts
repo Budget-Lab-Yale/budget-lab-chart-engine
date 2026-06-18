@@ -209,6 +209,18 @@ body {
   border: 0;
   height: 2px;
 }
+.tbl-legend-swatch.is-rect {
+  width: 14px;
+  height: 12px;
+  border-radius: 1px;
+}
+.tbl-legend-swatch.is-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px #000;
+}
 
 /* =========================================================================
  * Legend reset button

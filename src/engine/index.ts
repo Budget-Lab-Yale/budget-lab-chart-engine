@@ -29,6 +29,9 @@ export interface LegendItem {
   label: string;
   color: string | undefined;
   dashed: boolean;
+  markerShape: "line" | "rect" | "dot";
+  /** True for synthetic rows (e.g. Total) that are not interactive series. */
+  nonInteractive?: boolean;
 }
 
 export interface RenderResult {
@@ -191,15 +194,35 @@ export function renderChart(
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
   const hasDashOverrides = layers.dashedNames.size > 0;
-  const legendItems: LegendItem[] | null =
+  const markerShape: "line" | "rect" =
+    chartType === "bar" || chartType === "stacked" ? "rect" : "line";
+  const baseItems: LegendItem[] | null =
     seriesNames.length > 1 || hasDashOverrides
       ? seriesNames.map((name) => ({
           series: name,
           label: labelFor(name),
           color: colors.get(name),
           dashed: spec.series_styles?.[name]?.dashed === true,
+          markerShape,
         }))
       : null;
+  // Append legendExtras (e.g. diverging stacked Total row) after the series rows.
+  let legendItems: LegendItem[] | null = baseItems;
+  if (layers.legendExtras && layers.legendExtras.length > 0) {
+    const extras: LegendItem[] = layers.legendExtras.map((extra) => ({
+      series: `__extra__${extra.label}`,
+      label: extra.label,
+      color: undefined,
+      dashed: false,
+      markerShape: extra.markerShape,
+      nonInteractive: true,
+    }));
+    if (legendItems) {
+      legendItems = [...legendItems, ...extras];
+    }
+    // If there was only 1 series (no legend otherwise), a diverging chart still has ≥2
+    // series in practice per the brief — so this branch is a safety fallback only.
+  }
 
   return {
     svg,

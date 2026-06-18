@@ -15,7 +15,8 @@ export function renderLegend(
   const legend = doc.createElement("div");
   legend.className = "tbl-legend";
 
-  const allSeries = items.map((i) => i.series);
+  // Only real (interactive) series participate in hover-dim and pin logic.
+  const allSeries = items.filter((i) => !i.nonInteractive).map((i) => i.series);
   const pinned = new Set<string>();
   let hovered: string | null = null;
 
@@ -38,23 +39,38 @@ export function renderLegend(
     resetBtn.hidden = pinned.size === 0;
   };
 
-  for (const { series, label: displayLabel, color, dashed = false } of items) {
-    const btn = doc.createElement("button");
-    btn.type = "button";
+  for (const { series, label: displayLabel, color, dashed = false, markerShape, nonInteractive } of items) {
+    // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
+    // hover-dim / click-to-pin and carry no data-series attribute.
+    const btn: HTMLElement = nonInteractive
+      ? doc.createElement("span")
+      : doc.createElement("button");
+    if (!nonInteractive) {
+      (btn as HTMLButtonElement).type = "button";
+      btn.dataset.series = series; // data key — matches path[data-series]
+      btn.setAttribute("aria-pressed", "false");
+    }
     btn.className = "tbl-legend-item";
-    btn.dataset.series = series; // data key — matches path[data-series]
-    btn.setAttribute("aria-pressed", "false");
     // Series color exposed as a custom property so the pinned-state underline can
     // color-match the corresponding line.
     if (color) btn.style.setProperty("--legend-color", color);
 
     const swatch = doc.createElement("span");
     swatch.className = "tbl-legend-swatch";
-    if (dashed) {
-      swatch.classList.add("is-dashed");
-      if (color) swatch.style.setProperty("--swatch-color", color);
-    } else if (color) {
-      swatch.style.background = color;
+    if (markerShape === "rect") {
+      swatch.classList.add("is-rect");
+      if (color) swatch.style.background = color;
+    } else if (markerShape === "dot") {
+      swatch.classList.add("is-dot");
+      // White fill + black stroke via CSS — no inline color needed.
+    } else {
+      // "line" — existing behavior preserved.
+      if (dashed) {
+        swatch.classList.add("is-dashed");
+        if (color) swatch.style.setProperty("--swatch-color", color);
+      } else if (color) {
+        swatch.style.background = color;
+      }
     }
 
     const labelEl = doc.createElement("span");
@@ -63,15 +79,17 @@ export function renderLegend(
     btn.appendChild(swatch);
     btn.appendChild(labelEl);
 
-    btn.addEventListener("pointerenter", () => { hovered = series; applyHighlight(); });
-    btn.addEventListener("pointerleave", () => { hovered = null; applyHighlight(); });
-    btn.addEventListener("focus", () => { hovered = series; applyHighlight(); });
-    btn.addEventListener("blur", () => { hovered = null; applyHighlight(); });
-    btn.addEventListener("click", () => {
-      if (pinned.has(series)) pinned.delete(series);
-      else pinned.add(series);
-      applyHighlight();
-    });
+    if (!nonInteractive) {
+      btn.addEventListener("pointerenter", () => { hovered = series; applyHighlight(); });
+      btn.addEventListener("pointerleave", () => { hovered = null; applyHighlight(); });
+      btn.addEventListener("focus", () => { hovered = series; applyHighlight(); });
+      btn.addEventListener("blur", () => { hovered = null; applyHighlight(); });
+      btn.addEventListener("click", () => {
+        if (pinned.has(series)) pinned.delete(series);
+        else pinned.add(series);
+        applyHighlight();
+      });
+    }
 
     legend.appendChild(btn);
   }
