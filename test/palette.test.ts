@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { tblColorScale, resolveColor, TBL_COLORS } from "../src/engine/palette";
+import { tblColorScale, resolveColor, TBL_COLORS, monoScale } from "../src/engine/palette";
+import { tokens } from "../src/theme/tokens";
 
 describe("tblColorScale", () => {
   it("returns the categorical base hues in order for n<=7", () => {
@@ -50,5 +51,37 @@ describe("resolveColor", () => {
   it("passes undefined/empty through", () => {
     expect(resolveColor(undefined)).toBeUndefined();
     expect(resolveColor("")).toBe("");
+  });
+});
+
+describe("monoScale", () => {
+  it("returns all 7 tiers darkest-first for n=7, matching tokens.scales.blue", () => {
+    const result = monoScale("blue", 7);
+    expect(result).toHaveLength(7);
+    const s = tokens.scales.blue;
+    expect(result).toEqual([s["700"], s["600"], s["500"], s["400"], s["300"], s["200"], s["100"]]);
+  });
+
+  it("resolves alias purple→violet and returns the 3 darkest tiers (700,600,500)", () => {
+    const result = monoScale("purple", 3);
+    const s = tokens.scales.violet;
+    expect(result).toEqual([s["700"], s["600"], s["500"]]);
+  });
+
+  it("returns just the 700 tier for n=1", () => {
+    const result = monoScale("blue", 1);
+    expect(result).toEqual([tokens.scales.blue["700"]]);
+  });
+
+  it("clamps n>7 to 7 tiers", () => {
+    expect(monoScale("red", 10)).toHaveLength(7);
+  });
+
+  it("throws for a raw hex string", () => {
+    expect(() => monoScale("#123456", 3)).toThrow(/not a known categorical hue/);
+  });
+
+  it("throws for an unknown name like navy", () => {
+    expect(() => monoScale("navy", 3)).toThrow(/not a known categorical hue/);
   });
 });

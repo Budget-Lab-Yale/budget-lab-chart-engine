@@ -49,3 +49,33 @@ export function resolveColor(value: string | undefined): string | undefined {
   if (!value) return value;
   return TBL_COLORS[value] ?? value;
 }
+
+// The 7 usable tiers, darkest-first (skip tier 50 per spec).
+const MONO_TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
+
+/**
+ * Returns `n` hex strings from a hue's tonal scale, darkest-first (bottom-of-stack →
+ * top-of-stack). Intended for monochromatic stacked bars.
+ *
+ * - `base` may be a canonical hue key (`blue`, `amber`, `violet`, `green`, `red`,
+ *   `rose`, `russet`) or a Style-Guide alias (`purple`→violet, `pink`→rose,
+ *   `yellow`→amber, `brown`→russet).
+ * - Tiers 100–700 are used (tier 50 is skipped — too pale). That yields 7 usable tiers;
+ *   `n` is clamped to 7 (>7 mono segments is out of spec).
+ * - For `n < 7`, the darkest tiers are kept and the lightest are dropped
+ *   (e.g. n=4 → tiers 700,600,500,400).
+ * - Throws if `base` does not resolve to one of the 7 known categorical hues.
+ */
+export function monoScale(base: string, n: number): string[] {
+  // Resolve aliases (purple → violet, etc.) the same way NAMED is built above.
+  const canonical = (tokens.aliases as Record<string, string>)[base] ?? base;
+  const scale = (tokens.scales as Record<string, Record<string, string>>)[canonical];
+  if (!scale) {
+    throw new Error(
+      `monoScale: "${base}" is not a known categorical hue. ` +
+      `Expected one of: ${Object.keys(tokens.scales).join(", ")} (or a Style-Guide alias).`
+    );
+  }
+  const count = Math.min(n, MONO_TIERS.length);
+  return MONO_TIERS.slice(0, count).map((tier) => scale[tier] as string);
+}
