@@ -3,7 +3,7 @@
 // to build the per-chart x options (domain, axis marks, bottom margin, tooltip
 // formatters). Generic across chart types — the line builder consumes `xField`.
 import { d3 } from "./vendor";
-import { tblXAxis, tblTemporalXAxis, temporalXTicks } from "./axes";
+import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis } from "./axes";
 import { parseDate, parseQuarter, formatQuarter } from "./parse-time";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
 
@@ -22,7 +22,7 @@ export interface XOpts {
 }
 
 export interface XAdapter {
-  parseX: (v: string) => number | Date | null;
+  parseX: (v: string) => number | Date | string | null;
   xField: string;
   validate: (r: Record<string, unknown>) => boolean;
   buildXOpts: (data: Array<Record<string, any>>) => XOpts;
@@ -90,6 +90,42 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
           markerToX: (m) => parseQuarter(m.x),
           tooltipXParse: (v) => +(parseQuarter(v) as Date),
           tooltipXFormat: (v) => formatQuarter(new Date(v)),
+        };
+      },
+    };
+  }
+  if (xType === "categorical") {
+    return {
+      // Identity: the raw string IS the category key.
+      parseX: (v) => v,
+      xField: "_xc",
+      validate: (r) => typeof r._xc === "string" && r._xc !== "",
+      buildXOpts(data) {
+        // Category domain in data-encounter order (Style-Guide: declaration order is
+        // authoritative; never auto-sort by magnitude).
+        const seen = new Set<string>();
+        for (const row of data) {
+          const cat = row._xc as string | undefined;
+          if (typeof cat === "string" && cat !== "") seen.add(cat);
+        }
+        const categories = Array.from(seen);
+
+        // padding: 0.2 (inner gap between bands). paddingOuter leaves a small inset so
+        // groups sit inside the frame. Grouped/stacked builders may override band padding
+        // via mark-layer scale opts in a later task (A6/A7).
+        return {
+          marginBottom: 22,
+          xPlotOpts: {
+            type: "band",
+            domain: categories,
+            axis: null,
+            padding: 0.2,
+          },
+          axisMarks: tblBandXAxis(categories),
+          // Vertical reference markers are meaningless on a band scale.
+          markerToX: () => null,
+          tooltipXParse: undefined,
+          tooltipXFormat: undefined,
         };
       },
     };

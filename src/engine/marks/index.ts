@@ -13,16 +13,25 @@ export interface PreparedRow {
   _xn?: number;
   /** Parsed date x (temporal/quarterly axis). */
   _xd?: Date | null;
+  /** Parsed categorical x (band axis) — the raw string category key. */
+  _xc?: string;
   /** Confidence-band bounds, when the row's series has a band. */
   _lo?: number;
   _hi?: number;
 }
 
 export interface MarkContext {
-  /** In-memory field holding the parsed x value (`_xn` or `_xd`). */
+  /** In-memory field holding the parsed x value (`_xn`, `_xd`, or `_xc`). */
   xField: string;
   /** series key → resolved color. */
   colors: Map<string, string>;
+  /** Resolved, ordered series names (for bar builders that need positional info). */
+  seriesNames?: string[];
+  /** Inner plot width in px (outer width minus left+right margins). Approximate — bar
+   *  builders use this for px-based label-suppression logic. */
+  plotWidth?: number;
+  /** Inner plot height in px (outer height minus top+bottom margins). Approximate. */
+  plotHeight?: number;
 }
 
 export interface MarkLayers {

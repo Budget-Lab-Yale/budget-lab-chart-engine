@@ -188,6 +188,28 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
   ];
 }
 
+// Band (categorical) x-axis: one label per category, left-aligned at the band's left
+// edge (text-anchor "start"), per the bar-grouped spec. No tick marks.
+export function tblBandXAxis(
+  categories: string[],
+  _opts?: Record<string, never>,
+): Mark[] {
+  return [
+    Plot.text(categories, {
+      x: (d: string) => d,
+      text: (d: string) => d,
+      frameAnchor: "bottom",
+      dy: 12,
+      // Left-align label at band's left edge so it reads as a group header.
+      textAnchor: "start",
+      dx: 0,
+      fill: TBL.color.axis,
+      fontSize: TBL.size.axis,
+      fontWeight: 500,
+    }),
+  ];
+}
+
 /** Make a Plot-produced SVG responsive: swap fixed width/height for a viewBox so it
  * scales to its container. (Used by the live, non-overflowing render path.) */
 export function makeResponsive(svg: SVGSVGElement): SVGSVGElement {
