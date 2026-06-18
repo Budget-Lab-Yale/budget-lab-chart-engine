@@ -221,6 +221,9 @@ export interface BandCrosshairOptions {
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
   yFormat?: (v: number) => string;
+  /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
+   *  Defaults to vertical (categories on X axis). */
+  orientation?: "vertical" | "horizontal";
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -228,6 +231,14 @@ export interface CategoryBand {
   category: string;
   xMin: number;
   xMax: number;
+}
+
+/** A resolved horizontal band: the category key and its [yMin, yMax] in SVG user units.
+ *  Used for horizontal bar charts where categories are on the Y axis. */
+export interface CategoryBandH {
+  category: string;
+  yMin: number;
+  yMax: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +266,34 @@ export function resolveCategoryFromBands(
   for (const b of bands) {
     const mid = (b.xMin + b.xMax) / 2;
     const dist = Math.abs(svgX - mid);
+    if (dist < bestDist) { bestDist = dist; best = b; }
+  }
+  return best.category;
+}
+
+/**
+ * Given a list of CategoryBandH entries and a cursor y in SVG user units, return the
+ * category whose y-band contains the cursor, or snap to the nearest band.
+ * Used for horizontal bar charts where categories map to Y-axis rows.
+ * Returns null when bands is empty.
+ */
+export function resolveCategoryFromBandsH(
+  bands: CategoryBandH[],
+  svgY: number,
+): string | null {
+  if (!bands.length) return null;
+
+  // Check containment first.
+  for (const b of bands) {
+    if (svgY >= b.yMin && svgY <= b.yMax) return b.category;
+  }
+
+  // Snap to nearest band midpoint.
+  let best: CategoryBandH = bands[0]!;
+  let bestDist = Infinity;
+  for (const b of bands) {
+    const mid = (b.yMin + b.yMax) / 2;
+    const dist = Math.abs(svgY - mid);
     if (dist < bestDist) { bestDist = dist; best = b; }
   }
   return best.category;
@@ -312,7 +351,7 @@ export function buildBandTooltipHtml(
 
 /**
  * Read the rendered bar rect geometry from `svgEl` and return one CategoryBand
- * per distinct category.
+ * per distinct category (vertical orientation — categories on X axis).
  *
  * - Single-band charts (stacked, single-series bar): all rects share the same
  *   `data-series` namespace; each distinct x-position (rounded to int) is a
@@ -400,12 +439,50 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
 }
 
 /**
+ * Read the rendered bar rect geometry from `svgEl` and return one CategoryBandH
+ * per distinct category for HORIZONTAL orientation (categories on Y axis).
+ * Groups rects by their rounded y-coordinate to derive per-category y-bands.
+ */
+function readCategoryBandsH(svgEl: SVGSVGElement, opts: BandCrosshairOptions): CategoryBandH[] {
+  const { categories = [] } = opts;
+
+  const allRects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
+  if (!allRects.length) return [];
+
+  // Group rects by rounded y-coordinate (each horizontal category row has a distinct y).
+  const yToBand = new Map<number, { yMin: number; yMax: number }>();
+  for (const rect of allRects) {
+    const ry = parseFloat(rect.getAttribute("y") ?? "0");
+    const rh = parseFloat(rect.getAttribute("height") ?? "0");
+    const key = Math.round(ry);
+    const existing = yToBand.get(key);
+    if (!existing) {
+      yToBand.set(key, { yMin: ry, yMax: ry + rh });
+    } else {
+      existing.yMin = Math.min(existing.yMin, ry);
+      existing.yMax = Math.max(existing.yMax, ry + rh);
+    }
+  }
+
+  // Sort by y position (top to bottom) to match category declaration order.
+  const sortedKeys = Array.from(yToBand.keys()).sort((a, b) => a - b);
+  return sortedKeys.map((key, i) => {
+    const band = yToBand.get(key)!;
+    const cat = categories[i] ?? String(i);
+    return { category: cat, yMin: band.yMin, yMax: band.yMax };
+  });
+}
+
+/**
  * Attach a category-based hover tooltip to a categorical (band-axis) chart SVG.
- * Resolves cursor x → category using rendered rect geometry, shows a tooltip with
- * per-series values and (for stacked) a Total row.
+ * Resolves cursor x (vertical) or cursor y (horizontal) → category using rendered
+ * rect geometry, shows a tooltip with per-series values and (for stacked) a Total
+ * row, and draws a translucent area highlight over the hovered category's band.
  */
 export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOptions): void {
   if (!svgEl || !opts.rows?.length) return;
+
+  const horizontal = opts.orientation === "horizontal";
 
   const yFormat =
     opts.yFormat ??
@@ -415,10 +492,24 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
   const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
 
+  const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
+  const mr = +(svgEl.dataset.marginRight ?? "") || 8;
+  const mt = +(svgEl.dataset.marginTop ?? "") || 18;
+  const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
+
   const NS = "http://www.w3.org/2000/svg";
 
-  // Remove any previously attached band-crosshair elements.
-  svgEl.querySelectorAll(".tbl-band-crosshair-hit").forEach((el) => el.remove());
+  // Remove any previously attached band-crosshair elements (hit area + highlight).
+  svgEl.querySelectorAll(".tbl-band-crosshair-hit, .tbl-band-crosshair-hl").forEach((el) => el.remove());
+
+  // Area highlight rect — drawn BEFORE the hit area so it sits above the bars but below
+  // the pointer-events layer. Hidden by default (opacity 0).
+  const hl = svgEl.ownerDocument.createElementNS(NS, "rect");
+  hl.classList.add("tbl-band-crosshair-hl");
+  hl.setAttribute("fill", TBL.color.annotationDim);
+  hl.setAttribute("opacity", "0");
+  hl.style.pointerEvents = "none";
+  svgEl.appendChild(hl);
 
   // Transparent hit area.
   const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
@@ -433,17 +524,57 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
   const tip = getSharedTooltip(svgEl.ownerDocument);
 
+  /** Show the highlight over the given band geometry, spanning the full plot axis. */
+  function showHighlight(bandMin: number, bandMax: number): void {
+    if (horizontal) {
+      // Band is a y-row; highlight spans full plot width.
+      hl.setAttribute("x", String(ml));
+      hl.setAttribute("y", String(bandMin));
+      hl.setAttribute("width", String(W - ml - mr));
+      hl.setAttribute("height", String(Math.max(0, bandMax - bandMin)));
+    } else {
+      // Band is an x-column; highlight spans full plot height.
+      hl.setAttribute("x", String(bandMin));
+      hl.setAttribute("y", String(mt));
+      hl.setAttribute("width", String(Math.max(0, bandMax - bandMin)));
+      hl.setAttribute("height", String(H - mt - mb));
+    }
+    hl.setAttribute("opacity", "0.12");
+  }
+
   function update(evt: PointerEvent): void {
     const rect = svgEl.getBoundingClientRect();
     if (!rect.width) return;
 
-    const scaleX = W / rect.width;
-    const svgX = (evt.clientX - rect.left) * scaleX;
+    let category: string | null = null;
+    let hlMin = 0;
+    let hlMax = 0;
 
-    // Read geometry fresh on each event so it reflects the current render.
-    const bands = readCategoryBands(svgEl, opts);
-    const category = resolveCategoryFromBands(bands, svgX);
+    if (horizontal) {
+      // Horizontal: resolve cursor Y → category via y-bands.
+      const scaleY = H / rect.height;
+      const svgY = (evt.clientY - rect.top) * scaleY;
+      const bands = readCategoryBandsH(svgEl, opts);
+      category = resolveCategoryFromBandsH(bands, svgY);
+      if (category) {
+        const b = bands.find((x) => x.category === category);
+        if (b) { hlMin = b.yMin; hlMax = b.yMax; }
+      }
+    } else {
+      // Vertical: resolve cursor X → category via x-bands (existing behavior).
+      const scaleX = W / rect.width;
+      const svgX = (evt.clientX - rect.left) * scaleX;
+      const bands = readCategoryBands(svgEl, opts);
+      category = resolveCategoryFromBands(bands, svgX);
+      if (category) {
+        const b = bands.find((x) => x.category === category);
+        if (b) { hlMin = b.xMin; hlMax = b.xMax; }
+      }
+    }
+
     if (!category) { hide(); return; }
+
+    showHighlight(hlMin, hlMax);
 
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
@@ -470,6 +601,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   }
 
   function hide(): void {
+    hl.setAttribute("opacity", "0");
     tip.style.opacity = "0";
   }
 

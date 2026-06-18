@@ -11,9 +11,11 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveCategoryFromBands,
+  resolveCategoryFromBandsH,
   buildBandTooltipHtml,
   attachBandCrosshair,
   type CategoryBand,
+  type CategoryBandH,
 } from "../src/engine/crosshair";
 import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
@@ -72,6 +74,68 @@ describe("resolveCategoryFromBands", () => {
     expect(resolveCategoryFromBands(single, 0)).toBe("Solo");
     expect(resolveCategoryFromBands(single, 30)).toBe("Solo");
     expect(resolveCategoryFromBands(single, 999)).toBe("Solo");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveCategoryFromBandsH — PURE helper (horizontal / Y-axis resolution)
+// ---------------------------------------------------------------------------
+
+describe("resolveCategoryFromBandsH", () => {
+  const BANDS_H: CategoryBandH[] = [
+    { category: "Northeast", yMin: 20, yMax: 80 },
+    { category: "Midwest",   yMin: 90, yMax: 150 },
+    { category: "South",     yMin: 160, yMax: 220 },
+  ];
+
+  it("returns null for empty bands", () => {
+    expect(resolveCategoryFromBandsH([], 50)).toBeNull();
+  });
+
+  it("resolves a cursor inside the Northeast band (Y=50)", () => {
+    expect(resolveCategoryFromBandsH(BANDS_H, 50)).toBe("Northeast");
+  });
+
+  it("resolves a cursor at the top edge of Midwest band (Y=90)", () => {
+    expect(resolveCategoryFromBandsH(BANDS_H, 90)).toBe("Midwest");
+  });
+
+  it("resolves a cursor at the bottom edge of Midwest band (Y=150)", () => {
+    expect(resolveCategoryFromBandsH(BANDS_H, 150)).toBe("Midwest");
+  });
+
+  it("resolves a cursor inside the South band (Y=190)", () => {
+    expect(resolveCategoryFromBandsH(BANDS_H, 190)).toBe("South");
+  });
+
+  it("snaps to nearest band when cursor falls between rows", () => {
+    // Gap between Northeast (yMax=80) and Midwest (yMin=90): cursor at 85
+    // mid-Northeast=50, mid-Midwest=120 → dist-to-NE=35, dist-to-MW=35 — equidistant,
+    // snap returns one of the two adjacent rows.
+    const result = resolveCategoryFromBandsH(BANDS_H, 85);
+    expect(["Northeast", "Midwest"]).toContain(result);
+  });
+
+  it("snaps to nearest when cursor is above all bands", () => {
+    expect(resolveCategoryFromBandsH(BANDS_H, 0)).toBe("Northeast");
+  });
+
+  it("snaps to nearest when cursor is below all bands", () => {
+    expect(resolveCategoryFromBandsH(BANDS_H, 999)).toBe("South");
+  });
+
+  it("resolves a single band regardless of Y position", () => {
+    const single: CategoryBandH[] = [{ category: "Solo", yMin: 30, yMax: 70 }];
+    expect(resolveCategoryFromBandsH(single, 0)).toBe("Solo");
+    expect(resolveCategoryFromBandsH(single, 50)).toBe("Solo");
+    expect(resolveCategoryFromBandsH(single, 999)).toBe("Solo");
+  });
+
+  it("does NOT return Northeast for a cursor in the Midwest row (regression: always-first bug)", () => {
+    // This is the exact failure the fix addresses: before the fix, horizontal charts
+    // always resolved via cursor-X and returned the first category for any Y position.
+    expect(resolveCategoryFromBandsH(BANDS_H, 120)).toBe("Midwest");
+    expect(resolveCategoryFromBandsH(BANDS_H, 200)).toBe("South");
   });
 });
 
@@ -273,6 +337,110 @@ describe("attachBandCrosshair (smoke)", () => {
     expect(() => {
       hit.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
     }).not.toThrow();
+  });
+
+  it("appends a .tbl-band-crosshair-hl (highlight) rect to the SVG", () => {
+    const svg = makeSvg();
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"] });
+    expect(svg.querySelector(".tbl-band-crosshair-hl")).not.toBeNull();
+  });
+
+  it("highlight rect is hidden by default (opacity 0)", () => {
+    const svg = makeSvg();
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"] });
+    const hl = svg.querySelector(".tbl-band-crosshair-hl") as SVGRectElement;
+    expect(hl).not.toBeNull();
+    expect(hl.getAttribute("opacity")).toBe("0");
+  });
+
+  it("highlight rect is inserted before the hit area (z-order: hl below hit)", () => {
+    const svg = makeSvg();
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"] });
+    const children = Array.from(svg.children);
+    const hlIdx = children.findIndex((el) => el.classList.contains("tbl-band-crosshair-hl"));
+    const hitIdx = children.findIndex((el) => el.classList.contains("tbl-band-crosshair-hit"));
+    expect(hlIdx).toBeGreaterThanOrEqual(0);
+    expect(hitIdx).toBeGreaterThan(hlIdx);
+  });
+
+  it("re-attaching replaces BOTH highlight and hit elements (not duplicated)", () => {
+    const svg = makeSvg();
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"] });
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"] });
+    expect(svg.querySelectorAll(".tbl-band-crosshair-hl").length).toBe(1);
+    expect(svg.querySelectorAll(".tbl-band-crosshair-hit").length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachBandCrosshair horizontal smoke tests
+// ---------------------------------------------------------------------------
+
+function makeHorizontalSvg(doc: Document = document): SVGSVGElement {
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
+  svg.setAttribute("width", "600");
+  svg.setAttribute("height", "400");
+  // Horizontal bars: rects have distinct y values (category rows on Y axis).
+  const g = doc.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("aria-label", "bar");
+  // Two category rows at different y positions.
+  const rect1 = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect1.setAttribute("x", "50");
+  rect1.setAttribute("width", "200");
+  rect1.setAttribute("y", "30");
+  rect1.setAttribute("height", "40");
+  const rect2 = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect2.setAttribute("x", "50");
+  rect2.setAttribute("width", "150");
+  rect2.setAttribute("y", "90");
+  rect2.setAttribute("height", "40");
+  g.appendChild(rect1);
+  g.appendChild(rect2);
+  svg.appendChild(g);
+  return svg;
+}
+
+describe("attachBandCrosshair horizontal (smoke)", () => {
+  const H_ROWS = [
+    { _xc: "Northeast", series: "Alpha", _y: 10 },
+    { _xc: "Midwest",   series: "Alpha", _y: 8  },
+  ];
+
+  it("does not throw for horizontal orientation", () => {
+    const svg = makeHorizontalSvg();
+    expect(() =>
+      attachBandCrosshair(svg, {
+        rows: H_ROWS,
+        categories: ["Northeast", "Midwest"],
+        orientation: "horizontal",
+      }),
+    ).not.toThrow();
+  });
+
+  it("creates both .tbl-band-crosshair-hl and .tbl-band-crosshair-hit for horizontal", () => {
+    const svg = makeHorizontalSvg();
+    attachBandCrosshair(svg, {
+      rows: H_ROWS,
+      categories: ["Northeast", "Midwest"],
+      orientation: "horizontal",
+    });
+    expect(svg.querySelector(".tbl-band-crosshair-hl")).not.toBeNull();
+    expect(svg.querySelector(".tbl-band-crosshair-hit")).not.toBeNull();
+  });
+
+  it("pointermove on horizontal chart fires without throwing", () => {
+    const svg = makeHorizontalSvg();
+    document.body.appendChild(svg);
+    attachBandCrosshair(svg, {
+      rows: H_ROWS,
+      categories: ["Northeast", "Midwest"],
+      orientation: "horizontal",
+    });
+    const hit = svg.querySelector(".tbl-band-crosshair-hit") as Element;
+    expect(() => {
+      hit.dispatchEvent(new PointerEvent("pointermove", { clientX: 200, clientY: 110, bubbles: true }));
+    }).not.toThrow();
+    document.body.removeChild(svg);
   });
 });
 

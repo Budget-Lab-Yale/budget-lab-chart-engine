@@ -409,6 +409,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, units),
+        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
       });
     } else {
       attachCrosshair(svg, {
