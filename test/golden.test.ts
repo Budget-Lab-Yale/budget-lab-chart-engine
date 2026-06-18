@@ -183,13 +183,12 @@ describe("golden SVG — bars", () => {
     const { svg } = renderChart(BAR_THIN_SPEC, rows, { width: 720, height: 400, document });
     // Bars still render...
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(24);
-    // ...but the value-label text mark is omitted entirely. The only remaining
-    // aria-label="text" groups are the chrome labels (y-tick labels + band x-axis labels);
-    // a value-label group would be a third. Assert no <text> renders any bar's value (1.5).
-    const texts = Array.from(svg.querySelectorAll('g[aria-label="text"] text')).map(
-      (t) => t.textContent ?? "",
-    );
-    expect(texts.some((t) => t === "1.5")).toBe(false);
+    // ...but the value-label text mark is omitted entirely. When suppressed, only the chrome
+    // text groups are present: the y-tick-label group and the band x-axis group (2 total).
+    // A value-label Plot.text call would add a third g[aria-label="text"]. This assertion is
+    // robust to label content — it counts groups, not specific text strings.
+    const textGroups = svg.querySelectorAll('g[aria-label="text"]');
+    expect(textGroups.length).toBe(2);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-thin.golden.svg");
   });
 

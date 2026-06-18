@@ -12,6 +12,7 @@
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { tblBandXAxis, tblBandYAxis } from "../axes";
+import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -50,6 +51,7 @@ export function buildBarMarks(
   ctx: MarkContext,
 ): MarkLayers {
   const { xField, colors } = ctx;
+  const catField = xField;
   const seriesNames = ctx.seriesNames ?? [];
   const horizontal = spec.orientation === "horizontal";
   const isMulti = seriesNames.length > 1;
@@ -59,7 +61,7 @@ export function buildBarMarks(
   {
     const seen = new Set<string>();
     for (const r of data) {
-      const cat = r._xc;
+      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
       if (typeof cat === "string" && cat !== "" && !seen.has(cat)) {
         seen.add(cat);
         categories.push(cat);
@@ -68,7 +70,7 @@ export function buildBarMarks(
   }
 
   // Units suffix for value labels (matches the y-tick units inference upstream).
-  const units = inferUnits(spec.subtitle);
+  const units = inferUnitsFromSubtitle(spec.subtitle);
   const showValueLabels = spec.valueLabels?.show !== false;
   const signed = spec.valueLabels?.signed === true;
 
@@ -174,11 +176,11 @@ export function buildBarMarks(
   // Highlight/dim overrides the fill channel with a literal accessor.
   const fillChannel = highlightSet ? (d: PreparedRow) => fillFor(d.series) : "series";
 
-  overlay.push(Plot.barY(data, { fx: "_xc", x: "series", y: "_y", fill: fillChannel }));
+  overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel }));
 
   if (emitValueLabels) {
     overlay.push(
-      ...buildValueLabelMarks(data, { band: "series", facet: "_xc" }, fmt, horizontal),
+      ...buildValueLabelMarks(data, { band: "series", facet: catField }, fmt, horizontal),
     );
   }
 
@@ -268,10 +270,3 @@ function buildValueLabelMarks(
   return marks;
 }
 
-/** Mirror engine/index.ts inferUnitsFromSubtitle (not exported there). */
-function inferUnits(subtitle?: string): string {
-  if (!subtitle) return "";
-  const lower = subtitle.toLowerCase();
-  if (lower.includes("percent") || lower.includes("percentage point")) return "%";
-  return "";
-}

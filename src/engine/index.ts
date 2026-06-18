@@ -14,6 +14,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
+import { inferUnitsFromSubtitle } from "./util";
 
 export interface RenderOptions {
   width?: number;
@@ -64,13 +65,6 @@ function buildColorMap(
     m.set(s, override || (palette[i] as string));
   });
   return m;
-}
-
-function inferUnitsFromSubtitle(subtitle?: string): string {
-  if (!subtitle) return "";
-  const lower = subtitle.toLowerCase();
-  if (lower.includes("percent") || lower.includes("percentage point")) return "%";
-  return "";
 }
 
 export function renderChart(
