@@ -1,0 +1,13 @@
+series,time,value
+Lower rates,A,4
+Wider brackets,A,2
+Limit deductions,A,-1.5
+Repeal credit,A,-2.5
+Lower rates,B,3
+Wider brackets,B,2.5
+Limit deductions,B,-1
+Repeal credit,B,-3
+Lower rates,C,1
+Wider brackets,C,1
+Limit deductions,C,-2
+Repeal credit,C,-3

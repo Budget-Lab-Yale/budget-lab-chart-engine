@@ -4,6 +4,7 @@
 import type { ChartSpec, ChartType } from "../../spec/types";
 import { buildLineMarks } from "./line";
 import { buildBarMarks } from "./bar";
+import { buildStackedMarks } from "./stacked";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -61,21 +62,18 @@ export interface MarkLayers {
    *  group scale, not the adapter's `x` scale). When present, used INSTEAD of the
    *  adapter's `xOpts.axisMarks` in assemblePlot. */
   xAxisMarks?: unknown[];
+  /** Optional: extra legend rows beyond the per-series swatches (diverging stacked bars
+   *  emit a "Total" row with a dot marker). A7 only PRODUCES this metadata; A8 renders it.
+   *  Line/bar leave it undefined. */
+  legendExtras?: { label: string; markerShape: "dot" }[];
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;
 
-// bar / stacked builders are registered here once implemented (later tasks).
-const _notImplemented =
-  (type: ChartType): MarkBuilder =>
-  () => {
-    throw new Error(`Mark builder for chartType "${type}" is not yet implemented`);
-  };
-
 const REGISTRY: Record<ChartType, MarkBuilder> = {
   line: buildLineMarks,
   bar: buildBarMarks,
-  stacked: _notImplemented("stacked"),
+  stacked: buildStackedMarks,
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {

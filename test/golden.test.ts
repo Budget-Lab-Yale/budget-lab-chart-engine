@@ -11,6 +11,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
+import { buildStackedMarks } from "../src/engine/marks/stacked";
+import type { PreparedRow } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -197,5 +199,152 @@ describe("golden SVG — bars", () => {
     const { svg } = renderChart(BAR_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document });
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal.golden.svg");
+  });
+});
+
+// --- Stacked bars (task A7) ---
+
+const STACKED_CUMULATIVE_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Compensation by component",
+  subtitle: "Thousands of dollars",
+  xAxisType: "categorical",
+  series_order: ["Wages", "Benefits", "Taxes"],
+  data: "stacked-cumulative.csv",
+};
+
+const STACKED_DIVERGING_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Contributions to the net effect",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
+  data: "stacked-diverging.csv",
+};
+
+const STACKED_MONO_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Tiered composition",
+  subtitle: "Units",
+  xAxisType: "categorical",
+  series_order: ["Tier A", "Tier B", "Tier C", "Tier D"],
+  barStack: { mono: { base: "blue" } },
+  data: "stacked-mono.csv",
+};
+
+const STACKED_100_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Share of spending by level of government",
+  subtitle: "Percent",
+  xAxisType: "categorical",
+  series_order: ["Federal", "State", "Local"],
+  barStack: { normalize: true },
+  data: "stacked-100.csv",
+};
+
+describe("golden SVG — stacked bars", () => {
+  it("renders a cumulative (all-positive) stack with net text above", async () => {
+    const rows = parseCsv("./fixtures/stacked-cumulative.csv");
+    const { svg, legendItems } = renderChart(STACKED_CUMULATIVE_SPEC, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    // 3 categories x 3 series = 9 rects (all present).
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(9);
+    // Tagging order: category-major, declaration order within each category. The bottom of
+    // the first category's stack (first rect) is the first-declared series "Wages".
+    expect(rects[0]?.getAttribute("data-series")).toBe("Wages");
+    expect(rects[1]?.getAttribute("data-series")).toBe("Benefits");
+    expect(rects[2]?.getAttribute("data-series")).toBe("Taxes");
+    // No diverging dot → no "Total" legend extra; per-series legend present (3 series).
+    expect(legendItems?.length).toBe(3);
+    // Net text above each stack: stack mark + one net-text mark = a g[aria-label="text"]
+    // for the net beyond the chrome (y-tick + band-x = 2) → 3 text groups.
+    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(3);
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-cumulative.golden.svg");
+  });
+
+  it("renders a diverging stack with a net dot + signed label and Total legend extra", async () => {
+    const rows = parseCsv("./fixtures/stacked-diverging.csv");
+    const { svg } = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document });
+    // 3 categories x 4 series = 12 rects.
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(12);
+    // A net dot exists (Plot.dot → g[aria-label="dot"] with circles).
+    const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
+    expect(dots.length).toBe(3); // one per category
+    // Diverging stack-order pin: within category A, declaration order from 0 is
+    // Lower rates (bottom positive), Wider brackets, then the negatives. The first rect
+    // (visual bottom of the positive sub-stack) is the first-declared positive series.
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects[0]?.getAttribute("data-series")).toBe("Lower rates");
+    expect(rects[1]?.getAttribute("data-series")).toBe("Wider brackets");
+    expect(rects[2]?.getAttribute("data-series")).toBe("Limit deductions");
+    expect(rects[3]?.getAttribute("data-series")).toBe("Repeal credit");
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-diverging.golden.svg");
+  });
+
+  it("diverging stack exposes a Total legendExtras entry; cumulative does not", () => {
+    // legendExtras is a mark-layer field (A7 produces it; A8 renders it), so assert it via
+    // the builder directly rather than through the render path.
+    const divData: PreparedRow[] = parseCsv("./fixtures/stacked-diverging.csv").map((r) => ({
+      series: r.series as string,
+      time: r.time as string,
+      _y: r.value === "" ? null : +(r.value as string),
+      _xc: r.time as string,
+    }));
+    const divLayers = buildStackedMarks(divData, STACKED_DIVERGING_SPEC, {
+      xField: "_xc",
+      colors: new Map(),
+      seriesNames: STACKED_DIVERGING_SPEC.series_order,
+    });
+    expect(divLayers.legendExtras).toEqual([{ label: "Total", markerShape: "dot" }]);
+
+    const cumData: PreparedRow[] = parseCsv("./fixtures/stacked-cumulative.csv").map((r) => ({
+      series: r.series as string,
+      time: r.time as string,
+      _y: r.value === "" ? null : +(r.value as string),
+      _xc: r.time as string,
+    }));
+    const cumLayers = buildStackedMarks(cumData, STACKED_CUMULATIVE_SPEC, {
+      xField: "_xc",
+      colors: new Map(),
+      seriesNames: STACKED_CUMULATIVE_SPEC.series_order,
+    });
+    expect(cumLayers.legendExtras).toBeUndefined();
+  });
+
+  it("renders monochromatic segments in darkest-bottom tier order", async () => {
+    const rows = parseCsv("./fixtures/stacked-mono.csv");
+    const { svg } = renderChart(STACKED_MONO_SPEC, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    // 3 categories x 4 series = 12 rects. First category's 4 segments, bottom→top, carry
+    // the 4 darkest blue tiers (700, 600, 500, 400) since all values are positive and the
+    // declaration order maps directly to bottom→top.
+    expect(rects.length).toBe(12);
+    expect(rects[0]?.getAttribute("fill")).toBe("#002B61"); // 700, bottom
+    expect(rects[1]?.getAttribute("fill")).toBe("#00407A"); // 600
+    expect(rects[2]?.getAttribute("fill")).toBe("#005794"); // 500
+    expect(rects[3]?.getAttribute("fill")).toBe("#0070AF"); // 400, top
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-mono.golden.svg");
+  });
+
+  it("renders a 100%-stacked chart with a 0–100 y-axis and no net callout", async () => {
+    const rows = parseCsv("./fixtures/stacked-100.csv");
+    const { svg } = renderChart(STACKED_100_SPEC, rows, { width: 720, height: 400, document });
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(9);
+    // No net text/dot for normalized (every bar tops at 100%). Only chrome text groups
+    // (y-tick labels + band x-axis) → 2.
+    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-100.golden.svg");
+  });
+
+  it("diverging stacked render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/stacked-diverging.csv");
+    const a = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    const b = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    expect(a).toBe(b);
   });
 });

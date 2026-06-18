@@ -1,0 +1,10 @@
+series,time,value
+Federal,2020,50
+State,2020,30
+Local,2020,20
+Federal,2021,40
+State,2021,40
+Local,2021,20
+Federal,2022,60
+State,2022,25
+Local,2022,15
