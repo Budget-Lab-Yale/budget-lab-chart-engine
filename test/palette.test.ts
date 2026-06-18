@@ -84,4 +84,10 @@ describe("monoScale", () => {
   it("throws for an unknown name like navy", () => {
     expect(() => monoScale("navy", 3)).toThrow(/not a known categorical hue/);
   });
+
+  it("throws for n=0, n=-1, and n=NaN", () => {
+    expect(() => monoScale("blue", 0)).toThrow(RangeError);
+    expect(() => monoScale("blue", -1)).toThrow(RangeError);
+    expect(() => monoScale("blue", NaN)).toThrow(RangeError);
+  });
 });

@@ -67,6 +67,7 @@ const MONO_TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
  * - Throws if `base` does not resolve to one of the 7 known categorical hues.
  */
 export function monoScale(base: string, n: number): string[] {
+  if (!Number.isFinite(n) || n < 1) throw new RangeError(`monoScale: n must be a positive integer, got ${n}`);
   // Resolve aliases (purple → violet, etc.) the same way NAMED is built above.
   const canonical = (tokens.aliases as Record<string, string>)[base] ?? base;
   const scale = (tokens.scales as Record<string, Record<string, string>>)[canonical];
