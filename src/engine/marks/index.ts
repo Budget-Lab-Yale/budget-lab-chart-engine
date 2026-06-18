@@ -3,6 +3,7 @@
 // the engine (data prep, axes, assemble, render) is chart-type agnostic.
 import type { ChartSpec, ChartType } from "../../spec/types";
 import { buildLineMarks } from "./line";
+import { buildBarMarks } from "./bar";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -49,8 +50,17 @@ export interface MarkLayers {
   xScaleOpts?: Record<string, unknown>;
   /** Optional: faceted-group band scale options (grouped bars use `fx`). */
   fxScaleOpts?: Record<string, unknown>;
+  /** Optional: a mark layer that owns the y-scale (horizontal bars put the category band
+   *  on `y`) supplies y-scale options here; merged over assemblePlot's value-axis y. When
+   *  present, assemblePlot treats the chart as horizontal: it skips the vertical value
+   *  chrome (horizontal gridlines / y-tick labels) and the layer supplies its own. */
+  yScaleOpts?: Record<string, unknown>;
   /** Which Plot scale carries the category band ("x" default, "fx" for grouped bars). */
   xScaleField?: "x" | "fx";
+  /** Optional: x-axis label marks supplied by the layer (grouped bars label the `fx`
+   *  group scale, not the adapter's `x` scale). When present, used INSTEAD of the
+   *  adapter's `xOpts.axisMarks` in assemblePlot. */
+  xAxisMarks?: unknown[];
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;
@@ -64,7 +74,7 @@ const _notImplemented =
 
 const REGISTRY: Record<ChartType, MarkBuilder> = {
   line: buildLineMarks,
-  bar: _notImplemented("bar"),
+  bar: buildBarMarks,
   stacked: _notImplemented("stacked"),
 };
 

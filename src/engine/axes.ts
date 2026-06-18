@@ -195,15 +195,21 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
 // `ot` helper), which would center the text anchor. We counter that with an initializer
 // that sets `this.dx = -bandwidth/2` after Plot has computed the scale — the net offset
 // is zero, landing the textAnchor:"start" origin at the band's left edge.
-// Final pixel-exact alignment is confirmed against the grouped-bar golden in task A6,
-// where the bar marks and these labels share the same band scale.
-export function tblBandXAxis(categories: string[]): Mark[] {
+//
+// `scaleField` selects which band scale the labels sit on: "x" for single-series bars
+// (categories ARE the x band) and "fx" for grouped bars (categories are the facet groups;
+// `x` carries the inner series). The initializer reads bandwidth from that same scale.
+export function tblBandXAxis(
+  categories: string[],
+  scaleField: "x" | "fx" = "x",
+): Mark[] {
+  const channel = scaleField === "fx" ? { fx: (d: string) => d } : { x: (d: string) => d };
   return [
     Plot.text(
       categories,
       Plot.initializer(
         {
-          x: (d: string) => d,
+          ...channel,
           text: (d: string) => d,
           frameAnchor: "bottom",
           dy: 12,
@@ -220,12 +226,29 @@ export function tblBandXAxis(categories: string[]): Mark[] {
           _channels: unknown,
           scales: Record<string, { bandwidth?: () => number }>,
         ) {
-          const bw = scales?.x?.bandwidth?.();
+          const bw = scales?.[scaleField]?.bandwidth?.();
           if (bw != null) this.dx = -bw / 2;
           return {};
         },
       ),
     ),
+  ];
+}
+
+// Band (categorical) y-axis for HORIZONTAL bars: one label per category at the band's
+// left edge in the label margin (svg x=0), vertically centered on its band. No ticks.
+export function tblBandYAxis(categories: string[]): Mark[] {
+  return [
+    Plot.text(categories, {
+      y: (d: string) => d,
+      text: (d: string) => d,
+      frameAnchor: "left",
+      dx: -TBL_MARGIN_LEFT,
+      textAnchor: "start",
+      fill: TBL.color.axis,
+      fontSize: TBL.size.axis,
+      fontWeight: 500,
+    }),
   ];
 }
 

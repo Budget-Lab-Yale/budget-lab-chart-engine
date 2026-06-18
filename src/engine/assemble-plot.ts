@@ -48,30 +48,64 @@ export function assemblePlot({
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
 
   const marks: unknown[] = [];
+  // Horizontal bars (layer owns the y band scale): the value axis runs along x, so the
+  // chrome flips — vertical gridlines + x value-tick labels + a vertical zero baseline,
+  // and the layer supplies its own category labels on the y band via xAxisMarks.
+  const horizontal = layers.yScaleOpts != null;
 
   // 1. Band underlay (behind everything).
   marks.push(...layers.underlay);
 
-  // 2. Gridlines + y-tick labels. 3. X-axis. (extend across both label columns so the
-  //    chart edges sit flush with the canvas.)
-  marks.push(
-    ...gridAndYLabels(yTicks, {
-      yTickFormat: makeTickFormatter(yTicks, units),
-      marginRight: effMarginRight,
-    }),
-  );
-  marks.push(...xOpts.axisMarks);
+  if (horizontal) {
+    // 2h. Vertical gridlines + x value-tick labels (skip 0 from the light grid; baseline
+    //     is painted darker below).
+    const xTickFmt = makeTickFormatter(yTicks, units);
+    marks.push(
+      Plot.ruleX(
+        yTicks.filter((t) => t !== 0),
+        { stroke: TBL.color.gridline, strokeWidth: 1 },
+      ),
+      Plot.text(yTicks, {
+        x: (d: number) => d,
+        text: xTickFmt,
+        frameAnchor: "bottom",
+        dy: 12,
+        textAnchor: "middle",
+        fill: TBL.color.axis,
+        fontSize: TBL.size.axis,
+        fontWeight: 500,
+      }),
+    );
+    // 3h. Category labels on the y band (layer-supplied).
+    marks.push(...(layers.xAxisMarks ?? []));
+    // 4h. Vertical zero baseline.
+    marks.push(
+      Plot.ruleX([0], { stroke: TBL.color.axisStroke, strokeWidth: 1 }),
+    );
+  } else {
+    // 2. Gridlines + y-tick labels. 3. X-axis. (extend across both label columns so the
+    //    chart edges sit flush with the canvas.)
+    marks.push(
+      ...gridAndYLabels(yTicks, {
+        yTickFormat: makeTickFormatter(yTicks, units),
+        marginRight: effMarginRight,
+      }),
+    );
+    // X-axis labels: a mark layer that re-homes the category band (grouped bars label the
+    // `fx` group scale) supplies its own axis marks; use those instead of the adapter's.
+    marks.push(...(layers.xAxisMarks ?? xOpts.axisMarks));
 
-  // 4. Zero baseline (darker rule painted over the light gridlines).
-  marks.push(
-    Plot.ruleY([0], {
-      stroke: TBL.color.axisStroke,
-      strokeWidth: 1,
-      insetLeft: -TBL_MARGIN_LEFT,
-      insetRight: -effMarginRight,
-      clip: false,
-    }),
-  );
+    // 4. Zero baseline (darker rule painted over the light gridlines).
+    marks.push(
+      Plot.ruleY([0], {
+        stroke: TBL.color.axisStroke,
+        strokeWidth: 1,
+        insetLeft: -TBL_MARGIN_LEFT,
+        insetRight: -effMarginRight,
+        clip: false,
+      }),
+    );
+  }
 
   // 5. Reference markers (vertical rules, e.g. a treatment date).
   for (const m of spec.xAxisPolicy?.markers ?? []) {
@@ -97,14 +131,22 @@ export function assemblePlot({
     }),
     ...(width ? { width } : {}),
     className: PLOT_CLASS,
-    y: { label: null, axis: null, grid: false, domain: yDomain },
+    // Vertical: y carries the value domain. Horizontal: the value domain moves to x and
+    // the layer supplies a band y (yScaleOpts).
+    y: horizontal
+      ? { label: null, axis: null, grid: false, ...(layers.yScaleOpts ?? {}) }
+      : { label: null, axis: null, grid: false, domain: yDomain },
     color: { domain: seriesNames, range: seriesNames.map((s) => colors.get(s)) },
     marks,
   };
-  // X-scale opts: adapter supplies the base; a mark layer that owns the x-scale (bars)
-  // merges over it (mark-layer wins on conflict). Line leaves xScaleOpts undefined, so
-  // the original `plotOpts.x = xOpts.xPlotOpts` path is taken unchanged.
-  if (layers.xScaleOpts) {
+  if (horizontal) {
+    // x is the value (linear) axis; merge any layer x opts (none needed today) over the
+    // computed value domain.
+    plotOpts.x = { label: null, axis: null, grid: false, domain: yDomain, ...(layers.xScaleOpts ?? {}) };
+  } else if (layers.xScaleOpts) {
+    // X-scale opts: adapter supplies the base; a mark layer that owns the x-scale (bars)
+    // merges over it (mark-layer wins on conflict). Line leaves xScaleOpts undefined, so
+    // the original `plotOpts.x = xOpts.xPlotOpts` path is taken unchanged.
     plotOpts.x = { ...(xOpts.xPlotOpts ?? {}), ...layers.xScaleOpts };
   } else if (xOpts.xPlotOpts) {
     plotOpts.x = xOpts.xPlotOpts;
