@@ -143,7 +143,7 @@ export const CHART_SPEC_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        netDisplay: { type: "string", enum: ["auto", "text", "dot"] },
+        netDisplay: { type: "string", enum: ["auto", "text", "dot", "none"] },
         mono: {
           type: "object",
           additionalProperties: false,

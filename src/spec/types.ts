@@ -96,8 +96,12 @@ export interface ChartSpec {
   valueLabels?: { show?: boolean; signed?: boolean };
   /** Stacked-bar display options. */
   barStack?: {
-    /** How to render the net (sum) callout. */
-    netDisplay?: "auto" | "text" | "dot";
+    /** How to render the net (sum) callout.
+     * - "auto" (default): dot when any value is negative, otherwise text.
+     * - "text": text above the top of each cumulative stack.
+     * - "dot": white-stroked black dot at the true net value.
+     * - "none": suppress all net markers and the "Total" legend entry. */
+    netDisplay?: "auto" | "text" | "dot" | "none";
     /** Monochrome override: render all segments using shades of one base color. */
     mono?: { base: ColorRef };
     netLabelColor?: "white" | "black";

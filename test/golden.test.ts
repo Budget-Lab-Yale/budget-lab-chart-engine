@@ -232,6 +232,16 @@ const STACKED_MONO_SPEC: ChartSpec = {
   data: "stacked-mono.csv",
 };
 
+const STACKED_NONE_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Net markers suppressed",
+  subtitle: "Units",
+  xAxisType: "categorical",
+  series_order: ["Positive A", "Positive B", "Negative A"],
+  barStack: { netDisplay: "none" },
+  data: "stacked-none.csv",
+};
+
 const STACKED_100_SPEC: ChartSpec = {
   chartType: "stacked",
   title: "Share of spending by level of government",
@@ -339,6 +349,40 @@ describe("golden SVG — stacked bars", () => {
     expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-100.golden.svg");
+  });
+
+  it("netDisplay:none suppresses all net markers and Total legend entry", async () => {
+    const rows = parseCsv("./fixtures/stacked-none.csv");
+    const { svg, legendItems } = renderChart(STACKED_NONE_SPEC, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    // 3 categories x 3 series = 9 rects.
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(9);
+    // No net dot (diverging data would normally produce one).
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
+    // No net text above (only chrome text groups: y-tick + band-x = 2).
+    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    // No "Total" legend extra — only the 3 series entries.
+    expect(legendItems?.length).toBe(3);
+    expect(legendItems?.map((l) => l.series)).not.toContain("Total");
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-none.golden.svg");
+  });
+
+  it("netDisplay:none via buildStackedMarks emits no legendExtras", () => {
+    const noneData: PreparedRow[] = parseCsv("./fixtures/stacked-none.csv").map((r) => ({
+      series: r.series as string,
+      time: r.time as string,
+      _y: r.value === "" ? null : +(r.value as string),
+      _xc: r.time as string,
+    }));
+    const noneLayers = buildStackedMarks(noneData, STACKED_NONE_SPEC, {
+      xField: "_xc",
+      colors: new Map(),
+      seriesNames: STACKED_NONE_SPEC.series_order,
+    });
+    expect(noneLayers.legendExtras).toBeUndefined();
   });
 
   it("diverging stacked render is deterministic (byte-identical)", () => {

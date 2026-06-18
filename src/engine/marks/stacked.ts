@@ -96,16 +96,19 @@ export function buildStackedMarks(
 
   // Net display mode (bar-stacked.md §6): "auto" → dot when any negative, else text.
   // Normalized stacks always top at 100% so a net callout is meaningless — suppress.
+  // "none" explicitly suppresses all net markers and the Total legend entry.
   const netDisplayCfg = spec.barStack?.netDisplay ?? "auto";
   const netMode: "dot" | "text" | "none" = normalize
     ? "none"
-    : netDisplayCfg === "dot"
-      ? "dot"
-      : netDisplayCfg === "text"
-        ? "text"
-        : hasNegatives
-          ? "dot"
-          : "text";
+    : netDisplayCfg === "none"
+      ? "none"
+      : netDisplayCfg === "dot"
+        ? "dot"
+        : netDisplayCfg === "text"
+          ? "text"
+          : hasNegatives
+            ? "dot"
+            : "text";
 
   const units = inferUnitsFromSubtitle(spec.subtitle);
   const allValues = data
@@ -209,12 +212,12 @@ export function buildStackedMarks(
   }));
 
   if (netMode === "text") {
-    // Text above the stack top (= positive sum, since no negatives in this branch). 10pt
+    // Text above the stack top (= positive sum, since no negatives in this branch). 14pt
     // 700 text_heading, baseline 6px above the top.
     const common = {
       text: (d: { net: number }) => netFmt(d.net),
       fill: TBL.color.heading,
-      fontSize: 10,
+      fontSize: 14,
       fontWeight: 700,
     };
     overlay.push(
@@ -230,20 +233,20 @@ export function buildStackedMarks(
         Plot.dot(netRows, {
           y: "_xc",
           x: "net",
-          r: 7,
+          r: 10,
           fill: WHITE,
           stroke: MARK_BLACK,
-          strokeWidth: 1.5,
+          strokeWidth: 2,
         }),
         Plot.text(netRows, {
           y: "_xc",
           x: "net",
           text: (d: { net: number }) => netFmt(d.net),
           fill: netLabelFill,
-          fontSize: 10,
+          fontSize: 14,
           fontWeight: 700,
           textAnchor: "middle",
-          dy: 19,
+          dy: 22,
         }),
       );
     } else {
@@ -251,20 +254,20 @@ export function buildStackedMarks(
         Plot.dot(netRows, {
           x: "_xc",
           y: "net",
-          r: 7,
+          r: 10,
           fill: WHITE,
           stroke: MARK_BLACK,
-          strokeWidth: 1.5,
+          strokeWidth: 2,
         }),
         Plot.text(netRows, {
           x: "_xc",
           y: "net",
           text: (d: { net: number }) => netFmt(d.net),
           fill: netLabelFill,
-          fontSize: 10,
+          fontSize: 14,
           fontWeight: 700,
           textAnchor: "middle",
-          dy: 19,
+          dy: 22,
         }),
       );
     }

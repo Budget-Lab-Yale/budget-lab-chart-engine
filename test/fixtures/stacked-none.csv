@@ -1,0 +1,10 @@
+series,time,value
+Positive A,2021,30
+Positive B,2021,20
+Negative A,2021,-10
+Positive A,2022,35
+Positive B,2022,25
+Negative A,2022,-15
+Positive A,2023,40
+Positive B,2023,30
+Negative A,2023,-20
