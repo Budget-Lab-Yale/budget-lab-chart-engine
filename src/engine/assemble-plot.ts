@@ -6,6 +6,7 @@
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
 import { tblPlotDefaults, gridAndYLabels } from "./axes";
+import { collapseFacetChrome, GRIDLINE_CLASS, ZERO_BASELINE_CLASS } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
 import type { ChartSpec } from "../spec/types";
 import type { XOpts } from "./x-adapter";
@@ -52,6 +53,11 @@ export function assemblePlot({
   // chrome flips — vertical gridlines + x value-tick labels + a vertical zero baseline,
   // and the layer supplies its own category labels on the y band via xAxisMarks.
   const horizontal = layers.yScaleOpts != null;
+  // Faceted (grouped bars): categories live on the `fx` group scale, so Plot repeats the
+  // chrome per facet. We tag the chrome marks with findable classNames ONLY in this case so
+  // the post-render collapse pass can find them; non-faceted output stays byte-identical
+  // (Plot omits the class attribute entirely when className is undefined).
+  const faceted = layers.xScaleField === "fx";
 
   // 1. Band underlay (behind everything).
   marks.push(...layers.underlay);
@@ -89,6 +95,7 @@ export function assemblePlot({
       ...gridAndYLabels(yTicks, {
         yTickFormat: makeTickFormatter(yTicks, units),
         marginRight: effMarginRight,
+        ...(faceted ? { gridlineClassName: GRIDLINE_CLASS } : {}),
       }),
     );
     // X-axis labels: a mark layer that re-homes the category band (grouped bars label the
@@ -103,6 +110,10 @@ export function assemblePlot({
         insetLeft: -TBL_MARGIN_LEFT,
         insetRight: -effMarginRight,
         clip: false,
+        // className tags the wrapping <g> so the facet-chrome collapse pass can find the
+        // per-facet zero-baseline copies — faceted charts only, so non-faceted output is
+        // byte-identical.
+        ...(faceted ? { className: ZERO_BASELINE_CLASS } : {}),
       }),
     );
   }
@@ -159,6 +170,17 @@ export function assemblePlot({
   svg.dataset.marginRight = String((plotOpts.marginRight as number) ?? 8);
   svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
   svg.dataset.marginBottom = String((plotOpts.marginBottom as number) ?? 28);
+
+  // Facet-aware chrome collapse: when the layer faceted the categories onto `fx` (grouped
+  // bars), Plot repeated the gridlines / zero baseline / y-tick labels inside every facet.
+  // Collapse them to continuous full-width gridlines + one left y-axis. No-op for all other
+  // chart types (the pass only fires when xScaleField === "fx").
+  if (layers.xScaleField === "fx") {
+    // Read width from the rendered SVG so the right plot edge is correct regardless of
+    // whether an explicit width was passed (Plot defaults it otherwise).
+    const svgWidth = Number(svg.getAttribute("width")) || (plotOpts.width as number) || 640;
+    collapseFacetChrome(svg, { width: svgWidth, marginRight: effMarginRight });
+  }
 
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
   // order its matched elements appear in (DOM order); tag by index. For lines this is the

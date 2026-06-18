@@ -50,7 +50,16 @@ export function gridAndYLabels(
     yTickFormat = (d: number) => String(d),
     marginLeft = TBL_MARGIN_LEFT,
     marginRight = TBL_MARGIN_RIGHT,
-  }: { yTickFormat?: (d: number) => string; marginLeft?: number; marginRight?: number } = {},
+    gridlineClassName,
+  }: {
+    yTickFormat?: (d: number) => string;
+    marginLeft?: number;
+    marginRight?: number;
+    /** When set (faceted charts only), tags the gridline <g> so the facet-chrome collapse
+     *  pass can find the per-facet copies. Left undefined for non-faceted charts so their
+     *  output stays byte-identical (Plot omits the class attribute entirely). */
+    gridlineClassName?: string;
+  } = {},
 ): Mark[] {
   // Skip y=0 from the light gridlines — the zero baseline is painted darker on top,
   // and stacking two 1px rules at the same y looks fuzzy. The "0" label still renders.
@@ -62,6 +71,7 @@ export function gridAndYLabels(
       insetLeft: -marginLeft,
       insetRight: -marginRight,
       clip: false,
+      ...(gridlineClassName ? { className: gridlineClassName } : {}),
     }),
     // className tags the wrapping <g> so the live renderer can find these labels
     // post-render and replace them with a sticky overlay during horizontal scroll.
