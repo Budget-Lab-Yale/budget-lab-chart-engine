@@ -66,15 +66,23 @@ export function buildLineMarks(
 
   // Series encounter order within each line group, so post-render path tagging maps
   // each <path data-series> correctly even when dashed+solid groups share a color.
+  // `g[aria-label="line"] path` returns all line paths in document order — dashed-group
+  // paths first (they paint first), then solid-group paths — which matches concatenating
+  // each group's encounter order in the same dashed-then-solid sequence.
   const encounterOrder = (rs: PreparedRow[]): string[] => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const r of rs) if (!seen.has(r.series)) { seen.add(r.series); out.push(r.series); }
     return out;
   };
-  const groupOrders: string[][] = [];
-  if (dashedData.length) groupOrders.push(encounterOrder(dashedData));
-  if (solidData.length) groupOrders.push(encounterOrder(solidData));
+  const seriesOrder: string[] = [];
+  if (dashedData.length) seriesOrder.push(...encounterOrder(dashedData));
+  if (solidData.length) seriesOrder.push(...encounterOrder(solidData));
 
-  return { underlay, overlay, groupOrders, dashedNames };
+  return {
+    underlay,
+    overlay,
+    tagging: [{ selector: 'g[aria-label="line"] path', seriesOrder }],
+    dashedNames,
+  };
 }

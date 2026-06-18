@@ -39,10 +39,18 @@ export interface MarkLayers {
   underlay: unknown[];
   /** Marks painted on top of the chrome (the lines). */
   overlay: unknown[];
-  /** Series encounter order per line group, for post-render path tagging. */
-  groupOrders: string[][];
+  /** Post-render data-series tagging. For each entry, the elements matched by `selector`
+   *  (in DOM order) are tagged data-series from `seriesOrder` by index. */
+  tagging: { selector: string; seriesOrder: string[] }[];
   /** Series rendered dashed (drives legend swatches + tooltip styling). */
   dashedNames: Set<string>;
+  /** Optional: a mark layer that owns its x-scale (bars) supplies band-scale options here;
+   *  merged over the adapter's x options in assemblePlot. */
+  xScaleOpts?: Record<string, unknown>;
+  /** Optional: faceted-group band scale options (grouped bars use `fx`). */
+  fxScaleOpts?: Record<string, unknown>;
+  /** Which Plot scale carries the category band ("x" default, "fx" for grouped bars). */
+  xScaleField?: "x" | "fx";
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;

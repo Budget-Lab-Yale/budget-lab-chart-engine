@@ -101,7 +101,15 @@ export function assemblePlot({
     color: { domain: seriesNames, range: seriesNames.map((s) => colors.get(s)) },
     marks,
   };
-  if (xOpts.xPlotOpts) plotOpts.x = xOpts.xPlotOpts;
+  // X-scale opts: adapter supplies the base; a mark layer that owns the x-scale (bars)
+  // merges over it (mark-layer wins on conflict). Line leaves xScaleOpts undefined, so
+  // the original `plotOpts.x = xOpts.xPlotOpts` path is taken unchanged.
+  if (layers.xScaleOpts) {
+    plotOpts.x = { ...(xOpts.xPlotOpts ?? {}), ...layers.xScaleOpts };
+  } else if (xOpts.xPlotOpts) {
+    plotOpts.x = xOpts.xPlotOpts;
+  }
+  if (layers.fxScaleOpts) plotOpts.fx = layers.fxScaleOpts;
   if (document) plotOpts.document = document;
 
   const svg = Plot.plot(plotOpts) as SVGSVGElement;
@@ -110,17 +118,14 @@ export function assemblePlot({
   svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
   svg.dataset.marginBottom = String((plotOpts.marginBottom as number) ?? 28);
 
-  // Tag <path data-series=…> for legend hover-dim. Plot.line with z:"series" emits one
-  // path per unique series in data-encounter order; tag each line group's paths against
-  // that group's own encounter order so dashed-then-solid splits stay mapped correctly.
-  const groupOrders = layers.groupOrders;
-  svg.querySelectorAll('g[aria-label="line"]').forEach((g, gi) => {
-    const order = groupOrders[gi];
-    if (!order) return;
-    g.querySelectorAll("path").forEach((p, pi) => {
-      if (pi < order.length) p.setAttribute("data-series", order[pi] as string);
+  // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
+  // order its matched elements appear in (DOM order); tag by index. For lines this is the
+  // flat dashed-then-solid path order, matching the old per-group loop byte-for-byte.
+  for (const { selector, seriesOrder } of layers.tagging) {
+    svg.querySelectorAll(selector).forEach((el, i) => {
+      if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
     });
-  });
+  }
 
   return svg;
 }
