@@ -32,5 +32,7 @@ export const TBL = {
 // marginLeft holds a "label column": y-tick labels sit at svg x=0 (sharing the left
 // edge with title/subtitle above) and the plot area starts at x=marginLeft. marginRight
 // reserves room for the rightmost x-tick label so it isn't clipped.
+// marginTop matches the tblPlotDefaults default; used for inner-plot-height approximations.
 export const TBL_MARGIN_LEFT = 44;
 export const TBL_MARGIN_RIGHT = 16;
+export const TBL_MARGIN_TOP = 18;

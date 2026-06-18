@@ -188,25 +188,44 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
   ];
 }
 
-// Band (categorical) x-axis: one label per category, left-aligned at the band's left
-// edge (text-anchor "start"), per the bar-grouped spec. No tick marks.
-export function tblBandXAxis(
-  categories: string[],
-  _opts?: Record<string, never>,
-): Mark[] {
+// Band (categorical) x-axis: one label per category, anchored at the band's left edge,
+// per the bar-grouped spec. No tick marks.
+//
+// Plot 0.6.16 auto-adds bandwidth/2 to any text mark on a band scale (via its internal
+// `ot` helper), which would center the text anchor. We counter that with an initializer
+// that sets `this.dx = -bandwidth/2` after Plot has computed the scale — the net offset
+// is zero, landing the textAnchor:"start" origin at the band's left edge.
+// Final pixel-exact alignment is confirmed against the grouped-bar golden in task A6,
+// where the bar marks and these labels share the same band scale.
+export function tblBandXAxis(categories: string[]): Mark[] {
   return [
-    Plot.text(categories, {
-      x: (d: string) => d,
-      text: (d: string) => d,
-      frameAnchor: "bottom",
-      dy: 12,
-      // Left-align label at band's left edge so it reads as a group header.
-      textAnchor: "start",
-      dx: 0,
-      fill: TBL.color.axis,
-      fontSize: TBL.size.axis,
-      fontWeight: 500,
-    }),
+    Plot.text(
+      categories,
+      Plot.initializer(
+        {
+          x: (d: string) => d,
+          text: (d: string) => d,
+          frameAnchor: "bottom",
+          dy: 12,
+          textAnchor: "start",
+          dx: 0,
+          fill: TBL.color.axis,
+          fontSize: TBL.size.axis,
+          fontWeight: 500,
+        },
+        function (
+          this: { dx: number },
+          _data: unknown,
+          _facets: unknown,
+          _channels: unknown,
+          scales: Record<string, { bandwidth?: () => number }>,
+        ) {
+          const bw = scales?.x?.bandwidth?.();
+          if (bw != null) this.dx = -bw / 2;
+          return {};
+        },
+      ),
+    ),
   ];
 }
 

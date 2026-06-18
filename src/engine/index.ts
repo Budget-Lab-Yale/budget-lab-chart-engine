@@ -13,7 +13,7 @@ import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
 
 export interface RenderOptions {
   width?: number;
@@ -144,13 +144,12 @@ export function renderChart(
   const units = inferUnitsFromSubtitle(spec.subtitle);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
-  // Approximation: uses the tblPlotDefaults marginTop (18) and the adapter's
+  // Approximation: uses TBL_MARGIN_TOP (matches tblPlotDefaults default) and the adapter's
   // marginBottom; bar builders should treat these as rough guidance, not pixel-perfect.
   const effWidth = opts.width ?? 720;
   const effHeight = opts.height ?? 320;
-  const marginTop = 18; // matches tblPlotDefaults default
   const plotWidth = effWidth - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT;
-  const plotHeight = effHeight - marginTop - xOpts.marginBottom;
+  const plotHeight = effHeight - TBL_MARGIN_TOP - xOpts.marginBottom;
 
   // Chart-type-specific marks, then assemble the Plot.
   const layers = markBuilderFor(spec.chartType)(dataInScope, spec, {

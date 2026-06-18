@@ -77,6 +77,11 @@ describe("makeXAdapter('categorical')", () => {
       expect(Array.isArray(opts.axisMarks)).toBe(true);
       expect(opts.axisMarks.length).toBeGreaterThan(0);
     });
+
+    it("buildXOpts([]) yields an empty band domain without throwing", () => {
+      const emptyOpts = adapter.buildXOpts([]);
+      expect(emptyOpts.xPlotOpts?.["domain"]).toEqual([]);
+    });
   });
 });
 
