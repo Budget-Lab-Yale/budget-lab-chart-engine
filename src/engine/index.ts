@@ -8,7 +8,7 @@
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
-import { computeYAxis } from "./scales";
+import { computeYAxis, computeBarYExtent } from "./scales";
 import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow } from "./marks/index";
@@ -123,19 +123,37 @@ export function renderChart(
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
   ];
   const policy = spec.yAxisPolicy ?? {};
-  let yMax = policy.max;
-  if (policy.autoWiden && yMax != null) {
-    const dataMax = Math.max(...(yForAxis.filter(Number.isFinite) as number[]));
-    if (dataMax > yMax) {
-      const step = policy.autoWiden.step || 1;
-      yMax = Math.ceil(dataMax / step) * step;
-    }
-  }
-  const hardDomain: [number, number] | null =
-    policy.min != null && yMax != null ? [policy.min, yMax] : null;
   const tickCount = policy.tickCount ?? 5;
+  const chartType = spec.chartType;
+
+  let hardDomain: [number, number] | null;
+  let includeZero: boolean;
+
+  if (chartType === "bar" || chartType === "stacked") {
+    // Bar/stacked: mandatory zero baseline; axis extent derived from stacked totals +
+    // value-label headroom. Author-supplied yAxisPolicy.min / .max still win (override
+    // the computed bar extent), but we force includeZero so nice() never drops zero.
+    includeZero = true;
+    const barExtent = computeBarYExtent(dataInScope, spec, chartType);
+    const resolvedMin = policy.min ?? barExtent.min;
+    const resolvedMax = policy.max ?? barExtent.max;
+    hardDomain = [resolvedMin, resolvedMax];
+  } else {
+    // Line (and future non-bar types): unchanged behavior.
+    includeZero = policy.includeZero === true;
+    let yMax = policy.max;
+    if (policy.autoWiden && yMax != null) {
+      const dataMax = Math.max(...(yForAxis.filter(Number.isFinite) as number[]));
+      if (dataMax > yMax) {
+        const step = policy.autoWiden.step || 1;
+        yMax = Math.ceil(dataMax / step) * step;
+      }
+    }
+    hardDomain = policy.min != null && yMax != null ? [policy.min, yMax] : null;
+  }
+
   const { domain: yDomain, ticks: yTicks } = computeYAxis(yForAxis, {
-    includeZero: policy.includeZero === true,
+    includeZero,
     domain: hardDomain,
     tickCount,
   });
