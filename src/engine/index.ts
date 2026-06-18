@@ -48,6 +48,9 @@ export interface RenderResult {
   dataInScope: PreparedRow[];
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
+   *  (stacked charts only). render-live uses it to order the vertical legend column. */
+  legendVisualOrder?: string[];
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -196,12 +199,16 @@ export function renderChart(
   const hasDashOverrides = layers.dashedNames.size > 0;
   const markerShape: "line" | "rect" =
     chartType === "bar" || chartType === "stacked" ? "rect" : "line";
+  // When the mark layer is the source of truth for series colors (stacked: mono tiers or
+  // categorical), use those for the legend swatches so the legend matches the bars.
+  const legendColorFor = (name: string): string | undefined =>
+    layers.seriesColors?.get(name) ?? colors.get(name);
   const baseItems: LegendItem[] | null =
     seriesNames.length > 1 || hasDashOverrides
       ? seriesNames.map((name) => ({
           series: name,
           label: labelFor(name),
-          color: colors.get(name),
+          color: legendColorFor(name),
           dashed: spec.series_styles?.[name]?.dashed === true,
           markerShape,
         }))
@@ -236,5 +243,6 @@ export function renderChart(
     dataInScope,
     tooltipXParse: xOpts.tooltipXParse,
     tooltipXFormat: xOpts.tooltipXFormat,
+    legendVisualOrder: layers.legendVisualOrder,
   };
 }

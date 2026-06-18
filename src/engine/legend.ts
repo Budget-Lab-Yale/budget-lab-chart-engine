@@ -20,13 +20,20 @@ export function renderLegend(
   const pinned = new Set<string>();
   let hovered: string | null = null;
 
+  // Circular reset button — declared up front (applyHighlight toggles its visibility) but
+  // appended at the END of the legend so it sits after the last item. Hidden until pinned,
+  // so toggling it in on the first pin does not shift the data-series rows above it.
+  const resetBtn = doc.createElement("button");
+
   const applyHighlight = (): void => {
     const active = new Set(pinned);
     if (hovered) active.add(hovered);
     // Dim only when a subset is highlighted (not everything, not nothing).
     const dimAll = active.size > 0 && active.size < allSeries.length;
     if (svg) {
-      svg.querySelectorAll("path[data-series]").forEach((p) => {
+      // Dim ALL data-series elements: line charts tag <path>, bar/stacked tag <rect>.
+      // Matching only path[data-series] left bar/stacked hover-dim + click-pin dead.
+      svg.querySelectorAll("[data-series]").forEach((p) => {
         const s = p.getAttribute("data-series");
         p.classList.toggle("tbl-dimmed", dimAll && !active.has(s as string));
       });
@@ -94,16 +101,13 @@ export function renderLegend(
     legend.appendChild(btn);
   }
 
-  // Circular reset button — placed before the first legend item so it stays in a
-  // stable, visible position regardless of how the items wrap. Hidden until pinned.
-  const resetBtn = doc.createElement("button");
   resetBtn.type = "button";
   resetBtn.className = "tbl-legend-reset";
   resetBtn.setAttribute("aria-label", "Clear pinned highlights");
   resetBtn.innerHTML = '<span class="tbl-legend-reset-icon">⟲</span>';
   resetBtn.hidden = true;
   resetBtn.addEventListener("click", () => { pinned.clear(); applyHighlight(); });
-  legend.insertBefore(resetBtn, legend.firstChild);
+  legend.appendChild(resetBtn);
 
   parent.appendChild(legend);
   return legend;

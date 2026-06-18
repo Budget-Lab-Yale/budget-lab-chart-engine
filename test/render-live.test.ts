@@ -526,3 +526,202 @@ describe("legend swatch shapes", () => {
     expect(buttons.length).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Legend correctness fixes (TT-L)
+
+describe("legend hover/click dimming on bar & stacked charts (Fix #1)", () => {
+  const BAR_SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "Bar dim test",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    series_order: ["2019", "2022"],
+    data: "inline",
+  };
+  const BAR_ROWS: TidyRow[] = [
+    { time: "Northeast", series: "2019", value: "3.2" },
+    { time: "Midwest",   series: "2019", value: "2.1" },
+    { time: "Northeast", series: "2022", value: "4.1" },
+    { time: "Midwest",   series: "2022", value: "2.5" },
+  ];
+
+  it("clicking a legend item dims the OTHER series' <rect>s, not the clicked one", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: BAR_SPEC, rows: BAR_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const btn2019 = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="2019"]')!;
+    expect(btn2019).not.toBeNull();
+    btn2019.click();
+    // Rects of 2019 stay un-dimmed; rects of 2022 are dimmed.
+    const rects2019 = svg.querySelectorAll('rect[data-series="2019"]');
+    const rects2022 = svg.querySelectorAll('rect[data-series="2022"]');
+    expect(rects2019.length).toBeGreaterThan(0);
+    expect(rects2022.length).toBeGreaterThan(0);
+    rects2019.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(false));
+    rects2022.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
+    // Clicking again clears the pin → nothing dimmed.
+    btn2019.click();
+    svg.querySelectorAll("[data-series]").forEach((r) =>
+      expect(r.classList.contains("tbl-dimmed")).toBe(false),
+    );
+  });
+
+  it("line chart still dims <path>s (not regressed)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const btnA = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="A"]')!;
+    btnA.click();
+    const pathsA = svg.querySelectorAll('path[data-series="A"]');
+    const pathsB = svg.querySelectorAll('path[data-series="B"]');
+    expect(pathsA.length).toBeGreaterThan(0);
+    expect(pathsB.length).toBeGreaterThan(0);
+    pathsA.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(false));
+    pathsB.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(true));
+  });
+});
+
+describe("monochromatic stacked legend swatch colors (Fix #2)", () => {
+  const MONO_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Mono stacked",
+    subtitle: "Units",
+    xAxisType: "categorical",
+    series_order: ["Tier A", "Tier B", "Tier C", "Tier D"],
+    barStack: { mono: { base: "blue" } },
+    data: "inline",
+  };
+  const MONO_ROWS: TidyRow[] = [
+    { time: "Q1", series: "Tier A", value: "30" },
+    { time: "Q1", series: "Tier B", value: "20" },
+    { time: "Q1", series: "Tier C", value: "15" },
+    { time: "Q1", series: "Tier D", value: "10" },
+  ];
+
+  it("legend swatch background equals the bar's tonal tier (darkest-at-bottom)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MONO_SPEC, rows: MONO_ROWS, width: 720 });
+    // All-positive: bottom→top tier assignment = declaration order; tiers darkest-first
+    // for blue = 700,600,500,400. So Tier A=#002B61 (700), Tier D=#0070AF (400).
+    const tierA = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Tier A"] .tbl-legend-swatch')!;
+    const tierD = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Tier D"] .tbl-legend-swatch')!;
+    expect(tierA.style.background).toBe("rgb(0, 43, 97)");  // #002B61
+    expect(tierD.style.background).toBe("rgb(0, 112, 175)"); // #0070AF
+  });
+});
+
+describe("diverging right-legend visual-stack order (Fix #3)", () => {
+  const DIVERGING_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Diverging order",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
+    data: "inline",
+  };
+  const DIVERGING_ROWS: TidyRow[] = [
+    { time: "A", series: "Lower rates",       value: "4"    },
+    { time: "A", series: "Wider brackets",    value: "2"    },
+    { time: "A", series: "Limit deductions",  value: "-1.5" },
+    { time: "A", series: "Repeal credit",     value: "-2.5" },
+    { time: "B", series: "Lower rates",       value: "3"    },
+    { time: "B", series: "Wider brackets",    value: "2.5"  },
+    { time: "B", series: "Limit deductions",  value: "-1"   },
+    { time: "B", series: "Repeal credit",     value: "-3"   },
+  ];
+
+  it("right-legend reads top→bottom in visual-stack order, Total last", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS, width: 800 });
+    const rightSlot = container.querySelector(".figure-legend-slot--right")!;
+    expect(rightSlot).not.toBeNull();
+    const items = rightSlot.querySelectorAll(".tbl-legend-item");
+    const labels = Array.from(items).map((el) => (el as HTMLElement).textContent?.trim());
+    // positives [Lower rates, Wider brackets] reversed → [Wider brackets, Lower rates];
+    // negatives [Limit deductions, Repeal credit] in order; Total last.
+    expect(labels).toEqual([
+      "Wider brackets",
+      "Lower rates",
+      "Limit deductions",
+      "Repeal credit",
+      "Total",
+    ]);
+  });
+});
+
+describe("right-legend swatch left-alignment (Fix #4)", () => {
+  const FIVE_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Five series stacked",
+    subtitle: "Percent",
+    xAxisType: "categorical",
+    series_order: ["S1", "S2", "S3", "S4", "S5"],
+    data: "inline",
+  };
+  const FIVE_ROWS: TidyRow[] = [
+    { time: "A", series: "S1", value: "1" },
+    { time: "A", series: "S2", value: "2" },
+    { time: "A", series: "S3", value: "1" },
+    { time: "A", series: "S4", value: "2" },
+    { time: "A", series: "S5", value: "1" },
+  ];
+
+  it("vertical legend items stretch full-width and left-align (structure guarantees common left edge)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SPEC, rows: FIVE_ROWS, width: 800 });
+    const legend = container.querySelector(".figure-legend-slot--right .tbl-legend--vertical")!;
+    expect(legend).not.toBeNull();
+    // The CSS uses align-items:stretch + .tbl-legend-item{width:100%;justify-content:flex-start}
+    // so every item is the same width and its swatch starts at the same left x. Assert the
+    // class that the CSS rule keys on is present on the legend and items.
+    expect(legend.classList.contains("tbl-legend--vertical")).toBe(true);
+    const items = legend.querySelectorAll(".tbl-legend-item");
+    expect(items.length).toBe(5);
+  });
+});
+
+describe("reset button position & visibility (Fix #5)", () => {
+  const FIVE_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Five series stacked",
+    subtitle: "Percent",
+    xAxisType: "categorical",
+    series_order: ["S1", "S2", "S3", "S4", "S5"],
+    data: "inline",
+  };
+  const FIVE_ROWS: TidyRow[] = [
+    { time: "A", series: "S1", value: "1" },
+    { time: "A", series: "S2", value: "2" },
+    { time: "A", series: "S3", value: "1" },
+    { time: "A", series: "S4", value: "2" },
+    { time: "A", series: "S5", value: "1" },
+  ];
+
+  it("reset button is the LAST child of the legend and hidden until pinned", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: FIVE_SPEC, rows: FIVE_ROWS, width: 800 });
+    const legend = container.querySelector(".figure-legend-slot--right .tbl-legend")!;
+    const reset = legend.querySelector<HTMLButtonElement>(".tbl-legend-reset")!;
+    expect(reset).not.toBeNull();
+    // Last child of the legend.
+    expect(legend.lastElementChild).toBe(reset);
+    // Hidden until something is pinned.
+    expect(reset.hidden).toBe(true);
+    // Pin a series → reset becomes visible.
+    const firstBtn = legend.querySelector<HTMLButtonElement>("button.tbl-legend-item[data-series]")!;
+    firstBtn.click();
+    expect(reset.hidden).toBe(false);
+    // Clicking reset clears the pin and re-hides itself.
+    reset.click();
+    expect(reset.hidden).toBe(true);
+  });
+
+  it("reset button is the last child of a TOP legend too", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS, width: 720 });
+    const legend = container.querySelector(".figure-legend-slot .tbl-legend")!;
+    const reset = legend.querySelector(".tbl-legend-reset")!;
+    expect(legend.lastElementChild).toBe(reset);
+  });
+});

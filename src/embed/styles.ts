@@ -105,14 +105,27 @@ body {
   width: 160px;
   align-self: center;
 }
-/* Vertical legend: items stacked in a column with consistent row spacing. */
+/* Vertical legend: items stacked in a column with consistent row spacing. Items stretch
+   to the column width and left-align their contents, so every swatch sits on a common
+   left edge (Fix #D). */
 .tbl-legend--vertical {
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 0 0;
   row-gap: 4px;
   margin: 0;
   min-height: 0;
+}
+.tbl-legend--vertical .tbl-legend-item {
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+}
+/* Reset button left-aligned at the bottom of the vertical legend (no trailing right
+   margin pushing it off the common left edge). */
+.tbl-legend--vertical .tbl-legend-reset {
+  margin: 2px 0 0 0;
+  align-self: flex-start;
 }
 
 /* Scroll wrapper isolates horizontal overflow to the chart region, so the title/subtitle/
@@ -295,10 +308,11 @@ body {
 /* =========================================================================
  * Hover-to-dim
  * ========================================================================= */
-.figure-canvas svg path[data-series] {
+/* Applies to line <path data-series> AND bar/stacked <rect data-series>. */
+.figure-canvas svg [data-series] {
   transition: opacity 120ms linear;
 }
-.figure-canvas svg path.tbl-dimmed {
+.figure-canvas svg .tbl-dimmed {
   opacity: 0.15;
 }
 

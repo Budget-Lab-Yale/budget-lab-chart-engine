@@ -120,24 +120,33 @@ export function buildStackedMarks(
   // stack rank (through 0 for diverging), NOT declaration order. We compute each series'
   // bottom→top rank within its (single-category) stack; since the stack order is the same
   // across categories (declaration order), one global ranking suffices.
+  // Series sign classification (by SUMMED value across categories): a series is negative
+  // if its total is < 0, positive otherwise. Edge case: a genuinely mixed-sign series is
+  // classified by the sign of its sum, which can place it on the "wrong" visual side for
+  // individual categories — acceptable, and the only well-defined single classification.
+  const sumBySeries = new Map<string, number>();
+  for (const r of data) {
+    const y = r._y;
+    if (!Number.isFinite(y as number) || y == null) continue;
+    sumBySeries.set(r.series, (sumBySeries.get(r.series) ?? 0) + (y as number));
+  }
+  const sign = new Map<string, number>();
+  for (const s of seriesNames) sign.set(s, (sumBySeries.get(s) ?? 0) < 0 ? -1 : 1);
+  const negs = seriesNames.filter((s) => sign.get(s) === -1);
+  const poss = seriesNames.filter((s) => sign.get(s) !== -1);
+
+  // Visual stack order, top→bottom (bar-stacked.md §8.2): positives stack up from 0 in
+  // declaration order (first-declared just above 0) so visual top→bottom = positives
+  // REVERSED; negatives stack down from 0 in declaration order so visual top→bottom =
+  // negatives in declaration order. Full order = [positives reversed] ++ [negatives].
+  const legendVisualOrder = [...poss.slice().reverse(), ...negs];
+
   const monoBase = spec.barStack?.mono?.base;
   // series → mono tier hex (darkest at bottom of the visual stack), or null when categorical.
   let monoTierForSeries: Map<string, string> | null = null;
   let fillChannel: string | ((d: PreparedRow) => string);
   if (monoBase) {
     const tiers = monoScale(monoBase, seriesNames.length); // darkest-first
-    // Visual bottom→top order: negative series stack downward (so the LAST-declared
-    // negative is the visual bottom), then positive series stack upward in declaration
-    // order. Determine each series' sign from its representative value across the data
-    // (a series is treated as negative if its first finite value is negative).
-    const sign = new Map<string, number>();
-    for (const r of data) {
-      const y = r._y;
-      if (sign.has(r.series) || !Number.isFinite(y as number) || y == null) continue;
-      sign.set(r.series, (y as number) < 0 ? -1 : 1);
-    }
-    const negs = seriesNames.filter((s) => sign.get(s) === -1);
-    const poss = seriesNames.filter((s) => sign.get(s) !== -1);
     // Bottom→top: bottommost negative first. Negatives stack downward in declaration
     // order, so the last-declared negative sits at the visual bottom → reverse them.
     const bottomToTop = [...negs.slice().reverse(), ...poss];
@@ -150,6 +159,13 @@ export function buildStackedMarks(
   } else {
     // Categorical: literal accessor against the engine color map (matches the legend).
     fillChannel = (d: PreparedRow) => colors.get(d.series) || TBL.color.blue;
+  }
+
+  // Resolved series → fill color: the source of truth for the legend swatches. Mono uses
+  // the tonal tier per series; categorical uses the engine color map.
+  const seriesColors = new Map<string, string>();
+  for (const s of seriesNames) {
+    seriesColors.set(s, monoTierForSeries?.get(s) ?? colors.get(s) ?? TBL.color.blue);
   }
 
   // --- Stack mark ---
@@ -320,6 +336,8 @@ export function buildStackedMarks(
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
       xAxisMarks: tblBandYAxis(categories),
+      seriesColors,
+      legendVisualOrder,
       ...(legendExtras ? { legendExtras } : {}),
     };
   }
@@ -332,6 +350,8 @@ export function buildStackedMarks(
     // Single category band on `x`; refine outer pad like single-series bars. xScaleField
     // stays "x" → adapter's x labels are correct, no xAxisMarks override needed.
     xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
+    seriesColors,
+    legendVisualOrder,
     ...(legendExtras ? { legendExtras } : {}),
   };
 }

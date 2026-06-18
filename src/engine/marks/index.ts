@@ -66,6 +66,16 @@ export interface MarkLayers {
    *  emit a "Total" row with a dot marker). A7 only PRODUCES this metadata; A8 renders it.
    *  Line/bar leave it undefined. */
   legendExtras?: { label: string; markerShape: "dot" }[];
+  /** Optional: series → resolved fill color, when the mark layer is the source of truth
+   *  for series colors (stacked bars: mono tonal tiers, else the categorical map). When
+   *  present, renderChart uses these for the legend swatches so the legend matches the
+   *  bars. Line/grouped-bar leave it undefined (the engine color map already matches). */
+  seriesColors?: Map<string, string>;
+  /** Optional: the visual top-to-bottom stack order of the interactive series, for the
+   *  RIGHT (vertical) legend. For a diverging stack this is [positives reversed] ++
+   *  [negatives in declaration order]; the non-interactive Total row is appended by the
+   *  renderer. Non-stacked / top-legend charts leave it undefined. */
+  legendVisualOrder?: string[];
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;

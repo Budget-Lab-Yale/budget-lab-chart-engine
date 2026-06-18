@@ -302,19 +302,27 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let currentLegendPos: "top" | "right" | null = null;
 
   /**
-   * Order legendItems for the right-legend column:
-   *   - Series rows in REVERSED declaration order (top-of-stack first, matching visual stack).
-   *   - nonInteractive rows (e.g. Total) moved to the END in their original relative order.
-   *
-   * Note: for diverging stacks the ideal order interleaves positives top-down then negatives;
-   * this reversed-series-then-total approximation is correct for the all-positive case and is a
-   * good visual approximation for diverging. Exact diverging interleaving can be refined in the
-   * visual pass.
+   * Order legendItems for the right-legend column to match the VISUAL top→bottom stack:
+   *   - When the engine supplies `legendVisualOrder` (stacked charts), series rows follow
+   *     that order ([positives reversed] ++ [negatives in declaration order]).
+   *   - Otherwise fall back to REVERSED declaration order (top-of-stack first).
+   *   - nonInteractive rows (e.g. Total) are appended at the END in original relative order.
    */
-  function orderForRightLegend(items: LegendItem[]): LegendItem[] {
+  function orderForRightLegend(items: LegendItem[], visualOrder?: string[]): LegendItem[] {
     const series = items.filter((i) => !i.nonInteractive);
     const extras = items.filter((i) => i.nonInteractive);
-    return [...[...series].reverse(), ...extras];
+    let orderedSeries: LegendItem[];
+    if (visualOrder && visualOrder.length) {
+      const bySeries = new Map(series.map((i) => [i.series, i]));
+      orderedSeries = visualOrder
+        .map((s) => bySeries.get(s))
+        .filter((i): i is LegendItem => i != null);
+      // Append any series not named in visualOrder (defensive), preserving their order.
+      for (const i of series) if (!visualOrder.includes(i.series)) orderedSeries.push(i);
+    } else {
+      orderedSeries = [...series].reverse();
+    }
+    return [...orderedSeries, ...extras];
   }
 
   const draw = (outerWidth: number, legendPos: "top" | "right"): void => {
@@ -336,7 +344,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     }
     const {
       svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, units,
-      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat,
+      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder,
     } = built;
 
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
@@ -363,7 +371,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // Top legend slot stays in the DOM but is now empty (no content added).
         }
         // Render the right-side vertical legend with reversed series order.
-        const orderedItems = orderForRightLegend(legendItems);
+        const orderedItems = orderForRightLegend(legendItems, legendVisualOrder);
         rightLegendSlot!.replaceChildren();
         renderLegend(rightLegendSlot!, orderedItems, { svg });
         // Add vertical class to the rendered legend element.
