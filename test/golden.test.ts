@@ -425,7 +425,7 @@ describe("golden SVG — stacked bars", () => {
     expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
     // No "Total" legend extra — only the 3 series entries.
     expect(legendItems?.length).toBe(3);
-    expect(legendItems?.map((l) => l.series)).not.toContain("Total");
+    expect(legendItems?.every((l) => !l.series.startsWith("__extra__"))).toBe(true);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-none.golden.svg");
   });
 

@@ -517,7 +517,7 @@ describe("legend swatch shapes", () => {
       { series: "__extra__Total", label: "Total", color: undefined, dashed: false, markerShape: "dot", nonInteractive: true },
     ];
     renderLegend(parent, items, { svg: fakeSvg });
-    // The reset button is the first child; legend items follow.
+    // The reset button is the last child; legend items precede it.
     const legendItems = parent.querySelectorAll(".tbl-legend-item");
     // 3 items rendered.
     expect(legendItems.length).toBe(3);

@@ -544,7 +544,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
   function update(evt: PointerEvent): void {
     const rect = svgEl.getBoundingClientRect();
-    if (!rect.width) return;
+    if (!rect.width || !rect.height) return;
 
     let category: string | null = null;
     let hlMin = 0;
