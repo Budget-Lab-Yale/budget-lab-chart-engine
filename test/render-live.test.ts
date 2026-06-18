@@ -353,6 +353,32 @@ describe("right-side legend layout", () => {
     expect(container.querySelector(".figure-body--legend-right")).toBeNull();
   });
 
+  it("diverging stacked chart (<5 series, no explicit legendPosition) defaults to right legend", () => {
+    // 4 series (below the ≥5 threshold), but negative values → diverging → should use right legend.
+    const spec: ChartSpec = {
+      chartType: "stacked",
+      title: "Diverging stacked right",
+      subtitle: "Percentage points",
+      xAxisType: "categorical",
+      series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { time: "A", series: "Lower rates",       value: "4"    },
+      { time: "A", series: "Wider brackets",    value: "2"    },
+      { time: "A", series: "Limit deductions",  value: "-1.5" },
+      { time: "A", series: "Repeal credit",     value: "-2.5" },
+      { time: "B", series: "Lower rates",       value: "3"    },
+      { time: "B", series: "Wider brackets",    value: "2.5"  },
+      { time: "B", series: "Limit deductions",  value: "-1"   },
+      { time: "B", series: "Repeal credit",     value: "-3"   },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows, width: 800 });
+    expect(container.querySelector(".figure-body--legend-right")).not.toBeNull();
+    expect(container.querySelector(".figure-legend-slot--right .tbl-legend")).not.toBeNull();
+  });
+
   it("right-legend: top .figure-legend-slot is empty (legend moved to right column)", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });

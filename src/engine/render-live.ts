@@ -45,9 +45,8 @@ const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGE
  *
  * Rule (per Style-Guide §8.2/§8.3):
  *   - Explicit `spec.legendPosition` always wins.
- *   - Otherwise: "right" when chartType === "stacked" AND seriesCount >= 5; "top" otherwise.
- *   - Diverging detection (any negative _y) could also trigger "right", but series count ≥ 5
- *     covers the main case cleanly; diverging-specific ordering is a visual-pass refinement.
+ *   - Otherwise: "right" when chartType === "stacked" AND (seriesCount >= 5 OR the chart is
+ *     diverging — any row with _y < 0); "top" otherwise.
  *
  * The fallback to "top" when the card is too narrow is enforced in mountChart (not here),
  * after the card width is known.
@@ -55,11 +54,20 @@ const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGE
 function resolveLegendPosition(
   spec: ChartSpec,
   seriesCount: number,
+  rows: TidyRow[],
 ): "top" | "right" {
   if (spec.legendPosition === "top" || spec.legendPosition === "right") {
     return spec.legendPosition;
   }
-  if (spec.chartType === "stacked" && seriesCount >= 5) return "right";
+  if (spec.chartType === "stacked") {
+    if (seriesCount >= 5) return "right";
+    // Diverging: any row with a negative _y value.
+    const isDiverging = rows.some((r) => {
+      const v = typeof r._y === "number" ? r._y : Number(r.value);
+      return Number.isFinite(v) && v < 0;
+    });
+    if (isDiverging) return "right";
+  }
   return "top";
 }
 
@@ -429,7 +437,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   }
   // Fall back to top if the card is too narrow for the right-legend column.
   const resolvedPos = (): "top" | "right" => {
-    const pos = resolveLegendPosition(spec, prelimSeriesCount);
+    const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
     if (pos === "right" && (card.clientWidth || initialWidth || 720) < LEGEND_RIGHT_MIN_CARD_WIDTH) {
       return "top";
     }
@@ -462,7 +470,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
         const cardW = card.clientWidth;
-        const pos = resolveLegendPosition(spec, prelimSeriesCount);
+        const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
         const effectivePos: "top" | "right" =
           pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
         draw(cardW, effectivePos);

@@ -106,7 +106,12 @@ export interface ChartSpec {
   };
   /** Series keys to visually highlight (dimming all others). */
   highlightSeries?: string[];
-  /** Where to render the legend; defaults to right. */
+  /**
+   * Where to render the legend.
+   *
+   * Defaults to "top", except: a stacked chart that is diverging (any category/series has a
+   * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
+   */
   legendPosition?: "top" | "right";
 
   // Data
