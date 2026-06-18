@@ -5,9 +5,9 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line";
+export type ChartType = "line" | "bar" | "stacked";
 
-export type XAxisType = "numeric" | "temporal" | "quarterly";
+export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
@@ -88,6 +88,26 @@ export interface ChartSpec {
   series_labels?: Record<string, string>;
 
   confidence_bands?: ConfidenceBand[];
+
+  // Bar / stacked bar
+  /** Chart orientation; defaults to "vertical" (value axis is Y). */
+  orientation?: "vertical" | "horizontal";
+  /** In-bar value labels. */
+  valueLabels?: { show?: boolean; signed?: boolean };
+  /** Stacked-bar display options. */
+  barStack?: {
+    /** How to render the net (sum) callout. */
+    netDisplay?: "auto" | "text" | "dot";
+    /** Monochrome override: render all segments using shades of one base color. */
+    mono?: { base: ColorRef };
+    netLabelColor?: "white" | "black";
+    /** Normalize each bar to 100 % (0–1 scale). */
+    normalize?: boolean;
+  };
+  /** Series keys to visually highlight (dimming all others). */
+  highlightSeries?: string[];
+  /** Where to render the legend; defaults to right. */
+  legendPosition?: "top" | "right";
 
   // Data
   data: DataSource;

@@ -38,8 +38,17 @@ export interface MarkLayers {
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;
 
+// bar / stacked builders are registered here once implemented (later tasks).
+const _notImplemented =
+  (type: ChartType): MarkBuilder =>
+  () => {
+    throw new Error(`Mark builder for chartType "${type}" is not yet implemented`);
+  };
+
 const REGISTRY: Record<ChartType, MarkBuilder> = {
   line: buildLineMarks,
+  bar: _notImplemented("bar"),
+  stacked: _notImplemented("stacked"),
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {

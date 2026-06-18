@@ -62,6 +62,10 @@ function timeParseError(xAxisType: XAxisType, value: string): string | null {
   if (xAxisType === "quarterly") {
     return QUARTER_RE.test(value) ? null : `expected YYYYQ#, got ${JSON.stringify(value)}`;
   }
+  if (xAxisType === "categorical") {
+    // Any non-empty string is a valid category label.
+    return value.trim() !== "" ? null : `expected a non-empty category label, got ${JSON.stringify(value)}`;
+  }
   return `unknown xAxisType ${JSON.stringify(xAxisType)}`;
 }
 

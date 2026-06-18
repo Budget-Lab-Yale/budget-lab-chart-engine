@@ -98,7 +98,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line"] },
+    chartType: { type: "string", enum: ["line", "bar", "stacked"] },
 
     // Text
     eyebrow: { type: "string" },
@@ -109,7 +109,7 @@ export const CHART_SPEC_SCHEMA = {
     x_axis_title: { type: "string" },
 
     // Axes
-    xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly"] },
+    xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },
     xAxisPolicy: X_AXIS_POLICY,
     yAxisPolicy: Y_AXIS_POLICY,
 
@@ -128,6 +128,34 @@ export const CHART_SPEC_SCHEMA = {
     series_labels: { type: "object", additionalProperties: { type: "string" } },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
+
+    // Bar / stacked bar
+    orientation: { type: "string", enum: ["vertical", "horizontal"] },
+    valueLabels: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        show: { type: "boolean" },
+        signed: { type: "boolean" },
+      },
+    },
+    barStack: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        netDisplay: { type: "string", enum: ["auto", "text", "dot"] },
+        mono: {
+          type: "object",
+          additionalProperties: false,
+          required: ["base"],
+          properties: { base: { type: "string" } },
+        },
+        netLabelColor: { type: "string", enum: ["white", "black"] },
+        normalize: { type: "boolean" },
+      },
+    },
+    highlightSeries: { type: "array", items: { type: "string" } },
+    legendPosition: { type: "string", enum: ["top", "right"] },
 
     // Data
     data: DATA_SOURCE,

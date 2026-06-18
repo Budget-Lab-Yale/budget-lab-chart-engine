@@ -50,6 +50,54 @@ describe("validateSpec (structural)", () => {
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/step/);
   });
+
+  it("accepts a bar spec with categorical xAxisType and bar fields", () => {
+    const r = validateSpec({
+      chartType: "bar",
+      title: "Bar Demo",
+      xAxisType: "categorical",
+      data: "data.csv",
+      orientation: "vertical",
+      valueLabels: { show: true, signed: false },
+      highlightSeries: ["a"],
+      legendPosition: "top",
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts a stacked spec with a barStack block", () => {
+    const r = validateSpec({
+      chartType: "stacked",
+      title: "Stacked Demo",
+      xAxisType: "categorical",
+      data: "data.csv",
+      barStack: {
+        netDisplay: "text",
+        mono: { base: "#003366" },
+        netLabelColor: "white",
+        normalize: false,
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an unknown key inside barStack", () => {
+    const r = validateSpec({
+      chartType: "stacked",
+      title: "Bad Stack",
+      xAxisType: "categorical",
+      data: "data.csv",
+      barStack: { bogusKey: true },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogusKey/);
+  });
+
+  it("rejects an invalid orientation enum value", () => {
+    const r = validateSpec({ ...VALID, orientation: "diagonal" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/vertical, horizontal/);
+  });
 });
 
 describe("validateChartData (cross-reference + CSV format)", () => {
