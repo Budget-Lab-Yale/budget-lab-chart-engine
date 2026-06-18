@@ -1,6 +1,9 @@
 // Cursor-following crosshair tooltip (a live-layer DOM primitive). A vertical guide
 // stays inside the SVG and snaps to the nearest x in the data; the tooltip is appended
 // to document.body and positioned with position:fixed at the cursor's viewport coords.
+//
+// Also exports `attachBandCrosshair` for categorical (band-axis) charts (bar/stacked),
+// which resolves the hovered category from rendered rect geometry and shows a tooltip.
 import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { escapeHtml } from "./util";
@@ -191,6 +194,282 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
 
   function hide(): void {
     guide.setAttribute("opacity", "0");
+    tip.style.opacity = "0";
+  }
+
+  hit.style.pointerEvents = "all";
+  hit.addEventListener("pointermove", update as EventListener);
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("pointerdown", update as EventListener);
+}
+
+// ---------------------------------------------------------------------------
+// Band-axis (categorical) hover tooltip — bar / stacked charts
+// ---------------------------------------------------------------------------
+
+export interface BandCrosshairOptions {
+  /** All rows in scope (dataInScope from renderChart). Each must have `_xc` (the category
+   *  key), `series`, and `_y`. */
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+  /** True for stacked charts — appends a "Total" row (Σ of the category's values). */
+  isStacked?: boolean;
+  /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
+  isFaceted?: boolean;
+  /** Ordered list of categories (declaration order → facet index order for fx layout). */
+  categories?: string[];
+  colors?: Map<string, string>;
+  seriesLabels?: Record<string, string>;
+  seriesOrder?: string[];
+  yFormat?: (v: number) => string;
+}
+
+/** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
+export interface CategoryBand {
+  category: string;
+  xMin: number;
+  xMax: number;
+}
+
+// ---------------------------------------------------------------------------
+// PURE helpers (exported for unit tests)
+
+/**
+ * Given a list of CategoryBands and a cursor x in SVG user units, return the
+ * category whose band contains x, or snap to the nearest band if x falls
+ * between two bands. Returns null when bands is empty.
+ */
+export function resolveCategoryFromBands(
+  bands: CategoryBand[],
+  svgX: number,
+): string | null {
+  if (!bands.length) return null;
+
+  // Check containment first.
+  for (const b of bands) {
+    if (svgX >= b.xMin && svgX <= b.xMax) return b.category;
+  }
+
+  // Snap to nearest band midpoint.
+  let best: CategoryBand = bands[0]!;
+  let bestDist = Infinity;
+  for (const b of bands) {
+    const mid = (b.xMin + b.xMax) / 2;
+    const dist = Math.abs(svgX - mid);
+    if (dist < bestDist) { bestDist = dist; best = b; }
+  }
+  return best.category;
+}
+
+/**
+ * Build the inner HTML for the band tooltip: header row + one row per series
+ * present for `category`, ordered by `seriesOrder`, plus an optional Total row
+ * for stacked charts. PURE — no DOM access.
+ */
+export function buildBandTooltipHtml(
+  category: string,
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>,
+  opts: {
+    isStacked?: boolean;
+    colors?: Map<string, string>;
+    seriesLabels?: Record<string, string>;
+    seriesOrder?: string[];
+    yFormat?: (v: number) => string;
+  },
+): string {
+  const { isStacked, colors, seriesLabels, seriesOrder, yFormat } = opts;
+  const fmt = yFormat ?? ((v: number) => String(v));
+
+  // Collect values for this category, keyed by series.
+  const catRows = rows.filter((r) => r._xc === category);
+  const valBySeries = new Map<string, number>();
+  for (const r of catRows) {
+    if (r._y != null && Number.isFinite(r._y)) valBySeries.set(r.series, r._y);
+  }
+
+  const orderedSeries = seriesOrder && seriesOrder.length
+    ? seriesOrder.filter((s) => valBySeries.has(s))
+    : [...valBySeries.keys()];
+
+  let html = `<div class="tbl-tooltip-head">${escapeHtml(category)}</div>`;
+  let total = 0;
+  for (const series of orderedSeries) {
+    const v = valBySeries.get(series);
+    if (v == null) continue;
+    total += v;
+    const dot = colors?.get(series) || "currentColor";
+    const display = (seriesLabels && seriesLabels[series]) || series;
+    html += `<div class="tbl-tooltip-row"><span class="tbl-tooltip-swatch" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+  }
+
+  if (isStacked && orderedSeries.length > 1) {
+    html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch" style="background: currentColor; opacity: 0"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+  }
+
+  return html;
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the rendered bar rect geometry from `svgEl` and return one CategoryBand
+ * per distinct category.
+ *
+ * - Single-band charts (stacked, single-series bar): all rects share the same
+ *   `data-series` namespace; each distinct x-position (rounded to int) is a
+ *   separate category. We derive category labels from `opts.categories` by
+ *   matching sorted x-positions to sorted category order.
+ * - Fx-faceted charts (grouped bars): each facet `<g>` wraps one category;
+ *   we read the bounding box of each facet group and map them in fx-domain index
+ *   order to `opts.categories`.
+ */
+function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): CategoryBand[] {
+  const { isFaceted, categories = [] } = opts;
+
+  if (isFaceted) {
+    // Grouped bars: Plot wraps each fx category in a <g> with a translate transform.
+    // The aria-label on the outer group may vary by Plot version; we match any <g>
+    // that has a translate transform inside the facets container.
+    const facetGroups = Array.from(
+      svgEl.querySelectorAll<SVGGElement>('g[aria-label^="facet"]'),
+    );
+    // If that yields nothing, fall back to any <g> with role="presentation" that
+    // contains bars — Plot's internal structure.
+    const groups = facetGroups.length
+      ? facetGroups
+      : Array.from(svgEl.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g'));
+
+    if (!groups.length) return [];
+
+    // Sort by x-translate to match facet order (category order).
+    const parsed: Array<{ x: number; g: SVGGElement }> = [];
+    for (const g of groups) {
+      const transform = g.getAttribute("transform") ?? "";
+      const m = /translate\(\s*([\d.+-]+)/.exec(transform);
+      if (!m) continue;
+      parsed.push({ x: parseFloat(m[1]!), g });
+    }
+    parsed.sort((a, b) => a.x - b.x);
+
+    return parsed.map((p, i) => {
+      const cat = categories[i] ?? String(i);
+      // Use the rects inside the group to determine the x-range.
+      const rects = Array.from(p.g.querySelectorAll<SVGRectElement>("rect"));
+      if (!rects.length) {
+        const tx = p.x;
+        return { category: cat, xMin: tx, xMax: tx + 1 };
+      }
+      let xMin = Infinity;
+      let xMax = -Infinity;
+      for (const rect of rects) {
+        const rx = parseFloat(rect.getAttribute("x") ?? "0") + p.x;
+        const rw = parseFloat(rect.getAttribute("width") ?? "0");
+        if (rx < xMin) xMin = rx;
+        if (rx + rw > xMax) xMax = rx + rw;
+      }
+      return { category: cat, xMin, xMax };
+    });
+  }
+
+  // Single-band: all rects for the bars share a common x for each category.
+  // Group them by rounded x-coordinate.
+  const allRects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
+  if (!allRects.length) return [];
+
+  // Group rects by their integer x (each category gets a distinct band x).
+  const xToBand = new Map<number, { xMin: number; xMax: number }>();
+  for (const rect of allRects) {
+    const rx = parseFloat(rect.getAttribute("x") ?? "0");
+    const rw = parseFloat(rect.getAttribute("width") ?? "0");
+    const key = Math.round(rx);
+    const existing = xToBand.get(key);
+    if (!existing) {
+      xToBand.set(key, { xMin: rx, xMax: rx + rw });
+    } else {
+      existing.xMin = Math.min(existing.xMin, rx);
+      existing.xMax = Math.max(existing.xMax, rx + rw);
+    }
+  }
+
+  // Sort by x position to match category declaration order.
+  const sortedKeys = Array.from(xToBand.keys()).sort((a, b) => a - b);
+  return sortedKeys.map((key, i) => {
+    const band = xToBand.get(key)!;
+    const cat = categories[i] ?? String(i);
+    return { category: cat, xMin: band.xMin, xMax: band.xMax };
+  });
+}
+
+/**
+ * Attach a category-based hover tooltip to a categorical (band-axis) chart SVG.
+ * Resolves cursor x → category using rendered rect geometry, shows a tooltip with
+ * per-series values and (for stacked) a Total row.
+ */
+export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOptions): void {
+  if (!svgEl || !opts.rows?.length) return;
+
+  const yFormat =
+    opts.yFormat ??
+    ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+
+  const NS = "http://www.w3.org/2000/svg";
+
+  // Remove any previously attached band-crosshair elements.
+  svgEl.querySelectorAll(".tbl-band-crosshair-hit").forEach((el) => el.remove());
+
+  // Transparent hit area.
+  const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
+  hit.classList.add("tbl-band-crosshair-hit");
+  hit.setAttribute("x", "0");
+  hit.setAttribute("y", "0");
+  hit.setAttribute("width", String(W));
+  hit.setAttribute("height", String(H));
+  hit.setAttribute("fill", "transparent");
+  hit.style.cursor = "default";
+  svgEl.appendChild(hit);
+
+  const tip = getSharedTooltip(svgEl.ownerDocument);
+
+  function update(evt: PointerEvent): void {
+    const rect = svgEl.getBoundingClientRect();
+    if (!rect.width) return;
+
+    const scaleX = W / rect.width;
+    const svgX = (evt.clientX - rect.left) * scaleX;
+
+    // Read geometry fresh on each event so it reflects the current render.
+    const bands = readCategoryBands(svgEl, opts);
+    const category = resolveCategoryFromBands(bands, svgX);
+    if (!category) { hide(); return; }
+
+    const html = buildBandTooltipHtml(category, opts.rows, {
+      isStacked: opts.isStacked,
+      colors: opts.colors,
+      seriesLabels: opts.seriesLabels,
+      seriesOrder: opts.seriesOrder,
+      yFormat,
+    });
+    tip.innerHTML = html;
+
+    const offset = 14;
+    const win = svgEl.ownerDocument.defaultView!;
+    const vw = win.innerWidth;
+    const vh = win.innerHeight;
+    tip.style.opacity = "1";
+    let left = evt.clientX + offset;
+    let top = evt.clientY + offset;
+    if (left + tip.offsetWidth + 4 > vw) left = evt.clientX - tip.offsetWidth - offset;
+    if (top + tip.offsetHeight + 4 > vh) top = evt.clientY - tip.offsetHeight - offset;
+    if (left < 4) left = 4;
+    if (top < 4) top = 4;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  }
+
+  function hide(): void {
     tip.style.opacity = "0";
   }
 

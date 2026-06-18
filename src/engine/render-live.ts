@@ -9,7 +9,7 @@ import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import { renderChart } from "./index.js";
 import { renderLegend } from "./legend.js";
-import { attachCrosshair } from "./crosshair.js";
+import { attachCrosshair, attachBandCrosshair } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
@@ -372,19 +372,43 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    attachCrosshair(svg, {
-      rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
-      xField: "time",
-      yField: "value",
-      seriesField: "series",
-      xParse: tooltipXParse as ((v: unknown) => number) | undefined,
-      xFormat: tooltipXFormat,
-      yFormat: (v) => formatValue(v, units),
-      colors,
-      dashedSeries: dashedNames,
-      seriesLabels,
-      seriesOrder,
-    });
+    if (spec.xAxisType === "categorical") {
+      // Determine if this is a stacked chart (needs Total row) and if it uses
+      // fx-faceted grouped bar layout (xScaleField === "fx" in bar.ts).
+      const isStacked = spec.chartType === "stacked";
+      const isFaceted = spec.chartType === "bar" && (seriesOrder.length > 1);
+      // Derive the ordered category list from the data rows (declaration order).
+      const catsSeen = new Set<string>();
+      const cats: string[] = [];
+      for (const r of dataInScope) {
+        const cat = r._xc;
+        if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
+      }
+      attachBandCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units),
+      });
+    } else {
+      attachCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
+        xField: "time",
+        yField: "value",
+        seriesField: "series",
+        xParse: tooltipXParse as ((v: unknown) => number) | undefined,
+        xFormat: tooltipXFormat,
+        yFormat: (v) => formatValue(v, units),
+        colors,
+        dashedSeries: dashedNames,
+        seriesLabels,
+        seriesOrder,
+      });
+    }
 
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
