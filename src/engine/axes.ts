@@ -198,62 +198,122 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
   ];
 }
 
-// Band (categorical) x-axis: one label per category, anchored at the band's left edge,
-// per the bar-grouped spec. No tick marks.
+// Band (categorical) x-axis: one label per category, anchored at the band's LEFT EDGE,
+// per the bar-grouped spec. No tick marks. The single-band (`x`) and grouped (`fx`) cases
+// need DIFFERENT Plot mechanics — see below.
 //
-// Plot 0.6.16 auto-adds bandwidth/2 to any text mark on a band scale (via its internal
-// `ot` helper), which would center the text anchor. We counter that with an initializer
-// that sets `this.dx = -bandwidth/2` after Plot has computed the scale — the net offset
-// is zero, landing the textAnchor:"start" origin at the band's left edge.
+// Why the original A2 approach produced CENTERED (then collapsed) labels — verified
+// empirically in Plot 0.6.16 (see the tweak-axis report): a text mark whose only horizontal
+// position comes from a BAND channel AND which carries `frameAnchor:"bottom"` has its
+// per-band x positions DISCARDED — Plot collapses every label onto the frame's horizontal
+// centre. (frameAnchor overrides the band channel for band scales; it does NOT for
+// linear/temporal scales, which is why the temporal axis was unaffected.) The A2
+// initializer's `dx = -bandwidth/2` never took effect: the labels were already collapsed,
+// so the shift only corrupted the group transform to NaN (every label piling at the frame's
+// left edge in the real chart).
 //
-// `scaleField` selects which band scale the labels sit on: "x" for single-series bars
-// (categories ARE the x band) and "fx" for grouped bars (categories are the facet groups;
-// `x` carries the inner series). The initializer reads bandwidth from that same scale.
+// `scaleField`: "x" for single-series bars (categories ARE the x band); "fx" for grouped
+// bars (categories are the facet groups; `x` carries the inner series).
 export function tblBandXAxis(
   categories: string[],
   scaleField: "x" | "fx" = "x",
 ): Mark[] {
-  const channel = scaleField === "fx" ? { fx: (d: string) => d } : { x: (d: string) => d };
+  if (scaleField === "fx") {
+    // GROUPED: each category is its own FACET frame, so we facet the text mark on `fx`
+    // (one label per facet) and anchor it to the facet frame's BOTTOM-LEFT corner — which
+    // is the group band's left edge at the plot's bottom. `frameAnchor:"bottom-left"`
+    // resolves per-facet (unlike a bare band channel, it survives faceting), so no
+    // initializer / dx is needed.
+    const rows = categories.map((c) => ({ c }));
+    return [
+      Plot.text(rows, {
+        fx: (d: { c: string }) => d.c,
+        text: (d: { c: string }) => d.c,
+        frameAnchor: "bottom-left",
+        dy: 12,
+        textAnchor: "start",
+        fill: TBL.color.axis,
+        fontSize: TBL.size.axis,
+        fontWeight: 500,
+      }),
+    ];
+  }
+
+  // SINGLE BAND: categories live on the `x` band scale (no faceting). The fix has two parts,
+  // both in the initializer (after Plot has computed the scales):
+  //   1. NO `frameAnchor`, so the band channel positions each label at its band. On a band
+  //      scale Plot anchors the text at the band CENTRE, so we shift left by `bandwidth/2`
+  //      via `this.dx` to land the `textAnchor:"start"` origin on the band's LEFT EDGE.
+  //   2. Supply the vertical position ourselves: a `scale:null` `y` channel at the plot's
+  //      bottom edge (height − marginBottom), replacing the `frameAnchor:"bottom"` we dropped.
   return [
     Plot.text(
       categories,
       Plot.initializer(
         {
-          ...channel,
+          x: (d: string) => d,
           text: (d: string) => d,
-          frameAnchor: "bottom",
           dy: 12,
           textAnchor: "start",
-          dx: 0,
           fill: TBL.color.axis,
           fontSize: TBL.size.axis,
           fontWeight: 500,
         },
         function (
           this: { dx: number },
-          _data: unknown,
+          data: unknown[],
           _facets: unknown,
           _channels: unknown,
           scales: Record<string, { bandwidth?: () => number }>,
+          dimensions: { height?: number; marginBottom?: number },
         ) {
-          const bw = scales?.[scaleField]?.bandwidth?.();
+          const bw = scales?.x?.bandwidth?.();
           if (bw != null) this.dx = -bw / 2;
-          return {};
+          const yBottom = (dimensions?.height ?? 0) - (dimensions?.marginBottom ?? 0);
+          const ys = data.map(() => yBottom);
+          return { channels: { y: { value: ys, scale: null } } };
         },
       ),
     ),
   ];
 }
 
+// Approximate the rendered px width of a string at the axis font size. No canvas/DOM
+// measurement (jsdom has none, and we need byte-stable headless output), so we use a
+// per-character average-advance heuristic for Figtree: ~0.55em per character is a good
+// fit for mixed-case label text at this size. Deterministic by construction.
+const AVG_CHAR_EM = 0.55;
+export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axis): number {
+  return text.length * fontSize * AVG_CHAR_EM;
+}
+
+// Responsive LEFT GUTTER for horizontal bars: the y-axis category labels live in the left
+// margin (left-justified at svg x=0), so the margin must be wide enough for the LONGEST
+// label or it clips into the plot. Derived from the longest category at the axis font size
+// (not a fixed constant), clamped to a sensible range so a single very long label doesn't
+// swallow the whole canvas. `pad` reserves a small gap between the label and the bars.
+export function horizontalLeftGutter(
+  categories: string[],
+  { pad = 10, min = TBL_MARGIN_LEFT, max = 240 }: { pad?: number; min?: number; max?: number } = {},
+): number {
+  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c)), 0);
+  return Math.round(Math.max(min, Math.min(max, longest + pad)));
+}
+
 // Band (categorical) y-axis for HORIZONTAL bars: one label per category at the band's
 // left edge in the label margin (svg x=0), vertically centered on its band. No ticks.
-export function tblBandYAxis(categories: string[]): Mark[] {
+// `marginLeft` is the (responsive) left gutter width; the label is pushed left by that
+// amount so its `textAnchor:"start"` origin lands at svg x=0, flush with the title above.
+export function tblBandYAxis(
+  categories: string[],
+  marginLeft: number = TBL_MARGIN_LEFT,
+): Mark[] {
   return [
     Plot.text(categories, {
       y: (d: string) => d,
       text: (d: string) => d,
       frameAnchor: "left",
-      dx: -TBL_MARGIN_LEFT,
+      dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,

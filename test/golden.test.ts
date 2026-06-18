@@ -30,6 +30,23 @@ function parseCsv(path: string): TidyRow[] {
   });
 }
 
+// Absolute x of an SVG element, accumulating every `transform="translate(x,y)"` up the
+// ancestor chain to the root <svg>. jsdom has no layout engine, so we read the transforms
+// Plot emits (per-element + per-group) directly. Used to assert label-vs-bar alignment.
+function absX(el: Element | null): number {
+  let x = 0;
+  let n: Element | null = el;
+  while (n && n.tagName.toLowerCase() !== "svg") {
+    const tf = n.getAttribute("transform");
+    if (tf) {
+      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
+      if (m) x += Number(m[1]);
+    }
+    n = n.parentElement;
+  }
+  return x;
+}
+
 const GRADS_SPEC: ChartSpec = {
   chartType: "line",
   title:
@@ -140,7 +157,21 @@ describe("golden SVG — bars", () => {
     const rows = parseCsv("./fixtures/bar-single.csv");
     const { svg } = renderChart(BAR_SINGLE_SPEC, rows, { width: 720, height: 400, document });
     // 4 bars rendered.
-    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(4);
+    // Category labels sit at the band's LEFT EDGE (Style-Guide), not centered: each label's
+    // resolved x equals the corresponding bar's left x. (Regression guard for the A2 fix —
+    // the labels used to collapse to the frame's left edge.)
+    const labelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
+      Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
+    );
+    const labels = Array.from(labelG?.querySelectorAll("text") ?? []);
+    expect(labels.map((t) => t.textContent)).toEqual(["Northeast", "Midwest", "South", "West"]);
+    labels.forEach((label, i) => {
+      const rect = rects[i] as Element;
+      const barLeft = absX(rect.parentElement) + Number(rect.getAttribute("x"));
+      expect(Math.abs(absX(label) - barLeft)).toBeLessThan(1);
+    });
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-single.golden.svg");
   });
 
@@ -163,6 +194,22 @@ describe("golden SVG — bars", () => {
     expect(rects[5]?.getAttribute("data-series")).toBe("2025"); // Midwest 2025
     expect(rects[6]?.getAttribute("data-series")).toBe("2019"); // South 2019
     expect(rects[8]?.getAttribute("data-series")).toBe("2025"); // South 2025
+    // Group (fx) labels sit at each group's LEFT EDGE, not centered. The group left edge is
+    // the min bar-left across the group's 3 bars; the label's resolved x must match it.
+    const groupLefts = [0, 3, 6].map((start) => {
+      const groupRects = [start, start + 1, start + 2].map((i) => rects[i] as Element);
+      return Math.min(
+        ...groupRects.map((r) => absX(r.parentElement) + Number(r.getAttribute("x"))),
+      );
+    });
+    const fxLabelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
+      Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
+    );
+    const fxLabels = Array.from(fxLabelG?.querySelectorAll("text") ?? []);
+    expect(fxLabels.map((t) => t.textContent)).toEqual(["Northeast", "Midwest", "South"]);
+    fxLabels.forEach((label, i) => {
+      expect(Math.abs(absX(label) - (groupLefts[i] as number))).toBeLessThan(1);
+    });
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-multi.golden.svg");
   });
 
@@ -197,7 +244,19 @@ describe("golden SVG — bars", () => {
   it("renders the horizontal single-series variant", async () => {
     const rows = parseCsv("./fixtures/bar-horizontal.csv");
     const { svg } = renderChart(BAR_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document });
-    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(4);
+    // The left gutter widens responsively to fit the longest category label ("Northeastern
+    // region", ~19 chars) so it isn't clipped. Assert: (1) the gutter exceeds the default
+    // 44px, and (2) the longest label's estimated width fits within it (the labels are
+    // left-justified at svg x=0 and must end before the plot/bars begin at x=marginLeft).
+    const marginLeft = Number(svg.dataset.marginLeft);
+    expect(marginLeft).toBeGreaterThan(44);
+    const longestLabel = rows.reduce((w, r) => Math.max(w, (r.time as string).length), 0);
+    const estWidth = longestLabel * 10.5 * 0.55; // matches axes.estimateLabelWidth heuristic
+    expect(estWidth).toBeLessThanOrEqual(marginLeft);
+    // Bars begin at the gutter edge (value-axis origin = marginLeft), past the labels.
+    rects.forEach((r) => expect(Number(r.getAttribute("x"))).toBeGreaterThanOrEqual(marginLeft - 1));
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal.golden.svg");
   });
 });

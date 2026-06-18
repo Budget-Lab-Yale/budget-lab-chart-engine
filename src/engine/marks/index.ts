@@ -58,6 +58,11 @@ export interface MarkLayers {
   yScaleOpts?: Record<string, unknown>;
   /** Which Plot scale carries the category band ("x" default, "fx" for grouped bars). */
   xScaleField?: "x" | "fx";
+  /** Optional: a responsive LEFT margin (px) the layer wants applied. Horizontal bars set
+   *  this to a gutter wide enough for their longest y-axis category label (see
+   *  axes.horizontalLeftGutter); assemblePlot passes it to the Plot marginLeft so the labels
+   *  are not clipped. Left undefined by vertical charts (they keep the default margin). */
+  marginLeft?: number;
   /** Optional: x-axis label marks supplied by the layer (grouped bars label the `fx`
    *  group scale, not the adapter's `x` scale). When present, used INSTEAD of the
    *  adapter's `xOpts.axisMarks` in assemblePlot. */

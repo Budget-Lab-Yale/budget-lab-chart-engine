@@ -139,6 +139,9 @@ export function assemblePlot({
       marginBottom: xOpts.marginBottom,
       ...(height != null ? { height } : {}),
       ...(marginRight != null ? { marginRight } : {}),
+      // Horizontal bars supply a responsive left gutter sized to their longest category
+      // label (axes.horizontalLeftGutter); vertical charts leave it undefined → default.
+      ...(layers.marginLeft != null ? { marginLeft: layers.marginLeft } : {}),
     }),
     ...(width ? { width } : {}),
     className: PLOT_CLASS,

@@ -19,7 +19,7 @@
 // we pass NO order/reverse option and rely on data being supplied in declaration order.
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
-import { tblBandYAxis } from "../axes";
+import { tblBandYAxis, horizontalLeftGutter } from "../axes";
 import { monoScale } from "../palette";
 import { inferUnitsFromSubtitle } from "../util";
 import { tokens } from "../../theme/tokens";
@@ -332,13 +332,16 @@ export function buildStackedMarks(
     netMode === "dot" ? [{ label: "Total", markerShape: "dot" as const }] : undefined;
 
   if (horizontal) {
+    // Responsive left gutter so the longest category label is not clipped (see bar.ts).
+    const gutter = horizontalLeftGutter(categories);
     return {
       underlay: [],
       overlay,
       tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder }],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-      xAxisMarks: tblBandYAxis(categories),
+      xAxisMarks: tblBandYAxis(categories, gutter),
+      marginLeft: gutter,
       seriesColors,
       legendVisualOrder,
       ...(legendExtras ? { legendExtras } : {}),

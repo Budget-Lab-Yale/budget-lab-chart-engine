@@ -11,7 +11,7 @@
 // Horizontal single-series puts categories on a band `y` (the value axis moves to `x`).
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
-import { tblBandXAxis, tblBandYAxis } from "../axes";
+import { tblBandXAxis, tblBandYAxis, horizontalLeftGutter } from "../axes";
 import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -140,14 +140,17 @@ export function buildBarMarks(
 
     if (horizontal) {
       // Categories on the band `y`; value on `x` (assemblePlot moves the value domain to
-      // `x` when yScaleOpts is present). Supply the y band + its left-edge labels.
+      // `x` when yScaleOpts is present). Supply the y band + its left-edge labels, and a
+      // responsive left gutter wide enough for the longest category label (else it clips).
+      const gutter = horizontalLeftGutter(categories);
       return {
         underlay: [],
         overlay,
         tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-        xAxisMarks: tblBandYAxis(categories),
+        xAxisMarks: tblBandYAxis(categories, gutter),
+        marginLeft: gutter,
       };
     }
 
