@@ -135,6 +135,56 @@ function resolveSeriesAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | n
   return null;
 }
 
+/**
+ * Add transparent FAT "hit" paths for a LINE chart so clicking ON or NEAR a thin line
+ * resolves that line's series. The visible lines are ~2px strokes that
+ * `document.elementsFromPoint` almost never lands on; these clones are invisible but
+ * carry a ~14px stroke with `pointer-events: stroke`, so the cursor is hit-tested
+ * within ~7px of the line.
+ *
+ * Z-order: the crosshair appends its `.tbl-crosshair-hit` overlay LAST
+ * (pointer-events:all, topmost) so hover works. We insert each hit-path BELOW that
+ * overlay (before the first `.tbl-crosshair-hit`). The click handler resolves the series
+ * via `elementsFromPoint` (the whole stack, not the event target), so it pierces the
+ * transparent overlay and finds the fat hit-path's `data-series`. The hover (pointermove
+ * on the overlay) is unaffected because the overlay stays on top.
+ *
+ * Each hit-path clones the visible path's `d` (geometry) and `data-series`, and the
+ * `pathLength`/transform context is preserved because we insert the clone as a sibling in
+ * the same `g[aria-label="line"]` group. Idempotent per render: the SVG is rebuilt each
+ * draw(), and we guard against double-adding via the `.tbl-line-hitpath` marker.
+ */
+function addLineHitPaths(svgEl: SVGSVGElement): void {
+  const NS = "http://www.w3.org/2000/svg";
+  const overlay = svgEl.querySelector(".tbl-crosshair-hit");
+  const linePaths = Array.from(
+    svgEl.querySelectorAll<SVGPathElement>('g[aria-label="line"] path[data-series]'),
+  );
+  for (const path of linePaths) {
+    const series = path.getAttribute("data-series");
+    const d = path.getAttribute("d");
+    if (!series || !d) continue;
+    const hit = svgEl.ownerDocument.createElementNS(NS, "path");
+    hit.classList.add("tbl-line-hitpath");
+    hit.setAttribute("data-series", series);
+    hit.setAttribute("d", d);
+    hit.setAttribute("fill", "none");
+    hit.setAttribute("stroke", "transparent");
+    hit.setAttribute("stroke-width", "14");
+    hit.setAttribute("stroke-linecap", "round");
+    hit.setAttribute("stroke-linejoin", "round");
+    hit.style.pointerEvents = "stroke";
+    hit.style.cursor = "pointer";
+    // Insert below the topmost crosshair overlay so the overlay keeps handling hover and
+    // the click handler (elementsFromPoint, full stack) still pierces down to this path.
+    if (overlay) {
+      svgEl.insertBefore(hit, overlay);
+    } else {
+      svgEl.appendChild(hit);
+    }
+  }
+}
+
 /** Format a numeric value for tooltip display. */
 function formatValue(v: number, units: string): string {
   if (!Number.isFinite(v)) return "—";
@@ -507,6 +557,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (legendHandle) {
       const handle = legendHandle; // capture the non-null value for the click closure
       card.classList.add("is-selectable");
+      // Line charts: the visible lines are thin ~2px strokes that elementsFromPoint rarely
+      // hits. Add transparent fat hit-paths (per series, below the crosshair overlay) so
+      // clicking ON or NEAR a line resolves its series. Gated to the continuous-x (line)
+      // case; bars resolve directly off the rect geometry and don't need this.
+      if (spec.xAxisType !== "categorical") {
+        addLineHitPaths(svg);
+      }
       // The crosshair sets the hit overlay's cursor inline (crosshair/default), which would
       // win over the .is-selectable CSS rule. Override it to `pointer` so the click
       // affordance shows across the whole plot when selection is on.

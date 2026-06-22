@@ -907,6 +907,71 @@ describe("mountChart two-way selection wiring", () => {
     expect(container.querySelector(".figure-card.is-selectable")).toBeNull();
   });
 
+  it("multi-series LINE chart adds a .tbl-line-hitpath per visible line, below the crosshair overlay", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const linePaths = Array.from(svg.querySelectorAll('g[aria-label="line"] path[data-series]'));
+    const hitPaths = Array.from(svg.querySelectorAll<SVGPathElement>(".tbl-line-hitpath"));
+    expect(linePaths.length).toBeGreaterThan(0);
+    // One hit-path per visible line, same series + geometry.
+    expect(hitPaths.length).toBe(linePaths.length);
+    const visibleSeries = new Set(linePaths.map((p) => p.getAttribute("data-series")));
+    const hitSeries = new Set(hitPaths.map((p) => p.getAttribute("data-series")));
+    expect(hitSeries).toEqual(visibleSeries);
+    for (const hp of hitPaths) {
+      // Fat, invisible, stroke-only hit-testable.
+      expect(Number(hp.getAttribute("stroke-width"))).toBeGreaterThanOrEqual(10);
+      expect(hp.getAttribute("stroke")).toBe("transparent");
+      expect(hp.getAttribute("fill")).toBe("none");
+      expect(hp.style.pointerEvents).toBe("stroke");
+      expect(hp.getAttribute("d")).toBeTruthy();
+    }
+    // Each hit-path's `d` matches a visible line's `d`.
+    const visibleDs = new Set(linePaths.map((p) => p.getAttribute("d")));
+    for (const hp of hitPaths) expect(visibleDs.has(hp.getAttribute("d"))).toBe(true);
+    // Inserted BELOW the topmost crosshair overlay (overlay is later in document order).
+    const overlay = svg.querySelector(".tbl-crosshair-hit")!;
+    expect(overlay).not.toBeNull();
+    for (const hp of hitPaths) {
+      // compareDocumentPosition: overlay FOLLOWING hp → hp precedes overlay (is below it).
+      expect(hp.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it("single-series no-legend LINE chart adds NO hit-paths", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SINGLE_SERIES_SPEC, rows: SINGLE_SERIES_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    expect(svg.querySelectorAll(".tbl-line-hitpath").length).toBe(0);
+  });
+
+  it("BAR chart adds no .tbl-line-hitpath (gated to the line case)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: BAR_SPEC, rows: BAR_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    expect(svg.querySelectorAll(".tbl-line-hitpath").length).toBe(0);
+  });
+
+  it("a hit-path's data-series drives the legend toggle (chart→legend sync for lines)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const hit = svg.querySelector<SVGPathElement>('.tbl-line-hitpath[data-series="A"]')!;
+    expect(hit).not.toBeNull();
+    // The click handler resolves this series and calls handle.toggle — exercise the toggle
+    // via the equivalent legend button (elementsFromPoint is not layout-backed in jsdom).
+    const series = hit.getAttribute("data-series")!;
+    const btn = container.querySelector<HTMLButtonElement>(`.tbl-legend-item[data-series="${series}"]`)!;
+    btn.click();
+    svg.querySelectorAll('path[data-series="B"]').forEach((p) =>
+      expect(p.classList.contains("tbl-dimmed")).toBe(true),
+    );
+    svg.querySelectorAll('path[data-series="A"]').forEach((p) =>
+      expect(p.classList.contains("tbl-dimmed")).toBe(false),
+    );
+  });
+
   it("a click resolving to a bar's series pins it (toggle path), proving chart→legend sync", () => {
     // jsdom lacks layout for elementsFromPoint, so exercise the same resolution the click
     // handler uses: read a rect's data-series and call the legend toggle. We verify the

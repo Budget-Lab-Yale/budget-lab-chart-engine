@@ -44,7 +44,10 @@ describe("standalone HTML", () => {
     const chart = doc.querySelector("#chart");
     expect(chart?.querySelector("svg")).toBeTruthy();
     expect(chart?.querySelectorAll(".tbl-legend .tbl-legend-item").length).toBe(2);
-    expect(chart?.querySelectorAll("svg path[data-series]").length).toBe(2);
+    // Visible line paths live inside g[aria-label="line"]; the transparent fat hit-paths
+    // (.tbl-line-hitpath) are siblings appended to the svg, so scope the count to the
+    // line group to exclude them.
+    expect(chart?.querySelectorAll('svg g[aria-label="line"] path[data-series]').length).toBe(2);
     expect(doc.querySelector(".figure-title")?.textContent).toBe("Bundle smoke");
     expect(chart?.querySelector(".figure-supertitle")?.textContent).toBe("Figure 1");
   });
