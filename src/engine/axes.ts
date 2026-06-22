@@ -198,19 +198,14 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
   ];
 }
 
-// Band (categorical) x-axis: one label per category, anchored at the band's LEFT EDGE,
-// per the bar-grouped spec. No tick marks. The single-band (`x`) and grouped (`fx`) cases
-// need DIFFERENT Plot mechanics — see below.
+// Band (categorical) x-axis: one label per category, CENTERED under each bar / group, per
+// the stakeholder's second visual pass. No tick marks. Centering is Plot's NATURAL band
+// behavior — a band text mark is positioned at the band CENTER — so both the single-band
+// (`x`) and grouped (`fx`) cases just anchor at the band/facet center via `frameAnchor`
+// + `textAnchor:"middle"`. No initializer / `dx` machinery is needed.
 //
-// Why the original A2 approach produced CENTERED (then collapsed) labels — verified
-// empirically in Plot 0.6.16 (see the tweak-axis report): a text mark whose only horizontal
-// position comes from a BAND channel AND which carries `frameAnchor:"bottom"` has its
-// per-band x positions DISCARDED — Plot collapses every label onto the frame's horizontal
-// centre. (frameAnchor overrides the band channel for band scales; it does NOT for
-// linear/temporal scales, which is why the temporal axis was unaffected.) The A2
-// initializer's `dx = -bandwidth/2` never took effect: the labels were already collapsed,
-// so the shift only corrupted the group transform to NaN (every label piling at the frame's
-// left edge in the real chart).
+// (This reverses the earlier left-edge experiment; see git history. The horizontal-bar left
+// gutter, which still uses `estimateLabelWidth`, is unaffected.)
 //
 // `scaleField`: "x" for single-series bars (categories ARE the x band); "fx" for grouped
 // bars (categories are the facet groups; `x` carries the inner series).
@@ -219,19 +214,17 @@ export function tblBandXAxis(
   scaleField: "x" | "fx" = "x",
 ): Mark[] {
   if (scaleField === "fx") {
-    // GROUPED: each category is its own FACET frame, so we facet the text mark on `fx`
-    // (one label per facet) and anchor it to the facet frame's BOTTOM-LEFT corner — which
-    // is the group band's left edge at the plot's bottom. `frameAnchor:"bottom-left"`
-    // resolves per-facet (unlike a bare band channel, it survives faceting), so no
-    // initializer / dx is needed.
+    // GROUPED: each category is its own FACET frame. Facet the text mark on `fx` (one label
+    // per facet) and anchor it to the facet frame's BOTTOM CENTER, so the label centers under
+    // the cluster. `frameAnchor:"bottom"` resolves per-facet.
     const rows = categories.map((c) => ({ c }));
     return [
       Plot.text(rows, {
         fx: (d: { c: string }) => d.c,
         text: (d: { c: string }) => d.c,
-        frameAnchor: "bottom-left",
+        frameAnchor: "bottom",
         dy: 12,
-        textAnchor: "start",
+        textAnchor: "middle",
         fill: TBL.color.axis,
         fontSize: TBL.size.axis,
         fontWeight: 500,
@@ -239,42 +232,21 @@ export function tblBandXAxis(
     ];
   }
 
-  // SINGLE BAND: categories live on the `x` band scale (no faceting). The fix has two parts,
-  // both in the initializer (after Plot has computed the scales):
-  //   1. NO `frameAnchor`, so the band channel positions each label at its band. On a band
-  //      scale Plot anchors the text at the band CENTRE, so we shift left by `bandwidth/2`
-  //      via `this.dx` to land the `textAnchor:"start"` origin on the band's LEFT EDGE.
-  //   2. Supply the vertical position ourselves: a `scale:null` `y` channel at the plot's
-  //      bottom edge (height − marginBottom), replacing the `frameAnchor:"bottom"` we dropped.
+  // SINGLE BAND: categories live on the `x` band scale (no faceting). `frameAnchor:"bottom"`
+  // anchors the label at the plot's bottom edge; the band `x` channel centers it under each
+  // bar (Plot positions a band text mark at the band center). `textAnchor:"middle"` keeps
+  // the glyphs centered on that point.
   return [
-    Plot.text(
-      categories,
-      Plot.initializer(
-        {
-          x: (d: string) => d,
-          text: (d: string) => d,
-          dy: 12,
-          textAnchor: "start",
-          fill: TBL.color.axis,
-          fontSize: TBL.size.axis,
-          fontWeight: 500,
-        },
-        function (
-          this: { dx: number },
-          data: unknown[],
-          _facets: unknown,
-          _channels: unknown,
-          scales: Record<string, { bandwidth?: () => number }>,
-          dimensions: { height?: number; marginBottom?: number },
-        ) {
-          const bw = scales?.x?.bandwidth?.();
-          if (bw != null) this.dx = -bw / 2;
-          const yBottom = (dimensions?.height ?? 0) - (dimensions?.marginBottom ?? 0);
-          const ys = data.map(() => yBottom);
-          return { channels: { y: { value: ys, scale: null } } };
-        },
-      ),
-    ),
+    Plot.text(categories, {
+      x: (d: string) => d,
+      text: (d: string) => d,
+      frameAnchor: "bottom",
+      dy: 12,
+      textAnchor: "middle",
+      fill: TBL.color.axis,
+      fontSize: TBL.size.axis,
+      fontWeight: 500,
+    }),
   ];
 }
 

@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveCategoryFromBands,
   resolveCategoryFromBandsH,
+  widenBandsToMidpoints,
   buildBandTooltipHtml,
   attachBandCrosshair,
   type CategoryBand,
@@ -140,6 +141,54 @@ describe("resolveCategoryFromBandsH", () => {
 });
 
 // ---------------------------------------------------------------------------
+// widenBandsToMidpoints — PURE helper (tweak-r2 #2)
+// ---------------------------------------------------------------------------
+
+describe("widenBandsToMidpoints", () => {
+  it("returns empty for empty input", () => {
+    expect(widenBandsToMidpoints([], 0, 100)).toEqual([]);
+  });
+
+  it("clamps a single band to the plot edges", () => {
+    // Center is irrelevant: the lone band has no neighbors, so both edges clamp.
+    expect(widenBandsToMidpoints([{ min: 40, max: 60 }], 10, 200)).toEqual([
+      { min: 10, max: 200 },
+    ]);
+  });
+
+  it("extends inner edges to the midpoint between adjacent centers", () => {
+    // Bars centered at 30, 80, 130 (each width 40). Step = 50; inner edges at the center
+    // midpoints (55, 105). Outer edges clamp to lo/hi.
+    const bands = [
+      { min: 10, max: 50 }, // center 30
+      { min: 60, max: 100 }, // center 80
+      { min: 110, max: 150 }, // center 130
+    ];
+    expect(widenBandsToMidpoints(bands, 0, 200)).toEqual([
+      { min: 0, max: 55 }, // left clamps to lo=0; right = (30+80)/2
+      { min: 55, max: 105 }, // (30+80)/2 .. (80+130)/2
+      { min: 105, max: 200 }, // left = (80+130)/2; right clamps to hi=200
+    ]);
+  });
+
+  it("widened bands cover the gaps with no holes (adjacent bands share an edge)", () => {
+    const bands = [
+      { min: 10, max: 30 },
+      { min: 50, max: 70 },
+    ];
+    const wide = widenBandsToMidpoints(bands, 0, 100);
+    expect(wide[0]!.max).toBe(wide[1]!.min); // shared midpoint, no gap
+  });
+
+  it("does not mutate the input bands", () => {
+    const bands = [{ min: 10, max: 50 }, { min: 60, max: 100 }];
+    const copy = bands.map((b) => ({ ...b }));
+    widenBandsToMidpoints(bands, 0, 200);
+    expect(bands).toEqual(copy);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildBandTooltipHtml — PURE helper
 // ---------------------------------------------------------------------------
 
@@ -216,6 +265,17 @@ describe("buildBandTooltipHtml", () => {
     expect(html).toContain("Total");
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
+  });
+
+  it("Total row swatch carries the is-dot (circle) class; per-series rows do not", () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, colors: COLORS });
+    // The Total row's swatch is a circle matching the net dot / legend.
+    expect(html).toContain('class="tbl-tooltip-swatch is-dot"');
+    // Per-series rows keep the plain colored-square swatch (no is-dot): Cat1 has 2 series.
+    const perSeries = html.match(/class="tbl-tooltip-swatch"/g) ?? [];
+    expect(perSeries.length).toBe(2);
+    // Exactly one is-dot swatch (the Total row).
+    expect((html.match(/is-dot/g) ?? []).length).toBe(1);
   });
 
   it("Total row has the correct signed sum for diverging data", () => {

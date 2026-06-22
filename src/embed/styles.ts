@@ -368,6 +368,15 @@ body {
   );
   height: 2px;
 }
+/* Total row (diverging net dot): a CIRCLE swatch matching the net marker + legend "Total"
+   entry — white fill, black inset stroke. Mirrors .tbl-legend-swatch.is-dot. */
+.tbl-tooltip-swatch.is-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px #000;
+}
 
 /* =========================================================================
  * Figure header — flex row with title-text left, logo right

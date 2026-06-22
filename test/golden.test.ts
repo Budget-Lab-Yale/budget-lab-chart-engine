@@ -159,9 +159,8 @@ describe("golden SVG — bars", () => {
     // 4 bars rendered.
     const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
     expect(rects.length).toBe(4);
-    // Category labels sit at the band's LEFT EDGE (Style-Guide), not centered: each label's
-    // resolved x equals the corresponding bar's left x. (Regression guard for the A2 fix —
-    // the labels used to collapse to the frame's left edge.)
+    // Category labels are CENTERED under each bar (tweak-r2): each label's resolved x equals
+    // the corresponding bar's CENTER x (left + width/2), within tolerance.
     const labelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
       Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
     );
@@ -169,8 +168,9 @@ describe("golden SVG — bars", () => {
     expect(labels.map((t) => t.textContent)).toEqual(["Northeast", "Midwest", "South", "West"]);
     labels.forEach((label, i) => {
       const rect = rects[i] as Element;
-      const barLeft = absX(rect.parentElement) + Number(rect.getAttribute("x"));
-      expect(Math.abs(absX(label) - barLeft)).toBeLessThan(1);
+      const barCenter =
+        absX(rect.parentElement) + Number(rect.getAttribute("x")) + Number(rect.getAttribute("width")) / 2;
+      expect(Math.abs(absX(label) - barCenter)).toBeLessThan(1);
     });
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-single.golden.svg");
   });
@@ -194,13 +194,20 @@ describe("golden SVG — bars", () => {
     expect(rects[5]?.getAttribute("data-series")).toBe("2025"); // Midwest 2025
     expect(rects[6]?.getAttribute("data-series")).toBe("2019"); // South 2019
     expect(rects[8]?.getAttribute("data-series")).toBe("2025"); // South 2025
-    // Group (fx) labels sit at each group's LEFT EDGE, not centered. The group left edge is
-    // the min bar-left across the group's 3 bars; the label's resolved x must match it.
-    const groupLefts = [0, 3, 6].map((start) => {
+    // Group (fx) labels are CENTERED under each cluster (tweak-r2). The group center is the
+    // midpoint between the group's leftmost bar-left and rightmost bar-right; the label's
+    // resolved x must match it.
+    const groupCenters = [0, 3, 6].map((start) => {
       const groupRects = [start, start + 1, start + 2].map((i) => rects[i] as Element);
-      return Math.min(
+      const left = Math.min(
         ...groupRects.map((r) => absX(r.parentElement) + Number(r.getAttribute("x"))),
       );
+      const right = Math.max(
+        ...groupRects.map(
+          (r) => absX(r.parentElement) + Number(r.getAttribute("x")) + Number(r.getAttribute("width")),
+        ),
+      );
+      return (left + right) / 2;
     });
     const fxLabelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
       Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
@@ -208,7 +215,7 @@ describe("golden SVG — bars", () => {
     const fxLabels = Array.from(fxLabelG?.querySelectorAll("text") ?? []);
     expect(fxLabels.map((t) => t.textContent)).toEqual(["Northeast", "Midwest", "South"]);
     fxLabels.forEach((label, i) => {
-      expect(Math.abs(absX(label) - (groupLefts[i] as number))).toBeLessThan(1);
+      expect(Math.abs(absX(label) - (groupCenters[i] as number))).toBeLessThan(1);
     });
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-multi.golden.svg");
   });

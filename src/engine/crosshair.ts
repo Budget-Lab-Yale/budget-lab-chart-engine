@@ -245,6 +245,36 @@ export interface CategoryBandH {
 // PURE helpers (exported for unit tests)
 
 /**
+ * Widen a set of 1-D bands so each spans to the MIDPOINT between its neighbors'
+ * centers — i.e. the full band STEP, not just the bar width. The hover highlight then
+ * covers the surrounding padding gutters (half the gap on each side), so hovering the
+ * space between bars still feels attached to the nearer bar.
+ *
+ * `bands` are the bar/cluster extents `[min, max]` (ascending by center). `lo`/`hi` are
+ * the plot's axis edges; the first band clamps left to `lo`, the last clamps right to `hi`.
+ * PURE — input bands are not mutated; new `[min, max]` pairs are returned in input order.
+ */
+export function widenBandsToMidpoints(
+  bands: Array<{ min: number; max: number }>,
+  lo: number,
+  hi: number,
+): Array<{ min: number; max: number }> {
+  if (!bands.length) return [];
+  const centers = bands.map((b) => (b.min + b.max) / 2);
+  return bands.map((b, i) => {
+    const c = centers[i]!;
+    const prev = i > 0 ? centers[i - 1]! : null;
+    const next = i < centers.length - 1 ? centers[i + 1]! : null;
+    // Inner edges sit at the midpoint between adjacent centers; outer edges clamp to the
+    // plot edge (equivalently, extend a half-step past the bar — but clamping is simpler
+    // and matches the visible plot area).
+    const left = prev != null ? (prev + c) / 2 : lo;
+    const right = next != null ? (c + next) / 2 : hi;
+    return { min: left, max: right };
+  });
+}
+
+/**
  * Given a list of CategoryBands and a cursor x in SVG user units, return the
  * category whose band contains x, or snap to the nearest band if x falls
  * between two bands. Returns null when bands is empty.
@@ -341,7 +371,10 @@ export function buildBandTooltipHtml(
   }
 
   if (isStacked && orderedSeries.length > 1) {
-    html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch" style="background: currentColor; opacity: 0"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+    // The Total row matches the net DOT marker / legend "Total" entry: a CIRCLE swatch
+    // (white fill, black inset stroke) rather than a colored square. `is-dot` carries the
+    // circle styling (see styles.ts); no inline color needed.
+    html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch is-dot"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
   }
 
   return html;
@@ -551,20 +584,42 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     let hlMax = 0;
 
     if (horizontal) {
-      // Horizontal: resolve cursor Y → category via y-bands.
+      // Horizontal: resolve cursor Y → category via y-bands, widened to the midpoints
+      // between adjacent rows (clamped to the plot's vertical edges).
       const scaleY = H / rect.height;
       const svgY = (evt.clientY - rect.top) * scaleY;
-      const bands = readCategoryBandsH(svgEl, opts);
+      const raw = readCategoryBandsH(svgEl, opts);
+      const wide = widenBandsToMidpoints(
+        raw.map((b) => ({ min: b.yMin, max: b.yMax })),
+        mt,
+        H - mb,
+      );
+      const bands: CategoryBandH[] = raw.map((b, i) => ({
+        category: b.category,
+        yMin: wide[i]!.min,
+        yMax: wide[i]!.max,
+      }));
       category = resolveCategoryFromBandsH(bands, svgY);
       if (category) {
         const b = bands.find((x) => x.category === category);
         if (b) { hlMin = b.yMin; hlMax = b.yMax; }
       }
     } else {
-      // Vertical: resolve cursor X → category via x-bands (existing behavior).
+      // Vertical: resolve cursor X → category via x-bands, widened to the midpoints
+      // between adjacent bar/cluster centers (clamped to the plot's horizontal edges).
       const scaleX = W / rect.width;
       const svgX = (evt.clientX - rect.left) * scaleX;
-      const bands = readCategoryBands(svgEl, opts);
+      const raw = readCategoryBands(svgEl, opts);
+      const wide = widenBandsToMidpoints(
+        raw.map((b) => ({ min: b.xMin, max: b.xMax })),
+        ml,
+        W - mr,
+      );
+      const bands: CategoryBand[] = raw.map((b, i) => ({
+        category: b.category,
+        xMin: wide[i]!.min,
+        xMax: wide[i]!.max,
+      }));
       category = resolveCategoryFromBands(bands, svgX);
       if (category) {
         const b = bands.find((x) => x.category === category);
