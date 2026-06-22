@@ -428,11 +428,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
    *   - When the engine supplies `legendVisualOrder` (stacked charts), series rows follow
    *     that order ([positives reversed] ++ [negatives in declaration order]).
    *   - Otherwise fall back to REVERSED declaration order (top-of-stack first).
-   *   - nonInteractive rows (e.g. Total) are appended at the END in original relative order.
+   *   - extra rows (e.g. the interactive Total pseudo-series) are appended at the END in
+   *     original relative order.
    */
   function orderForRightLegend(items: LegendItem[], visualOrder?: string[]): LegendItem[] {
-    const series = items.filter((i) => !i.nonInteractive);
-    const extras = items.filter((i) => i.nonInteractive);
+    const series = items.filter((i) => !i.nonInteractive && !i.isExtra);
+    const extras = items.filter((i) => i.nonInteractive || i.isExtra);
     let orderedSeries: LegendItem[];
     if (visualOrder && visualOrder.length) {
       const bySeries = new Map(series.map((i) => [i.series, i]));
@@ -593,7 +594,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let prelimSeriesCount = 1;
   try {
     const prelim = renderChart(spec, rows, { width: initialCardWidth, height });
-    prelimSeriesCount = (prelim.legendItems ?? []).filter((i) => !i.nonInteractive).length;
+    prelimSeriesCount = (prelim.legendItems ?? []).filter((i) => !i.nonInteractive && !i.isExtra).length;
   } catch {
     // Ignore — draw() will surface the error.
   }

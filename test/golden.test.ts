@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { renderChart } from "../src/engine/index";
+import { renderChart, TOTAL_SERIES_KEY } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
 import type { PreparedRow } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
@@ -437,6 +437,11 @@ describe("golden SVG — stacked bars", () => {
     // A net dot exists (Plot.dot → g[aria-label="dot"] with circles).
     const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
     expect(dots.length).toBe(3); // one per category
+    // Net dots + net labels carry the shared Total key as data-series (TT6 #2/#3).
+    dots.forEach((d) => expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
+    const netLabels = svg.querySelectorAll("g.tbl-net-label text");
+    expect(netLabels.length).toBe(3);
+    netLabels.forEach((t) => expect(t.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
     // Diverging stack-order pin: within category A, declaration order from 0 is
     // Lower rates (bottom positive), Wider brackets, then the negatives. The first rect
     // (visual bottom of the positive sub-stack) is the first-declared positive series.
@@ -462,7 +467,9 @@ describe("golden SVG — stacked bars", () => {
       colors: new Map(),
       seriesNames: STACKED_DIVERGING_SPEC.series_order,
     });
-    expect(divLayers.legendExtras).toEqual([{ label: "Total", markerShape: "dot" }]);
+    expect(divLayers.legendExtras).toEqual([
+      { series: TOTAL_SERIES_KEY, label: "Total", markerShape: "dot" },
+    ]);
 
     const cumData: PreparedRow[] = parseCsv("./fixtures/stacked-cumulative.csv").map((r) => ({
       series: r.series as string,
@@ -519,7 +526,7 @@ describe("golden SVG — stacked bars", () => {
     expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
     // No "Total" legend extra — only the 3 series entries.
     expect(legendItems?.length).toBe(3);
-    expect(legendItems?.every((l) => !l.series.startsWith("__extra__"))).toBe(true);
+    expect(legendItems?.every((l) => l.series !== TOTAL_SERIES_KEY)).toBe(true);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-none.golden.svg");
   });
 

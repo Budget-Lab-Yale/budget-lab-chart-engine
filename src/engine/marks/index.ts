@@ -73,9 +73,10 @@ export interface MarkLayers {
    *  adapter's `xOpts.axisMarks` in assemblePlot. */
   xAxisMarks?: unknown[];
   /** Optional: extra legend rows beyond the per-series swatches (diverging stacked bars
-   *  emit a "Total" row with a dot marker). A7 only PRODUCES this metadata; A8 renders it.
-   *  Line/bar leave it undefined. */
-  legendExtras?: { label: string; markerShape: "dot" }[];
+   *  emit a "Total" row with a dot marker). `series` is the row's selection key — for the
+   *  diverging Total it is TOTAL_SERIES_KEY, shared with the net dot/label `data-series` so
+   *  the row and the chart markers pin/hover/dim together. Line/bar leave it undefined. */
+  legendExtras?: { series: string; label: string; markerShape: "dot" }[];
   /** Optional: series → resolved fill color, when the mark layer is the source of truth
    *  for series colors (stacked bars: mono tonal tiers, else the categorical map). When
    *  present, renderChart uses these for the legend swatches so the legend matches the

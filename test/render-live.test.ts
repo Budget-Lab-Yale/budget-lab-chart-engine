@@ -9,6 +9,7 @@ import { CHART_CSS } from "../src/embed/styles";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import type { LegendItem } from "../src/engine/index";
+import { TOTAL_SERIES_KEY } from "../src/engine/index";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -531,52 +532,113 @@ describe("legend swatch shapes", () => {
     expect(dotSwatch).not.toBeNull();
   });
 
-  it("diverging stacked Total row is non-interactive — no data-series attribute", () => {
+  it("diverging stacked Total row is an interactive button carrying TOTAL_SERIES_KEY", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS });
     const items = container.querySelectorAll(".tbl-legend-item");
     const lastItem = items[items.length - 1] as HTMLElement;
     expect(lastItem.textContent).toContain("Total");
-    expect(lastItem.dataset["series"]).toBeUndefined();
-  });
-
-  it("diverging stacked Total row is a span, not a button", () => {
-    const container = document.createElement("div");
-    mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS });
-    const items = container.querySelectorAll(".tbl-legend-item");
-    const lastItem = items[items.length - 1] as HTMLElement;
-    expect(lastItem.tagName.toLowerCase()).toBe("span");
+    expect(lastItem.tagName.toLowerCase()).toBe("button");
+    expect(lastItem.dataset["series"]).toBe(TOTAL_SERIES_KEY);
   });
 
   it("diverging stacked real-series items are interactive buttons with data-series", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS });
     const items = container.querySelectorAll(".tbl-legend-item");
-    // All but the last are real series.
+    // All but the last (Total) are real series.
     const realItems = Array.from(items).slice(0, items.length - 1);
     for (const item of realItems) {
       expect((item as HTMLElement).tagName.toLowerCase()).toBe("button");
-      expect((item as HTMLElement).dataset["series"]).toBeTruthy();
+      const s = (item as HTMLElement).dataset["series"];
+      expect(s).toBeTruthy();
+      expect(s).not.toBe(TOTAL_SERIES_KEY);
     }
   });
 
-  // --- renderLegend unit tests: verify allSeries count is not inflated by Total row ---
-  it("renderLegend allSeries count does not include the Total row", () => {
+  it("net dots + net labels carry TOTAL_SERIES_KEY as data-series", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
+    expect(dots.length).toBeGreaterThan(0);
+    dots.forEach((d) => expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
+    const labels = svg.querySelectorAll("g.tbl-net-label text");
+    expect(labels.length).toBe(dots.length);
+    labels.forEach((t) => expect(t.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
+  });
+
+  it("pinning a real series dims the net dots; unpin clears", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const realBtn = container.querySelector<HTMLButtonElement>(
+      '.tbl-legend-item[data-series="Lower rates"]',
+    )!;
+    realBtn.click();
+    const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
+    dots.forEach((d) => expect(d.classList.contains("tbl-dimmed")).toBe(true));
+    realBtn.click();
+    dots.forEach((d) => expect(d.classList.contains("tbl-dimmed")).toBe(false));
+  });
+
+  it("pinning Total dims the real-series rects but keeps the net dots bright", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    const totalBtn = container.querySelector<HTMLButtonElement>(
+      `.tbl-legend-item[data-series="${TOTAL_SERIES_KEY}"]`,
+    )!;
+    totalBtn.click();
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    rects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
+    const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
+    dots.forEach((d) => expect(d.classList.contains("tbl-dimmed")).toBe(false));
+    totalBtn.click();
+    rects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(false));
+  });
+
+  it("two-way: legendHandle.toggle(TOTAL_SERIES_KEY) dims real series", () => {
+    const parent = document.createElement("div");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg") as unknown as SVGSVGElement;
+    const realRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    realRect.setAttribute("data-series", "A");
+    const totalCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    totalCircle.setAttribute("data-series", TOTAL_SERIES_KEY);
+    svg.appendChild(realRect);
+    svg.appendChild(totalCircle);
+    const items: LegendItem[] = [
+      { series: "A", label: "A", color: "#f00", dashed: false, markerShape: "rect" },
+      { series: "B", label: "B", color: "#00f", dashed: false, markerShape: "rect" },
+      { series: TOTAL_SERIES_KEY, label: "Total", color: undefined, dashed: false, markerShape: "dot", isExtra: true },
+    ];
+    const handle = renderLegend(parent, items, { svg })!;
+    // Toggling Total dims the real series, keeps the Total marker bright.
+    handle.toggle(TOTAL_SERIES_KEY);
+    expect(realRect.classList.contains("tbl-dimmed")).toBe(true);
+    expect(totalCircle.classList.contains("tbl-dimmed")).toBe(false);
+    handle.toggle(TOTAL_SERIES_KEY);
+    // Toggling a real series dims the Total marker.
+    handle.toggle("A");
+    expect(totalCircle.classList.contains("tbl-dimmed")).toBe(true);
+    expect(realRect.classList.contains("tbl-dimmed")).toBe(false);
+  });
+
+  // --- renderLegend unit tests: Total IS interactive and counts in allSeries ---
+  it("renderLegend renders the Total row as an interactive button", () => {
     const parent = document.createElement("div");
     const fakeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg") as unknown as SVGSVGElement;
     const items: LegendItem[] = [
       { series: "A", label: "A", color: "#f00", dashed: false, markerShape: "rect" },
       { series: "B", label: "B", color: "#00f", dashed: false, markerShape: "rect" },
-      { series: "__extra__Total", label: "Total", color: undefined, dashed: false, markerShape: "dot", nonInteractive: true },
+      { series: TOTAL_SERIES_KEY, label: "Total", color: undefined, dashed: false, markerShape: "dot", isExtra: true },
     ];
     renderLegend(parent, items, { svg: fakeSvg });
-    // The reset button is the last child; legend items precede it.
     const legendItems = parent.querySelectorAll(".tbl-legend-item");
-    // 3 items rendered.
     expect(legendItems.length).toBe(3);
-    // Only 2 are buttons (the real series).
+    // All 3 are interactive buttons with data-series (Total included now).
     const buttons = parent.querySelectorAll(".tbl-legend-item[data-series]");
-    expect(buttons.length).toBe(2);
+    expect(buttons.length).toBe(3);
   });
 });
 

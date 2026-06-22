@@ -25,6 +25,12 @@ import { inferUnitsFromSubtitle } from "../util";
 import { tokens } from "../../theme/tokens";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
+import { TOTAL_SERIES_KEY } from "../series-keys";
+
+// Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
+// pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
+const NET_DOT_CLASS = "tbl-net-marker";
+const NET_LABEL_CLASS = "tbl-net-label";
 
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
@@ -238,6 +244,7 @@ export function buildStackedMarks(
           fill: WHITE,
           stroke: MARK_BLACK,
           strokeWidth: 2,
+          className: NET_DOT_CLASS,
         }),
         Plot.text(netRows, {
           y: "_xc",
@@ -248,6 +255,7 @@ export function buildStackedMarks(
           fontWeight: TBL_VALUE_LABEL.fontWeight,
           textAnchor: "middle",
           dy: 20,
+          className: NET_LABEL_CLASS,
         }),
       );
     } else {
@@ -259,6 +267,7 @@ export function buildStackedMarks(
           fill: WHITE,
           stroke: MARK_BLACK,
           strokeWidth: 2,
+          className: NET_DOT_CLASS,
         }),
         Plot.text(netRows, {
           x: "_xc",
@@ -269,6 +278,7 @@ export function buildStackedMarks(
           fontWeight: TBL_VALUE_LABEL.fontWeight,
           textAnchor: "middle",
           dy: 20,
+          className: NET_LABEL_CLASS,
         }),
       );
     }
@@ -329,8 +339,30 @@ export function buildStackedMarks(
   }
 
   // --- Legend extras: diverging stacks add a "Total" dot row (A8 renders it) ---
+  // The row carries TOTAL_SERIES_KEY, shared with the net dot/label data-series below, so
+  // legend row + chart markers pin/hover/dim as one pseudo-series.
   const legendExtras =
-    netMode === "dot" ? [{ label: "Total", markerShape: "dot" as const }] : undefined;
+    netMode === "dot"
+      ? [{ series: TOTAL_SERIES_KEY, label: "Total", markerShape: "dot" as const }]
+      : undefined;
+
+  // --- Net-marker tagging (dot mode only) ---
+  // One net dot + one net label per category, so each selector matches `categories.length`
+  // elements in DOM order; tag every one with TOTAL_SERIES_KEY so the existing pin/dim
+  // system treats them as the Total pseudo-series.
+  const netTagging =
+    netMode === "dot"
+      ? [
+          {
+            selector: `g.${NET_DOT_CLASS} circle`,
+            seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
+          },
+          {
+            selector: `g.${NET_LABEL_CLASS} text`,
+            seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
+          },
+        ]
+      : [];
 
   // showTotalDot: true = diverging (dot marker exists on chart → circle swatch in tooltip);
   // false = cumulative (text callout only → plain text Total in tooltip, no swatch);
@@ -344,7 +376,10 @@ export function buildStackedMarks(
     return {
       underlay: [],
       overlay,
-      tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder }],
+      tagging: [
+        { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+        ...netTagging,
+      ],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
       xAxisMarks: tblBandYAxis(categories, gutter),
@@ -359,7 +394,10 @@ export function buildStackedMarks(
   return {
     underlay: [],
     overlay,
-    tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder }],
+    tagging: [
+      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+      ...netTagging,
+    ],
     dashedNames: new Set<string>(),
     // Single category band on `x`; refine outer pad like single-series bars. xScaleField
     // stays "x" → adapter's x labels are correct, no xAxisMarks override needed.

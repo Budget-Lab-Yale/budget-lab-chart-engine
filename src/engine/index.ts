@@ -16,6 +16,8 @@ import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
 import { inferUnitsFromSubtitle } from "./util";
 
+export { TOTAL_SERIES_KEY } from "./series-keys";
+
 export interface RenderOptions {
   width?: number;
   height?: number;
@@ -32,6 +34,9 @@ export interface LegendItem {
   markerShape: "line" | "rect" | "dot";
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
+  /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
+   *  but should sort AFTER the real series in the right-legend column. */
+  isExtra?: boolean;
 }
 
 export interface RenderResult {
@@ -219,13 +224,17 @@ export function renderChart(
   // Append legendExtras (e.g. diverging stacked Total row) after the series rows.
   let legendItems: LegendItem[] | null = baseItems;
   if (layers.legendExtras && layers.legendExtras.length > 0) {
+    // The Total pseudo-series is INTERACTIVE: its `series` is the shared TOTAL_SERIES_KEY,
+    // matching the net dot/label `data-series`, so the legend row and the chart markers
+    // pin/hover/dim as one. `isExtra` keeps it sorted after the real series in the right
+    // legend without making it non-interactive.
     const extras: LegendItem[] = layers.legendExtras.map((extra) => ({
-      series: `__extra__${extra.label}`,
+      series: extra.series,
       label: extra.label,
       color: undefined,
       dashed: false,
       markerShape: extra.markerShape,
-      nonInteractive: true,
+      isExtra: true,
     }));
     if (legendItems) {
       legendItems = [...legendItems, ...extras];
