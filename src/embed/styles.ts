@@ -127,6 +127,14 @@ body {
   margin: 2px 0 0 0;
   align-self: flex-start;
 }
+/* The vertical (right) legend is vertically centered on the chart, so the reset button
+   appearing/disappearing must NOT change the column height (that would re-center and shift
+   every row). Reserve its slot always: keep it in flow but invisible until pinned (overrides
+   the global display:none for the hidden state). */
+.tbl-legend--vertical .tbl-legend-reset[hidden] {
+  display: inline-flex;
+  visibility: hidden;
+}
 
 /* Scroll wrapper isolates horizontal overflow to the chart region, so the title/subtitle/
    source above and below keep wrapping to the card width. */

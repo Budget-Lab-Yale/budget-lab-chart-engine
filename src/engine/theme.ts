@@ -34,10 +34,10 @@ export const TBL = {
 // between the bar's end/top and the number (perpendicular to the value axis); the
 // negative-direction offset is larger to clear the descending text box.
 export const TBL_VALUE_LABEL = {
-  fontSize: 14,
+  fontSize: 12, // match the legend text size (keep the heavier 700 weight)
   fontWeight: 700,
   gap: 12, // above a positive bar / outside a bar end
-  gapBelow: 20, // below a negative bar (clears the 14px text box)
+  gapBelow: 18, // below a negative bar (clears the text box)
 } as const;
 
 // marginLeft holds a "label column": y-tick labels sit at svg x=0 (sharing the left

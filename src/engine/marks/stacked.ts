@@ -244,10 +244,10 @@ export function buildStackedMarks(
           x: "net",
           text: (d: { net: number }) => netFmt(d.net),
           fill: netLabelFill,
-          fontSize: 14,
-          fontWeight: 700,
+          fontSize: TBL_VALUE_LABEL.fontSize,
+          fontWeight: TBL_VALUE_LABEL.fontWeight,
           textAnchor: "middle",
-          dy: 22,
+          dy: 20,
         }),
       );
     } else {
@@ -265,10 +265,10 @@ export function buildStackedMarks(
           y: "net",
           text: (d: { net: number }) => netFmt(d.net),
           fill: netLabelFill,
-          fontSize: 14,
-          fontWeight: 700,
+          fontSize: TBL_VALUE_LABEL.fontSize,
+          fontWeight: TBL_VALUE_LABEL.fontWeight,
           textAnchor: "middle",
-          dy: 22,
+          dy: 20,
         }),
       );
     }
