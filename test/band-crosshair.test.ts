@@ -260,15 +260,15 @@ describe("buildBandTooltipHtml", () => {
     expect(html).not.toContain("Total");
   });
 
-  it("adds a Total row for stacked charts (isStacked=true)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, colors: COLORS });
+  it("adds a Total row for diverging stacked charts (isStacked=true, showTotalDot=true)", () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
     expect(html).toContain("Total");
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
 
-  it("Total row swatch carries the is-dot (circle) class; per-series rows do not", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, colors: COLORS });
+  it("Total row swatch carries the is-dot (circle) class for diverging stacks; per-series rows do not", () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
     // The Total row's swatch is a circle matching the net dot / legend.
     expect(html).toContain('class="tbl-tooltip-swatch is-dot"');
     // Per-series rows keep the plain colored-square swatch (no is-dot): Cat1 has 2 series.
@@ -278,6 +278,22 @@ describe("buildBandTooltipHtml", () => {
     expect((html.match(/is-dot/g) ?? []).length).toBe(1);
   });
 
+  it("Total row does NOT use is-dot for cumulative stacked charts (showTotalDot=false)", () => {
+    // Cumulative (all-positive) stacks show a text-above net callout, not a dot marker,
+    // so the tooltip Total row must match: plain label + value, no circle swatch.
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, colors: COLORS });
+    expect(html).toContain("Total");
+    expect(html).not.toContain("is-dot");
+    // Total = 10 + 5 = 15
+    expect(html).toContain("15");
+  });
+
+  it("omits Total row when showTotalDot is undefined (netDisplay:none / normalized)", () => {
+    // No net marker on the chart → no Total row in the tooltip.
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, colors: COLORS });
+    expect(html).not.toContain("Total");
+  });
+
   it("Total row has the correct signed sum for diverging data", () => {
     const divergingRows: BandRow[] = [
       { _xc: "X", series: "Up",   _y:  8 },
@@ -285,6 +301,7 @@ describe("buildBandTooltipHtml", () => {
     ];
     const html = buildBandTooltipHtml("X", divergingRows, {
       isStacked: true,
+      showTotalDot: true,
       colors: new Map([["Up", "#0f0"], ["Down", "#f00"]]),
     });
     expect(html).toContain("Total");
@@ -294,8 +311,8 @@ describe("buildBandTooltipHtml", () => {
 
   it("does NOT add a Total row for a single-series stacked", () => {
     const singleRows: BandRow[] = [{ _xc: "X", series: "Only", _y: 42 }];
-    const html = buildBandTooltipHtml("X", singleRows, { isStacked: true });
-    // Only 1 series → no Total row
+    const html = buildBandTooltipHtml("X", singleRows, { isStacked: true, showTotalDot: true });
+    // Only 1 series → no Total row regardless of showTotalDot
     expect(html).not.toContain("Total");
   });
 

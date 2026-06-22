@@ -344,7 +344,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     }
     const {
       svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, units,
-      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder,
+      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, showTotalDot,
     } = built;
 
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
@@ -403,6 +403,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       attachBandCrosshair(svg, {
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isStacked,
+        showTotalDot,
         isFaceted,
         categories: cats,
         colors,

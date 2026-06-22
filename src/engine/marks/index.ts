@@ -81,6 +81,15 @@ export interface MarkLayers {
    *  [negatives in declaration order]; the non-interactive Total row is appended by the
    *  renderer. Non-stacked / top-legend charts leave it undefined. */
   legendVisualOrder?: string[];
+  /** Controls how the band-crosshair tooltip renders the Total row for stacked charts.
+   *  - true  (netMode==="dot"):  show Total with a circle (is-dot) swatch — the net-dot
+   *    marker exists on the chart and matches this styling.
+   *  - false (netMode==="text"): show Total as plain text with no swatch — the cumulative
+   *    stack shows a text-above callout, not a dot.
+   *  - undefined (netMode==="none"): omit the Total row entirely — netDisplay:"none" or
+   *    normalized stacks suppress all net markers, so no Total should appear.
+   *  Non-stacked mark layers leave this undefined. */
+  showTotalDot?: boolean;
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;

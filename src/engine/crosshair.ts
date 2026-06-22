@@ -211,8 +211,13 @@ export interface BandCrosshairOptions {
   /** All rows in scope (dataInScope from renderChart). Each must have `_xc` (the category
    *  key), `series`, and `_y`. */
   rows: Array<{ _xc?: string; series: string; _y: number | null }>;
-  /** True for stacked charts — appends a "Total" row (Σ of the category's values). */
+  /** True for stacked charts — enables the Total row logic in the tooltip. */
   isStacked?: boolean;
+  /** Controls the Total row style for stacked charts (mirrors MarkLayers.showTotalDot).
+   *  - true:      diverging/net-dot stack — Total row uses a circle (is-dot) swatch.
+   *  - false:     cumulative stack — Total row shows as plain text with no swatch.
+   *  - undefined: netDisplay:"none" or normalized — Total row is omitted entirely. */
+  showTotalDot?: boolean;
   /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
   isFaceted?: boolean;
   /** Ordered list of categories (declaration order → facet index order for fx layout). */
@@ -261,8 +266,7 @@ export function widenBandsToMidpoints(
 ): Array<{ min: number; max: number }> {
   if (!bands.length) return [];
   const centers = bands.map((b) => (b.min + b.max) / 2);
-  return bands.map((b, i) => {
-    const c = centers[i]!;
+  return centers.map((c, i) => {
     const prev = i > 0 ? centers[i - 1]! : null;
     const next = i < centers.length - 1 ? centers[i + 1]! : null;
     // Inner edges sit at the midpoint between adjacent centers; outer edges clamp to the
@@ -333,19 +337,25 @@ export function resolveCategoryFromBandsH(
  * Build the inner HTML for the band tooltip: header row + one row per series
  * present for `category`, ordered by `seriesOrder`, plus an optional Total row
  * for stacked charts. PURE — no DOM access.
+ *
+ * The Total row rendering depends on `showTotalDot`:
+ *   - true:      dot-swatch circle (is-dot) — diverging stack with a net-dot marker.
+ *   - false:     plain text label only (no swatch) — cumulative stack with text callout.
+ *   - undefined: Total row is omitted — netDisplay:"none" / normalized stack.
  */
 export function buildBandTooltipHtml(
   category: string,
   rows: Array<{ _xc?: string; series: string; _y: number | null }>,
   opts: {
     isStacked?: boolean;
+    showTotalDot?: boolean;
     colors?: Map<string, string>;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
   },
 ): string {
-  const { isStacked, colors, seriesLabels, seriesOrder, yFormat } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -370,11 +380,19 @@ export function buildBandTooltipHtml(
     html += `<div class="tbl-tooltip-row"><span class="tbl-tooltip-swatch" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
-  if (isStacked && orderedSeries.length > 1) {
-    // The Total row matches the net DOT marker / legend "Total" entry: a CIRCLE swatch
-    // (white fill, black inset stroke) rather than a colored square. `is-dot` carries the
-    // circle styling (see styles.ts); no inline color needed.
-    html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch is-dot"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+  // Total row: only for stacked charts with 2+ series, and only when showTotalDot is not
+  // undefined (undefined = netDisplay:"none"/normalized — no net marker, no Total row).
+  if (isStacked && orderedSeries.length > 1 && showTotalDot !== undefined) {
+    if (showTotalDot) {
+      // Diverging stack: Total row matches the net-dot marker and legend "Total" entry —
+      // a CIRCLE swatch (white fill, black inset stroke). `is-dot` carries the circle
+      // styling (see styles.ts); no inline color needed.
+      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch is-dot"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+    } else {
+      // Cumulative stack: net callout is a text-above marker, not a dot — no swatch in
+      // the tooltip either. Show Total as a plain label + value row.
+      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+    }
   }
 
   return html;
@@ -633,6 +651,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
+      showTotalDot: opts.showTotalDot,
       colors: opts.colors,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,

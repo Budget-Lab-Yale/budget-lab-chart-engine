@@ -51,6 +51,9 @@ export interface RenderResult {
   /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
    *  (stacked charts only). render-live uses it to order the vertical legend column. */
   legendVisualOrder?: string[];
+  /** Net-dot mode for the band crosshair's Total row (stacked charts only).
+   *  Mirrors MarkLayers.showTotalDot — see that field for the tri-state semantics. */
+  showTotalDot?: boolean;
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -244,5 +247,6 @@ export function renderChart(
     tooltipXParse: xOpts.tooltipXParse,
     tooltipXFormat: xOpts.tooltipXFormat,
     legendVisualOrder: layers.legendVisualOrder,
+    showTotalDot: layers.showTotalDot,
   };
 }

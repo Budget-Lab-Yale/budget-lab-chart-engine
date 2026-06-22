@@ -331,6 +331,12 @@ export function buildStackedMarks(
   const legendExtras =
     netMode === "dot" ? [{ label: "Total", markerShape: "dot" as const }] : undefined;
 
+  // showTotalDot: true = diverging (dot marker exists on chart → circle swatch in tooltip);
+  // false = cumulative (text callout only → plain text Total in tooltip, no swatch);
+  // undefined = netMode "none" or normalized (no net marker at all → omit Total row).
+  const showTotalDot: boolean | undefined =
+    netMode === "dot" ? true : netMode === "text" ? false : undefined;
+
   if (horizontal) {
     // Responsive left gutter so the longest category label is not clipped (see bar.ts).
     const gutter = horizontalLeftGutter(categories);
@@ -344,6 +350,7 @@ export function buildStackedMarks(
       marginLeft: gutter,
       seriesColors,
       legendVisualOrder,
+      showTotalDot,
       ...(legendExtras ? { legendExtras } : {}),
     };
   }
@@ -358,6 +365,7 @@ export function buildStackedMarks(
     xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
     seriesColors,
     legendVisualOrder,
+    showTotalDot,
     ...(legendExtras ? { legendExtras } : {}),
   };
 }
