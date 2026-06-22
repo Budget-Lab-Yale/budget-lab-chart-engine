@@ -29,6 +29,17 @@ export const TBL = {
   dashArray: "5 3",
 } as const;
 
+// Callout number labels — the single shared style for per-bar VALUE labels (grouped/single
+// bars) and stacked NET-TOTAL text, so they read consistently. `gap` is the px offset
+// between the bar's end/top and the number (perpendicular to the value axis); the
+// negative-direction offset is larger to clear the descending text box.
+export const TBL_VALUE_LABEL = {
+  fontSize: 14,
+  fontWeight: 700,
+  gap: 12, // above a positive bar / outside a bar end
+  gapBelow: 20, // below a negative bar (clears the 14px text box)
+} as const;
+
 // marginLeft holds a "label column": y-tick labels sit at svg x=0 (sharing the left
 // edge with title/subtitle above) and the plot area starts at x=marginLeft. marginRight
 // reserves room for the rightmost x-tick label so it isn't clipped.

@@ -18,7 +18,7 @@
 // order (first-declared negative just below 0). That is exactly the Style-Guide rule, so
 // we pass NO order/reverse option and rely on data being supplied in declaration order.
 import { Plot } from "../vendor";
-import { TBL } from "../theme";
+import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { tblBandYAxis, horizontalLeftGutter } from "../axes";
 import { monoScale } from "../palette";
 import { inferUnitsFromSubtitle } from "../util";
@@ -214,16 +214,17 @@ export function buildStackedMarks(
   if (netMode === "text") {
     // Text above the stack top (= positive sum, since no negatives in this branch). 14pt
     // 700 text_heading, baseline 6px above the top.
+    // Shared callout style (matches the per-bar value labels — see theme.ts TBL_VALUE_LABEL).
     const common = {
       text: (d: { net: number }) => netFmt(d.net),
       fill: TBL.color.heading,
-      fontSize: 14,
-      fontWeight: 700,
+      fontSize: TBL_VALUE_LABEL.fontSize,
+      fontWeight: TBL_VALUE_LABEL.fontWeight,
     };
     overlay.push(
       horizontal
-        ? Plot.text(netRows, { ...common, y: "_xc", x: "posTop", textAnchor: "start", dx: 8 })
-        : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -12 }),
+        ? Plot.text(netRows, { ...common, y: "_xc", x: "posTop", textAnchor: "start", dx: TBL_VALUE_LABEL.gap })
+        : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -TBL_VALUE_LABEL.gap }),
     );
   } else if (netMode === "dot") {
     // Black-stroked white dot at the true net y, plus a signed value label below.

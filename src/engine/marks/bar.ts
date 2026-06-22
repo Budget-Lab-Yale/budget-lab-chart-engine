@@ -14,7 +14,7 @@
 // own `xAxisMarks` (group labels on `fx`) which assemblePlot uses INSTEAD of the adapter's.
 // Horizontal single-series puts categories on a band `y` (the value axis moves to `x`).
 import { Plot } from "../vendor";
-import { TBL } from "../theme";
+import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { tblBandXAxis, tblBandYAxis, tblFacetGroupYAxis, horizontalLeftGutter } from "../axes";
 import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
@@ -277,12 +277,14 @@ function buildValueLabelMarks(
   horizontal: boolean,
 ): unknown[] {
   const text = (d: PreparedRow) => fmt(d._y as number);
+  // Shared callout style (matches the stacked net-total text — see theme.ts TBL_VALUE_LABEL).
   const common = {
     text,
     fill: TBL.color.heading,
-    fontSize: TBL.size.axis,
-    fontWeight: 600,
+    fontSize: TBL_VALUE_LABEL.fontSize,
+    fontWeight: TBL_VALUE_LABEL.fontWeight,
   };
+  const { gap, gapBelow } = TBL_VALUE_LABEL;
   const pos = data.filter((d) => Number.isFinite(d._y as number) && (d._y as number) >= 0);
   const neg = data.filter((d) => Number.isFinite(d._y as number) && (d._y as number) < 0);
   const marks: unknown[] = [];
@@ -297,8 +299,8 @@ function buildValueLabelMarks(
         textAnchor: anchor,
         dx,
       });
-    if (pos.length) marks.push(base(pos, 4, "start"));
-    if (neg.length) marks.push(base(neg, -4, "end"));
+    if (pos.length) marks.push(base(pos, gap, "start"));
+    if (neg.length) marks.push(base(neg, -gap, "end"));
     return marks;
   }
 
@@ -310,8 +312,8 @@ function buildValueLabelMarks(
       y: "_y",
       dy,
     });
-  if (pos.length) marks.push(base(pos, -4));
-  if (neg.length) marks.push(base(neg, 12));
+  if (pos.length) marks.push(base(pos, -gap));
+  if (neg.length) marks.push(base(neg, gapBelow));
   return marks;
 }
 
