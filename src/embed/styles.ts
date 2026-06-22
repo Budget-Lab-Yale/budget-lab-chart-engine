@@ -317,6 +317,19 @@ body {
 }
 
 /* =========================================================================
+ * Click-to-select cursor — only on interactive (has-legend) charts.
+ * render-live adds .is-selectable to the card when it wires chart clicks to the
+ * legend's pin toggle. The transparent crosshair hit-overlay sits ON TOP of the
+ * marks, so its cursor wins where they overlap; give it the same pointer cursor so the
+ * affordance is consistent across the whole plot when selection is on.
+ * ========================================================================= */
+.figure-card.is-selectable .figure-canvas svg [data-series],
+.figure-card.is-selectable .figure-canvas svg .tbl-crosshair-hit,
+.figure-card.is-selectable .figure-canvas svg .tbl-band-crosshair-hit {
+  cursor: pointer;
+}
+
+/* =========================================================================
  * Crosshair tooltip â€” frosted glass
  * ========================================================================= */
 .tbl-tooltip {

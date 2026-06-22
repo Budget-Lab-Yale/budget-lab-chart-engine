@@ -9,6 +9,7 @@ import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import { renderChart } from "./index.js";
 import { renderLegend } from "./legend.js";
+import type { LegendHandle } from "./legend.js";
 import { attachCrosshair, attachBandCrosshair } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -107,6 +108,32 @@ function resolveLegendPosition(
 }
 
 type OverlayEl = HTMLElement & { _ro?: ResizeObserver };
+
+/**
+ * Resolve the `data-series` of the chart mark under a click, hit-testing THROUGH the
+ * transparent crosshair hit-overlay that sits on top of the bars/paths.
+ *
+ * The crosshair appends a full-SVG transparent rect with pointer-events:all, so the click
+ * target is that overlay (no data-series). `elementsFromPoint` returns the element stack
+ * top→bottom; we skip the overlay (and any other non-mark element) and return the first
+ * element carrying a `data-series` attribute. Returns null if none is found.
+ *
+ * Guarded for jsdom: `elementsFromPoint` may be absent — feature-detect and no-op so SSR
+ * and tests don't throw. (The toggle path itself is exercised directly in tests.)
+ */
+function resolveSeriesAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | null {
+  const doc = svgEl.ownerDocument as Document & {
+    elementsFromPoint?: (x: number, y: number) => Element[];
+  };
+  if (typeof doc.elementsFromPoint !== "function") return null;
+  const stack = doc.elementsFromPoint(evt.clientX, evt.clientY);
+  for (const el of stack) {
+    const series = el.getAttribute?.("data-series");
+    if (series) return series;
+    if (el === svgEl) break; // don't search past the chart's own SVG
+  }
+  return null;
+}
 
 /** Format a numeric value for tooltip display. */
 function formatValue(v: number, units: string): string {
@@ -392,6 +419,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
     // --- Legend layout ---
+    let legendHandle: LegendHandle | null = null;
     if (legendItems) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
@@ -411,7 +439,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // Render the right-side vertical legend with reversed series order.
         const orderedItems = orderForRightLegend(legendItems, legendVisualOrder);
         rightLegendSlot!.replaceChildren();
-        renderLegend(rightLegendSlot!, orderedItems, { svg });
+        legendHandle = renderLegend(rightLegendSlot!, orderedItems, { svg });
         // Add vertical class to the rendered legend element.
         const legendEl = rightLegendSlot!.querySelector(".tbl-legend");
         if (legendEl) legendEl.classList.add("tbl-legend--vertical");
@@ -420,7 +448,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       } else {
         // Top legend (default behavior — unchanged).
         legendSlot.replaceChildren();
-        renderLegend(legendSlot, legendItems, { svg });
+        legendHandle = renderLegend(legendSlot, legendItems, { svg });
       }
     }
 
@@ -469,6 +497,27 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
     currentOverlay = attachYAxisOverlay(canvasScroll, svg);
+
+    // --- Two-way selection: clicking a bar/segment/line PINS that series via the legend
+    // handle (single source of truth). Only wire when an interactive legend exists; a
+    // single-series no-legend chart has nothing to select. The crosshair attaches a
+    // TRANSPARENT full-SVG hit rect on top of the marks (pointer-events:all), so a plain
+    // click lands on that overlay, not the bar — hit-test THROUGH it with
+    // elementsFromPoint and find the first [data-series] mark beneath the cursor.
+    if (legendHandle) {
+      card.classList.add("is-selectable");
+      // The crosshair sets the hit overlay's cursor inline (crosshair/default), which would
+      // win over the .is-selectable CSS rule. Override it to `pointer` so the click
+      // affordance shows across the whole plot when selection is on.
+      svg.querySelectorAll<SVGElement>(".tbl-crosshair-hit, .tbl-band-crosshair-hit")
+        .forEach((el) => { el.style.cursor = "pointer"; });
+      svg.addEventListener("click", (evt) => {
+        const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+        if (series) legendHandle!.toggle(series);
+      });
+    } else {
+      card.classList.remove("is-selectable");
+    }
   };
 
   // Initial draw: we don't know the series count yet, so render first to get legendItems,

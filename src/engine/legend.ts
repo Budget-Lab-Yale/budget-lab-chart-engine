@@ -4,11 +4,20 @@
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
 
+/** Handle returned by renderLegend: the rendered element plus a `toggle(series)` that
+ *  flips the SAME pin state a legend-button click would, keeping ONE source of truth
+ *  (the internal `pinned` Set) so the chart can act as a second selection input. */
+export interface LegendHandle {
+  element: HTMLElement;
+  /** Toggle a series' pinned state (no-op for an unknown/non-interactive series). */
+  toggle(series: string): void;
+}
+
 export function renderLegend(
   parent: HTMLElement,
   items: LegendItem[],
   { svg }: { svg?: SVGSVGElement } = {},
-): HTMLElement | null {
+): LegendHandle | null {
   if (!items?.length) return null;
 
   const doc = parent.ownerDocument;
@@ -44,6 +53,15 @@ export function renderLegend(
       btn.setAttribute("aria-pressed", String(pinned.has(s)));
     });
     resetBtn.hidden = pinned.size === 0;
+  };
+
+  // Shared pin toggle — the single source of truth for both legend-button clicks and
+  // chart clicks (via the returned handle). Unknown / non-interactive series are a no-op.
+  const togglePin = (series: string): void => {
+    if (!allSeries.includes(series)) return;
+    if (pinned.has(series)) pinned.delete(series);
+    else pinned.add(series);
+    applyHighlight();
   };
 
   for (const { series, label: displayLabel, color, dashed = false, markerShape, nonInteractive } of items) {
@@ -91,11 +109,7 @@ export function renderLegend(
       btn.addEventListener("pointerleave", () => { hovered = null; applyHighlight(); });
       btn.addEventListener("focus", () => { hovered = series; applyHighlight(); });
       btn.addEventListener("blur", () => { hovered = null; applyHighlight(); });
-      btn.addEventListener("click", () => {
-        if (pinned.has(series)) pinned.delete(series);
-        else pinned.add(series);
-        applyHighlight();
-      });
+      btn.addEventListener("click", () => { togglePin(series); });
     }
 
     legend.appendChild(btn);
@@ -110,5 +124,5 @@ export function renderLegend(
   legend.appendChild(resetBtn);
 
   parent.appendChild(legend);
-  return legend;
+  return { element: legend, toggle: togglePin };
 }
