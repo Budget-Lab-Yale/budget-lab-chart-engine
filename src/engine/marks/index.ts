@@ -49,8 +49,13 @@ export interface MarkLayers {
   /** Optional: a mark layer that owns its x-scale (bars) supplies band-scale options here;
    *  merged over the adapter's x options in assemblePlot. */
   xScaleOpts?: Record<string, unknown>;
-  /** Optional: faceted-group band scale options (grouped bars use `fx`). */
+  /** Optional: faceted-group band scale options (vertical grouped bars use `fx`). */
   fxScaleOpts?: Record<string, unknown>;
+  /** Optional: faceted-group band scale options for HORIZONTAL grouped bars, which facet
+   *  the categories onto `fy` (row facets) with the inner series band on `y`. Presence of
+   *  this signals assemblePlot to run the fy-oriented facet-chrome collapse (continuous
+   *  full-height vertical gridlines + one value-axis label row at the bottom). */
+  fyScaleOpts?: Record<string, unknown>;
   /** Optional: a mark layer that owns the y-scale (horizontal bars put the category band
    *  on `y`) supplies y-scale options here; merged over assemblePlot's value-axis y. When
    *  present, assemblePlot treats the chart as horizontal: it skips the vertical value

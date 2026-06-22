@@ -28,6 +28,41 @@ export interface MountOptions {
 const MIN_CHART_WIDTH = 390;
 const FIXED_CHART_HEIGHT = 400;
 
+// Horizontal bars grow taller with the bar/row count (the stakeholder blessed taller
+// horizontals). Per-row pixel budget + chrome headroom, floored at the vertical default so
+// short horizontals don't shrink. Vertical charts keep the fixed height.
+const HORIZONTAL_PX_PER_ROW = 34; // per bar (single/stacked: 1 per category; grouped: per series-in-group)
+const HORIZONTAL_CHROME_PX = 80; // top/bottom margins + value-axis label row + a little slack
+
+/** Compute the live-mount height for a chart. Horizontal bars scale with the number of bars
+ *  (rows): single-series / stacked → one row per category; grouped → categories x series.
+ *  Vertical charts (and non-bar types) return the fixed default. Floored at
+ *  FIXED_CHART_HEIGHT so short horizontals are not smaller than a vertical chart. */
+export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+  if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
+    return FIXED_CHART_HEIGHT;
+  }
+  const seriesField = spec.series_field || "series";
+  const cats = new Set<string>();
+  const series = new Set<string>();
+  for (const r of rows) {
+    const cat = r.time;
+    if (typeof cat === "string" && cat !== "") cats.add(cat);
+    const s = r[seriesField];
+    if (typeof s === "string" && s !== "") series.add(s);
+  }
+  const nCats = Math.max(1, cats.size);
+  // series_order, when present, is the authoritative series count (it filters/orders).
+  const nSeries =
+    spec.series_order && spec.series_order.length
+      ? spec.series_order.length
+      : Math.max(1, series.size);
+  // Stacked stacks all series into one row per category; grouped clusters one row per series.
+  const grouped = spec.chartType === "bar" && nSeries > 1;
+  const rowCount = grouped ? nCats * nSeries : nCats;
+  return Math.max(FIXED_CHART_HEIGHT, Math.round(rowCount * HORIZONTAL_PX_PER_ROW + HORIZONTAL_CHROME_PX));
+}
+
 // Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px
 // Figtree; the exact value is tunable in the visual pass. The chart area is computed as
 // (outerContainerWidth − LEGEND_COLUMN_WIDTH − LEGEND_GAP) so the ResizeObserver observes
@@ -234,7 +269,10 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): 
  *   observer for the SVG-widening case.)
  */
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
-  const { spec, rows, width: initialWidth, height = FIXED_CHART_HEIGHT } = opts;
+  const { spec, rows, width: initialWidth } = opts;
+  // Explicit height (callers / golden path) wins; otherwise horizontal bars grow taller
+  // with the bar/row count and everything else uses the fixed default.
+  const height = opts.height ?? computeChartHeight(spec, rows);
   const doc = container.ownerDocument;
 
   const card = doc.createElement("div");

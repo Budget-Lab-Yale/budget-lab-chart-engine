@@ -1,7 +1,11 @@
 // Bar chart mark builder. Produces single-series and grouped (multi-series) bars,
-// vertical (default) or horizontal single-series, with in-bar value labels and optional
-// highlight/dim. The generic chrome (gridlines, y-labels, zero baseline) is added by
-// assemblePlot.
+// vertical (default) or horizontal, with in-bar value labels and optional highlight/dim.
+// The generic chrome (gridlines, y-labels, zero baseline) is added by assemblePlot.
+//
+// Grouped HORIZONTAL bars mirror the vertical grouped idiom with the axes swapped: `fy` =
+// group (category, row facets), `y` = series within group (band), `x` = value, via barX.
+// assemblePlot collapses the per-facet chrome (continuous vertical gridlines + one
+// value-axis label row) for the fy case (signaled by fyScaleOpts).
 //
 // Category-label homing (see task A6 sec A/B): single-series VERTICAL bars put categories
 // on the `x` band scale, so the adapter's `tblBandXAxis(.., "x")` labels them and this
@@ -11,7 +15,7 @@
 // Horizontal single-series puts categories on a band `y` (the value axis moves to `x`).
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
-import { tblBandXAxis, tblBandYAxis, horizontalLeftGutter } from "../axes";
+import { tblBandXAxis, tblBandYAxis, tblFacetGroupYAxis, horizontalLeftGutter } from "../axes";
 import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -166,18 +170,56 @@ export function buildBarMarks(
     };
   }
 
-  // --- Multi-series grouped (vertical): fx = group (category), x = series within group. ---
-  // Horizontal grouped (fy faceting + band y + group labels) is not wired through the
-  // assemble chrome yet; vertical grouped is the supported multi-series path (A6 scope).
-  if (horizontal) {
-    throw new Error(
-      "buildBarMarks: horizontal orientation is supported for single-series bars only; " +
-        "grouped (multi-series) horizontal bars are not yet implemented.",
-    );
-  }
-
   // Highlight/dim overrides the fill channel with a literal accessor.
   const fillChannel = highlightSet ? (d: PreparedRow) => fillFor(d.series) : "series";
+
+  // --- Multi-series grouped, HORIZONTAL: fy = group (category, row facets), y = series
+  //     within group (band), x = value (_y), via barX. Mirrors the vertical grouped idiom
+  //     (fx→fy, x-band→y-band, barY→barX). assemblePlot runs the fy facet-chrome collapse
+  //     (continuous full-height vertical gridlines + one value-axis label row). ---
+  if (horizontal) {
+    overlay.push(Plot.barX(data, { fy: catField, y: "series", x: "_y", fill: fillChannel }));
+
+    if (emitValueLabels) {
+      overlay.push(
+        ...buildValueLabelMarks(data, { band: "series", facet: catField }, fmt, horizontal),
+      );
+    }
+
+    // --- Rect tagging order (horizontal grouped) ---
+    // Empirically (Plot 0.6.16, barX faceted on fy with an explicit inner-series band
+    // domain): Plot emits a <rect> for EVERY (group, series) pair of the fy-domain x
+    // y-domain cross-product, in facet-major order (category/fy order, then series in
+    // y-domain order within each facet). A null/missing value does NOT omit the rect — Plot
+    // renders it at zero WIDTH (verified empirically through the engine render path, which
+    // keeps the null-value row in scope). This matches the vertical fx+barY case. The
+    // fy/y domains are pinned (declaration order / seriesNames), so the order is
+    // deterministic and independent of the data rows. We must NOT skip pairs.
+    const hRectSeriesOrder: string[] = [];
+    for (let g = 0; g < categories.length; g++) {
+      for (const s of seriesNames) hRectSeriesOrder.push(s);
+    }
+
+    // Group band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-group
+    // padding, no axis (groups labeled via the fy group-label mark). Inner series band on
+    // `y`: domain in series order, padding 0 so bars touch within the group.
+    const fyGroupOpts = { domain: categories, padding: 0.2, paddingOuter: 0.2, axis: null };
+    const innerYBandOpts = { type: "band", domain: seriesNames, padding: 0, axis: null };
+
+    const gutter = horizontalLeftGutter(categories);
+    return {
+      underlay: [],
+      overlay,
+      tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder }],
+      dashedNames: new Set<string>(),
+      yScaleOpts: innerYBandOpts,
+      fyScaleOpts: fyGroupOpts,
+      xAxisMarks: tblFacetGroupYAxis(categories, gutter),
+      marginLeft: gutter,
+    };
+  }
+
+  // --- Multi-series grouped (vertical): fx = group (category), x = series within group. ---
 
   overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel }));
 

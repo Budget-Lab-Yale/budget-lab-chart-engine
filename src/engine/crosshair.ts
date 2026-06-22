@@ -497,10 +497,48 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
 /**
  * Read the rendered bar rect geometry from `svgEl` and return one CategoryBandH
  * per distinct category for HORIZONTAL orientation (categories on Y axis).
- * Groups rects by their rounded y-coordinate to derive per-category y-bands.
+ *
+ * - Single-band (single-series / stacked horizontal): all rects share the same y per
+ *   category row; group by rounded y-coordinate.
+ * - Fy-faceted (grouped horizontal): each category is its own ROW facet `<g>` translated
+ *   by the facet's y origin (`translate(0,ty)`); the rect `y` is LOCAL to the facet, so we
+ *   must add the facet translate. We read each facet group's absolute y-extent and map them
+ *   in fy-domain (translate) order to `opts.categories` — the analog of the vertical
+ *   fx-faceted branch in readCategoryBands.
  */
 function readCategoryBandsH(svgEl: SVGSVGElement, opts: BandCrosshairOptions): CategoryBandH[] {
-  const { categories = [] } = opts;
+  const { isFaceted, categories = [] } = opts;
+
+  if (isFaceted) {
+    // Grouped horizontal: Plot wraps each fy category in a <g translate(0,ty)> inside the
+    // bar mark group. Read each facet group's absolute y-range from its rects.
+    const groups = Array.from(svgEl.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g'));
+    if (groups.length) {
+      const parsed: Array<{ y: number; g: SVGGElement }> = [];
+      for (const g of groups) {
+        const transform = g.getAttribute("transform") ?? "";
+        const m = /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(transform);
+        const ty = m ? parseFloat(m[1]!) : 0;
+        parsed.push({ y: ty, g });
+      }
+      parsed.sort((a, b) => a.y - b.y);
+      return parsed.map((p, i) => {
+        const cat = categories[i] ?? String(i);
+        const rects = Array.from(p.g.querySelectorAll<SVGRectElement>("rect"));
+        if (!rects.length) return { category: cat, yMin: p.y, yMax: p.y + 1 };
+        let yMin = Infinity;
+        let yMax = -Infinity;
+        for (const rect of rects) {
+          const ry = parseFloat(rect.getAttribute("y") ?? "0") + p.y;
+          const rh = parseFloat(rect.getAttribute("height") ?? "0");
+          if (ry < yMin) yMin = ry;
+          if (ry + rh > yMax) yMax = ry + rh;
+        }
+        return { category: cat, yMin, yMax };
+      });
+    }
+    // Fall through to the single-band path if no facet groups were found (defensive).
+  }
 
   const allRects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
   if (!allRects.length) return [];

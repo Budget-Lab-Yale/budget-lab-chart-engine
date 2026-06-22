@@ -152,6 +152,16 @@ const BAR_HORIZONTAL_SPEC: ChartSpec = {
   data: "bar-horizontal.csv",
 };
 
+const BAR_GROUPED_HORIZONTAL_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Effect by region over time",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  orientation: "horizontal",
+  series_order: ["2019", "2022", "2025"],
+  data: "bar-multi.csv",
+};
+
 describe("golden SVG — bars", () => {
   it("renders a single-series bar chart (brand.blue, value labels)", async () => {
     const rows = parseCsv("./fixtures/bar-single.csv");
@@ -266,6 +276,56 @@ describe("golden SVG — bars", () => {
     rects.forEach((r) => expect(Number(r.getAttribute("x"))).toBeGreaterThanOrEqual(marginLeft - 1));
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal.golden.svg");
   });
+
+  it("renders a multi-series grouped HORIZONTAL bar chart via fy", async () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const { svg } = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    // 3 groups (Northeast, Midwest, South) x 3 series. Midwest/2022 is missing in the
+    // fixture, but the engine keeps the null-value row in scope and Plot's fy+barX renders
+    // it at zero WIDTH (it does NOT omit the rect — verified empirically, same as the
+    // vertical fx+barY full cross-product). So the full 3x3 = 9 rects are emitted.
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(9);
+    // Tagging order is facet-major: each group tagged 2019,2022,2025 regardless of the gap.
+    expect(rects[0]?.getAttribute("data-series")).toBe("2019"); // Northeast 2019
+    expect(rects[1]?.getAttribute("data-series")).toBe("2022"); // Northeast 2022
+    expect(rects[2]?.getAttribute("data-series")).toBe("2025"); // Northeast 2025
+    expect(rects[3]?.getAttribute("data-series")).toBe("2019"); // Midwest 2019
+    expect(rects[4]?.getAttribute("data-series")).toBe("2022"); // Midwest 2022 (zero-width)
+    expect(rects[4]?.getAttribute("width")).toBe("0"); // the omitted value -> zero width
+    expect(rects[5]?.getAttribute("data-series")).toBe("2025"); // Midwest 2025
+    expect(rects[6]?.getAttribute("data-series")).toBe("2019"); // South 2019
+    expect(rects[8]?.getAttribute("data-series")).toBe("2025"); // South 2025
+    // fy facet-chrome collapse: exactly ONE value-axis tick-label group and one gridline
+    // group survive (the per-facet duplicates were dropped).
+    expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
+    expect(svg.querySelectorAll("g.tbl-gridline").length).toBe(1);
+    expect(svg.querySelectorAll("g.tbl-zero-baseline").length).toBe(1);
+    // Surviving gridlines span the full plot height (continuous vertical rules): the kept
+    // group's lines were stretched to top→bottom plot edges (marginTop..height-marginBottom).
+    const mt = Number(svg.dataset.marginTop);
+    const mb = Number(svg.dataset.marginBottom);
+    const gridGroup = svg.querySelector("g.tbl-gridline");
+    const gridTy = (() => {
+      const m = /translate\(\s*-?[\d.]+\s*[ ,]\s*(-?[\d.]+)/.exec(gridGroup?.getAttribute("transform") ?? "");
+      return m ? Number(m[1]) : 0;
+    })();
+    const firstLine = gridGroup?.querySelector("line");
+    expect(Number(firstLine?.getAttribute("y1")) + gridTy).toBeCloseTo(mt, 0);
+    expect(Number(firstLine?.getAttribute("y2")) + gridTy).toBeCloseTo(400 - mb, 0);
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-grouped-horizontal.golden.svg");
+  });
+
+  it("grouped horizontal render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const a = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    const b = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    expect(a).toBe(b);
+  });
 });
 
 // --- Stacked bars (task A7) ---
@@ -318,7 +378,34 @@ const STACKED_100_SPEC: ChartSpec = {
   data: "stacked-100.csv",
 };
 
+const STACKED_HORIZONTAL_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Compensation by component",
+  subtitle: "Thousands of dollars",
+  xAxisType: "categorical",
+  orientation: "horizontal",
+  series_order: ["Wages", "Benefits", "Taxes"],
+  data: "stacked-cumulative.csv",
+};
+
 describe("golden SVG — stacked bars", () => {
+  it("renders a cumulative HORIZONTAL stack (single y band, no fy faceting)", async () => {
+    const rows = parseCsv("./fixtures/stacked-cumulative.csv");
+    const { svg } = renderChart(STACKED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document });
+    // 3 categories x 3 series = 9 rects (all present). Horizontal stacked uses a single
+    // y band (no faceting), so there is exactly ONE value-axis tick-label / gridline set.
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(9);
+    expect(rects[0]?.getAttribute("data-series")).toBe("Wages");
+    expect(rects[1]?.getAttribute("data-series")).toBe("Benefits");
+    expect(rects[2]?.getAttribute("data-series")).toBe("Taxes");
+    // No fy collapse classes (single-band stacked is not faceted).
+    expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(0);
+    // Responsive left gutter for the category labels.
+    expect(Number(svg.dataset.marginLeft)).toBeGreaterThan(0);
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-horizontal.golden.svg");
+  });
+
   it("renders a cumulative (all-positive) stack with net text above", async () => {
     const rows = parseCsv("./fixtures/stacked-cumulative.csv");
     const { svg, legendItems } = renderChart(STACKED_CUMULATIVE_SPEC, rows, {

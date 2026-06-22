@@ -575,6 +575,20 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     expect(() => mountChart(container, { spec: STACKED_SPEC, rows: STACKED_ROWS })).not.toThrow();
   });
 
+  it("grouped HORIZONTAL bar chart mounts, faceted on fy, with a band crosshair", () => {
+    const hSpec: ChartSpec = { ...BAR_SPEC, orientation: "horizontal" };
+    const container = document.createElement("div");
+    mountChart(container, { spec: hSpec, rows: BAR_ROWS, width: 720, height: 400 });
+    const chartSvg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    expect(chartSvg).not.toBeNull();
+    // fy-faceted: each category is its own row-facet <g translate(0,ty)> inside the bar mark.
+    const facetGroups = chartSvg.querySelectorAll('g[aria-label="bar"] > g');
+    expect(facetGroups.length).toBe(2); // Northeast, Midwest
+    // Band crosshair attached (categorical hover), not the continuous line crosshair.
+    expect(chartSvg.querySelector(".tbl-band-crosshair-hit")).not.toBeNull();
+    expect(chartSvg.querySelector(".tbl-crosshair")).toBeNull();
+  });
+
   it("categorical chart gets a .tbl-band-crosshair-hit element (not the line crosshair)", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: BAR_SPEC, rows: BAR_ROWS });

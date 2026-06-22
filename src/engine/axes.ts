@@ -294,6 +294,31 @@ export function tblBandYAxis(
   ];
 }
 
+// Group (category) labels for HORIZONTAL GROUPED bars: categories are the `fy` ROW FACETS
+// (analog of tblBandXAxis(.., "fx") for vertical grouped, swapping fx→fy / bottom→left).
+// Facet the text mark on `fy` (one label per row facet) and anchor it to the facet frame's
+// LEFT edge, vertically CENTERED on the cluster (matches the vertical grouped convention:
+// group labels are centered on their band). The label is pushed left by `marginLeft` so its
+// `textAnchor:"start"` origin lands at svg x=0, flush with the title above.
+export function tblFacetGroupYAxis(
+  categories: string[],
+  marginLeft: number = TBL_MARGIN_LEFT,
+): Mark[] {
+  const rows = categories.map((c) => ({ c }));
+  return [
+    Plot.text(rows, {
+      fy: (d: { c: string }) => d.c,
+      text: (d: { c: string }) => d.c,
+      frameAnchor: "left",
+      dx: -marginLeft,
+      textAnchor: "start",
+      fill: TBL.color.axis,
+      fontSize: TBL.size.axis,
+      fontWeight: 500,
+    }),
+  ];
+}
+
 /** Make a Plot-produced SVG responsive: swap fixed width/height for a viewBox so it
  * scales to its container. (Used by the live, non-overflowing render path.) */
 export function makeResponsive(svg: SVGSVGElement): SVGSVGElement {

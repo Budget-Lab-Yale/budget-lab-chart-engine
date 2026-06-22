@@ -2,7 +2,7 @@
 //
 // Tests for the embed live-render layer: mountChart + buildStandaloneHtml.
 import { describe, it, expect } from "vitest";
-import { mountChart } from "../src/engine/render-live";
+import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { renderLegend } from "../src/engine/legend";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
 import { CHART_CSS } from "../src/embed/styles";
@@ -119,6 +119,59 @@ describe("mountChart", () => {
       mountChart(container, { spec: SINGLE_SERIES_SPEC, rows: SINGLE_SERIES_ROWS, width: 500, height: 300 }),
     ).not.toThrow();
     expect(container.querySelector("svg")).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeChartHeight — horizontal bars grow taller with the bar/row count
+
+describe("computeChartHeight", () => {
+  const catRows = (cats: string[], series: string[]): TidyRow[] => {
+    const out: TidyRow[] = [];
+    for (const s of series) for (const c of cats) out.push({ time: c, series: s, value: "1" });
+    return out as TidyRow[];
+  };
+
+  it("returns the fixed default for vertical charts", () => {
+    const spec: ChartSpec = { chartType: "bar", title: "v", xAxisType: "categorical", data: "x" };
+    expect(computeChartHeight(spec, catRows(["A", "B", "C"], ["S"]))).toBe(400);
+  });
+
+  it("returns the fixed default for line charts regardless of orientation", () => {
+    const spec: ChartSpec = { chartType: "line", title: "l", xAxisType: "temporal", data: "x" };
+    expect(computeChartHeight(spec, catRows(["A", "B"], ["S"]))).toBe(400);
+  });
+
+  it("floors short horizontal charts at the fixed default", () => {
+    const spec: ChartSpec = {
+      chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal", data: "x",
+    };
+    // 3 rows would be ~182px, below the 400 floor.
+    expect(computeChartHeight(spec, catRows(["A", "B", "C"], ["S"]))).toBe(400);
+  });
+
+  it("grows a grouped horizontal chart with categories x series", () => {
+    const spec: ChartSpec = {
+      chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
+      series_order: ["X", "Y", "Z"], data: "x",
+    };
+    // 6 categories x 3 series = 18 rows → 18*34 + 80 = 692, above the floor.
+    const h = computeChartHeight(spec, catRows(["a", "b", "c", "d", "e", "f"], ["X", "Y", "Z"]));
+    expect(h).toBe(18 * 34 + 80);
+    expect(h).toBeGreaterThan(400);
+  });
+
+  it("grows a stacked horizontal chart by one row per category (series do not multiply)", () => {
+    const spec: ChartSpec = {
+      chartType: "stacked", title: "h", xAxisType: "categorical", orientation: "horizontal",
+      series_order: ["X", "Y", "Z"], data: "x",
+    };
+    // 12 categories, stacked → 12 rows → 12*34 + 80 = 488.
+    const h = computeChartHeight(
+      spec,
+      catRows(["a","b","c","d","e","f","g","h","i","j","k","l"], ["X", "Y", "Z"]),
+    );
+    expect(h).toBe(12 * 34 + 80);
   });
 });
 
