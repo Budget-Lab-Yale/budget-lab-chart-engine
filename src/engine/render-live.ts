@@ -15,7 +15,7 @@ import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
-import { tokens } from "../theme/tokens.js";
+import { TBL } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
 
 export interface MountOptions {
@@ -199,7 +199,6 @@ function addLineHitPaths(svgEl: SVGSVGElement): void {
 // segment behind it is dimmed (near-white), white text is illegible — so each label adapts
 // its color to the segment DIRECTLY behind it: dark when that segment is dimmed (or there is
 // no segment behind, i.e. the white background), white when the segment is active.
-const NET_LABEL_DARK = tokens.structural.text_heading;
 const NET_LABEL_WHITE = "#FFFFFF";
 
 /**
@@ -210,75 +209,65 @@ const NET_LABEL_WHITE = "#FFFFFF";
  *   - behind segment active  → white (the existing default over a full-color segment)
  */
 export function netLabelFill(behindDimmed: boolean, hasBehind: boolean): string {
-  return !hasBehind || behindDimmed ? NET_LABEL_DARK : NET_LABEL_WHITE;
+  return !hasBehind || behindDimmed ? TBL.color.heading : NET_LABEL_WHITE;
 }
 
 /**
- * Detect, per net-total label, the stacked-segment SERIES drawn directly behind it, by
- * geometry. Runs once post-render. We compare in SCREEN coordinates (getBoundingClientRect):
- * the segment rects bake their geometry into x/y attributes, but the net-LABEL text marks are
- * positioned by a transform, so a text element's getBBox() returns its own local box (origin-
- * centered), NOT user space — only the post-layout client rect places both in the same frame.
- * A label's behind-series is the non-Total segment rect whose [left,right] contains the
- * label's center x AND [top,bottom] contains its center y. The mapping is stamped on
- * `dataset.behindSeries` (empty string = none) so recolorNetLabels can read it on every
- * highlight change. No-op when there are no net labels (anything but a diverging/dot-mode
- * stacked chart) or in non-layout environments (jsdom: client rects are all zero → no hit).
- */
-function detectNetLabelBehindSeries(svg: SVGSVGElement): void {
-  const labels = svg.querySelectorAll<SVGTextElement>(
-    `g.tbl-net-label text[data-series="${TOTAL_SERIES_KEY}"]`,
-  );
-  if (!labels.length) return;
-  const rects = Array.from(
-    svg.querySelectorAll<SVGRectElement>(
-      `rect[data-series]:not([data-series="${TOTAL_SERIES_KEY}"])`,
-    ),
-  );
-  // Precompute each rect's screen extent + series once.
-  const extents = rects.map((rect) => {
-    const b = rect.getBoundingClientRect();
-    return {
-      series: rect.getAttribute("data-series") ?? "",
-      x0: b.left,
-      x1: b.right,
-      y0: b.top,
-      y1: b.bottom,
-    };
-  });
-  labels.forEach((label) => {
-    const b = label.getBoundingClientRect();
-    let found = "";
-    // Degenerate (zero-size) label box → no real layout (e.g. jsdom); leave behind unset so
-    // recolor falls through to the dark default rather than spuriously matching a 0×0 rect.
-    if (b.width > 0 || b.height > 0) {
-      const cx = b.left + b.width / 2;
-      const cy = b.top + b.height / 2;
-      for (const e of extents) {
-        if (cx >= e.x0 && cx <= e.x1 && cy >= e.y0 && cy <= e.y1) {
-          found = e.series;
-          break;
-        }
-      }
-    }
-    label.dataset.behindSeries = found;
-  });
-}
-
-/**
- * Recolor every net-total label from the CURRENT dim state. Reads the behind-series stamped
- * by detectNetLabelBehindSeries; dim state is per-series (all rects of a dimmed series carry
- * .tbl-dimmed), so checking any one rect of that series is sufficient and stable. Called once
- * after wiring (initial state) and on every highlight change via the legend's onHighlight hook
- * (which fires AFTER applyHighlight toggles the classes, so the read is fresh).
+ * Recolor every net-total label from the CURRENT dim state. Detection of the behind-series
+ * is computed LIVE on each call (not cached), so geometry is always fresh even when the chart
+ * first rendered off-screen or with zero geometry. We compare in SCREEN coordinates
+ * (getBoundingClientRect): segment rects bake geometry into x/y attributes, but net-label
+ * text marks are positioned by a transform, so only the post-layout client rect places both
+ * in the same frame. A label's behind-series is the first non-Total segment rect whose
+ * [left,right] × [top,bottom] contains the label's center — skipping zero-size rects (a
+ * value=0 segment renders as zero-height; inclusive containment with y0===y1 can spuriously
+ * match). No-op when there are no net labels (anything but a diverging/dot-mode stacked chart)
+ * or in non-layout environments (jsdom: client rects are all zero → label box is zero → skip).
+ * Called once after wiring (initial state) and on every highlight change via the legend's
+ * onHighlight hook (which fires AFTER applyHighlight toggles the classes, so the read is fresh).
+ * In the initial nothing-pinned state no segment is dimmed → all labels stay white regardless
+ * of detection.
  */
 function recolorNetLabels(svg: SVGSVGElement): void {
   const labels = svg.querySelectorAll<SVGTextElement>(
     `g.tbl-net-label text[data-series="${TOTAL_SERIES_KEY}"]`,
   );
   if (!labels.length) return;
+
+  // Precompute extents for all non-Total segment rects, skipping zero-size ones.
+  const extents = Array.from(
+    svg.querySelectorAll<SVGRectElement>(
+      `rect[data-series]:not([data-series="${TOTAL_SERIES_KEY}"])`,
+    ),
+  ).flatMap((rect) => {
+    const b = rect.getBoundingClientRect();
+    // Skip zero-size rects: a value=0 segment renders as a zero-height rect; inclusive
+    // containment (cy>=y0 && cy<=y1) with y0===y1 can spuriously match a degenerate center.
+    if (!(b.width > 0 && b.height > 0)) return [];
+    return [{
+      series: rect.getAttribute("data-series") ?? "",
+      x0: b.left,
+      x1: b.right,
+      y0: b.top,
+      y1: b.bottom,
+    }];
+  });
+
   labels.forEach((label) => {
-    const behind = label.dataset.behindSeries ?? "";
+    const b = label.getBoundingClientRect();
+    let behind = "";
+    // Degenerate (zero-size) label box → no real layout (e.g. jsdom); skip hit-test and fall
+    // through to the dark default (both dimensions must be positive).
+    if (b.width > 0 && b.height > 0) {
+      const cx = b.left + b.width / 2;
+      const cy = b.top + b.height / 2;
+      for (const e of extents) {
+        if (cx >= e.x0 && cx <= e.x1 && cy >= e.y0 && cy <= e.y1) {
+          behind = e.series;
+          break;
+        }
+      }
+    }
     const hasBehind = behind !== "";
     let behindDimmed = false;
     if (hasBehind) {
@@ -287,7 +276,8 @@ function recolorNetLabels(svg: SVGSVGElement): void {
       );
       behindDimmed = rect?.classList.contains("tbl-dimmed") ?? false;
     }
-    label.setAttribute("fill", netLabelFill(behindDimmed, hasBehind));
+    // Use inline style so a future CSS fill rule on .tbl-net-label text can't override.
+    label.style.fill = netLabelFill(behindDimmed, hasBehind);
   });
 }
 
@@ -621,10 +611,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       }
     }
 
-    // Detect the segment behind each net-total label (geometry, post-render) and set the
-    // initial label colors from the current (un-dimmed) state. No-op unless this is a
-    // diverging/dot-mode stacked chart (the only case with tbl-net-label elements).
-    detectNetLabelBehindSeries(svg);
+    // Set the initial label colors from the current (un-dimmed) state. No-op unless this is a
+    // diverging/dot-mode stacked chart (the only case with tbl-net-label elements). Detection
+    // of the behind-series is computed live inside recolorNetLabels on each call.
     recolorNetLabels(svg);
 
     currentLegendPos = legendPos;
