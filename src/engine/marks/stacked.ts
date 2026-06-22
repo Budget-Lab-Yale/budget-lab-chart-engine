@@ -222,8 +222,8 @@ export function buildStackedMarks(
     };
     overlay.push(
       horizontal
-        ? Plot.text(netRows, { ...common, y: "_xc", x: "posTop", textAnchor: "start", dx: 6 })
-        : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -6 }),
+        ? Plot.text(netRows, { ...common, y: "_xc", x: "posTop", textAnchor: "start", dx: 8 })
+        : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -12 }),
     );
   } else if (netMode === "dot") {
     // Black-stroked white dot at the true net y, plus a signed value label below.
