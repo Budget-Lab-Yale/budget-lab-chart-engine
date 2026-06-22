@@ -440,9 +440,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         const orderedItems = orderForRightLegend(legendItems, legendVisualOrder);
         rightLegendSlot!.replaceChildren();
         legendHandle = renderLegend(rightLegendSlot!, orderedItems, { svg });
-        // Add vertical class to the rendered legend element.
-        const legendEl = rightLegendSlot!.querySelector(".tbl-legend");
-        if (legendEl) legendEl.classList.add("tbl-legend--vertical");
+        // Add the vertical-layout class to the rendered legend element (use the handle's
+        // element directly rather than re-querying the slot).
+        legendHandle?.element.classList.add("tbl-legend--vertical");
         // Ensure top legend slot stays empty.
         legendSlot.replaceChildren();
       } else {
@@ -505,6 +505,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // click lands on that overlay, not the bar — hit-test THROUGH it with
     // elementsFromPoint and find the first [data-series] mark beneath the cursor.
     if (legendHandle) {
+      const handle = legendHandle; // capture the non-null value for the click closure
       card.classList.add("is-selectable");
       // The crosshair sets the hit overlay's cursor inline (crosshair/default), which would
       // win over the .is-selectable CSS rule. Override it to `pointer` so the click
@@ -513,7 +514,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         .forEach((el) => { el.style.cursor = "pointer"; });
       svg.addEventListener("click", (evt) => {
         const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-        if (series) legendHandle!.toggle(series);
+        if (series) handle.toggle(series);
       });
     } else {
       card.classList.remove("is-selectable");
