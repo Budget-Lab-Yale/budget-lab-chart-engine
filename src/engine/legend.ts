@@ -16,7 +16,7 @@ export interface LegendHandle {
 export function renderLegend(
   parent: HTMLElement,
   items: LegendItem[],
-  { svg }: { svg?: SVGSVGElement } = {},
+  { svg, onHighlight }: { svg?: SVGSVGElement; onHighlight?: () => void } = {},
 ): LegendHandle | null {
   if (!items?.length) return null;
 
@@ -53,6 +53,10 @@ export function renderLegend(
       btn.setAttribute("aria-pressed", String(pinned.has(s)));
     });
     resetBtn.hidden = pinned.size === 0;
+    // Notify after the dim classes are toggled so the callback reads the fresh dim state
+    // (e.g. recoloring net-total labels by the behind-segment's dim class). Runs on every
+    // highlight change — pin, hover, focus, blur, and reset.
+    onHighlight?.();
   };
 
   // Shared pin toggle — the single source of truth for both legend-button clicks and

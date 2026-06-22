@@ -2,7 +2,7 @@
 //
 // Tests for the embed live-render layer: mountChart + buildStandaloneHtml.
 import { describe, it, expect } from "vitest";
-import { mountChart, computeChartHeight } from "../src/engine/render-live";
+import { mountChart, computeChartHeight, netLabelFill } from "../src/engine/render-live";
 import { renderLegend } from "../src/engine/legend";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
 import { CHART_CSS } from "../src/embed/styles";
@@ -931,6 +931,76 @@ describe("renderLegend handle.toggle (single source of truth)", () => {
     svg.querySelectorAll("[data-series]").forEach((r) =>
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Net-total label legibility over dimmed bars (TT7)
+// ---------------------------------------------------------------------------
+
+describe("netLabelFill (pure color decision)", () => {
+  const DARK = "#1A1A2E"; // tokens.structural.text_heading
+  const WHITE = "#FFFFFF";
+
+  it("dimmed behind segment → dark", () => {
+    expect(netLabelFill(true, true)).toBe(DARK);
+  });
+
+  it("active behind segment → white", () => {
+    expect(netLabelFill(false, true)).toBe(WHITE);
+  });
+
+  it("no segment behind (over white background) → dark", () => {
+    expect(netLabelFill(false, false)).toBe(DARK);
+    // hasBehind=false wins regardless of the dimmed flag.
+    expect(netLabelFill(true, false)).toBe(DARK);
+  });
+});
+
+describe("renderLegend onHighlight hook", () => {
+  const NS = "http://www.w3.org/2000/svg";
+  const ITEMS: LegendItem[] = [
+    { series: "A", label: "A", color: "#f00", dashed: false, markerShape: "rect" },
+    { series: "B", label: "B", color: "#00f", dashed: false, markerShape: "rect" },
+  ];
+
+  function makeSvg(): SVGSVGElement {
+    const svg = document.createElementNS(NS, "svg") as unknown as SVGSVGElement;
+    for (const s of ["A", "B"]) {
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("data-series", s);
+      svg.appendChild(rect);
+    }
+    return svg;
+  }
+
+  it("fires onHighlight after applyHighlight on a pin and on reset", () => {
+    const parent = document.createElement("div");
+    const svg = makeSvg();
+    const calls: boolean[] = [];
+    // Spy records the dim state at call time to prove it runs AFTER classes are toggled.
+    const handle = renderLegend(parent, ITEMS, {
+      svg,
+      onHighlight: () => {
+        calls.push(svg.querySelector('[data-series="A"]')!.classList.contains("tbl-dimmed"));
+      },
+    })!;
+    expect(calls.length).toBe(0); // not called during render
+    // Pin B → A dims; the callback sees the fresh dimmed state (true).
+    handle.toggle("B");
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toBe(true);
+    // Reset (unpin) → nothing dimmed; callback fires again and reads the cleared state.
+    handle.toggle("B");
+    expect(calls.length).toBe(2);
+    expect(calls[1]).toBe(false);
+  });
+
+  it("absent onHighlight is harmless (existing callers unaffected)", () => {
+    const parent = document.createElement("div");
+    const svg = makeSvg();
+    const handle = renderLegend(parent, ITEMS, { svg })!;
+    expect(() => handle.toggle("A")).not.toThrow();
   });
 });
 
