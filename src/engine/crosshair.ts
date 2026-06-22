@@ -256,7 +256,10 @@ export interface CategoryBandH {
  * space between bars still feels attached to the nearer bar.
  *
  * `bands` are the bar/cluster extents `[min, max]` (ascending by center). `lo`/`hi` are
- * the plot's axis edges; the first band clamps left to `lo`, the last clamps right to `hi`.
+ * the plot's axis edges, used only as a clamp so a band never spills past the plot.
+ * Inner edges sit at the midpoint between adjacent centers; the OUTER edges of the first
+ * and last bands extend a SYMMETRIC half-step (mirroring the nearest gap) rather than
+ * stretching to the plot edge — so the end bars' highlight is balanced with the inner ones.
  * PURE — input bands are not mutated; new `[min, max]` pairs are returned in input order.
  */
 export function widenBandsToMidpoints(
@@ -269,12 +272,14 @@ export function widenBandsToMidpoints(
   return centers.map((c, i) => {
     const prev = i > 0 ? centers[i - 1]! : null;
     const next = i < centers.length - 1 ? centers[i + 1]! : null;
-    // Inner edges sit at the midpoint between adjacent centers; outer edges clamp to the
-    // plot edge (equivalently, extend a half-step past the bar — but clamping is simpler
-    // and matches the visible plot area).
-    const left = prev != null ? (prev + c) / 2 : lo;
-    const right = next != null ? (c + next) / 2 : hi;
-    return { min: left, max: right };
+    // Outer edges extend half the nearest gap past the bar center (symmetric with the
+    // inner midpoints); a single band falls back to its own half-width. Clamp to [lo, hi]
+    // so the highlight never exceeds the plot area.
+    const left =
+      prev != null ? (prev + c) / 2 : next != null ? c - (next - c) / 2 : (bands[i] as { min: number }).min;
+    const right =
+      next != null ? (c + next) / 2 : prev != null ? c + (c - prev) / 2 : (bands[i] as { max: number }).max;
+    return { min: Math.max(lo, left), max: Math.min(hi, right) };
   });
 }
 

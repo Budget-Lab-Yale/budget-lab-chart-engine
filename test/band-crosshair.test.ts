@@ -149,26 +149,37 @@ describe("widenBandsToMidpoints", () => {
     expect(widenBandsToMidpoints([], 0, 100)).toEqual([]);
   });
 
-  it("clamps a single band to the plot edges", () => {
-    // Center is irrelevant: the lone band has no neighbors, so both edges clamp.
+  it("falls back to a single band's own width when it has no neighbors", () => {
+    // Lone band: no neighbor to derive a half-step, so it keeps its own extents (clamped).
     expect(widenBandsToMidpoints([{ min: 40, max: 60 }], 10, 200)).toEqual([
-      { min: 10, max: 200 },
+      { min: 40, max: 60 },
     ]);
   });
 
-  it("extends inner edges to the midpoint between adjacent centers", () => {
+  it("extends inner edges to midpoints and outer edges by a symmetric half-step", () => {
     // Bars centered at 30, 80, 130 (each width 40). Step = 50; inner edges at the center
-    // midpoints (55, 105). Outer edges clamp to lo/hi.
+    // midpoints (55, 105). Outer edges extend a half-step (25) past the end centers — NOT
+    // to the plot edge — so the end bands are balanced (width 50, same as the middle band).
     const bands = [
       { min: 10, max: 50 }, // center 30
       { min: 60, max: 100 }, // center 80
       { min: 110, max: 150 }, // center 130
     ];
     expect(widenBandsToMidpoints(bands, 0, 200)).toEqual([
-      { min: 0, max: 55 }, // left clamps to lo=0; right = (30+80)/2
+      { min: 5, max: 55 }, // left = 30 - (80-30)/2 = 5; right = (30+80)/2
       { min: 55, max: 105 }, // (30+80)/2 .. (80+130)/2
-      { min: 105, max: 200 }, // left = (80+130)/2; right clamps to hi=200
+      { min: 105, max: 155 }, // left = (80+130)/2; right = 130 + (130-80)/2 = 155
     ]);
+  });
+
+  it("clamps an outer half-step to the plot edge when it would overflow", () => {
+    // Center 10 with a right neighbor at 90: half-step left = 10 - 40 = -30, clamped to lo=0.
+    const bands = [
+      { min: 0, max: 20 }, // center 10
+      { min: 80, max: 100 }, // center 90
+    ];
+    const wide = widenBandsToMidpoints(bands, 0, 200);
+    expect(wide[0]!.min).toBe(0); // -30 clamped up to lo
   });
 
   it("widened bands cover the gaps with no holes (adjacent bands share an edge)", () => {
