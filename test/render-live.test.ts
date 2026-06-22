@@ -920,9 +920,9 @@ describe("mountChart two-way selection wiring", () => {
     const hitSeries = new Set(hitPaths.map((p) => p.getAttribute("data-series")));
     expect(hitSeries).toEqual(visibleSeries);
     for (const hp of hitPaths) {
-      // Fat, invisible, stroke-only hit-testable.
+      // Fat, invisible (painted with zero opacity), stroke-only hit-testable.
       expect(Number(hp.getAttribute("stroke-width"))).toBeGreaterThanOrEqual(10);
-      expect(hp.getAttribute("stroke")).toBe("transparent");
+      expect(hp.getAttribute("stroke-opacity")).toBe("0");
       expect(hp.getAttribute("fill")).toBe("none");
       expect(hp.style.pointerEvents).toBe("stroke");
       expect(hp.getAttribute("d")).toBeTruthy();

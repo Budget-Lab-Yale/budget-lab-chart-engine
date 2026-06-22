@@ -149,10 +149,13 @@ function resolveSeriesAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | n
  * transparent overlay and finds the fat hit-path's `data-series`. The hover (pointermove
  * on the overlay) is unaffected because the overlay stays on top.
  *
- * Each hit-path clones the visible path's `d` (geometry) and `data-series`, and the
- * `pathLength`/transform context is preserved because we insert the clone as a sibling in
- * the same `g[aria-label="line"]` group. Idempotent per render: the SVG is rebuilt each
- * draw(), and we guard against double-adding via the `.tbl-line-hitpath` marker.
+ * Each hit-path clones the visible path's `d` (geometry) and `data-series`. The clone is
+ * inserted at the SVG root (just before the crosshair overlay), which is correct here
+ * because this engine's Plot output bakes the margins into the path coordinates — the
+ * `g[aria-label="line"]` group carries only a 0.5px crispness transform, so a root-level
+ * clone lands within ~0.5px of the visible line (well inside the 14px hit stroke). No
+ * in-function idempotency guard is needed: `draw()` rebuilds the SVG before each call, so
+ * the hit-paths are always fresh.
  */
 function addLineHitPaths(svgEl: SVGSVGElement): void {
   const NS = "http://www.w3.org/2000/svg";
@@ -169,7 +172,11 @@ function addLineHitPaths(svgEl: SVGSVGElement): void {
     hit.setAttribute("data-series", series);
     hit.setAttribute("d", d);
     hit.setAttribute("fill", "none");
-    hit.setAttribute("stroke", "transparent");
+    // Invisible but reliably hit-testable: pointer-events:stroke is geometry-based, but a
+    // painted-with-zero-opacity stroke is the safest cross-browser choice (some engines treat
+    // stroke="transparent" as non-painted). The 14px width gives a ~7px-each-side hit zone.
+    hit.setAttribute("stroke", "#000");
+    hit.setAttribute("stroke-opacity", "0");
     hit.setAttribute("stroke-width", "14");
     hit.setAttribute("stroke-linecap", "round");
     hit.setAttribute("stroke-linejoin", "round");
