@@ -211,10 +211,13 @@ export function renderFigure(
   // (The old Plot-faceting path — one combined SVG, collapseFacetGridChrome, facet-aware
   // crosshair — is retired; combinedSvg is now undefined for shared mode too.)
 
-  // 1. Shared y-domain: probe-render over ALL in-scope rows and read the computed domain. This
-  //    reuses renderPane's full auto/hard/bar resolution, so the shared domain is exactly what a
-  //    single chart over all rows would use. The probe SVG is discarded.
-  const probe = renderPane(spec, rows, { ...opts, pane: true }, "probe");
+  // 1. Shared y-domain: probe-render over the IN-SCOPE rows (only facet values in paneValues —
+  //    so pane_order-excluded panes don't inflate the shared scale) and read the computed domain.
+  //    This reuses renderPane's full auto/hard/bar resolution, so the shared domain is exactly
+  //    what a single chart over those rows would use. The probe SVG is discarded.
+  const paneValueSet = new Set(paneValues);
+  const inScopeRows = rows.filter((r) => paneValueSet.has(r[facetField] as string));
+  const probe = renderPane(spec, inScopeRows, { ...opts, pane: true }, "probe");
   const sharedYDomain = probe.yDomain;
 
   // 2. Render each pane as its own single frame, forcing the shared y-domain and hiding the
