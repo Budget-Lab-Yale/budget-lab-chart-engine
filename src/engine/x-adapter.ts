@@ -74,8 +74,12 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
           marginBottom: temporalMarginBottom(xDomain),
           axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
           markerToX: (m) => parseDate(m.x),
-          tooltipXParse: undefined, // crosshair auto-detects YYYY-MM-DD
-          tooltipXFormat: undefined,
+          // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
+          // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
+          // formats in local time, shifting "2022-01-01" to "Dec 2021" in negative-offset zones
+          // (and mis-snapping the guide). Format a single-line "%b %Y" to match the axis.
+          tooltipXParse: (v) => +parseDate(v),
+          tooltipXFormat: (v) => d3.timeFormat("%b %Y")(new Date(v)),
         };
       },
     };
