@@ -789,6 +789,102 @@ describe("golden figure — shared-mode small multiples (renderFigure, task B4)"
   });
 });
 
+// --- Figure orchestrator: per-pane small multiples (task B5) ---
+//
+// Per-pane mode renders each pane as its OWN single-frame SVG with an independent y-scale,
+// units, and x-domain (Plot faceting can't give independent y-scales). The fixture has four
+// panes with deliberately different value ranges (≈1-4, ≈40-62, ≈800-1020, ≈12000-17000) so
+// the per-pane y-tick labels visibly differ. Asserts pane count/order, independent y-domains,
+// unique clip-path ids per pane, the thinner pane line stroke, and determinism.
+
+const PERPANE_SPEC: ChartSpec = {
+  chartType: "line",
+  title: "Trend by magnitude",
+  subtitle: "Index",
+  xAxisType: "temporal",
+  data: "facet-perpane.csv",
+  small_multiples: {
+    facet_field: "facet",
+    columns: 2,
+    mode: "per-pane",
+    pane_order: ["Small", "Medium", "Large", "Huge"],
+    pane_titles: { Small: "Small", Medium: "Medium", Large: "Large", Huge: "Huge" },
+  },
+};
+
+// Serialize every pane SVG into one deterministic string for the golden snapshot.
+function serializePanes(fig: FigureRenderResult): string {
+  return fig.panes
+    .map((p) => `<!-- pane: ${p.value} (${p.title}) -->\n${(p.svg as SVGSVGElement).outerHTML}`)
+    .join("\n\n");
+}
+
+// Y-tick label texts for one pane's SVG, in document order.
+function yTickLabels(svg: SVGSVGElement): string[] {
+  return Array.from(svg.querySelectorAll("g.tbl-y-tick-label text")).map((t) => t.textContent ?? "");
+}
+
+describe("golden figure — per-pane small multiples (renderFigure, task B5)", () => {
+  it("renders each pane as its own SVG with an independent y-scale", async () => {
+    const rows = parseCsv("./fixtures/facet-perpane.csv");
+    const fig = renderFigure(PERPANE_SPEC, rows, { width: 720, height: 460, document });
+
+    // Per-pane mode: no combined SVG; one SVG per pane.
+    expect(fig.mode).toBe("per-pane");
+    expect(fig.combinedSvg).toBeUndefined();
+    expect(fig.panes.length).toBe(4);
+    // Pane order follows pane_order.
+    expect(fig.panes.map((p) => p.value)).toEqual(["Small", "Medium", "Large", "Huge"]);
+    expect(fig.panes.map((p) => p.title)).toEqual(["Small", "Medium", "Large", "Huge"]);
+    // Each pane carries its own SVG + per-pane interaction metadata.
+    fig.panes.forEach((p) => {
+      expect((p.svg as SVGSVGElement).tagName.toLowerCase()).toBe("svg");
+      expect(p.dataInScope?.length).toBe(4);
+      expect(p.seriesOrder).toEqual(["Series"]);
+    });
+
+    // Independent y-domains: the four panes' y-tick label sets are all distinct (different
+    // value ranges → different scales). Compare the joined tick-label strings pairwise.
+    const tickSets = fig.panes.map((p) => yTickLabels(p.svg as SVGSVGElement).join("|"));
+    expect(new Set(tickSets).size).toBe(4);
+
+    // Unique clip-path scope per pane: Plot derives its generated class + any clip-path ids
+    // from the SVG's root className, which renderFigure makes unique per pane via the
+    // classNameSuffix (p0..p3). So each pane's Plot class is distinct across the composed DOM,
+    // guaranteeing clip-path ids never collide when the panes share one document.
+    const paneClasses = fig.panes.map((p) => (p.svg as SVGSVGElement).getAttribute("class"));
+    expect(paneClasses).toEqual(["tblchart-p0", "tblchart-p1", "tblchart-p2", "tblchart-p3"]);
+    expect(new Set(paneClasses).size).toBe(paneClasses.length);
+
+    // Pane line stroke is the thinner small-multiples width (1.75px), not the default 2px.
+    // Plot emits stroke-width on the line mark's wrapping <g> (inside g[aria-label="line"]),
+    // so read it from the nearest ancestor that carries the attribute.
+    const lineGroup = (fig.panes[0]!.svg as SVGSVGElement).querySelector('g[aria-label="line"]');
+    const strokeEl = lineGroup?.querySelector("[stroke-width]") ?? lineGroup;
+    expect(strokeEl?.getAttribute("stroke-width")).toBe(String(TBL.strokeWidth.pane));
+
+    // Single, unstyled series → no figure legend.
+    expect(fig.legendItems).toBeNull();
+
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-perpane.golden.svg");
+  });
+
+  it("per-pane figure render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/facet-perpane.csv");
+    const a = serializePanes(renderFigure(PERPANE_SPEC, rows, { width: 720, height: 460, document }));
+    const b = serializePanes(renderFigure(PERPANE_SPEC, rows, { width: 720, height: 460, document }));
+    expect(a).toBe(b);
+  });
+
+  it("render() dispatches a per-pane spec to the figure path", () => {
+    const rows = parseCsv("./fixtures/facet-perpane.csv");
+    const fig = render(PERPANE_SPEC, rows, { width: 720, height: 460, document }) as FigureRenderResult;
+    expect(fig.mode).toBe("per-pane");
+    expect(fig.combinedSvg).toBeUndefined();
+    expect(fig.panes.length).toBe(4);
+  });
+});
+
 describe("axes primitives — pane titles + tick density (task B3)", () => {
   it("paneTitleMark returns one non-empty text mark per grid", () => {
     const marks = paneTitleMark([

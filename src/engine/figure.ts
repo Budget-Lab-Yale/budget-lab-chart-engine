@@ -16,12 +16,28 @@ function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
 }
 
-/** A pane's identity in the figure result. For shared mode the SVG lives on
- *  `combinedSvg`; `svg` per-pane is filled by per-pane mode (B5). */
+/** A pane's identity in the figure result. For shared mode the SVG lives on the figure's
+ *  `combinedSvg` and only `value`/`title` are populated. For per-pane mode each pane is its
+ *  OWN single-frame SVG with independent y-scale/units/x-domain, and the per-pane interaction
+ *  metadata the live layer (B6) needs for the per-pane crosshair is carried here. */
 export interface FigurePane {
   value: string;
   title: string;
+  /** Per-pane mode: this pane's standalone SVG (own y-domain/units/x-domain). */
   svg?: SVGSVGElement;
+  /** Per-pane mode: rows actually rendered in this pane (series-filtered), for the crosshair. */
+  dataInScope?: PreparedRow[];
+  /** Per-pane mode: this pane's series → resolved color map. */
+  colors?: Map<string, string>;
+  /** Per-pane mode: this pane's resolved series order. */
+  seriesOrder?: string[];
+  /** Per-pane mode: this pane's dashed series. */
+  dashedNames?: Set<string>;
+  /** Per-pane mode: this pane's units (each pane infers independently). */
+  units?: string;
+  /** Per-pane mode: this pane's x-value parse/format for the crosshair. */
+  tooltipXParse?: (v: string) => number;
+  tooltipXFormat?: (v: number) => string;
 }
 
 export interface FigureRenderResult {
@@ -65,13 +81,10 @@ export function renderFigure(
   const sm = spec.small_multiples;
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
-  if (mode === "per-pane") {
-    // B5 implements per-pane mode (each pane its own y-scale/units → N SVGs).
-    throw new Error("small_multiples mode 'per-pane' is not yet implemented (planned for B5).");
-  }
 
-  // Bar-family panes in shared mode are a later task (B8): the bar/stacked mark builders
-  // don't bind fxField/fyField, so all panes would superimpose silently. Fail loud.
+  // Bar-family panes are a later task (B8): the bar/stacked mark builders don't bind
+  // fxField/fyField (shared) and per-pane composition is line-only here, so fail loud for both
+  // modes. (Applies before the mode branch — neither shared nor per-pane supports bars yet.)
   if (spec.chartType !== "line") {
     throw new Error(
       "small multiples currently support line charts only; bar/stacked panes are not yet implemented (B8)",
@@ -104,12 +117,72 @@ export function renderFigure(
   const gridRows = Math.ceil(paneValues.length / columns);
 
   const titles = sm.pane_titles ?? {};
+  const titleFor = (value: string): string => titles[value] ?? value;
+  const seriesLabels = spec.series_labels ?? {};
+
+  // PER-PANE mode: each pane is its OWN single-frame SVG with an independent y-scale, units,
+  // and x-domain (Plot faceting can't give independent y-scales, so we render + compose N
+  // mini-SVGs instead of one faceted SVG). Each pane gets a distinct deterministic
+  // classNameSuffix ("p0", "p1", …) so clip-path ids stay unique across the composed DOM, and
+  // `pane: true` thins its line stroke.
+  if (mode === "per-pane") {
+    const panes: FigurePane[] = paneValues.map((value, i) => {
+      // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
+      // renders a standalone single frame for these rows only.
+      const paneRows = rows.filter((r) => (r[facetField] as string) === value);
+      const p = renderPane(spec, paneRows, { ...opts, pane: true }, `p${i}`);
+      return {
+        value,
+        title: titleFor(value),
+        svg: p.svg,
+        dataInScope: p.dataInScope,
+        colors: p.colors,
+        seriesOrder: p.seriesNames,
+        dashedNames: p.layers.dashedNames,
+        units: p.units || inferUnitsFromSubtitle(spec.subtitle),
+        tooltipXParse: p.tooltipXParse,
+        tooltipXFormat: p.tooltipXFormat,
+      };
+    });
+
+    // Figure-level legend: series config is shared across panes, so compute it ONCE from the
+    // first pane's series/colors (same as shared mode). Single/unstyled series → null.
+    const first = panes[0];
+    const legendItems = buildLegendItems(
+      spec,
+      first?.seriesOrder ?? [],
+      first?.colors ?? new Map(),
+      // The legend reads dashedNames + (for bars) the extras; per-pane is line-only, so derive
+      // a minimal MarkLayers from the first pane's dashed set.
+      { underlay: [], overlay: [], tagging: [], dashedNames: first?.dashedNames ?? new Set() },
+    );
+
+    return {
+      mode: "per-pane",
+      combinedSvg: undefined,
+      panes,
+      columns,
+      rows: gridRows,
+      legendItems,
+      seriesLabels,
+      colors: first?.colors ?? new Map(),
+      seriesOrder: first?.seriesOrder ?? [],
+      dashedNames: first?.dashedNames ?? new Set(),
+      units: first?.units ?? inferUnitsFromSubtitle(spec.subtitle),
+      xAxisTitle: spec.x_axis_title ?? null,
+      dataInScope: first?.dataInScope ?? [],
+      tooltipXParse: first?.tooltipXParse,
+      tooltipXFormat: first?.tooltipXFormat,
+    };
+  }
+
+  // SHARED mode: one shared y-scale → ONE faceted SVG.
   const cellFor = new Map<string, { col: number; row: number; title: string }>();
   const panes: FigurePane[] = [];
   paneValues.forEach((value, i) => {
     const col = i % columns;
     const row = Math.floor(i / columns);
-    const title = titles[value] ?? value;
+    const title = titleFor(value);
     cellFor.set(value, { col, row, title });
     panes.push({ value, title });
   });
@@ -119,7 +192,8 @@ export function renderFigure(
   // 3 + 4. Shared y-domain + faceted build. renderPane parses rows, tags grid indices, computes
   //         ONE y-axis over all in-scope rows (shared), drives the line marks with fx/fy facet
   //         channels, and assembles ONE faceted SVG. A single deterministic className suffix.
-  const pane = renderPane(spec, rows, opts, "fig", facetInfo);
+  //         `pane: true` thins the line stroke (panes are small — same as per-pane mode).
+  const pane = renderPane(spec, rows, { ...opts, pane: true }, "fig", facetInfo);
 
   // 5. Figure-level legend: series config is shared across panes, so compute it ONCE exactly as
   //    renderChart does. L1/single-series → null (pane titles carry identity).
@@ -132,7 +206,7 @@ export function renderFigure(
     columns,
     rows: gridRows,
     legendItems,
-    seriesLabels: spec.series_labels ?? {},
+    seriesLabels,
     colors: pane.colors,
     seriesOrder: pane.seriesNames,
     dashedNames: pane.layers.dashedNames,

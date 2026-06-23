@@ -1,0 +1,17 @@
+facet,series,time,value
+Small,Series,2020-01-01,1
+Small,Series,2021-01-01,2
+Small,Series,2022-01-01,3
+Small,Series,2023-01-01,4
+Medium,Series,2020-01-01,40
+Medium,Series,2021-01-01,55
+Medium,Series,2022-01-01,48
+Medium,Series,2023-01-01,62
+Large,Series,2020-01-01,800
+Large,Series,2021-01-01,950
+Large,Series,2022-01-01,870
+Large,Series,2023-01-01,1020
+Huge,Series,2020-01-01,12000
+Huge,Series,2021-01-01,15000
+Huge,Series,2022-01-01,13500
+Huge,Series,2023-01-01,17000

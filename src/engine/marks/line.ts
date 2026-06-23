@@ -19,6 +19,12 @@ export function buildLineMarks(
   const facetChannels =
     fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
+  // Small-multiples line stroke: panes are small, so lines render thinner (1.75px) in BOTH
+  // shared and per-pane modes (ctx.pane set by the orchestrator). Single charts → default 2px.
+  const solidStroke = ctx.pane ? TBL.strokeWidth.pane : TBL.strokeWidth.solid;
+  // Dashed keeps its pattern; only the width thins for panes.
+  const dashedStroke = ctx.pane ? TBL.strokeWidth.pane : TBL.strokeWidth.dashed;
+
   // Underlay: confidence-band areas, painted behind the gridlines.
   const underlay: unknown[] = [];
   for (const band of spec.confidence_bands ?? []) {
@@ -50,7 +56,7 @@ export function buildLineMarks(
         y: "_y",
         z: "series",
         stroke: "series",
-        strokeWidth: TBL.strokeWidth.dashed,
+        strokeWidth: dashedStroke,
         strokeDasharray: TBL.dashArray,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
         ...facetChannels,
@@ -64,7 +70,7 @@ export function buildLineMarks(
         y: "_y",
         z: "series",
         stroke: "series",
-        strokeWidth: TBL.strokeWidth.solid,
+        strokeWidth: solidStroke,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
         ...facetChannels,
       }),

@@ -50,6 +50,10 @@ export interface MarkContext {
   /** Small-multiples (shared mode): the PreparedRow field bound to Plot's `fy` (row) facet
    *  channel (`"_fyRow"`). Bound alongside `fxField`. */
   fyField?: string;
+  /** Small-multiples (either mode): this mark belongs to a (small) pane, so line marks render
+   *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
+   *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
+  pane?: boolean;
 }
 
 export interface MarkLayers {

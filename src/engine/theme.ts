@@ -25,7 +25,9 @@ export const TBL = {
     legend: 12,
     annotation: 11,
   },
-  strokeWidth: { solid: 2, dashed: 2 },
+  // `pane` is the thinner small-multiples line stroke (Style-Guide §4.5): panes are small,
+  // so both shared- and per-pane lines render at 1.75px instead of the full 2px.
+  strokeWidth: { solid: 2, dashed: 2, pane: 1.75 },
   dashArray: "5 3",
 } as const;
 

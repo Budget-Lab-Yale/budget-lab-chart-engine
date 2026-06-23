@@ -24,6 +24,10 @@ export interface RenderOptions {
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;
+  /** Small-multiples: this pane is one cell of a figure, so line marks render with the
+   *  thinner pane stroke (TBL.strokeWidth.pane). Set by renderFigure for BOTH shared- and
+   *  per-pane panes; absent → single chart → default stroke. Threaded into MarkContext.pane. */
+  pane?: boolean;
 }
 
 export interface LegendItem {
@@ -240,6 +244,8 @@ export function renderPane(
     // Shared-mode small multiples: pass the facet field names so the mark builder binds
     // fx/fy on its marks (they face into the grid). Absent → single frame.
     ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
+    // Pane stroke flag: thins line marks for figure panes (both modes). renderFigure sets it.
+    ...(opts.pane ? { pane: true } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.
