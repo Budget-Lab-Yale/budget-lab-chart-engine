@@ -1281,9 +1281,88 @@ function addCoordRegion(g: SVGGElement, doc: Document, x: number, w: number, yTo
   g.appendChild(r);
 }
 
-/** The y for the active pane's x-axis value label — just above the plot area. */
-function coordXLabelY(mt: number): number {
-  return Math.max(8, mt - 4);
+/**
+ * Read the x-axis label ROW y-centers for a pane (top→bottom, in user coords), so the active
+ * pane's highlighted x value can be drawn on the SAME row(s) as the axis ticks — matching the
+ * axis's line breaks (e.g. the two-tier temporal axis: a month row + a year row). Geometry is
+ * read in screen space (getBoundingClientRect), cached per attach; without layout (jsdom) the
+ * list is empty and the caller skips the label.
+ */
+function makeAxisRows(svgEl: SVGSVGElement, plotBottom: number) {
+  let rows: number[] | null = null;
+  const build = (): void => {
+    rows = [];
+    const svgRect = svgEl.getBoundingClientRect();
+    if (!svgRect.width || !svgRect.height) return;
+    const vb = svgEl.viewBox?.baseVal;
+    const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+    const sy = Hd / svgRect.height;
+    const ys: number[] = [];
+    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+      if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
+      const r = t.getBoundingClientRect();
+      if (!r.width) continue;
+      const top = (r.top - svgRect.top) * sy;
+      if (top < plotBottom - 2) continue; // only labels below the plot area (the x-axis)
+      ys.push(((r.top + r.bottom) / 2 - svgRect.top) * sy);
+    }
+    ys.sort((a, b) => a - b);
+    // Cluster into distinct rows (month tier, year tier, …).
+    const clustered: number[] = [];
+    for (const y of ys) {
+      if (!clustered.length || y - clustered[clustered.length - 1]! > 4) clustered.push(y);
+    }
+    rows = clustered;
+  };
+  return {
+    get(): number[] {
+      if (!rows) build();
+      return rows ?? [];
+    },
+  };
+}
+
+/**
+ * Draw the active pane's highlighted x value as text on a frosted pill, one line per axis row so
+ * the line breaks match the axis (e.g. month on the first row, year on the second). Centered on
+ * `cx`; bold + dark so it reads as the highlighted axis label.
+ */
+function addCoordAxisLabel(
+  g: SVGGElement,
+  doc: Document,
+  cx: number,
+  lines: Array<{ text: string; cy: number }>,
+): void {
+  if (!lines.length) return;
+  const fontSize = 10.5;
+  const padX = 4;
+  const padY = 2;
+  const w = Math.max(...lines.map((l) => l.text.length)) * fontSize * 0.62 + padX * 2;
+  const top = Math.min(...lines.map((l) => l.cy)) - fontSize / 2 - padY;
+  const bot = Math.max(...lines.map((l) => l.cy)) + fontSize / 2 + padY;
+  const rect = doc.createElementNS(COORD_NS, "rect");
+  rect.setAttribute("x", String(cx - w / 2));
+  rect.setAttribute("y", String(top));
+  rect.setAttribute("width", String(w));
+  rect.setAttribute("height", String(bot - top));
+  rect.setAttribute("rx", "3");
+  rect.setAttribute("fill", "#ffffff");
+  rect.setAttribute("fill-opacity", "0.82");
+  rect.setAttribute("stroke", "#c8cdd7");
+  rect.setAttribute("stroke-opacity", "0.7");
+  g.appendChild(rect);
+  for (const l of lines) {
+    const t = doc.createElementNS(COORD_NS, "text");
+    t.setAttribute("x", String(cx));
+    t.setAttribute("y", String(l.cy));
+    t.setAttribute("dy", "0.32em");
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("fill", COORD_LABEL_DARK);
+    t.setAttribute("font-size", String(fontSize));
+    t.setAttribute("font-weight", "700");
+    t.textContent = l.text;
+    g.appendChild(t);
+  }
 }
 
 /**
@@ -1299,7 +1378,7 @@ export function attachSecondaryLineCursor(
   const noop = (): void => {};
   if (!svgEl || !opts.rows?.length) return noop;
   const { rows, xField = "time", yField = "value", seriesField = "series", colors, seriesOrder } = opts;
-  let { xParse, xFormat } = opts;
+  let { xParse } = opts;
   const yFormat =
     opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
 
@@ -1313,27 +1392,18 @@ export function attachSecondaryLineCursor(
   const plotW = W - ml - mr;
   const plotH = H - mt - mb;
 
+  // The active pane highlights the EXISTING x-axis label(s), so only x PARSING is needed here
+  // (no x formatting — we never draw our own x text).
   if (!xParse) {
     const sample = rows[0]?.[xField];
-    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
-      xParse = (v) => +new Date(String(v));
-      if (!xFormat) xFormat = (v) => d3.timeFormat("%b %Y")(new Date(v));
-    } else if (/Q\d/.test(String(sample))) {
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
+    else if (/Q\d/.test(String(sample)))
       xParse = (v) => {
         const m = /(\d{4})Q(\d)/.exec(String(v));
         return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
       };
-      if (!xFormat)
-        xFormat = (v) => {
-          const dd = new Date(v);
-          return `${dd.getFullYear()}Q${Math.floor(dd.getMonth() / 3) + 1}`;
-        };
-    } else {
-      xParse = (v) => +(v as number);
-      if (!xFormat) xFormat = (v) => String(v);
-    }
+    else xParse = (v) => +(v as number);
   }
-  const fmtX = xFormat ?? ((v: number) => String(v));
   const xs = Array.from(new Set(rows.map((r) => xParse!(r[xField])))).sort((a, b) => a - b);
   if (!xs.length) return noop;
   const bySeries = new Map<string, Map<number, number>>();
@@ -1350,8 +1420,15 @@ export function attachSecondaryLineCursor(
   const order =
     seriesOrder && seriesOrder.length ? seriesOrder.filter((s) => bySeries.has(s)) : [...bySeries.keys()];
 
+  // x-axis label format: temporal (two lines: month / year), quarterly, or plain. Drives the
+  // active pane's highlighted x value so its line breaks match the axis.
+  const sampleX = String(rows[0]?.[xField] ?? "");
+  const isDate = /^\d{4}-\d{2}-\d{2}/.test(sampleX);
+  const isQuarter = /Q\d/.test(sampleX);
+
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
+  const axisRows = makeAxisRows(svgEl, mt + plotH);
 
   return (xValue: number | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
@@ -1368,7 +1445,27 @@ export function attachSecondaryLineCursor(
     }
     const gx = xToPx(nx);
     addCoordGuide(g, doc, gx, mt, mt + plotH);
-    if (active) addCoordPill(g, doc, gx, coordXLabelY(mt), "middle", fmtX(nx), COORD_LABEL_DARK, 700);
+    // Active pane: draw the full current x value at the axis, matching its line breaks (a
+    // temporal date shows month + year on two lines even mid-year, e.g. "Jul" / "2021").
+    if (active) {
+      const ys = axisRows.get();
+      if (ys.length) {
+        let lines: Array<{ text: string; cy: number }>;
+        if (isDate) {
+          const dt = new Date(nx);
+          lines = [
+            { text: d3.timeFormat("%b")(dt), cy: ys[0]! },
+            { text: d3.timeFormat("%Y")(dt), cy: ys[1] ?? ys[0]! + 12 },
+          ];
+        } else if (isQuarter) {
+          const dt = new Date(nx);
+          lines = [{ text: `${dt.getFullYear()}Q${Math.floor(dt.getMonth() / 3) + 1}`, cy: ys[0]! }];
+        } else {
+          lines = [{ text: String(nx), cy: ys[0]! }];
+        }
+        addCoordAxisLabel(g, doc, gx, lines);
+      }
+    }
     const weight = active ? 700 : 600;
     const toPy = readLinearYScale(svgEl);
     const flip = gx > ml + plotW * 0.72;
@@ -1379,7 +1476,8 @@ export function attachSecondaryLineCursor(
         const color = colors?.get(series) || "#666666";
         const py = toPy(v);
         addCoordDot(g, doc, gx, py, color);
-        addCoordPill(g, doc, flip ? gx - 7 : gx + 7, py, flip ? "end" : "start", yFormat(v), color, weight);
+        // Offset the pill clear of the dot (r=3) so they don't intersect.
+        addCoordPill(g, doc, flip ? gx - 10 : gx + 10, py, flip ? "end" : "start", yFormat(v), color, weight);
       }
     }
     g.setAttribute("opacity", "1");
@@ -1485,6 +1583,7 @@ export function attachSecondaryBandCursor(
 
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
+  const axisRows = makeAxisRows(svgEl, mt + plotH);
 
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
@@ -1509,18 +1608,25 @@ export function attachSecondaryBandCursor(
     addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, plotH);
     const weight = active ? 700 : 600;
     if (active) {
-      addCoordPill(g, doc, (wide.min + wide.max) / 2, coordXLabelY(mt), "middle", category, COORD_LABEL_DARK, 700);
+      // Highlight the category on the x-axis row, centered on the bar band (single line — a
+      // categorical axis label is one line, so this matches it).
+      const ys = axisRows.get();
+      if (ys.length) {
+        const rawCenter = (raw[idx]!.xMin + raw[idx]!.xMax) / 2;
+        addCoordAxisLabel(g, doc, rawCenter, [{ text: category, cy: ys[0]! }]);
+      }
     }
     for (const rect of rectsByCat.get(category) ?? []) {
       const v = vals.get(rect.series);
       if (v == null || Number.isNaN(v)) continue;
+      const color = opts.colors?.get(rect.series) || COORD_LABEL_DARK; // color-matched to the series
       if (opts.isStacked) {
         // WITHIN the segment, centered.
-        addCoordPill(g, doc, rect.cx, rect.y + rect.h / 2, "middle", yFormat(v), COORD_LABEL_DARK, weight);
+        addCoordPill(g, doc, rect.cx, rect.y + rect.h / 2, "middle", yFormat(v), color, weight);
       } else {
         // ABOVE the bar (centered), or below for a negative bar — like the normal value labels.
         const cy = v >= 0 ? rect.y - 9 : rect.y + rect.h + 9;
-        addCoordPill(g, doc, rect.cx, cy, "middle", yFormat(v), COORD_LABEL_DARK, weight);
+        addCoordPill(g, doc, rect.cx, cy, "middle", yFormat(v), color, weight);
       }
     }
     g.setAttribute("opacity", "1");
