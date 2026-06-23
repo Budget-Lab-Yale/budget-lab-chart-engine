@@ -121,6 +121,7 @@ export const CHART_SPEC_SCHEMA = {
     source: { type: "string" },
     note: { type: "string" },
     x_axis_title: { type: "string" },
+    y_axis_title: { type: "string" },
 
     // Axes
     xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },

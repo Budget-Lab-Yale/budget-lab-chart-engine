@@ -116,6 +116,17 @@ describe("small_multiples config", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts x_axis_title and y_axis_title strings", () => {
+    const r = validateSpec({ ...VALID, x_axis_title: "Year", y_axis_title: "Percent of GDP" });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects a non-string y_axis_title", () => {
+    const r = validateSpec({ ...VALID, y_axis_title: 42 });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/y_axis_title/);
+  });
+
   it("rejects a non-boolean coordinated_cursor", () => {
     const r = validateSpec({
       ...VALID,

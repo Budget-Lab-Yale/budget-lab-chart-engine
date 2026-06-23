@@ -364,6 +364,16 @@ function appendXAxisTitle(canvasScroll: HTMLElement, axisTitle: string | null): 
   canvasScroll.appendChild(el);
 }
 
+/** Append an axis-title caption (`cls`) to `parent` when `title` is set. Used for the y-axis
+ *  caption (above the plot) and the figure-level x-axis title (below the grid). */
+function appendAxisTitleEl(parent: HTMLElement, doc: Document, cls: string, title: string | null): void {
+  if (!title) return;
+  const el = doc.createElement("div");
+  el.className = cls;
+  el.textContent = title;
+  parent.appendChild(el);
+}
+
 /** Data (CSV) + Image (PNG) download buttons for the source line. */
 function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): HTMLElement {
   const downloads = doc.createElement("div");
@@ -477,6 +487,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const legendSlot = doc.createElement("div");
   legendSlot.className = "figure-legend-slot";
   card.appendChild(legendSlot);
+
+  // Y-axis title: a horizontal caption just above the plot (left-aligned), above the legend's
+  // canvas. Coexists with the units subtitle.
+  appendAxisTitleEl(card, doc, "figure-y-axis-title", spec.y_axis_title ?? null);
 
   // Scroll wrapper isolates horizontal overflow to the chart region; the canvas holds the
   // native-px SVG (which overflows below MIN_CHART_WIDTH).
@@ -938,12 +952,18 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   legendSlot.className = "figure-legend-slot";
   card.appendChild(legendSlot);
 
+  // Figure-level y-axis title: one caption above the whole grid (left-aligned).
+  appendAxisTitleEl(card, doc, "figure-y-axis-title", spec.y_axis_title ?? null);
+
   // Body: BOTH modes use the responsive `.figure-grid` of independent per-pane mini-SVGs.
   // (Shared mode is no longer a single faceted SVG — it is the same per-pane composition with
   // one shared y-domain + y-labels only on the left column, all handled inside renderFigure.)
   const grid = doc.createElement("div");
   grid.className = "figure-grid";
   card.appendChild(grid);
+
+  // Figure-level x-axis title: one centered caption below the whole grid.
+  appendAxisTitleEl(card, doc, "figure-x-axis-title", spec.x_axis_title ?? null);
 
   renderSourceLine(card, {
     note: spec.note,

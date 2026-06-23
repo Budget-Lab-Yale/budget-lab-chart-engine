@@ -89,6 +89,9 @@ export interface ChartSpec {
   source?: string;
   note?: string;
   x_axis_title?: string;
+  /** Y-axis title — a short caption above the axis (left-aligned, horizontal). Coexists with the
+   *  units subtitle; the author manages any redundancy. */
+  y_axis_title?: string;
 
   // Axes
   xAxisType: XAxisType;

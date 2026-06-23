@@ -207,6 +207,14 @@ body {
   color: var(--tbl-text-axis);
   text-align: center;
 }
+/* Y-axis title: a short horizontal caption left-aligned just above the plot (above the top
+ * tick). Coexists with the units subtitle. */
+.figure-y-axis-title {
+  margin: 0 0 4px;
+  font: var(--tw-semi) 12px/1.3 var(--tbl-font-sans);
+  color: var(--tbl-text-axis);
+  text-align: left;
+}
 
 /* =========================================================================
  * Meta / source line

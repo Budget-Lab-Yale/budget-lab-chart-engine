@@ -76,6 +76,23 @@ describe("mountChart", () => {
     expect(container.querySelector(".tbl-legend")).not.toBeNull();
   });
 
+  it("renders the y-axis title caption when y_axis_title is set", () => {
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: { ...MULTI_SERIES_SPEC, y_axis_title: "Percent of GDP" },
+      rows: MULTI_SERIES_ROWS,
+    });
+    const yt = container.querySelector(".figure-y-axis-title");
+    expect(yt).not.toBeNull();
+    expect(yt?.textContent).toBe("Percent of GDP");
+  });
+
+  it("omits the y-axis title caption when y_axis_title is absent", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS });
+    expect(container.querySelector(".figure-y-axis-title")).toBeNull();
+  });
+
   it("does not render a .tbl-legend for a single unstyled series", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: SINGLE_SERIES_SPEC, rows: SINGLE_SERIES_ROWS });

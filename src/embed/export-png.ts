@@ -202,6 +202,7 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     : renderChart(spec, rows, { width: INNER_W });
   const legendItems = meta.legendItems ?? [];
   const xAxisTitle = meta.xAxisTitle ?? "";
+  const yAxisTitle = spec.y_axis_title ?? "";
 
   const title = spec.title ?? "";
   const subtitle = spec.subtitle ?? "";
@@ -256,6 +257,14 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   }
   if (legendItems.length) {
     cursor = drawLegend(root, legendItems, cursor + 26);
+  }
+  // Y-axis title: a left-aligned caption just above the plot (coexists with the units subtitle).
+  if (yAxisTitle) {
+    cursor = drawLines(root, wrapText(yAxisTitle, `${W_SEMI} 12px ${FONT}`, INNER_W), MARGIN, cursor + 18, 16, {
+      size: 12,
+      weight: W_SEMI,
+      fill: AXIS,
+    });
   }
   const chartTop = cursor + 14;
 
