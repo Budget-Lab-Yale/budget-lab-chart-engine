@@ -72,6 +72,9 @@ export interface SmallMultiplesConfig {
   pane_order?: string[];
   /** facet value → display title above the pane (falls back to the raw value). */
   pane_titles?: Record<string, string>;
+  /** Coordinated cursor: hovering one pane echoes a secondary cursor (guide + compact value
+   *  labels) on every other pane at the same x. Default true; set false to disable. */
+  coordinated_cursor?: boolean;
 }
 
 export interface ChartSpec {

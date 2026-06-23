@@ -13,7 +13,12 @@ import { renderChart } from "./index.js";
 import { renderFigure } from "./figure.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
-import { attachCrosshair, attachBandCrosshair } from "./crosshair.js";
+import {
+  attachCrosshair,
+  attachBandCrosshair,
+  attachSecondaryLineCursor,
+  attachSecondaryBandCursor,
+} from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
@@ -786,7 +791,9 @@ function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec): v
  *   - categorical (bar/stacked panes): `attachBandCrosshair` (mirrors mountChart's categorical
  *     branch — `isStacked`/`isFaceted`/`showTotalDot`/`categories`/`orientation`); bar rects
  *     carry `data-series`, so clicks resolve directly with no fat hit-paths.
- *  Shared mode is line-only, so the band branch is only reached for per-pane bar/stacked panes.
+ *  Both modes support all chart types, so the band branch is reached for any categorical pane.
+ *  When `ctx.onResolve` is set (coordinated cursor), the primary crosshair emits its resolved
+ *  x-key and a secondary-cursor driver is attached + returned for the figure-level bus.
  *  `dataInScope`/tooltip/bar-metadata come from the pane (or figure) metadata. */
 function wireFigureSvg(
   svg: SVGSVGElement,
@@ -802,9 +809,16 @@ function wireFigureSvg(
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
     showTotalDot?: boolean;
+    /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and
+     *  a secondary-cursor driver is attached + returned so sibling panes can be echoed. */
+    onResolve?: (key: unknown) => void;
   },
-): void {
+): ((key: unknown) => void) | undefined {
   const categorical = ctx.spec.xAxisType === "categorical";
+  const coordinated = ctx.onResolve != null;
+  // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so skip the secondary
+  // echo there (the per-pane primary tooltip still works).
+  const horizontal = ctx.spec.orientation === "horizontal";
   // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
   // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
@@ -831,7 +845,8 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units),
-      orientation: ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical",
+      orientation: horizontal ? "horizontal" : "vertical",
+      ...(coordinated ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
       // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
@@ -841,7 +856,19 @@ function wireFigureSvg(
         if (series) handle.toggle(series);
       });
     }
-    return;
+    if (coordinated && !horizontal) {
+      return attachSecondaryBandCursor(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors: ctx.colors,
+        seriesLabels: ctx.seriesLabels,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units),
+      }) as (key: unknown) => void;
+    }
+    return undefined;
   }
 
   attachCrosshair(svg, {
@@ -856,6 +883,7 @@ function wireFigureSvg(
     dashedSeries: ctx.dashedNames,
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
+    ...(coordinated ? { onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
   });
   if (handle) {
     // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
@@ -866,6 +894,20 @@ function wireFigureSvg(
       if (series) handle.toggle(series);
     });
   }
+  if (coordinated) {
+    return attachSecondaryLineCursor(svg, {
+      rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
+      xField: "time",
+      yField: "value",
+      seriesField: "series",
+      xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
+      yFormat: (v) => formatValue(v, ctx.units),
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+    }) as (key: unknown) => void;
+  }
+  return undefined;
 }
 
 /**
@@ -877,8 +919,9 @@ function wireFigureSvg(
  *
  * Shared vs. per-pane is now ENTIRELY a renderFigure concern: shared mode forces one y-domain
  * across panes and hides the y-tick labels on non-leftmost columns; the live wiring here is
- * identical for both. SHARED mode is line-only (renderFigure throws for bar/stacked); PER-PANE
- * mode supports line, bar, and stacked panes.
+ * identical for both. Both modes support line, bar, and stacked panes. A coordinated cursor
+ * (on by default, `coordinated_cursor: false` to disable) echoes a secondary cursor on sibling
+ * panes at the hovered x.
  */
 function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const { spec, rows } = opts;
@@ -987,9 +1030,20 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
     // need tooltips); selection click is gated on `handle` inside wireFigureSvg.
     card.classList.toggle("is-selectable", handle != null);
-    for (const pane of fig.panes) {
-      if (!pane.svg) continue;
-      wireFigureSvg(pane.svg, handle, {
+
+    // Coordinated cursor: hovering one pane echoes a secondary cursor on every OTHER pane at the
+    // same x. Default on for multi-pane figures; `coordinated_cursor: false` disables. The bus
+    // collects each pane's secondary-cursor driver; a pane's primary crosshair emits its resolved
+    // x-key, which drives the others (and clears the source's own secondary).
+    const coordinated = sm.coordinated_cursor !== false && fig.panes.length > 1;
+    const drivers: Array<(key: unknown) => void> = [];
+    const emit = (sourceIdx: number, key: unknown): void => {
+      for (let i = 0; i < drivers.length; i++) drivers[i]!(i === sourceIdx ? null : key);
+    };
+
+    fig.panes.forEach((pane, idx) => {
+      if (!pane.svg) { drivers.push(() => {}); return; }
+      const driver = wireFigureSvg(pane.svg, handle, {
         spec,
         dataInScope: pane.dataInScope ?? [],
         colors: pane.colors ?? new Map(),
@@ -1000,8 +1054,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
+        ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
-    }
+      drivers.push(driver ?? (() => {}));
+    });
   };
 
   const draw = (w: number): void => { drawGrid(w); };

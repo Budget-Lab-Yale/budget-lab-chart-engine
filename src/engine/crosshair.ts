@@ -25,6 +25,9 @@ export interface CrosshairOptions {
   seriesLabels?: Record<string, string>;
   /** Fixed tooltip row order (matches the legend); else data-encounter order. */
   seriesOrder?: string[];
+  /** Coordinated-cursor hook: called with the resolved x-value on each move (and null on
+   *  leave) so the live layer can echo a secondary cursor on sibling small-multiples panes. */
+  onResolve?: (xValue: number | null) => void;
 }
 
 let activeTooltip: HTMLElement | null = null; // single shared tooltip element
@@ -158,6 +161,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     guide.setAttribute("x1", String(gx));
     guide.setAttribute("x2", String(gx));
     guide.setAttribute("opacity", "1");
+    opts.onResolve?.(snap);
 
     let html = `<div class="tbl-tooltip-head">${escapeHtml(xFormat!(snap))}</div>`;
     const tipSeries =
@@ -195,6 +199,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   function hide(): void {
     guide.setAttribute("opacity", "0");
     tip.style.opacity = "0";
+    opts.onResolve?.(null);
   }
 
   hit.style.pointerEvents = "all";
@@ -623,6 +628,9 @@ export interface BandCrosshairOptions {
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
+  /** Coordinated-cursor hook: called with the resolved category (and null on leave) so the
+   *  live layer can echo a secondary cursor on sibling small-multiples panes. */
+  onResolve?: (category: string | null) => void;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -1085,6 +1093,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     if (!category) { hide(); return; }
 
     showHighlight(hlMin, hlMax);
+    opts.onResolve?.(category);
 
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
@@ -1114,10 +1123,287 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   function hide(): void {
     hl.setAttribute("opacity", "0");
     tip.style.opacity = "0";
+    opts.onResolve?.(null);
   }
 
   hit.style.pointerEvents = "all";
   hit.addEventListener("pointermove", update as EventListener);
   hit.addEventListener("pointerleave", hide);
   hit.addEventListener("pointerdown", update as EventListener);
+}
+
+// ---------------------------------------------------------------------------
+// Coordinated (secondary) cursor — small-multiples cross-pane echo
+// ---------------------------------------------------------------------------
+// When the user hovers ONE pane, the live layer broadcasts the resolved x (a numeric x for line
+// panes, a category key for band panes) to every OTHER pane, which echoes a lightweight
+// SECONDARY cursor: a thin muted guide line + a small hollow dot and compact value label per
+// series at that x (stacked panes show one compact net-total label). The hovered pane keeps its
+// full primary crosshair/tooltip; the secondary cursor is deliberately muted so it does not pull
+// focus. These attach NO pointer handlers — they are driven externally by the returned
+// driver(key|null) (null clears). They read the pane's y-scale via Plot's svg.scale("y"); in a
+// non-layout environment (jsdom) that is unavailable, so the driver no-ops (browser verifies).
+
+/** Read a linear value→pixel mapper from Plot's y-scale, or null if unavailable. */
+function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
+  const scaleFn = (svgEl as unknown as { scale?: (n: string) => unknown }).scale;
+  if (typeof scaleFn !== "function") return null;
+  try {
+    const y = scaleFn.call(svgEl, "y") as { domain?: number[]; range?: number[] } | undefined;
+    const d = y?.domain;
+    const r = y?.range;
+    if (!d || !r || d.length < 2 || r.length < 2 || d[1] === d[0]) return null;
+    const d0 = d[0]!, d1 = d[1]!, r0 = r[0]!, r1 = r[1]!;
+    return (v: number) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
+  } catch {
+    return null;
+  }
+}
+
+const COORD_NS = "http://www.w3.org/2000/svg";
+
+/** Append a small hollow dot (white fill, series-color ring) to the coord group. */
+function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string): void {
+  const dot = doc.createElementNS(COORD_NS, "circle");
+  dot.setAttribute("cx", String(cx));
+  dot.setAttribute("cy", String(cy));
+  dot.setAttribute("r", "3");
+  dot.setAttribute("fill", "#ffffff");
+  dot.setAttribute("stroke", color);
+  dot.setAttribute("stroke-width", "1.5");
+  g.appendChild(dot);
+}
+
+/** Append a compact value label beside the point (flips to the left near the right edge). */
+function addCoordLabel(
+  g: SVGGElement,
+  doc: Document,
+  cx: number,
+  cy: number,
+  flip: boolean,
+  text: string,
+  color: string,
+): void {
+  const label = doc.createElementNS(COORD_NS, "text");
+  label.setAttribute("x", String(flip ? cx - 6 : cx + 6));
+  label.setAttribute("y", String(cy));
+  label.setAttribute("dy", "0.32em");
+  label.setAttribute("text-anchor", flip ? "end" : "start");
+  label.setAttribute("fill", color);
+  label.setAttribute("font-size", "10");
+  label.setAttribute("font-weight", "600");
+  label.setAttribute("fill-opacity", "0.9");
+  label.textContent = text;
+  g.appendChild(label);
+}
+
+/** Create the (re-attachable) secondary-cursor group on an SVG. */
+function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
+  svgEl.querySelectorAll(".tbl-coord").forEach((el) => el.remove());
+  const g = svgEl.ownerDocument.createElementNS(COORD_NS, "g");
+  g.classList.add("tbl-coord");
+  g.setAttribute("opacity", "0");
+  g.style.pointerEvents = "none";
+  svgEl.appendChild(g);
+  return g;
+}
+
+/** Draw the thin muted vertical guide line into the coord group. */
+function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, yBot: number): void {
+  const guide = doc.createElementNS(COORD_NS, "line");
+  guide.setAttribute("x1", String(x));
+  guide.setAttribute("x2", String(x));
+  guide.setAttribute("y1", String(yTop));
+  guide.setAttribute("y2", String(yBot));
+  guide.setAttribute("stroke", TBL.color.annotationDim);
+  guide.setAttribute("stroke-width", "1");
+  guide.setAttribute("stroke-dasharray", "2 3");
+  guide.setAttribute("stroke-opacity", "0.55");
+  g.appendChild(guide);
+}
+
+/**
+ * Attach a secondary (coordinated) cursor to a CONTINUOUS (line) small-multiples pane. Returns a
+ * driver: `driver(xValue)` snaps to this pane's nearest x and echoes the guide + per-series dot
+ * and compact value label; `driver(null)` clears. No pointer handlers (externally driven).
+ */
+export function attachSecondaryLineCursor(
+  svgEl: SVGSVGElement,
+  opts: CrosshairOptions,
+): (xValue: number | null) => void {
+  const noop = (): void => {};
+  if (!svgEl || !opts.rows?.length) return noop;
+  const { rows, xField = "time", yField = "value", seriesField = "series", colors, seriesOrder } = opts;
+  let { xParse } = opts;
+  const yFormat =
+    opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+  const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
+  const mr = +(svgEl.dataset.marginRight ?? "") || 8;
+  const mt = +(svgEl.dataset.marginTop ?? "") || 18;
+  const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
+  const plotW = W - ml - mr;
+  const plotH = H - mt - mb;
+
+  if (!xParse) {
+    const sample = rows[0]?.[xField];
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
+    else if (/Q\d/.test(String(sample)))
+      xParse = (v) => {
+        const m = /(\d{4})Q(\d)/.exec(String(v));
+        return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
+      };
+    else xParse = (v) => +(v as number);
+  }
+  const xs = Array.from(new Set(rows.map((r) => xParse!(r[xField])))).sort((a, b) => a - b);
+  if (!xs.length) return noop;
+  const bySeries = new Map<string, Map<number, number>>();
+  for (const r of rows) {
+    const v = r[yField];
+    if (v === "" || v == null) continue;
+    const k = r[seriesField] as string;
+    if (!bySeries.has(k)) bySeries.set(k, new Map());
+    bySeries.get(k)!.set(xParse!(r[xField]), +(v as number));
+  }
+  const xMin = xs[0]!;
+  const xMax = xs[xs.length - 1]!;
+  const xToPx = (x: number): number => ml + (xMax > xMin ? (x - xMin) / (xMax - xMin) : 0) * plotW;
+  const order =
+    seriesOrder && seriesOrder.length ? seriesOrder.filter((s) => bySeries.has(s)) : [...bySeries.keys()];
+
+  const doc = svgEl.ownerDocument;
+  const g = makeCoordGroup(svgEl);
+
+  return (xValue: number | null): void => {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    if (xValue == null) {
+      g.setAttribute("opacity", "0");
+      return;
+    }
+    // Snap to this pane's nearest x (panes may not share identical x-sets).
+    let nx = xs[0]!;
+    let best = Infinity;
+    for (const x of xs) {
+      const d = Math.abs(x - xValue);
+      if (d < best) { best = d; nx = x; }
+    }
+    const gx = xToPx(nx);
+    addCoordGuide(g, doc, gx, mt, mt + plotH);
+    const toPy = readLinearYScale(svgEl);
+    const flip = gx > ml + plotW * 0.72;
+    if (toPy) {
+      for (const series of order) {
+        const v = bySeries.get(series)!.get(nx);
+        if (v == null || Number.isNaN(v)) continue;
+        const color = colors?.get(series) || "#666666";
+        const py = toPy(v);
+        addCoordDot(g, doc, gx, py, color);
+        addCoordLabel(g, doc, gx, py, flip, yFormat(v), color);
+      }
+    }
+    g.setAttribute("opacity", "1");
+  };
+}
+
+export interface SecondaryBandOptions {
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+  isStacked?: boolean;
+  isFaceted?: boolean;
+  categories?: string[];
+  colors?: Map<string, string>;
+  seriesLabels?: Record<string, string>;
+  seriesOrder?: string[];
+  yFormat?: (v: number) => string;
+}
+
+/**
+ * Attach a secondary (coordinated) cursor to a CATEGORICAL (band-axis) small-multiples pane.
+ * Returns a driver: `driver(category)` echoes a guide at that category's band center plus a
+ * compact value label per series (bar/grouped) or one net-total label (stacked) at the data
+ * height; `driver(null)` clears. No pointer handlers (externally driven). Vertical orientation
+ * only — horizontal panes pass through as a no-op driver (coordinated cursor is x-keyed).
+ */
+export function attachSecondaryBandCursor(
+  svgEl: SVGSVGElement,
+  opts: SecondaryBandOptions,
+): (category: string | null) => void {
+  const noop = (): void => {};
+  if (!svgEl || !opts.rows?.length) return noop;
+  const yFormat =
+    opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+  const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
+  const mr = +(svgEl.dataset.marginRight ?? "") || 8;
+  const mt = +(svgEl.dataset.marginTop ?? "") || 18;
+  const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
+  const plotH = H - mt - mb;
+
+  const valByCat = new Map<string, Map<string, number>>();
+  for (const r of opts.rows) {
+    if (!r._xc || r._y == null || !Number.isFinite(r._y)) continue;
+    if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
+    valByCat.get(r._xc)!.set(r.series, r._y);
+  }
+  const orderFor = (cat: string): string[] => {
+    const vals = valByCat.get(cat);
+    if (!vals) return [];
+    return opts.seriesOrder && opts.seriesOrder.length
+      ? opts.seriesOrder.filter((s) => vals.has(s))
+      : [...vals.keys()];
+  };
+
+  const doc = svgEl.ownerDocument;
+  const g = makeCoordGroup(svgEl);
+
+  return (category: string | null): void => {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    if (category == null) {
+      g.setAttribute("opacity", "0");
+      return;
+    }
+    const bands = readCategoryBands(svgEl, {
+      rows: opts.rows,
+      isFaceted: opts.isFaceted,
+      categories: opts.categories,
+    } as BandCrosshairOptions);
+    const band = bands.find((b) => b.category === category);
+    const vals = valByCat.get(category);
+    if (!band || !vals) {
+      g.setAttribute("opacity", "0");
+      return;
+    }
+    const cx = (band.xMin + band.xMax) / 2;
+    addCoordGuide(g, doc, cx, mt, mt + plotH);
+    const toPy = readLinearYScale(svgEl);
+    const flip = cx > ml + (W - ml - mr) * 0.72;
+    if (toPy) {
+      if (opts.isStacked) {
+        // One compact net-total label at the top of the stack (the breakdown stays in the
+        // hovered pane's full tooltip).
+        let posSum = 0;
+        let net = 0;
+        for (const s of orderFor(category)) {
+          const v = vals.get(s)!;
+          net += v;
+          if (v > 0) posSum += v;
+        }
+        addCoordLabel(g, doc, cx, toPy(Math.max(posSum, net)), flip, yFormat(net), "#444444");
+      } else {
+        for (const s of orderFor(category)) {
+          const v = vals.get(s)!;
+          const color = opts.colors?.get(s) || "#666666";
+          const py = toPy(v);
+          addCoordDot(g, doc, cx, py, color);
+          addCoordLabel(g, doc, cx, py, flip, yFormat(v), color);
+        }
+      }
+    }
+    g.setAttribute("opacity", "1");
+  };
 }

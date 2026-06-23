@@ -102,6 +102,7 @@ const SMALL_MULTIPLES = {
     mode: { type: "string", enum: ["shared", "per-pane"] },
     pane_order: { type: "array", items: { type: "string" } },
     pane_titles: { type: "object", additionalProperties: { type: "string" } },
+    coordinated_cursor: { type: "boolean" },
   },
 } as const;
 

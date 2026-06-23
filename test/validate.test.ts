@@ -110,9 +110,19 @@ describe("small_multiples config", () => {
         columns: 3,
         pane_order: ["east", "west"],
         pane_titles: { east: "East Region", west: "West Region" },
+        coordinated_cursor: false,
       },
     });
     expect(r.valid).toBe(true);
+  });
+
+  it("rejects a non-boolean coordinated_cursor", () => {
+    const r = validateSpec({
+      ...VALID,
+      small_multiples: { facet_field: "region", coordinated_cursor: "yes" },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/coordinated_cursor/);
   });
 
   it("rejects small_multiples missing facet_field (required)", () => {

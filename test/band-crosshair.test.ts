@@ -15,6 +15,8 @@ import {
   widenBandsToMidpoints,
   buildBandTooltipHtml,
   attachBandCrosshair,
+  attachSecondaryLineCursor,
+  attachSecondaryBandCursor,
   type CategoryBand,
   type CategoryBandH,
 } from "../src/engine/crosshair";
@@ -622,5 +624,97 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     expect(chartSvg.querySelector(".tbl-band-crosshair-hit")).toBeNull();
     // The continuous crosshair line element should be present.
     expect(chartSvg.querySelector(".tbl-crosshair")).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coordinated (secondary) cursor — small-multiples cross-pane echo
+// ---------------------------------------------------------------------------
+// These are externally-driven (no pointer handlers): the figure bus calls the returned driver
+// with the hovered x-key (or null to clear). Pixel-accurate dot/label placement needs Plot's
+// y-scale + real layout (browser); here we verify the contract — a guide group appears on a
+// driven key and clears on null, re-attach is idempotent, and out-of-scope keys clear.
+
+describe("attachSecondaryBandCursor (coordinated cursor)", () => {
+  const ROWS: BandRow[] = [
+    { _xc: "Cat1", series: "Alpha", _y: 10 },
+    { _xc: "Cat1", series: "Beta", _y: 5 },
+  ];
+
+  it("returns a driver; driving a known category shows a .tbl-coord guide, null clears it", () => {
+    const svg = makeSvg();
+    document.body.appendChild(svg);
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: ROWS,
+      categories: ["Cat1"],
+      colors: COLORS,
+      seriesOrder: ["Alpha", "Beta"],
+    });
+    expect(typeof drive).toBe("function");
+    drive("Cat1");
+    const g = svg.querySelector("g.tbl-coord");
+    expect(g).not.toBeNull();
+    expect(g!.getAttribute("opacity")).toBe("1");
+    expect(g!.querySelector("line")).not.toBeNull(); // the muted guide line
+    drive(null);
+    expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
+    document.body.removeChild(svg);
+  });
+
+  it("an unknown category clears the cursor", () => {
+    const svg = makeSvg();
+    document.body.appendChild(svg);
+    const drive = attachSecondaryBandCursor(svg, { rows: ROWS, categories: ["Cat1"] });
+    drive("Nope");
+    expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
+    document.body.removeChild(svg);
+  });
+
+  it("empty rows → a callable no-op driver", () => {
+    const svg = makeSvg();
+    const drive = attachSecondaryBandCursor(svg, { rows: [] });
+    expect(() => drive("Cat1")).not.toThrow();
+  });
+
+  it("re-attaching replaces the previous coord group (not duplicated)", () => {
+    const svg = makeSvg();
+    attachSecondaryBandCursor(svg, { rows: ROWS, categories: ["Cat1"] });
+    attachSecondaryBandCursor(svg, { rows: ROWS, categories: ["Cat1"] });
+    expect(svg.querySelectorAll("g.tbl-coord").length).toBe(1);
+  });
+});
+
+describe("attachSecondaryLineCursor (coordinated cursor)", () => {
+  const ROWS = [
+    { time: "2020-01-01", series: "A", value: 3 },
+    { time: "2021-01-01", series: "A", value: 5 },
+    { time: "2020-01-01", series: "B", value: 1 },
+    { time: "2021-01-01", series: "B", value: 2 },
+  ];
+
+  it("driving an x shows a .tbl-coord guide; null clears it", () => {
+    const svg = makeSvg();
+    document.body.appendChild(svg);
+    const drive = attachSecondaryLineCursor(svg, {
+      rows: ROWS,
+      xField: "time",
+      yField: "value",
+      seriesField: "series",
+      colors: new Map([["A", "#f00"], ["B", "#00f"]]),
+    });
+    drive(+new Date("2021-01-01"));
+    const g = svg.querySelector("g.tbl-coord");
+    expect(g).not.toBeNull();
+    expect(g!.getAttribute("opacity")).toBe("1");
+    expect(g!.querySelector("line")).not.toBeNull();
+    drive(null);
+    expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
+    document.body.removeChild(svg);
+  });
+
+  it("empty rows → a callable no-op driver", () => {
+    const svg = makeSvg();
+    const drive = attachSecondaryLineCursor(svg, { rows: [] });
+    expect(() => drive(123)).not.toThrow();
   });
 });
