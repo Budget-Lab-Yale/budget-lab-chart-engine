@@ -17,6 +17,7 @@ import {
   attachBandCrosshair,
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
+  spreadLabelYs,
   type CategoryBand,
   type CategoryBandH,
 } from "../src/engine/crosshair";
@@ -658,6 +659,32 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
 // with the hovered x-key (or null to clear). Pixel-accurate dot/label placement needs Plot's
 // y-scale + real layout (browser); here we verify the contract — a guide group appears on a
 // driven key and clears on null, re-attach is idempotent, and out-of-scope keys clear.
+
+describe("spreadLabelYs (pill de-collision)", () => {
+  it("leaves a single label untouched", () => {
+    expect(spreadLabelYs([100], 16, 0, 400)).toEqual([100]);
+  });
+
+  it("pushes overlapping labels apart to at least minGap, preserving input order", () => {
+    // Two near-identical values: must end up >= 16 apart, still mapped to original indices.
+    const out = spreadLabelYs([200, 205], 16, 0, 400);
+    expect(Math.abs(out[1]! - out[0]!)).toBeGreaterThanOrEqual(16);
+    expect(out[0]).toBeLessThan(out[1]!); // 205 was the lower (greater y) of the two
+  });
+
+  it("keeps well-separated labels at their data positions", () => {
+    expect(spreadLabelYs([50, 200, 350], 16, 0, 400)).toEqual([50, 200, 350]);
+  });
+
+  it("clamps the spread run within [lo, hi]", () => {
+    const out = spreadLabelYs([398, 399, 400], 16, 0, 400);
+    expect(Math.min(...out)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...out)).toBeLessThanOrEqual(400);
+    // adjacent gaps still respected
+    const sorted = [...out].sort((a, b) => a - b);
+    expect(sorted[1]! - sorted[0]!).toBeGreaterThanOrEqual(16 - 1e-9);
+  });
+});
 
 describe("attachSecondaryBandCursor (coordinated cursor)", () => {
   const ROWS: BandRow[] = [

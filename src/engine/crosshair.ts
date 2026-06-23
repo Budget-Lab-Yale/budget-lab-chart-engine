@@ -1244,6 +1244,33 @@ function addCoordPill(
   g.appendChild(t);
 }
 
+/** Pill label height (text + vertical padding) — the minimum vertical gap between stacked pills. */
+const COORD_PILL_H = 16;
+
+/**
+ * PURE — de-collide a set of label y-centers so adjacent pills don't overlap. Labels are pushed
+ * apart to at least `minGap`, preserving their order (sorted by y), then the run is clamped into
+ * [lo, hi]. Input `ys` are the ideal positions (the data points); the returned array (same order
+ * as input) is where the LABELS should sit — the dots still mark the true points.
+ */
+export function spreadLabelYs(ys: number[], minGap: number, lo: number, hi: number): number[] {
+  const n = ys.length;
+  if (n <= 1) return ys.slice();
+  const order = ys.map((_, i) => i).sort((a, b) => ys[a]! - ys[b]!);
+  const placed = order.map((i) => ys[i]!);
+  for (let i = 1; i < n; i++) {
+    if (placed[i]! < placed[i - 1]! + minGap) placed[i] = placed[i - 1]! + minGap;
+  }
+  // Clamp the run into [lo, hi]: shift up if it overflows the bottom, then down if it then
+  // overflows the top (when the stack is taller than the range, the top wins / it overflows down).
+  const overflow = placed[n - 1]! - hi;
+  if (overflow > 0) for (let i = 0; i < n; i++) placed[i]! -= overflow;
+  if (placed[0]! < lo) { const s = lo - placed[0]!; for (let i = 0; i < n; i++) placed[i]! += s; }
+  const out = new Array<number>(n);
+  order.forEach((origIdx, k) => { out[origIdx] = placed[k]!; });
+  return out;
+}
+
 /** Create the (re-attachable) coordinated-cursor group on an SVG. */
 function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
   svgEl.querySelectorAll(".tbl-coord").forEach((el) => el.remove());
@@ -1470,15 +1497,15 @@ export function attachSecondaryLineCursor(
     const toPy = readLinearYScale(svgEl);
     const flip = gx > ml + plotW * 0.72;
     if (toPy) {
-      for (const series of order) {
-        const v = bySeries.get(series)!.get(nx);
-        if (v == null || Number.isNaN(v)) continue;
-        const color = colors?.get(series) || "#666666";
-        const py = toPy(v);
-        addCoordDot(g, doc, gx, py, color);
-        // Offset the pill clear of the dot (r=3) so they don't intersect.
-        addCoordPill(g, doc, flip ? gx - 10 : gx + 10, py, flip ? "end" : "start", yFormat(v), color, weight);
-      }
+      // Dot stays on the true point; the label pill is de-collided vertically.
+      const pts = order
+        .map((s) => ({ s, v: bySeries.get(s)!.get(nx) }))
+        .filter((p) => p.v != null && !Number.isNaN(p.v)) as Array<{ s: string; v: number }>;
+      for (const p of pts) addCoordDot(g, doc, gx, toPy(p.v), colors?.get(p.s) || "#666666");
+      const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
+      pts.forEach((p, i) => {
+        addCoordPill(g, doc, flip ? gx - 10 : gx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colors?.get(p.s) || "#666666", weight);
+      });
     }
     g.setAttribute("opacity", "1");
   };
@@ -1616,17 +1643,20 @@ export function attachSecondaryBandCursor(
         addCoordAxisLabel(g, doc, rawCenter, [{ text: category, cy: ys[0]! }]);
       }
     }
-    for (const rect of rectsByCat.get(category) ?? []) {
-      const v = vals.get(rect.series);
-      if (v == null || Number.isNaN(v)) continue;
-      const color = opts.colors?.get(rect.series) || COORD_LABEL_DARK; // color-matched to the series
-      if (opts.isStacked) {
-        // WITHIN the segment, centered.
-        addCoordPill(g, doc, rect.cx, rect.y + rect.h / 2, "middle", yFormat(v), color, weight);
-      } else {
-        // ABOVE the bar (centered), or below for a negative bar — like the normal value labels.
-        const cy = v >= 0 ? rect.y - 9 : rect.y + rect.h + 9;
-        addCoordPill(g, doc, rect.cx, cy, "middle", yFormat(v), color, weight);
+    const valid = (rectsByCat.get(category) ?? [])
+      .map((rect) => ({ rect, v: vals.get(rect.series) }))
+      .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
+    const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK; // color-matched
+    if (opts.isStacked) {
+      // Segments share one x (single band), so de-collide the within-segment labels vertically.
+      const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
+      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+    } else {
+      // ABOVE each bar (centered), or below for a negative bar — like the normal value labels.
+      // Grouped bars sit at distinct x, so horizontal separation already avoids collisions.
+      for (const x of valid) {
+        const cy = x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9;
+        addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
       }
     }
     g.setAttribute("opacity", "1");
@@ -1834,13 +1864,12 @@ export function attachSecondaryCategoricalLineCursor(
     const flip = cx > ml + (W - ml - mr) * 0.72;
     const toPy = readLinearYScale(svgEl);
     if (toPy) {
-      for (const s of orderFor(category)) {
-        const v = vals.get(s)!;
-        const color = opts.colors?.get(s) || "#666666";
-        const py = toPy(v);
-        addCoordDot(g, doc, cx, py, color);
-        addCoordPill(g, doc, flip ? cx - 10 : cx + 10, py, flip ? "end" : "start", yFormat(v), color, weight);
-      }
+      const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)! }));
+      for (const p of pts) addCoordDot(g, doc, cx, toPy(p.v), opts.colors?.get(p.s) || "#666666");
+      const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
+      pts.forEach((p, i) => {
+        addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), opts.colors?.get(p.s) || "#666666", weight);
+      });
     }
     g.setAttribute("opacity", "1");
   };
