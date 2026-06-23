@@ -238,7 +238,9 @@ describe("attachFacetCrosshair (smoke)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// mountFigure shared — the flat crosshair must NOT be attached to a shared figure.
+// mountFigure shared — shared mode is now a per-pane grid composition: each pane is its OWN
+// mini-SVG with its OWN flat per-pane crosshair, confined to that pane. (The old combined
+// faceted SVG + facet-aware crosshair model was retired.)
 // ---------------------------------------------------------------------------
 
 describe("mountFigure shared crosshair wiring", () => {
@@ -251,23 +253,29 @@ describe("mountFigure shared crosshair wiring", () => {
   } as ChartSpec;
 
   const rows: TidyRow[] = [];
+  let seed = 0;
   for (const facet of ["Northeast", "South"]) {
     for (const t of ["2020-01-01", "2020-02-01", "2020-03-01"]) {
       for (const s of ["<5 Weeks", "27+ Weeks"]) {
-        rows.push({ facet, time: t, series: s, value: String(Math.random() * 5 + 1) } as TidyRow);
+        rows.push({ facet, time: t, series: s, value: String(1 + (++seed % 5)) } as TidyRow);
       }
     }
   }
 
-  it("mounts without throwing and does NOT attach the flat crosshair overlay", () => {
+  it("mounts a per-pane grid with one flat crosshair overlay PER pane", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     let teardown: () => void = () => {};
     expect(() => { teardown = mountChart(container, { spec, rows, width: 838, height: 420 }); }).not.toThrow();
-    const svg = container.querySelector(".figure-canvas svg");
-    expect(svg).not.toBeNull();
-    // The FLAT crosshair overlay must NOT be present on a shared figure (it was the bug).
-    expect(svg!.querySelector(".tbl-crosshair-hit")).toBeNull();
+    // Shared mode renders into the responsive per-pane grid (not a single combined canvas).
+    const grid = container.querySelector(".figure-grid");
+    expect(grid).not.toBeNull();
+    const paneSvgs = container.querySelectorAll(".figure-pane svg");
+    expect(paneSvgs.length).toBe(2);
+    // Each pane carries its OWN flat crosshair hit overlay (confined to that pane).
+    paneSvgs.forEach((svg) => {
+      expect(svg.querySelector(".tbl-crosshair-hit")).not.toBeNull();
+    });
     teardown();
     container.remove();
   });

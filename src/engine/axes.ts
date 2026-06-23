@@ -51,6 +51,7 @@ export function gridAndYLabels(
     marginLeft = TBL_MARGIN_LEFT,
     marginRight = TBL_MARGIN_RIGHT,
     gridlineClassName,
+    hideYLabels = false,
   }: {
     yTickFormat?: (d: number) => string;
     marginLeft?: number;
@@ -59,12 +60,16 @@ export function gridAndYLabels(
      *  pass can find the per-facet copies. Left undefined for non-faceted charts so their
      *  output stays byte-identical (Plot omits the class attribute entirely). */
     gridlineClassName?: string;
+    /** Shared-mode small multiples, non-leftmost columns: emit the gridlines (so the plot
+     *  area stays aligned) but DROP the y-tick label text marks. The left margin is kept by
+     *  the caller, so panes stay the same width and aligned. Default false → labels emitted. */
+    hideYLabels?: boolean;
   } = {},
 ): Mark[] {
   // Skip y=0 from the light gridlines — the zero baseline is painted darker on top,
   // and stacking two 1px rules at the same y looks fuzzy. The "0" label still renders.
   const gridlineTicks = yTicks.filter((t) => t !== 0);
-  return [
+  const marks: Mark[] = [
     Plot.ruleY(gridlineTicks, {
       stroke: TBL.color.gridline,
       strokeWidth: 1,
@@ -73,21 +78,28 @@ export function gridAndYLabels(
       clip: false,
       ...(gridlineClassName ? { className: gridlineClassName } : {}),
     }),
-    // className tags the wrapping <g> so the live renderer can find these labels
-    // post-render and replace them with a sticky overlay during horizontal scroll.
-    Plot.text(yTicks, {
-      y: (d: number) => d,
-      text: yTickFormat,
-      frameAnchor: "left",
-      dx: -marginLeft,
-      dy: -6,
-      textAnchor: "start",
-      fill: TBL.color.axis,
-      fontSize: TBL.size.axis,
-      fontWeight: 500,
-      className: "tbl-y-tick-label",
-    }),
   ];
+  // className tags the wrapping <g> so the live renderer can find these labels
+  // post-render and replace them with a sticky overlay during horizontal scroll.
+  // Shared-mode non-leftmost panes pass hideYLabels → the label marks are skipped entirely
+  // (gridlines above stay), so only the left column shows tick values.
+  if (!hideYLabels) {
+    marks.push(
+      Plot.text(yTicks, {
+        y: (d: number) => d,
+        text: yTickFormat,
+        frameAnchor: "left",
+        dx: -marginLeft,
+        dy: -6,
+        textAnchor: "start",
+        fill: TBL.color.axis,
+        fontSize: TBL.size.axis,
+        fontWeight: 500,
+        className: "tbl-y-tick-label",
+      }),
+    );
+  }
+  return marks;
 }
 
 /** One pane of a small-multiples grid: its (col,row) cell coordinate + its display title. */

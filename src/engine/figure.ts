@@ -1,14 +1,17 @@
 // Figure-level orchestrator for small-multiples specs. Turns a spec carrying
-// `small_multiples` into a multi-panel figure. This task (B4) implements SHARED mode for
-// LINE-family panes: partition rows by `facet_field`, lay the panes out on a (col,row) grid,
-// compute ONE shared y-domain across all in-scope rows, and render a single faceted SVG via
-// the B3 faceting primitives (renderPane → assemblePlot's `facet` option). Per-pane mode is
-// B5; bar-family panes are B8.
+// `small_multiples` into a multi-panel figure of N independent mini-SVGs laid out on a
+// (col,row) grid. BOTH modes use the SAME per-pane composition (each pane is its own single
+// frame with its own crosshair / dimming / selection). They differ only in the y-scale:
+//   - per-pane: each pane computes its own y-domain (and shows its own y-tick labels).
+//   - shared:   ALL panes use ONE y-domain (computed once over all in-scope rows), and y-tick
+//               LABELS show only on the leftmost column (col>0 panes hide them; gridlines +
+//               plot area + left margin stay so panes remain aligned).
+// SHARED mode is line-only (the guard below); per-pane supports line/bar/stacked.
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems } from "./index";
-import type { FacetInfo, LegendItem, RenderOptions } from "./index";
+import type { LegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
 
 /** Default grid-column count for `n` panes: ≈ ceil(sqrt(n)), capped at 4. */
@@ -16,39 +19,40 @@ function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
 }
 
-/** A pane's identity in the figure result. For shared mode the SVG lives on the figure's
- *  `combinedSvg` and only `value`/`title` are populated. For per-pane mode each pane is its
- *  OWN single-frame SVG with independent y-scale/units/x-domain, and the per-pane interaction
- *  metadata the live layer (B6) needs for the per-pane crosshair is carried here. */
+/** A pane's identity + its standalone SVG and per-pane interaction metadata. BOTH modes
+ *  populate every field the same way (each pane is its OWN single-frame SVG with its own
+ *  crosshair / dimming / selection); shared mode only forces a common y-domain and hides the
+ *  y-tick labels on non-leftmost columns. */
 export interface FigurePane {
   value: string;
   title: string;
-  /** Per-pane mode: this pane's standalone SVG (own y-domain/units/x-domain). */
+  /** This pane's standalone SVG. */
   svg?: SVGSVGElement;
-  /** Per-pane mode: rows actually rendered in this pane (series-filtered), for the crosshair. */
+  /** Rows actually rendered in this pane (series-filtered), for the crosshair. */
   dataInScope?: PreparedRow[];
-  /** Per-pane mode: this pane's series → resolved color map. */
+  /** This pane's series → resolved color map. */
   colors?: Map<string, string>;
-  /** Per-pane mode: this pane's resolved series order. */
+  /** This pane's resolved series order. */
   seriesOrder?: string[];
-  /** Per-pane mode: this pane's dashed series. */
+  /** This pane's dashed series. */
   dashedNames?: Set<string>;
-  /** Per-pane mode: this pane's units (each pane infers independently). */
+  /** This pane's units (each pane infers independently). */
   units?: string;
-  /** Per-pane mode: this pane's x-value parse/format for the crosshair. */
+  /** This pane's x-value parse/format for the crosshair. */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
-  /** Per-pane mode (stacked panes): net-dot mode for the band crosshair's Total row. Mirrors
+  /** Stacked panes: net-dot mode for the band crosshair's Total row. Mirrors
    *  MarkLayers.showTotalDot — line/bar panes leave this undefined. */
   showTotalDot?: boolean;
-  /** Per-pane mode (stacked panes): visual top→bottom stack order, for the band crosshair's
+  /** Stacked panes: visual top→bottom stack order, for the band crosshair's
    *  Total/series ordering. Line/bar panes leave this undefined. */
   legendVisualOrder?: string[];
 }
 
 export interface FigureRenderResult {
   mode: "shared" | "per-pane";
-  /** Shared mode: the ONE faceted SVG. */
+  /** Always undefined now — both modes are per-pane compositions (no combined SVG). Retained
+   *  for API/back-compat with callers that still check `combinedSvg in result`. */
   combinedSvg?: SVGSVGElement;
   panes: FigurePane[];
   columns: number;
@@ -75,9 +79,9 @@ export interface FigureRenderResult {
 /**
  * Render a small-multiples figure. Requires `spec.small_multiples`.
  *
- * Shared mode (default): one shared y-scale → ONE faceted SVG. Flow:
- *   partition + order panes → grid layout → shared y-domain (computed inside renderPane over
- *   all in-scope rows) → faceted build (renderPane drives assemblePlot's `facet` option).
+ * Both modes: partition + order panes → grid layout → render N independent single-frame panes.
+ * Shared mode (default) additionally probe-renders over all in-scope rows for ONE shared
+ * y-domain, then forces it on every pane and hides the y-tick labels on non-leftmost columns.
  */
 export function renderFigure(
   spec: ChartSpec,
@@ -198,46 +202,77 @@ export function renderFigure(
     };
   }
 
-  // SHARED mode: one shared y-scale → ONE faceted SVG.
-  const cellFor = new Map<string, { col: number; row: number; title: string }>();
-  const panes: FigurePane[] = [];
-  paneValues.forEach((value, i) => {
+  // SHARED mode: the SAME per-pane composition as above (N independent mini-SVGs in the grid,
+  // each its own frame with its own crosshair / dimming / selection), with TWO differences:
+  //   1. ALL panes use ONE shared y-domain, computed once over ALL in-scope rows.
+  //   2. y-axis tick LABELS show only on the leftmost column (col 0); panes with col > 0 keep
+  //      their gridlines + plot area + left margin but hide the tick label text (so panes stay
+  //      aligned and the same width).
+  // (The old Plot-faceting path — one combined SVG, collapseFacetGridChrome, facet-aware
+  // crosshair — is retired; combinedSvg is now undefined for shared mode too.)
+
+  // 1. Shared y-domain: probe-render over ALL in-scope rows and read the computed domain. This
+  //    reuses renderPane's full auto/hard/bar resolution, so the shared domain is exactly what a
+  //    single chart over all rows would use. The probe SVG is discarded.
+  const probe = renderPane(spec, rows, { ...opts, pane: true }, "probe");
+  const sharedYDomain = probe.yDomain;
+
+  // 2. Render each pane as its own single frame, forcing the shared y-domain and hiding the
+  //    y-tick labels on every non-leftmost column. Identical to per-pane mode otherwise.
+  let firstLayers: MarkLayers | undefined;
+  const panes: FigurePane[] = paneValues.map((value, i) => {
     const col = i % columns;
-    const row = Math.floor(i / columns);
-    const title = titleFor(value);
-    cellFor.set(value, { col, row, title });
-    panes.push({ value, title });
+    const paneRows = rows.filter((r) => (r[facetField] as string) === value);
+    const p = renderPane(
+      spec,
+      paneRows,
+      { ...opts, pane: true, yDomain: sharedYDomain, hideYAxisLabels: col > 0 },
+      `p${i}`,
+    );
+    if (i === 0) firstLayers = p.layers;
+    return {
+      value,
+      title: titleFor(value),
+      svg: p.svg,
+      dataInScope: p.dataInScope,
+      colors: p.colors,
+      seriesOrder: p.seriesNames,
+      dashedNames: p.layers.dashedNames,
+      units: p.units || inferUnitsFromSubtitle(spec.subtitle),
+      tooltipXParse: p.tooltipXParse,
+      tooltipXFormat: p.tooltipXFormat,
+      showTotalDot: p.layers.showTotalDot,
+      legendVisualOrder: p.layers.legendVisualOrder,
+    };
   });
 
-  const facetInfo: FacetInfo = { facetField, cellFor, columns, rows: gridRows };
-
-  // 3 + 4. Shared y-domain + faceted build. renderPane parses rows, tags grid indices, computes
-  //         ONE y-axis over all in-scope rows (shared), drives the line marks with fx/fy facet
-  //         channels, and assembles ONE faceted SVG. A single deterministic className suffix.
-  //         `pane: true` thins the line stroke (panes are small — same as per-pane mode).
-  const pane = renderPane(spec, rows, { ...opts, pane: true }, "fig", facetInfo);
-
-  // 5. Figure-level legend: series config is shared across panes, so compute it ONCE exactly as
-  //    renderChart does. L1/single-series → null (pane titles carry identity).
-  const legendItems = buildLegendItems(spec, pane.seriesNames, pane.colors, pane.layers);
+  // 3. Figure-level legend: series config is shared across panes, so compute it ONCE from the
+  //    first pane (same source of truth as a single chart). L1/single-series → null.
+  const first = panes[0];
+  const legendItems = buildLegendItems(
+    spec,
+    first?.seriesOrder ?? [],
+    first?.colors ?? new Map(),
+    firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
+  );
 
   return {
     mode: "shared",
-    combinedSvg: pane.svg,
+    combinedSvg: undefined,
     panes,
     columns,
     rows: gridRows,
     legendItems,
     seriesLabels,
-    colors: pane.colors,
-    seriesOrder: pane.seriesNames,
-    dashedNames: pane.layers.dashedNames,
-    units: pane.units || inferUnitsFromSubtitle(spec.subtitle),
+    colors: first?.colors ?? new Map(),
+    seriesOrder: first?.seriesOrder ?? [],
+    dashedNames: first?.dashedNames ?? new Set(),
+    units: first?.units ?? inferUnitsFromSubtitle(spec.subtitle),
     xAxisTitle: spec.x_axis_title ?? null,
-    dataInScope: pane.dataInScope,
-    tooltipXParse: pane.tooltipXParse,
-    tooltipXFormat: pane.tooltipXFormat,
-    legendVisualOrder: pane.layers.legendVisualOrder,
-    showTotalDot: pane.layers.showTotalDot,
+    dataInScope: first?.dataInScope ?? [],
+    tooltipXParse: first?.tooltipXParse,
+    tooltipXFormat: first?.tooltipXFormat,
+    legendVisualOrder: firstLayers?.legendVisualOrder,
+    showTotalDot: firstLayers?.showTotalDot,
   };
 }

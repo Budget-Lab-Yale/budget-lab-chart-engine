@@ -57,6 +57,12 @@ export interface AssembleOptions {
    *  `rows` so cell order is deterministic, adds one pane title per cell, and collapses the
    *  repeated chrome. */
   facet?: FacetOptions;
+  /** Shared-mode small multiples, non-leftmost columns: emit the y gridlines (so the plot
+   *  area stays aligned with the left column) but SKIP the y-tick label text marks. The left
+   *  margin is unchanged so every pane is the same width. Default/absent → labels emitted
+   *  (byte-identical single-chart + leftmost-pane output). Ignored for horizontal bars (their
+   *  value axis runs along x). */
+  hideYAxisLabels?: boolean;
 }
 
 export interface FacetOptions {
@@ -84,6 +90,7 @@ export function assemblePlot({
   document,
   classNameSuffix,
   facet,
+  hideYAxisLabels,
 }: AssembleOptions): SVGSVGElement {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
   // SHARED-mode small-multiples grid: a 2-D fx×fy facet sharing the single yDomain. The
@@ -166,6 +173,9 @@ export function assemblePlot({
         yTickFormat: makeTickFormatter(yTicks, units),
         marginRight: effMarginRight,
         ...(faceted ? { gridlineClassName: GRIDLINE_CLASS } : {}),
+        // Shared-mode small multiples, non-leftmost panes: keep gridlines, drop the y-tick
+        // label text so only the left column shows values (left margin stays for alignment).
+        ...(hideYAxisLabels ? { hideYLabels: true } : {}),
       }),
     );
     // X-axis labels: a mark layer that re-homes the category band (grouped bars label the

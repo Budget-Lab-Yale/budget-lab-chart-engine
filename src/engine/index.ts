@@ -31,6 +31,15 @@ export interface RenderOptions {
   /** Small-multiples: override the figure's grid column count (else spec.small_multiples.columns
    *  or the ≈ceil(sqrt(n)) default). The live layer passes this for responsive col reflow. */
   columns?: number;
+  /** Shared-mode small multiples: force this hard y-domain (computed once over ALL in-scope
+   *  rows by the orchestrator) instead of the per-pane/auto domain. Fed to computeYAxis as the
+   *  domain so every pane shares one scale; overrides the line auto-domain AND the bar extent.
+   *  Ticks are computed against it. Absent → per-pane/auto domain (unchanged). */
+  yDomain?: [number, number];
+  /** Shared-mode small multiples, non-leftmost columns: keep the y gridlines but drop the
+   *  y-tick LABEL text marks (so only the left column shows values; left margin stays for
+   *  alignment). Threaded to assemblePlot. Absent → labels emitted (unchanged). */
+  hideYAxisLabels?: boolean;
 }
 
 export interface LegendItem {
@@ -97,6 +106,10 @@ export interface PaneResult {
   seriesNames: string[];
   colors: Map<string, string>;
   units: string;
+  /** The y-domain this pane was rendered against (after the auto/hard/bar-extent resolution,
+   *  or the forced opts.yDomain). The shared-mode orchestrator probe-renders over all rows and
+   *  reads this to obtain the one shared domain. */
+  yDomain: [number, number];
   dataInScope: PreparedRow[];
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
    *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
@@ -105,7 +118,16 @@ export interface PaneResult {
   tooltipXFormat?: (v: number) => string;
 }
 
-/** SHARED-mode faceting passed into renderPane: the value→(col,row) grid assignment the
+/** DORMANT (Plot grid-faceting): the old SHARED-mode combined-SVG path passed this into
+ *  renderPane to drive Plot's fx/fy facet grid. Shared mode is now a per-pane composition
+ *  (figure.ts), so renderFigure no longer constructs a FacetInfo. The faceting machinery
+ *  (this type, assemblePlot's `facet` option, collapseFacetGridChrome, paneTitleMark,
+ *  attachFacetCrosshair, the facet-regions golden) is left in place + still unit-tested via the
+ *  assemblePlot facet path, but is unused by the live shared figure. Candidate for a later
+ *  cleanup round. NOTE: the bar/stacked fx-grouped + fy-horizontal chrome (collapseFacetChrome /
+ *  collapseFacetChromeY) is a DIFFERENT, still-live path — do not remove that.
+ *
+ *  SHARED-mode faceting passed into renderPane: the value→(col,row) grid assignment the
  *  orchestrator computed, plus the grid dimensions + per-cell pane titles. When present,
  *  renderPane tags each row with its grid-index fields, drops out-of-scope facet values,
  *  drives the markBuilder + x-adapter in faceted mode, and passes `facet` to assemblePlot —
@@ -218,9 +240,12 @@ export function renderPane(
     hardDomain = policy.min != null && yMax != null ? [policy.min, yMax] : null;
   }
 
+  // Shared-mode small multiples: opts.yDomain is the ONE domain the orchestrator computed over
+  // all in-scope rows. It overrides both the line auto-domain and the bar extent so every pane
+  // shares one scale; ticks are computed against it.
   const { domain: yDomain, ticks: yTicks } = computeYAxis(yForAxis, {
     includeZero,
-    domain: hardDomain,
+    domain: opts.yDomain ?? hardDomain,
     tickCount,
   });
 
@@ -279,6 +304,7 @@ export function renderPane(
     document: opts.document,
     classNameSuffix,
     ...(facetOpt ? { facet: facetOpt } : {}),
+    ...(opts.hideYAxisLabels ? { hideYAxisLabels: true } : {}),
   });
 
   return {
@@ -286,6 +312,7 @@ export function renderPane(
     seriesNames,
     colors,
     units,
+    yDomain,
     dataInScope,
     layers,
     tooltipXParse: xOpts.tooltipXParse,

@@ -13,8 +13,7 @@ import { renderChart } from "./index.js";
 import { renderFigure } from "./figure.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
-import { attachCrosshair, attachBandCrosshair, attachFacetCrosshair } from "./crosshair.js";
-import type { FacetCrosshairPane } from "./crosshair.js";
+import { attachCrosshair, attachBandCrosshair } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
@@ -740,13 +739,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 }
 
 // --- Small-multiples figure mount ----------------------------------------------------------
-// Below this pane width the per-pane grid reflows to fewer columns (3→2→1).
+// Below this pane width the grid reflows to fewer columns (3→2→1). Used by both modes.
 const PANE_MIN_WIDTH = 240;
-// Per-pane mini-chart height (per-pane mode); shared mode sizes the faceted SVG by row count.
+// Per-pane mini-chart height (both modes — each pane is an independent mini-SVG).
 const PANE_HEIGHT = 240;
-// Shared-mode faceted SVG: pixels budgeted per facet ROW (rows are a touch shorter than a
-// standalone per-pane mini-chart since they share one x-axis row at the bottom).
-const SHARED_ROW_HEIGHT = 210;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
@@ -873,85 +869,20 @@ function wireFigureSvg(
 }
 
 /**
- * Wire the FACET-AWARE crosshair + two-way selection onto a SHARED-mode small-multiples
- * figure (one faceted line SVG). Unlike `wireFigureSvg` (which attaches the FLAT crosshair
- * spanning the whole plot and keying tooltip data across all facets), this groups
- * `dataInScope` by `_facet` into per-cell panes and attaches `attachFacetCrosshair`, so the
- * guide is confined to the hovered pane and the tooltip shows only that pane's title + values.
- * Selection (click → legend.toggle) is wired identically to the line branch of wireFigureSvg
- * (fat hit-paths + elementsFromPoint), since data-series spans all facets.
- */
-function wireSharedFigureSvg(
-  svg: SVGSVGElement,
-  handle: LegendHandle | null,
-  fig: FigureRenderResult,
-): void {
-  // Group dataInScope rows by facet. Each row carries _facet/_fxCol/_fyRow + time/series/_y.
-  const byFacet = new Map<string, PreparedRow[]>();
-  for (const r of fig.dataInScope) {
-    const f = r._facet;
-    if (f == null) continue;
-    if (!byFacet.has(f)) byFacet.set(f, []);
-    byFacet.get(f)!.push(r);
-  }
-  // Build one FacetCrosshairPane per figure pane (value/title), reading the (col,row) from the
-  // pane's rows (every row of a facet shares the same _fxCol/_fyRow).
-  const panes: FacetCrosshairPane[] = [];
-  for (const p of fig.panes) {
-    const rows = byFacet.get(p.value) ?? [];
-    if (!rows.length) continue;
-    const col = Number(rows[0]!._fxCol ?? 0);
-    const row = Number(rows[0]!._fyRow ?? 0);
-    panes.push({
-      facet: p.value,
-      col,
-      row,
-      title: p.title,
-      rows: rows.map((r) => ({ time: r.time, series: r.series, value: r._y })),
-    });
-  }
-
-  attachFacetCrosshair(svg, {
-    panes,
-    xField: "time",
-    yField: "value",
-    seriesField: "series",
-    xParse: fig.tooltipXParse as ((v: unknown) => number) | undefined,
-    xFormat: fig.tooltipXFormat,
-    yFormat: (v) => formatValue(v, fig.units),
-    colors: fig.colors,
-    dashedSeries: fig.dashedNames,
-    seriesLabels: fig.seriesLabels,
-    seriesOrder: fig.seriesOrder,
-  });
-
-  if (handle) {
-    // Lines are thin; add transparent fat hit-paths so clicks near a line resolve its series.
-    addLineHitPaths(svg);
-    svg.querySelectorAll<SVGElement>(".tbl-facet-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
-    svg.addEventListener("click", (evt) => {
-      const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-      if (series) handle.toggle(series);
-    });
-  }
-}
-
-/**
- * Mount a small-multiples figure. Two layouts:
- *  - SHARED mode: ONE faceted SVG (shared y-scale) in a scroll wrapper, like a single chart —
- *    top legend, two-way selection (data-series spans all facets → dims/pins cross-pane), and
- *    the sticky y-axis overlay on the left column.
- *  - PER-PANE mode: a responsive `.figure-grid` of mini-chart cells (each its own y-scale),
- *    reflowing columns by width; the top legend's highlight root is the GRID so dimming spans
- *    every pane; each pane gets its own crosshair + click-to-select.
- * SHARED mode is line-only (renderFigure throws for bar/stacked); PER-PANE mode supports
- * line, bar, and stacked panes (B8) — each pane is an independent single frame, so the
- * crosshair is dispatched per pane by xAxisType (band for categorical, line for continuous).
+ * Mount a small-multiples figure. BOTH modes render into a responsive `.figure-grid` of
+ * independent per-pane mini-chart SVGs (each its own y-scale or, in shared mode, a forced
+ * common y-scale), reflowing columns by width. The top legend's highlight root is the GRID so
+ * dimming/pinning spans every pane; each pane gets its own crosshair + click-to-select,
+ * dispatched per pane by xAxisType (band for categorical, line for continuous).
+ *
+ * Shared vs. per-pane is now ENTIRELY a renderFigure concern: shared mode forces one y-domain
+ * across panes and hides the y-tick labels on non-leftmost columns; the live wiring here is
+ * identical for both. SHARED mode is line-only (renderFigure throws for bar/stacked); PER-PANE
+ * mode supports line, bar, and stacked panes.
  */
 function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const { spec, rows } = opts;
   const sm = spec.small_multiples!;
-  const mode = sm.mode ?? "shared";
   const doc = container.ownerDocument;
 
   const card = doc.createElement("div");
@@ -962,22 +893,12 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   legendSlot.className = "figure-legend-slot";
   card.appendChild(legendSlot);
 
-  // Body: shared → scroll wrapper holding the one faceted SVG; per-pane → responsive grid.
-  let canvasScroll: HTMLElement | null = null;
-  let canvas: HTMLElement | null = null;
-  let grid: HTMLElement | null = null;
-  if (mode === "per-pane") {
-    grid = doc.createElement("div");
-    grid.className = "figure-grid";
-    card.appendChild(grid);
-  } else {
-    canvasScroll = doc.createElement("div");
-    canvasScroll.className = "figure-canvas-scroll";
-    canvas = doc.createElement("div");
-    canvas.className = "figure-canvas";
-    canvasScroll.appendChild(canvas);
-    card.appendChild(canvasScroll);
-  }
+  // Body: BOTH modes use the responsive `.figure-grid` of independent per-pane mini-SVGs.
+  // (Shared mode is no longer a single faceted SVG — it is the same per-pane composition with
+  // one shared y-domain + y-labels only on the left column, all handled inside renderFigure.)
+  const grid = doc.createElement("div");
+  grid.className = "figure-grid";
+  card.appendChild(grid);
 
   renderSourceLine(card, {
     note: spec.note,
@@ -986,42 +907,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   });
   container.appendChild(card);
 
-  let currentOverlay: OverlayEl | null = null;
   let lastSig = "";
-
-  const drawShared = (width: number): void => {
-    const sig = `s:${width}`;
-    if (sig === lastSig) return;
-    let fig: FigureRenderResult;
-    try {
-      // Faceted SVG height grows with the row count so each pane row stays legible.
-      const tmpCols = sm.columns && sm.columns > 0 ? sm.columns : undefined;
-      fig = renderFigure(spec, rows, { width, height: FIXED_CHART_HEIGHT, columns: tmpCols });
-      const gridHeight = Math.max(FIXED_CHART_HEIGHT, fig.rows * SHARED_ROW_HEIGHT);
-      if (gridHeight !== FIXED_CHART_HEIGHT) {
-        fig = renderFigure(spec, rows, { width, height: gridHeight, columns: tmpCols });
-      }
-    } catch (e) {
-      if (canvas) canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
-      return; // leave lastSig unchanged so a re-render at the same width retries after a fix
-    }
-    lastSig = sig; // commit only after a successful render
-    const svg = fig.combinedSvg!;
-    canvas!.replaceChildren(svg);
-    legendSlot.replaceChildren();
-    const handle = fig.legendItems
-      ? renderLegend(legendSlot, fig.legendItems, { svg, onHighlight: () => recolorNetLabels(svg) })
-      : null;
-    recolorNetLabels(svg);
-    // Attach the crosshair always; selection (click→pin) is wired only when a legend exists.
-    card.classList.toggle("is-selectable", handle != null);
-    // Shared mode is line-only and FACETED: use the facet-aware crosshair so the guide is
-    // confined to the hovered pane and the tooltip shows only that pane's title + values.
-    wireSharedFigureSvg(svg, handle, fig);
-    currentOverlay?._ro?.disconnect();
-    currentOverlay?.remove();
-    currentOverlay = attachYAxisOverlay(canvasScroll!, svg);
-  };
 
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
@@ -1038,7 +924,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     return Math.max(1, n);
   };
 
-  const drawPerPane = (outerWidth: number): void => {
+  // Draw the responsive grid of independent per-pane mini-SVGs. Used by BOTH modes: renderFigure
+  // returns a uniform panes[] grid (shared mode forces one y-domain + hides non-left y-labels
+  // internally), so the live wiring is identical — each pane gets its own crosshair + selection,
+  // and the legend's highlight root is the grid so dimming/pinning spans every pane.
+  const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= PANE_MIN_WIDTH each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
@@ -1051,12 +941,12 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     try {
       fig = renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
     } catch (e) {
-      if (grid) grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
     }
     lastSig = sig; // commit only after a successful render
-    grid!.style.setProperty("--figure-cols", String(fig.columns));
-    grid!.replaceChildren();
+    grid.style.setProperty("--figure-cols", String(fig.columns));
+    grid.replaceChildren();
     for (const pane of fig.panes) {
       const cell = doc.createElement("div");
       cell.className = "figure-pane";
@@ -1065,13 +955,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       title.textContent = pane.title;
       cell.appendChild(title);
       if (pane.svg) cell.appendChild(pane.svg);
-      grid!.appendChild(cell);
+      grid.appendChild(cell);
     }
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     const handle = fig.legendItems
       ? renderLegend(legendSlot, fig.legendItems, {
-          svg: grid!,
+          svg: grid,
           onHighlight: () => { for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg); },
         })
       : null;
@@ -1095,24 +985,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     }
   };
 
-  const draw = (w: number): void => { if (mode === "per-pane") drawPerPane(w); else drawShared(w); };
+  const draw = (w: number): void => { drawGrid(w); };
 
   const initialWidth = card.clientWidth || opts.width || 720;
   draw(initialWidth);
-
-  // Shared mode: keep the sticky y-axis overlay pinned as the faceted SVG scrolls horizontally
-  // (same discipline as the single-chart controller). Per-pane mode has no overlay/scroll.
-  let scrollRaf: number | null = null;
-  const onScroll = (): void => {
-    if (scrollRaf !== null) return;
-    scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = null;
-      if (currentOverlay && canvasScroll) {
-        currentOverlay.style.transform = `translateX(${canvasScroll.scrollLeft}px)`;
-      }
-    });
-  };
-  canvasScroll?.addEventListener("scroll", onScroll);
 
   let resizeRaf: number | null = null;
   let ro: ResizeObserver | undefined;
@@ -1130,9 +1006,5 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   return () => {
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
-    if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
-    canvasScroll?.removeEventListener("scroll", onScroll);
-    currentOverlay?._ro?.disconnect();
-    currentOverlay?.remove();
   };
 }

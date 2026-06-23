@@ -24,8 +24,7 @@ const LOGO_BASELINE_FRAC = 0.87; // wordmark baseline within the logo box
 const SCALE = 2;
 
 // Small-multiples figure layout tokens.
-const SHARED_ROW_H = 200; // budgeted px per facet ROW (shared mode) above the default avail
-const PANE_CHART_H = 190; // per-pane mini-chart height (per-pane mode)
+const PANE_CHART_H = 190; // per-pane mini-chart height (both modes)
 const PANE_TITLE_H = 18; // per-pane title band height
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
@@ -280,55 +279,39 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     chartSvg.setAttribute("height", String(contentHeight));
     root.appendChild(chartSvg);
   } else {
+    // BOTH modes are per-pane compositions: lay the N mini-SVGs into a (cols × rows) grid,
+    // each with a pane-title text above it. (Shared mode forces one y-domain across panes and
+    // hides the y-tick labels on non-leftmost columns inside renderFigure; the export layout is
+    // otherwise identical.) Render the panes at the exact cell width so they fill their column.
     const figMeta = meta as FigureRenderResult;
-    const sm = spec.small_multiples!;
-    const mode = sm.mode ?? "shared";
-    if (mode === "shared") {
-      // Shared figure: ONE faceted SVG framed like the single chart, but its height grows with
-      // the row count so >2 rows aren't cramped. defaultAvail keeps a ≤2-row figure at the 750
-      // frame; more rows extend it.
-      const defaultAvail = Math.max(160, H - chartTop - bottomH);
-      const gridHeight = Math.max(defaultAvail, (figMeta.rows ?? 1) * SHARED_ROW_H);
-      const fig = renderFigure(spec, rows, { width: INNER_W, height: gridHeight });
-      const combined = fig.combinedSvg!;
-      combined.setAttribute("x", String(MARGIN));
-      combined.setAttribute("y", String(chartTop));
-      combined.setAttribute("width", String(INNER_W));
-      combined.setAttribute("height", String(gridHeight));
-      root.appendChild(combined);
-      contentHeight = gridHeight;
-    } else {
-      // Per-pane figure: lay the N mini-SVGs into a (cols × rows) grid, each with a pane-title
-      // text above it. Render the panes at the exact cell width so they fill their column.
-      const cols = figMeta.columns;
-      const gridRows = figMeta.rows;
-      const paneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
-      const fig = renderFigure(spec, rows, {
-        width: paneW,
-        height: PANE_CHART_H,
-        columns: cols,
-      });
-      const gridTop = chartTop;
-      fig.panes.forEach((pane, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const x = MARGIN + col * (paneW + COL_GAP);
-        const y = gridTop + row * (PANE_TITLE_H + PANE_CHART_H + ROW_GAP);
-        root.appendChild(
-          textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
-        );
-        if (pane.svg) {
-          const ps = pane.svg;
-          ps.setAttribute("x", String(x));
-          ps.setAttribute("y", String(y + PANE_TITLE_H));
-          ps.setAttribute("width", String(paneW));
-          ps.setAttribute("height", String(PANE_CHART_H));
-          root.appendChild(ps);
-        }
-      });
-      contentHeight =
-        gridRows * (PANE_TITLE_H + PANE_CHART_H) + (gridRows - 1) * ROW_GAP;
-    }
+    const cols = figMeta.columns;
+    const gridRows = figMeta.rows;
+    const paneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
+    const fig = renderFigure(spec, rows, {
+      width: paneW,
+      height: PANE_CHART_H,
+      columns: cols,
+    });
+    const gridTop = chartTop;
+    fig.panes.forEach((pane, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = MARGIN + col * (paneW + COL_GAP);
+      const y = gridTop + row * (PANE_TITLE_H + PANE_CHART_H + ROW_GAP);
+      root.appendChild(
+        textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
+      );
+      if (pane.svg) {
+        const ps = pane.svg;
+        ps.setAttribute("x", String(x));
+        ps.setAttribute("y", String(y + PANE_TITLE_H));
+        ps.setAttribute("width", String(paneW));
+        ps.setAttribute("height", String(PANE_CHART_H));
+        root.appendChild(ps);
+      }
+    });
+    contentHeight =
+      gridRows * (PANE_TITLE_H + PANE_CHART_H) + (gridRows - 1) * ROW_GAP;
   }
 
   // Figures extend the fixed 750 frame so many panes aren't cramped; the single chart stays at H.

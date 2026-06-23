@@ -1153,14 +1153,27 @@ describe("mountChart small multiples", () => {
     small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
   };
 
-  it("shared mode mounts ONE faceted svg in the canvas + a top legend", () => {
+  it("shared mode mounts a per-pane grid (shared y-scale) + a top legend", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: SHARED_SPEC, rows: FACET_ROWS, width: 800 });
     expect(container.querySelector(".figure-card")).not.toBeNull();
-    // Exactly one combined SVG, in the scroll canvas (not a grid).
-    expect(container.querySelector(".figure-grid")).toBeNull();
-    const svgs = container.querySelectorAll(".figure-canvas svg");
-    expect(svgs.length).toBe(1);
+    // Shared mode is now a per-pane grid composition (not one combined canvas SVG).
+    const grid = container.querySelector(".figure-grid");
+    expect(grid).not.toBeNull();
+    expect(container.querySelector(".figure-canvas")).toBeNull();
+    const panes = grid!.querySelectorAll(".figure-pane");
+    expect(panes.length).toBe(4); // 4 regions
+    panes.forEach((p) => {
+      expect(p.querySelector(".figure-pane-title")).not.toBeNull();
+      expect(p.querySelector("svg")).not.toBeNull();
+    });
+    // y-tick LABELS only on the leftmost column (2 cols → panes 0,2 show; 1,3 don't).
+    const labelCount = (i: number): number =>
+      panes[i]!.querySelectorAll("g.tbl-y-tick-label text").length;
+    expect(labelCount(0)).toBeGreaterThan(0);
+    expect(labelCount(2)).toBeGreaterThan(0);
+    expect(labelCount(1)).toBe(0);
+    expect(labelCount(3)).toBe(0);
     // Top legend present (2 interactive series) and selection wired.
     expect(container.querySelector(".tbl-legend")).not.toBeNull();
     expect(container.querySelector(".figure-card")!.classList.contains("is-selectable")).toBe(true);

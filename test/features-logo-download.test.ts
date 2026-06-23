@@ -110,24 +110,30 @@ describe("buildExportSvg — small multiples", () => {
     small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
   };
 
-  it("shared figure: one framed faceted svg + chrome, height >= 750", () => {
+  it("shared figure: N per-pane svgs (shared scale) laid in a grid + chrome", () => {
     const svg = buildExportSvg(SHARED_SPEC, FACET_ROWS);
     expect(svg.tagName.toLowerCase()).toBe("svg");
-    // Exactly one chart svg (the faceted combinedSvg), plus the chrome.
+    // Shared mode is now a per-pane composition: one standalone svg per pane (4 regions).
     const inner = svg.querySelectorAll("svg");
-    expect(inner.length).toBe(1);
-    // Faceted line marks are present.
-    expect(inner[0]!.querySelectorAll("path").length).toBeGreaterThan(0);
-    // Chrome: title, legend, source.
+    expect(inner.length).toBe(4);
+    // Line marks are present in each pane.
+    inner.forEach((s) => expect(s.querySelectorAll("path").length).toBeGreaterThan(0));
+    // Each pane title is present (drawn as export text above its cell).
+    for (const region of ["Northeast", "Midwest", "South", "West"]) {
+      expect(svg.textContent).toContain(region);
+    }
+    // Panes are laid in a grid: at 2 cols there is more than one distinct column x.
+    const xs = Array.from(inner).map((s) => Number(s.getAttribute("x")));
+    expect(new Set(xs).size).toBeGreaterThan(1);
+    // Chrome: title + source.
     expect(svg.textContent).toContain("Regions");
     expect(svg.textContent).toContain("Test Source");
-    expect(svg.querySelector(".tbl-legend, [class*='legend']") !== null || svg.textContent?.includes("A")).toBe(true);
-    expect(Number(svg.getAttribute("height"))).toBeGreaterThanOrEqual(750);
   });
 
   it("shared figure with many rows extends the frame beyond 750", () => {
-    // 6 panes at 2 cols → 3 rows → 3*200 = 600 grid; chartTop+grid+bottom > 750.
+    // 6 panes at 2 cols → 3 rows → the per-pane grid is taller than the default avail.
     const svg = buildExportSvg({ ...SHARED_SPEC }, MANY_ROWS);
+    expect(svg.querySelectorAll("svg").length).toBe(6);
     expect(Number(svg.getAttribute("height"))).toBeGreaterThan(750);
     // Background rect tracks the extended height (stays behind, first painted).
     const bg = svg.querySelector("rect");

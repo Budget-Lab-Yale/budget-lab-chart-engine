@@ -714,49 +714,66 @@ const FIGURE_SPEC: ChartSpec = {
   },
 };
 
-describe("golden figure — shared-mode small multiples (renderFigure, task B4)", () => {
-  it("renders a 2x2 faceted line figure as one combined SVG", async () => {
+describe("golden figure — shared-mode small multiples (renderFigure, rewritten)", () => {
+  it("renders a 2x2 grid of per-pane SVGs that share ONE y-scale, y-labels left column only", async () => {
     const rows = parseCsv("./fixtures/facet-regions.csv");
     const fig = renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document });
 
-    // Pane count = facet count; grid columns/rows correct.
+    // Shared mode is now a per-pane composition: NO combined SVG, one SVG per pane.
     expect(fig.mode).toBe("shared");
+    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     expect(fig.columns).toBe(2);
     expect(fig.rows).toBe(2);
     expect(fig.panes.map((p) => p.value)).toEqual(["Northeast", "Midwest", "South", "West"]);
+    // Each pane is its own SVG.
+    fig.panes.forEach((p) => {
+      expect((p.svg as SVGSVGElement).tagName.toLowerCase()).toBe("svg");
+    });
 
-    const svg = fig.combinedSvg as SVGSVGElement;
-    expect(svg.tagName.toLowerCase()).toBe("svg");
+    // SHARED y-scale: every pane's y-tick VALUES are identical (the gridlines are present in
+    // every pane). The left-column panes carry their label text; read the tick set from one.
+    // Index by grid column: 2 columns → panes 0,2 are col 0 (left); panes 1,3 are col 1 (right).
+    const left0 = yTickLabels(fig.panes[0]!.svg as SVGSVGElement);
+    const left2 = yTickLabels(fig.panes[2]!.svg as SVGSVGElement);
+    expect(left0.length).toBeGreaterThan(0);
+    // Both left-column panes show the SAME tick labels (one shared domain).
+    expect(left2).toEqual(left0);
 
-    // One left-column y-tick-label set: 2 rows survive (leftmost column only).
-    expect(svg.querySelectorAll("g.tbl-y-tick-label").length).toBe(2);
-    // Bottom-row-only x labels: 2 temporal marks x 2 bottom-row columns = 4 groups.
-    expect(svg.querySelectorAll(`g.${X_AXIS_LABEL_CLASS}`).length).toBe(4);
-    // A pane title per cell.
-    const titleTexts = Array.from(svg.querySelectorAll("g.tbl-pane-title text"))
-      .map((t) => t.textContent)
-      .sort();
-    expect(titleTexts).toEqual(["Midwest", "Northeast", "South", "West"]);
+    // y-tick LABEL text appears ONLY on the leftmost column (col 0 = panes 0 & 2). The right
+    // column (col 1 = panes 1 & 3) has NO y-tick-label text marks (gridlines stay; just labels
+    // are dropped), so panes stay aligned with the left margin intact.
+    expect(yTickLabels(fig.panes[1]!.svg as SVGSVGElement)).toEqual([]);
+    expect(yTickLabels(fig.panes[3]!.svg as SVGSVGElement)).toEqual([]);
+
+    // Gridlines ARE still present in the right-column panes (plot area kept) — the ruleY
+    // gridline group renders even when its label text is suppressed.
+    fig.panes.forEach((p) => {
+      const svg = p.svg as SVGSVGElement;
+      // A line mark (the data) renders in every pane.
+      expect(svg.querySelectorAll('g[aria-label="line"]').length).toBeGreaterThan(0);
+    });
+
+    // Unique clip-path scope per pane (classNameSuffix p0..p3).
+    const paneClasses = fig.panes.map((p) => (p.svg as SVGSVGElement).getAttribute("class"));
+    expect(paneClasses).toEqual(["tblchart-p0", "tblchart-p1", "tblchart-p2", "tblchart-p3"]);
 
     // Single, unstyled series → no figure legend (pane titles carry identity).
     expect(fig.legendItems).toBeNull();
 
-    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/figure-regions.golden.svg");
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-regions.golden.svg");
   });
 
   it("figure render is deterministic (byte-identical)", () => {
     const rows = parseCsv("./fixtures/facet-regions.csv");
-    const a = renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document })
-      .combinedSvg!.outerHTML;
-    const b = renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document })
-      .combinedSvg!.outerHTML;
+    const a = serializePanes(renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document }));
+    const b = serializePanes(renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document }));
     expect(a).toBe(b);
   });
 
-  it("renderFigure throws for bar/stacked SHARED small_multiples (B8 guard, shared-only)", () => {
+  it("renderFigure throws for bar/stacked SHARED small_multiples (line-only guard, shared-only)", () => {
     const rows = parseCsv("./fixtures/facet-regions.csv");
-    // SHARED mode is line-only: grouped bars collide with the grid's fx. Per-pane is the path.
+    // SHARED mode is line-only. Per-pane is the path for bar/stacked.
     const barSharedSpec: ChartSpec = { ...FIGURE_SPEC, chartType: "bar" };
     expect(() => renderFigure(barSharedSpec, rows, { document })).toThrow(
       /shared-mode small multiples support line charts only/,
@@ -771,7 +788,9 @@ describe("golden figure — shared-mode small multiples (renderFigure, task B4)"
     const figRows = parseCsv("./fixtures/facet-regions.csv");
     const fig = render(FIGURE_SPEC, figRows, { width: 720, height: 460, document }) as FigureRenderResult;
     expect(fig.mode).toBe("shared");
-    expect(fig.combinedSvg).toBeTruthy();
+    // Shared mode no longer produces a combined SVG; it is a per-pane composition.
+    expect(fig.combinedSvg).toBeUndefined();
+    expect(fig.panes.length).toBe(4);
 
     // No small_multiples → renderChart's RenderResult (a single `svg`, no `combinedSvg`).
     const single = render(GRADS_SPEC, parseCsv("./fixtures/grads-recent.csv"), {
