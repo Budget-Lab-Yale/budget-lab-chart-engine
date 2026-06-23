@@ -28,6 +28,10 @@ export interface CrosshairOptions {
   /** Coordinated-cursor hook: called with the resolved x-value on each move (and null on
    *  leave) so the live layer can echo a secondary cursor on sibling small-multiples panes. */
   onResolve?: (xValue: number | null) => void;
+  /** Hit-test only: keep the pointer hit area + `onResolve` emission but draw NO guide and show
+   *  NO tooltip. Used by coordinated small-multiples figures, where the unified secondary-cursor
+   *  renderer (driven by the figure bus) draws every pane's indicators instead. */
+  emitOnly?: boolean;
 }
 
 let activeTooltip: HTMLElement | null = null; // single shared tooltip element
@@ -107,18 +111,22 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   const pxToX = (px: number): number => xMin + ((px - ml) / plotW) * (xMax - xMin);
   const bisect = d3.bisector((d: number) => d).left;
 
+  const emitOnly = opts.emitOnly ?? false;
   const NS = "http://www.w3.org/2000/svg";
   svgEl.querySelectorAll(".tbl-crosshair, .tbl-crosshair-hit").forEach((el) => el.remove());
 
-  const guide = svgEl.ownerDocument.createElementNS(NS, "line");
-  guide.classList.add("tbl-crosshair");
-  guide.setAttribute("stroke", TBL.color.annotationDim);
-  guide.setAttribute("stroke-dasharray", "3 3");
-  guide.setAttribute("y1", String(mt));
-  guide.setAttribute("y2", String(mt + plotH));
-  guide.setAttribute("opacity", "0");
-  guide.style.pointerEvents = "none";
-  svgEl.appendChild(guide);
+  // emitOnly (coordinated figure): no guide, no tooltip — the secondary renderer draws visuals.
+  const guide = emitOnly ? null : svgEl.ownerDocument.createElementNS(NS, "line");
+  if (guide) {
+    guide.classList.add("tbl-crosshair");
+    guide.setAttribute("stroke", TBL.color.annotationDim);
+    guide.setAttribute("stroke-dasharray", "3 3");
+    guide.setAttribute("y1", String(mt));
+    guide.setAttribute("y2", String(mt + plotH));
+    guide.setAttribute("opacity", "0");
+    guide.style.pointerEvents = "none";
+    svgEl.appendChild(guide);
+  }
 
   // Transparent hit-area covering the full SVG so events fire over any region.
   const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
@@ -131,7 +139,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
 
   function snapX(svgX: number): number | null {
     if (svgX < ml || svgX > ml + plotW) return null;
@@ -157,11 +165,12 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       hide();
       return;
     }
-    const gx = xToPx(snap);
-    guide.setAttribute("x1", String(gx));
-    guide.setAttribute("x2", String(gx));
-    guide.setAttribute("opacity", "1");
     opts.onResolve?.(snap);
+    if (emitOnly) return;
+    const gx = xToPx(snap);
+    guide!.setAttribute("x1", String(gx));
+    guide!.setAttribute("x2", String(gx));
+    guide!.setAttribute("opacity", "1");
 
     let html = `<div class="tbl-tooltip-head">${escapeHtml(xFormat!(snap))}</div>`;
     const tipSeries =
@@ -179,26 +188,26 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       const swatchStyle = isDashed ? `--swatch-color: ${dot}` : `background: ${dot}`;
       html += `<div class="tbl-tooltip-row"><span class="${swatchClass}" style="${swatchStyle}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
     }
-    tip.innerHTML = html;
+    tip!.innerHTML = html;
 
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
     const vw = win.innerWidth;
     const vh = win.innerHeight;
-    tip.style.opacity = "1";
+    tip!.style.opacity = "1";
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
-    if (left + tip.offsetWidth + 4 > vw) left = evt.clientX - tip.offsetWidth - offset;
-    if (top + tip.offsetHeight + 4 > vh) top = evt.clientY - tip.offsetHeight - offset;
+    if (left + tip!.offsetWidth + 4 > vw) left = evt.clientX - tip!.offsetWidth - offset;
+    if (top + tip!.offsetHeight + 4 > vh) top = evt.clientY - tip!.offsetHeight - offset;
     if (left < 4) left = 4;
     if (top < 4) top = 4;
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
+    tip!.style.left = `${left}px`;
+    tip!.style.top = `${top}px`;
   }
 
   function hide(): void {
-    guide.setAttribute("opacity", "0");
-    tip.style.opacity = "0";
+    if (guide) guide.setAttribute("opacity", "0");
+    if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
 
@@ -631,6 +640,10 @@ export interface BandCrosshairOptions {
   /** Coordinated-cursor hook: called with the resolved category (and null on leave) so the
    *  live layer can echo a secondary cursor on sibling small-multiples panes. */
   onResolve?: (category: string | null) => void;
+  /** Hit-test only: keep the pointer hit area + `onResolve` emission but draw NO highlight and
+   *  show NO tooltip (the coordinated secondary renderer draws every pane's shaded region +
+   *  labels instead). */
+  emitOnly?: boolean;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -993,19 +1006,23 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   const mt = +(svgEl.dataset.marginTop ?? "") || 18;
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
 
+  const emitOnly = opts.emitOnly ?? false;
   const NS = "http://www.w3.org/2000/svg";
 
   // Remove any previously attached band-crosshair elements (hit area + highlight).
   svgEl.querySelectorAll(".tbl-band-crosshair-hit, .tbl-band-crosshair-hl").forEach((el) => el.remove());
 
   // Area highlight rect — drawn BEFORE the hit area so it sits above the bars but below
-  // the pointer-events layer. Hidden by default (opacity 0).
-  const hl = svgEl.ownerDocument.createElementNS(NS, "rect");
-  hl.classList.add("tbl-band-crosshair-hl");
-  hl.setAttribute("fill", TBL.color.annotationDim);
-  hl.setAttribute("opacity", "0");
-  hl.style.pointerEvents = "none";
-  svgEl.appendChild(hl);
+  // the pointer-events layer. Hidden by default (opacity 0). emitOnly (coordinated figure):
+  // the secondary renderer draws the shaded region + labels, so skip the highlight + tooltip.
+  const hl = emitOnly ? null : svgEl.ownerDocument.createElementNS(NS, "rect");
+  if (hl) {
+    hl.classList.add("tbl-band-crosshair-hl");
+    hl.setAttribute("fill", TBL.color.annotationDim);
+    hl.setAttribute("opacity", "0");
+    hl.style.pointerEvents = "none";
+    svgEl.appendChild(hl);
+  }
 
   // Transparent hit area.
   const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
@@ -1018,10 +1035,11 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
 
   /** Show the highlight over the given band geometry, spanning the full plot axis. */
   function showHighlight(bandMin: number, bandMax: number): void {
+    if (!hl) return;
     if (horizontal) {
       // Band is a y-row; highlight spans full plot width.
       hl.setAttribute("x", String(ml));
@@ -1092,8 +1110,10 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     if (!category) { hide(); return; }
 
-    showHighlight(hlMin, hlMax);
     opts.onResolve?.(category);
+    if (emitOnly) return;
+
+    showHighlight(hlMin, hlMax);
 
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
@@ -1103,26 +1123,26 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       seriesOrder: opts.seriesOrder,
       yFormat,
     });
-    tip.innerHTML = html;
+    tip!.innerHTML = html;
 
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
     const vw = win.innerWidth;
     const vh = win.innerHeight;
-    tip.style.opacity = "1";
+    tip!.style.opacity = "1";
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
-    if (left + tip.offsetWidth + 4 > vw) left = evt.clientX - tip.offsetWidth - offset;
-    if (top + tip.offsetHeight + 4 > vh) top = evt.clientY - tip.offsetHeight - offset;
+    if (left + tip!.offsetWidth + 4 > vw) left = evt.clientX - tip!.offsetWidth - offset;
+    if (top + tip!.offsetHeight + 4 > vh) top = evt.clientY - tip!.offsetHeight - offset;
     if (left < 4) left = 4;
     if (top < 4) top = 4;
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
+    tip!.style.left = `${left}px`;
+    tip!.style.top = `${top}px`;
   }
 
   function hide(): void {
-    hl.setAttribute("opacity", "0");
-    tip.style.opacity = "0";
+    if (hl) hl.setAttribute("opacity", "0");
+    if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
 
@@ -1133,16 +1153,18 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 }
 
 // ---------------------------------------------------------------------------
-// Coordinated (secondary) cursor — small-multiples cross-pane echo
+// Coordinated cursor — small-multiples cross-pane echo
 // ---------------------------------------------------------------------------
-// When the user hovers ONE pane, the live layer broadcasts the resolved x (a numeric x for line
-// panes, a category key for band panes) to every OTHER pane, which echoes a lightweight
-// SECONDARY cursor: a thin muted guide line + a small hollow dot and compact value label per
-// series at that x (stacked panes show one compact net-total label). The hovered pane keeps its
-// full primary crosshair/tooltip; the secondary cursor is deliberately muted so it does not pull
-// focus. These attach NO pointer handlers — they are driven externally by the returned
-// driver(key|null) (null clears). They read the pane's y-scale via Plot's svg.scale("y"); in a
-// non-layout environment (jsdom) that is unavailable, so the driver no-ops (browser verifies).
+// When the user hovers a pane, the live layer broadcasts the resolved x (a numeric x for line
+// panes, a category key for band panes) to EVERY pane (including the hovered one), which renders
+// a coordinated cursor. There is no floating tooltip: each pane shows compact in-place value
+// labels, each on a frosted-glass pill for legibility (mirrors the tooltip surface). The hovered
+// ("active") pane is distinguished by heavier label weight + the current x-axis value shown above
+// the plot. Lines draw a guide + per-series dot; bars draw a shaded band region with value labels
+// ABOVE each bar (centered); stacked draws the region with a label WITHIN each segment. Drivers
+// attach NO pointer handlers — they are driven externally by `driver(key|null, active)`. They read
+// the pane's y-scale via Plot's svg.scale("y"); without layout (jsdom) the value placement no-ops
+// but the guide/region still render (browser carries pixel correctness).
 
 /** Read a linear value→pixel mapper from Plot's y-scale, or null if unavailable. */
 function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
@@ -1161,6 +1183,8 @@ function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null 
 }
 
 const COORD_NS = "http://www.w3.org/2000/svg";
+/** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
+const COORD_LABEL_DARK = "#1A1A2E";
 
 /** Append a small hollow dot (white fill, series-color ring) to the coord group. */
 function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string): void {
@@ -1174,30 +1198,53 @@ function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, colo
   g.appendChild(dot);
 }
 
-/** Append a compact value label beside the point (flips to the left near the right edge). */
-function addCoordLabel(
+/**
+ * Append a value label on a frosted-glass pill (rounded translucent-white rect + faint border,
+ * mirroring the tooltip surface — SVG can't blur a backdrop, so a high-opacity white panel stands
+ * in). Anchored "start" | "middle" | "end" about (cx,cy). Width is estimated from the text length
+ * (no getBBox, so it is deterministic and works without layout). The pill is inserted before the
+ * text so it sits behind.
+ */
+function addCoordPill(
   g: SVGGElement,
   doc: Document,
   cx: number,
   cy: number,
-  flip: boolean,
+  anchor: "start" | "middle" | "end",
   text: string,
   color: string,
+  weight: number,
 ): void {
-  const label = doc.createElementNS(COORD_NS, "text");
-  label.setAttribute("x", String(flip ? cx - 6 : cx + 6));
-  label.setAttribute("y", String(cy));
-  label.setAttribute("dy", "0.32em");
-  label.setAttribute("text-anchor", flip ? "end" : "start");
-  label.setAttribute("fill", color);
-  label.setAttribute("font-size", "10");
-  label.setAttribute("font-weight", "600");
-  label.setAttribute("fill-opacity", "0.9");
-  label.textContent = text;
-  g.appendChild(label);
+  const fontSize = 10.5;
+  const padX = 4;
+  const padY = 2.5;
+  const w = text.length * fontSize * 0.62 + padX * 2;
+  const h = fontSize + padY * 2;
+  const x0 = anchor === "start" ? cx - padX : anchor === "end" ? cx - w + padX : cx - w / 2;
+  const rect = doc.createElementNS(COORD_NS, "rect");
+  rect.setAttribute("x", String(x0));
+  rect.setAttribute("y", String(cy - h / 2));
+  rect.setAttribute("width", String(w));
+  rect.setAttribute("height", String(h));
+  rect.setAttribute("rx", "3");
+  rect.setAttribute("fill", "#ffffff");
+  rect.setAttribute("fill-opacity", "0.82");
+  rect.setAttribute("stroke", "#c8cdd7");
+  rect.setAttribute("stroke-opacity", "0.7");
+  g.appendChild(rect);
+  const t = doc.createElementNS(COORD_NS, "text");
+  t.setAttribute("x", String(cx));
+  t.setAttribute("y", String(cy));
+  t.setAttribute("dy", "0.32em");
+  t.setAttribute("text-anchor", anchor);
+  t.setAttribute("fill", color);
+  t.setAttribute("font-size", String(fontSize));
+  t.setAttribute("font-weight", String(weight));
+  t.textContent = text;
+  g.appendChild(t);
 }
 
-/** Create the (re-attachable) secondary-cursor group on an SVG. */
+/** Create the (re-attachable) coordinated-cursor group on an SVG. */
 function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
   svgEl.querySelectorAll(".tbl-coord").forEach((el) => el.remove());
   const g = svgEl.ownerDocument.createElementNS(COORD_NS, "g");
@@ -1208,7 +1255,7 @@ function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
   return g;
 }
 
-/** Draw the thin muted vertical guide line into the coord group. */
+/** Draw the thin muted vertical guide line (line panes) into the coord group. */
 function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, yBot: number): void {
   const guide = doc.createElementNS(COORD_NS, "line");
   guide.setAttribute("x1", String(x));
@@ -1222,19 +1269,37 @@ function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, y
   g.appendChild(guide);
 }
 
+/** Draw the shaded band region (bar/stacked panes) into the coord group. */
+function addCoordRegion(g: SVGGElement, doc: Document, x: number, w: number, yTop: number, h: number): void {
+  const r = doc.createElementNS(COORD_NS, "rect");
+  r.setAttribute("x", String(x));
+  r.setAttribute("y", String(yTop));
+  r.setAttribute("width", String(Math.max(0, w)));
+  r.setAttribute("height", String(Math.max(0, h)));
+  r.setAttribute("fill", TBL.color.annotationDim);
+  r.setAttribute("opacity", "0.12");
+  g.appendChild(r);
+}
+
+/** The y for the active pane's x-axis value label — just above the plot area. */
+function coordXLabelY(mt: number): number {
+  return Math.max(8, mt - 4);
+}
+
 /**
- * Attach a secondary (coordinated) cursor to a CONTINUOUS (line) small-multiples pane. Returns a
- * driver: `driver(xValue)` snaps to this pane's nearest x and echoes the guide + per-series dot
- * and compact value label; `driver(null)` clears. No pointer handlers (externally driven).
+ * Attach a coordinated cursor to a CONTINUOUS (line) small-multiples pane. Returns a driver:
+ * `driver(xValue, active)` snaps to this pane's nearest x and renders the guide + per-series dot
+ * and a compact value label (on a pill); when `active`, labels use a heavier weight and the
+ * current x value is shown above the plot. `driver(null)` clears. No pointer handlers.
  */
 export function attachSecondaryLineCursor(
   svgEl: SVGSVGElement,
   opts: CrosshairOptions,
-): (xValue: number | null) => void {
+): (xValue: number | null, active?: boolean) => void {
   const noop = (): void => {};
   if (!svgEl || !opts.rows?.length) return noop;
   const { rows, xField = "time", yField = "value", seriesField = "series", colors, seriesOrder } = opts;
-  let { xParse } = opts;
+  let { xParse, xFormat } = opts;
   const yFormat =
     opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
 
@@ -1250,14 +1315,25 @@ export function attachSecondaryLineCursor(
 
   if (!xParse) {
     const sample = rows[0]?.[xField];
-    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
-    else if (/Q\d/.test(String(sample)))
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
+      xParse = (v) => +new Date(String(v));
+      if (!xFormat) xFormat = (v) => d3.timeFormat("%b %Y")(new Date(v));
+    } else if (/Q\d/.test(String(sample))) {
       xParse = (v) => {
         const m = /(\d{4})Q(\d)/.exec(String(v));
         return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
       };
-    else xParse = (v) => +(v as number);
+      if (!xFormat)
+        xFormat = (v) => {
+          const dd = new Date(v);
+          return `${dd.getFullYear()}Q${Math.floor(dd.getMonth() / 3) + 1}`;
+        };
+    } else {
+      xParse = (v) => +(v as number);
+      if (!xFormat) xFormat = (v) => String(v);
+    }
   }
+  const fmtX = xFormat ?? ((v: number) => String(v));
   const xs = Array.from(new Set(rows.map((r) => xParse!(r[xField])))).sort((a, b) => a - b);
   if (!xs.length) return noop;
   const bySeries = new Map<string, Map<number, number>>();
@@ -1277,7 +1353,7 @@ export function attachSecondaryLineCursor(
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
 
-  return (xValue: number | null): void => {
+  return (xValue: number | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
     if (xValue == null) {
       g.setAttribute("opacity", "0");
@@ -1292,6 +1368,8 @@ export function attachSecondaryLineCursor(
     }
     const gx = xToPx(nx);
     addCoordGuide(g, doc, gx, mt, mt + plotH);
+    if (active) addCoordPill(g, doc, gx, coordXLabelY(mt), "middle", fmtX(nx), COORD_LABEL_DARK, 700);
+    const weight = active ? 700 : 600;
     const toPy = readLinearYScale(svgEl);
     const flip = gx > ml + plotW * 0.72;
     if (toPy) {
@@ -1301,7 +1379,7 @@ export function attachSecondaryLineCursor(
         const color = colors?.get(series) || "#666666";
         const py = toPy(v);
         addCoordDot(g, doc, gx, py, color);
-        addCoordLabel(g, doc, gx, py, flip, yFormat(v), color);
+        addCoordPill(g, doc, flip ? gx - 7 : gx + 7, py, flip ? "end" : "start", yFormat(v), color, weight);
       }
     }
     g.setAttribute("opacity", "1");
@@ -1319,17 +1397,70 @@ export interface SecondaryBandOptions {
   yFormat?: (v: number) => string;
 }
 
+/** A rendered bar rect's geometry + series, for one category. */
+interface CatRect {
+  series: string;
+  cx: number;
+  y: number;
+  h: number;
+}
+
+/** Bucket the rendered bar rects by category (fx-faceted: one group per category; single-band:
+ *  grouped by rounded x). Returns category → its rects {series, cx, y(top), h}. Deterministic
+ *  (reads attributes + facet translate; no layout). */
+function buildRectsByCategory(svgEl: SVGSVGElement, opts: SecondaryBandOptions): Map<string, CatRect[]> {
+  const { isFaceted, categories = [] } = opts;
+  const out = new Map<string, CatRect[]>();
+  const rectOf = (rect: SVGRectElement, dx: number): CatRect => {
+    const x = parseFloat(rect.getAttribute("x") ?? "0");
+    const w = parseFloat(rect.getAttribute("width") ?? "0");
+    return {
+      series: rect.getAttribute("data-series") ?? "",
+      cx: dx + x + w / 2,
+      y: parseFloat(rect.getAttribute("y") ?? "0"),
+      h: parseFloat(rect.getAttribute("height") ?? "0"),
+    };
+  };
+
+  if (isFaceted) {
+    const groups = Array.from(svgEl.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g'));
+    const parsed: Array<{ tx: number; g: SVGGElement }> = [];
+    for (const gg of groups) {
+      const m = /translate\(\s*([\d.+-]+)/.exec(gg.getAttribute("transform") ?? "");
+      if (m) parsed.push({ tx: parseFloat(m[1]!), g: gg });
+    }
+    parsed.sort((a, b) => a.tx - b.tx);
+    parsed.forEach((p, i) => {
+      const cat = categories[i] ?? String(i);
+      out.set(cat, Array.from(p.g.querySelectorAll<SVGRectElement>("rect")).map((r) => rectOf(r, p.tx)));
+    });
+    return out;
+  }
+
+  const allRects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
+  const byX = new Map<number, CatRect[]>();
+  for (const rect of allRects) {
+    const key = Math.round(parseFloat(rect.getAttribute("x") ?? "0"));
+    if (!byX.has(key)) byX.set(key, []);
+    byX.get(key)!.push(rectOf(rect, 0));
+  }
+  Array.from(byX.keys())
+    .sort((a, b) => a - b)
+    .forEach((k, i) => out.set(categories[i] ?? String(i), byX.get(k)!));
+  return out;
+}
+
 /**
- * Attach a secondary (coordinated) cursor to a CATEGORICAL (band-axis) small-multiples pane.
- * Returns a driver: `driver(category)` echoes a guide at that category's band center plus a
- * compact value label per series (bar/grouped) or one net-total label (stacked) at the data
- * height; `driver(null)` clears. No pointer handlers (externally driven). Vertical orientation
- * only — horizontal panes pass through as a no-op driver (coordinated cursor is x-keyed).
+ * Attach a coordinated cursor to a CATEGORICAL (band-axis) small-multiples pane. Returns a driver:
+ * `driver(category, active)` renders a shaded band region over the hovered category and a value
+ * label per series — ABOVE each bar (centered) for bar/grouped, or WITHIN each segment for stacked
+ * — each on a pill. When `active`, labels use heavier weight and the category value is shown above
+ * the plot. `driver(null)` clears. No pointer handlers (externally driven). Vertical only.
  */
 export function attachSecondaryBandCursor(
   svgEl: SVGSVGElement,
   opts: SecondaryBandOptions,
-): (category: string | null) => void {
+): (category: string | null, active?: boolean) => void {
   const noop = (): void => {};
   if (!svgEl || !opts.rows?.length) return noop;
   const yFormat =
@@ -1350,58 +1481,46 @@ export function attachSecondaryBandCursor(
     if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
     valByCat.get(r._xc)!.set(r.series, r._y);
   }
-  const orderFor = (cat: string): string[] => {
-    const vals = valByCat.get(cat);
-    if (!vals) return [];
-    return opts.seriesOrder && opts.seriesOrder.length
-      ? opts.seriesOrder.filter((s) => vals.has(s))
-      : [...vals.keys()];
-  };
+  const rectsByCat = buildRectsByCategory(svgEl, opts);
 
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
 
-  return (category: string | null): void => {
+  return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
     if (category == null) {
       g.setAttribute("opacity", "0");
       return;
     }
-    const bands = readCategoryBands(svgEl, {
+    const raw = readCategoryBands(svgEl, {
       rows: opts.rows,
       isFaceted: opts.isFaceted,
       categories: opts.categories,
     } as BandCrosshairOptions);
-    const band = bands.find((b) => b.category === category);
+    const idx = raw.findIndex((b) => b.category === category);
     const vals = valByCat.get(category);
-    if (!band || !vals) {
+    if (idx < 0 || !vals) {
       g.setAttribute("opacity", "0");
       return;
     }
-    const cx = (band.xMin + band.xMax) / 2;
-    addCoordGuide(g, doc, cx, mt, mt + plotH);
-    const toPy = readLinearYScale(svgEl);
-    const flip = cx > ml + (W - ml - mr) * 0.72;
-    if (toPy) {
+    // Region spans the full band STEP (widened to the midpoints between clusters), matching the
+    // hovered pane's highlight, so the shaded column reads the same across panes.
+    const wide = widenBandsToMidpoints(raw.map((b) => ({ min: b.xMin, max: b.xMax })), ml, W - mr)[idx]!;
+    addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, plotH);
+    const weight = active ? 700 : 600;
+    if (active) {
+      addCoordPill(g, doc, (wide.min + wide.max) / 2, coordXLabelY(mt), "middle", category, COORD_LABEL_DARK, 700);
+    }
+    for (const rect of rectsByCat.get(category) ?? []) {
+      const v = vals.get(rect.series);
+      if (v == null || Number.isNaN(v)) continue;
       if (opts.isStacked) {
-        // One compact net-total label at the top of the stack (the breakdown stays in the
-        // hovered pane's full tooltip).
-        let posSum = 0;
-        let net = 0;
-        for (const s of orderFor(category)) {
-          const v = vals.get(s)!;
-          net += v;
-          if (v > 0) posSum += v;
-        }
-        addCoordLabel(g, doc, cx, toPy(Math.max(posSum, net)), flip, yFormat(net), "#444444");
+        // WITHIN the segment, centered.
+        addCoordPill(g, doc, rect.cx, rect.y + rect.h / 2, "middle", yFormat(v), COORD_LABEL_DARK, weight);
       } else {
-        for (const s of orderFor(category)) {
-          const v = vals.get(s)!;
-          const color = opts.colors?.get(s) || "#666666";
-          const py = toPy(v);
-          addCoordDot(g, doc, cx, py, color);
-          addCoordLabel(g, doc, cx, py, flip, yFormat(v), color);
-        }
+        // ABOVE the bar (centered), or below for a negative bar — like the normal value labels.
+        const cy = v >= 0 ? rect.y - 9 : rect.y + rect.h + 9;
+        addCoordPill(g, doc, rect.cx, cy, "middle", yFormat(v), COORD_LABEL_DARK, weight);
       }
     }
     g.setAttribute("opacity", "1");

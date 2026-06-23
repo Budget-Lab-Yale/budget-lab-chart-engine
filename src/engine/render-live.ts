@@ -809,16 +809,16 @@ function wireFigureSvg(
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
     showTotalDot?: boolean;
-    /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and
-     *  a secondary-cursor driver is attached + returned so sibling panes can be echoed. */
+    /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
+     *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
     onResolve?: (key: unknown) => void;
   },
-): ((key: unknown) => void) | undefined {
+): ((key: unknown, active?: boolean) => void) | undefined {
   const categorical = ctx.spec.xAxisType === "categorical";
-  const coordinated = ctx.onResolve != null;
-  // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so skip the secondary
-  // echo there (the per-pane primary tooltip still works).
+  // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so they keep the per-pane
+  // tooltip instead. `useCoord` gates the no-tooltip emitOnly + coordinated-renderer path.
   const horizontal = ctx.spec.orientation === "horizontal";
+  const useCoord = ctx.onResolve != null && !horizontal;
   // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
   // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
@@ -846,7 +846,8 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units),
       orientation: horizontal ? "horizontal" : "vertical",
-      ...(coordinated ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+      // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
+      ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
       // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
@@ -856,7 +857,7 @@ function wireFigureSvg(
         if (series) handle.toggle(series);
       });
     }
-    if (coordinated && !horizontal) {
+    if (useCoord) {
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isStacked,
@@ -866,7 +867,7 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.units),
-      }) as (key: unknown) => void;
+      }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
   }
@@ -883,7 +884,7 @@ function wireFigureSvg(
     dashedSeries: ctx.dashedNames,
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
-    ...(coordinated ? { onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
+    ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
   });
   if (handle) {
     // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
@@ -894,18 +895,19 @@ function wireFigureSvg(
       if (series) handle.toggle(series);
     });
   }
-  if (coordinated) {
+  if (useCoord) {
     return attachSecondaryLineCursor(svg, {
       rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
       xField: "time",
       yField: "value",
       seriesField: "series",
       xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
+      xFormat: ctx.tooltipXFormat,
       yFormat: (v) => formatValue(v, ctx.units),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-    }) as (key: unknown) => void;
+    }) as (key: unknown, active?: boolean) => void;
   }
   return undefined;
 }
@@ -1036,9 +1038,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // collects each pane's secondary-cursor driver; a pane's primary crosshair emits its resolved
     // x-key, which drives the others (and clears the source's own secondary).
     const coordinated = sm.coordinated_cursor !== false && fig.panes.length > 1;
-    const drivers: Array<(key: unknown) => void> = [];
+    const drivers: Array<(key: unknown, active?: boolean) => void> = [];
+    // Render EVERY pane at the hovered x: the source (hovered) pane gets active styling (heavier
+    // labels + the x-axis value above); the rest get passive styling. null clears all.
     const emit = (sourceIdx: number, key: unknown): void => {
-      for (let i = 0; i < drivers.length; i++) drivers[i]!(i === sourceIdx ? null : key);
+      for (let i = 0; i < drivers.length; i++) drivers[i]!(key, i === sourceIdx);
     };
 
     fig.panes.forEach((pane, idx) => {

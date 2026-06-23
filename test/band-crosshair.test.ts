@@ -655,7 +655,7 @@ describe("attachSecondaryBandCursor (coordinated cursor)", () => {
     const g = svg.querySelector("g.tbl-coord");
     expect(g).not.toBeNull();
     expect(g!.getAttribute("opacity")).toBe("1");
-    expect(g!.querySelector("line")).not.toBeNull(); // the muted guide line
+    expect(g!.querySelector("rect")).not.toBeNull(); // the shaded band region
     drive(null);
     expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
     document.body.removeChild(svg);
