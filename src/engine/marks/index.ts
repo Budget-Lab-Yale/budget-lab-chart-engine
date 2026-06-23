@@ -43,6 +43,13 @@ export interface MarkContext {
   plotWidth?: number;
   /** Inner plot height in px (outer height minus top+bottom margins). Approximate. */
   plotHeight?: number;
+  /** Small-multiples (shared mode): the PreparedRow field bound to Plot's `fx` (column)
+   *  facet channel — set by the figure orchestrator (`"_fxCol"`). When present, mark builders
+   *  must bind `fx` on their marks so they face into the grid. Absent → single frame. */
+  fxField?: string;
+  /** Small-multiples (shared mode): the PreparedRow field bound to Plot's `fy` (row) facet
+   *  channel (`"_fyRow"`). Bound alongside `fxField`. */
+  fyField?: string;
 }
 
 export interface MarkLayers {

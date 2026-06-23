@@ -12,7 +12,12 @@ export function buildLineMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, colors } = ctx;
+  const { xField, colors, fxField, fyField } = ctx;
+
+  // Shared-mode small multiples: when the orchestrator supplies facet field names, every mark
+  // binds `fx`/`fy` so it faces into the grid. Absent → no facet channels → single frame.
+  const facetChannels =
+    fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
   // Underlay: confidence-band areas, painted behind the gridlines.
   const underlay: unknown[] = [];
@@ -23,7 +28,7 @@ export function buildLineMarks(
         data.filter(
           (r) => r.series === band.series && Number.isFinite(r._lo) && Number.isFinite(r._hi),
         ),
-        { x: xField, y1: "_lo", y2: "_hi", fill: bandColor, fillOpacity: 0.18 },
+        { x: xField, y1: "_lo", y2: "_hi", fill: bandColor, fillOpacity: 0.18, ...facetChannels },
       ),
     );
   }
@@ -48,6 +53,7 @@ export function buildLineMarks(
         strokeWidth: TBL.strokeWidth.dashed,
         strokeDasharray: TBL.dashArray,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
+        ...facetChannels,
       }),
     );
   }
@@ -60,6 +66,7 @@ export function buildLineMarks(
         stroke: "series",
         strokeWidth: TBL.strokeWidth.solid,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
+        ...facetChannels,
       }),
     );
   }

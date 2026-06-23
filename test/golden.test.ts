@@ -10,7 +10,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { renderChart, TOTAL_SERIES_KEY } from "../src/engine/index";
+import { renderChart, renderFigure, render, TOTAL_SERIES_KEY } from "../src/engine/index";
+import type { FigureRenderResult } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
 import type { PreparedRow, MarkLayers } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
@@ -688,6 +689,85 @@ describe("golden SVG — shared-mode small multiples", () => {
     const a = buildFacetedPlot().outerHTML;
     const b = buildFacetedPlot().outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+// --- Figure orchestrator: shared-mode small multiples (task B4) ---
+//
+// Drives the WHOLE figure path through `renderFigure`: the orchestrator partitions the
+// facet-regions fixture by `facet`, lays out a 2x2 grid, computes ONE shared y-domain, and
+// (via renderPane → assemblePlot's `facet` option) renders ONE faceted SVG. The line mark
+// builder binds fx/fy from the MarkContext facet fields. Asserts grid + collapsed chrome +
+// pane titles, then locks the combined SVG to a golden.
+
+const FIGURE_SPEC: ChartSpec = {
+  chartType: "line",
+  title: "Trend by region",
+  subtitle: "Index",
+  xAxisType: "temporal",
+  data: "facet-regions.csv",
+  small_multiples: {
+    facet_field: "facet",
+    columns: 2,
+    mode: "shared",
+    pane_titles: { Northeast: "Northeast", Midwest: "Midwest", South: "South", West: "West" },
+  },
+};
+
+describe("golden figure — shared-mode small multiples (renderFigure, task B4)", () => {
+  it("renders a 2x2 faceted line figure as one combined SVG", async () => {
+    const rows = parseCsv("./fixtures/facet-regions.csv");
+    const fig = renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document });
+
+    // Pane count = facet count; grid columns/rows correct.
+    expect(fig.mode).toBe("shared");
+    expect(fig.panes.length).toBe(4);
+    expect(fig.columns).toBe(2);
+    expect(fig.rows).toBe(2);
+    expect(fig.panes.map((p) => p.value)).toEqual(["Northeast", "Midwest", "South", "West"]);
+
+    const svg = fig.combinedSvg as SVGSVGElement;
+    expect(svg.tagName.toLowerCase()).toBe("svg");
+
+    // One left-column y-tick-label set: 2 rows survive (leftmost column only).
+    expect(svg.querySelectorAll("g.tbl-y-tick-label").length).toBe(2);
+    // Bottom-row-only x labels: 2 temporal marks x 2 bottom-row columns = 4 groups.
+    expect(svg.querySelectorAll(`g.${X_AXIS_LABEL_CLASS}`).length).toBe(4);
+    // A pane title per cell.
+    const titleTexts = Array.from(svg.querySelectorAll("g.tbl-pane-title text"))
+      .map((t) => t.textContent)
+      .sort();
+    expect(titleTexts).toEqual(["Midwest", "Northeast", "South", "West"]);
+
+    // Single, unstyled series → no figure legend (pane titles carry identity).
+    expect(fig.legendItems).toBeNull();
+
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/figure-regions.golden.svg");
+  });
+
+  it("figure render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/facet-regions.csv");
+    const a = renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document })
+      .combinedSvg!.outerHTML;
+    const b = renderFigure(FIGURE_SPEC, rows, { width: 720, height: 460, document })
+      .combinedSvg!.outerHTML;
+    expect(a).toBe(b);
+  });
+
+  it("render() dispatches: small_multiples -> figure, else -> single chart", () => {
+    const figRows = parseCsv("./fixtures/facet-regions.csv");
+    const fig = render(FIGURE_SPEC, figRows, { width: 720, height: 460, document }) as FigureRenderResult;
+    expect(fig.mode).toBe("shared");
+    expect(fig.combinedSvg).toBeTruthy();
+
+    // No small_multiples → renderChart's RenderResult (a single `svg`, no `combinedSvg`).
+    const single = render(GRADS_SPEC, parseCsv("./fixtures/grads-recent.csv"), {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect("combinedSvg" in single).toBe(false);
+    expect((single as { svg: SVGSVGElement }).svg.tagName.toLowerCase()).toBe("svg");
   });
 });
 

@@ -84,7 +84,7 @@ function buildColorMap(
 /** Single rendered pane (frame): the SVG plus everything `renderChart`'s legend-decision
  *  block and `RenderResult` need. The Phase B figure orchestrator renders N of these (each
  *  with a distinct `classNameSuffix`) and composes them. */
-interface PaneResult {
+export interface PaneResult {
   svg: SVGSVGElement;
   /** Series order (also the filter when spec.series_order is set). */
   seriesNames: string[];
@@ -98,15 +98,31 @@ interface PaneResult {
   tooltipXFormat?: (v: number) => string;
 }
 
+/** SHARED-mode faceting passed into renderPane: the value→(col,row) grid assignment the
+ *  orchestrator computed, plus the grid dimensions + per-cell pane titles. When present,
+ *  renderPane tags each row with its grid-index fields, drops out-of-scope facet values,
+ *  drives the markBuilder + x-adapter in faceted mode, and passes `facet` to assemblePlot —
+ *  producing ONE faceted SVG whose y-domain is shared across every in-scope pane. */
+export interface FacetInfo {
+  facetField: string;
+  /** facet value → grid cell. Out-of-scope values (not a key) drop the row. */
+  cellFor: Map<string, { col: number; row: number; title: string }>;
+  columns: number;
+  rows: number;
+}
+
 /** Render the single-frame pipeline: parse rows → series order/colors → y-axis (incl. the
  *  bar y-extent pre-pass) → x-adapter/xOpts → markBuilder → assemblePlot. No legend or
  *  RenderResult assembly — that stays in renderChart. `classNameSuffix` is threaded into
- *  assemblePlot for unique-but-deterministic clip-path ids per pane (absent → "tblchart"). */
-function renderPane(
+ *  assemblePlot for unique-but-deterministic clip-path ids per pane (absent → "tblchart").
+ *  When `facetInfo` is supplied (shared-mode small multiples), every parsed row is tagged with
+ *  its grid indices, the markBuilder binds fx/fy, and the result is ONE faceted SVG. */
+export function renderPane(
   spec: ChartSpec,
   rows: TidyRow[],
   opts: RenderOptions = {},
   classNameSuffix?: string,
+  facetInfo?: FacetInfo,
 ): PaneResult {
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
@@ -131,9 +147,22 @@ function renderPane(
           row._hi = hi !== "" && hi != null ? +hi : undefined;
         }
       }
+      // Shared-mode small multiples: tag the row with its pane's facet value + grid indices.
+      // Rows whose facet value isn't in the ordered pane set are dropped below.
+      if (facetInfo) {
+        const fval = r[facetInfo.facetField] as string;
+        const cell = facetInfo.cellFor.get(fval);
+        if (cell) {
+          row._facet = fval;
+          row._fxCol = String(cell.col);
+          row._fyRow = String(cell.row);
+        }
+      }
       return row;
     })
-    .filter((r) => adapter.validate(r as unknown as Record<string, unknown>));
+    .filter((r) => adapter.validate(r as unknown as Record<string, unknown>))
+    // Drop rows outside the in-scope pane set (consistent with pane_order filtering).
+    .filter((r) => !facetInfo || r._facet != null);
 
   if (!data.length) throw new Error("No data.");
 
@@ -188,7 +217,9 @@ function renderPane(
     tickCount,
   });
 
-  const xOpts = adapter.buildXOpts(dataInScope);
+  // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
+  // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
+  const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null);
   const units = inferUnitsFromSubtitle(spec.subtitle);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
@@ -206,7 +237,23 @@ function renderPane(
     seriesNames,
     plotWidth,
     plotHeight,
+    // Shared-mode small multiples: pass the facet field names so the mark builder binds
+    // fx/fy on its marks (they face into the grid). Absent → single frame.
+    ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
   });
+
+  // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.
+  const facetOpt = facetInfo
+    ? {
+        columns: facetInfo.columns,
+        rows: facetInfo.rows,
+        cells: Array.from(facetInfo.cellFor.values()).map((c) => ({
+          col: c.col,
+          row: c.row,
+          title: c.title,
+        })),
+      }
+    : undefined;
 
   const svg = assemblePlot({
     layers,
@@ -222,6 +269,7 @@ function renderPane(
     marginRight: opts.marginRight,
     document: opts.document,
     classNameSuffix,
+    ...(facetOpt ? { facet: facetOpt } : {}),
   });
 
   return {
@@ -236,16 +284,16 @@ function renderPane(
   };
 }
 
-export function renderChart(
+/** Build the legend rows from a spec + a rendered pane's series order / colors / mark layers.
+ *  Shared by renderChart (single frame) and renderFigure (figure-level legend), so both decide
+ *  legend presence and ordering identically. Returns null for a single, unstyled series. */
+export function buildLegendItems(
   spec: ChartSpec,
-  rows: TidyRow[],
-  opts: RenderOptions = {},
-): RenderResult {
-  const pane = renderPane(spec, rows, opts);
-  const { svg, seriesNames, colors, units, dataInScope, layers } = pane;
+  seriesNames: string[],
+  colors: Map<string, string>,
+  layers: MarkLayers,
+): LegendItem[] | null {
   const chartType = spec.chartType;
-
-  // Legend: present when 2+ series OR any series carries a style override.
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
   const hasDashOverrides = layers.dashedNames.size > 0;
@@ -285,6 +333,19 @@ export function renderChart(
     // the Total marker is never silently dropped.
     legendItems = legendItems ? [...legendItems, ...extras] : extras;
   }
+  return legendItems;
+}
+
+export function renderChart(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  opts: RenderOptions = {},
+): RenderResult {
+  const pane = renderPane(spec, rows, opts);
+  const { svg, seriesNames, colors, units, dataInScope, layers } = pane;
+
+  const seriesLabels = spec.series_labels ?? {};
+  const legendItems = buildLegendItems(spec, seriesNames, colors, layers);
 
   return {
     svg,
@@ -301,4 +362,23 @@ export function renderChart(
     legendVisualOrder: layers.legendVisualOrder,
     showTotalDot: layers.showTotalDot,
   };
+}
+
+// Figure orchestrator (small multiples). Imported here for the `render` dispatcher; figure.ts
+// imports renderPane/buildLegendItems back from this module (ES-module cycle is safe — both
+// references resolve at call time, not at module evaluation).
+import { renderFigure } from "./figure";
+import type { FigureRenderResult } from "./figure";
+export { renderFigure } from "./figure";
+export type { FigureRenderResult, FigurePane } from "./figure";
+
+/** Top-level dispatcher: a `small_multiples` spec renders a multi-panel figure (renderFigure),
+ *  everything else renders a single chart (renderChart). render-live/export switch to this in
+ *  B6/B7; for now both renderChart and renderFigure stay exported and callable directly. */
+export function render(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  opts: RenderOptions = {},
+): RenderResult | FigureRenderResult {
+  return spec.small_multiples ? renderFigure(spec, rows, opts) : renderChart(spec, rows, opts);
 }
