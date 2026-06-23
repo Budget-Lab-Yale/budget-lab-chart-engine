@@ -20,6 +20,8 @@ import type { MarkLayers } from "./marks/index";
 
 // A fixed class name makes Plot's generated class + clip-path ids deterministic, so
 // repeated renders are byte-identical (the golden-SVG locking gate depends on this).
+// When a pane suffix is supplied (multi-pane figures), append it so each pane's Plot
+// class + clip-path ids are unique-but-deterministic; absent → exactly "tblchart".
 const PLOT_CLASS = "tblchart";
 
 export interface AssembleOptions {
@@ -36,6 +38,10 @@ export interface AssembleOptions {
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests). */
   document?: Document;
+  /** Optional pane suffix: when set, the Plot className becomes `tblchart-${suffix}`,
+   *  giving each pane in a multi-pane figure unique-but-deterministic clip-path ids.
+   *  Absent → className stays exactly "tblchart" (byte-identical single-chart output). */
+  classNameSuffix?: string;
 }
 
 export function assemblePlot({
@@ -51,6 +57,7 @@ export function assemblePlot({
   height,
   marginRight,
   document,
+  classNameSuffix,
 }: AssembleOptions): SVGSVGElement {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
 
@@ -164,7 +171,7 @@ export function assemblePlot({
       ...(layers.marginLeft != null ? { marginLeft: layers.marginLeft } : {}),
     }),
     ...(width ? { width } : {}),
-    className: PLOT_CLASS,
+    className: classNameSuffix ? `${PLOT_CLASS}-${classNameSuffix}` : PLOT_CLASS,
     // Vertical: y carries the value domain. Horizontal: the value domain moves to x and
     // the layer supplies a band y (yScaleOpts).
     y: horizontal

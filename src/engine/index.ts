@@ -81,11 +81,33 @@ function buildColorMap(
   return m;
 }
 
-export function renderChart(
+/** Single rendered pane (frame): the SVG plus everything `renderChart`'s legend-decision
+ *  block and `RenderResult` need. The Phase B figure orchestrator renders N of these (each
+ *  with a distinct `classNameSuffix`) and composes them. */
+interface PaneResult {
+  svg: SVGSVGElement;
+  /** Series order (also the filter when spec.series_order is set). */
+  seriesNames: string[];
+  colors: Map<string, string>;
+  units: string;
+  dataInScope: PreparedRow[];
+  /** The chart-type-specific mark layers — legend decision reads dashedNames /
+   *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
+  layers: ReturnType<ReturnType<typeof markBuilderFor>>;
+  tooltipXParse?: (v: string) => number;
+  tooltipXFormat?: (v: number) => string;
+}
+
+/** Render the single-frame pipeline: parse rows → series order/colors → y-axis (incl. the
+ *  bar y-extent pre-pass) → x-adapter/xOpts → markBuilder → assemblePlot. No legend or
+ *  RenderResult assembly — that stays in renderChart. `classNameSuffix` is threaded into
+ *  assemblePlot for unique-but-deterministic clip-path ids per pane (absent → "tblchart"). */
+function renderPane(
   spec: ChartSpec,
   rows: TidyRow[],
   opts: RenderOptions = {},
-): RenderResult {
+  classNameSuffix?: string,
+): PaneResult {
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
 
@@ -199,7 +221,29 @@ export function renderChart(
     height: opts.height,
     marginRight: opts.marginRight,
     document: opts.document,
+    classNameSuffix,
   });
+
+  return {
+    svg,
+    seriesNames,
+    colors,
+    units,
+    dataInScope,
+    layers,
+    tooltipXParse: xOpts.tooltipXParse,
+    tooltipXFormat: xOpts.tooltipXFormat,
+  };
+}
+
+export function renderChart(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  opts: RenderOptions = {},
+): RenderResult {
+  const pane = renderPane(spec, rows, opts);
+  const { svg, seriesNames, colors, units, dataInScope, layers } = pane;
+  const chartType = spec.chartType;
 
   // Legend: present when 2+ series OR any series carries a style override.
   const seriesLabels = spec.series_labels ?? {};
@@ -253,8 +297,8 @@ export function renderChart(
     units,
     xAxisTitle: spec.x_axis_title ?? null,
     dataInScope,
-    tooltipXParse: xOpts.tooltipXParse,
-    tooltipXFormat: xOpts.tooltipXFormat,
+    tooltipXParse: pane.tooltipXParse,
+    tooltipXFormat: pane.tooltipXFormat,
     legendVisualOrder: layers.legendVisualOrder,
     showTotalDot: layers.showTotalDot,
   };
