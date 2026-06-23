@@ -1199,7 +1199,8 @@ const COORD_LABEL_DARK = "#1A1A2E";
 function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string, symbol?: string): void {
   if (symbol && symbol !== "circle") {
     const p = doc.createElementNS(COORD_NS, "path");
-    p.setAttribute("d", symbolPathD(symbol, 70));
+    // Area ~42 (≈ radius 3.7) — just larger than the static marker (~34) so it reads as a ring.
+    p.setAttribute("d", symbolPathD(symbol, 42));
     p.setAttribute("transform", `translate(${cx},${cy})`);
     p.setAttribute("fill", "#ffffff");
     p.setAttribute("stroke", color);
@@ -1210,7 +1211,7 @@ function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, colo
   const dot = doc.createElementNS(COORD_NS, "circle");
   dot.setAttribute("cx", String(cx));
   dot.setAttribute("cy", String(cy));
-  dot.setAttribute("r", "4");
+  dot.setAttribute("r", "3.6");
   dot.setAttribute("fill", "#ffffff");
   dot.setAttribute("stroke", color);
   dot.setAttribute("stroke-width", "1.5");
