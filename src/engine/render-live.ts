@@ -7,7 +7,10 @@
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
+import type { PreparedRow } from "./marks/index.js";
+import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
+import { renderFigure } from "./figure.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import { attachCrosshair, attachBandCrosshair } from "./crosshair.js";
@@ -448,6 +451,10 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): 
  *   observer for the SVG-widening case.)
  */
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
+  // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
+  // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
+  if (opts.spec.small_multiples) return mountFigure(container, opts);
+
   const { spec, rows, width: initialWidth } = opts;
   // Explicit height (callers / golden path) wins; otherwise horizontal bars grow taller
   // with the bar/row count and everything else uses the fixed default.
@@ -753,6 +760,253 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
     canvasScroll.removeEventListener("scroll", onScroll);
+    currentOverlay?._ro?.disconnect();
+  };
+}
+
+// --- Small-multiples figure mount ----------------------------------------------------------
+// Below this pane width the per-pane grid reflows to fewer columns (3→2→1).
+const PANE_MIN_WIDTH = 240;
+// Per-pane mini-chart height (per-pane mode); shared mode sizes the faceted SVG by row count.
+const PANE_HEIGHT = 240;
+// Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
+const GRID_GAP = 16;
+
+/** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
+ *  header so single-chart and figure cards look identical. */
+function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec): void {
+  const header = doc.createElement("div");
+  header.className = "figure-header";
+  if (spec.eyebrow) {
+    const eyebrow = doc.createElement("div");
+    eyebrow.className = "figure-supertitle";
+    eyebrow.textContent = spec.eyebrow;
+    header.appendChild(eyebrow);
+  }
+  const titlebar = doc.createElement("div");
+  titlebar.className = "figure-titlebar";
+  if (spec.title) {
+    const h = doc.createElement("h3");
+    h.className = "figure-title";
+    h.textContent = spec.title;
+    titlebar.appendChild(h);
+  }
+  const logoWrapper = doc.createElement("div");
+  logoWrapper.className = "figure-logo";
+  logoWrapper.innerHTML = LOGO_SVG;
+  titlebar.appendChild(logoWrapper);
+  header.appendChild(titlebar);
+  if (spec.subtitle) {
+    const s = doc.createElement("p");
+    s.className = "figure-subtitle";
+    s.textContent = spec.subtitle;
+    header.appendChild(s);
+  }
+  card.appendChild(header);
+}
+
+/** Wire the continuous-x crosshair + two-way selection onto one figure SVG (shared combined
+ *  SVG or a per-pane mini-SVG). Figures are line-only (renderFigure throws for bar/stacked),
+ *  so the continuous crosshair applies; `dataInScope`/tooltip come from the pane metadata. */
+function wireFigureSvg(
+  svg: SVGSVGElement,
+  handle: LegendHandle,
+  ctx: {
+    dataInScope: PreparedRow[];
+    colors: Map<string, string>;
+    dashedNames: Set<string>;
+    seriesLabels: Record<string, string>;
+    seriesOrder: string[];
+    units: string;
+    tooltipXParse?: (v: string) => number;
+    tooltipXFormat?: (v: number) => string;
+  },
+): void {
+  attachCrosshair(svg, {
+    rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
+    xField: "time",
+    yField: "value",
+    seriesField: "series",
+    xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
+    xFormat: ctx.tooltipXFormat,
+    yFormat: (v) => formatValue(v, ctx.units),
+    colors: ctx.colors,
+    dashedSeries: ctx.dashedNames,
+    seriesLabels: ctx.seriesLabels,
+    seriesOrder: ctx.seriesOrder,
+  });
+  // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
+  addLineHitPaths(svg);
+  svg.querySelectorAll<SVGElement>(".tbl-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
+  svg.addEventListener("click", (evt) => {
+    const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+    if (series) handle.toggle(series);
+  });
+}
+
+/**
+ * Mount a small-multiples figure. Two layouts:
+ *  - SHARED mode: ONE faceted SVG (shared y-scale) in a scroll wrapper, like a single chart —
+ *    top legend, two-way selection (data-series spans all facets → dims/pins cross-pane), and
+ *    the sticky y-axis overlay on the left column.
+ *  - PER-PANE mode: a responsive `.figure-grid` of mini-chart cells (each its own y-scale),
+ *    reflowing columns by width; the top legend's highlight root is the GRID so dimming spans
+ *    every pane; each pane gets its own crosshair + click-to-select.
+ * Figures are line-only for now (renderFigure throws for bar/stacked — B8).
+ */
+function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
+  const { spec, rows } = opts;
+  const sm = spec.small_multiples!;
+  const mode = sm.mode ?? "shared";
+  const doc = container.ownerDocument;
+
+  const card = doc.createElement("div");
+  card.className = "figure-card";
+  buildFigureHeader(card, doc, spec);
+
+  const legendSlot = doc.createElement("div");
+  legendSlot.className = "figure-legend-slot";
+  card.appendChild(legendSlot);
+
+  // Body: shared → scroll wrapper holding the one faceted SVG; per-pane → responsive grid.
+  let canvasScroll: HTMLElement | null = null;
+  let canvas: HTMLElement | null = null;
+  let grid: HTMLElement | null = null;
+  if (mode === "per-pane") {
+    grid = doc.createElement("div");
+    grid.className = "figure-grid";
+    card.appendChild(grid);
+  } else {
+    canvasScroll = doc.createElement("div");
+    canvasScroll.className = "figure-canvas-scroll";
+    canvas = doc.createElement("div");
+    canvas.className = "figure-canvas";
+    canvasScroll.appendChild(canvas);
+    card.appendChild(canvasScroll);
+  }
+
+  renderSourceLine(card, {
+    note: spec.note,
+    source: spec.source,
+    actions: buildDownloadActions(doc, spec, rows),
+  });
+  container.appendChild(card);
+
+  let currentOverlay: OverlayEl | null = null;
+  let lastSig = "";
+
+  const drawShared = (width: number): void => {
+    const sig = `s:${width}`;
+    if (sig === lastSig) return;
+    lastSig = sig;
+    let fig: FigureRenderResult;
+    try {
+      // Faceted SVG height grows with the row count so each pane row stays legible.
+      const tmpCols = sm.columns && sm.columns > 0 ? sm.columns : undefined;
+      fig = renderFigure(spec, rows, { width, height: FIXED_CHART_HEIGHT, columns: tmpCols });
+      const gridHeight = Math.max(FIXED_CHART_HEIGHT, fig.rows * 210);
+      if (gridHeight !== FIXED_CHART_HEIGHT) {
+        fig = renderFigure(spec, rows, { width, height: gridHeight, columns: tmpCols });
+      }
+    } catch (e) {
+      if (canvas) canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      return;
+    }
+    const svg = fig.combinedSvg!;
+    canvas!.replaceChildren(svg);
+    legendSlot.replaceChildren();
+    const handle = fig.legendItems
+      ? renderLegend(legendSlot, fig.legendItems, { svg, onHighlight: () => recolorNetLabels(svg) })
+      : null;
+    recolorNetLabels(svg);
+    if (handle) {
+      card.classList.add("is-selectable");
+      wireFigureSvg(svg, handle, fig);
+    } else {
+      card.classList.remove("is-selectable");
+    }
+    currentOverlay?._ro?.disconnect();
+    currentOverlay?.remove();
+    currentOverlay = attachYAxisOverlay(canvasScroll!, svg);
+  };
+
+  const drawPerPane = (outerWidth: number): void => {
+    const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → let renderFigure default
+    // Reflow: how many columns fit at >= PANE_MIN_WIDTH each.
+    const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (PANE_MIN_WIDTH + GRID_GAP)));
+    const cols = baseCols ? Math.min(baseCols, fitCols) : fitCols;
+    const paneW = Math.max(PANE_MIN_WIDTH, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
+    const sig = `p:${cols}:${paneW}`;
+    if (sig === lastSig) return;
+    lastSig = sig;
+    let fig: FigureRenderResult;
+    try {
+      fig = renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
+    } catch (e) {
+      if (grid) grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      return;
+    }
+    grid!.style.setProperty("--figure-cols", String(fig.columns));
+    grid!.replaceChildren();
+    for (const pane of fig.panes) {
+      const cell = doc.createElement("div");
+      cell.className = "figure-pane";
+      const title = doc.createElement("div");
+      title.className = "figure-pane-title";
+      title.textContent = pane.title;
+      cell.appendChild(title);
+      if (pane.svg) cell.appendChild(pane.svg);
+      grid!.appendChild(cell);
+    }
+    legendSlot.replaceChildren();
+    // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
+    const handle = fig.legendItems
+      ? renderLegend(legendSlot, fig.legendItems, {
+          svg: grid!,
+          onHighlight: () => { for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg); },
+        })
+      : null;
+    if (handle) {
+      card.classList.add("is-selectable");
+      for (const pane of fig.panes) {
+        if (!pane.svg) continue;
+        wireFigureSvg(pane.svg, handle, {
+          dataInScope: pane.dataInScope ?? [],
+          colors: pane.colors ?? new Map(),
+          dashedNames: pane.dashedNames ?? new Set(),
+          seriesLabels: fig.seriesLabels,
+          seriesOrder: pane.seriesOrder ?? [],
+          units: pane.units ?? fig.units,
+          tooltipXParse: pane.tooltipXParse,
+          tooltipXFormat: pane.tooltipXFormat,
+        });
+      }
+    } else {
+      card.classList.remove("is-selectable");
+    }
+  };
+
+  const draw = (w: number): void => { if (mode === "per-pane") drawPerPane(w); else drawShared(w); };
+
+  const initialWidth = card.clientWidth || opts.width || 720;
+  draw(initialWidth);
+
+  let resizeRaf: number | null = null;
+  let ro: ResizeObserver | undefined;
+  if (typeof ResizeObserver !== "undefined") {
+    ro = new ResizeObserver(() => {
+      if (resizeRaf !== null) return;
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = null;
+        draw(card.clientWidth || initialWidth);
+      });
+    });
+    ro.observe(card);
+  }
+
+  return () => {
+    ro?.disconnect();
+    if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     currentOverlay?._ro?.disconnect();
   };
 }

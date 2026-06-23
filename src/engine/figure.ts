@@ -113,7 +113,14 @@ export function renderFigure(
 
   // 2. Grid layout. columns = config else default; rows = ceil(n / columns). col = i % columns,
   //    row = floor(i / columns).
-  const columns = sm.columns && sm.columns > 0 ? sm.columns : defaultColumns(paneValues.length);
+  // Column count: a live-layer override (responsive reflow) wins, else the spec config, else
+  // the ≈ceil(sqrt(n)) default. Clamp to [1, paneValues.length].
+  const requestedColumns = opts.columns && opts.columns > 0
+    ? opts.columns
+    : sm.columns && sm.columns > 0
+      ? sm.columns
+      : defaultColumns(paneValues.length);
+  const columns = Math.max(1, Math.min(requestedColumns, paneValues.length));
   const gridRows = Math.ceil(paneValues.length / columns);
 
   const titles = sm.pane_titles ?? {};

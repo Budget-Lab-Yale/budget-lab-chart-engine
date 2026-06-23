@@ -136,6 +136,29 @@ body {
   visibility: hidden;
 }
 
+/* Small-multiples PER-PANE grid: a responsive CSS grid of mini-chart cells. The live layer
+   sets --figure-cols (reflowed by container width) and re-renders each pane's SVG at the
+   matching pane width. Each cell stacks a pane title above its mini-SVG. */
+.figure-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--figure-cols, 2), minmax(0, 1fr));
+  gap: 18px 16px;
+  width: 100%;
+}
+.figure-pane {
+  min-width: 0;
+}
+.figure-pane-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tbl-text-heading);
+  margin: 0 0 2px 0;
+}
+.figure-pane svg {
+  display: block;
+  max-width: 100%;
+}
+
 /* Scroll wrapper isolates horizontal overflow to the chart region, so the title/subtitle/
    source above and below keep wrapping to the card width. */
 .figure-canvas-scroll {

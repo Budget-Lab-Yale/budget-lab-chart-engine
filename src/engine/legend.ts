@@ -16,7 +16,9 @@ export interface LegendHandle {
 export function renderLegend(
   parent: HTMLElement,
   items: LegendItem[],
-  { svg, onHighlight }: { svg?: SVGSVGElement; onHighlight?: () => void } = {},
+  // `svg` is the highlight ROOT queried for `[data-series]` on dim — an SVG for a single
+  // chart, or a container (e.g. the figure grid) so dimming spans every pane's SVG.
+  { svg, onHighlight }: { svg?: Element; onHighlight?: () => void } = {},
 ): LegendHandle | null {
   if (!items?.length) return null;
 

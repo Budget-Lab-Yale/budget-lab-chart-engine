@@ -1127,3 +1127,84 @@ describe("mountChart two-way selection wiring", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// mountChart — small-multiples figures (B6)
+
+describe("mountChart small multiples", () => {
+  const FACET_ROWS: TidyRow[] = [];
+  for (const region of ["Northeast", "Midwest", "South", "West"]) {
+    for (let y = 2020; y <= 2023; y++) {
+      FACET_ROWS.push({ facet: region, series: "A", time: `${y}-01-01`, value: String(2 + (y - 2020)) } as TidyRow);
+      FACET_ROWS.push({ facet: region, series: "B", time: `${y}-01-01`, value: String(5 + (y - 2020)) } as TidyRow);
+    }
+  }
+  const SHARED_SPEC: ChartSpec = {
+    chartType: "line",
+    title: "Regions",
+    subtitle: "Percent",
+    xAxisType: "temporal",
+    series_order: ["A", "B"],
+    data: "inline",
+    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+  };
+  const PERPANE_SPEC: ChartSpec = {
+    ...SHARED_SPEC,
+    small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
+  };
+
+  it("shared mode mounts ONE faceted svg in the canvas + a top legend", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SHARED_SPEC, rows: FACET_ROWS, width: 800 });
+    expect(container.querySelector(".figure-card")).not.toBeNull();
+    // Exactly one combined SVG, in the scroll canvas (not a grid).
+    expect(container.querySelector(".figure-grid")).toBeNull();
+    const svgs = container.querySelectorAll(".figure-canvas svg");
+    expect(svgs.length).toBe(1);
+    // Top legend present (2 interactive series) and selection wired.
+    expect(container.querySelector(".tbl-legend")).not.toBeNull();
+    expect(container.querySelector(".figure-card")!.classList.contains("is-selectable")).toBe(true);
+  });
+
+  it("per-pane mode builds a .figure-grid with one titled cell + svg per pane", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: PERPANE_SPEC, rows: FACET_ROWS, width: 800 });
+    const grid = container.querySelector(".figure-grid");
+    expect(grid).not.toBeNull();
+    const panes = grid!.querySelectorAll(".figure-pane");
+    expect(panes.length).toBe(4); // 4 regions
+    // Each pane has a title and its own SVG.
+    panes.forEach((p) => {
+      expect(p.querySelector(".figure-pane-title")).not.toBeNull();
+      expect(p.querySelector("svg")).not.toBeNull();
+    });
+    // --figure-cols set for the responsive grid.
+    expect((grid as HTMLElement).style.getPropertyValue("--figure-cols")).not.toBe("");
+    // No combined single canvas SVG in per-pane mode.
+    expect(container.querySelector(".figure-canvas")).toBeNull();
+  });
+
+  it("per-pane legend dims [data-series] across ALL pane svgs (grid as highlight root)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: PERPANE_SPEC, rows: FACET_ROWS, width: 800 });
+    // Pin series "A" via its legend button.
+    const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="A"]')!;
+    expect(btn).not.toBeNull();
+    btn.click();
+    // Every pane's "B" path dims; "A" stays bright — across all panes.
+    const bPaths = container.querySelectorAll('.figure-grid path[data-series="B"]');
+    expect(bPaths.length).toBeGreaterThan(1); // one per pane
+    bPaths.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(true));
+    container.querySelectorAll('.figure-grid path[data-series="A"]').forEach((p) =>
+      expect(p.classList.contains("tbl-dimmed")).toBe(false),
+    );
+  });
+
+  it("does not throw and produces a card for a single-pane figure", () => {
+    const container = document.createElement("div");
+    const oneRowSpec: ChartSpec = { ...SHARED_SPEC, small_multiples: { facet_field: "facet", mode: "shared" } };
+    const oneRegion = FACET_ROWS.filter((r) => r["facet"] === "Northeast");
+    expect(() => mountChart(container, { spec: oneRowSpec, rows: oneRegion, width: 600 })).not.toThrow();
+    expect(container.querySelector(".figure-card")).not.toBeNull();
+  });
+});

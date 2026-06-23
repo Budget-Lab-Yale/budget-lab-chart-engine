@@ -28,6 +28,9 @@ export interface RenderOptions {
    *  thinner pane stroke (TBL.strokeWidth.pane). Set by renderFigure for BOTH shared- and
    *  per-pane panes; absent → single chart → default stroke. Threaded into MarkContext.pane. */
   pane?: boolean;
+  /** Small-multiples: override the figure's grid column count (else spec.small_multiples.columns
+   *  or the ≈ceil(sqrt(n)) default). The live layer passes this for responsive col reflow. */
+  columns?: number;
 }
 
 export interface LegendItem {
