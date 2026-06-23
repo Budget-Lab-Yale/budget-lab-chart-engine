@@ -3,10 +3,11 @@
 // (col,row) grid. BOTH modes use the SAME per-pane composition (each pane is its own single
 // frame with its own crosshair / dimming / selection). They differ only in the y-scale:
 //   - per-pane: each pane computes its own y-domain (and shows its own y-tick labels).
-//   - shared:   ALL panes use ONE y-domain (computed once over all in-scope rows), and y-tick
+//   - shared:   ALL panes use ONE y-domain (the union of the per-pane domains), and y-tick
 //               LABELS show only on the leftmost column (col>0 panes hide them; gridlines +
 //               plot area + left margin stay so panes remain aligned).
-// SHARED mode is line-only (the guard below); per-pane supports line/bar/stacked.
+// BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
+// bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -143,17 +144,6 @@ export function renderFigure(
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
 
-  // SHARED mode is line-only (B8): shared faceting uses Plot `fx` for the grid columns, but
-  // grouped bars also use `fx` for their series grouping (collision), and faceted bar chrome
-  // is a larger effort — deferred. PER-PANE mode renders each pane as an independent single
-  // frame (the grid is CSS-composed), so all bar types work like a normal per-pane chart with
-  // no faceting collision; the guard below is scoped to the shared branch.
-  if (mode === "shared" && spec.chartType !== "line") {
-    throw new Error(
-      "shared-mode small multiples support line charts only; use mode: per-pane for bar/stacked",
-    );
-  }
-
   const facetField = sm.facet_field;
 
   // 1. Partition + order panes. Distinct facet values in data-encounter order, then reorder +
@@ -262,14 +252,22 @@ export function renderFigure(
   // (The old Plot-faceting path — one combined SVG, collapseFacetGridChrome, facet-aware
   // crosshair — is retired; combinedSvg is now undefined for shared mode too.)
 
-  // 1. Shared y-domain: probe-render over the IN-SCOPE rows (only facet values in paneValues —
-  //    so pane_order-excluded panes don't inflate the shared scale) and read the computed domain.
-  //    This reuses renderPane's full auto/hard/bar resolution, so the shared domain is exactly
-  //    what a single chart over those rows would use. The probe SVG is discarded.
-  const paneValueSet = new Set(paneValues);
-  const inScopeRows = rows.filter((r) => paneValueSet.has(r[facetField] as string));
-  const probe = renderPane(spec, inScopeRows, { ...opts, pane: true }, "probe");
-  const sharedYDomain = probe.yDomain;
+  // 1. Shared y-domain: probe EACH pane independently and UNION the per-pane domains. A single
+  //    combined probe over all in-scope rows would, for STACKED bars, sum same-category rows
+  //    ACROSS panes (panes share the x-categories) and inflate the scale. Probing per pane and
+  //    unioning is correct for every chart type, and — because computeYAxis's nice-rounding is
+  //    monotonic — yields exactly the combined-probe domain for line/single-series/grouped bars,
+  //    so those stay unchanged. Each per-pane probe already applies the bar zero-baseline +
+  //    value-label headroom, so the union endpoints carry it. Probe SVGs are discarded.
+  let yLo = Infinity;
+  let yHi = -Infinity;
+  for (const value of paneValues) {
+    const paneRows = rows.filter((r) => (r[facetField] as string) === value);
+    const [lo, hi] = renderPane(spec, paneRows, { ...opts, pane: true }, "probe").yDomain;
+    if (lo < yLo) yLo = lo;
+    if (hi > yHi) yHi = hi;
+  }
+  const sharedYDomain: [number, number] = [yLo, yHi];
 
   // 2. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
   //    columns drop the ~44px label gutter for a small left margin; column OUTER widths are made

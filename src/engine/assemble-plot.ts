@@ -245,8 +245,9 @@ export function assemblePlot({
       ...(marginRight != null ? { marginRight } : {}),
       // Horizontal bars supply a responsive left gutter sized to their longest category
       // label (axes.horizontalLeftGutter); vertical charts leave it undefined → default. The
-      // shared-mode small-multiples `marginLeft` override wins when present (line-only, so it
-      // never coexists with the horizontal-bar gutter).
+      // shared-mode small-multiples `marginLeft` override wins when present (the label-less
+      // columns' small gutter); it applies to vertical panes (line/bar/stacked) — horizontal
+      // bars carry a category gutter and aren't used in shared mode.
       ...(marginLeft != null
         ? { marginLeft }
         : layers.marginLeft != null

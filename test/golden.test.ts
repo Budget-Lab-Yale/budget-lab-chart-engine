@@ -808,17 +808,96 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
     expect(a).toBe(b);
   });
 
-  it("renderFigure throws for bar/stacked SHARED small_multiples (line-only guard, shared-only)", () => {
-    const rows = parseCsv("./fixtures/facet-regions.csv");
-    // SHARED mode is line-only. Per-pane is the path for bar/stacked.
-    const barSharedSpec: ChartSpec = { ...FIGURE_SPEC, chartType: "bar" };
-    expect(() => renderFigure(barSharedSpec, rows, { document })).toThrow(
-      /shared-mode small multiples support line charts only/,
-    );
-    const stackedSharedSpec: ChartSpec = { ...FIGURE_SPEC, chartType: "stacked" };
-    expect(() => renderFigure(stackedSharedSpec, rows, { document })).toThrow(
-      /shared-mode small multiples support line charts only/,
-    );
+  it("renders bar SHARED small multiples (shared y-scale, y-labels left column only)", async () => {
+    // SHARED mode now supports every chart type: each pane is an independent single frame, so a
+    // grouped bar's own `fx` faceting never collides with the CSS-composed grid.
+    const rows = parseCsv("./fixtures/figure-bar-perpane.csv");
+    const barShared: ChartSpec = {
+      chartType: "bar",
+      title: "Effect by year, by region",
+      subtitle: "Percentage points",
+      xAxisType: "categorical",
+      data: "figure-bar-perpane.csv",
+      small_multiples: {
+        facet_field: "facet",
+        columns: 2,
+        mode: "shared",
+        pane_order: ["Northeast", "Midwest", "South", "West"],
+        pane_titles: { Northeast: "Northeast", Midwest: "Midwest", South: "South", West: "West" },
+      },
+    };
+    const fig = renderFigure(barShared, rows, { width: 720, height: 460, document });
+
+    expect(fig.mode).toBe("shared");
+    expect(fig.panes.length).toBe(4);
+    // Each pane keeps its own bars (3 categories) — no faceting collision with the grid.
+    fig.panes.forEach((p) => {
+      expect((p.svg as SVGSVGElement).querySelectorAll('g[aria-label="bar"] rect').length).toBe(3);
+    });
+    // SHARED y-scale: the two left-column panes (0,2) carry the SAME y-tick values.
+    const left0 = yTickLabels(fig.panes[0]!.svg as SVGSVGElement);
+    expect(left0.length).toBeGreaterThan(0);
+    expect(yTickLabels(fig.panes[2]!.svg as SVGSVGElement)).toEqual(left0);
+    // y-tick LABELS only on the leftmost column; the right column (panes 1,3) drops them.
+    expect(yTickLabels(fig.panes[1]!.svg as SVGSVGElement)).toEqual([]);
+    expect(yTickLabels(fig.panes[3]!.svg as SVGSVGElement)).toEqual([]);
+    // Equal inner DATA width across the row (same bar apparent width); col 0 outer width wider.
+    const dataW = (p: FigurePane): number => {
+      const svg = p.svg as SVGSVGElement;
+      return (
+        Number(svg.getAttribute("width")) -
+        Number(svg.dataset.marginLeft) -
+        Number(svg.dataset.marginRight)
+      );
+    };
+    expect(dataW(fig.panes[1]!)).toBe(dataW(fig.panes[0]!));
+    expect(fig.columnWidths![0]).toBeGreaterThan(fig.columnWidths![1]!);
+    // Labeled left column keeps the 44px gutter; label-less columns use the small 2px margin.
+    expect(Number((fig.panes[0]!.svg as SVGSVGElement).dataset.marginLeft)).toBe(44);
+    expect(Number((fig.panes[1]!.svg as SVGSVGElement).dataset.marginLeft)).toBe(2);
+
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-bar-shared.golden.svg");
+  });
+
+  it("shared stacked y-domain is the per-pane UNION, not the cross-pane sum", () => {
+    // A single combined probe over all rows would, for stacked, sum same-category stacks ACROSS
+    // panes and inflate the scale. The shared domain must instead equal the UNION of the panes'
+    // independent (per-pane) domains: same top/bottom as the widest single pane, never the sum.
+    const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
+    const base: ChartSpec = {
+      chartType: "stacked",
+      title: "Contributions to the net effect, by plan",
+      subtitle: "Percentage points",
+      xAxisType: "categorical",
+      series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
+      data: "figure-stacked-perpane.csv",
+      small_multiples: {
+        facet_field: "facet",
+        columns: 2,
+        pane_order: ["Plan A", "Plan B"],
+        pane_titles: { "Plan A": "Plan A", "Plan B": "Plan B" },
+      },
+    };
+    const opts = { width: 720, height: 360, document };
+    const shared = renderFigure({ ...base, small_multiples: { ...base.small_multiples!, mode: "shared" } }, rows, opts);
+    const perpane = renderFigure({ ...base, small_multiples: { ...base.small_multiples!, mode: "per-pane" } }, rows, opts);
+
+    const top = (svg: SVGSVGElement): number => Math.max(...yTickLabels(svg).map((t) => parseFloat(t)));
+    const bot = (svg: SVGSVGElement): number => Math.min(...yTickLabels(svg).map((t) => parseFloat(t)));
+    // Per-pane domains (both panes labeled in per-pane mode).
+    const ppTop = Math.max(top(perpane.panes[0]!.svg as SVGSVGElement), top(perpane.panes[1]!.svg as SVGSVGElement));
+    const ppBot = Math.min(bot(perpane.panes[0]!.svg as SVGSVGElement), bot(perpane.panes[1]!.svg as SVGSVGElement));
+    // Shared domain (read from the labeled left-column pane 0).
+    const shTop = top(shared.panes[0]!.svg as SVGSVGElement);
+    const shBot = bot(shared.panes[0]!.svg as SVGSVGElement);
+
+    expect(shared.mode).toBe("shared");
+    expect(shTop).toBe(ppTop); // union top == widest single pane, NOT the summed (~2x) total
+    expect(shBot).toBe(ppBot);
+    // Both panes share one scale: left column pane 2-of-row? here only 2 panes — pane 1 hides
+    // labels but renders the same bars under the same (shared) gridlines.
+    expect((shared.panes[1]!.svg as SVGSVGElement).querySelectorAll('g[aria-label="bar"] rect').length)
+      .toBe((shared.panes[0]!.svg as SVGSVGElement).querySelectorAll('g[aria-label="bar"] rect').length);
   });
 
   it("render() dispatches: small_multiples -> figure, else -> single chart", () => {
