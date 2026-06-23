@@ -60,6 +60,20 @@ export type DataSource =
       map?: { timeField: string; seriesField: string; valueField: string };
     };
 
+export interface SmallMultiplesConfig {
+  /** Tidy-data column whose distinct values split the panes. */
+  facet_field: string;
+  /** Grid columns. Default derived later (≈ ceil(sqrt(n)), capped) — not enforced here. */
+  columns?: number;
+  /** "shared": one y-scale, y-labels left column only (default).
+   *  "per-pane": each pane its own y-scale/units. */
+  mode?: "shared" | "per-pane";
+  /** Pane render order + inclusion filter (like series_order is for series). */
+  pane_order?: string[];
+  /** facet value → display title above the pane (falls back to the raw value). */
+  pane_titles?: Record<string, string>;
+}
+
 export interface ChartSpec {
   chartType: ChartType;
 
@@ -117,6 +131,9 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
    */
   legendPosition?: "top" | "right";
+
+  // Small multiples (multi-panel); per-pane base chart type stays `chartType`.
+  small_multiples?: SmallMultiplesConfig;
 
   // Data
   data: DataSource;

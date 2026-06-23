@@ -92,6 +92,19 @@ const DATA_SOURCE = {
   ],
 } as const;
 
+const SMALL_MULTIPLES = {
+  type: "object",
+  additionalProperties: false,
+  required: ["facet_field"],
+  properties: {
+    facet_field: { type: "string", minLength: 1 },
+    columns: { type: "integer", minimum: 1 },
+    mode: { type: "string", enum: ["shared", "per-pane"] },
+    pane_order: { type: "array", items: { type: "string" } },
+    pane_titles: { type: "object", additionalProperties: { type: "string" } },
+  },
+} as const;
+
 export const CHART_SPEC_SCHEMA = {
   $id: "https://budget-lab-yale.github.io/schemas/chart-spec.json",
   type: "object",
@@ -156,6 +169,9 @@ export const CHART_SPEC_SCHEMA = {
     },
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
+
+    // Small multiples (multi-panel)
+    small_multiples: SMALL_MULTIPLES,
 
     // Data
     data: DATA_SOURCE,

@@ -100,6 +100,53 @@ describe("validateSpec (structural)", () => {
   });
 });
 
+describe("small_multiples config", () => {
+  it("accepts a spec with a full small_multiples block", () => {
+    const r = validateSpec({
+      ...VALID,
+      small_multiples: {
+        facet_field: "region",
+        mode: "shared",
+        columns: 3,
+        pane_order: ["east", "west"],
+        pane_titles: { east: "East Region", west: "West Region" },
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects small_multiples missing facet_field (required)", () => {
+    const r = validateSpec({
+      ...VALID,
+      small_multiples: { mode: "shared" },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/facet_field/);
+  });
+
+  it("rejects a bad mode enum value", () => {
+    const r = validateSpec({
+      ...VALID,
+      small_multiples: { facet_field: "region", mode: "grid" },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/shared, per-pane/);
+  });
+
+  it("rejects an unknown key inside small_multiples", () => {
+    const r = validateSpec({
+      ...VALID,
+      small_multiples: { facet_field: "region", bogusKey: true },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogusKey/);
+  });
+
+  it("a spec without small_multiples validates exactly as before (backward-compat)", () => {
+    expect(validateSpec(VALID)).toEqual({ valid: true, errors: [] });
+  });
+});
+
 describe("validateChartData (cross-reference + CSV format)", () => {
   it("passes valid rows", () => {
     expect(validateChartData(VALID, ROWS)).toEqual({ valid: true, errors: [] });
