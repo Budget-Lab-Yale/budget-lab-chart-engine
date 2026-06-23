@@ -87,8 +87,16 @@ export function collapseFacetChrome(
     return groups.length ? [groups[0] as SVGGElement] : [];
   };
 
-  // 1. Y-tick labels: one set at the left margin.
-  collapseDuplicateGroups(Y_TICK_LABEL_CLASS);
+  // 1. Y-tick labels: keep ONE set (the leftmost facet's) and strip its facet x-translate so
+  //    the labels sit at the absolute left edge, matching the non-faceted band y-axis. Plot
+  //    renders the per-facet label copies INSIDE each facet's `<g transform="translate(tx,0)">`;
+  //    keeping the first leaves it shifted right by the leftmost facet's origin (tx). The
+  //    label text's own dx and the parent offset already place it correctly relative to x=0,
+  //    so removing the facet tx (preserving any ty) lands it at the left edge like single-series.
+  const yLabelGroup = collapseDuplicateGroups(Y_TICK_LABEL_CLASS)[0];
+  if (yLabelGroup) {
+    yLabelGroup.setAttribute("transform", `translate(0,${readTranslateY(yLabelGroup)})`);
+  }
 
   // 2 + 3. Gridlines and zero baseline: collapse to the leftmost facet, then stretch its
   // lines to full plot width.
