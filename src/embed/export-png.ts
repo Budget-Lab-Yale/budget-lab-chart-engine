@@ -3,7 +3,8 @@
 
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
-import { renderChart } from "../engine/index.js";
+import { renderChart, renderFigure } from "../engine/index.js";
+import type { FigureRenderResult } from "../engine/index.js";
 import { TBL } from "../engine/theme.js";
 import { LOGO_DATA_URL, FIGTREE_FONT_FACE, LOGO_ASPECT } from "./assets.js";
 
@@ -21,6 +22,13 @@ const LOGO_W = 150;
 const LOGO_H = LOGO_W / LOGO_ASPECT; // 37.5 (logo viewBox is 216×54 = 4:1)
 const LOGO_BASELINE_FRAC = 0.87; // wordmark baseline within the logo box
 const SCALE = 2;
+
+// Small-multiples figure layout tokens.
+const SHARED_ROW_H = 200; // budgeted px per facet ROW (shared mode) above the default avail
+const PANE_CHART_H = 190; // per-pane mini-chart height (per-pane mode)
+const PANE_TITLE_H = 18; // per-pane title band height
+const COL_GAP = 20; // horizontal gap between per-pane grid cells
+const ROW_GAP = 18; // vertical gap between per-pane grid rows
 
 // Typography weights (matching styles.ts Figtree weight scale)
 const W_BODY = 500;
@@ -184,9 +192,14 @@ function drawLegend(
  * number belongs to the publication context, not the standalone image).
  */
 export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement {
+  const isFigure = spec.small_multiples != null;
+
   // Pre-render to read legend items + axis title (rendered for real again below at the
-  // computed height).
-  const meta = renderChart(spec, rows, { width: INNER_W });
+  // computed height). For a figure the legend + x-axis title come from renderFigure (the
+  // figure-level legend), not from a single chart.
+  const meta = isFigure
+    ? renderFigure(spec, rows, { width: INNER_W })
+    : renderChart(spec, rows, { width: INNER_W });
   const legendItems = meta.legendItems ?? [];
   const xAxisTitle = meta.xAxisTitle ?? "";
 
@@ -207,7 +220,10 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   style.textContent = FIGTREE_FONT_FACE;
   defs.appendChild(style);
   root.appendChild(defs);
-  root.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: H, fill: "#FFFFFF" }));
+  // Background rect: painted first so it stays behind everything. Its height is patched to the
+  // (possibly extended) figure height once known; the single-chart path keeps the fixed H.
+  const bgRect = svgEl("rect", { x: 0, y: 0, width: W, height: H, fill: "#FFFFFF" });
+  root.appendChild(bgRect);
 
   // --- top chrome: title (+ logo), subtitle, legend ---
   const titleFirstBaseline = MARGIN + 22;
@@ -250,18 +266,80 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
   if (source) bottomH += note ? 15 : 18;
   bottomH += MARGIN - 15; // bottom padding
-  const chartHeight = Math.max(160, H - chartTop - bottomH);
 
-  // Chart, sized to fill.
-  const { svg: chartSvg } = renderChart(spec, rows, { width: INNER_W, height: chartHeight });
-  chartSvg.setAttribute("x", String(MARGIN));
-  chartSvg.setAttribute("y", String(chartTop));
-  chartSvg.setAttribute("width", String(INNER_W));
-  chartSvg.setAttribute("height", String(chartHeight));
-  root.appendChild(chartSvg);
+  // Chart region. `contentHeight` is the height occupied by the chart/figure body below
+  // `chartTop`; for the single chart it fills the fixed frame, for a figure it can extend it.
+  let contentHeight: number;
+  if (!isFigure) {
+    // Single chart — unchanged: fills the height left after the chrome inside the 750 frame.
+    contentHeight = Math.max(160, H - chartTop - bottomH);
+    const { svg: chartSvg } = renderChart(spec, rows, { width: INNER_W, height: contentHeight });
+    chartSvg.setAttribute("x", String(MARGIN));
+    chartSvg.setAttribute("y", String(chartTop));
+    chartSvg.setAttribute("width", String(INNER_W));
+    chartSvg.setAttribute("height", String(contentHeight));
+    root.appendChild(chartSvg);
+  } else {
+    const figMeta = meta as FigureRenderResult;
+    const sm = spec.small_multiples!;
+    const mode = sm.mode ?? "shared";
+    if (mode === "shared") {
+      // Shared figure: ONE faceted SVG framed like the single chart, but its height grows with
+      // the row count so >2 rows aren't cramped. defaultAvail keeps a ≤2-row figure at the 750
+      // frame; more rows extend it.
+      const defaultAvail = Math.max(160, H - chartTop - bottomH);
+      const gridHeight = Math.max(defaultAvail, (figMeta.rows ?? 1) * SHARED_ROW_H);
+      const fig = renderFigure(spec, rows, { width: INNER_W, height: gridHeight });
+      const combined = fig.combinedSvg!;
+      combined.setAttribute("x", String(MARGIN));
+      combined.setAttribute("y", String(chartTop));
+      combined.setAttribute("width", String(INNER_W));
+      combined.setAttribute("height", String(gridHeight));
+      root.appendChild(combined);
+      contentHeight = gridHeight;
+    } else {
+      // Per-pane figure: lay the N mini-SVGs into a (cols × rows) grid, each with a pane-title
+      // text above it. Render the panes at the exact cell width so they fill their column.
+      const cols = figMeta.columns;
+      const gridRows = figMeta.rows;
+      const paneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
+      const fig = renderFigure(spec, rows, {
+        width: paneW,
+        height: PANE_CHART_H,
+        columns: cols,
+      });
+      const gridTop = chartTop;
+      fig.panes.forEach((pane, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = MARGIN + col * (paneW + COL_GAP);
+        const y = gridTop + row * (PANE_TITLE_H + PANE_CHART_H + ROW_GAP);
+        root.appendChild(
+          textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
+        );
+        if (pane.svg) {
+          const ps = pane.svg;
+          ps.setAttribute("x", String(x));
+          ps.setAttribute("y", String(y + PANE_TITLE_H));
+          ps.setAttribute("width", String(paneW));
+          ps.setAttribute("height", String(PANE_CHART_H));
+          root.appendChild(ps);
+        }
+      });
+      contentHeight =
+        gridRows * (PANE_TITLE_H + PANE_CHART_H) + (gridRows - 1) * ROW_GAP;
+    }
+  }
+
+  // Figures extend the fixed 750 frame so many panes aren't cramped; the single chart stays at H.
+  const H_eff = isFigure ? Math.max(H, chartTop + contentHeight + bottomH) : H;
+  if (H_eff !== H) {
+    root.setAttribute("height", String(H_eff));
+    bgRect.setAttribute("height", String(H_eff));
+  }
 
   // --- bottom chrome: x-axis title, note, source ---
-  let by = chartTop + chartHeight;
+  let by = chartTop + contentHeight;
   if (xAxisTitle) {
     by += 14;
     root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_BODY, fill: AXIS, anchor: "middle" }));

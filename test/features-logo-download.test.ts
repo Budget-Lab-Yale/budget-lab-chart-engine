@@ -73,3 +73,91 @@ describe("buildExportSvg — composition", () => {
     expect(svg.textContent ?? "").not.toContain("Figure 9");
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildExportSvg — small-multiples figures (B7)
+
+describe("buildExportSvg — small multiples", () => {
+  // 4 facets × 2 series, enough for a 2x2 grid (default) or a many-row figure.
+  const FACET_ROWS: TidyRow[] = [];
+  for (const region of ["Northeast", "Midwest", "South", "West"]) {
+    for (let y = 2020; y <= 2023; y++) {
+      FACET_ROWS.push({ facet: region, series: "A", time: `${y}-01-01`, value: String(2 + (y - 2020)) } as TidyRow);
+      FACET_ROWS.push({ facet: region, series: "B", time: `${y}-01-01`, value: String(5 + (y - 2020)) } as TidyRow);
+    }
+  }
+  // 6 facets for the "extended height with many rows" cases.
+  const MANY_ROWS: TidyRow[] = [];
+  for (const region of ["R1", "R2", "R3", "R4", "R5", "R6"]) {
+    for (let y = 2020; y <= 2023; y++) {
+      MANY_ROWS.push({ facet: region, series: "A", time: `${y}-01-01`, value: String(2 + (y - 2020)) } as TidyRow);
+      MANY_ROWS.push({ facet: region, series: "B", time: `${y}-01-01`, value: String(5 + (y - 2020)) } as TidyRow);
+    }
+  }
+  const SHARED_SPEC: ChartSpec = {
+    chartType: "line",
+    title: "Regions",
+    subtitle: "Percent",
+    source: "Test Source",
+    note: "Test note.",
+    xAxisType: "temporal",
+    series_order: ["A", "B"],
+    data: "inline",
+    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+  };
+  const PERPANE_SPEC: ChartSpec = {
+    ...SHARED_SPEC,
+    small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
+  };
+
+  it("shared figure: one framed faceted svg + chrome, height >= 750", () => {
+    const svg = buildExportSvg(SHARED_SPEC, FACET_ROWS);
+    expect(svg.tagName.toLowerCase()).toBe("svg");
+    // Exactly one chart svg (the faceted combinedSvg), plus the chrome.
+    const inner = svg.querySelectorAll("svg");
+    expect(inner.length).toBe(1);
+    // Faceted line marks are present.
+    expect(inner[0]!.querySelectorAll("path").length).toBeGreaterThan(0);
+    // Chrome: title, legend, source.
+    expect(svg.textContent).toContain("Regions");
+    expect(svg.textContent).toContain("Test Source");
+    expect(svg.querySelector(".tbl-legend, [class*='legend']") !== null || svg.textContent?.includes("A")).toBe(true);
+    expect(Number(svg.getAttribute("height"))).toBeGreaterThanOrEqual(750);
+  });
+
+  it("shared figure with many rows extends the frame beyond 750", () => {
+    // 6 panes at 2 cols → 3 rows → 3*200 = 600 grid; chartTop+grid+bottom > 750.
+    const svg = buildExportSvg({ ...SHARED_SPEC }, MANY_ROWS);
+    expect(Number(svg.getAttribute("height"))).toBeGreaterThan(750);
+    // Background rect tracks the extended height (stays behind, first painted).
+    const bg = svg.querySelector("rect");
+    expect(bg?.getAttribute("height")).toBe(svg.getAttribute("height"));
+  });
+
+  it("per-pane figure: N pane titles + N pane svgs laid in a grid", () => {
+    const svg = buildExportSvg(PERPANE_SPEC, FACET_ROWS);
+    // One standalone svg per pane (4 regions).
+    const inner = svg.querySelectorAll("svg");
+    expect(inner.length).toBe(4);
+    // Each pane title text is present.
+    for (const region of ["Northeast", "Midwest", "South", "West"]) {
+      expect(svg.textContent).toContain(region);
+    }
+    // Panes are laid in a grid: at 2 cols the second pane sits to the right of the first.
+    const xs = Array.from(inner).map((s) => Number(s.getAttribute("x")));
+    expect(new Set(xs).size).toBeGreaterThan(1); // more than one distinct column x
+  });
+
+  it("per-pane figure with >4 panes extends the frame beyond 750", () => {
+    // 6 panes at 2 cols → 3 rows → grid taller than the default avail.
+    const svg = buildExportSvg(PERPANE_SPEC, MANY_ROWS);
+    expect(svg.querySelectorAll("svg").length).toBe(6);
+    expect(Number(svg.getAttribute("height"))).toBeGreaterThan(750);
+  });
+
+  it("single chart export stays at the fixed 750 frame (unchanged)", () => {
+    const svg = buildExportSvg(SPEC, ROWS);
+    expect(svg.getAttribute("width")).toBe("1000");
+    expect(svg.getAttribute("height")).toBe("750");
+  });
+});
