@@ -121,7 +121,7 @@ describe("small_multiples config", () => {
       small_multiples: { mode: "shared" },
     });
     expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/facet_field/);
+    expect(r.errors.join("\n")).toMatch(/small_multiples.*facet_field/);
   });
 
   it("rejects a bad mode enum value", () => {
@@ -189,6 +189,47 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     const r = validateChartData(spec, ROWS);
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/confidence_bands references a "lo" column/);
+  });
+
+  it("flags small_multiples.facet_field not present as a data column", () => {
+    const spec: ChartSpec = {
+      ...VALID,
+      small_multiples: { facet_field: "region", mode: "shared" },
+    };
+    const r = validateChartData(spec, ROWS);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/small_multiples\.facet_field.*"region".*no such column/);
+  });
+
+  it("flags small_multiples.pane_order with a value absent from the facet column", () => {
+    const rows: TidyRow[] = [
+      { time: "2021-01-01", series: "a", value: "1", region: "east" },
+      { time: "2021-02-01", series: "a", value: "2", region: "west" },
+    ];
+    const spec: ChartSpec = {
+      ...VALID,
+      small_multiples: { facet_field: "region", mode: "shared", pane_order: ["east", "typo"] },
+    };
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/pane_order names panes \["typo"\]/);
+  });
+
+  it("passes a valid small_multiples facet config", () => {
+    const rows: TidyRow[] = [
+      { time: "2021-01-01", series: "a", value: "1", region: "east" },
+      { time: "2021-02-01", series: "a", value: "2", region: "west" },
+    ];
+    const spec: ChartSpec = {
+      ...VALID,
+      small_multiples: {
+        facet_field: "region",
+        mode: "shared",
+        pane_order: ["east", "west"],
+        pane_titles: { east: "East Region", west: "West Region" },
+      },
+    };
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
   });
 });
 

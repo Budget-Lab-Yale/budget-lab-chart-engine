@@ -32,7 +32,7 @@ function formatAjvError(e: ErrorObject): string {
     return `${path}: ${e.message}${allowed ? ` (allowed: ${allowed})` : ""}`;
   }
   if (e.keyword === "required") {
-    return `(root): missing required property "${e.params.missingProperty}"`;
+    return `${path}: missing required property "${e.params.missingProperty}"`;
   }
   return `${path}: ${e.message ?? "invalid"}`;
 }
@@ -149,6 +149,36 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       errors.push(
         `confidence_bands names series ${JSON.stringify(b.series)} not found in the data (data series: ${knownSeries})`,
       );
+    }
+  }
+
+  // Cross-reference: small_multiples facet_field must exist as a column; pane_order /
+  // pane_titles keys must correspond to actual distinct values in that column.
+  if (spec.small_multiples) {
+    const { facet_field, pane_order, pane_titles } = spec.small_multiples;
+    if (!columns.has(facet_field)) {
+      errors.push(
+        `config/data mismatch: small_multiples.facet_field is "${facet_field}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
+      );
+    } else {
+      const facetValues = new Set(rows.map((r) => r[facet_field] as string));
+      const knownFacets = JSON.stringify([...facetValues].sort());
+      if (pane_order) {
+        const unknown = pane_order.filter((v) => !facetValues.has(v));
+        if (unknown.length) {
+          errors.push(
+            `small_multiples.pane_order names panes ${JSON.stringify(unknown)} not found in facet column "${facet_field}" (data values: ${knownFacets})`,
+          );
+        }
+      }
+      if (pane_titles) {
+        const unknown = Object.keys(pane_titles).filter((v) => !facetValues.has(v));
+        if (unknown.length) {
+          errors.push(
+            `small_multiples.pane_titles names panes ${JSON.stringify(unknown)} not found in facet column "${facet_field}" (data values: ${knownFacets})`,
+          );
+        }
+      }
     }
   }
 
