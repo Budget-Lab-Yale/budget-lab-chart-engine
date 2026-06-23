@@ -199,16 +199,18 @@ body {
 }
 
 /* X-axis title — sticky + centered in the visible viewport regardless of horizontal scroll. */
+/* X- and y-axis titles share one type treatment (12px semibold, axis color); they differ only
+ * in placement — x centered below the plot, y left-aligned above it. The negative top margin on
+ * the x-title absorbs the SVG's bottom whitespace below the tick labels so the title sits close
+ * to them (not floating well below). */
 .figure-x-axis-title {
   position: sticky;
   left: 0;
-  margin: 6px 0 0;
-  font: var(--tw-body) 11.5px/1.3 var(--tbl-font-sans);
+  margin: -3px 0 0;
+  font: var(--tw-semi) 12px/1.3 var(--tbl-font-sans);
   color: var(--tbl-text-axis);
   text-align: center;
 }
-/* Y-axis title: a short horizontal caption left-aligned just above the plot (above the top
- * tick). Coexists with the units subtitle. */
 .figure-y-axis-title {
   margin: 0 0 4px;
   font: var(--tw-semi) 12px/1.3 var(--tbl-font-sans);

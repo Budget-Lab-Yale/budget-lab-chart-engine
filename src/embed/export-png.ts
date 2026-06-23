@@ -347,7 +347,7 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   let by = chartTop + contentHeight;
   if (xAxisTitle) {
     by += 14;
-    root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_BODY, fill: AXIS, anchor: "middle" }));
+    root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
   }
   if (noteLines.length) {
     by = drawLines(root, noteLines, MARGIN, by + 18, 15, { size: 11, weight: W_BODY, fill: MUTED });
