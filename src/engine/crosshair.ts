@@ -435,7 +435,7 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
   } catch {
     return;
   }
-  if (!fx?.range || !fy?.range || !xS?.range) return;
+  if (!fx?.range || !fy?.range || !xS?.range || !yS?.range) return;
 
   const cells = computeFacetCells(
     fx,
@@ -489,7 +489,9 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
 
   const bisect = d3.bisector((d: number) => d).left;
   const NS = "http://www.w3.org/2000/svg";
-  svgEl.querySelectorAll(".tbl-crosshair, .tbl-crosshair-hit, .tbl-facet-crosshair, .tbl-facet-crosshair-hit").forEach((el) => el.remove());
+  // Remove only THIS crosshair's own elements on re-attach (not the flat crosshair's
+  // .tbl-crosshair*, which attachCrosshair owns) so the two never clobber each other.
+  svgEl.querySelectorAll(".tbl-facet-crosshair, .tbl-facet-crosshair-hit").forEach((el) => el.remove());
 
   const guide = svgEl.ownerDocument.createElementNS(NS, "line");
   guide.classList.add("tbl-facet-crosshair");
