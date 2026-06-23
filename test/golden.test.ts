@@ -15,6 +15,14 @@ import { buildStackedMarks } from "../src/engine/marks/stacked";
 import type { PreparedRow } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { assemblePlot } from "../src/engine/assemble-plot";
+import { Plot, d3 } from "../src/engine/vendor";
+import { TBL } from "../src/engine/theme";
+import { paneTitleMark, tblTemporalXAxis, temporalXTicks } from "../src/engine/axes";
+import { computeYAxis } from "../src/engine/scales";
+import { makeTickFormatter } from "../src/engine/scales";
+import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
+import { parseDate } from "../src/engine/parse-time";
 
 // Minimal CSV → TidyRow[]. The real data layer (engine step 5) handles quoting/remote
 // sources; these fixtures are deliberately comma-free so a plain split suffices.
@@ -550,5 +558,161 @@ describe("golden SVG — stacked bars", () => {
     const a = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+// --- Shared-mode small multiples (task B3) ---
+//
+// Builds a 2x2 faceted line plot directly via assemblePlot (the figure orchestrator B4 will
+// drive this the same way). Each region is one pane; the shared y-scale + fx/fy facet grid
+// renders as ONE SVG. The chrome must collapse to: y-tick labels on the LEFT column only,
+// x-axis labels on the BOTTOM row only, a pane title per cell, per-pane gridlines.
+
+// 2x2 layout: Northeast (0,0), Midwest (1,0), South (0,1), West (1,1).
+const FACET_LAYOUT: Record<string, { col: number; row: number }> = {
+  Northeast: { col: 0, row: 0 },
+  Midwest: { col: 1, row: 0 },
+  South: { col: 0, row: 1 },
+  West: { col: 1, row: 1 },
+};
+
+function buildFacetedPlot() {
+  const rows = parseCsv("./fixtures/facet-regions.csv");
+  // Parse into PreparedRows carrying the temporal x + the facet grid-index fields.
+  const data: PreparedRow[] = rows.map((r) => {
+    const facet = r.facet as string;
+    const cell = FACET_LAYOUT[facet] as { col: number; row: number };
+    return {
+      series: r.series as string,
+      time: r.time as string,
+      _y: r.value === "" ? null : +(r.value as string),
+      _xd: parseDate(r.time as string),
+      _facet: facet,
+      _fxCol: String(cell.col),
+      _fyRow: String(cell.row),
+    };
+  });
+
+  // Faceted line overlay: the line mark carries the fx/fy facet channels.
+  const overlay = [
+    Plot.line(data, {
+      x: "_xd",
+      y: "_y",
+      z: "series",
+      fx: "_fxCol",
+      fy: "_fyRow",
+      stroke: TBL.color.blue,
+      strokeWidth: TBL.strokeWidth.solid,
+      defined: (r: PreparedRow) => Number.isFinite(r._y),
+    }),
+  ];
+
+  // Shared y-axis across all panes.
+  const { domain: yDomain, ticks: yTicks } = computeYAxis(
+    data.map((d) => d._y),
+    { includeZero: true, tickCount: 5 },
+  );
+
+  // Shared temporal x-axis; tag the label groups so the grid collapse keeps the bottom row.
+  const xs = data.map((d) => +(d._xd as Date));
+  const xDomain: [Date, Date] = [new Date(Math.min(...xs)), new Date(Math.max(...xs))];
+  const axisMarks = tblTemporalXAxis(xDomain, 1, X_AXIS_LABEL_CLASS);
+
+  const layers = {
+    underlay: [],
+    overlay,
+    tagging: [],
+    dashedNames: new Set<string>(),
+    xAxisMarks: axisMarks,
+  };
+
+  const cells = Object.entries(FACET_LAYOUT).map(([title, { col, row }]) => ({
+    col,
+    row,
+    title,
+  }));
+
+  const spec: ChartSpec = {
+    chartType: "line",
+    title: "Trend by region",
+    subtitle: "Index",
+    xAxisType: "temporal",
+    data: "facet-regions.csv",
+    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+  };
+
+  return assemblePlot({
+    layers: layers as never,
+    yDomain,
+    yTicks,
+    units: "",
+    xOpts: {
+      marginBottom: 38,
+      axisMarks,
+      markerToX: () => parseDate("2020-01-01"),
+    },
+    seriesNames: ["Series"],
+    colors: new Map([["Series", TBL.color.blue]]),
+    spec,
+    width: 720,
+    height: 460,
+    document,
+    classNameSuffix: "facet",
+    facet: { columns: 2, rows: 2, cells },
+  });
+}
+
+describe("golden SVG — shared-mode small multiples", () => {
+  it("renders a 2x2 faceted line grid with collapsed chrome", async () => {
+    const svg = buildFacetedPlot();
+    expect(svg.tagName.toLowerCase()).toBe("svg");
+
+    // ONE left-column y-tick-label set: 2 rows x (originally 2 columns) collapse to 2 groups
+    // (one per row, leftmost column only).
+    const yLabelGroups = svg.querySelectorAll("g.tbl-y-tick-label");
+    expect(yLabelGroups.length).toBe(2);
+
+    // X-axis labels: bottom row only. The temporal axis emits 2 text marks (month + year),
+    // each faceted into the grid; after collapse each keeps only its bottom-row copies =
+    // 2 columns. So 2 marks x 2 bottom-row cells = 4 groups.
+    const xLabelGroups = svg.querySelectorAll(`g.${X_AXIS_LABEL_CLASS}`);
+    expect(xLabelGroups.length).toBe(4);
+
+    // A pane title per cell (4 panes → 4 title groups, none collapsed).
+    const titleTexts = Array.from(
+      svg.querySelectorAll("g.tbl-pane-title text"),
+    ).map((t) => t.textContent);
+    expect(titleTexts.sort()).toEqual(["Midwest", "Northeast", "South", "West"]);
+
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/facet-regions.golden.svg");
+  });
+
+  it("faceted grid render is deterministic (byte-identical)", () => {
+    const a = buildFacetedPlot().outerHTML;
+    const b = buildFacetedPlot().outerHTML;
+    expect(a).toBe(b);
+  });
+});
+
+describe("axes primitives — pane titles + tick density (task B3)", () => {
+  it("paneTitleMark returns one non-empty text mark per grid", () => {
+    const marks = paneTitleMark([
+      { col: 0, row: 0, title: "A" },
+      { col: 1, row: 0, title: "B" },
+    ]);
+    expect(marks.length).toBe(1);
+    expect(marks[0]).toBeTruthy();
+  });
+
+  it("a higher density multiplier yields fewer (or equal) x ticks", () => {
+    const xDomain: [Date, Date] = [new Date(2010, 0, 1), new Date(2026, 0, 1)];
+    const dense = temporalXTicks(xDomain, 1);
+    const sparse = temporalXTicks(xDomain, 2);
+    expect(sparse.length).toBeLessThan(dense.length);
+    // Default (no multiplier) matches multiplier 1.
+    expect(temporalXTicks(xDomain).length).toBe(dense.length);
+    // Sentinel against an unused import.
+    expect(typeof makeTickFormatter([0, 1], "")).toBe("function");
+    expect(typeof d3.timeFormat).toBe("function");
   });
 });

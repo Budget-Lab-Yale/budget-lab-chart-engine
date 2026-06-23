@@ -1,0 +1,17 @@
+facet,series,time,value
+Northeast,Series,2020-01-01,10
+Northeast,Series,2021-01-01,14
+Northeast,Series,2022-01-01,12
+Northeast,Series,2023-01-01,18
+Midwest,Series,2020-01-01,8
+Midwest,Series,2021-01-01,9
+Midwest,Series,2022-01-01,13
+Midwest,Series,2023-01-01,11
+South,Series,2020-01-01,15
+South,Series,2021-01-01,12
+South,Series,2022-01-01,16
+South,Series,2023-01-01,20
+West,Series,2020-01-01,6
+West,Series,2021-01-01,11
+West,Series,2022-01-01,9
+West,Series,2023-01-01,14

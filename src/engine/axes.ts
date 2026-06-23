@@ -90,6 +90,38 @@ export function gridAndYLabels(
   ];
 }
 
+/** One pane of a small-multiples grid: its (col,row) cell coordinate + its display title. */
+export interface PaneTitleCell {
+  /** Grid column index (drives the `fx` facet channel via String(col)). */
+  col: number;
+  /** Grid row index (drives the `fy` facet channel via String(row)). */
+  row: number;
+  /** Display title for the pane (falls back to the raw facet value upstream). */
+  title: string;
+}
+
+// Per-facet pane title for shared-mode small-multiples grids. Renders one title at each
+// pane cell's TOP-LEFT, 11pt/700 in the heading color. The text mark facets on BOTH `fx`
+// (=String(col)) and `fy` (=String(row)) so Plot places exactly one title in its (col,row)
+// cell. Tagged with PANE_TITLE_CLASS so the chrome pass / tests can find it (it is never
+// collapsed — one per pane is correct).
+export function paneTitleMark(cells: PaneTitleCell[]): Mark[] {
+  return [
+    Plot.text(cells, {
+      fx: (d: PaneTitleCell) => String(d.col),
+      fy: (d: PaneTitleCell) => String(d.row),
+      text: (d: PaneTitleCell) => d.title,
+      frameAnchor: "top-left",
+      dy: -8,
+      textAnchor: "start",
+      fill: TBL.color.text,
+      fontSize: 11,
+      fontWeight: 700,
+      className: "tbl-pane-title",
+    }),
+  ];
+}
+
 // X-axis tick labels (numeric): left-anchored at each tick, just below the bottom
 // gridline.
 export function tblXAxis({ xTickFormat }: { xTickFormat?: (d: unknown) => string } = {}): Mark[] {
@@ -118,8 +150,12 @@ export function pickTemporalCadence(xDomain: [Date, Date]): number {
   return 120; // every 10 years
 }
 
-export function temporalXTicks(xDomain: [Date, Date]): Date[] {
-  const cadence = pickTemporalCadence(xDomain);
+// `densityMultiplier` thins the ticks for narrow panes (small multiples): the base cadence
+// (months between ticks) is multiplied so a higher value yields FEWER ticks. Default 1 =
+// unchanged. The multiplier is applied to the month cadence and re-bucketed so the
+// yearly/sub-yearly snapping below stays consistent (e.g. yearly cadence × 2 → every 2 years).
+export function temporalXTicks(xDomain: [Date, Date], densityMultiplier = 1): Date[] {
+  const cadence = pickTemporalCadence(xDomain) * Math.max(1, Math.round(densityMultiplier));
   const [start, end] = xDomain;
 
   if (cadence < 12) {
@@ -149,10 +185,18 @@ export function temporalXTicks(xDomain: [Date, Date]): Date[] {
 // Two-line temporal x-axis: month name on top, year below (January only). When every
 // tick lands on January (yearly+ cadence) the "Jan" line is redundant, so just the
 // year renders at the top-line position.
-export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
-  const ticks = temporalXTicks(xDomain);
+// `className` (faceted small-multiples only): tags the x-axis-label text group(s) so the
+// grid chrome collapse can keep the bottom-row copies and drop the rest. Left undefined for
+// single-frame charts so their output stays byte-identical (Plot omits the class attribute).
+export function tblTemporalXAxis(
+  xDomain: [Date, Date],
+  densityMultiplier = 1,
+  className?: string,
+): Mark[] {
+  const ticks = temporalXTicks(xDomain, densityMultiplier);
   const yearTicks = ticks.filter((d) => d.getMonth() === 0);
   const allJanuary = ticks.length > 0 && yearTicks.length === ticks.length;
+  const cls = className ? { className } : {};
 
   if (allJanuary) {
     return [
@@ -166,6 +210,7 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
         fill: TBL.color.axis,
         fontSize: TBL.size.axis,
         fontWeight: 500,
+        ...cls,
       }),
     ];
   }
@@ -182,6 +227,7 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
+      ...cls,
     }),
     // Year (bottom line, January only)
     Plot.text(yearTicks, {
@@ -194,6 +240,7 @@ export function tblTemporalXAxis(xDomain: [Date, Date]): Mark[] {
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
+      ...cls,
     }),
   ];
 }

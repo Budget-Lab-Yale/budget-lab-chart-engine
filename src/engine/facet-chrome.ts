@@ -128,6 +128,56 @@ function readTranslateY(el: SVGGElement): number {
   return m ? Number(m[1]) : 0;
 }
 
+/** ClassName stamped on a per-facet x-axis-label text group in a GRID facet (assemble-plot)
+ *  so the grid collapse can keep the bottom-row copies and drop the rest. */
+export const X_AXIS_LABEL_CLASS = "tbl-x-axis-label";
+/** ClassName stamped on the per-facet pane-title text group in a GRID facet (axes.paneTitleMark)
+ *  — never collapsed (one per pane is correct); exported for the test to count. */
+export const PANE_TITLE_CLASS = "tbl-pane-title";
+
+/**
+ * Collapse the repeated per-facet chrome of a 2-D (`fx`×`fy`) faceted GRID in place.
+ *
+ * Plot renders each facet cell as its own translated `<g transform="translate(tx,ty)">`
+ * inside the shared parent group for each className. The shared y-scale means every cell
+ * carries an identical copy of the y-tick labels (one column too many) and the x-axis labels
+ * (one row too many). The Style-Guide grid look keeps:
+ *
+ * - **Y-tick labels:** only the LEFTMOST column (smallest `tx`) — one set per row; the
+ *   duplicate columns are removed.
+ * - **X-axis labels:** only the BOTTOM row (largest `ty`) — one set per column; the
+ *   duplicate rows are removed.
+ * - **Gridlines + zero baseline:** kept PER CELL (each pane has its own gridlines spanning
+ *   its own pane — that is correct for a grid, not a single stretched rule). Untouched here.
+ * - **Pane titles:** kept per cell (one per pane is the intent). Untouched here.
+ *
+ * Deterministic DOM pass (no Date/random); no-op-safe when no faceted groups are found.
+ */
+export function collapseFacetGridChrome(svg: SVGSVGElement): void {
+  // Keep only the facet-cell groups in the leftmost column (min tx) for a class.
+  const keepLeftmostColumn = (className: string): void => {
+    const groups = Array.from(svg.querySelectorAll<SVGGElement>(`g.${className}`));
+    if (groups.length <= 1) return;
+    const minTx = Math.min(...groups.map(readTranslateX));
+    for (const g of groups) {
+      if (Math.abs(readTranslateX(g) - minTx) > 0.5) g.remove();
+    }
+  };
+
+  // Keep only the facet-cell groups in the bottom row (max ty) for a class.
+  const keepBottomRow = (className: string): void => {
+    const groups = Array.from(svg.querySelectorAll<SVGGElement>(`g.${className}`));
+    if (groups.length <= 1) return;
+    const maxTy = Math.max(...groups.map(readTranslateY));
+    for (const g of groups) {
+      if (Math.abs(readTranslateY(g) - maxTy) > 0.5) g.remove();
+    }
+  };
+
+  keepLeftmostColumn(Y_TICK_LABEL_CLASS);
+  keepBottomRow(X_AXIS_LABEL_CLASS);
+}
+
 /** A line collapses to a vertical full-height rule at a fixed x-pixel (the value-tick).
  *  We rewrite each line's y1/y2 (in the kept group's local frame) to span the full plot
  *  height. The shared x-scale puts every value tick at the same x-pixel in every facet, so

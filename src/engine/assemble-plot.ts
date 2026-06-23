@@ -5,13 +5,16 @@
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
-import { tblPlotDefaults, gridAndYLabels } from "./axes";
+import { tblPlotDefaults, gridAndYLabels, paneTitleMark } from "./axes";
+import type { PaneTitleCell } from "./axes";
 import {
   collapseFacetChrome,
   collapseFacetChromeY,
+  collapseFacetGridChrome,
   GRIDLINE_CLASS,
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
+  X_AXIS_LABEL_CLASS,
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
 import type { ChartSpec } from "../spec/types";
@@ -42,6 +45,28 @@ export interface AssembleOptions {
    *  giving each pane in a multi-pane figure unique-but-deterministic clip-path ids.
    *  Absent → className stays exactly "tblchart" (byte-identical single-chart output). */
   classNameSuffix?: string;
+  /** Optional SHARED-mode small-multiples faceting. When present, assemblePlot builds ONE
+   *  Plot with a 2-D facet grid (`fx` = columns, `fy` = rows) sharing the single `yDomain`,
+   *  then collapses the repeated per-facet chrome to the Style-Guide grid look (y-tick
+   *  labels on the leftmost column only, x-axis labels on the bottom row only, per-pane
+   *  gridlines + pane titles kept). Absent → behavior is EXACTLY as today (single frame).
+   *
+   *  The layer's marks must already carry `fx`/`fy` channels bound to the per-row grid-index
+   *  fields (`fx: "_fxCol"`, `fy: "_fyRow"` — String column/row indices the orchestrator adds
+   *  to each data row). assemblePlot drives Plot's `fx`/`fy` scale domains from `columns`/
+   *  `rows` so cell order is deterministic, adds one pane title per cell, and collapses the
+   *  repeated chrome. */
+  facet?: FacetOptions;
+}
+
+export interface FacetOptions {
+  /** Grid columns. Plot `fx` domain becomes ["0".."columns-1"]. */
+  columns: number;
+  /** Grid rows. Plot `fy` domain becomes ["0".."rows-1"]. */
+  rows: number;
+  /** One entry per pane: its (col,row) cell + display title. Drives the per-cell pane titles
+   *  (and documents the orchestrator's `_fxCol`/`_fyRow` assignment). */
+  cells: PaneTitleCell[];
 }
 
 export function assemblePlot({
@@ -58,8 +83,13 @@ export function assemblePlot({
   marginRight,
   document,
   classNameSuffix,
+  facet,
 }: AssembleOptions): SVGSVGElement {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
+  // SHARED-mode small-multiples grid: a 2-D fx×fy facet sharing the single yDomain. The
+  // layer's marks already carry fx/fy channels; here we drive the fx/fy scale domains and
+  // (after render) collapse the repeated per-facet chrome to the grid look.
+  const gridFaceted = facet != null;
 
   const marks: unknown[] = [];
   // Horizontal bars (layer owns the y band scale): the value axis runs along x, so the
@@ -161,6 +191,13 @@ export function assemblePlot({
   // 6. Line overlay (on top).
   marks.push(...layers.overlay);
 
+  // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
+  //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each
+  //    title lands in its own (col,row) cell.
+  if (gridFaceted && facet) {
+    marks.push(...paneTitleMark(facet.cells));
+  }
+
   const plotOpts: Record<string, unknown> = {
     ...tblPlotDefaults({
       marginBottom: xOpts.marginBottom,
@@ -194,6 +231,20 @@ export function assemblePlot({
   }
   if (layers.fxScaleOpts) plotOpts.fx = layers.fxScaleOpts;
   if (layers.fyScaleOpts) plotOpts.fy = layers.fyScaleOpts;
+  // Shared-mode grid: drive the fx (columns) + fy (rows) facet scales from the layout. The
+  // domains are the String column/row indices the marks reference; explicit so cell order is
+  // deterministic. axis:null suppresses Plot's native facet-axis chrome (we supply our own
+  // pane titles + collapsed engine chrome).
+  if (gridFaceted && facet) {
+    plotOpts.fx = {
+      domain: Array.from({ length: facet.columns }, (_, i) => String(i)),
+      axis: null,
+    };
+    plotOpts.fy = {
+      domain: Array.from({ length: facet.rows }, (_, i) => String(i)),
+      axis: null,
+    };
+  }
   if (document) plotOpts.document = document;
 
   const svg = Plot.plot(plotOpts) as SVGSVGElement;
@@ -221,6 +272,11 @@ export function assemblePlot({
       marginTop: (plotOpts.marginTop as number) ?? 18,
       marginBottom: (plotOpts.marginBottom as number) ?? 24,
     });
+  } else if (gridFaceted) {
+    // Shared-mode small-multiples grid: Plot repeated the y-tick labels in every column and
+    // the x-axis labels in every row. Keep the leftmost column's y-labels + the bottom row's
+    // x-labels; drop the duplicates. Per-pane gridlines + pane titles are kept (correct).
+    collapseFacetGridChrome(svg);
   }
 
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series

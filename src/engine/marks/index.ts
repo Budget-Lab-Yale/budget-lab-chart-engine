@@ -20,6 +20,15 @@ export interface PreparedRow {
   /** Confidence-band bounds, when the row's series has a band. */
   _lo?: number;
   _hi?: number;
+  /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
+   *  facet_field that splits this row's pane). */
+  _facet?: string;
+  /** Small-multiples (shared mode): the pane's grid COLUMN index as a String, bound to Plot's
+   *  `fx` facet channel by the orchestrator-built marks. */
+  _fxCol?: string;
+  /** Small-multiples (shared mode): the pane's grid ROW index as a String, bound to Plot's
+   *  `fy` facet channel. */
+  _fyRow?: string;
 }
 
 export interface MarkContext {
