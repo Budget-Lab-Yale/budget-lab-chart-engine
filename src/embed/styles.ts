@@ -307,6 +307,15 @@ body {
   background: #fff;
   box-shadow: inset 0 0 0 1.5px #000;
 }
+/* Line + point-marker swatch: sized to the inline SVG (line with the series' symbol). */
+.tbl-legend-swatch.is-symbol {
+  width: 22px;
+  height: 12px;
+  border-radius: 0;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+}
 
 /* =========================================================================
  * Legend reset button

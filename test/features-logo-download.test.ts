@@ -166,6 +166,20 @@ describe("buildExportSvg — small multiples", () => {
     expect(Number(svg.getAttribute("height"))).toBeGreaterThan(750);
   });
 
+  it("short figure (single row of panes) sizes to content — no 750 whitespace floor", () => {
+    // 2 facets at 2 cols → a single row, so the export should be much shorter than 750.
+    const twoFacets: TidyRow[] = [];
+    for (const region of ["Men", "Women"]) {
+      for (let y = 2020; y <= 2023; y++) {
+        twoFacets.push({ facet: region, series: "A", time: `${y}-01-01`, value: String(2 + (y - 2020)) } as TidyRow);
+        twoFacets.push({ facet: region, series: "B", time: `${y}-01-01`, value: String(5 + (y - 2020)) } as TidyRow);
+      }
+    }
+    const svg = buildExportSvg(SHARED_SPEC, twoFacets);
+    expect(svg.querySelectorAll("svg").length).toBe(2);
+    expect(Number(svg.getAttribute("height"))).toBeLessThan(750);
+  });
+
   it("single chart export stays at the fixed 750 frame (unchanged)", () => {
     const svg = buildExportSvg(SPEC, ROWS);
     expect(svg.getAttribute("width")).toBe("1000");

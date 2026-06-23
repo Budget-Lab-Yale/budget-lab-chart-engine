@@ -13,7 +13,7 @@ import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { inferUnitsFromSubtitle } from "./util";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
@@ -62,6 +62,9 @@ export interface LegendItem {
   color: string | undefined;
   dashed: boolean;
   markerShape: "line" | "rect" | "dot";
+  /** Line charts with point markers: the d3 symbol name for this series (shown on the line
+   *  swatch so series can be told apart by shape, not just color). */
+  markerSymbol?: string;
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
   /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
@@ -354,14 +357,18 @@ export function buildLegendItems(
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
     layers.seriesColors?.get(name) ?? colors.get(name);
+  // Line charts with point markers: each series carries its marker shape so the legend swatch
+  // shows the same symbol as the chart (assigned by series index, matching the symbol scale).
+  const withSymbols = markerShape === "line" && spec.points === true;
   const baseItems: LegendItem[] | null =
     seriesNames.length > 1 || hasDashOverrides
-      ? seriesNames.map((name) => ({
+      ? seriesNames.map((name, i) => ({
           series: name,
           label: labelFor(name),
           color: legendColorFor(name),
           dashed: spec.series_styles?.[name]?.dashed === true,
           markerShape,
+          ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
         }))
       : null;
   // Append legendExtras (e.g. diverging stacked Total row) after the series rows.

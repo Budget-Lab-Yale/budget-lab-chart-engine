@@ -336,8 +336,10 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
       gridRows * (PANE_TITLE_H + PANE_CHART_H) + (gridRows - 1) * ROW_GAP;
   }
 
-  // Figures extend the fixed 750 frame so many panes aren't cramped; the single chart stays at H.
-  const H_eff = isFigure ? Math.max(H, chartTop + contentHeight + bottomH) : H;
+  // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
+  // single row of panes) doesn't leave a big band of whitespace below. The single chart keeps the
+  // fixed 4:3 frame.
+  const H_eff = isFigure ? Math.round(chartTop + contentHeight + bottomH) : H;
   if (H_eff !== H) {
     root.setAttribute("height", String(H_eff));
     bgRect.setAttribute("height", String(H_eff));

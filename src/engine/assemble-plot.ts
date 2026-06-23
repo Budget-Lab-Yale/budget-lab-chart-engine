@@ -278,6 +278,9 @@ export function assemblePlot({
   }
   if (layers.fxScaleOpts) plotOpts.fx = layers.fxScaleOpts;
   if (layers.fyScaleOpts) plotOpts.fy = layers.fyScaleOpts;
+  // Per-series marker symbols (line point markers). axis:null suppresses Plot's symbol legend
+  // (the engine renders its own legend).
+  if (layers.symbolScaleOpts) plotOpts.symbol = { ...layers.symbolScaleOpts, axis: null };
   // Shared-mode grid: drive the fx (columns) + fy (rows) facet scales from the layout. The
   // domains are the String column/row indices the marks reference; explicit so cell order is
   // deterministic. axis:null suppresses Plot's native facet-axis chrome (we supply our own

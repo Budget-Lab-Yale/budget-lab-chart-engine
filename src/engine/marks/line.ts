@@ -3,7 +3,7 @@
 // markers) is added by assemblePlot. Split out of the tracker's monolithic
 // buildLineChart so other chart types can register their own builder (marks/index.ts).
 import { Plot } from "../vendor";
-import { TBL } from "../theme";
+import { TBL, markerSymbolForIndex } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -19,11 +19,9 @@ export function buildLineMarks(
   const facetChannels =
     fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
-  // Small-multiples line stroke: panes are small, so lines render thinner (1.75px) in BOTH
-  // shared and per-pane modes (ctx.pane set by the orchestrator). Single charts → default 2px.
-  const solidStroke = ctx.pane ? TBL.strokeWidth.pane : TBL.strokeWidth.solid;
-  // Dashed keeps its pattern; only the width thins for panes.
-  const dashedStroke = ctx.pane ? TBL.strokeWidth.pane : TBL.strokeWidth.dashed;
+  // Lines render at the full weight in panes too (matches single charts) for legibility.
+  const solidStroke = TBL.strokeWidth.solid;
+  const dashedStroke = TBL.strokeWidth.dashed;
 
   // Underlay: confidence-band areas, painted behind the gridlines.
   const underlay: unknown[] = [];
@@ -90,7 +88,10 @@ export function buildLineMarks(
         x: xField,
         y: "_y",
         fill: "series",
-        r: ctx.pane ? 2.6 : 3,
+        // Distinct symbol per series (accessibility): mapped via the symbol scale below so
+        // series can be told apart without relying on color.
+        symbol: "series",
+        r: ctx.pane ? 3.3 : 3.6,
         stroke: "#ffffff",
         strokeWidth: 1,
         ...facetChannels,
@@ -121,11 +122,18 @@ export function buildLineMarks(
   const xScaleOpts = categorical ? { type: "point" as const, padding: 0.08 } : undefined;
 
   const tagging = [{ selector: 'g[aria-label="line"] path', seriesOrder }];
-  // Tag each marker circle (DOM order == pointData order) with its series so dots dim with the
-  // legend exactly like the lines.
+  // Per-series symbol scale for the markers (series → distinct shape, in MARKER_SYMBOLS order).
+  let symbolScaleOpts: { domain: string[]; range: string[] } | undefined;
   if (pointData.length) {
+    const symbolSeries = ctx.seriesNames ?? seriesOrder;
+    symbolScaleOpts = {
+      domain: symbolSeries,
+      range: symbolSeries.map((_, i) => markerSymbolForIndex(i)),
+    };
+    // Symbol markers render as <path>; tag each (DOM order == pointData order) with its series
+    // so the dots dim with the legend exactly like the lines.
     tagging.push({
-      selector: 'g[aria-label="dot"] circle',
+      selector: 'g[aria-label="dot"] path',
       seriesOrder: pointData.map((r) => r.series),
     });
   }
@@ -136,5 +144,6 @@ export function buildLineMarks(
     tagging,
     dashedNames,
     ...(xScaleOpts ? { xScaleOpts } : {}),
+    ...(symbolScaleOpts ? { symbolScaleOpts } : {}),
   };
 }

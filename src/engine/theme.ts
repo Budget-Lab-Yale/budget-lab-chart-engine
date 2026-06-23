@@ -25,11 +25,29 @@ export const TBL = {
     legend: 12,
     annotation: 11,
   },
-  // `pane` is the thinner small-multiples line stroke (Style-Guide §4.5): panes are small,
-  // so both shared- and per-pane lines render at 1.75px instead of the full 2px.
-  strokeWidth: { solid: 2, dashed: 2, pane: 1.75 },
+  // `pane` was a thinner small-multiples line stroke; panes now match single charts (2px) for
+  // legibility, so `pane` equals `solid` (kept for any non-line callers).
+  strokeWidth: { solid: 2, dashed: 2, pane: 2 },
   dashArray: "5 3",
 } as const;
+
+// Per-series point-marker symbols (d3 symbol names), in a fixed, distinguishable order so a
+// series' shape is stable and series can be told apart without relying on color (accessibility).
+// Assigned by series index; wraps if there are more series than shapes.
+export const MARKER_SYMBOLS = [
+  "circle",
+  "square",
+  "triangle",
+  "diamond",
+  "star",
+  "wye",
+  "cross",
+] as const;
+
+/** The marker symbol for a series at index `i` (wraps). */
+export function markerSymbolForIndex(i: number): string {
+  return MARKER_SYMBOLS[((i % MARKER_SYMBOLS.length) + MARKER_SYMBOLS.length) % MARKER_SYMBOLS.length]!;
+}
 
 // Callout number labels — the single shared style for per-bar VALUE labels (grouped/single
 // bars) and stacked NET-TOTAL text, so they read consistently. `gap` is the px offset

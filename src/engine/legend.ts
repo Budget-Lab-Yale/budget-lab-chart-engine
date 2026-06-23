@@ -3,6 +3,56 @@
 // interactive legend against that SVG. Paths are matched by their `data-series` attr,
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
+import { d3 } from "./vendor";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const SYMBOL_TYPES: Record<string, unknown> = {
+  circle: d3.symbolCircle,
+  square: d3.symbolSquare,
+  triangle: d3.symbolTriangle,
+  diamond: d3.symbolDiamond,
+  star: d3.symbolStar,
+  wye: d3.symbolWye,
+  cross: d3.symbolCross,
+};
+
+/** A d3 symbol path centered at (0,0) for the given symbol name. */
+function symbolPathD(name: string, size: number): string {
+  const type = SYMBOL_TYPES[name] ?? d3.symbolCircle;
+  return d3.symbol().type(type as never).size(size)() ?? "";
+}
+
+/** Build a line+symbol legend swatch (an inline SVG): a short colored line with the series'
+ *  marker centered on it, so series can be identified by shape as well as color. */
+function buildSymbolSwatch(
+  doc: Document,
+  color: string | undefined,
+  dashed: boolean,
+  symbol: string,
+): SVGSVGElement {
+  const stroke = color || "currentColor";
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "22");
+  svg.setAttribute("height", "12");
+  svg.setAttribute("viewBox", "0 0 22 12");
+  const line = doc.createElementNS(SVG_NS, "line");
+  line.setAttribute("x1", "1");
+  line.setAttribute("x2", "21");
+  line.setAttribute("y1", "6");
+  line.setAttribute("y2", "6");
+  line.setAttribute("stroke", stroke);
+  line.setAttribute("stroke-width", "2");
+  if (dashed) line.setAttribute("stroke-dasharray", "4 2");
+  svg.appendChild(line);
+  const path = doc.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", symbolPathD(symbol, 32));
+  path.setAttribute("transform", "translate(11,6)");
+  path.setAttribute("fill", stroke);
+  path.setAttribute("stroke", "#ffffff");
+  path.setAttribute("stroke-width", "0.75");
+  svg.appendChild(path);
+  return svg;
+}
 
 /** Handle returned by renderLegend: the rendered element plus a `toggle(series)` that
  *  flips the SAME pin state a legend-button click would, keeping ONE source of truth
@@ -70,7 +120,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, dashed = false, markerShape, nonInteractive } of items) {
+  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, nonInteractive } of items) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -94,6 +144,11 @@ export function renderLegend(
     } else if (markerShape === "dot") {
       swatch.classList.add("is-dot");
       // White fill + black stroke via CSS — no inline color needed.
+    } else if (markerSymbol) {
+      // Line chart with point markers: line + the series' marker symbol (shape conveys identity
+      // alongside color). An inline SVG, sized via the .is-symbol class.
+      swatch.classList.add("is-symbol");
+      swatch.appendChild(buildSymbolSwatch(doc, color, dashed, markerSymbol));
     } else {
       // "line" — existing behavior preserved.
       if (dashed) {

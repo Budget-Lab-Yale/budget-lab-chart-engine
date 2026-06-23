@@ -647,8 +647,8 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     const chartSvg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
     expect(chartSvg.querySelector(".tbl-catline-hit")).not.toBeNull();
     expect(chartSvg.querySelector(".tbl-band-crosshair-hit")).toBeNull();
-    // points:true → marker dots rendered.
-    expect(chartSvg.querySelectorAll('g[aria-label="dot"] circle').length).toBeGreaterThan(0);
+    // points:true → per-series marker symbols (rendered as <path>), tagged with data-series.
+    expect(chartSvg.querySelectorAll('g[aria-label="dot"] path[data-series]').length).toBeGreaterThan(0);
   });
 });
 

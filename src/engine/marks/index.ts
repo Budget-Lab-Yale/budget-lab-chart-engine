@@ -69,6 +69,9 @@ export interface MarkLayers {
   /** Optional: a mark layer that owns its x-scale (bars) supplies band-scale options here;
    *  merged over the adapter's x options in assemblePlot. */
   xScaleOpts?: Record<string, unknown>;
+  /** Optional: per-series symbol scale (line point markers) — {domain: series, range: shapes}.
+   *  Threaded to plotOpts.symbol so each series gets a distinct marker shape. */
+  symbolScaleOpts?: { domain: string[]; range: string[] };
   /** Optional: faceted-group band scale options (vertical grouped bars use `fx`). */
   fxScaleOpts?: Record<string, unknown>;
   /** Optional: faceted-group band scale options for HORIZONTAL grouped bars, which facet
