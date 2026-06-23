@@ -339,18 +339,23 @@ body {
 /* =========================================================================
  * Hover-to-dim
  * ========================================================================= */
-/* Applies to line <path data-series> AND bar/stacked <rect data-series>. */
-.figure-canvas svg [data-series] {
+/* Applies to line <path data-series> AND bar/stacked <rect data-series>. Scoped to the chart
+   regions — the single-chart canvas AND the per-pane small-multiples grid — so dimming works
+   for figures too (the grid svgs live in .figure-grid, not .figure-canvas). */
+.figure-canvas svg [data-series],
+.figure-grid svg [data-series] {
   transition: opacity 120ms linear;
 }
-.figure-canvas svg .tbl-dimmed {
+.figure-canvas svg .tbl-dimmed,
+.figure-grid svg .tbl-dimmed {
   opacity: 0.15;
 }
 /* The diverging net-total LABEL is a wide text over the bar center; it is tagged with the
    Total key so it DIMS with the dot, but it must not steal clicks from the segments beneath
    it. Make it non-interactive so clicks fall through to the segment — only the small net
    DOT (tbl-net-marker) selects Total. */
-.figure-canvas svg .tbl-net-label {
+.figure-canvas svg .tbl-net-label,
+.figure-grid svg .tbl-net-label {
   pointer-events: none;
 }
 
@@ -363,7 +368,10 @@ body {
  * ========================================================================= */
 .figure-card.is-selectable .figure-canvas svg [data-series],
 .figure-card.is-selectable .figure-canvas svg .tbl-crosshair-hit,
-.figure-card.is-selectable .figure-canvas svg .tbl-band-crosshair-hit {
+.figure-card.is-selectable .figure-canvas svg .tbl-band-crosshair-hit,
+.figure-card.is-selectable .figure-grid svg [data-series],
+.figure-card.is-selectable .figure-grid svg .tbl-crosshair-hit,
+.figure-card.is-selectable .figure-grid svg .tbl-band-crosshair-hit {
   cursor: pointer;
 }
 

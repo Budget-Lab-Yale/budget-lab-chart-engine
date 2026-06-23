@@ -793,7 +793,7 @@ function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec): v
  *  `dataInScope`/tooltip/bar-metadata come from the pane (or figure) metadata. */
 function wireFigureSvg(
   svg: SVGSVGElement,
-  handle: LegendHandle,
+  handle: LegendHandle | null,
   ctx: {
     spec: ChartSpec;
     dataInScope: PreparedRow[];
@@ -808,6 +808,10 @@ function wireFigureSvg(
   },
 ): void {
   const categorical = ctx.spec.xAxisType === "categorical";
+  // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
+  // (single-series bar panes have no legend but still need hover tooltips). Selection (the
+  // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
+  // an interactive legend.
   if (categorical) {
     // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
     const isStacked = ctx.spec.chartType === "stacked";
@@ -832,12 +836,14 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.units),
       orientation: ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical",
     });
-    // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
-    svg.querySelectorAll<SVGElement>(".tbl-band-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
-    svg.addEventListener("click", (evt) => {
-      const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-      if (series) handle.toggle(series);
-    });
+    if (handle) {
+      // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
+      svg.querySelectorAll<SVGElement>(".tbl-band-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
+      svg.addEventListener("click", (evt) => {
+        const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+        if (series) handle.toggle(series);
+      });
+    }
     return;
   }
 
@@ -854,13 +860,15 @@ function wireFigureSvg(
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
   });
-  // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
-  addLineHitPaths(svg);
-  svg.querySelectorAll<SVGElement>(".tbl-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
-  svg.addEventListener("click", (evt) => {
-    const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-    if (series) handle.toggle(series);
-  });
+  if (handle) {
+    // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
+    addLineHitPaths(svg);
+    svg.querySelectorAll<SVGElement>(".tbl-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
+    svg.addEventListener("click", (evt) => {
+      const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+      if (series) handle.toggle(series);
+    });
+  }
 }
 
 /**
@@ -940,13 +948,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       ? renderLegend(legendSlot, fig.legendItems, { svg, onHighlight: () => recolorNetLabels(svg) })
       : null;
     recolorNetLabels(svg);
-    if (handle) {
-      card.classList.add("is-selectable");
-      // Shared mode is line-only, so this always takes the continuous-crosshair branch.
-      wireFigureSvg(svg, handle, { spec, ...fig });
-    } else {
-      card.classList.remove("is-selectable");
-    }
+    // Attach the crosshair always; selection (click→pin) is wired only when a legend exists.
+    card.classList.toggle("is-selectable", handle != null);
+    // Shared mode is line-only, so this always takes the continuous-crosshair branch.
+    wireFigureSvg(svg, handle, { spec, ...fig });
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
     currentOverlay = attachYAxisOverlay(canvasScroll!, svg);
@@ -1004,25 +1009,23 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           onHighlight: () => { for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg); },
         })
       : null;
-    if (handle) {
-      card.classList.add("is-selectable");
-      for (const pane of fig.panes) {
-        if (!pane.svg) continue;
-        wireFigureSvg(pane.svg, handle, {
-          spec,
-          dataInScope: pane.dataInScope ?? [],
-          colors: pane.colors ?? new Map(),
-          dashedNames: pane.dashedNames ?? new Set(),
-          seriesLabels: fig.seriesLabels,
-          seriesOrder: pane.seriesOrder ?? [],
-          units: pane.units ?? fig.units,
-          tooltipXParse: pane.tooltipXParse,
-          tooltipXFormat: pane.tooltipXFormat,
-          showTotalDot: pane.showTotalDot,
-        });
-      }
-    } else {
-      card.classList.remove("is-selectable");
+    // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
+    // need tooltips); selection click is gated on `handle` inside wireFigureSvg.
+    card.classList.toggle("is-selectable", handle != null);
+    for (const pane of fig.panes) {
+      if (!pane.svg) continue;
+      wireFigureSvg(pane.svg, handle, {
+        spec,
+        dataInScope: pane.dataInScope ?? [],
+        colors: pane.colors ?? new Map(),
+        dashedNames: pane.dashedNames ?? new Set(),
+        seriesLabels: fig.seriesLabels,
+        seriesOrder: pane.seriesOrder ?? [],
+        units: pane.units ?? fig.units,
+        tooltipXParse: pane.tooltipXParse,
+        tooltipXFormat: pane.tooltipXFormat,
+        showTotalDot: pane.showTotalDot,
+      });
     }
   };
 

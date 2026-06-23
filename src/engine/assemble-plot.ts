@@ -253,13 +253,19 @@ export function assemblePlot({
   // deterministic. axis:null suppresses Plot's native facet-axis chrome (we supply our own
   // pane titles + collapsed engine chrome).
   if (gridFaceted && facet) {
+    // paddingInner separates the panes so each (col,row) cell reads as a DISTINCT small
+    // multiple sharing one y-scale — without a vertical gap the two stacked rows of a column
+    // run together and look like a single tall chart with a doubled axis. Rows need a larger
+    // gap (the shared y-axis repeats per row, so the boundary must be unmistakable).
     plotOpts.fx = {
       domain: Array.from({ length: facet.columns }, (_, i) => String(i)),
       axis: null,
+      paddingInner: 0.08,
     };
     plotOpts.fy = {
       domain: Array.from({ length: facet.rows }, (_, i) => String(i)),
       axis: null,
+      paddingInner: 0.22,
     };
   }
   if (document) plotOpts.document = document;
