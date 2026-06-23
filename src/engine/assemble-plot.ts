@@ -172,20 +172,24 @@ export function assemblePlot({
     // `fx` group scale) supplies its own axis marks; use those instead of the adapter's.
     marks.push(...(layers.xAxisMarks ?? xOpts.axisMarks));
 
-    // 4. Zero baseline (darker rule painted over the light gridlines).
-    marks.push(
-      Plot.ruleY([0], {
-        stroke: TBL.color.axisStroke,
-        strokeWidth: 1,
-        insetLeft: -TBL_MARGIN_LEFT,
-        insetRight: -effMarginRight,
-        clip: false,
-        // className tags the wrapping <g> so the facet-chrome collapse pass can find the
-        // per-facet zero-baseline copies — faceted charts only, so non-faceted output is
-        // byte-identical.
-        ...(faceted ? { className: ZERO_BASELINE_CLASS } : {}),
-      }),
-    );
+    // 4. Zero baseline (darker rule painted over the light gridlines) — ONLY when 0 is within
+    //    the y-domain. Drawing it for a domain that excludes 0 (e.g. an index/percent range
+    //    starting at 1%) leaves a stray dark rule (most visible per-pane in small multiples).
+    if (yDomain[0] <= 0 && yDomain[1] >= 0) {
+      marks.push(
+        Plot.ruleY([0], {
+          stroke: TBL.color.axisStroke,
+          strokeWidth: 1,
+          insetLeft: -TBL_MARGIN_LEFT,
+          insetRight: -effMarginRight,
+          clip: false,
+          // className tags the wrapping <g> so the facet-chrome collapse pass can find the
+          // per-facet zero-baseline copies — faceted charts only, so non-faceted output is
+          // byte-identical.
+          ...(faceted ? { className: ZERO_BASELINE_CLASS } : {}),
+        }),
+      );
+    }
   }
 
   // 5. Reference markers (vertical rules, e.g. a treatment date).
