@@ -45,6 +45,14 @@ export interface AssembleOptions {
    *  giving each pane in a multi-pane figure unique-but-deterministic clip-path ids.
    *  Absent → className stays exactly "tblchart" (byte-identical single-chart output). */
   classNameSuffix?: string;
+  /** Shared-mode small multiples: override the plot's LEFT margin (default TBL_MARGIN_LEFT).
+   *  Applied to tblPlotDefaults marginLeft, the gridline insetLeft / y-label dx (gridAndYLabels),
+   *  and the zero-baseline insetLeft so the plot area, gridlines and (when shown) labels all use
+   *  the same margin. The leftmost (labeled) pane passes TBL_MARGIN_LEFT (=default); label-less
+   *  columns pass a small margin so they don't reserve the label gutter. Absent → TBL_MARGIN_LEFT
+   *  (byte-identical single-chart + per-pane output). Vertical (line) charts only — shared mode is
+   *  line-only, so this never collides with the horizontal-bar `layers.marginLeft` gutter. */
+  marginLeft?: number;
   /** Optional SHARED-mode small-multiples faceting. When present, assemblePlot builds ONE
    *  Plot with a 2-D facet grid (`fx` = columns, `fy` = rows) sharing the single `yDomain`,
    *  then collapses the repeated per-facet chrome to the Style-Guide grid look (y-tick
@@ -89,10 +97,14 @@ export function assemblePlot({
   marginRight,
   document,
   classNameSuffix,
+  marginLeft,
   facet,
   hideYAxisLabels,
 }: AssembleOptions): SVGSVGElement {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
+  // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
+  // Used for the plot defaults, the gridline insetLeft / y-label dx, and the zero-baseline.
+  const effMarginLeft = marginLeft ?? TBL_MARGIN_LEFT;
   // SHARED-mode small-multiples grid: a 2-D fx×fy facet sharing the single yDomain. The
   // layer's marks already carry fx/fy channels; here we drive the fx/fy scale domains and
   // (after render) collapse the repeated per-facet chrome to the grid look.
@@ -171,6 +183,7 @@ export function assemblePlot({
     marks.push(
       ...gridAndYLabels(yTicks, {
         yTickFormat: makeTickFormatter(yTicks, units),
+        marginLeft: effMarginLeft,
         marginRight: effMarginRight,
         ...(faceted ? { gridlineClassName: GRIDLINE_CLASS } : {}),
         // Shared-mode small multiples, non-leftmost panes: keep gridlines, drop the y-tick
@@ -190,7 +203,7 @@ export function assemblePlot({
         Plot.ruleY([0], {
           stroke: TBL.color.axisStroke,
           strokeWidth: 1,
-          insetLeft: -TBL_MARGIN_LEFT,
+          insetLeft: -effMarginLeft,
           insetRight: -effMarginRight,
           clip: false,
           // className tags the wrapping <g> so the facet-chrome collapse pass can find the
@@ -231,8 +244,14 @@ export function assemblePlot({
       ...(height != null ? { height } : {}),
       ...(marginRight != null ? { marginRight } : {}),
       // Horizontal bars supply a responsive left gutter sized to their longest category
-      // label (axes.horizontalLeftGutter); vertical charts leave it undefined → default.
-      ...(layers.marginLeft != null ? { marginLeft: layers.marginLeft } : {}),
+      // label (axes.horizontalLeftGutter); vertical charts leave it undefined → default. The
+      // shared-mode small-multiples `marginLeft` override wins when present (line-only, so it
+      // never coexists with the horizontal-bar gutter).
+      ...(marginLeft != null
+        ? { marginLeft }
+        : layers.marginLeft != null
+          ? { marginLeft: layers.marginLeft }
+          : {}),
     }),
     ...(width ? { width } : {}),
     className: classNameSuffix ? `${PLOT_CLASS}-${classNameSuffix}` : PLOT_CLASS,

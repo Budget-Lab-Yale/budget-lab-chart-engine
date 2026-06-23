@@ -13,10 +13,56 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems } from "./index";
 import type { LegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
 
 /** Default grid-column count for `n` panes: ≈ ceil(sqrt(n)), capped at 4. */
 function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
+}
+
+/** Label-less (non-leftmost) columns get a small left margin instead of the ~44px y-label
+ *  gutter, so the series doesn't render with a big blank strip on its left. */
+export const SHARED_LABELLESS_MARGIN_LEFT = 2;
+
+/** SHARED-mode small-multiples per-row width math (the single source of truth, reused by the
+ *  live grid and the PNG export). Given the TOTAL inner grid width `availW` (the width the row
+ *  of panes spans, minus inter-column gaps already accounted for by the caller), the column
+ *  count and the inter-column gap, compute:
+ *   - `dataW`: the inner DATA/plot width, IDENTICAL for every column (so the series renders at
+ *     the same apparent width in every pane);
+ *   - `colWidths[c]`: each column's OUTER width — the leftmost (labeled) column is wider (it
+ *     carries the full TBL_MARGIN_LEFT label gutter), the label-less columns are narrower (they
+ *     only reserve SHARED_LABELLESS_MARGIN_LEFT);
+ *   - `marginLeft[c]`: the per-column left margin (TBL_MARGIN_LEFT for col 0, the small margin
+ *     otherwise) to thread into renderPane.
+ *
+ *  Width identity (per the brief):
+ *    dataW    = (availW − LM − (C−1)·lm − C·R − (C−1)·G) / C
+ *    colW[0]  = dataW + LM + R
+ *    colW[c>0]= dataW + lm + R
+ *  For C=1 there is no label-less column, so dataW = availW − LM − R.
+ *  The colWidths sum to availW − (C−1)·G (i.e. they tile the row exactly, leaving the gaps). */
+export function sharedColumnWidths(
+  availW: number,
+  columns: number,
+  gap: number,
+): { dataW: number; colWidths: number[]; marginLeft: number[] } {
+  const LM = TBL_MARGIN_LEFT;
+  const lm = SHARED_LABELLESS_MARGIN_LEFT;
+  const R = TBL_MARGIN_RIGHT;
+  const C = Math.max(1, columns);
+  const dataW =
+    C === 1
+      ? availW - LM - R
+      : (availW - LM - (C - 1) * lm - C * R - (C - 1) * gap) / C;
+  const colWidths: number[] = [];
+  const marginLeft: number[] = [];
+  for (let c = 0; c < C; c++) {
+    const isLeft = c === 0;
+    marginLeft.push(isLeft ? LM : lm);
+    colWidths.push(dataW + (isLeft ? LM : lm) + R);
+  }
+  return { dataW, colWidths, marginLeft };
 }
 
 /** A pane's identity + its standalone SVG and per-pane interaction metadata. BOTH modes
@@ -57,6 +103,11 @@ export interface FigureRenderResult {
   panes: FigurePane[];
   columns: number;
   rows: number;
+  /** SHARED mode only: the per-column OUTER pixel widths (length === `columns`) the panes were
+   *  rendered at — col 0 wider (labeled), col>0 narrower (label-less), all sharing one inner data
+   *  width. The live grid sets `grid-template-columns` to these px widths and the PNG export lays
+   *  the panes out the same way. Undefined for per-pane mode (equal `1fr` columns). */
+  columnWidths?: number[];
   legendItems: LegendItem[] | null;
   seriesLabels: Record<string, string>;
   // Fields render-live / export read (mirrors RenderResult's interaction surface).
@@ -220,8 +271,17 @@ export function renderFigure(
   const probe = renderPane(spec, inScopeRows, { ...opts, pane: true }, "probe");
   const sharedYDomain = probe.yDomain;
 
-  // 2. Render each pane as its own single frame, forcing the shared y-domain and hiding the
-  //    y-tick labels on every non-leftmost column. Identical to per-pane mode otherwise.
+  // 2. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
+  //    columns drop the ~44px label gutter for a small left margin; column OUTER widths are made
+  //    unequal so the inner DATA width is IDENTICAL across a row (labeled col 0 wider, label-less
+  //    cols narrower). The TOTAL inner grid width is `opts.gridWidth` (live grid) else `opts.width`
+  //    (e.g. golden tests pass a single width as the row total); the gap matches the live grid.
+  const gridGap = opts.gridGap ?? 0;
+  const availW = opts.gridWidth ?? opts.width ?? 720;
+  const { colWidths, marginLeft: colMarginLeft } = sharedColumnWidths(availW, columns, gridGap);
+
+  // 3. Render each pane as its own single frame at its column's OUTER width + left margin,
+  //    forcing the shared y-domain and hiding the y-tick labels on every non-leftmost column.
   let firstLayers: MarkLayers | undefined;
   const panes: FigurePane[] = paneValues.map((value, i) => {
     const col = i % columns;
@@ -229,7 +289,14 @@ export function renderFigure(
     const p = renderPane(
       spec,
       paneRows,
-      { ...opts, pane: true, yDomain: sharedYDomain, hideYAxisLabels: col > 0 },
+      {
+        ...opts,
+        pane: true,
+        yDomain: sharedYDomain,
+        hideYAxisLabels: col > 0,
+        width: colWidths[col],
+        marginLeft: colMarginLeft[col],
+      },
       `p${i}`,
     );
     if (i === 0) firstLayers = p.layers;
@@ -249,7 +316,7 @@ export function renderFigure(
     };
   });
 
-  // 3. Figure-level legend: series config is shared across panes, so compute it ONCE from the
+  // 4. Figure-level legend: series config is shared across panes, so compute it ONCE from the
   //    first pane (same source of truth as a single chart). L1/single-series → null.
   const first = panes[0];
   const legendItems = buildLegendItems(
@@ -265,6 +332,7 @@ export function renderFigure(
     panes,
     columns,
     rows: gridRows,
+    columnWidths: colWidths,
     legendItems,
     seriesLabels,
     colors: first?.colors ?? new Map(),

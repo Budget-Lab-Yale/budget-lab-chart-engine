@@ -928,23 +928,42 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // returns a uniform panes[] grid (shared mode forces one y-domain + hides non-left y-labels
   // internally), so the live wiring is identical — each pane gets its own crosshair + selection,
   // and the legend's highlight root is the grid so dimming/pinning spans every pane.
+  const isShared = (sm.mode ?? "shared") === "shared";
+
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= PANE_MIN_WIDTH each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (PANE_MIN_WIDTH + GRID_GAP)));
     const cols = Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
+    // SHARED mode: pass the TOTAL inner grid width + gap so renderFigure's width helper sizes the
+    // unequal columns (labeled col 0 wider, label-less cols narrower) sharing one inner data width.
+    // PER-PANE mode: equal panes, one shared pane width (1fr columns).
     const paneW = Math.max(PANE_MIN_WIDTH, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
-    const sig = `p:${cols}:${paneW}`;
+    const sig = isShared ? `s:${cols}:${outerWidth}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
     let fig: FigureRenderResult;
     try {
-      fig = renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
+      fig = isShared
+        ? renderFigure(spec, rows, {
+            gridWidth: outerWidth,
+            gridGap: GRID_GAP,
+            height: PANE_HEIGHT,
+            columns: cols,
+          })
+        : renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
     }
     lastSig = sig; // commit only after a successful render
+    // SHARED mode: explicit unequal column px widths (the panes are rendered at those widths, so
+    // the grid template must match). PER-PANE mode: equal 1fr columns via --figure-cols.
+    if (isShared && fig.columnWidths && fig.columnWidths.length) {
+      grid.style.gridTemplateColumns = fig.columnWidths.map((w) => `${w}px`).join(" ");
+    } else {
+      grid.style.gridTemplateColumns = "";
+    }
     grid.style.setProperty("--figure-cols", String(fig.columns));
     grid.replaceChildren();
     for (const pane of fig.panes) {

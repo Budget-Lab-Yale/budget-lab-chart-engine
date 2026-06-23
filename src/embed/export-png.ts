@@ -5,6 +5,7 @@ import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
+import { sharedColumnWidths } from "../engine/figure.js";
 import { TBL } from "../engine/theme.js";
 import { LOGO_DATA_URL, FIGTREE_FONT_FACE, LOGO_ASPECT } from "./assets.js";
 
@@ -286,17 +287,29 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
-    const paneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
-    const fig = renderFigure(spec, rows, {
-      width: paneW,
-      height: PANE_CHART_H,
-      columns: cols,
-    });
+    const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
+    // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
+    // one inner data width — same helper as the live grid, so the export matches the live look.
+    // PER-PANE mode: equal columns (unchanged).
+    const shared = isShared ? sharedColumnWidths(INNER_W, cols, COL_GAP) : null;
+    const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
+    const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
+    // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
+    const colX: number[] = [];
+    let acc = MARGIN;
+    for (let c = 0; c < cols; c++) {
+      colX.push(acc);
+      acc += colWidth(c) + COL_GAP;
+    }
+    const fig = isShared
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: PANE_CHART_H, columns: cols })
+      : renderFigure(spec, rows, { width: equalPaneW, height: PANE_CHART_H, columns: cols });
     const gridTop = chartTop;
     fig.panes.forEach((pane, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const x = MARGIN + col * (paneW + COL_GAP);
+      const x = colX[col]!;
+      const w = colWidth(col);
       const y = gridTop + row * (PANE_TITLE_H + PANE_CHART_H + ROW_GAP);
       root.appendChild(
         textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
@@ -305,7 +318,7 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
         const ps = pane.svg;
         ps.setAttribute("x", String(x));
         ps.setAttribute("y", String(y + PANE_TITLE_H));
-        ps.setAttribute("width", String(paneW));
+        ps.setAttribute("width", String(w));
         ps.setAttribute("height", String(PANE_CHART_H));
         root.appendChild(ps);
       }

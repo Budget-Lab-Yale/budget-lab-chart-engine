@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderChart, renderFigure, render, TOTAL_SERIES_KEY } from "../src/engine/index";
-import type { FigureRenderResult } from "../src/engine/index";
+import type { FigureRenderResult, FigurePane } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
 import type { PreparedRow, MarkLayers } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
@@ -760,6 +760,43 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
 
     // Single, unstyled series → no figure legend (pane titles carry identity).
     expect(fig.legendItems).toBeNull();
+
+    // Unequal OUTER column widths: the labeled left column is WIDER (carries the 44px label
+    // gutter); the label-less columns are NARROWER (small 2px left margin, no gutter). Returned
+    // per-column widths drive the live grid template + the export layout.
+    expect(fig.columnWidths).toBeDefined();
+    expect(fig.columnWidths!.length).toBe(2);
+    expect(fig.columnWidths![0]).toBeGreaterThan(fig.columnWidths![1]!);
+
+    // Per-pane SVG widths match the column widths (col 0 = panes 0,2; col 1 = panes 1,3).
+    const svgW = (p: FigurePane): number => Number((p.svg as SVGSVGElement).getAttribute("width"));
+    expect(svgW(fig.panes[0]!)).toBe(fig.columnWidths![0]);
+    expect(svgW(fig.panes[2]!)).toBe(fig.columnWidths![0]);
+    expect(svgW(fig.panes[1]!)).toBe(fig.columnWidths![1]);
+    expect(svgW(fig.panes[3]!)).toBe(fig.columnWidths![1]);
+
+    // Left margin: leftmost column keeps the full 44px label gutter; label-less columns use the
+    // small 2px margin (NO blank gutter). Stamped on the SVG as data-margin-left.
+    const marginLeft = (p: FigurePane): number =>
+      Number((p.svg as SVGSVGElement).dataset.marginLeft);
+    expect(marginLeft(fig.panes[0]!)).toBe(44);
+    expect(marginLeft(fig.panes[2]!)).toBe(44);
+    expect(marginLeft(fig.panes[1]!)).toBe(2);
+    expect(marginLeft(fig.panes[3]!)).toBe(2);
+
+    // IDENTICAL inner DATA width across the row: outerWidth − marginLeft − marginRight is equal
+    // for the labeled and the label-less panes (so the series renders at the same apparent width).
+    const dataW = (p: FigurePane): number => {
+      const svg = p.svg as SVGSVGElement;
+      return (
+        Number(svg.getAttribute("width")) -
+        Number(svg.dataset.marginLeft) -
+        Number(svg.dataset.marginRight)
+      );
+    };
+    expect(dataW(fig.panes[1]!)).toBe(dataW(fig.panes[0]!));
+    expect(dataW(fig.panes[2]!)).toBe(dataW(fig.panes[0]!));
+    expect(dataW(fig.panes[3]!)).toBe(dataW(fig.panes[0]!));
 
     await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-regions.golden.svg");
   });
