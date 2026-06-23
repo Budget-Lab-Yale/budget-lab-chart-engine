@@ -38,9 +38,16 @@ export interface FigureRenderResult {
   seriesOrder: string[];
   dashedNames: Set<string>;
   units: string;
+  xAxisTitle: string | null;
   dataInScope: PreparedRow[];
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** Visual top-to-bottom stack order of the interactive series (stacked panes only; line
+   *  panes leave this undefined). Mirrors RenderResult.legendVisualOrder. */
+  legendVisualOrder?: string[];
+  /** Net-dot mode for the band crosshair's Total row (stacked panes only; line panes leave
+   *  this undefined). Mirrors RenderResult.showTotalDot. */
+  showTotalDot?: boolean;
 }
 
 /**
@@ -61,6 +68,14 @@ export function renderFigure(
   if (mode === "per-pane") {
     // B5 implements per-pane mode (each pane its own y-scale/units → N SVGs).
     throw new Error("small_multiples mode 'per-pane' is not yet implemented (planned for B5).");
+  }
+
+  // Bar-family panes in shared mode are a later task (B8): the bar/stacked mark builders
+  // don't bind fxField/fyField, so all panes would superimpose silently. Fail loud.
+  if (spec.chartType !== "line") {
+    throw new Error(
+      "small multiples currently support line charts only; bar/stacked panes are not yet implemented (B8)",
+    );
   }
 
   const facetField = sm.facet_field;
@@ -122,8 +137,11 @@ export function renderFigure(
     seriesOrder: pane.seriesNames,
     dashedNames: pane.layers.dashedNames,
     units: pane.units || inferUnitsFromSubtitle(spec.subtitle),
+    xAxisTitle: spec.x_axis_title ?? null,
     dataInScope: pane.dataInScope,
     tooltipXParse: pane.tooltipXParse,
     tooltipXFormat: pane.tooltipXFormat,
+    legendVisualOrder: pane.layers.legendVisualOrder,
+    showTotalDot: pane.layers.showTotalDot,
   };
 }

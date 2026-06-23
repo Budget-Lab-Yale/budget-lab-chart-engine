@@ -754,6 +754,24 @@ describe("golden figure — shared-mode small multiples (renderFigure, task B4)"
     expect(a).toBe(b);
   });
 
+  it("renderFigure throws for bar/stacked small_multiples (B8 guard)", () => {
+    const rows = parseCsv("./fixtures/facet-regions.csv");
+    const barFigureSpec: ChartSpec = {
+      ...FIGURE_SPEC,
+      chartType: "bar",
+    };
+    expect(() => renderFigure(barFigureSpec, rows, { document })).toThrow(
+      /small multiples currently support line charts only/,
+    );
+    const stackedFigureSpec: ChartSpec = {
+      ...FIGURE_SPEC,
+      chartType: "stacked",
+    };
+    expect(() => renderFigure(stackedFigureSpec, rows, { document })).toThrow(
+      /small multiples currently support line charts only/,
+    );
+  });
+
   it("render() dispatches: small_multiples -> figure, else -> single chart", () => {
     const figRows = parseCsv("./fixtures/facet-regions.csv");
     const fig = render(FIGURE_SPEC, figRows, { width: 720, height: 460, document }) as FigureRenderResult;
