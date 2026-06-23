@@ -25,10 +25,9 @@ export const Y_TICK_LABEL_CLASS = "tbl-y-tick-label";
 export const X_TICK_LABEL_CLASS = "tbl-x-tick-label";
 
 export interface CollapseFacetChromeOptions {
-  /** Outer SVG width in px (the right plot edge is width - marginRight). */
+  /** Outer SVG width in px. Gridlines are stretched to span 0..width (the full pane,
+   *  edge to edge), matching the non-faceted band gridline. */
   width: number;
-  /** Right margin in px. */
-  marginRight: number;
   // Extension point for B3 (fx+fy grids): the `fy` row dimension. A faceted grid repeats
   // the y-chrome once per (column,row) cell. For the single-row `fx` case handled here,
   // every facet shares one y-scale and one row, so we keep the FIRST cell's chrome and
@@ -74,7 +73,7 @@ function stretchLinesToFullWidth(
  */
 export function collapseFacetChrome(
   svg: SVGSVGElement,
-  { width, marginRight }: CollapseFacetChromeOptions,
+  { width }: CollapseFacetChromeOptions,
 ): void {
   // Collapse the repeated label/rule groups identified by className. For each class, the
   // matched groups are the per-facet copies in left-to-right facet order (DOM order, which
@@ -99,15 +98,15 @@ export function collapseFacetChrome(
     if (!group) continue;
 
     // The kept group is the leftmost facet's; it is translated by the facet's x origin
-    // (`transform="translate(tx,0)"`). Lines are in that local frame. We want them to span
-    // from the current left extent (x1, which already includes the left gridline-extension
-    // inset) to the right plot edge in absolute coords. Convert the right edge to the
-    // group's local frame by subtracting the group's tx.
+    // (`transform="translate(tx,0)"`). Lines are in that local frame. Match the non-faceted
+    // band gridline, which spans the FULL pane width (absolute 0 → svgWidth, edge to edge):
+    // an `fx`-faceted group otherwise leaves its gridlines inset by the facet padding on the
+    // left and the right margin on the right, so they float off the pane edges and the bars
+    // read as unbalanced/"pushed". Convert the absolute pane edges into the kept group's
+    // local frame by subtracting its tx.
     const tx = readTranslateX(group);
-    const firstLine = group.querySelector<SVGLineElement>("line");
-    const leftLocalX = firstLine ? Number(firstLine.getAttribute("x1") ?? "0") : 0;
-    const rightEdgeAbs = width - marginRight;
-    const rightLocalX = rightEdgeAbs - tx;
+    const leftLocalX = 0 - tx;
+    const rightLocalX = width - tx;
     stretchLinesToFullWidth(group, leftLocalX, rightLocalX);
   }
 }

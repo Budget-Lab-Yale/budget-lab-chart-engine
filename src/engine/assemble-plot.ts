@@ -313,7 +313,7 @@ export function assemblePlot({
     // Read width from the rendered SVG so the right plot edge is correct regardless of
     // whether an explicit width was passed (Plot defaults it otherwise).
     const svgWidth = Number(svg.getAttribute("width")) || (plotOpts.width as number) || 640;
-    collapseFacetChrome(svg, { width: svgWidth, marginRight: effMarginRight });
+    collapseFacetChrome(svg, { width: svgWidth });
   } else if (fyFaceted) {
     // Horizontal grouped: collapse the per-row-facet value chrome to continuous full-height
     // vertical gridlines + one value-axis tick-label row at the bottom.
