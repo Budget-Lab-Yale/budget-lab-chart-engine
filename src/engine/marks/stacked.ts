@@ -210,6 +210,12 @@ export function buildStackedMarks(
 
   const overlay: unknown[] = [stackMark];
 
+  // Small-multiples pane (§6): suppress the net TEXT (the value text above a cumulative stack
+  // AND the signed label below the diverging dot) and in-segment labels — panes are small. The
+  // diverging net DOT is KEPT (it still carries the net). Gated on ctx.pane so single-chart
+  // (non-pane) output stays byte-identical.
+  const pane = ctx.pane === true;
+
   // --- Net total markers ---
   const netRows = categories.map((cat) => ({
     _xc: cat,
@@ -217,7 +223,7 @@ export function buildStackedMarks(
     posTop: posSumByCat.get(cat) ?? 0,
   }));
 
-  if (netMode === "text") {
+  if (netMode === "text" && !pane) {
     // Text above the stack top (= positive sum, since no negatives in this branch). 14pt
     // 700 text_heading, baseline 6px above the top.
     // Shared callout style (matches the per-bar value labels — see theme.ts TBL_VALUE_LABEL).
@@ -233,7 +239,8 @@ export function buildStackedMarks(
         : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -TBL_VALUE_LABEL.gap }),
     );
   } else if (netMode === "dot") {
-    // Black-stroked white dot at the true net y, plus a signed value label below.
+    // Black-stroked white dot at the true net y (KEPT in panes), plus a signed value label
+    // below (suppressed in panes — §6). The dot still carries the net for small multiples.
     const netLabelFill = spec.barStack?.netLabelColor === "black" ? MARK_BLACK : WHITE;
     if (horizontal) {
       overlay.push(
@@ -246,18 +253,22 @@ export function buildStackedMarks(
           strokeWidth: 2,
           className: NET_DOT_CLASS,
         }),
-        Plot.text(netRows, {
-          y: "_xc",
-          x: "net",
-          text: (d: { net: number }) => netFmt(d.net),
-          fill: netLabelFill,
-          fontSize: TBL_VALUE_LABEL.fontSize,
-          fontWeight: TBL_VALUE_LABEL.fontWeight,
-          textAnchor: "middle",
-          dy: 20,
-          className: NET_LABEL_CLASS,
-        }),
       );
+      if (!pane) {
+        overlay.push(
+          Plot.text(netRows, {
+            y: "_xc",
+            x: "net",
+            text: (d: { net: number }) => netFmt(d.net),
+            fill: netLabelFill,
+            fontSize: TBL_VALUE_LABEL.fontSize,
+            fontWeight: TBL_VALUE_LABEL.fontWeight,
+            textAnchor: "middle",
+            dy: 20,
+            className: NET_LABEL_CLASS,
+          }),
+        );
+      }
     } else {
       overlay.push(
         Plot.dot(netRows, {
@@ -269,25 +280,29 @@ export function buildStackedMarks(
           strokeWidth: 2,
           className: NET_DOT_CLASS,
         }),
-        Plot.text(netRows, {
-          x: "_xc",
-          y: "net",
-          text: (d: { net: number }) => netFmt(d.net),
-          fill: netLabelFill,
-          fontSize: TBL_VALUE_LABEL.fontSize,
-          fontWeight: TBL_VALUE_LABEL.fontWeight,
-          textAnchor: "middle",
-          dy: 20,
-          className: NET_LABEL_CLASS,
-        }),
       );
+      if (!pane) {
+        overlay.push(
+          Plot.text(netRows, {
+            x: "_xc",
+            y: "net",
+            text: (d: { net: number }) => netFmt(d.net),
+            fill: netLabelFill,
+            fontSize: TBL_VALUE_LABEL.fontSize,
+            fontWeight: TBL_VALUE_LABEL.fontWeight,
+            textAnchor: "middle",
+            dy: 20,
+            className: NET_LABEL_CLASS,
+          }),
+        );
+      }
     }
   }
 
   // --- Segment labels ---
   // Suppressed entirely when net is a dot (diverging). For cumulative (text) they are
   // OPTIONAL, default OFF — only when spec.valueLabels.show === true.
-  if (netMode !== "dot" && spec.valueLabels?.show === true) {
+  if (netMode !== "dot" && !pane && spec.valueLabels?.show === true) {
     // Mono light tiers (the two lightest, 100 & 200 per the Style-Guide) get dark text;
     // everything else white. monoScale returns darkest-first, so the light tiers are the
     // last two hexes assigned.
@@ -357,10 +372,15 @@ export function buildStackedMarks(
             selector: `g.${NET_DOT_CLASS} circle`,
             seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
           },
-          {
-            selector: `g.${NET_LABEL_CLASS} text`,
-            seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
-          },
+          // The net LABEL text is suppressed in panes, so only tag it for the single chart.
+          ...(pane
+            ? []
+            : [
+                {
+                  selector: `g.${NET_LABEL_CLASS} text`,
+                  seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
+                },
+              ]),
         ]
       : [];
 

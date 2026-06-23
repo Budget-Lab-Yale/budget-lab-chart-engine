@@ -6,7 +6,7 @@
 // B5; bar-family panes are B8.
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
-import type { PreparedRow } from "./marks/index";
+import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems } from "./index";
 import type { FacetInfo, LegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
@@ -38,6 +38,12 @@ export interface FigurePane {
   /** Per-pane mode: this pane's x-value parse/format for the crosshair. */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** Per-pane mode (stacked panes): net-dot mode for the band crosshair's Total row. Mirrors
+   *  MarkLayers.showTotalDot — line/bar panes leave this undefined. */
+  showTotalDot?: boolean;
+  /** Per-pane mode (stacked panes): visual top→bottom stack order, for the band crosshair's
+   *  Total/series ordering. Line/bar panes leave this undefined. */
+  legendVisualOrder?: string[];
 }
 
 export interface FigureRenderResult {
@@ -82,12 +88,14 @@ export function renderFigure(
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
 
-  // Bar-family panes are a later task (B8): the bar/stacked mark builders don't bind
-  // fxField/fyField (shared) and per-pane composition is line-only here, so fail loud for both
-  // modes. (Applies before the mode branch — neither shared nor per-pane supports bars yet.)
-  if (spec.chartType !== "line") {
+  // SHARED mode is line-only (B8): shared faceting uses Plot `fx` for the grid columns, but
+  // grouped bars also use `fx` for their series grouping (collision), and faceted bar chrome
+  // is a larger effort — deferred. PER-PANE mode renders each pane as an independent single
+  // frame (the grid is CSS-composed), so all bar types work like a normal per-pane chart with
+  // no faceting collision; the guard below is scoped to the shared branch.
+  if (mode === "shared" && spec.chartType !== "line") {
     throw new Error(
-      "small multiples currently support line charts only; bar/stacked panes are not yet implemented (B8)",
+      "shared-mode small multiples support line charts only; use mode: per-pane for bar/stacked",
     );
   }
 
@@ -133,11 +141,16 @@ export function renderFigure(
   // classNameSuffix ("p0", "p1", …) so clip-path ids stay unique across the composed DOM, and
   // `pane: true` thins its line stroke.
   if (mode === "per-pane") {
+    // Keep the first pane's full PaneResult so the figure-level legend reads its real mark
+    // layers (rect swatches for bar/stacked, the diverging-stack "Total" extra, mono/categorical
+    // seriesColors). Line panes carry a dashedNames-only layer, so this is a no-op for them.
+    let firstLayers: MarkLayers | undefined;
     const panes: FigurePane[] = paneValues.map((value, i) => {
       // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
       // renders a standalone single frame for these rows only.
       const paneRows = rows.filter((r) => (r[facetField] as string) === value);
       const p = renderPane(spec, paneRows, { ...opts, pane: true }, `p${i}`);
+      if (i === 0) firstLayers = p.layers;
       return {
         value,
         title: titleFor(value),
@@ -149,19 +162,19 @@ export function renderFigure(
         units: p.units || inferUnitsFromSubtitle(spec.subtitle),
         tooltipXParse: p.tooltipXParse,
         tooltipXFormat: p.tooltipXFormat,
+        showTotalDot: p.layers.showTotalDot,
+        legendVisualOrder: p.layers.legendVisualOrder,
       };
     });
 
     // Figure-level legend: series config is shared across panes, so compute it ONCE from the
-    // first pane's series/colors (same as shared mode). Single/unstyled series → null.
+    // first pane's series/colors + its mark layers (same source of truth as a single chart).
     const first = panes[0];
     const legendItems = buildLegendItems(
       spec,
       first?.seriesOrder ?? [],
       first?.colors ?? new Map(),
-      // The legend reads dashedNames + (for bars) the extras; per-pane is line-only, so derive
-      // a minimal MarkLayers from the first pane's dashed set.
-      { underlay: [], overlay: [], tagging: [], dashedNames: first?.dashedNames ?? new Set() },
+      firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
     );
 
     return {
@@ -180,6 +193,8 @@ export function renderFigure(
       dataInScope: first?.dataInScope ?? [],
       tooltipXParse: first?.tooltipXParse,
       tooltipXFormat: first?.tooltipXFormat,
+      legendVisualOrder: firstLayers?.legendVisualOrder,
+      showTotalDot: firstLayers?.showTotalDot,
     };
   }
 

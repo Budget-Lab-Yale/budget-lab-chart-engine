@@ -782,13 +782,20 @@ function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec): v
   card.appendChild(header);
 }
 
-/** Wire the continuous-x crosshair + two-way selection onto one figure SVG (shared combined
- *  SVG or a per-pane mini-SVG). Figures are line-only (renderFigure throws for bar/stacked),
- *  so the continuous crosshair applies; `dataInScope`/tooltip come from the pane metadata. */
+/** Wire the crosshair + two-way selection onto one figure SVG (shared combined SVG or a
+ *  per-pane mini-SVG). Dispatches the crosshair by `spec.xAxisType`:
+ *   - continuous (line): `attachCrosshair` + the fat line hit-paths (thin strokes are hard to
+ *     hit), and `resolveSeriesAtPoint` for clicks.
+ *   - categorical (bar/stacked panes): `attachBandCrosshair` (mirrors mountChart's categorical
+ *     branch — `isStacked`/`isFaceted`/`showTotalDot`/`categories`/`orientation`); bar rects
+ *     carry `data-series`, so clicks resolve directly with no fat hit-paths.
+ *  Shared mode is line-only, so the band branch is only reached for per-pane bar/stacked panes.
+ *  `dataInScope`/tooltip/bar-metadata come from the pane (or figure) metadata. */
 function wireFigureSvg(
   svg: SVGSVGElement,
   handle: LegendHandle,
   ctx: {
+    spec: ChartSpec;
     dataInScope: PreparedRow[];
     colors: Map<string, string>;
     dashedNames: Set<string>;
@@ -797,8 +804,43 @@ function wireFigureSvg(
     units: string;
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
+    showTotalDot?: boolean;
   },
 ): void {
+  const categorical = ctx.spec.xAxisType === "categorical";
+  if (categorical) {
+    // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
+    const isStacked = ctx.spec.chartType === "stacked";
+    // A grouped per-pane bar IS fx-faceted within its own frame (xScaleField === "fx" in
+    // bar.ts), so isFaceted = bar && >1 series.
+    const isFaceted = ctx.spec.chartType === "bar" && ctx.seriesOrder.length > 1;
+    const catsSeen = new Set<string>();
+    const cats: string[] = [];
+    for (const r of ctx.dataInScope) {
+      const cat = r._xc;
+      if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
+    }
+    attachBandCrosshair(svg, {
+      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+      isStacked,
+      showTotalDot: ctx.showTotalDot,
+      isFaceted,
+      categories: cats,
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v) => formatValue(v, ctx.units),
+      orientation: ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical",
+    });
+    // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
+    svg.querySelectorAll<SVGElement>(".tbl-band-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
+    svg.addEventListener("click", (evt) => {
+      const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+      if (series) handle.toggle(series);
+    });
+    return;
+  }
+
   attachCrosshair(svg, {
     rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
     xField: "time",
@@ -829,7 +871,9 @@ function wireFigureSvg(
  *  - PER-PANE mode: a responsive `.figure-grid` of mini-chart cells (each its own y-scale),
  *    reflowing columns by width; the top legend's highlight root is the GRID so dimming spans
  *    every pane; each pane gets its own crosshair + click-to-select.
- * Figures are line-only for now (renderFigure throws for bar/stacked — B8).
+ * SHARED mode is line-only (renderFigure throws for bar/stacked); PER-PANE mode supports
+ * line, bar, and stacked panes (B8) — each pane is an independent single frame, so the
+ * crosshair is dispatched per pane by xAxisType (band for categorical, line for continuous).
  */
 function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const { spec, rows } = opts;
@@ -898,7 +942,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     recolorNetLabels(svg);
     if (handle) {
       card.classList.add("is-selectable");
-      wireFigureSvg(svg, handle, fig);
+      // Shared mode is line-only, so this always takes the continuous-crosshair branch.
+      wireFigureSvg(svg, handle, { spec, ...fig });
     } else {
       card.classList.remove("is-selectable");
     }
@@ -964,6 +1009,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       for (const pane of fig.panes) {
         if (!pane.svg) continue;
         wireFigureSvg(pane.svg, handle, {
+          spec,
           dataInScope: pane.dataInScope ?? [],
           colors: pane.colors ?? new Map(),
           dashedNames: pane.dashedNames ?? new Set(),
@@ -972,6 +1018,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           units: pane.units ?? fig.units,
           tooltipXParse: pane.tooltipXParse,
           tooltipXFormat: pane.tooltipXFormat,
+          showTotalDot: pane.showTotalDot,
         });
       }
     } else {

@@ -754,21 +754,16 @@ describe("golden figure — shared-mode small multiples (renderFigure, task B4)"
     expect(a).toBe(b);
   });
 
-  it("renderFigure throws for bar/stacked small_multiples (B8 guard)", () => {
+  it("renderFigure throws for bar/stacked SHARED small_multiples (B8 guard, shared-only)", () => {
     const rows = parseCsv("./fixtures/facet-regions.csv");
-    const barFigureSpec: ChartSpec = {
-      ...FIGURE_SPEC,
-      chartType: "bar",
-    };
-    expect(() => renderFigure(barFigureSpec, rows, { document })).toThrow(
-      /small multiples currently support line charts only/,
+    // SHARED mode is line-only: grouped bars collide with the grid's fx. Per-pane is the path.
+    const barSharedSpec: ChartSpec = { ...FIGURE_SPEC, chartType: "bar" };
+    expect(() => renderFigure(barSharedSpec, rows, { document })).toThrow(
+      /shared-mode small multiples support line charts only/,
     );
-    const stackedFigureSpec: ChartSpec = {
-      ...FIGURE_SPEC,
-      chartType: "stacked",
-    };
-    expect(() => renderFigure(stackedFigureSpec, rows, { document })).toThrow(
-      /small multiples currently support line charts only/,
+    const stackedSharedSpec: ChartSpec = { ...FIGURE_SPEC, chartType: "stacked" };
+    expect(() => renderFigure(stackedSharedSpec, rows, { document })).toThrow(
+      /shared-mode small multiples support line charts only/,
     );
   });
 
@@ -882,6 +877,123 @@ describe("golden figure — per-pane small multiples (renderFigure, task B5)", (
     expect(fig.mode).toBe("per-pane");
     expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
+  });
+});
+
+// --- Figure orchestrator: per-pane BAR + STACKED small multiples (task B8) ---
+//
+// Per-pane mode supports all bar types: each pane is an independent single frame (the grid is
+// CSS-composed), so bars render with no faceting collision. Pane suppression (gated on
+// ctx.pane) drops in-bar VALUE labels (bar) and in-segment labels + the net TEXT (stacked) —
+// but KEEPS the diverging net DOT. Single-chart bar/stacked output stays byte-identical.
+
+const BAR_FIGURE_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Effect by year, by region",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  data: "figure-bar-perpane.csv",
+  small_multiples: {
+    facet_field: "facet",
+    columns: 2,
+    mode: "per-pane",
+    pane_order: ["Northeast", "Midwest", "South", "West"],
+    pane_titles: { Northeast: "Northeast", Midwest: "Midwest", South: "South", West: "West" },
+  },
+};
+
+const STACKED_FIGURE_SPEC: ChartSpec = {
+  chartType: "stacked",
+  title: "Contributions to the net effect, by plan",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
+  data: "figure-stacked-perpane.csv",
+  small_multiples: {
+    facet_field: "facet",
+    columns: 2,
+    mode: "per-pane",
+    pane_order: ["Plan A", "Plan B"],
+    pane_titles: { "Plan A": "Plan A", "Plan B": "Plan B" },
+  },
+};
+
+describe("golden figure — per-pane bar small multiples (renderFigure, task B8)", () => {
+  it("renders each pane as its own single-series bar SVG with value labels suppressed", async () => {
+    const rows = parseCsv("./fixtures/figure-bar-perpane.csv");
+    const fig = renderFigure(BAR_FIGURE_SPEC, rows, { width: 360, height: 240, document });
+
+    // Per-pane mode: no combined SVG; one SVG per pane, in pane_order.
+    expect(fig.mode).toBe("per-pane");
+    expect(fig.combinedSvg).toBeUndefined();
+    expect(fig.panes.length).toBe(4);
+    expect(fig.panes.map((p) => p.value)).toEqual(["Northeast", "Midwest", "South", "West"]);
+    expect(fig.panes.map((p) => p.title)).toEqual(["Northeast", "Midwest", "South", "West"]);
+
+    // Each pane is its own SVG with 3 bars (3 categories), no faceting collision.
+    fig.panes.forEach((p) => {
+      const svg = p.svg as SVGSVGElement;
+      expect(svg.tagName.toLowerCase()).toBe("svg");
+      expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(3);
+      // Value labels SUPPRESSED in panes (§6): the only text groups are the chrome
+      // (y-tick-label group + band x-axis group = 2). A value-label Plot.text would add a 3rd.
+      expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    });
+
+    // Single series, single chart-type → no figure legend (single-series bars get none).
+    expect(fig.legendItems).toBeNull();
+
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-bar-perpane.golden.svg");
+  });
+
+  it("per-pane bar figure render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/figure-bar-perpane.csv");
+    const a = serializePanes(renderFigure(BAR_FIGURE_SPEC, rows, { width: 360, height: 240, document }));
+    const b = serializePanes(renderFigure(BAR_FIGURE_SPEC, rows, { width: 360, height: 240, document }));
+    expect(a).toBe(b);
+  });
+});
+
+describe("golden figure — per-pane stacked small multiples (renderFigure, task B8)", () => {
+  it("renders diverging stacked panes: net DOT kept, net TEXT + segment labels suppressed", async () => {
+    const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
+    const fig = renderFigure(STACKED_FIGURE_SPEC, rows, { width: 360, height: 240, document });
+
+    expect(fig.mode).toBe("per-pane");
+    expect(fig.combinedSvg).toBeUndefined();
+    expect(fig.panes.length).toBe(2);
+    expect(fig.panes.map((p) => p.value)).toEqual(["Plan A", "Plan B"]);
+
+    fig.panes.forEach((p) => {
+      const svg = p.svg as SVGSVGElement;
+      expect(svg.tagName.toLowerCase()).toBe("svg");
+      // 2 categories x 4 series = 8 rects per pane.
+      expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(8);
+      // Diverging net DOT is KEPT — one per category (2 categories).
+      const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
+      expect(dots.length).toBe(2);
+      dots.forEach((d) => expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
+      // Net TEXT label SUPPRESSED in panes — no tbl-net-label text group.
+      expect(svg.querySelectorAll("g.tbl-net-label text").length).toBe(0);
+      // Segment labels SUPPRESSED (diverging already suppresses them, and panes too): the only
+      // text groups are the chrome (y-tick-label + band x-axis = 2).
+      expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    });
+
+    // Diverging stack → figure legend carries the 4 series (rect swatches) + a Total dot row.
+    expect(fig.legendItems?.some((l) => l.series === TOTAL_SERIES_KEY)).toBe(true);
+    expect(fig.legendItems?.every((l) => l.markerShape === "rect" || l.series === TOTAL_SERIES_KEY)).toBe(true);
+    // The figure-level showTotalDot reflects the diverging panes.
+    expect(fig.showTotalDot).toBe(true);
+
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-stacked-perpane.golden.svg");
+  });
+
+  it("per-pane stacked figure render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
+    const a = serializePanes(renderFigure(STACKED_FIGURE_SPEC, rows, { width: 360, height: 240, document }));
+    const b = serializePanes(renderFigure(STACKED_FIGURE_SPEC, rows, { width: 360, height: 240, document }));
+    expect(a).toBe(b);
   });
 });
 

@@ -1207,4 +1207,57 @@ describe("mountChart small multiples", () => {
     expect(() => mountChart(container, { spec: oneRowSpec, rows: oneRegion, width: 600 })).not.toThrow();
     expect(container.querySelector(".figure-card")).not.toBeNull();
   });
+
+  // --- Per-pane BAR figure (task B8) ---
+  const BAR_FACET_ROWS: TidyRow[] = [];
+  for (const region of ["Northeast", "Midwest", "South", "West"]) {
+    for (const [s, base] of [["2019", 2], ["2022", 3], ["2025", 4]] as const) {
+      BAR_FACET_ROWS.push({ facet: region, series: s, time: "All", value: String(base) } as TidyRow);
+      BAR_FACET_ROWS.push({ facet: region, series: s, time: "Under 65", value: String(base + 1) } as TidyRow);
+    }
+  }
+  const BAR_PERPANE_SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "Effect by year, by region",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    series_order: ["2019", "2022", "2025"],
+    data: "inline",
+    small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
+  };
+
+  it("per-pane bar figure mounts a .figure-grid with bar <rect>s per pane + rect-swatch legend", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: BAR_PERPANE_SPEC, rows: BAR_FACET_ROWS, width: 800 });
+    const grid = container.querySelector(".figure-grid");
+    expect(grid).not.toBeNull();
+    const panes = grid!.querySelectorAll(".figure-pane");
+    expect(panes.length).toBe(4); // 4 regions
+    // Each pane has bar <rect>s (grouped bars: 2 categories x 3 series = 6 rects).
+    panes.forEach((p) => {
+      expect(p.querySelector(".figure-pane-title")).not.toBeNull();
+      const rects = p.querySelectorAll('svg g[aria-label="bar"] rect');
+      expect(rects.length).toBe(6);
+    });
+    // Legend uses rect swatches (bar markerShape), not line swatches.
+    const swatch = container.querySelector(".tbl-legend-item .tbl-legend-swatch");
+    expect(swatch).not.toBeNull();
+    expect(swatch!.classList.contains("is-rect")).toBe(true);
+  });
+
+  it("clicking a per-pane bar legend item dims rects across ALL panes", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: BAR_PERPANE_SPEC, rows: BAR_FACET_ROWS, width: 800 });
+    // Pin series "2019" via its legend button.
+    const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="2019"]')!;
+    expect(btn).not.toBeNull();
+    btn.click();
+    // Every pane's non-2019 rects dim; 2019 rects stay bright — across all panes.
+    const otherRects = container.querySelectorAll('.figure-grid rect[data-series="2025"]');
+    expect(otherRects.length).toBeGreaterThan(1); // multiple panes
+    otherRects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
+    container.querySelectorAll('.figure-grid rect[data-series="2019"]').forEach((r) =>
+      expect(r.classList.contains("tbl-dimmed")).toBe(false),
+    );
+  });
 });

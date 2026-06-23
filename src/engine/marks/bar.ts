@@ -109,7 +109,10 @@ export function buildBarMarks(
         `chart is too dense for grouped bars (consider a line chart or fewer series).`,
     );
   }
-  const emitValueLabels = showValueLabels && estBarPx >= VALUE_LABEL_MIN_PX;
+  // Small-multiples panes are narrow (Style-Guide §6: value labels suppressed in panes).
+  // Gate on ctx.pane so the px-suppression heuristic doesn't have to be relied on — keeps
+  // single-chart (non-pane) output byte-identical.
+  const emitValueLabels = showValueLabels && !ctx.pane && estBarPx >= VALUE_LABEL_MIN_PX;
 
   const allValues = data
     .map((r) => r._y)

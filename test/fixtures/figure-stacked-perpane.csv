@@ -1,0 +1,17 @@
+facet,series,time,value
+Plan A,Lower rates,Year 1,4
+Plan A,Wider brackets,Year 1,2
+Plan A,Limit deductions,Year 1,-1.5
+Plan A,Repeal credit,Year 1,-2.5
+Plan A,Lower rates,Year 2,3
+Plan A,Wider brackets,Year 2,2.5
+Plan A,Limit deductions,Year 2,-1
+Plan A,Repeal credit,Year 2,-3
+Plan B,Lower rates,Year 1,5
+Plan B,Wider brackets,Year 1,1.5
+Plan B,Limit deductions,Year 1,-2
+Plan B,Repeal credit,Year 1,-1.5
+Plan B,Lower rates,Year 2,4
+Plan B,Wider brackets,Year 2,2
+Plan B,Limit deductions,Year 2,-1.5
+Plan B,Repeal credit,Year 2,-2

@@ -1,0 +1,13 @@
+facet,series,time,value
+Northeast,Effect,2019,3.2
+Northeast,Effect,2022,4.1
+Northeast,Effect,2025,4.8
+Midwest,Effect,2019,2.1
+Midwest,Effect,2022,2.6
+Midwest,Effect,2025,3.3
+South,Effect,2019,4.5
+South,Effect,2022,5.0
+South,Effect,2025,5.6
+West,Effect,2019,1.8
+West,Effect,2022,2.2
+West,Effect,2025,2.9
