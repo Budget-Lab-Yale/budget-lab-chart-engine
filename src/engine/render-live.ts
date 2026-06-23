@@ -25,7 +25,7 @@ import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
-import { TBL } from "./theme.js";
+import { TBL, markerSymbolForIndex } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
 
 export interface MountOptions {
@@ -845,6 +845,11 @@ function wireFigureSvg(
   // tooltip instead. `useCoord` gates the no-tooltip emitOnly + coordinated-renderer path.
   const horizontal = ctx.spec.orientation === "horizontal";
   const useCoord = ctx.onResolve != null && !horizontal;
+  // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
+  // match the static marker. Keyed by series index, matching the chart's symbol scale.
+  const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
+    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const))
+    : undefined;
   // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
   // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
@@ -876,6 +881,7 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.units),
+        symbols: markerSymbols,
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -965,6 +971,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
+      symbols: markerSymbols,
     }) as (key: unknown, active?: boolean) => void;
   }
   return undefined;

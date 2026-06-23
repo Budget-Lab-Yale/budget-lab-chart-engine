@@ -7,6 +7,7 @@ import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
 import { sharedColumnWidths } from "../engine/figure.js";
 import { TBL } from "../engine/theme.js";
+import { symbolPathD } from "../engine/symbols.js";
 import { LOGO_DATA_URL, FIGTREE_FONT_FACE, LOGO_ASPECT } from "./assets.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -25,7 +26,8 @@ const LOGO_BASELINE_FRAC = 0.87; // wordmark baseline within the logo box
 const SCALE = 2;
 
 // Small-multiples figure layout tokens.
-const PANE_CHART_H = 190; // per-pane mini-chart height (both modes)
+const PANE_CHART_H = 240; // per-pane mini-chart height — matches the live PANE_HEIGHT so the
+                          // exported panes keep the same (squarer) proportion as on screen.
 const PANE_TITLE_H = 18; // per-pane title band height
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
@@ -132,7 +134,7 @@ function drawLines(
 
 function drawLegend(
   root: SVGElement,
-  items: Array<{ label: string; color: string | undefined; dashed: boolean }>,
+  items: Array<{ label: string; color: string | undefined; dashed: boolean; markerSymbol?: string }>,
   firstBaseline: number,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
@@ -161,6 +163,20 @@ function drawLegend(
           stroke: color,
           "stroke-width": 2,
           "stroke-dasharray": "5 3",
+        }),
+      );
+    } else if (item.markerSymbol) {
+      // Line + the series' marker symbol (matches the chart markers, for accessibility).
+      root.appendChild(
+        svgEl("line", { x1: x, y1: cy, x2: x + SW, y2: cy, stroke: color, "stroke-width": 2 }),
+      );
+      root.appendChild(
+        svgEl("path", {
+          d: symbolPathD(item.markerSymbol, 34),
+          transform: `translate(${x + SW / 2},${cy})`,
+          fill: color,
+          stroke: "#ffffff",
+          "stroke-width": 0.75,
         }),
       );
     } else {

@@ -3,24 +3,9 @@
 // interactive legend against that SVG. Paths are matched by their `data-series` attr,
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
-import { d3 } from "./vendor";
+import { symbolPathD } from "./symbols";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const SYMBOL_TYPES: Record<string, unknown> = {
-  circle: d3.symbolCircle,
-  square: d3.symbolSquare,
-  triangle: d3.symbolTriangle,
-  diamond: d3.symbolDiamond,
-  star: d3.symbolStar,
-  wye: d3.symbolWye,
-  cross: d3.symbolCross,
-};
-
-/** A d3 symbol path centered at (0,0) for the given symbol name. */
-function symbolPathD(name: string, size: number): string {
-  const type = SYMBOL_TYPES[name] ?? d3.symbolCircle;
-  return d3.symbol().type(type as never).size(size)() ?? "";
-}
 
 /** Build a line+symbol legend swatch (an inline SVG): a short colored line with the series'
  *  marker centered on it, so series can be identified by shape as well as color. */

@@ -180,6 +180,14 @@ describe("buildExportSvg — small multiples", () => {
     expect(Number(svg.getAttribute("height"))).toBeLessThan(750);
   });
 
+  it("draws per-series marker symbols in the legend when points is set", () => {
+    // The legend symbol swatches use a thin white outline (stroke-width 0.75), distinct from the
+    // pane markers (stroke-width 1), so we can detect them.
+    const svg = buildExportSvg({ ...SHARED_SPEC, points: true }, FACET_ROWS);
+    const legendSymbols = svg.querySelectorAll('path[stroke-width="0.75"]');
+    expect(legendSymbols.length).toBe(2); // one per series (A, B)
+  });
+
   it("single chart export stays at the fixed 750 frame (unchanged)", () => {
     const svg = buildExportSvg(SPEC, ROWS);
     expect(svg.getAttribute("width")).toBe("1000");

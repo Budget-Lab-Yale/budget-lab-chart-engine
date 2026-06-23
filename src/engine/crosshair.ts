@@ -7,6 +7,7 @@
 import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { escapeHtml } from "./util";
+import { symbolPathD } from "./symbols";
 
 type Row = Record<string, unknown>;
 
@@ -32,6 +33,9 @@ export interface CrosshairOptions {
    *  NO tooltip. Used by coordinated small-multiples figures, where the unified secondary-cursor
    *  renderer (driven by the figure bus) draws every pane's indicators instead. */
   emitOnly?: boolean;
+  /** series → marker symbol name (line charts with point markers). When set, the coordinated
+   *  hover dot takes the series' shape so it matches the static marker. */
+  symbols?: Map<string, string>;
 }
 
 let activeTooltip: HTMLElement | null = null; // single shared tooltip element
@@ -1186,12 +1190,27 @@ const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
 const COORD_LABEL_DARK = "#1A1A2E";
 
-/** Append a small hollow dot (white fill, series-color ring) to the coord group. */
-function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string): void {
+/**
+ * Append a hollow highlight marker (white fill, series-color ring) to the coord group. When a
+ * `symbol` is given (the series' marker shape), the highlight takes that shape so it matches the
+ * static point marker it sits over; otherwise a circle. Sized a touch larger than the static
+ * marker so it reads as a highlight ring.
+ */
+function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string, symbol?: string): void {
+  if (symbol && symbol !== "circle") {
+    const p = doc.createElementNS(COORD_NS, "path");
+    p.setAttribute("d", symbolPathD(symbol, 70));
+    p.setAttribute("transform", `translate(${cx},${cy})`);
+    p.setAttribute("fill", "#ffffff");
+    p.setAttribute("stroke", color);
+    p.setAttribute("stroke-width", "1.5");
+    g.appendChild(p);
+    return;
+  }
   const dot = doc.createElementNS(COORD_NS, "circle");
   dot.setAttribute("cx", String(cx));
   dot.setAttribute("cy", String(cy));
-  dot.setAttribute("r", "3");
+  dot.setAttribute("r", "4");
   dot.setAttribute("fill", "#ffffff");
   dot.setAttribute("stroke", color);
   dot.setAttribute("stroke-width", "1.5");
@@ -1501,7 +1520,7 @@ export function attachSecondaryLineCursor(
       const pts = order
         .map((s) => ({ s, v: bySeries.get(s)!.get(nx) }))
         .filter((p) => p.v != null && !Number.isNaN(p.v)) as Array<{ s: string; v: number }>;
-      for (const p of pts) addCoordDot(g, doc, gx, toPy(p.v), colors?.get(p.s) || "#666666");
+      for (const p of pts) addCoordDot(g, doc, gx, toPy(p.v), colors?.get(p.s) || "#666666", opts.symbols?.get(p.s));
       const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
       pts.forEach((p, i) => {
         addCoordPill(g, doc, flip ? gx - 10 : gx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colors?.get(p.s) || "#666666", weight);
@@ -1717,6 +1736,8 @@ export interface CategoricalLineOptions {
   /** Hit-test + emit only (coordinated figures); no tooltip/guide. */
   emitOnly?: boolean;
   onResolve?: (category: string | null) => void;
+  /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
+  symbols?: Map<string, string>;
 }
 
 /**
@@ -1865,7 +1886,7 @@ export function attachSecondaryCategoricalLineCursor(
     const toPy = readLinearYScale(svgEl);
     if (toPy) {
       const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)! }));
-      for (const p of pts) addCoordDot(g, doc, cx, toPy(p.v), opts.colors?.get(p.s) || "#666666");
+      for (const p of pts) addCoordDot(g, doc, cx, toPy(p.v), opts.colors?.get(p.s) || "#666666", opts.symbols?.get(p.s));
       const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
       pts.forEach((p, i) => {
         addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), opts.colors?.get(p.s) || "#666666", weight);
