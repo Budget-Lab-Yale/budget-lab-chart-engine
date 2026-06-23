@@ -109,6 +109,9 @@ export interface ChartSpec {
 
   confidence_bands?: ConfidenceBand[];
 
+  /** Line charts: draw a marker (dot) at each data point. Default false. */
+  points?: boolean;
+
   // Bar / stacked bar
   /** Chart orientation; defaults to "vertical" (value axis is Y). */
   orientation?: "vertical" | "horizontal";

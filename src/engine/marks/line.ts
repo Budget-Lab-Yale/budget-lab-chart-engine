@@ -77,6 +77,27 @@ export function buildLineMarks(
     );
   }
 
+  // Data-point markers (spec.points): a filled dot at each finite point, on top of the lines.
+  // Dashed-then-solid order matches the line groups so post-render tagging maps each <circle>
+  // to its series (one tagging entry per circle, in this exact DOM order) → dots dim with the
+  // legend like the lines. Pane charts use a slightly smaller radius.
+  const pointData = spec.points
+    ? [...dashedData, ...solidData].filter((r) => Number.isFinite(r._y))
+    : [];
+  if (pointData.length) {
+    overlay.push(
+      Plot.dot(pointData, {
+        x: xField,
+        y: "_y",
+        fill: "series",
+        r: ctx.pane ? 2.6 : 3,
+        stroke: "#ffffff",
+        strokeWidth: 1,
+        ...facetChannels,
+      }),
+    );
+  }
+
   // Series encounter order within each line group, so post-render path tagging maps
   // each <path data-series> correctly even when dashed+solid groups share a color.
   // `g[aria-label="line"] path` returns all line paths in document order — dashed-group
@@ -92,10 +113,28 @@ export function buildLineMarks(
   if (dashedData.length) seriesOrder.push(...encounterOrder(dashedData));
   if (solidData.length) seriesOrder.push(...encounterOrder(solidData));
 
+  // Categorical x (xField "_xc"): a line connects category points, so use a POINT scale (points
+  // span the axis with only a small edge inset) instead of the bar BAND scale (whose outer
+  // padding + half-bandwidth pushes the first/last point well inside the plot — wasted space on
+  // a line). The band axis labels resolve to the same positions, so they stay aligned.
+  const categorical = xField === "_xc";
+  const xScaleOpts = categorical ? { type: "point" as const, padding: 0.08 } : undefined;
+
+  const tagging = [{ selector: 'g[aria-label="line"] path', seriesOrder }];
+  // Tag each marker circle (DOM order == pointData order) with its series so dots dim with the
+  // legend exactly like the lines.
+  if (pointData.length) {
+    tagging.push({
+      selector: 'g[aria-label="dot"] circle',
+      seriesOrder: pointData.map((r) => r.series),
+    });
+  }
+
   return {
     underlay,
     overlay,
-    tagging: [{ selector: 'g[aria-label="line"] path', seriesOrder }],
+    tagging,
     dashedNames,
+    ...(xScaleOpts ? { xScaleOpts } : {}),
   };
 }

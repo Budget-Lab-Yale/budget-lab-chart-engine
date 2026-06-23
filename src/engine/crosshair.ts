@@ -1632,3 +1632,216 @@ export function attachSecondaryBandCursor(
     g.setAttribute("opacity", "1");
   };
 }
+
+// ---------------------------------------------------------------------------
+// Categorical-x LINE charts — crosshair + coordinated cursor
+// ---------------------------------------------------------------------------
+// A line over ordinal categories (e.g. age bins) has no bars, so the band crosshair (which reads
+// bar-rect geometry) can't resolve a category. These resolve the category from the rendered
+// x-axis label positions (one centered label per category, at the same x as the line points) and
+// render a line-style cursor (guide + per-series dot + value pill), reusing the coordinated-cursor
+// helpers. The hovered x is keyed by the category string, exactly like the band path.
+
+/** Read the categorical x-axis label centers (one row of labels below the plot): category → cx
+ *  in SVG user coords. Screen-space measurement; empty without layout (jsdom). */
+function readCategoryCentersFromAxis(svgEl: SVGSVGElement, plotBottom: number): Array<{ category: string; cx: number }> {
+  const svgRect = svgEl.getBoundingClientRect();
+  if (!svgRect.width || !svgRect.height) return [];
+  const vb = svgEl.viewBox?.baseVal;
+  const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const sx = Wd / svgRect.width;
+  const sy = Hd / svgRect.height;
+  const out: Array<{ category: string; cx: number }> = [];
+  const seen = new Set<string>();
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+    if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
+    const r = t.getBoundingClientRect();
+    if (!r.width) continue;
+    if ((r.top - svgRect.top) * sy < plotBottom - 2) continue; // x-axis labels sit below the plot
+    const category = (t.textContent ?? "").trim();
+    if (!category || seen.has(category)) continue;
+    seen.add(category);
+    out.push({ category, cx: ((r.left + r.right) / 2 - svgRect.left) * sx });
+  }
+  return out;
+}
+
+/** Resolve the category whose axis-label center is nearest the cursor x. */
+function nearestCategory(centers: Array<{ category: string; cx: number }>, svgX: number): string | null {
+  let best: string | null = null;
+  let bd = Infinity;
+  for (const c of centers) {
+    const d = Math.abs(c.cx - svgX);
+    if (d < bd) { bd = d; best = c.category; }
+  }
+  return best;
+}
+
+export interface CategoricalLineOptions {
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+  colors?: Map<string, string>;
+  seriesLabels?: Record<string, string>;
+  seriesOrder?: string[];
+  yFormat?: (v: number) => string;
+  /** Hit-test + emit only (coordinated figures); no tooltip/guide. */
+  emitOnly?: boolean;
+  onResolve?: (category: string | null) => void;
+}
+
+/**
+ * Crosshair for a categorical-x LINE chart. Resolves the category from the x-axis label centers;
+ * single charts get a guide + tooltip, coordinated figure panes pass `emitOnly` (hit-test + emit
+ * only, the secondary renderer draws). No bar rects required.
+ */
+export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: CategoricalLineOptions): void {
+  if (!svgEl || !opts.rows?.length) return;
+  const emitOnly = opts.emitOnly ?? false;
+  const yFormat =
+    opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+  const mt = +(svgEl.dataset.marginTop ?? "") || 18;
+  const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
+  const plotBottom = mt + (H - mt - mb);
+
+  const NS = "http://www.w3.org/2000/svg";
+  svgEl.querySelectorAll(".tbl-catline-hit, .tbl-catline-guide").forEach((el) => el.remove());
+
+  const guide = emitOnly ? null : svgEl.ownerDocument.createElementNS(NS, "line");
+  if (guide) {
+    guide.classList.add("tbl-catline-guide");
+    guide.setAttribute("stroke", TBL.color.annotationDim);
+    guide.setAttribute("stroke-dasharray", "3 3");
+    guide.setAttribute("y1", String(mt));
+    guide.setAttribute("y2", String(plotBottom));
+    guide.setAttribute("opacity", "0");
+    guide.style.pointerEvents = "none";
+    svgEl.appendChild(guide);
+  }
+  const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
+  hit.classList.add("tbl-catline-hit");
+  hit.setAttribute("x", "0");
+  hit.setAttribute("y", "0");
+  hit.setAttribute("width", String(W));
+  hit.setAttribute("height", String(H));
+  hit.setAttribute("fill", "transparent");
+  hit.style.cursor = "crosshair";
+  svgEl.appendChild(hit);
+
+  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  let centers: Array<{ category: string; cx: number }> | null = null;
+
+  function update(evt: PointerEvent): void {
+    const rect = svgEl.getBoundingClientRect();
+    if (!rect.width) return;
+    if (!centers) centers = readCategoryCentersFromAxis(svgEl, plotBottom);
+    if (!centers.length) return;
+    const svgX = (evt.clientX - rect.left) * (W / rect.width);
+    const category = nearestCategory(centers, svgX);
+    if (!category) { hide(); return; }
+    opts.onResolve?.(category);
+    if (emitOnly) return;
+    const cx = centers.find((c) => c.category === category)!.cx;
+    guide!.setAttribute("x1", String(cx));
+    guide!.setAttribute("x2", String(cx));
+    guide!.setAttribute("opacity", "1");
+    tip!.innerHTML = buildBandTooltipHtml(category, opts.rows, {
+      colors: opts.colors,
+      seriesLabels: opts.seriesLabels,
+      seriesOrder: opts.seriesOrder,
+      yFormat,
+    });
+    const offset = 14;
+    const win = svgEl.ownerDocument.defaultView!;
+    tip!.style.opacity = "1";
+    let left = evt.clientX + offset;
+    let top = evt.clientY + offset;
+    if (left + tip!.offsetWidth + 4 > win.innerWidth) left = evt.clientX - tip!.offsetWidth - offset;
+    if (top + tip!.offsetHeight + 4 > win.innerHeight) top = evt.clientY - tip!.offsetHeight - offset;
+    tip!.style.left = `${Math.max(4, left)}px`;
+    tip!.style.top = `${Math.max(4, top)}px`;
+  }
+  function hide(): void {
+    if (guide) guide.setAttribute("opacity", "0");
+    if (tip) tip.style.opacity = "0";
+    opts.onResolve?.(null);
+  }
+  hit.style.pointerEvents = "all";
+  hit.addEventListener("pointermove", update as EventListener);
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("pointerdown", update as EventListener);
+}
+
+/**
+ * Coordinated (secondary) cursor for a categorical-x LINE pane. Mirrors attachSecondaryLineCursor
+ * but keys off the category (x-axis label centers) instead of a numeric x: guide + per-series dot
+ * and value pill at the category's x; when active, the category is highlighted on the axis row.
+ */
+export function attachSecondaryCategoricalLineCursor(
+  svgEl: SVGSVGElement,
+  opts: CategoricalLineOptions,
+): (category: string | null, active?: boolean) => void {
+  const noop = (): void => {};
+  if (!svgEl || !opts.rows?.length) return noop;
+  const yFormat =
+    opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+  const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
+  const mr = +(svgEl.dataset.marginRight ?? "") || 8;
+  const mt = +(svgEl.dataset.marginTop ?? "") || 18;
+  const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
+  const plotH = H - mt - mb;
+
+  const valByCat = new Map<string, Map<string, number>>();
+  for (const r of opts.rows) {
+    if (!r._xc || r._y == null || !Number.isFinite(r._y)) continue;
+    if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
+    valByCat.get(r._xc)!.set(r.series, r._y);
+  }
+  const orderFor = (cat: string): string[] => {
+    const vals = valByCat.get(cat);
+    if (!vals) return [];
+    return opts.seriesOrder && opts.seriesOrder.length
+      ? opts.seriesOrder.filter((s) => vals.has(s))
+      : [...vals.keys()];
+  };
+
+  const doc = svgEl.ownerDocument;
+  const g = makeCoordGroup(svgEl);
+  const axisRows = makeAxisRows(svgEl, mt + plotH);
+  let centers: Array<{ category: string; cx: number }> | null = null;
+
+  return (category: string | null, active = false): void => {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    if (category == null) { g.setAttribute("opacity", "0"); return; }
+    if (!centers) centers = readCategoryCentersFromAxis(svgEl, mt + plotH);
+    const c = centers.find((x) => x.category === category);
+    const vals = valByCat.get(category);
+    if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
+    const cx = c.cx;
+    addCoordGuide(g, doc, cx, mt, mt + plotH);
+    if (active) {
+      const ys = axisRows.get();
+      if (ys.length) addCoordAxisLabel(g, doc, cx, [{ text: category, cy: ys[0]! }]);
+    }
+    const weight = active ? 700 : 600;
+    const flip = cx > ml + (W - ml - mr) * 0.72;
+    const toPy = readLinearYScale(svgEl);
+    if (toPy) {
+      for (const s of orderFor(category)) {
+        const v = vals.get(s)!;
+        const color = opts.colors?.get(s) || "#666666";
+        const py = toPy(v);
+        addCoordDot(g, doc, cx, py, color);
+        addCoordPill(g, doc, flip ? cx - 10 : cx + 10, py, flip ? "end" : "start", yFormat(v), color, weight);
+      }
+    }
+    g.setAttribute("opacity", "1");
+  };
+}

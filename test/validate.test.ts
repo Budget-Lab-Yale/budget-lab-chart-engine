@@ -116,6 +116,16 @@ describe("small_multiples config", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts a boolean points flag", () => {
+    expect(validateSpec({ ...VALID, points: true }).valid).toBe(true);
+  });
+
+  it("rejects a non-boolean points flag", () => {
+    const r = validateSpec({ ...VALID, points: "yes" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/points/);
+  });
+
   it("accepts x_axis_title and y_axis_title strings", () => {
     const r = validateSpec({ ...VALID, x_axis_title: "Year", y_axis_title: "Percent of GDP" });
     expect(r.valid).toBe(true);

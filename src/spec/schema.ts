@@ -143,6 +143,7 @@ export const CHART_SPEC_SCHEMA = {
     series_labels: { type: "object", additionalProperties: { type: "string" } },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
+    points: { type: "boolean" },
 
     // Bar / stacked bar
     orientation: { type: "string", enum: ["vertical", "horizontal"] },

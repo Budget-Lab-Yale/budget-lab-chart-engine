@@ -18,6 +18,8 @@ import {
   attachBandCrosshair,
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
+  attachCategoricalLineCrosshair,
+  attachSecondaryCategoricalLineCursor,
 } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -618,7 +620,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    if (spec.xAxisType === "categorical") {
+    if (spec.xAxisType === "categorical" && spec.chartType === "line") {
+      // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
+      // guide + tooltip.
+      attachCategoricalLineCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units),
+      });
+    } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses
       // fx-faceted grouped bar layout (xScaleField === "fx" in bar.ts).
       const isStacked = spec.chartType === "stacked";
@@ -837,6 +849,38 @@ function wireFigureSvg(
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
   // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
   // an interactive legend.
+  if (categorical && ctx.spec.chartType === "line") {
+    // Categorical-x LINE pane: resolve the category from the x-axis labels (no bars). Coordinated
+    // panes hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
+    attachCategoricalLineCrosshair(svg, {
+      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v) => formatValue(v, ctx.units),
+      ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+    });
+    if (handle) {
+      // Lines are thin; fat hit-paths + tagged dots let clicks resolve the series.
+      addLineHitPaths(svg);
+      svg.querySelectorAll<SVGElement>(".tbl-catline-hit").forEach((el) => { el.style.cursor = "pointer"; });
+      svg.addEventListener("click", (evt) => {
+        const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+        if (series) handle.toggle(series);
+      });
+    }
+    if (useCoord) {
+      return attachSecondaryCategoricalLineCursor(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors: ctx.colors,
+        seriesLabels: ctx.seriesLabels,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units),
+      }) as (key: unknown, active?: boolean) => void;
+    }
+    return undefined;
+  }
+
   if (categorical) {
     // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
     const isStacked = ctx.spec.chartType === "stacked";

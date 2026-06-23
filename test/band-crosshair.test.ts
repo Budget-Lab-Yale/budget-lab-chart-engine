@@ -625,6 +625,30 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     // The continuous crosshair line element should be present.
     expect(chartSvg.querySelector(".tbl-crosshair")).not.toBeNull();
   });
+
+  it("categorical-x LINE chart uses the categorical-line crosshair (not band, not continuous)", () => {
+    const catLineSpec: ChartSpec = {
+      chartType: "line",
+      title: "Categorical line",
+      xAxisType: "categorical",
+      series_order: ["A", "B"],
+      points: true,
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { time: "18-21", series: "A", value: "1" },
+      { time: "22-25", series: "A", value: "2" },
+      { time: "18-21", series: "B", value: "3" },
+      { time: "22-25", series: "B", value: "4" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec: catLineSpec, rows });
+    const chartSvg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    expect(chartSvg.querySelector(".tbl-catline-hit")).not.toBeNull();
+    expect(chartSvg.querySelector(".tbl-band-crosshair-hit")).toBeNull();
+    // points:true → marker dots rendered.
+    expect(chartSvg.querySelectorAll('g[aria-label="dot"] circle').length).toBeGreaterThan(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
