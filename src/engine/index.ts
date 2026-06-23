@@ -11,7 +11,7 @@ import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
 import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
-import type { PreparedRow } from "./marks/index";
+import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
 import { inferUnitsFromSubtitle } from "./util";
@@ -93,7 +93,7 @@ interface PaneResult {
   dataInScope: PreparedRow[];
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
    *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
-  layers: ReturnType<ReturnType<typeof markBuilderFor>>;
+  layers: MarkLayers;
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
 }
@@ -280,11 +280,10 @@ export function renderChart(
       markerShape: extra.markerShape,
       isExtra: true,
     }));
-    if (legendItems) {
-      legendItems = [...legendItems, ...extras];
-    }
-    // If there was only 1 series (no legend otherwise), a diverging chart still has ≥2
-    // series in practice per the brief — so this branch is a safety fallback only.
+    // Append the extras (e.g. the diverging "Total" dot row). If there were no series rows
+    // (a single-series chart with no style override), the extras alone form the legend, so
+    // the Total marker is never silently dropped.
+    legendItems = legendItems ? [...legendItems, ...extras] : extras;
   }
 
   return {
