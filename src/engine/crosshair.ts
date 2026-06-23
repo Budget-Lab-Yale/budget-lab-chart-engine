@@ -204,6 +204,398 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
 }
 
 // ---------------------------------------------------------------------------
+// Facet-aware crosshair — SHARED-mode small-multiples LINE figures
+// ---------------------------------------------------------------------------
+// A shared figure is ONE faceted SVG (fx columns x fy rows) sharing a y-scale. The flat
+// `attachCrosshair` above would span the guide across BOTH stacked rows of a column and
+// collide tooltip data across panes. This variant treats each facet CELL as a separate
+// chart: it resolves the cell under the cursor, draws a guide confined to that cell's plot
+// y-range, snaps to the shared x-domain within the cell, and shows a tooltip headed by the
+// pane's title with only that pane's series values.
+
+/** One facet's data + identity, supplied by the live layer (grouped from dataInScope). */
+export interface FacetCrosshairPane {
+  /** The facet value (e.g. "Northeast"). */
+  facet: string;
+  /** Grid column index. */
+  col: number;
+  /** Grid row index. */
+  row: number;
+  /** Pane display title (header of the tooltip). */
+  title: string;
+  /** This pane's rows (already restricted to this facet). */
+  rows: Row[];
+}
+
+export interface FacetCrosshairOptions {
+  panes: FacetCrosshairPane[];
+  xField?: string;
+  yField?: string;
+  seriesField?: string;
+  xParse?: (v: unknown) => number;
+  xFormat?: (v: number) => string;
+  yFormat?: (v: number) => string;
+  colors?: Map<string, string>;
+  dashedSeries?: Set<string>;
+  seriesLabels?: Record<string, string>;
+  seriesOrder?: string[];
+}
+
+/** A resolved facet cell's geometry in SVG user coords. The plot area of the cell is
+ *  [x0,x1] x [y0,y1]; the guide is confined to [y0,y1]; the shared x-domain maps linearly
+ *  across [x0,x1]. */
+export interface FacetCell {
+  facet: string;
+  col: number;
+  row: number;
+  title: string;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/** A minimal view of a Plot band scale (what `svg.scale("fx"|"fy")` returns). */
+export interface BandScaleLike {
+  domain: unknown[];
+  range: [number, number] | number[];
+  bandwidth?: number;
+}
+
+/** A minimal view of a Plot continuous scale (what `svg.scale("x"|"y")` returns). */
+export interface ContinuousScaleLike {
+  range: [number, number] | number[];
+}
+
+/**
+ * PURE — compute the absolute SVG-user-coordinate plot bounds of every facet cell from
+ * Plot's faceted scales. Each cell's origin is the band START of its (fx col, fy row); the
+ * within-cell plot area is the shared x/y scale ranges (which are cell-LOCAL), offset by the
+ * cell origin. Verified against the rendered figure (fy paddingInner 0.22, fx 0.08):
+ *   fx range [44,822] bandwidth 373 → col origins {0,405} (= bandStart − range[0]).
+ *   x range [44,417] local, y range [177,18] local → cell plot [tx+44,tx+417] x [ty+18,ty+177].
+ *
+ * Band-start derivation (no `.apply` is exposed): origin(i) = i * step, where step is the
+ * inter-band stride. With n>1 bands sharing the range, step = (rangeSpan − bandwidth)/(n−1).
+ * For n=1 there is a single band at origin 0. `panes` supplies the (col,row)→facet/title map;
+ * cells with no matching pane are skipped.
+ */
+export function computeFacetCells(
+  fx: BandScaleLike,
+  fy: BandScaleLike,
+  x: ContinuousScaleLike,
+  y: ContinuousScaleLike,
+  panes: Array<{ facet: string; col: number; row: number; title: string }>,
+): FacetCell[] {
+  const bandOrigin = (scale: BandScaleLike): number[] => {
+    const n = scale.domain.length;
+    const r0 = scale.range[0]!;
+    const r1 = scale.range[1]!;
+    const span = r1 - r0;
+    const bw = scale.bandwidth ?? span;
+    if (n <= 1) return [0];
+    const step = (span - bw) / (n - 1);
+    return Array.from({ length: n }, (_, i) => i * step);
+  };
+
+  const colOrigins = bandOrigin(fx);
+  const rowOrigins = bandOrigin(fy);
+
+  // Within-cell plot ranges are cell-LOCAL (the same in every cell — shared scales).
+  const xLo = Math.min(x.range[0]!, x.range[1]!);
+  const xHi = Math.max(x.range[0]!, x.range[1]!);
+  const yLo = Math.min(y.range[0]!, y.range[1]!);
+  const yHi = Math.max(y.range[0]!, y.range[1]!);
+
+  const cells: FacetCell[] = [];
+  for (const p of panes) {
+    const tx = colOrigins[p.col] ?? 0;
+    const ty = rowOrigins[p.row] ?? 0;
+    cells.push({
+      facet: p.facet,
+      col: p.col,
+      row: p.row,
+      title: p.title,
+      x0: tx + xLo,
+      x1: tx + xHi,
+      y0: ty + yLo,
+      y1: ty + yHi,
+    });
+  }
+  return cells;
+}
+
+/**
+ * PURE — resolve which facet cell a cursor (svgX, svgY) is over. A cursor inside a cell's
+ * plot rect [x0,x1] x [y0,y1] matches that cell directly. Outside every plot rect we still
+ * snap to the nearest cell BY ROW then COLUMN band, so hovering a pane's title row / inter-
+ * pane gutter still attaches to the intended pane (mirrors the band crosshair's snap). Pass
+ * `strict` to disable the nearest-snap and require containment (returns null outside). Returns
+ * null when there are no cells.
+ */
+export function resolveFacetCell(
+  cells: FacetCell[],
+  svgX: number,
+  svgY: number,
+  strict = false,
+): FacetCell | null {
+  if (!cells.length) return null;
+  for (const c of cells) {
+    if (svgX >= c.x0 && svgX <= c.x1 && svgY >= c.y0 && svgY <= c.y1) return c;
+  }
+  if (strict) return null;
+  // Nearest by clamped distance to each cell's plot rect.
+  let best: FacetCell | null = null;
+  let bestDist = Infinity;
+  for (const c of cells) {
+    const dx = svgX < c.x0 ? c.x0 - svgX : svgX > c.x1 ? svgX - c.x1 : 0;
+    const dy = svgY < c.y0 ? c.y0 - svgY : svgY > c.y1 ? svgY - c.y1 : 0;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) { bestDist = d; best = c; }
+  }
+  return best;
+}
+
+/**
+ * PURE — build the tooltip inner HTML for ONE facet cell at the snapped x. Header is the
+ * pane title + the formatted x label; then one row per series in `seriesOrder` that has a
+ * finite value at `snappedX` in this facet's `bySeries` lookup. Mirrors attachCrosshair's
+ * row markup (swatch + label + value, dashed handling). No DOM access.
+ */
+export function buildFacetTooltipHtml(
+  title: string,
+  xLabel: string,
+  bySeries: Map<string, Map<number, number>>,
+  snappedX: number,
+  opts: {
+    colors?: Map<string, string>;
+    dashedSeries?: Set<string>;
+    seriesLabels?: Record<string, string>;
+    seriesOrder?: string[];
+    yFormat: (v: number) => string;
+  },
+): string {
+  const { colors, dashedSeries, seriesLabels, seriesOrder, yFormat } = opts;
+  let html = `<div class="tbl-tooltip-head">${escapeHtml(title)} · ${escapeHtml(xLabel)}</div>`;
+  const tipSeries =
+    seriesOrder && seriesOrder.length
+      ? seriesOrder.filter((s) => bySeries.has(s))
+      : [...bySeries.keys()];
+  for (const series of tipSeries) {
+    const v = bySeries.get(series)!.get(snappedX);
+    if (v == null || Number.isNaN(v)) continue;
+    const dot = colors?.get(series) || "currentColor";
+    const isDashed = dashedSeries?.has(series);
+    const display = (seriesLabels && seriesLabels[series]) || series;
+    const swatchClass = isDashed ? "tbl-tooltip-swatch is-dashed" : "tbl-tooltip-swatch";
+    const swatchStyle = isDashed ? `--swatch-color: ${dot}` : `background: ${dot}`;
+    html += `<div class="tbl-tooltip-row"><span class="${swatchClass}" style="${swatchStyle}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+  }
+  return html;
+}
+
+/**
+ * Attach a facet-aware crosshair to a SHARED-mode small-multiples LINE figure (one faceted
+ * SVG). Resolves the cell under the cursor from Plot's faceted scales, draws a guide confined
+ * to that cell's plot y-range, snaps to the shared x-domain, and shows a per-pane tooltip.
+ *
+ * Resilient to non-layout environments (jsdom/SSR): if `svg.scale` is unavailable or the
+ * scales can't be read, it no-ops cleanly (browser verification carries correctness).
+ */
+export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairOptions): void {
+  const {
+    panes,
+    xField = "time",
+    yField = "value",
+    seriesField = "series",
+    colors,
+    dashedSeries,
+    seriesLabels,
+    seriesOrder,
+  } = opts;
+  let { xParse, xFormat } = opts;
+  const yFormat =
+    opts.yFormat ??
+    ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+  if (!svgEl || !panes?.length) return;
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+
+  // Feature-detect Plot's scale API; without it we cannot compute cell geometry → no-op.
+  const scaleFn = (svgEl as unknown as { scale?: (name: string) => unknown }).scale;
+  if (typeof scaleFn !== "function") return;
+  let fx: BandScaleLike, fy: BandScaleLike, xS: ContinuousScaleLike, yS: ContinuousScaleLike;
+  try {
+    fx = scaleFn.call(svgEl, "fx") as BandScaleLike;
+    fy = scaleFn.call(svgEl, "fy") as BandScaleLike;
+    xS = scaleFn.call(svgEl, "x") as ContinuousScaleLike;
+    yS = scaleFn.call(svgEl, "y") as ContinuousScaleLike;
+  } catch {
+    return;
+  }
+  if (!fx?.range || !fy?.range || !xS?.range) return;
+
+  const cells = computeFacetCells(
+    fx,
+    fy,
+    xS,
+    yS,
+    panes.map((p) => ({ facet: p.facet, col: p.col, row: p.row, title: p.title })),
+  );
+  if (!cells.length) return;
+
+  // x-parse/format inference (mirrors attachCrosshair) when the adapter didn't thread them.
+  if (!xParse) {
+    const sample = panes.find((p) => p.rows.length)?.rows[0]?.[xField];
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
+      xParse = (v) => +new Date(String(v));
+      if (!xFormat) xFormat = (v) => d3.timeFormat("%b %Y")(new Date(v));
+    } else if (/Q\d/.test(String(sample))) {
+      xParse = (v) => {
+        const m = /(\d{4})Q(\d)/.exec(String(v));
+        return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
+      };
+      if (!xFormat)
+        xFormat = (v) => {
+          const d = new Date(v);
+          const q = Math.floor(d.getMonth() / 3) + 1;
+          return `${d.getFullYear()}Q${q}`;
+        };
+    } else {
+      xParse = (v) => +(v as number);
+      if (!xFormat) xFormat = (v) => String(v);
+    }
+  }
+
+  // Per-facet lookup: facet → (sorted unique xs, series → x → value).
+  interface FacetData { xs: number[]; bySeries: Map<string, Map<number, number>>; }
+  const dataByFacet = new Map<string, FacetData>();
+  for (const p of panes) {
+    const xsSet = new Set<number>();
+    const bySeries = new Map<string, Map<number, number>>();
+    for (const r of p.rows) {
+      const xv = xParse!(r[xField]);
+      xsSet.add(xv);
+      const v = r[yField];
+      if (v === "" || v == null) continue;
+      const k = r[seriesField] as string;
+      if (!bySeries.has(k)) bySeries.set(k, new Map());
+      bySeries.get(k)!.set(xv, +(v as number));
+    }
+    dataByFacet.set(p.facet, { xs: [...xsSet].sort((a, b) => a - b), bySeries });
+  }
+
+  const bisect = d3.bisector((d: number) => d).left;
+  const NS = "http://www.w3.org/2000/svg";
+  svgEl.querySelectorAll(".tbl-crosshair, .tbl-crosshair-hit, .tbl-facet-crosshair, .tbl-facet-crosshair-hit").forEach((el) => el.remove());
+
+  const guide = svgEl.ownerDocument.createElementNS(NS, "line");
+  guide.classList.add("tbl-facet-crosshair");
+  guide.setAttribute("stroke", TBL.color.annotationDim);
+  guide.setAttribute("stroke-dasharray", "3 3");
+  guide.setAttribute("opacity", "0");
+  guide.style.pointerEvents = "none";
+  svgEl.appendChild(guide);
+
+  const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
+  hit.classList.add("tbl-facet-crosshair-hit");
+  hit.setAttribute("x", "0");
+  hit.setAttribute("y", "0");
+  hit.setAttribute("width", String(W));
+  hit.setAttribute("height", String(H));
+  hit.setAttribute("fill", "transparent");
+  hit.style.cursor = "crosshair";
+  svgEl.appendChild(hit);
+
+  const tip = getSharedTooltip(svgEl.ownerDocument);
+
+  /** Snap an absolute svgX to the nearest x in `xs`, given this cell's [x0,x1] plot range. */
+  function snapXInCell(svgX: number, cell: FacetCell, xs: number[]): number | null {
+    if (!xs.length) return null;
+    const xMin = xs[0]!;
+    const xMax = xs[xs.length - 1]!;
+    // Linear: shared x-domain maps across [cell.x0, cell.x1].
+    const span = cell.x1 - cell.x0;
+    const frac = span > 0 ? (svgX - cell.x0) / span : 0;
+    const xVal = xMin + frac * (xMax - xMin);
+    const i = bisect(xs, xVal);
+    const cand = [xs[i - 1], xs[i]].filter((v) => v != null) as number[];
+    if (!cand.length) return null;
+    return cand.length === 1
+      ? cand[0]!
+      : Math.abs(cand[0]! - xVal) < Math.abs(cand[1]! - xVal)
+        ? cand[0]!
+        : cand[1]!;
+  }
+
+  /** Map a snapped x value to its absolute pixel within the cell. */
+  function xToPxInCell(xVal: number, cell: FacetCell, xs: number[]): number {
+    const xMin = xs[0]!;
+    const xMax = xs[xs.length - 1]!;
+    const frac = xMax > xMin ? (xVal - xMin) / (xMax - xMin) : 0;
+    return cell.x0 + frac * (cell.x1 - cell.x0);
+  }
+
+  function update(evt: PointerEvent): void {
+    const rect = svgEl.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    const svgX = (evt.clientX - rect.left) * scaleX;
+    const svgY = (evt.clientY - rect.top) * scaleY;
+
+    const cell = resolveFacetCell(cells, svgX, svgY);
+    if (!cell) { hide(); return; }
+    const fd = dataByFacet.get(cell.facet);
+    if (!fd || !fd.xs.length) { hide(); return; }
+
+    const snap = snapXInCell(svgX, cell, fd.xs);
+    if (snap == null) { hide(); return; }
+
+    const gx = xToPxInCell(snap, cell, fd.xs);
+    guide.setAttribute("x1", String(gx));
+    guide.setAttribute("x2", String(gx));
+    guide.setAttribute("y1", String(cell.y0));
+    guide.setAttribute("y2", String(cell.y1));
+    guide.setAttribute("opacity", "1");
+
+    tip.innerHTML = buildFacetTooltipHtml(cell.title, xFormat!(snap), fd.bySeries, snap, {
+      colors,
+      dashedSeries,
+      seriesLabels,
+      seriesOrder,
+      yFormat,
+    });
+
+    const offset = 14;
+    const win = svgEl.ownerDocument.defaultView!;
+    const vw = win.innerWidth;
+    const vh = win.innerHeight;
+    tip.style.opacity = "1";
+    let left = evt.clientX + offset;
+    let top = evt.clientY + offset;
+    if (left + tip.offsetWidth + 4 > vw) left = evt.clientX - tip.offsetWidth - offset;
+    if (top + tip.offsetHeight + 4 > vh) top = evt.clientY - tip.offsetHeight - offset;
+    if (left < 4) left = 4;
+    if (top < 4) top = 4;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  }
+
+  function hide(): void {
+    guide.setAttribute("opacity", "0");
+    tip.style.opacity = "0";
+  }
+
+  hit.style.pointerEvents = "all";
+  hit.addEventListener("pointermove", update as EventListener);
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("pointerdown", update as EventListener);
+}
+
+// ---------------------------------------------------------------------------
 // Band-axis (categorical) hover tooltip — bar / stacked charts
 // ---------------------------------------------------------------------------
 

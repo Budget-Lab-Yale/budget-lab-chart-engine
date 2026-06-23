@@ -13,7 +13,8 @@ import { renderChart } from "./index.js";
 import { renderFigure } from "./figure.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
-import { attachCrosshair, attachBandCrosshair } from "./crosshair.js";
+import { attachCrosshair, attachBandCrosshair, attachFacetCrosshair } from "./crosshair.js";
+import type { FacetCrosshairPane } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
@@ -164,7 +165,7 @@ function resolveSeriesAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | n
  */
 function addLineHitPaths(svgEl: SVGSVGElement): void {
   const NS = "http://www.w3.org/2000/svg";
-  const overlay = svgEl.querySelector(".tbl-crosshair-hit");
+  const overlay = svgEl.querySelector(".tbl-crosshair-hit, .tbl-facet-crosshair-hit");
   const linePaths = Array.from(
     svgEl.querySelectorAll<SVGPathElement>('g[aria-label="line"] path[data-series]'),
   );
@@ -872,6 +873,70 @@ function wireFigureSvg(
 }
 
 /**
+ * Wire the FACET-AWARE crosshair + two-way selection onto a SHARED-mode small-multiples
+ * figure (one faceted line SVG). Unlike `wireFigureSvg` (which attaches the FLAT crosshair
+ * spanning the whole plot and keying tooltip data across all facets), this groups
+ * `dataInScope` by `_facet` into per-cell panes and attaches `attachFacetCrosshair`, so the
+ * guide is confined to the hovered pane and the tooltip shows only that pane's title + values.
+ * Selection (click → legend.toggle) is wired identically to the line branch of wireFigureSvg
+ * (fat hit-paths + elementsFromPoint), since data-series spans all facets.
+ */
+function wireSharedFigureSvg(
+  svg: SVGSVGElement,
+  handle: LegendHandle | null,
+  fig: FigureRenderResult,
+): void {
+  // Group dataInScope rows by facet. Each row carries _facet/_fxCol/_fyRow + time/series/_y.
+  const byFacet = new Map<string, PreparedRow[]>();
+  for (const r of fig.dataInScope) {
+    const f = r._facet;
+    if (f == null) continue;
+    if (!byFacet.has(f)) byFacet.set(f, []);
+    byFacet.get(f)!.push(r);
+  }
+  // Build one FacetCrosshairPane per figure pane (value/title), reading the (col,row) from the
+  // pane's rows (every row of a facet shares the same _fxCol/_fyRow).
+  const panes: FacetCrosshairPane[] = [];
+  for (const p of fig.panes) {
+    const rows = byFacet.get(p.value) ?? [];
+    if (!rows.length) continue;
+    const col = Number(rows[0]!._fxCol ?? 0);
+    const row = Number(rows[0]!._fyRow ?? 0);
+    panes.push({
+      facet: p.value,
+      col,
+      row,
+      title: p.title,
+      rows: rows.map((r) => ({ time: r.time, series: r.series, value: r._y })),
+    });
+  }
+
+  attachFacetCrosshair(svg, {
+    panes,
+    xField: "time",
+    yField: "value",
+    seriesField: "series",
+    xParse: fig.tooltipXParse as ((v: unknown) => number) | undefined,
+    xFormat: fig.tooltipXFormat,
+    yFormat: (v) => formatValue(v, fig.units),
+    colors: fig.colors,
+    dashedSeries: fig.dashedNames,
+    seriesLabels: fig.seriesLabels,
+    seriesOrder: fig.seriesOrder,
+  });
+
+  if (handle) {
+    // Lines are thin; add transparent fat hit-paths so clicks near a line resolve its series.
+    addLineHitPaths(svg);
+    svg.querySelectorAll<SVGElement>(".tbl-facet-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
+    svg.addEventListener("click", (evt) => {
+      const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+      if (series) handle.toggle(series);
+    });
+  }
+}
+
+/**
  * Mount a small-multiples figure. Two layouts:
  *  - SHARED mode: ONE faceted SVG (shared y-scale) in a scroll wrapper, like a single chart —
  *    top legend, two-way selection (data-series spans all facets → dims/pins cross-pane), and
@@ -950,8 +1015,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     recolorNetLabels(svg);
     // Attach the crosshair always; selection (click→pin) is wired only when a legend exists.
     card.classList.toggle("is-selectable", handle != null);
-    // Shared mode is line-only, so this always takes the continuous-crosshair branch.
-    wireFigureSvg(svg, handle, { spec, ...fig });
+    // Shared mode is line-only and FACETED: use the facet-aware crosshair so the guide is
+    // confined to the hovered pane and the tooltip shows only that pane's title + values.
+    wireSharedFigureSvg(svg, handle, fig);
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
     currentOverlay = attachYAxisOverlay(canvasScroll!, svg);
