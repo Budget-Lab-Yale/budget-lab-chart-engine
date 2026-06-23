@@ -464,35 +464,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const card = doc.createElement("div");
   card.className = "figure-card";
 
-  // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle below.
-  const header = doc.createElement("div");
-  header.className = "figure-header";
-  if (spec.eyebrow) {
-    const eyebrow = doc.createElement("div");
-    eyebrow.className = "figure-supertitle";
-    eyebrow.textContent = spec.eyebrow;
-    header.appendChild(eyebrow);
-  }
-  const titlebar = doc.createElement("div");
-  titlebar.className = "figure-titlebar";
-  if (spec.title) {
-    const h = doc.createElement("h3");
-    h.className = "figure-title";
-    h.textContent = spec.title;
-    titlebar.appendChild(h);
-  }
-  const logoWrapper = doc.createElement("div");
-  logoWrapper.className = "figure-logo";
-  logoWrapper.innerHTML = LOGO_SVG;
-  titlebar.appendChild(logoWrapper);
-  header.appendChild(titlebar);
-  if (spec.subtitle) {
-    const s = doc.createElement("p");
-    s.className = "figure-subtitle";
-    s.textContent = spec.subtitle;
-    header.appendChild(s);
-  }
-  card.appendChild(header);
+  // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
+  // below. Shared with the figure card via buildFigureHeader so the two never diverge.
+  buildFigureHeader(card, doc, spec);
 
   // Legend slot above the canvas (used for top-legend; hidden/empty for right-legend).
   const legendSlot = doc.createElement("div");
@@ -769,6 +743,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 const PANE_MIN_WIDTH = 240;
 // Per-pane mini-chart height (per-pane mode); shared mode sizes the faceted SVG by row count.
 const PANE_HEIGHT = 240;
+// Shared-mode faceted SVG: pixels budgeted per facet ROW (rows are a touch shorter than a
+// standalone per-pane mini-chart since they share one x-axis row at the bottom).
+const SHARED_ROW_HEIGHT = 210;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
@@ -898,20 +875,20 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const drawShared = (width: number): void => {
     const sig = `s:${width}`;
     if (sig === lastSig) return;
-    lastSig = sig;
     let fig: FigureRenderResult;
     try {
       // Faceted SVG height grows with the row count so each pane row stays legible.
       const tmpCols = sm.columns && sm.columns > 0 ? sm.columns : undefined;
       fig = renderFigure(spec, rows, { width, height: FIXED_CHART_HEIGHT, columns: tmpCols });
-      const gridHeight = Math.max(FIXED_CHART_HEIGHT, fig.rows * 210);
+      const gridHeight = Math.max(FIXED_CHART_HEIGHT, fig.rows * SHARED_ROW_HEIGHT);
       if (gridHeight !== FIXED_CHART_HEIGHT) {
         fig = renderFigure(spec, rows, { width, height: gridHeight, columns: tmpCols });
       }
     } catch (e) {
       if (canvas) canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
-      return;
+      return; // leave lastSig unchanged so a re-render at the same width retries after a fix
     }
+    lastSig = sig; // commit only after a successful render
     const svg = fig.combinedSvg!;
     canvas!.replaceChildren(svg);
     legendSlot.replaceChildren();
@@ -930,22 +907,38 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     currentOverlay = attachYAxisOverlay(canvasScroll!, svg);
   };
 
+  // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
+  // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
+  // width even when there are fewer panes than the reflow/config would allow.
+  const paneCount = (): number => {
+    const distinct = new Set<string>();
+    for (const r of rows) {
+      const v = r[sm.facet_field];
+      if (typeof v === "string" && v !== "") distinct.add(v);
+    }
+    const n = sm.pane_order && sm.pane_order.length
+      ? sm.pane_order.filter((v) => distinct.has(v)).length
+      : distinct.size;
+    return Math.max(1, n);
+  };
+
   const drawPerPane = (outerWidth: number): void => {
-    const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → let renderFigure default
-    // Reflow: how many columns fit at >= PANE_MIN_WIDTH each.
+    const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
+    // Reflow: how many columns fit at >= PANE_MIN_WIDTH each, capped by config and pane count
+    // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (PANE_MIN_WIDTH + GRID_GAP)));
-    const cols = baseCols ? Math.min(baseCols, fitCols) : fitCols;
+    const cols = Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     const paneW = Math.max(PANE_MIN_WIDTH, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
     const sig = `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
-    lastSig = sig;
     let fig: FigureRenderResult;
     try {
       fig = renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
     } catch (e) {
       if (grid) grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
-      return;
+      return; // leave lastSig unchanged so a same-width re-render retries after a fix
     }
+    lastSig = sig; // commit only after a successful render
     grid!.style.setProperty("--figure-cols", String(fig.columns));
     grid!.replaceChildren();
     for (const pane of fig.panes) {
@@ -991,6 +984,20 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const initialWidth = card.clientWidth || opts.width || 720;
   draw(initialWidth);
 
+  // Shared mode: keep the sticky y-axis overlay pinned as the faceted SVG scrolls horizontally
+  // (same discipline as the single-chart controller). Per-pane mode has no overlay/scroll.
+  let scrollRaf: number | null = null;
+  const onScroll = (): void => {
+    if (scrollRaf !== null) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = null;
+      if (currentOverlay && canvasScroll) {
+        currentOverlay.style.transform = `translateX(${canvasScroll.scrollLeft}px)`;
+      }
+    });
+  };
+  canvasScroll?.addEventListener("scroll", onScroll);
+
   let resizeRaf: number | null = null;
   let ro: ResizeObserver | undefined;
   if (typeof ResizeObserver !== "undefined") {
@@ -1007,6 +1014,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   return () => {
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+    if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
+    canvasScroll?.removeEventListener("scroll", onScroll);
     currentOverlay?._ro?.disconnect();
+    currentOverlay?.remove();
   };
 }
