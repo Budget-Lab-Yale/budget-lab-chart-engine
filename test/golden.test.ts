@@ -12,13 +12,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderChart, TOTAL_SERIES_KEY } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
-import type { PreparedRow } from "../src/engine/marks/index";
+import type { PreparedRow, MarkLayers } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { assemblePlot } from "../src/engine/assemble-plot";
 import { Plot, d3 } from "../src/engine/vendor";
 import { TBL } from "../src/engine/theme";
-import { paneTitleMark, tblTemporalXAxis, temporalXTicks } from "../src/engine/axes";
+import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
+import { makeXAdapter } from "../src/engine/x-adapter";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
@@ -613,17 +614,17 @@ function buildFacetedPlot() {
     { includeZero: true, tickCount: 5 },
   );
 
-  // Shared temporal x-axis; tag the label groups so the grid collapse keeps the bottom row.
-  const xs = data.map((d) => +(d._xd as Date));
-  const xDomain: [Date, Date] = [new Date(Math.min(...xs)), new Date(Math.max(...xs))];
-  const axisMarks = tblTemporalXAxis(xDomain, 1, X_AXIS_LABEL_CLASS);
+  // Shared temporal x-axis built through the REAL adapter with the faceted flag set, so the
+  // adapter (not the test) is what tags the x-axis label marks with X_AXIS_LABEL_CLASS. This
+  // exercises the production path end-to-end: buildXOpts(data, faceted=true) → tblTemporalXAxis
+  // with the class → grid collapse keeps the bottom row.
+  const xOpts = makeXAdapter("temporal").buildXOpts(data, true);
 
-  const layers = {
+  const layers: MarkLayers = {
     underlay: [],
     overlay,
     tagging: [],
     dashedNames: new Set<string>(),
-    xAxisMarks: axisMarks,
   };
 
   const cells = Object.entries(FACET_LAYOUT).map(([title, { col, row }]) => ({
@@ -642,15 +643,11 @@ function buildFacetedPlot() {
   };
 
   return assemblePlot({
-    layers: layers as never,
+    layers,
     yDomain,
     yTicks,
     units: "",
-    xOpts: {
-      marginBottom: 38,
-      axisMarks,
-      markerToX: () => parseDate("2020-01-01"),
-    },
+    xOpts,
     seriesNames: ["Series"],
     colors: new Map([["Series", TBL.color.blue]]),
     spec,
@@ -711,6 +708,12 @@ describe("axes primitives — pane titles + tick density (task B3)", () => {
     expect(sparse.length).toBeLessThan(dense.length);
     // Default (no multiplier) matches multiplier 1.
     expect(temporalXTicks(xDomain).length).toBe(dense.length);
+    // Documented clamping: expects integers >= 1. Non-integers floor (1.9 -> 1, NOT 2), and
+    // sub-1 / zero / negative inputs clamp to 1 (every tick), never collapsing the cadence.
+    expect(temporalXTicks(xDomain, 1.9).length).toBe(dense.length); // floor(1.9)=1
+    expect(temporalXTicks(xDomain, 0).length).toBe(dense.length); // max(1, 0)=1
+    expect(temporalXTicks(xDomain, 0.5).length).toBe(dense.length); // floor->0, max->1
+    expect(temporalXTicks(xDomain, -3).length).toBe(dense.length); // max(1, -3)=1
     // Sentinel against an unused import.
     expect(typeof makeTickFormatter([0, 1], "")).toBe("function");
     expect(typeof d3.timeFormat).toBe("function");

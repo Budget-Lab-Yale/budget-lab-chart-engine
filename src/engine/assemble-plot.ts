@@ -91,6 +91,19 @@ export function assemblePlot({
   // (after render) collapse the repeated per-facet chrome to the grid look.
   const gridFaceted = facet != null;
 
+  // Grid faceting (fx/fy small-multiples) of GROUPED bars is a later task (B8): a grouped-bar
+  // layer ALSO claims `fx` (its category group scale) and supplies `fxScaleOpts`, which would
+  // collide with the grid's own `fx` column scale — Plot would render into the wrong/empty
+  // cells and the chrome-collapse `else-if` chain (which prefers the `faceted` branch when
+  // `xScaleField === "fx"`) would skip `collapseFacetGridChrome` entirely. Rather than render
+  // silently-wrong output, fail loud until B8 implements it properly.
+  if (gridFaceted && (layers.xScaleField === "fx" || layers.fxScaleOpts != null)) {
+    throw new Error(
+      "grid faceting of grouped-bar charts is not yet supported (the grouped-bar `fx` " +
+        "category scale collides with the grid `fx` column scale; planned for task B8)",
+    );
+  }
+
   const marks: unknown[] = [];
   // Horizontal bars (layer owns the y band scale): the value axis runs along x, so the
   // chrome flips — vertical gridlines + x value-tick labels + a vertical zero baseline,

@@ -4,6 +4,7 @@
 // formatters). Generic across chart types — the line builder consumes `xField`.
 import { d3 } from "./vendor";
 import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis } from "./axes";
+import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseDate, parseQuarter, formatQuarter } from "./parse-time";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
 
@@ -25,7 +26,10 @@ export interface XAdapter {
   parseX: (v: string) => number | Date | string | null;
   xField: string;
   validate: (r: Record<string, unknown>) => boolean;
-  buildXOpts: (data: Array<Record<string, any>>) => XOpts;
+  /** Build the per-chart x options. `faceted` (shared-mode small multiples) tags the x-axis
+   *  label marks with `X_AXIS_LABEL_CLASS` so the grid chrome collapse can keep the bottom-row
+   *  copies and drop the duplicate rows. Default (false) → no class → output byte-identical. */
+  buildXOpts: (data: Array<Record<string, any>>, faceted?: boolean) => XOpts;
 }
 
 // Margin for the two-line month/year axis vs the collapsed year-only axis.
@@ -41,7 +45,7 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       parseX: (v) => +v,
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
-      buildXOpts(data) {
+      buildXOpts(data, faceted = false) {
         const xMax = d3.max(data, (d: any) => d._xn) as number;
         const anchorAtZero = xAxisPolicy?.anchorAtZero !== false;
         const xMin = anchorAtZero
@@ -50,7 +54,7 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
         return {
           marginBottom: 22,
           xPlotOpts: { label: null, axis: null, domain: [xMin, xMax] },
-          axisMarks: tblXAxis(),
+          axisMarks: tblXAxis({}, faceted ? X_AXIS_LABEL_CLASS : undefined),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
           tooltipXFormat: (v) => `Month ${v}`,
@@ -63,12 +67,12 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       parseX: (v) => parseDate(v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
-      buildXOpts(data) {
+      buildXOpts(data, faceted = false) {
         const xs = data.map((r) => +r._xd);
         const xDomain: [Date, Date] = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
         return {
           marginBottom: temporalMarginBottom(xDomain),
-          axisMarks: tblTemporalXAxis(xDomain),
+          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
           markerToX: (m) => parseDate(m.x),
           tooltipXParse: undefined, // crosshair auto-detects YYYY-MM-DD
           tooltipXFormat: undefined,
@@ -81,12 +85,12 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       parseX: (v) => parseQuarter(v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
-      buildXOpts(data) {
+      buildXOpts(data, faceted = false) {
         const xs = data.map((r) => +r._xd);
         const xDomain: [Date, Date] = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
         return {
           marginBottom: temporalMarginBottom(xDomain),
-          axisMarks: tblTemporalXAxis(xDomain),
+          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
           markerToX: (m) => parseQuarter(m.x),
           tooltipXParse: (v) => +(parseQuarter(v) as Date),
           tooltipXFormat: (v) => formatQuarter(new Date(v)),
@@ -100,7 +104,7 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       parseX: (v) => v,
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
-      buildXOpts(data) {
+      buildXOpts(data, faceted = false) {
         // Category domain in data-encounter order (Style-Guide: declaration order is
         // authoritative; never auto-sort by magnitude).
         const seen = new Set<string>();
@@ -121,7 +125,7 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
             axis: null,
             padding: 0.2,
           },
-          axisMarks: tblBandXAxis(categories),
+          axisMarks: tblBandXAxis(categories, "x", faceted ? X_AXIS_LABEL_CLASS : undefined),
           // Vertical reference markers are meaningless on a band scale.
           markerToX: () => null,
           tooltipXParse: undefined,

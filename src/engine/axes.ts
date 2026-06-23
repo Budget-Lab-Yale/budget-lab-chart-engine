@@ -123,8 +123,13 @@ export function paneTitleMark(cells: PaneTitleCell[]): Mark[] {
 }
 
 // X-axis tick labels (numeric): left-anchored at each tick, just below the bottom
-// gridline.
-export function tblXAxis({ xTickFormat }: { xTickFormat?: (d: unknown) => string } = {}): Mark[] {
+// gridline. `className` (faceted small-multiples only): tags the axis-label group so the grid
+// chrome collapse can keep the bottom-row copies. Left undefined for single-frame charts so
+// their output stays byte-identical (Plot omits the class attribute entirely).
+export function tblXAxis(
+  { xTickFormat }: { xTickFormat?: (d: unknown) => string } = {},
+  className?: string,
+): Mark[] {
   return [
     Plot.axisX({
       anchor: "bottom",
@@ -135,6 +140,7 @@ export function tblXAxis({ xTickFormat }: { xTickFormat?: (d: unknown) => string
       fill: TBL.color.axis,
       fontWeight: 500,
       tickFormat: xTickFormat,
+      ...(className ? { className } : {}),
     }),
   ];
 }
@@ -151,11 +157,14 @@ export function pickTemporalCadence(xDomain: [Date, Date]): number {
 }
 
 // `densityMultiplier` thins the ticks for narrow panes (small multiples): the base cadence
-// (months between ticks) is multiplied so a higher value yields FEWER ticks. Default 1 =
-// unchanged. The multiplier is applied to the month cadence and re-bucketed so the
-// yearly/sub-yearly snapping below stays consistent (e.g. yearly cadence × 2 → every 2 years).
+// (months between ticks) is multiplied so a higher value yields FEWER ticks. It is the tick
+// CADENCE divisor in reverse — 1 = every tick, 2 = every other tick, 3 = every third, etc.
+// EXPECTS INTEGERS ≥ 1. Non-integer or sub-1 inputs are clamped to an integer ≥ 1 (via
+// floor then max-1), so 1.9 → 1 (not 2) and 0/0.5/negatives → 1. Default 1 = unchanged. The
+// multiplier is applied to the month cadence and re-bucketed so the yearly/sub-yearly snapping
+// below stays consistent (e.g. yearly cadence × 2 → every 2 years).
 export function temporalXTicks(xDomain: [Date, Date], densityMultiplier = 1): Date[] {
-  const cadence = pickTemporalCadence(xDomain) * Math.max(1, Math.round(densityMultiplier));
+  const cadence = pickTemporalCadence(xDomain) * Math.max(1, Math.floor(densityMultiplier));
   const [start, end] = xDomain;
 
   if (cadence < 12) {
@@ -256,10 +265,15 @@ export function tblTemporalXAxis(
 //
 // `scaleField`: "x" for single-series bars (categories ARE the x band); "fx" for grouped
 // bars (categories are the facet groups; `x` carries the inner series).
+// `className` (faceted small-multiples only): tags the label group so the grid chrome collapse
+// can keep the bottom-row copies. Left undefined for single-frame charts so their output stays
+// byte-identical (Plot omits the class attribute entirely).
 export function tblBandXAxis(
   categories: string[],
   scaleField: "x" | "fx" = "x",
+  className?: string,
 ): Mark[] {
+  const cls = className ? { className } : {};
   if (scaleField === "fx") {
     // GROUPED: each category is its own FACET frame. Facet the text mark on `fx` (one label
     // per facet) and anchor it to the facet frame's BOTTOM CENTER, so the label centers under
@@ -275,6 +289,7 @@ export function tblBandXAxis(
         fill: TBL.color.axis,
         fontSize: TBL.size.axis,
         fontWeight: 500,
+        ...cls,
       }),
     ];
   }
@@ -293,6 +308,7 @@ export function tblBandXAxis(
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
+      ...cls,
     }),
   ];
 }
