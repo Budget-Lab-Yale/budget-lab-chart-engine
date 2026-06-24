@@ -163,9 +163,6 @@ export interface ChartSpec {
   // Data
   data: DataSource;
 
-  // Provenance / locking
-  /** Engine release that rendered/approved this chart (inherited from article.yaml). */
-  engineVersion?: string;
   /** Catalog facets. */
   tags?: string[];
 }
