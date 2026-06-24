@@ -1,9 +1,9 @@
 // sync-theme: generate src/theme/tokens.ts from the Style-Guide's palette/colors.json.
 //
-// The Style-Guide repo is the SINGLE SOURCE OF TRUTH for the palette. This script
-// reads it (from the `style-guide/` git submodule, or a path passed as argv[2]) and
-// emits a committed, typed tokens module the engine imports. CI re-runs this and
-// fails if the committed tokens.ts is stale vs. the submodule.
+// The Style-Guide is the SINGLE SOURCE OF TRUTH for the palette. This script reads it
+// (from the vendored `style-guide/palette/colors.json`, or a path passed as argv[2] to
+// re-sync from an upstream Style-Guide checkout) and emits a committed, typed tokens
+// module the engine imports.
 //
 // The emitted module normalizes colors.json into three flat maps the engine consumes
 // directly — `categorical[]`, `scales`, `structural` — plus `brand` and `aliases`.
@@ -23,7 +23,7 @@ const colorsPath = process.argv[2] ?? defaultColors;
 if (!existsSync(colorsPath)) {
   console.error(
     `sync-theme: colors.json not found at ${colorsPath}\n` +
-      `Add the Style-Guide submodule (git submodule add … style-guide) or pass a path.`,
+      `Pass a path to a Style-Guide colors.json, or restore style-guide/palette/.`,
   );
   process.exit(1);
 }

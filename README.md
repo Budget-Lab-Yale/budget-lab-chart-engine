@@ -21,8 +21,8 @@ that pins a version of this engine.
 | `src/embed/` | Web component + iframe page (shared versioned engine bundle) + standalone/PNG/SVG export. |
 | `src/cli/` | `tbl-chart` CLI: `validate`, `render`, `serve`, `snapshot` (implemented); `new`, `catalog` (planned). |
 | `src/snapshot/` | Headless-Chromium PNG render + pixel-diff harness (the visual locking gate). |
-| `scripts/` | `sync-theme.mjs` (colors.json → tokens.ts), `build.mjs` (esbuild). |
-| `style-guide/` | Git submodule → `Budget-Lab-Yale/Style-Guide` at a pinned SHA (added during setup). |
+| `scripts/` | `sync-theme.mjs` (colors.json → tokens.ts), `gen-assets.mjs` (logo/font → assets.ts), `build.mjs` (esbuild). |
+| `style-guide/` | Vendored Style-Guide build inputs only: `logos/` (logo SVG/PNG) + `palette/` (colors.json/css). The full Style-Guide (chart-type specs, conventions, etc.) lives in `Budget-Lab-Yale/Style-Guide`. |
 
 ## Toolchain
 
@@ -33,7 +33,7 @@ shipped as part of the engine bundle (zero runtime npm deps in the browser outpu
 ## Install (as a dependency)
 
 Distributed by **git tag** — no registry / `write:packages` needed. The `prepare` script
-builds `dist/` on install (the committed `tokens.ts` + vendored Plot/D3 mean no submodule init
+builds `dist/` on install (the committed `tokens.ts` + vendored Plot/D3 mean no extra setup
 is required):
 
 ```sh
@@ -61,7 +61,7 @@ tbl-chart snapshot <chart.yaml> [--update]  # headless-Chromium PNG vs baseline 
 
 ```sh
 npm install
-npm run sync-theme       # regenerate src/theme/tokens.ts + TOKENS_CSS from the Style-Guide submodule
+npm run sync-theme       # regenerate src/theme/tokens.ts + TOKENS_CSS from style-guide/palette (or pass an upstream colors.json path)
 npm run typecheck
 npm test                 # vitest (browser-free)
 npm run build

@@ -13,9 +13,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
-// Source paths — logo lives in the style-guide submodule bundled with the repo.
-// The task spec referenced budget-lab-interactives/style-guide/... but the actual
-// file is in the local style-guide submodule (same content).
+// Source paths — the logo lives in the vendored style-guide/ assets (logos + palette only).
 const LOGO_PATH = resolve(ROOT, "style-guide/logos/primary/TBL_ID_Graph_Primary.svg");
 const FONT_PATH = resolve(ROOT, "src/embed/assets/Figtree-variable.ttf");
 const OUT_PATH = resolve(ROOT, "src/embed/assets.ts");

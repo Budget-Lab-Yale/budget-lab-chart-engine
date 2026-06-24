@@ -1,0 +1,69 @@
+/*
+ * Budget Lab canonical palette — CSS custom properties
+ * Source: palette/colors.json
+ * Version: 0.2.0
+ *
+ * Naming aliases (match the canonical name when users say these):
+ *   purple → violet, pink → rose, yellow → amber, brown → russet
+ *
+ * Usage: place a <link> to this file in any web output, then reference
+ * tokens as var(--tbl-navy), var(--tbl-cat1), var(--tbl-blue-400), etc.
+ */
+
+:root {
+  /* ---- Brand ---- */
+  --tbl-navy: #101F5B;
+  --tbl-blue: #0072B2;
+  --tbl-sky:  #63AAFF;
+
+  /* ---- Categorical series (apply in order) ---- */
+  --tbl-cat1: #0072B2;  /* blue   */
+  --tbl-cat2: #E69F00;  /* amber  (alias: yellow)  */
+  --tbl-cat3: #8856BF;  /* violet (alias: purple)  */
+  --tbl-cat4: #2A8B3A;  /* green  */
+  --tbl-cat5: #B8302C;  /* red    */
+  --tbl-cat6: #CC79A7;  /* rose   (alias: pink)    */
+  --tbl-cat7: #7A5230;  /* russet (alias: brown)   */
+
+  /* ---- Tonal scales (50 lightest → 700 darkest, 8 tiers at fixed L*) ---- */
+  --tbl-blue-50:  #95DAFF;  --tbl-blue-100: #77BEFF;  --tbl-blue-200: #58A3E7;  --tbl-blue-300: #3689CB;
+  --tbl-blue-400: #0070AF;  --tbl-blue-500: #005794;  --tbl-blue-600: #00407A;  --tbl-blue-700: #002B61;
+
+  --tbl-amber-50:  #FFC63D;  --tbl-amber-100: #F4AB1A;  --tbl-amber-200: #D59000;  --tbl-amber-300: #B67700;
+  --tbl-amber-400: #985E00;  --tbl-amber-500: #7B4600;  --tbl-amber-600: #612F00;  --tbl-amber-700: #4B1900;
+
+  --tbl-violet-50:  #F6BCFF;  --tbl-violet-100: #D8A0FF;  --tbl-violet-200: #BC85F4;  --tbl-violet-300: #9F6BD7;
+  --tbl-violet-400: #8452BB;  --tbl-violet-500: #693A9F;  --tbl-violet-600: #4E2185;  --tbl-violet-700: #33076B;
+
+  --tbl-green-50:  #8CE990;  --tbl-green-100: #70CD76;  --tbl-green-200: #54B15C;  --tbl-green-300: #379644;
+  --tbl-green-400: #127B2C;  --tbl-green-500: #006213;  --tbl-green-600: #004900;  --tbl-green-700: #003100;
+
+  --tbl-red-50:  #FFA895;  --tbl-red-100: #FF8C7B;  --tbl-red-200: #FF7062;  --tbl-red-300: #E1554A;
+  --tbl-red-400: #C13933;  --tbl-red-500: #A2191D;  --tbl-red-600: #840006;  --tbl-red-700: #670000;
+
+  --tbl-rose-50:  #FFBAE9;  --tbl-rose-100: #F49ECD;  --tbl-rose-200: #D783B2;  --tbl-rose-300: #BB6997;
+  --tbl-rose-400: #9F507D;  --tbl-rose-500: #843764;  --tbl-rose-600: #691D4C;  --tbl-rose-700: #4F0035;
+
+  --tbl-russet-50:  #FDCAA3;  --tbl-russet-100: #E0AF89;  --tbl-russet-200: #C3946F;  --tbl-russet-300: #A77A56;
+  --tbl-russet-400: #8B623F;  --tbl-russet-500: #714A28;  --tbl-russet-600: #563313;  --tbl-russet-700: #3E1E00;
+
+  /* ---- Structural (non-data) ---- */
+  --tbl-bg:           #FFFFFF;
+  --tbl-bg-subtle:    #F6F7F9;
+  --tbl-bg-highlight: #D9EAFF;
+  --tbl-border:       #E5E5E5;
+  --tbl-gridline:     #F0F0F0;
+  --tbl-axis-stroke:  #999999;
+
+  /* ---- Text ---- */
+  --tbl-text-heading: #1A1A2E;
+  --tbl-text-body:    #4A4A4A;
+  --tbl-text-muted:   #6D6D6D;
+  --tbl-text-axis:    #666666;
+
+  /* ---- Annotations ---- */
+  --tbl-annotation-dim: #BBBBBB;
+
+  /* ---- Chart marks ---- */
+  --tbl-mark-black: #000000;  /* baseline/total/threshold lines — strong, neutral */
+}
