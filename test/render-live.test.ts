@@ -341,15 +341,19 @@ describe("buildStandaloneHtml", () => {
     }
   });
 
-  it("includes the Google Fonts Figtree link", () => {
+  it("inlines the Figtree font and makes no external font request", () => {
     const html = buildStandaloneHtml({
       spec: MULTI_SERIES_SPEC,
       rows: MULTI_SERIES_ROWS,
       liveBundleJs: FAKE_BUNDLE,
       css: CHART_CSS,
     });
-    expect(html).toContain("fonts.googleapis.com");
-    expect(html).toContain("Figtree");
+    // Self-contained: the font ships as a base64 @font-face so the page renders correctly with
+    // zero external requests (corporate firewalls block the fonts CDN). No Google Fonts link.
+    expect(html).toContain("@font-face");
+    expect(html).toContain("font-family:'Figtree'");
+    expect(html).toContain("data:font/ttf;base64,");
+    expect(html).not.toContain("fonts.googleapis.com");
   });
 });
 

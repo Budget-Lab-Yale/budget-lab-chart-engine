@@ -3,6 +3,7 @@
 // at runtime — the caller passes the already-bundled JS as a string.
 import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
+import { FIGTREE_FONT_FACE } from "./assets.js";
 
 export interface StandaloneInput {
   spec: ChartSpec;
@@ -64,10 +65,11 @@ export function buildStandaloneHtml(input: StandaloneInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtmlAttr(pageTitle)}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
+/* Figtree is inlined as a base64 @font-face (not loaded from Google Fonts) so the page renders
+   in the correct font with zero external requests — corporate firewalls that block the fonts CDN
+   would otherwise drop the chart back to a system fallback. */
+${FIGTREE_FONT_FACE}
 ${css}
 </style>
 </head>
