@@ -338,13 +338,14 @@ function maxBandLabelWidth(categories: string[]): number {
   return categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c)), 0);
 }
 
-/** Whether categorical band labels should rotate to 45°: true when a horizontal label would not
- *  fit its per-category slot (`plotWidth / n`) with a small gap. Returns false for <2 categories
- *  or non-positive width. */
+/** Whether categorical band labels should rotate to 45°: only once horizontal labels would
+ *  actually OVERLAP. Labels are centered on their ticks, so adjacent labels collide when the
+ *  label width exceeds the per-category slot (`plotWidth / n`). Up to that point they're allowed
+ *  to sit close. Returns false for <2 categories or non-positive width. */
 export function shouldRotateBandLabels(categories: string[], plotWidth: number): boolean {
   if (categories.length < 2 || !(plotWidth > 0)) return false;
   const step = plotWidth / categories.length;
-  return maxBandLabelWidth(categories) + 6 > step;
+  return maxBandLabelWidth(categories) > step;
 }
 
 /** Center y-offset (dy) for a rotated band label so the whole 45° label clears the axis. */

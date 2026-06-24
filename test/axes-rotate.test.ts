@@ -12,8 +12,11 @@ describe("shouldRotateBandLabels", () => {
     expect(shouldRotateBandLabels(cats, 220)).toBe(true);
   });
 
-  it("rotates when a single label is too wide for its slot", () => {
-    expect(shouldRotateBandLabels(["Total", "Physical care", "Reading"], 240)).toBe(true);
+  it("rotates only once a wide label overlaps its slot (not merely close)", () => {
+    // ~80px-wide "Physical care" in 80px slots (240/3) is close but not overlapping → no rotate.
+    expect(shouldRotateBandLabels(["Total", "Physical care", "Reading"], 240)).toBe(false);
+    // Narrower: the slots shrink below the label width → overlap → rotate.
+    expect(shouldRotateBandLabels(["Total", "Physical care", "Reading"], 195)).toBe(true);
   });
 
   it("never rotates for fewer than two categories or non-positive width", () => {
