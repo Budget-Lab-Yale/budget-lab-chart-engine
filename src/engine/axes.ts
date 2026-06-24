@@ -284,8 +284,18 @@ export function tblBandXAxis(
   categories: string[],
   scaleField: "x" | "fx" = "x",
   className?: string,
+  rotate = false,
 ): Mark[] {
   const cls = className ? { className } : {};
+  // When rotated, labels are CENTER-anchored and turned 45° (counter-clockwise, reading
+  // bottom-left → top-right). Center-anchoring keeps each label's bounding-box center on its
+  // tick — so the categorical-line crosshair, which reads label centers, stays accurate — while
+  // the 45° turn shrinks the horizontal footprint (~0.7×) to avoid collisions. `dy` pushes the
+  // label's center far enough below the axis that the whole (rotated) label clears the plot.
+  const rotProps = rotate
+    ? { rotate: -45, textAnchor: "middle" as const, dy: rotatedLabelDy(categories) }
+    : { dy: 12, textAnchor: "middle" as const };
+
   if (scaleField === "fx") {
     // GROUPED: each category is its own FACET frame. Facet the text mark on `fx` (one label
     // per facet) and anchor it to the facet frame's BOTTOM CENTER, so the label centers under
@@ -296,11 +306,10 @@ export function tblBandXAxis(
         fx: (d: { c: string }) => d.c,
         text: (d: { c: string }) => d.c,
         frameAnchor: "bottom",
-        dy: 12,
-        textAnchor: "middle",
         fill: TBL.color.axis,
         fontSize: TBL.size.axis,
         fontWeight: 500,
+        ...rotProps,
         ...cls,
       }),
     ];
@@ -315,14 +324,37 @@ export function tblBandXAxis(
       x: (d: string) => d,
       text: (d: string) => d,
       frameAnchor: "bottom",
-      dy: 12,
-      textAnchor: "middle",
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
+      ...rotProps,
       ...cls,
     }),
   ];
+}
+
+/** Longest estimated category-label width (axis font), used for the rotation decision + layout. */
+function maxBandLabelWidth(categories: string[]): number {
+  return categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c)), 0);
+}
+
+/** Whether categorical band labels should rotate to 45°: true when a horizontal label would not
+ *  fit its per-category slot (`plotWidth / n`) with a small gap. Returns false for <2 categories
+ *  or non-positive width. */
+export function shouldRotateBandLabels(categories: string[], plotWidth: number): boolean {
+  if (categories.length < 2 || !(plotWidth > 0)) return false;
+  const step = plotWidth / categories.length;
+  return maxBandLabelWidth(categories) + 6 > step;
+}
+
+/** Center y-offset (dy) for a rotated band label so the whole 45° label clears the axis. */
+function rotatedLabelDy(categories: string[]): number {
+  return Math.round(maxBandLabelWidth(categories) * 0.355 + 12);
+}
+
+/** Bottom margin needed to fit rotated 45° band labels (vs the ~22px horizontal default). */
+export function rotatedBandMarginBottom(categories: string[]): number {
+  return Math.round(Math.min(74, 18 + maxBandLabelWidth(categories) * 0.71));
 }
 
 // Approximate the rendered px width of a string at the axis font size. No canvas/DOM

@@ -261,7 +261,7 @@ export function buildBarMarks(
     fxScaleOpts: groupBandOpts,
     xScaleOpts: innerBandOpts,
     xScaleField: "fx",
-    xAxisMarks: tblBandXAxis(categories, "fx"),
+    xAxisMarks: tblBandXAxis(categories, "fx", undefined, ctx.rotateXLabels ?? false),
   };
 }
 

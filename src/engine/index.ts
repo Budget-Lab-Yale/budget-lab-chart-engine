@@ -9,6 +9,7 @@ import type { ChartSpec } from "../spec/types";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
+import { shouldRotateBandLabels } from "./axes";
 import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -266,9 +267,21 @@ export function renderPane(
     tickCount,
   });
 
+  // Categorical x-axis: rotate the band labels to 45° when horizontal labels would collide at
+  // this width (long labels and/or narrow panes). Uses the DATA width (outer width minus the
+  // ACTUAL margins) so the decision is identical across a shared figure's panes (which share one
+  // data width). Non-categorical → no categories → never rotates.
+  const catsForX =
+    spec.xAxisType === "categorical"
+      ? Array.from(new Set(dataInScope.map((r) => r._xc).filter((c): c is string => !!c)))
+      : [];
+  const dataWidthForX =
+    (opts.width ?? 720) - (opts.marginLeft ?? TBL_MARGIN_LEFT) - (opts.marginRight ?? TBL_MARGIN_RIGHT);
+  const rotateXLabels = shouldRotateBandLabels(catsForX, dataWidthForX);
+
   // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
   // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
-  const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null);
+  const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null, rotateXLabels);
   const units = inferUnitsFromSubtitle(spec.subtitle);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
@@ -291,6 +304,9 @@ export function renderPane(
     ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     // Pane stroke flag: thins line marks for figure panes (both modes). renderFigure sets it.
     ...(opts.pane ? { pane: true } : {}),
+    // Grouped bars label their categories on `fx`; pass the rotation decision so those labels
+    // match the single-band/line labels (the adapter handles the `x` band path).
+    ...(rotateXLabels ? { rotateXLabels: true } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.

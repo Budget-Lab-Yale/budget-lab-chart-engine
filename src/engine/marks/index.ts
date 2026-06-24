@@ -54,6 +54,9 @@ export interface MarkContext {
    *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
    *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
   pane?: boolean;
+  /** Categorical x-axis: render band labels at 45° to avoid collision (decided in renderChart
+   *  from width + labels). Grouped bars use it for their `fx` group labels. */
+  rotateXLabels?: boolean;
 }
 
 export interface MarkLayers {
