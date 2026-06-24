@@ -63,9 +63,12 @@ export interface LegendItem {
   label: string;
   color: string | undefined;
   dashed: boolean;
-  markerShape: "line" | "rect" | "dot";
-  /** Line charts with point markers: the d3 symbol name for this series (shown on the line
-   *  swatch so series can be told apart by shape, not just color). */
+  /** Swatch style: "line"/"rect"/"dot" for line/bar/stacked; "point" for scatter/dotplot — a
+   *  filled colored marker (the `markerSymbol`, default circle) with NO connecting line. */
+  markerShape: "line" | "rect" | "dot" | "point";
+  /** Line charts with point markers, or point charts with redundant color+shape encoding: the
+   *  d3 symbol name for this series (shown on the swatch so series can be told apart by shape,
+   *  not just color). */
   markerSymbol?: string;
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
@@ -74,10 +77,28 @@ export interface LegendItem {
   isExtra?: boolean;
 }
 
+/** One row of the SHAPE legend (point charts, dual color/shape encoding): a neutral-colored
+ *  marker symbol identifying a shape-channel value. Non-interactive in v1 (the shape legend
+ *  does not drive hover-dim / pin). */
+export interface ShapeLegendItem {
+  /** The raw shape-value key. */
+  shape: string;
+  label: string;
+  /** d3 symbol name (assigned by shape index, matching the chart's symbol scale). */
+  markerSymbol: string;
+}
+
 export interface RenderResult {
   svg: SVGSVGElement;
-  /** Legend rows (null for a single, unstyled series — no legend needed). */
+  /** Legend rows (null for a single, unstyled series — no legend needed). For point charts this
+   *  is the COLOR (series) legend; the shape legend (when distinct) is `shapeLegendItems`. */
   legendItems: LegendItem[] | null;
+  /** Point charts with two-field encoding: the SHAPE legend rows (neutral markers). Null when
+   *  shape encodes the same field as color (redundant → folded into `legendItems`) or absent. */
+  shapeLegendItems?: ShapeLegendItem[] | null;
+  /** Optional headings for the color/shape legend groups (point charts, dual encoding). */
+  colorLegendTitle?: string;
+  shapeLegendTitle?: string;
   seriesLabels: Record<string, string>;
   seriesOrder: string[];
   dashedNames: Set<string>;
@@ -190,6 +211,9 @@ export function renderPane(
         time: xRaw,
         _y: valRaw === "" || valRaw == null ? null : +valRaw,
       } as PreparedRow;
+      // Point charts: the independent shape-encoding value (drives marker symbol). When the shape
+      // column IS the series column (redundant encoding) this simply mirrors `series`.
+      if (cols.shape) row._shape = r[cols.shape] ?? "";
       (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {
@@ -297,6 +321,19 @@ export function renderPane(
   const plotWidth = effWidth - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT;
   const plotHeight = effHeight - TBL_MARGIN_TOP - xOpts.marginBottom;
 
+  // Point charts: the shape-encoding channel. Distinct shape values in spec.shape_order (filter +
+  // order) else data-encounter order; `shapeIsSeries` flags the redundant case (shape column ==
+  // series column) so the symbol scale + legend collapse to a single combined group.
+  const hasShape = cols.shape != null;
+  const shapeNames = hasShape
+    ? spec.shape_order && spec.shape_order.length
+      ? spec.shape_order.filter((s) => dataInScope.some((r) => r._shape === s))
+      : Array.from(
+          new Set(dataInScope.map((r) => r._shape).filter((s): s is string => s != null && s !== "")),
+        )
+    : undefined;
+  const shapeIsSeries = hasShape && cols.shape === cols.series;
+
   // Chart-type-specific marks, then assemble the Plot.
   const layers = markBuilderFor(spec.chartType)(dataInScope, spec, {
     xField: adapter.xField,
@@ -304,6 +341,7 @@ export function renderPane(
     seriesNames,
     plotWidth,
     plotHeight,
+    ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
     // Shared-mode small multiples: pass the facet field names so the mark builder binds
     // fx/fy on its marks (they face into the grid). Absent → single frame.
     ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
@@ -372,12 +410,29 @@ export function buildLegendItems(
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
   const hasDashOverrides = layers.dashedNames.size > 0;
-  const markerShape: "line" | "rect" =
-    chartType === "bar" || chartType === "stacked" ? "rect" : "line";
   // When the mark layer is the source of truth for series colors (stacked: mono tiers or
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
     layers.seriesColors?.get(name) ?? colors.get(name);
+
+  // Point charts (scatter / dotplot): the COLOR (series) legend. Swatch is a filled colored
+  // marker — the per-series symbol when shape encodes the same field (redundant → combined
+  // legend), otherwise a plain circle (shape is carried by the separate shape legend). A single
+  // color → no color legend (the shape legend, if any, stands alone).
+  if (chartType === "scatter" || chartType === "dotplot") {
+    if (seriesNames.length <= 1) return null;
+    return seriesNames.map((name, i) => ({
+      series: name,
+      label: labelFor(name),
+      color: legendColorFor(name),
+      dashed: false,
+      markerShape: "point" as const,
+      markerSymbol: layers.shapeIsSeries ? markerSymbolForIndex(i) : "circle",
+    }));
+  }
+
+  const markerShape: "line" | "rect" =
+    chartType === "bar" || chartType === "stacked" ? "rect" : "line";
   // Line charts with point markers: each series carries its marker shape so the legend swatch
   // shows the same symbol as the chart (assigned by series index, matching the symbol scale).
   const withSymbols = markerShape === "line" && spec.points === true;
@@ -415,6 +470,23 @@ export function buildLegendItems(
   return legendItems;
 }
 
+/** Build the SHAPE legend rows for a point chart with DUAL encoding (shape ≠ color). Returns
+ *  null when there is no shape channel, or when shape encodes the same field as color (the
+ *  redundant case — those symbols are folded into the combined color legend by buildLegendItems).
+ *  Symbols are assigned by shape index, matching the chart's symbol scale. */
+export function buildShapeLegendItems(
+  spec: ChartSpec,
+  layers: MarkLayers,
+): ShapeLegendItem[] | null {
+  if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
+  const shapeLabels = spec.shape_labels ?? {};
+  return layers.shapeNames.map((shape, i) => ({
+    shape,
+    label: shapeLabels[shape] ?? shape,
+    markerSymbol: markerSymbolForIndex(i),
+  }));
+}
+
 export function renderChart(
   spec: ChartSpec,
   rows: TidyRow[],
@@ -425,10 +497,14 @@ export function renderChart(
 
   const seriesLabels = spec.series_labels ?? {};
   const legendItems = buildLegendItems(spec, seriesNames, colors, layers);
+  const shapeLegendItems = buildShapeLegendItems(spec, layers);
 
   return {
     svg,
     legendItems,
+    shapeLegendItems,
+    colorLegendTitle: spec.color_legend_title,
+    shapeLegendTitle: spec.shape_legend_title,
     seriesLabels,
     seriesOrder: seriesNames,
     dashedNames: layers.dashedNames,

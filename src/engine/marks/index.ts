@@ -6,6 +6,7 @@ import type { BandLabelMode } from "../axes";
 import { buildLineMarks } from "./line";
 import { buildBarMarks } from "./bar";
 import { buildStackedMarks } from "./stacked";
+import { buildPointMarks } from "./point";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -21,6 +22,9 @@ export interface PreparedRow {
   /** Confidence-band bounds, when the row's series has a band. */
   _lo?: number;
   _hi?: number;
+  /** Point charts (scatter / dotplot): the raw shape-encoding value (from columns.shape).
+   *  Drives the marker symbol independently of `series` (color). Absent ⇒ no shape channel. */
+  _shape?: string;
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
    *  facet_field that splits this row's pane). */
   _facet?: string;
@@ -58,6 +62,15 @@ export interface MarkContext {
   /** Categorical x-axis label layout ("wrap" → two lines, "rotate" → 45°), decided in renderChart
    *  from width + labels to avoid collision. Grouped bars use it for their `fx` group labels. */
   xLabelMode?: BandLabelMode;
+  /** Point charts: the PreparedRow field holding the shape value (`"_shape"`) when a shape
+   *  channel is active. Absent ⇒ single shape (circle). */
+  shapeField?: string;
+  /** Point charts: the ordered distinct shape values driving the symbol scale + shape legend
+   *  (from spec.shape_order, else data-encounter order). */
+  shapeNames?: string[];
+  /** Point charts: true when the shape column IS the series column (redundant color+shape
+   *  encoding) — the symbol scale then keys off series identity and the legend is combined. */
+  shapeIsSeries?: boolean;
 }
 
 export interface MarkLayers {
@@ -76,6 +89,12 @@ export interface MarkLayers {
   /** Optional: per-series symbol scale (line point markers) — {domain: series, range: shapes}.
    *  Threaded to plotOpts.symbol so each series gets a distinct marker shape. */
   symbolScaleOpts?: { domain: string[]; range: string[] };
+  /** Point charts: the ordered distinct shape values (symbol-scale domain), for the shape
+   *  legend. Absent for non-point layers / when no shape channel is active. */
+  shapeNames?: string[];
+  /** Point charts: true when shape encodes the same field as color (series) — the legend is
+   *  then a single combined group of colored shapes rather than two groups. */
+  shapeIsSeries?: boolean;
   /** Optional: faceted-group band scale options (vertical grouped bars use `fx`). */
   fxScaleOpts?: Record<string, unknown>;
   /** Optional: faceted-group band scale options for HORIZONTAL grouped bars, which facet
@@ -131,6 +150,9 @@ const REGISTRY: Record<ChartType, MarkBuilder> = {
   line: buildLineMarks,
   bar: buildBarMarks,
   stacked: buildStackedMarks,
+  // Both point types share one builder; it branches on x-scale (numeric vs categorical point).
+  scatter: buildPointMarks,
+  dotplot: buildPointMarks,
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {

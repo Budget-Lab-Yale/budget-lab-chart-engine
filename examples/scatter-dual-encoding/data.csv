@@ -1,0 +1,10 @@
+shock,labor,gross,revenue
+Slow,Compressive,12,6
+Slow,Proportional,16,8
+Slow,Expansive,20,11
+Moderate,Compressive,400,85
+Moderate,Proportional,405,105
+Moderate,Expansive,392,127
+Rapid,Compressive,620,132
+Rapid,Proportional,632,170
+Rapid,Expansive,628,213

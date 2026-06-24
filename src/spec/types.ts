@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line" | "bar" | "stacked";
+export type ChartType = "line" | "bar" | "stacked" | "scatter" | "dotplot";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -90,6 +90,10 @@ export interface ColumnMap {
   series?: string;
   /** Column whose distinct values split small-multiples panes. */
   facet?: string;
+  /** Point charts (scatter / dotplot): column driving the marker SHAPE — an encoding channel
+   *  independent of `series` (which drives color). Point both at the same column for redundant
+   *  color+shape encoding (the dot-plot default). Omit ⇒ a single shape (circle), no shape legend. */
+  shape?: string;
 }
 
 export interface ChartSpec {
@@ -122,6 +126,18 @@ export interface ChartSpec {
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;
+
+  // Shape channel (point charts: scatter / dotplot). The shape COLUMN is mapped via
+  // `columns.shape`; these mirror the series_* fields for the shape-encoding legend.
+  /** Shape render order; also an inclusion filter when set. */
+  shape_order?: string[];
+  /** Short shape-value key → display label for the shape legend. */
+  shape_labels?: Record<string, string>;
+  /** Heading shown above the color (series) legend group — used when color and shape encode
+   *  two different fields, so each legend is labeled (e.g. "Shock variant"). */
+  color_legend_title?: string;
+  /** Heading shown above the shape legend group (e.g. "Labor map"). */
+  shape_legend_title?: string;
 
   confidence_bands?: ConfidenceBand[];
 

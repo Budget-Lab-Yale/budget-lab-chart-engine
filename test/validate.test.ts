@@ -57,6 +57,53 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/step/);
   });
 
+  it("accepts a scatter spec with numeric xAxisType and a shape channel", () => {
+    const r = validateSpec({
+      chartType: "scatter",
+      title: "Scatter Demo",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "gx", value: "gy", series: "color", shape: "shp" },
+      shape_order: ["a", "b"],
+      shape_labels: { a: "A" },
+      color_legend_title: "Color",
+      shape_legend_title: "Shape",
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("accepts a dotplot spec with categorical xAxisType", () => {
+    const r = validateSpec({
+      chartType: "dotplot",
+      title: "Dot Demo",
+      xAxisType: "categorical",
+      data: "data.csv",
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects scatter with a non-numeric xAxisType", () => {
+    const r = validateSpec({
+      chartType: "scatter",
+      title: "Scatter Demo",
+      xAxisType: "categorical",
+      data: "data.csv",
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/scatter.*requires xAxisType "numeric"/);
+  });
+
+  it("rejects dotplot with a non-categorical xAxisType", () => {
+    const r = validateSpec({
+      chartType: "dotplot",
+      title: "Dot Demo",
+      xAxisType: "numeric",
+      data: "data.csv",
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/dotplot.*requires xAxisType "categorical"/);
+  });
+
   it("accepts a bar spec with categorical xAxisType and bar fields", () => {
     const r = validateSpec({
       chartType: "bar",
@@ -218,6 +265,51 @@ describe("validateChartData (cross-reference + CSV format)", () => {
       { age_bin: "22-25", mean_hours: "2.0" },
     ];
     expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("accepts a scatter with an independent shape column present in the data", () => {
+    const spec: ChartSpec = {
+      chartType: "scatter",
+      title: "Scatter",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "gx", value: "gy", series: "color", shape: "shp" },
+      shape_order: ["tri", "dot"],
+    };
+    const rows: TidyRow[] = [
+      { gx: "1", gy: "10", color: "slow", shp: "tri" },
+      { gx: "2", gy: "20", color: "fast", shp: "dot" },
+    ];
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("flags a columns.shape that names a column absent from the data", () => {
+    const spec: ChartSpec = {
+      chartType: "scatter",
+      title: "Scatter",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "gx", value: "gy", shape: "shp" },
+    };
+    const rows: TidyRow[] = [{ gx: "1", gy: "10" }];
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/columns\.shape is "shp".*no such column/);
+  });
+
+  it("flags a shape_order value not present in the shape column", () => {
+    const spec: ChartSpec = {
+      chartType: "scatter",
+      title: "Scatter",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "gx", value: "gy", shape: "shp" },
+      shape_order: ["tri", "missing"],
+    };
+    const rows: TidyRow[] = [{ gx: "1", gy: "10", shp: "tri" }];
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/shape_order names shape values.*missing/);
   });
 
   it("flags a config series not present in the data", () => {

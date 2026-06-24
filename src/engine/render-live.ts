@@ -586,7 +586,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const {
       svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, units,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, showTotalDot,
+      shapeLegendItems, colorLegendTitle, shapeLegendTitle,
     } = built;
+    // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
+    // legend (the color legend still drives hover-dim, which is independent of the crosshair).
+    const isPoint = spec.chartType === "scatter" || spec.chartType === "dotplot";
 
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
     // overflows into the scroll wrapper below the floor instead of being CSS-scaled down.
@@ -595,8 +599,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
     // --- Legend layout ---
+    const shapeOpts = {
+      shapeItems: shapeLegendItems ?? undefined,
+      colorTitle: colorLegendTitle,
+      shapeTitle: shapeLegendTitle,
+    };
     let legendHandle: LegendHandle | null = null;
-    if (legendItems) {
+    if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
         if (currentLegendPos !== "right") {
@@ -613,11 +622,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // Top legend slot stays in the DOM but is now empty (no content added).
         }
         // Render the right-side vertical legend with reversed series order.
-        const orderedItems = orderForRightLegend(legendItems, legendVisualOrder);
+        const orderedItems = orderForRightLegend(legendItems ?? [], legendVisualOrder);
         rightLegendSlot!.replaceChildren();
         legendHandle = renderLegend(rightLegendSlot!, orderedItems, {
           svg,
           onHighlight: () => recolorNetLabels(svg),
+          ...shapeOpts,
         });
         // Add the vertical-layout class to the rendered legend element (use the handle's
         // element directly rather than re-querying the slot).
@@ -625,11 +635,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // Ensure top legend slot stays empty.
         legendSlot.replaceChildren();
       } else {
-        // Top legend (default behavior — unchanged).
+        // Top legend (default behavior — unchanged for non-point charts).
         legendSlot.replaceChildren();
-        legendHandle = renderLegend(legendSlot, legendItems, {
+        legendHandle = renderLegend(legendSlot, legendItems ?? [], {
           svg,
           onHighlight: () => recolorNetLabels(svg),
+          ...shapeOpts,
         });
       }
     }
@@ -641,7 +652,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    if (spec.xAxisType === "categorical" && spec.chartType === "line") {
+    if (isPoint) {
+      // Point charts: no crosshair in v1 (a shared-x cursor doesn't fit a scatter). Markers are
+      // static; the color legend's hover-dim still works via [data-series] tagging.
+    } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
       attachCategoricalLineCrosshair(svg, {
@@ -701,7 +715,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // TRANSPARENT full-SVG hit rect on top of the marks (pointer-events:all), so a plain
     // click lands on that overlay, not the bar — hit-test THROUGH it with
     // elementsFromPoint and find the first [data-series] mark beneath the cursor.
-    if (legendHandle) {
+    if (legendHandle && !isPoint) {
       const handle = legendHandle; // capture the non-null value for the click closure
       card.classList.add("is-selectable");
       // Line charts: the visible lines are thin ~2px strokes that elementsFromPoint rarely
@@ -862,6 +876,11 @@ function wireFigureSvg(
     onResolve?: (key: unknown) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
+  // Point charts (scatter / dotplot): no crosshair / selection in v1 — static markers + the
+  // grid-level color legend's hover-dim (which works via [data-series] tagging, set up by the
+  // legend handle independently of any per-pane crosshair).
+  if (ctx.spec.chartType === "scatter" || ctx.spec.chartType === "dotplot") return undefined;
+
   const categorical = ctx.spec.xAxisType === "categorical";
   // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so they keep the per-pane
   // tooltip instead. `useCoord` gates the no-tooltip emitOnly + coordinated-renderer path.
@@ -1117,10 +1136,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     }
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
-    const handle = fig.legendItems
-      ? renderLegend(legendSlot, fig.legendItems, {
+    const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
+    const handle = fig.legendItems || hasFigShape
+      ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
           onHighlight: () => { for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg); },
+          shapeItems: fig.shapeLegendItems ?? undefined,
+          colorTitle: fig.colorLegendTitle,
+          shapeTitle: fig.shapeLegendTitle,
         })
       : null;
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still

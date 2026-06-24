@@ -111,7 +111,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "bar", "stacked"] },
+    chartType: { type: "string", enum: ["line", "bar", "stacked", "scatter", "dotplot"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -122,6 +122,7 @@ export const CHART_SPEC_SCHEMA = {
         value: { type: "string" },
         series: { type: "string" },
         facet: { type: "string" },
+        shape: { type: "string" },
       },
     },
 
@@ -151,6 +152,12 @@ export const CHART_SPEC_SCHEMA = {
       },
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
+
+    // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
+    shape_order: { type: "array", items: { type: "string" } },
+    shape_labels: { type: "object", additionalProperties: { type: "string" } },
+    color_legend_title: { type: "string" },
+    shape_legend_title: { type: "string" },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
     points: { type: "boolean" },

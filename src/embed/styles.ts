@@ -319,6 +319,39 @@ body {
   display: inline-flex;
   align-items: center;
 }
+/* Point-chart swatch: a filled colored marker (the symbol) with no connecting line. */
+.tbl-legend-swatch.is-point {
+  width: 16px;
+  height: 14px;
+  border-radius: 0;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Two-group (color + shape) point legend: each group is a labeled inline cluster. */
+.tbl-legend-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+}
+.tbl-legend-group-title {
+  font: var(--tw-semi, 600) 11px/1.2 var(--tbl-font-sans-compact, var(--tbl-font-sans));
+  color: var(--tbl-text-muted, var(--tbl-text-axis));
+  text-transform: none;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+/* Shape-legend rows are non-interactive in v1: plain markers + labels, no hover affordance. */
+.tbl-legend-item.is-static {
+  cursor: default;
+  padding: 4px 8px 3px 6px;
+}
+.tbl-legend-item.is-static:hover {
+  background: transparent;
+  color: var(--tbl-text-body);
+}
 
 /* =========================================================================
  * Legend reset button

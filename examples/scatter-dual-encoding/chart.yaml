@@ -1,0 +1,30 @@
+chartType: scatter
+title: Revenue gains scale with factor-income expansion across shock paths
+xAxisType: numeric
+x_axis_title: Gross factor-income expansion ($B)
+y_axis_title: Change in total revenue ($B)
+
+# Color encodes the shock variant; marker shape encodes the labor map — two independent
+# categorical channels, so the legend renders as two labeled groups.
+columns:
+  x: gross
+  value: revenue
+  series: shock
+  shape: labor
+
+series_order: [Slow, Moderate, Rapid]
+series_colors:
+  Slow: "#9DC3E6"
+  Moderate: "#2E75B6"
+  Rapid: "#1F3864"
+
+shape_order: [Compressive, Proportional, Expansive]
+
+color_legend_title: "Shock variant"
+shape_legend_title: "Labor map"
+
+yAxisPolicy:
+  includeZero: true
+
+source: Illustrative example data
+data: data.csv

@@ -132,18 +132,28 @@ function drawLines(
   return lines.length ? by - lineHeight : firstBaseline;
 }
 
+const SHAPE_LEGEND_COLOR = "#555B66";
+
 function drawLegend(
   root: SVGElement,
-  items: Array<{ label: string; color: string | undefined; dashed: boolean; markerSymbol?: string }>,
+  items: Array<{ label: string; color: string | undefined; dashed: boolean; markerSymbol?: string; markerShape?: string }>,
   firstBaseline: number,
+  leadingTitle?: string,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
+  const titleFont = `${W_SEMI} 12px ${FONT}`;
   const SW = 22;
   const GAP = 6;
   const ITEM_GAP = 18;
   const ROW_H = 20;
   let x = MARGIN;
   let y = firstBaseline;
+
+  // Optional group heading (point charts, dual encoding): a short label before the items.
+  if (leadingTitle) {
+    root.appendChild(textEl(x, y, leadingTitle, { size: 12, weight: W_SEMI, fill: AXIS }));
+    x += measureText(leadingTitle, titleFont) + ITEM_GAP;
+  }
 
   for (const item of items) {
     const color = item.color ?? NAVY;
@@ -153,7 +163,18 @@ function drawLegend(
       y += ROW_H;
     }
     const cy = y - 4;
-    if (item.dashed) {
+    if (item.markerShape === "point") {
+      // Point chart: a filled colored marker (the symbol, default circle) with no line.
+      root.appendChild(
+        svgEl("path", {
+          d: symbolPathD(item.markerSymbol ?? "circle", 46),
+          transform: `translate(${x + SW / 2},${cy})`,
+          fill: color,
+          stroke: "#ffffff",
+          "stroke-width": 0.75,
+        }),
+      );
+    } else if (item.dashed) {
       root.appendChild(
         svgEl("line", {
           x1: x,
@@ -217,6 +238,10 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     ? renderFigure(spec, rows, { width: INNER_W })
     : renderChart(spec, rows, { width: INNER_W });
   const legendItems = meta.legendItems ?? [];
+  const shapeLegendItems = meta.shapeLegendItems ?? [];
+  const hasShapeLegend = shapeLegendItems.length > 0;
+  const colorLegendTitle = meta.colorLegendTitle ?? "";
+  const shapeLegendTitle = meta.shapeLegendTitle ?? "";
   const xAxisTitle = meta.xAxisTitle ?? "";
   const yAxisTitle = spec.y_axis_title ?? "";
 
@@ -272,7 +297,18 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     });
   }
   if (legendItems.length) {
-    cursor = drawLegend(root, legendItems, cursor + 26);
+    cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined);
+  }
+  // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
+  if (hasShapeLegend) {
+    const shapeRows = shapeLegendItems.map((s) => ({
+      label: s.label,
+      color: SHAPE_LEGEND_COLOR,
+      dashed: false,
+      markerShape: "point",
+      markerSymbol: s.markerSymbol,
+    }));
+    cursor = drawLegend(root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined);
   }
   // Y-axis title: a left-aligned caption just above the plot (coexists with the units subtitle).
   if (yAxisTitle) {
