@@ -32,6 +32,12 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/xAxisTpye/);
   });
 
+  it("rejects `eyebrow` — the figure number is an embed-time property, not a spec field", () => {
+    const r = validateSpec({ ...VALID, eyebrow: "Figure 1" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/eyebrow/);
+  });
+
   it("rejects a bad enum and lists the allowed values", () => {
     const r = validateSpec({ ...VALID, xAxisType: "weekly" });
     expect(r.valid).toBe(false);

@@ -81,9 +81,8 @@ export interface ChartSpec {
   chartType: ChartType;
 
   // Text
-  /** Eyebrow line above the title, e.g. "Figure 1" (rendered uppercase/tracked). Lives in
-   * the spec for now to nail the visual; intended to be supplied by the embed script later. */
-  eyebrow?: string;
+  // (The eyebrow / figure number is NOT a spec field — it's a property of the article a chart
+  //  is embedded in, supplied at embed time via MountOptions.eyebrow / `render --eyebrow`.)
   title: string;
   subtitle?: string;
   source?: string;

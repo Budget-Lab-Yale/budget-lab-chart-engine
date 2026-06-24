@@ -31,7 +31,7 @@ function usageText(): string {
     "",
     "Commands:",
     "  validate <spec.yaml>             schema + cross-reference + CSV validation",
-    "  render   <spec.yaml> [-o <out.html>]  render to a self-contained HTML file",
+    "  render   <spec.yaml> [-o <out.html>] [--eyebrow <text>]  render to a self-contained HTML file",
     "  serve    [dir] [--port <n>]      local review gallery (default port 5173)",
     "  snapshot <spec.yaml> [--baseline <path>] [--update]",
     "                                   compare or update a PNG baseline snapshot",
@@ -128,6 +128,9 @@ export interface RenderOptions {
   liveBundleJs: string;
   /** CSS string. Injected so tests can pass a stub. */
   css: string;
+  /** Eyebrow / figure number (from --eyebrow). An article-context property baked into the
+   *  output; omitted → no eyebrow. The embedder can still hide a baked value via `?eyebrow=off`. */
+  eyebrow?: string;
 }
 
 export interface RenderResult {
@@ -178,6 +181,7 @@ export async function runRender(
     rows,
     liveBundleJs: opts.liveBundleJs,
     css: opts.css,
+    eyebrow: opts.eyebrow,
   });
 
   // Determine output path.
@@ -386,6 +390,7 @@ export async function main(argv: string[]): Promise<number> {
       args: argv.slice(3),
       options: {
         output: { type: "string", short: "o" },
+        eyebrow: { type: "string" },
       },
       allowPositionals: true,
     });
@@ -414,6 +419,7 @@ export async function main(argv: string[]): Promise<number> {
       outPath: values.output,
       liveBundleJs,
       css: CHART_CSS,
+      eyebrow: values.eyebrow,
     });
     if (result.exitCode === 0) {
       console.log(result.message);

@@ -115,7 +115,7 @@ export const CHART_SPEC_SCHEMA = {
     chartType: { type: "string", enum: ["line", "bar", "stacked"] },
 
     // Text
-    eyebrow: { type: "string" },
+    // (No `eyebrow` — the figure number is an embed-time property of the article, not the spec.)
     title: { type: "string", minLength: 1 },
     subtitle: { type: "string" },
     source: { type: "string" },

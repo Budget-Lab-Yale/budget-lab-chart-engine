@@ -93,6 +93,18 @@ describe("mountChart", () => {
     expect(container.querySelector(".figure-y-axis-title")).toBeNull();
   });
 
+  it("renders the eyebrow from the mount option (not the spec)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS, eyebrow: "Figure 7" });
+    expect(container.querySelector(".figure-supertitle")?.textContent).toBe("Figure 7");
+  });
+
+  it("omits the eyebrow when the mount option is absent", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS });
+    expect(container.querySelector(".figure-supertitle")).toBeNull();
+  });
+
   it("does not render a .tbl-legend for a single unstyled series", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: SINGLE_SERIES_SPEC, rows: SINGLE_SERIES_ROWS });

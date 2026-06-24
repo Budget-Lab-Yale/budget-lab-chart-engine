@@ -68,11 +68,6 @@ describe("buildExportSvg — composition", () => {
     expect(svg.getAttribute("height")).toBe("750");
   });
 
-  it("omits the eyebrow / figure number from the export", () => {
-    const svg = buildExportSvg({ ...SPEC, eyebrow: "Figure 9" }, ROWS);
-    expect(svg.textContent ?? "").not.toContain("Figure 9");
-  });
-
   it("includes the y-axis title caption when y_axis_title is set", () => {
     const svg = buildExportSvg({ ...SPEC, y_axis_title: "Percent of GDP" }, ROWS);
     expect(svg.textContent ?? "").toContain("Percent of GDP");

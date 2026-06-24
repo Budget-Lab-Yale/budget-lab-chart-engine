@@ -34,6 +34,9 @@ export interface MountOptions {
   /** Initial render width (used before the container is measured). */
   width?: number;
   height?: number;
+  /** Eyebrow line above the title (e.g. "Figure 1"). A property of the article/embed context,
+   *  not the chart itself — supplied at mount time. Passing a value shows it; omitting hides it. */
+  eyebrow?: string;
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -483,7 +486,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
-  buildFigureHeader(card, doc, spec);
+  buildFigureHeader(card, doc, spec, opts.eyebrow);
 
   // Legend slot above the canvas (used for top-legend; hidden/empty for right-legend).
   const legendSlot = doc.createElement("div");
@@ -778,14 +781,15 @@ const PANE_HEIGHT = 240;
 const GRID_GAP = 16;
 
 /** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
- *  header so single-chart and figure cards look identical. */
-function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec): void {
+ *  header so single-chart and figure cards look identical. The eyebrow (figure number) is an
+ *  embed-time value supplied by the caller, not read from the spec. */
+function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec, eyebrowText?: string): void {
   const header = doc.createElement("div");
   header.className = "figure-header";
-  if (spec.eyebrow) {
+  if (eyebrowText) {
     const eyebrow = doc.createElement("div");
     eyebrow.className = "figure-supertitle";
-    eyebrow.textContent = spec.eyebrow;
+    eyebrow.textContent = eyebrowText;
     header.appendChild(eyebrow);
   }
   const titlebar = doc.createElement("div");
@@ -997,7 +1001,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
   const card = doc.createElement("div");
   card.className = "figure-card";
-  buildFigureHeader(card, doc, spec);
+  buildFigureHeader(card, doc, spec, opts.eyebrow);
 
   const legendSlot = doc.createElement("div");
   legendSlot.className = "figure-legend-slot";

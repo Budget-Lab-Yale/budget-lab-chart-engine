@@ -12,6 +12,10 @@ export interface StandaloneInput {
   css: string;
   /** Optional page title; falls back to spec.title. */
   title?: string;
+  /** Eyebrow / figure number (e.g. "Figure 1"), supplied by the article context. When set, it
+   *  is baked into the page and shown by default; the embed can suppress it at view time with
+   *  `?eyebrow=off` in the URL. Omitted → the chart renders with no eyebrow. */
+  eyebrow?: string;
 }
 
 /**
@@ -33,11 +37,19 @@ function safeJsonForScript(value: unknown): string {
  * - Calls mountChart with the serialized spec and rows.
  */
 export function buildStandaloneHtml(input: StandaloneInput): string {
-  const { spec, rows, liveBundleJs, css, title } = input;
+  const { spec, rows, liveBundleJs, css, title, eyebrow } = input;
   const pageTitle = title ?? spec.title ?? "Chart";
 
   const specJson = safeJsonForScript(spec);
   const rowsJson = safeJsonForScript(rows);
+
+  // Eyebrow: bake the value, but let the embedder hide it at view time via `?eyebrow=off`
+  // (also 0/false/none/hide). Emitted only when a value is present, so the bootstrap stays
+  // minimal for charts with no figure number.
+  const eyebrowMount =
+    eyebrow != null && eyebrow !== ""
+      ? `\n  eyebrow: /[?&]eyebrow=(off|0|false|none|hide)\\b/i.test(location.search) ? undefined : ${safeJsonForScript(eyebrow)},`
+      : "";
 
   // Neutralize any literal `</script` inside the bundle so it can't close the inline
   // <script> tag. The bundle is trusted, self-generated esbuild output (no source literal
@@ -67,7 +79,7 @@ ${safeBundle}
 <script>
 BudgetLabChart.mountChart(document.getElementById("chart"), {
   spec: ${specJson},
-  rows: ${rowsJson}
+  rows: ${rowsJson},${eyebrowMount}
 });
 </script>
 </body>

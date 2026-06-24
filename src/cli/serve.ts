@@ -61,16 +61,16 @@ function escapeHtml(s: string): string {
   );
 }
 
-/** Read a chart.yaml and pull out eyebrow + title for the index. Returns null on failure. */
-function readChartMeta(absPath: string): { title: string; eyebrow?: string } | null {
+/** Read a chart.yaml and pull out the title for the index. Returns null on failure. (The
+ *  figure-number eyebrow is no longer a spec field — it's supplied at embed time.) */
+function readChartMeta(absPath: string): { title: string } | null {
   try {
     const text = fs.readFileSync(absPath, "utf8");
     const spec = parseYaml(text) as Record<string, unknown>;
     if (typeof spec !== "object" || spec === null) return null;
     const title = typeof spec["title"] === "string" ? spec["title"] : null;
-    const eyebrow = typeof spec["eyebrow"] === "string" ? spec["eyebrow"] : undefined;
     if (!title) return null;
-    return { title, eyebrow };
+    return { title };
   } catch {
     return null;
   }
@@ -85,13 +85,9 @@ function buildIndexPage(charts: string[], rootDir: string): string {
             const rel = path.relative(rootDir, abs).replace(/\\/g, "/");
             const meta = readChartMeta(abs);
             const displayTitle = meta?.title ?? rel;
-            const eyebrow = meta?.eyebrow ?? "";
             const href = `/chart/${encodeURIComponent(rel).replace(/%2F/g, "/")}`;
             return [
               `<li class="chart-item">`,
-              eyebrow
-                ? `<span class="chart-eyebrow">${escapeHtml(eyebrow)}</span>`
-                : "",
               `<a class="chart-link" href="${escapeHtml(href)}">${escapeHtml(displayTitle)}</a>`,
               `<span class="chart-path">${escapeHtml(rel)}</span>`,
               `</li>`,
@@ -159,13 +155,6 @@ body {
 }
 .chart-item:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.10);
-}
-.chart-eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #666;
 }
 .chart-link {
   font-size: 16px;

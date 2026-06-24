@@ -18,7 +18,6 @@ import type { TidyRow } from "../src/data/index";
 
 const SPEC: ChartSpec = {
   chartType: "line",
-  eyebrow: "Figure 1",
   title: "Bundle smoke",
   xAxisType: "temporal",
   series_order: ["a", "b"],
@@ -34,7 +33,7 @@ const ROWS: TidyRow[] = [
 describe("standalone HTML", () => {
   it("mounts an interactive chart when its <script> tags execute (browser-equivalent)", () => {
     const liveBundleJs = readFileSync(BUNDLE_PATH, "utf8");
-    const html = buildStandaloneHtml({ spec: SPEC, rows: ROWS, liveBundleJs, css: CHART_CSS });
+    const html = buildStandaloneHtml({ spec: SPEC, rows: ROWS, liveBundleJs, css: CHART_CSS, eyebrow: "Figure 1" });
 
     // runScripts:"dangerously" executes the inline <script> tags synchronously during parse,
     // as a browser would. External resources (the Google Fonts <link>) are not fetched.
@@ -49,7 +48,31 @@ describe("standalone HTML", () => {
     // line group to exclude them.
     expect(chart?.querySelectorAll('svg g[aria-label="line"] path[data-series]').length).toBe(2);
     expect(doc.querySelector(".figure-title")?.textContent).toBe("Bundle smoke");
+    // The eyebrow is supplied at embed time (baked into the bootstrap) and shown by default.
     expect(chart?.querySelector(".figure-supertitle")?.textContent).toBe("Figure 1");
+  });
+
+  it("hides the baked-in eyebrow when the page URL carries ?eyebrow=off", () => {
+    const liveBundleJs = readFileSync(BUNDLE_PATH, "utf8");
+    const html = buildStandaloneHtml({ spec: SPEC, rows: ROWS, liveBundleJs, css: CHART_CSS, eyebrow: "Figure 1" });
+
+    const dom = new JSDOM(html, {
+      url: "https://example.com/chart/?eyebrow=off",
+      runScripts: "dangerously",
+      pretendToBeVisual: true,
+    });
+    const doc = dom.window.document;
+    expect(doc.querySelector("#chart svg")).toBeTruthy(); // chart still mounts
+    expect(doc.querySelector(".figure-supertitle")).toBeNull();
+  });
+
+  it("renders no eyebrow (and emits no eyebrow bootstrap) when none is supplied", () => {
+    const liveBundleJs = readFileSync(BUNDLE_PATH, "utf8");
+    const html = buildStandaloneHtml({ spec: SPEC, rows: ROWS, liveBundleJs, css: CHART_CSS });
+    expect(html).not.toContain("eyebrow:");
+
+    const dom = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true });
+    expect(dom.window.document.querySelector(".figure-supertitle")).toBeNull();
   });
 
   it("neutralizes a literal </script> inside the inlined bundle", () => {
