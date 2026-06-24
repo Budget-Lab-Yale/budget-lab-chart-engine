@@ -7,8 +7,10 @@ Extracted and generalized from the AI Labor Market Tracker's renderer (Observabl
 This repo is **the tool**; chart content lives in a separate archive repo (`budget-lab-charts`)
 that pins a version of this engine.
 
-> Status: v0.1.0 — engine + data layer + validator + CLI (`validate`/`render`/`serve`/`snapshot`)
-> implemented and tested. Distributed via git tag (see Install).
+> Status: line, grouped/stacked bar, and small-multiples chart types, with interactive
+> crosshair/legend, axis titles, PNG/SVG export, schema validation, and a
+> `validate`/`render`/`serve`/`snapshot` CLI — implemented and tested. Distributed via git tag
+> (see Install). The figure-number eyebrow is supplied at embed time, not in the chart spec.
 
 ## What's here
 
