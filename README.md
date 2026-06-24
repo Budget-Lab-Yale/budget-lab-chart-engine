@@ -39,7 +39,7 @@ builds `dist/` on install (the committed `tokens.ts` + vendored Plot/D3 mean no 
 is required):
 
 ```sh
-npm install github:Budget-Lab-Yale/budget-lab-chart-engine#v0.1.0
+npm install github:Budget-Lab-Yale/budget-lab-chart-engine#v1.0.0
 ```
 
 The archive repo (`budget-lab-charts`) pins a specific tag this way.
