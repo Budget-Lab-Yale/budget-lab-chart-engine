@@ -189,8 +189,7 @@ export const CHART_SPEC_SCHEMA = {
     // Data
     data: DATA_SOURCE,
 
-    // Provenance / locking
-    engineVersion: { type: "string" },
+    // Catalog facets
     tags: { type: "array", items: { type: "string" } },
   },
 } as const;

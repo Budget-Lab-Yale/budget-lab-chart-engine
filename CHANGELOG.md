@@ -12,6 +12,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   corporate firewalls that block the fonts CDN no longer drop charts to a system-font fallback.
   (The font was already vendored and inlined for PNG export; this reuses it for the live page.)
 
+### Removed
+- Dropped the unused `engineVersion` field from `ChartSpec` (schema + types). It was never read
+  by the engine; the rendering engine version is fixed by the consumer's dependency pin, not a
+  per-chart field. No chart specs set it.
+
 ## [1.0.3] — 2026-06-24
 
 ### Changed
