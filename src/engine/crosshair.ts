@@ -8,6 +8,7 @@ import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
+import { wrapBandLabel } from "./axes";
 
 type Row = Record<string, unknown>;
 
@@ -1412,6 +1413,99 @@ function addCoordAxisLabel(
   }
 }
 
+/** Detect how the rendered categorical x-axis labels are laid out, so the active-pane highlight
+ *  can match: "rotate" if a below-plot label carries a rotate transform, "wrap" if one renders as
+ *  multiple lines (>1 tspan), else "single". */
+function detectBandLabelMode(svgEl: SVGSVGElement, plotBottom: number): "single" | "wrap" | "rotate" {
+  const svgRect = svgEl.getBoundingClientRect();
+  if (!svgRect.height) return "single";
+  const vb = svgEl.viewBox?.baseVal;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const sy = Hd / svgRect.height;
+  // Scan ALL x-axis labels: rotation is all-or-nothing (short-circuit), but only MULTI-word
+  // labels wrap — so a single-word label (e.g. "Total") must not mask a wrapped neighbour.
+  let mode: "single" | "wrap" = "single";
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+    if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
+    const r = t.getBoundingClientRect();
+    if (!r.width) continue;
+    if ((r.top - svgRect.top) * sy < plotBottom - 2) continue; // x-axis labels only
+    if (/rotate/.test(t.getAttribute("transform") ?? "")) return "rotate";
+    if (t.querySelectorAll("tspan").length > 1) mode = "wrap";
+  }
+  return mode;
+}
+
+/** Draw the active-pane current-category highlight so it matches the axis labels' layout:
+ *  single line, wrapped to two lines, or rotated 45° (center-anchored, matching tblBandXAxis). */
+function addCoordCategoryHighlight(
+  g: SVGGElement,
+  doc: Document,
+  cx: number,
+  category: string,
+  mode: "single" | "wrap" | "rotate",
+  axisRows: number[],
+): void {
+  const rowY = axisRows[0];
+  if (rowY == null) return;
+  if (mode === "rotate") {
+    // Tilt the whole pill+label 45° about its center, mirroring the rotated axis label.
+    const sub = doc.createElementNS(COORD_NS, "g");
+    sub.setAttribute("transform", `rotate(-45 ${cx} ${rowY})`);
+    addCoordAxisLabel(sub, doc, cx, [{ text: category, cy: rowY }]);
+    g.appendChild(sub);
+    return;
+  }
+  if (mode === "wrap") {
+    const lines = wrapBandLabel(category).split("\n");
+    if (lines.length > 1) {
+      addCoordAxisLabel(g, doc, cx, [
+        { text: lines[0]!, cy: rowY - 6.5 },
+        { text: lines.slice(1).join(" "), cy: rowY + 6.5 },
+      ]);
+      return;
+    }
+  }
+  addCoordAxisLabel(g, doc, cx, [{ text: category, cy: rowY }]);
+}
+
+/**
+ * PURE — vertically de-collide per-bar value labels within a hovered cluster. Labels sit above
+ * their bars (their natural y); when two horizontally overlap, the HIGHER-VALUE bar's label keeps
+ * the higher position and the lower-value one is pushed down (ties: the left/earlier bar stays on
+ * top). Returns the y per input label (input order). `pad` is the min vertical gap.
+ */
+export function staggerBarLabels(
+  labels: Array<{ cx: number; w: number; value: number; y: number }>,
+  pad: number,
+): number[] {
+  const n = labels.length;
+  const out = new Array<number>(n);
+  if (n === 0) return out;
+  // Priority: higher value first (kept higher); ties → smaller cx (left) first.
+  const order = labels.map((_, i) => i).sort((a, b) => labels[b]!.value - labels[a]!.value || labels[a]!.cx - labels[b]!.cx);
+  const placed: number[] = [];
+  for (const i of order) {
+    let y = labels[i]!.y;
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const j of placed) {
+        const horiz = Math.abs(labels[i]!.cx - labels[j]!.cx) < (labels[i]!.w + labels[j]!.w) / 2;
+        if (horiz && Math.abs(y - out[j]!) < pad) { y = out[j]! + pad; moved = true; }
+      }
+    }
+    out[i] = y;
+    placed.push(i);
+  }
+  return out;
+}
+
+/** Estimated pill width for a value label (matches addCoordPill's sizing). */
+function coordPillWidth(text: string): number {
+  return text.length * 10.5 * 0.62 + 8;
+}
+
 /**
  * Attach a coordinated cursor to a CONTINUOUS (line) small-multiples pane. Returns a driver:
  * `driver(xValue, active)` snaps to this pane's nearest x and renders the guide + per-series dot
@@ -1655,12 +1749,12 @@ export function attachSecondaryBandCursor(
     addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, plotH);
     const weight = active ? 700 : 600;
     if (active) {
-      // Highlight the category on the x-axis row, centered on the bar band (single line — a
-      // categorical axis label is one line, so this matches it).
+      // Highlight the current category on the x-axis row, matching the axis labels' layout
+      // (single / wrapped two lines / rotated 45°), centered on the bar band.
       const ys = axisRows.get();
       if (ys.length) {
         const rawCenter = (raw[idx]!.xMin + raw[idx]!.xMax) / 2;
-        addCoordAxisLabel(g, doc, rawCenter, [{ text: category, cy: ys[0]! }]);
+        addCoordCategoryHighlight(g, doc, rawCenter, category, detectBandLabelMode(svgEl, mt + plotH), ys);
       }
     }
     const valid = (rectsByCat.get(category) ?? [])
@@ -1672,12 +1766,18 @@ export function attachSecondaryBandCursor(
       const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
       valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
     } else {
-      // ABOVE each bar (centered), or below for a negative bar — like the normal value labels.
-      // Grouped bars sit at distinct x, so horizontal separation already avoids collisions.
-      for (const x of valid) {
-        const cy = x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9;
-        addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
-      }
+      // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
+      // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
+      const ys = staggerBarLabels(
+        valid.map((x) => ({
+          cx: x.rect.cx,
+          w: coordPillWidth(yFormat(x.v)),
+          value: x.v,
+          y: x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9,
+        })),
+        COORD_PILL_H,
+      );
+      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
     }
     g.setAttribute("opacity", "1");
   };
@@ -1880,7 +1980,7 @@ export function attachSecondaryCategoricalLineCursor(
     addCoordGuide(g, doc, cx, mt, mt + plotH);
     if (active) {
       const ys = axisRows.get();
-      if (ys.length) addCoordAxisLabel(g, doc, cx, [{ text: category, cy: ys[0]! }]);
+      if (ys.length) addCoordCategoryHighlight(g, doc, cx, category, detectBandLabelMode(svgEl, mt + plotH), ys);
     }
     const weight = active ? 700 : 600;
     const flip = cx > ml + (W - ml - mr) * 0.72;

@@ -18,6 +18,7 @@ import {
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
   spreadLabelYs,
+  staggerBarLabels,
   type CategoryBand,
   type CategoryBandH,
 } from "../src/engine/crosshair";
@@ -683,6 +684,34 @@ describe("spreadLabelYs (pill de-collision)", () => {
     // adjacent gaps still respected
     const sorted = [...out].sort((a, b) => a - b);
     expect(sorted[1]! - sorted[0]!).toBeGreaterThanOrEqual(16 - 1e-9);
+  });
+});
+
+describe("staggerBarLabels (per-bar value-label de-collision)", () => {
+  it("leaves horizontally-separated labels at their natural y", () => {
+    const out = staggerBarLabels(
+      [{ cx: 0, w: 20, value: 5, y: 100 }, { cx: 100, w: 20, value: 3, y: 100 }],
+      16,
+    );
+    expect(out).toEqual([100, 100]);
+  });
+
+  it("keeps the higher-value label higher and pushes the lower one down when they overlap", () => {
+    const out = staggerBarLabels(
+      [{ cx: 10, w: 30, value: 5, y: 100 }, { cx: 20, w: 30, value: 3, y: 100 }],
+      16,
+    );
+    expect(out[0]).toBe(100); // higher value stays put (higher = smaller y)
+    expect(out[1]).toBeGreaterThanOrEqual(116); // lower value pushed down ≥ pad
+  });
+
+  it("breaks ties by putting the left (smaller cx) label on top", () => {
+    const out = staggerBarLabels(
+      [{ cx: 20, w: 30, value: 5, y: 100 }, { cx: 10, w: 30, value: 5, y: 100 }],
+      16,
+    );
+    expect(out[1]).toBe(100); // the left bar (cx 10) is on top
+    expect(out[0]).toBeGreaterThanOrEqual(116); // the right bar pushed down
   });
 });
 
