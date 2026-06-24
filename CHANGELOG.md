@@ -4,6 +4,13 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] — 2026-06-24
+
+### Changed
+- Standalone chart page background is now transparent (was opaque white), so a chart embedded in
+  an iframe inherits the host page's background — correct for publications with non-white pages.
+  Standalone, the browser default (white) shows through, so the gallery view is unchanged.
+
 ## [1.0.2] — 2026-06-24
 
 ### Changed

@@ -37,7 +37,10 @@ body {
   font-family: var(--tbl-font-sans);
   font-weight: var(--tw-body);
   color: var(--tbl-text-body);
-  background: var(--tbl-bg);
+  /* Transparent so the chart inherits the host page's background when embedded in an iframe
+     (e.g. publications with non-white backgrounds). Standalone, the browser default (white)
+     shows through, so the gallery view is visually unchanged. */
+  background: transparent;
   line-height: 1.5;
 }
 
