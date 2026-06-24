@@ -103,11 +103,12 @@ describe("buildExportSvg — small multiples", () => {
     xAxisType: "temporal",
     series_order: ["A", "B"],
     data: "inline",
-    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
   };
   const PERPANE_SPEC: ChartSpec = {
     ...SHARED_SPEC,
-    small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
+    small_multiples: { columns: 2, mode: "per-pane" },
   };
 
   it("shared figure: N per-pane svgs (shared scale) laid in a grid + chrome", () => {

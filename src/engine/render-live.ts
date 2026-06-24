@@ -5,6 +5,7 @@
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
 import type { ChartSpec } from "../spec/types.js";
+import { resolveColumns } from "../spec/columns.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
@@ -58,13 +59,13 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
     return FIXED_CHART_HEIGHT;
   }
-  const seriesField = spec.series_field || "series";
+  const cols = resolveColumns(spec, rows);
   const cats = new Set<string>();
   const series = new Set<string>();
   for (const r of rows) {
-    const cat = r.time;
+    const cat = r[cols.x];
     if (typeof cat === "string" && cat !== "") cats.add(cat);
-    const s = r[seriesField];
+    const s = cols.series ? r[cols.series] : null;
     if (typeof s === "string" && s !== "") series.add(s);
   }
   const nCats = Math.max(1, cats.size);
@@ -112,9 +113,10 @@ function resolveLegendPosition(
   }
   if (spec.chartType === "stacked") {
     if (seriesCount >= 5) return "right";
-    // Diverging: any row with a negative _y value.
+    // Diverging: any row with a negative value.
+    const valueCol = resolveColumns(spec, rows).value;
     const isDiverging = rows.some((r) => {
-      const v = typeof r._y === "number" ? r._y : Number(r.value);
+      const v = typeof r._y === "number" ? r._y : Number(r[valueCol]);
       return Number.isFinite(v) && v < 0;
     });
     if (isDiverging) return "right";
@@ -1032,10 +1034,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
   // width even when there are fewer panes than the reflow/config would allow.
+  const facetCol = resolveColumns(spec, rows).facet;
   const paneCount = (): number => {
     const distinct = new Set<string>();
     for (const r of rows) {
-      const v = r[sm.facet_field];
+      const v = facetCol ? r[facetCol] : undefined;
       if (typeof v === "string" && v !== "") distinct.add(v);
     }
     const n = sm.pane_order && sm.pane_order.length

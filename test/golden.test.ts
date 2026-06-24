@@ -640,7 +640,8 @@ function buildFacetedPlot() {
     subtitle: "Index",
     xAxisType: "temporal",
     data: "facet-regions.csv",
-    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
   };
 
   return assemblePlot({
@@ -706,8 +707,8 @@ const FIGURE_SPEC: ChartSpec = {
   subtitle: "Index",
   xAxisType: "temporal",
   data: "facet-regions.csv",
+  columns: { facet: "facet" },
   small_multiples: {
-    facet_field: "facet",
     columns: 2,
     mode: "shared",
     pane_titles: { Northeast: "Northeast", Midwest: "Midwest", South: "South", West: "West" },
@@ -818,8 +819,8 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
       subtitle: "Percentage points",
       xAxisType: "categorical",
       data: "figure-bar-perpane.csv",
+      columns: { facet: "facet" },
       small_multiples: {
-        facet_field: "facet",
         columns: 2,
         mode: "shared",
         pane_order: ["Northeast", "Midwest", "South", "West"],
@@ -871,8 +872,8 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
       xAxisType: "categorical",
       series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
       data: "figure-stacked-perpane.csv",
+      columns: { facet: "facet" },
       small_multiples: {
-        facet_field: "facet",
         columns: 2,
         pane_order: ["Plan A", "Plan B"],
         pane_titles: { "Plan A": "Plan A", "Plan B": "Plan B" },
@@ -933,8 +934,8 @@ const PERPANE_SPEC: ChartSpec = {
   subtitle: "Index",
   xAxisType: "temporal",
   data: "facet-perpane.csv",
+  columns: { facet: "facet" },
   small_multiples: {
-    facet_field: "facet",
     columns: 2,
     mode: "per-pane",
     pane_order: ["Small", "Medium", "Large", "Huge"],
@@ -1028,8 +1029,8 @@ const BAR_FIGURE_SPEC: ChartSpec = {
   subtitle: "Percentage points",
   xAxisType: "categorical",
   data: "figure-bar-perpane.csv",
+  columns: { facet: "facet" },
   small_multiples: {
-    facet_field: "facet",
     columns: 2,
     mode: "per-pane",
     pane_order: ["Northeast", "Midwest", "South", "West"],
@@ -1044,8 +1045,8 @@ const STACKED_FIGURE_SPEC: ChartSpec = {
   xAxisType: "categorical",
   series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
   data: "figure-stacked-perpane.csv",
+  columns: { facet: "facet" },
   small_multiples: {
-    facet_field: "facet",
     columns: 2,
     mode: "per-pane",
     pane_order: ["Plan A", "Plan B"],

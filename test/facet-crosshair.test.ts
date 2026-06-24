@@ -249,7 +249,8 @@ describe("mountFigure shared crosshair wiring", () => {
     title: "Regions",
     xAxisType: "temporal",
     series_order: ["<5 Weeks", "27+ Weeks"],
-    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
   } as ChartSpec;
 
   const rows: TidyRow[] = [];

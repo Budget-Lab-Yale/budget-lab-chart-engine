@@ -1,11 +1,10 @@
 // Data layer entry point. `loadData(source)` → tidy long rows (local CSV + remote
 // URL/JSON, remote→frozen) lands here in engine step 5.
 
-/** One row of tidy long-format data, as the engine consumes it. */
+/** One row of long-format data: a map of column name → cell value. The engine maps specific
+ *  columns onto its roles (x / value / series / facet) via the spec's `columns` block; no
+ *  particular column names are required. */
 export interface TidyRow {
-  time: string;
-  series: string;
-  value: string;
   [column: string]: string;
 }
 

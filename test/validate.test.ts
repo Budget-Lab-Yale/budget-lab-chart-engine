@@ -110,8 +110,8 @@ describe("small_multiples config", () => {
   it("accepts a spec with a full small_multiples block", () => {
     const r = validateSpec({
       ...VALID,
+      columns: { facet: "region" },
       small_multiples: {
-        facet_field: "region",
         mode: "shared",
         columns: 3,
         pane_order: ["east", "west"],
@@ -146,25 +146,23 @@ describe("small_multiples config", () => {
   it("rejects a non-boolean coordinated_cursor", () => {
     const r = validateSpec({
       ...VALID,
-      small_multiples: { facet_field: "region", coordinated_cursor: "yes" },
+      columns: { facet: "region" },
+      small_multiples: { coordinated_cursor: "yes" },
     });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/coordinated_cursor/);
   });
 
-  it("rejects small_multiples missing facet_field (required)", () => {
-    const r = validateSpec({
-      ...VALID,
-      small_multiples: { mode: "shared" },
-    });
+  it("rejects small_multiples with no facet column configured (data validation)", () => {
+    const r = validateChartData({ ...VALID, small_multiples: { mode: "shared" } }, ROWS);
     expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/small_multiples.*facet_field/);
+    expect(r.errors.join("\n")).toMatch(/requires a facet column|columns\.facet/);
   });
 
   it("rejects a bad mode enum value", () => {
     const r = validateSpec({
       ...VALID,
-      small_multiples: { facet_field: "region", mode: "grid" },
+      small_multiples: { mode: "grid" },
     });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/shared, per-pane/);
@@ -173,7 +171,7 @@ describe("small_multiples config", () => {
   it("rejects an unknown key inside small_multiples", () => {
     const r = validateSpec({
       ...VALID,
-      small_multiples: { facet_field: "region", bogusKey: true },
+      small_multiples: { bogusKey: true },
     });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/bogusKey/);
@@ -187,6 +185,39 @@ describe("small_multiples config", () => {
 describe("validateChartData (cross-reference + CSV format)", () => {
   it("passes valid rows", () => {
     expect(validateChartData(VALID, ROWS)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("accepts arbitrary column names declared via the columns block", () => {
+    const spec: ChartSpec = {
+      ...VALID,
+      xAxisType: "categorical",
+      columns: { x: "age_bin", value: "mean_hours", series: "cohort" },
+    };
+    const rows: TidyRow[] = [
+      { age_bin: "18-21", cohort: "Gen X", mean_hours: "1.5" },
+      { age_bin: "22-25", cohort: "Gen X", mean_hours: "2.0" },
+    ];
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("flags a columns.x that names a column absent from the data", () => {
+    const spec: ChartSpec = { ...VALID, xAxisType: "categorical", columns: { x: "age_bin" } };
+    const r = validateChartData(spec, ROWS); // ROWS have time/series/value, not age_bin
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/columns\.x is "age_bin".*no such column/);
+  });
+
+  it("accepts a chart with no series column (single implicit series)", () => {
+    const spec: ChartSpec = {
+      ...VALID,
+      xAxisType: "categorical",
+      columns: { x: "age_bin", value: "mean_hours" },
+    };
+    const rows: TidyRow[] = [
+      { age_bin: "18-21", mean_hours: "1.5" },
+      { age_bin: "22-25", mean_hours: "2.0" },
+    ];
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
   });
 
   it("flags a config series not present in the data", () => {
@@ -215,7 +246,7 @@ describe("validateChartData (cross-reference + CSV format)", () => {
   it("flags a missing required column", () => {
     const r = validateChartData(VALID, [{ time: "2021-01-01", series: "a" } as unknown as TidyRow]);
     expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/missing the required "value" column/);
+    expect(r.errors.join("\n")).toMatch(/columns\.value is "value".*no such column/);
   });
 
   it("flags a confidence_bands CI column absent from the data", () => {
@@ -228,14 +259,15 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     expect(r.errors.join("\n")).toMatch(/confidence_bands references a "lo" column/);
   });
 
-  it("flags small_multiples.facet_field not present as a data column", () => {
+  it("flags columns.facet not present as a data column", () => {
     const spec: ChartSpec = {
       ...VALID,
-      small_multiples: { facet_field: "region", mode: "shared" },
+      columns: { facet: "region" },
+      small_multiples: { mode: "shared" },
     };
     const r = validateChartData(spec, ROWS);
     expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/small_multiples\.facet_field.*"region".*no such column/);
+    expect(r.errors.join("\n")).toMatch(/columns\.facet.*"region".*no such column/);
   });
 
   it("flags small_multiples.pane_order with a value absent from the facet column", () => {
@@ -245,7 +277,8 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     ];
     const spec: ChartSpec = {
       ...VALID,
-      small_multiples: { facet_field: "region", mode: "shared", pane_order: ["east", "typo"] },
+      columns: { facet: "region" },
+      small_multiples: { mode: "shared", pane_order: ["east", "typo"] },
     };
     const r = validateChartData(spec, rows);
     expect(r.valid).toBe(false);
@@ -259,8 +292,8 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     ];
     const spec: ChartSpec = {
       ...VALID,
+      columns: { facet: "region" },
       small_multiples: {
-        facet_field: "region",
         mode: "shared",
         pane_order: ["east", "west"],
         pane_titles: { east: "East Region", west: "West Region" },

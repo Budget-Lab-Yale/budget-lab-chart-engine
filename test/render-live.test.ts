@@ -105,6 +105,44 @@ describe("mountChart", () => {
     expect(container.querySelector(".figure-supertitle")).toBeNull();
   });
 
+  it("renders with arbitrary column names mapped via the columns block", () => {
+    const spec: ChartSpec = {
+      chartType: "line",
+      title: "ATUS",
+      xAxisType: "categorical",
+      columns: { x: "age_bin", value: "mean_hours", series: "cohort" },
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { age_bin: "18-21", cohort: "A", mean_hours: "1" },
+      { age_bin: "22-25", cohort: "A", mean_hours: "2" },
+      { age_bin: "18-21", cohort: "B", mean_hours: "3" },
+      { age_bin: "22-25", cohort: "B", mean_hours: "4" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows });
+    expect(container.querySelector("svg")).not.toBeNull();
+    expect(container.querySelectorAll('svg g[aria-label="line"] path[data-series]').length).toBe(2);
+  });
+
+  it("renders a single implicit series (no legend) when no series column is mapped", () => {
+    const spec: ChartSpec = {
+      chartType: "line",
+      title: "Single",
+      xAxisType: "categorical",
+      columns: { x: "age_bin", value: "mean_hours" },
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { age_bin: "18-21", mean_hours: "1" },
+      { age_bin: "22-25", mean_hours: "2" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows });
+    expect(container.querySelector("svg")).not.toBeNull();
+    expect(container.querySelector(".tbl-legend")).toBeNull();
+  });
+
   it("does not render a .tbl-legend for a single unstyled series", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: SINGLE_SERIES_SPEC, rows: SINGLE_SERIES_ROWS });
@@ -1175,11 +1213,12 @@ describe("mountChart small multiples", () => {
     xAxisType: "temporal",
     series_order: ["A", "B"],
     data: "inline",
-    small_multiples: { facet_field: "facet", columns: 2, mode: "shared" },
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
   };
   const PERPANE_SPEC: ChartSpec = {
     ...SHARED_SPEC,
-    small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
+    small_multiples: { columns: 2, mode: "per-pane" },
   };
 
   it("shared mode mounts a per-pane grid (shared y-scale) + a top legend", () => {
@@ -1244,7 +1283,7 @@ describe("mountChart small multiples", () => {
 
   it("does not throw and produces a card for a single-pane figure", () => {
     const container = document.createElement("div");
-    const oneRowSpec: ChartSpec = { ...SHARED_SPEC, small_multiples: { facet_field: "facet", mode: "shared" } };
+    const oneRowSpec: ChartSpec = { ...SHARED_SPEC, small_multiples: { mode: "shared" } };
     const oneRegion = FACET_ROWS.filter((r) => r["facet"] === "Northeast");
     expect(() => mountChart(container, { spec: oneRowSpec, rows: oneRegion, width: 600 })).not.toThrow();
     expect(container.querySelector(".figure-card")).not.toBeNull();
@@ -1265,7 +1304,8 @@ describe("mountChart small multiples", () => {
     xAxisType: "categorical",
     series_order: ["2019", "2022", "2025"],
     data: "inline",
-    small_multiples: { facet_field: "facet", columns: 2, mode: "per-pane" },
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "per-pane" },
   };
 
   it("per-pane bar figure mounts a .figure-grid with bar <rect>s per pane + rect-swatch legend", () => {

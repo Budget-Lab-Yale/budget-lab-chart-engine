@@ -9,6 +9,7 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec } from "../spec/types";
+import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems } from "./index";
@@ -144,7 +145,10 @@ export function renderFigure(
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
 
-  const facetField = sm.facet_field;
+  const facetField = resolveColumns(spec, rows).facet;
+  if (!facetField) {
+    throw new Error("small_multiples requires a facet column (set columns.facet).");
+  }
 
   // 1. Partition + order panes. Distinct facet values in data-encounter order, then reorder +
   //    filter by pane_order when set (pane_order names the included panes, in order).

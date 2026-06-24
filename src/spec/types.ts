@@ -61,9 +61,9 @@ export type DataSource =
     };
 
 export interface SmallMultiplesConfig {
-  /** Tidy-data column whose distinct values split the panes. */
-  facet_field: string;
-  /** Grid columns. Default derived later (≈ ceil(sqrt(n)), capped) — not enforced here. */
+  /** Grid column COUNT (an integer) — distinct from the top-level `columns` role map. The
+   *  pane-splitting data column is `columns.facet`. Default derived later (≈ ceil(sqrt(n)),
+   *  capped) — not enforced here. */
   columns?: number;
   /** "shared": one y-scale, y-labels left column only (default).
    *  "per-pane": each pane its own y-scale/units. */
@@ -77,8 +77,26 @@ export interface SmallMultiplesConfig {
   coordinated_cursor?: boolean;
 }
 
+/** Maps data-column names onto the roles the engine consumes. Any column name is allowed; the
+ *  YAML declares what each does. The whole block is optional — absent ⇒ the legacy defaults
+ *  `x: "time"`, `value: "value"`, `series: "series"`. `series` may be omitted (or its column
+ *  absent) for a single-series chart. `facet` defines small-multiples panes. */
+export interface ColumnMap {
+  /** Column holding the x value (any xAxisType). Default "time". */
+  x?: string;
+  /** Column holding the numeric value. Default "value". */
+  value?: string;
+  /** Column holding the series key. Omit ⇒ single implicit series. Default "series" (if present). */
+  series?: string;
+  /** Column whose distinct values split small-multiples panes. */
+  facet?: string;
+}
+
 export interface ChartSpec {
   chartType: ChartType;
+
+  /** Data column → role mapping (x / value / series / facet). See ColumnMap. */
+  columns?: ColumnMap;
 
   // Text
   // (The eyebrow / figure number is NOT a spec field — it's a property of the article a chart
@@ -97,8 +115,7 @@ export interface ChartSpec {
   xAxisPolicy?: XAxisPolicy;
   yAxisPolicy?: YAxisPolicy;
 
-  // Series
-  series_field?: string;
+  // Series (the series COLUMN is mapped via `columns.series`)
   /** Render order; also an inclusion filter when set. */
   series_order?: string[];
   series_colors?: Record<string, ColorRef>;

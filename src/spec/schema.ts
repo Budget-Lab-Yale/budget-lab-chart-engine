@@ -95,9 +95,8 @@ const DATA_SOURCE = {
 const SMALL_MULTIPLES = {
   type: "object",
   additionalProperties: false,
-  required: ["facet_field"],
   properties: {
-    facet_field: { type: "string", minLength: 1 },
+    // Grid column COUNT (integer). The pane-splitting column is `columns.facet` (top level).
     columns: { type: "integer", minimum: 1 },
     mode: { type: "string", enum: ["shared", "per-pane"] },
     pane_order: { type: "array", items: { type: "string" } },
@@ -114,6 +113,18 @@ export const CHART_SPEC_SCHEMA = {
   properties: {
     chartType: { type: "string", enum: ["line", "bar", "stacked"] },
 
+    // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
+    columns: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        x: { type: "string" },
+        value: { type: "string" },
+        series: { type: "string" },
+        facet: { type: "string" },
+      },
+    },
+
     // Text
     // (No `eyebrow` — the figure number is an embed-time property of the article, not the spec.)
     title: { type: "string", minLength: 1 },
@@ -128,8 +139,7 @@ export const CHART_SPEC_SCHEMA = {
     xAxisPolicy: X_AXIS_POLICY,
     yAxisPolicy: Y_AXIS_POLICY,
 
-    // Series
-    series_field: { type: "string" },
+    // Series (the series COLUMN is mapped via `columns.series`)
     series_order: { type: "array", items: { type: "string" } },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
     series_styles: {

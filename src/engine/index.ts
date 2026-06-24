@@ -6,6 +6,7 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
+import { resolveColumns, SINGLE_SERIES_KEY } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
@@ -175,19 +176,23 @@ export function renderPane(
   if (!xType) throw new Error("No xAxisType.");
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy);
-  const seriesField = spec.series_field || "series";
+  const cols = resolveColumns(spec, rows);
 
-  // Parse + validate rows into the engine's in-memory shape.
+  // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
+  // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
+  // series column ⇒ a single implicit series.
   const data: PreparedRow[] = rows
     .map((r) => {
+      const xRaw = r[cols.x] ?? "";
+      const valRaw = r[cols.value];
       const row = {
-        series: r[seriesField] as string,
-        time: r.time,
-        _y: r.value === "" ? null : +r.value,
+        series: cols.series ? (r[cols.series] ?? "") : SINGLE_SERIES_KEY,
+        time: xRaw,
+        _y: valRaw === "" || valRaw == null ? null : +valRaw,
       } as PreparedRow;
-      (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(r.time);
+      (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
-        if (r[seriesField] === band.series) {
+        if (row.series === band.series) {
           const lo = r[band.lower];
           const hi = r[band.upper];
           row._lo = lo !== "" && lo != null ? +lo : undefined;

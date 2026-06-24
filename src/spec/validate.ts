@@ -12,6 +12,7 @@ import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
+import { resolveColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
 export interface ValidationResult {
@@ -79,19 +80,29 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     return { valid: false, errors: ["data has no rows"] };
   }
 
-  const seriesField = spec.series_field || "series";
+  const cols = resolveColumns(spec, rows);
   const columns = new Set(Object.keys(rows[0] as TidyRow));
 
-  // Required columns: time + value (the CSV contract) and the series field.
-  for (const required of ["time", "value"]) {
-    if (!columns.has(required)) errors.push(`data is missing the required "${required}" column`);
+  // Required columns resolve from the `columns` role map (defaults x:"time", value:"value",
+  // series:"series"). Series is optional (single-series charts); facet is required when faceting.
+  const requiredRoles: Array<[string, string]> = [
+    ["x", cols.x],
+    ["value", cols.value],
+  ];
+  if (cols.series) requiredRoles.push(["series", cols.series]);
+  if (spec.small_multiples) {
+    if (!cols.facet) {
+      errors.push(`small_multiples requires a facet column — set columns.facet`);
+    } else {
+      requiredRoles.push(["facet", cols.facet]);
+    }
   }
-  if (!columns.has(seriesField)) {
-    errors.push(
-      seriesField === "series"
-        ? `data is missing the required "series" column`
-        : `config/data mismatch: series_field is "${seriesField}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
-    );
+  for (const [role, col] of requiredRoles) {
+    if (!columns.has(col)) {
+      errors.push(
+        `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
+      );
+    }
   }
 
   // CI columns are required only because confidence_bands asks for them.
@@ -111,21 +122,22 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // just repeat the same missing-column failure for every row.
   if (errors.length) return { valid: false, errors };
 
-  // Per-row: time parses; value + CI numeric-or-empty. Collect the series set.
+  // Per-row: x parses under xAxisType; value + CI numeric-or-empty. Collect the series set.
   const seriesSeen = new Set<string>();
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i] as TidyRow;
     const rowNum = i + 2; // row 1 = header, data starts at 2
-    const timeErr = timeParseError(spec.xAxisType, row.time ?? "");
-    if (timeErr) errors.push(`row ${rowNum}: time: ${timeErr}`);
-    if (!isNumericOrEmpty(row.value ?? "")) {
-      errors.push(`row ${rowNum}: value ${JSON.stringify(row.value)} is not numeric`);
+    const xErr = timeParseError(spec.xAxisType, (row[cols.x] as string) ?? "");
+    if (xErr) errors.push(`row ${rowNum}: ${cols.x}: ${xErr}`);
+    const valRaw = (row[cols.value] as string) ?? "";
+    if (!isNumericOrEmpty(valRaw)) {
+      errors.push(`row ${rowNum}: ${cols.value} ${JSON.stringify(valRaw)} is not numeric`);
     }
     for (const col of ciCols) {
       const v = row[col] ?? "";
       if (!isNumericOrEmpty(v)) errors.push(`row ${rowNum}: ${col} ${JSON.stringify(v)} is not numeric`);
     }
-    seriesSeen.add(row[seriesField] as string);
+    if (cols.series) seriesSeen.add(row[cols.series] as string);
   }
 
   // Cross-reference: every config-named series must appear in the data.
@@ -152,32 +164,28 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
-  // Cross-reference: small_multiples facet_field must exist as a column; pane_order /
-  // pane_titles keys must correspond to actual distinct values in that column.
-  if (spec.small_multiples) {
-    const { facet_field, pane_order, pane_titles } = spec.small_multiples;
-    if (!columns.has(facet_field)) {
-      errors.push(
-        `config/data mismatch: small_multiples.facet_field is "${facet_field}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
-      );
-    } else {
-      const facetValues = new Set(rows.map((r) => r[facet_field] as string));
-      const knownFacets = JSON.stringify([...facetValues].sort());
-      if (pane_order) {
-        const unknown = pane_order.filter((v) => !facetValues.has(v));
-        if (unknown.length) {
-          errors.push(
-            `small_multiples.pane_order names panes ${JSON.stringify(unknown)} not found in facet column "${facet_field}" (data values: ${knownFacets})`,
-          );
-        }
+  // Cross-reference: small_multiples pane_order / pane_titles keys must correspond to actual
+  // distinct values in the facet column. (The facet column's existence is already enforced above
+  // via the resolved-columns check, which bails before this point if it's missing.)
+  if (spec.small_multiples && cols.facet && columns.has(cols.facet)) {
+    const facetField = cols.facet;
+    const { pane_order, pane_titles } = spec.small_multiples;
+    const facetValues = new Set(rows.map((r) => r[facetField] as string));
+    const knownFacets = JSON.stringify([...facetValues].sort());
+    if (pane_order) {
+      const unknown = pane_order.filter((v) => !facetValues.has(v));
+      if (unknown.length) {
+        errors.push(
+          `small_multiples.pane_order names panes ${JSON.stringify(unknown)} not found in facet column "${facetField}" (data values: ${knownFacets})`,
+        );
       }
-      if (pane_titles) {
-        const unknown = Object.keys(pane_titles).filter((v) => !facetValues.has(v));
-        if (unknown.length) {
-          errors.push(
-            `small_multiples.pane_titles names panes ${JSON.stringify(unknown)} not found in facet column "${facet_field}" (data values: ${knownFacets})`,
-          );
-        }
+    }
+    if (pane_titles) {
+      const unknown = Object.keys(pane_titles).filter((v) => !facetValues.has(v));
+      if (unknown.length) {
+        errors.push(
+          `small_multiples.pane_titles names panes ${JSON.stringify(unknown)} not found in facet column "${facetField}" (data values: ${knownFacets})`,
+        );
       }
     }
   }

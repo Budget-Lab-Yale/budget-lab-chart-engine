@@ -17,6 +17,7 @@ import { createServer, findCharts } from "./serve";
 import { renderChartPng } from "../snapshot/render-png";
 import { comparePng } from "../snapshot/compare";
 import type { ChartSpec } from "../spec/types";
+import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 
 // ---------------------------------------------------------------------------
@@ -105,10 +106,10 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
     return { exitCode: 1, message: lines };
   }
 
+  const cols = resolveColumns(typedSpec, rows);
   const seriesSet = new Set<string>();
   for (const row of rows) {
-    const key = typedSpec.series_field ?? "series";
-    seriesSet.add(row[key] ?? "");
+    seriesSet.add(cols.series ? (row[cols.series] ?? "") : "");
   }
 
   return {
