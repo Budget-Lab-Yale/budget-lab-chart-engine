@@ -4,6 +4,13 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] — 2026-06-24
+
+### Changed
+- Data (CSV) and Image (PNG) download filenames now use the chart's folder slug (derived from the
+  page URL, e.g. `childcare-by-activity.csv`) instead of a slugified title, which was unwieldy.
+  Falls back to the title slug when the page isn't served from a chart-folder URL.
+
 ## [1.0.1] — 2026-06-24
 
 ### Fixed

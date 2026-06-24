@@ -381,8 +381,24 @@ function appendAxisTitleEl(parent: HTMLElement, doc: Document, cls: string, titl
   parent.appendChild(el);
 }
 
-/** Data (CSV) + Image (PNG) download buttons for the source line. */
+/** The chart's folder slug, taken from the page URL (charts are served at `…/<chart-folder>/`).
+ *  Used for download filenames — far tidier than a slugified title. Falls back to the title slug
+ *  when the last path segment looks like a file (e.g. a local `index.html` preview). */
+function downloadSlug(spec: ChartSpec): string {
+  try {
+    const segs = location.pathname.split("/").filter(Boolean);
+    const last = segs[segs.length - 1];
+    if (last && !/\./.test(last)) return last;
+  } catch {
+    /* no location (SSR/jsdom) — fall through */
+  }
+  return titleToSlug(spec.title);
+}
+
+/** Data (CSV) + Image (PNG) download buttons for the source line. Filenames use the chart's folder
+ *  slug (from the URL) rather than the title, which makes for unwieldy filenames. */
 function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): HTMLElement {
+  const base = downloadSlug(spec);
   const downloads = doc.createElement("div");
   downloads.className = "figure-downloads";
 
@@ -401,7 +417,7 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): 
       const url = URL.createObjectURL(blob);
       const a = doc.createElement("a");
       a.href = url;
-      a.download = `${titleToSlug(spec.title)}.csv`;
+      a.download = `${base}.csv`;
       doc.body.appendChild(a);
       a.click();
       a.remove();
@@ -427,7 +443,7 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): 
     imgBtn.disabled = true;
     imgLabel.textContent = "…";
     try {
-      await exportChartPng(spec, rows);
+      await exportChartPng(spec, rows, { filename: `${base}.png` });
     } catch (err) {
       console.error("Image export failed:", err);
       imgLabel.textContent = "Failed";
