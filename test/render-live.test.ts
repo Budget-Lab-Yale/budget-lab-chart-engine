@@ -1347,3 +1347,74 @@ describe("mountChart small multiples", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Point charts: scatter (dual encoding) + dotplot (faceted, redundant encoding)
+
+describe("mountChart point charts", () => {
+  const SCATTER_SPEC: ChartSpec = {
+    chartType: "scatter",
+    title: "Scatter",
+    xAxisType: "numeric",
+    data: "inline",
+    columns: { x: "gx", value: "gy", series: "color", shape: "shp" },
+    series_order: ["Slow", "Fast"],
+    shape_order: ["Tri", "Dot"],
+    color_legend_title: "Shock",
+    shape_legend_title: "Labor",
+  };
+  const SCATTER_ROWS: TidyRow[] = [
+    { gx: "10", gy: "5", color: "Slow", shp: "Tri" },
+    { gx: "20", gy: "9", color: "Slow", shp: "Dot" },
+    { gx: "300", gy: "80", color: "Fast", shp: "Tri" },
+    { gx: "320", gy: "110", color: "Fast", shp: "Dot" },
+  ];
+
+  it("scatter mounts without throwing and tags each marker by color series", () => {
+    const container = document.createElement("div");
+    expect(() => mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 })).not.toThrow();
+    // Shape channel active → markers render as <path> tagged with the color series.
+    const markers = container.querySelectorAll('g[aria-label="dot"] path[data-series]');
+    expect(markers.length).toBe(4);
+  });
+
+  it("scatter renders TWO legend groups with headings (dual encoding)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 });
+    const groups = container.querySelectorAll(".tbl-legend-group");
+    expect(groups.length).toBe(2);
+    const titles = Array.from(container.querySelectorAll(".tbl-legend-group-title")).map((e) => e.textContent);
+    expect(titles).toContain("Shock");
+    expect(titles).toContain("Labor");
+    // Shape group rows are non-interactive.
+    expect(container.querySelectorAll(".tbl-legend-item.is-static").length).toBe(2);
+  });
+
+  const DOT_SPEC: ChartSpec = {
+    chartType: "dotplot",
+    title: "Dots",
+    xAxisType: "categorical",
+    data: "inline",
+    columns: { x: "cat", value: "v", series: "m", shape: "m", facet: "g" },
+    series_order: ["After", "Pre"],
+    small_multiples: { columns: 2, mode: "shared", pane_order: ["G1", "G2"] },
+  };
+  const DOT_ROWS: TidyRow[] = [];
+  for (const g of ["G1", "G2"]) {
+    for (const cat of ["Low", "High"]) {
+      DOT_ROWS.push({ g, cat, m: "After", v: "0.01" } as TidyRow);
+      DOT_ROWS.push({ g, cat, m: "Pre", v: "0.012" } as TidyRow);
+    }
+  }
+
+  it("faceted dotplot mounts a grid; redundant encoding → one combined legend (no shape group)", () => {
+    const container = document.createElement("div");
+    expect(() => mountChart(container, { spec: DOT_SPEC, rows: DOT_ROWS, width: 800 })).not.toThrow();
+    expect(container.querySelectorAll(".figure-pane").length).toBe(2);
+    // Combined (shape == series): a single flat legend, no two-group split.
+    expect(container.querySelectorAll(".tbl-legend-group").length).toBe(0);
+    expect(container.querySelectorAll(".tbl-legend-item").length).toBe(2);
+    // Markers tagged across panes so the color legend can dim them.
+    expect(container.querySelectorAll('.figure-grid g[aria-label="dot"] path[data-series]').length).toBeGreaterThan(1);
+  });
+});

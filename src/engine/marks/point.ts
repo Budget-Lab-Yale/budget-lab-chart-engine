@@ -25,12 +25,27 @@ export function buildPointMarks(
   // Marker radius: slightly smaller in small-multiples panes (matches the line-point markers).
   const r = ctx.pane ? 3.8 : 4.6;
 
+  // Categorical x (dotplot) with multiple series: dodge each series horizontally within its
+  // category so markers sit side by side instead of stacking at the band center. A fixed pixel
+  // offset (`dx`) keyed off series order, centered on the category. Numeric scatter never dodges.
+  const categorical = xField === "_xc";
+  const seriesNames = ctx.seriesNames ?? [];
+  const dodge = categorical && seriesNames.length > 1;
+  let dxFor: ((d: PreparedRow) => number) | undefined;
+  if (dodge) {
+    const gap = ctx.pane ? 11 : 14; // px between adjacent series within a category
+    const mid = (seriesNames.length - 1) / 2;
+    const offset = new Map(seriesNames.map((s, i) => [s, (i - mid) * gap]));
+    dxFor = (d) => offset.get(d.series) ?? 0;
+  }
+
   const overlay: unknown[] = [
     Plot.dot(data, {
       x: xField,
       y: "_y",
       fill: "series",
       ...(hasShape ? { symbol: shapeField } : {}),
+      ...(dxFor ? { dx: dxFor } : {}),
       r,
       stroke: "#ffffff",
       strokeWidth: 1,
@@ -43,7 +58,6 @@ export function buildPointMarks(
   // a small edge inset (the bar BAND scale's outer padding + half-bandwidth would push the
   // first/last category well inside the frame). Matches the categorical-line treatment. Numeric
   // x (scatter) keeps the adapter's linear domain (xScaleOpts undefined).
-  const categorical = xField === "_xc";
   const xScaleOpts = categorical ? { type: "point" as const, padding: 0.18 } : undefined;
 
   // Symbol scale: distinct marker per shape value, in MARKER_SYMBOLS order. When shape encodes

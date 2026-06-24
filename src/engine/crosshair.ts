@@ -2040,3 +2040,77 @@ export function attachSecondaryCategoricalLineCursor(
     g.setAttribute("opacity", "1");
   };
 }
+
+// ---------------------------------------------------------------------------
+// Per-point hover — scatter charts
+// ---------------------------------------------------------------------------
+
+export interface PointHoverOptions {
+  /** One entry per rendered marker, in the SAME DOM order as `selector` matches. */
+  points: Array<{ series: string; shape?: string; x: number; y: number | null }>;
+  /** CSS selector for the marker elements (e.g. 'g[aria-label="dot"] path'). */
+  selector: string;
+  colors?: Map<string, string>;
+  seriesLabels?: Record<string, string>;
+  shapeLabels?: Record<string, string>;
+  /** Show a shape row in the tooltip (dual encoding: shape ≠ color). */
+  showShape?: boolean;
+  /** Row labels for the color / shape / x / y tooltip rows. */
+  colorLabel?: string;
+  shapeLabel?: string;
+  xLabel?: string;
+  yLabel?: string;
+  xFormat?: (v: number) => string;
+  yFormat?: (v: number) => string;
+}
+
+/**
+ * Attach a per-point hover tooltip to a SCATTER chart. Each rendered marker (matched by
+ * `selector`, in data order) shows a tooltip with its color (series), shape value, and x/y on
+ * hover. No guide / snapping — a scatter's points aren't aligned on a shared x, so each marker
+ * is its own hover target. The color legend's hover-dim continues to work independently.
+ */
+export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions): void {
+  if (!svgEl || !opts.points?.length) return;
+  const doc = svgEl.ownerDocument;
+  const tip = getSharedTooltip(doc);
+  const xFormat = opts.xFormat ?? ((v: number) => `${v}`);
+  const yFormat = opts.yFormat ?? ((v: number) => `${v}`);
+  const markers = svgEl.querySelectorAll<SVGElement>(opts.selector);
+
+  const place = (evt: PointerEvent): void => {
+    const offset = 14;
+    const win = doc.defaultView!;
+    let left = evt.clientX + offset;
+    let top = evt.clientY + offset;
+    if (left + tip.offsetWidth + 4 > win.innerWidth) left = evt.clientX - tip.offsetWidth - offset;
+    if (top + tip.offsetHeight + 4 > win.innerHeight) top = evt.clientY - tip.offsetHeight - offset;
+    tip.style.left = `${Math.max(4, left)}px`;
+    tip.style.top = `${Math.max(4, top)}px`;
+  };
+
+  markers.forEach((el, i) => {
+    const p = opts.points[i];
+    if (!p) return;
+    el.style.cursor = "pointer";
+    const show = (evt: PointerEvent): void => {
+      const color = opts.colors?.get(p.series) || TBL.color.navy;
+      const sLabel = opts.seriesLabels?.[p.series] ?? p.series;
+      let html = `<div class="tbl-tooltip-head"><span class="tbl-tooltip-swatch" style="background:${color}"></span>${escapeHtml(sLabel)}</div>`;
+      if (opts.showShape && p.shape) {
+        const shLabel = opts.shapeLabels?.[p.shape] ?? p.shape;
+        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.shapeLabel ?? "Shape")}:</span> <span class="tbl-tooltip-value">${escapeHtml(shLabel)}</span></span></div>`;
+      }
+      html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span> <span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
+      if (p.y != null && Number.isFinite(p.y)) {
+        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
+      }
+      tip.innerHTML = html;
+      tip.style.opacity = "1";
+      place(evt);
+    };
+    el.addEventListener("pointerenter", show as EventListener);
+    el.addEventListener("pointermove", place as EventListener);
+    el.addEventListener("pointerleave", () => { tip.style.opacity = "0"; });
+  });
+}

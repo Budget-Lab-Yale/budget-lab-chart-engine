@@ -102,13 +102,26 @@ Changes required:
 - A shape-only legend group whose swatches are neutral-colored shapes (no fill
   color), distinct from the colored color-legend swatches.
 
-## Interactivity (v1 scope)
+## Interactivity
 
 - Points are tagged `data-series` by the **color** field, so the color legend's
-  hover-dim / click-to-pin works as it does for existing charts.
-- The **shape legend is static** in v1. Dimming by shape value is a follow-up.
-- **No crosshair** for these types — a shared-x coordinated cursor does not fit
-  a scatter. Per-point hover tooltips only.
+  hover-dim works as it does for existing charts (including across faceted panes).
+- The **shape legend is static**. Dimming by shape value is a follow-up.
+- **Hover tooltips** (added after the first review):
+  - **Scatter** — per-point hover (`attachPointHover`): hovering a marker shows
+    its series (color), shape value, and x/y. No shared-x guide; a scatter's
+    points aren't aligned on x, so each marker is its own hover target.
+  - **Dot plot** — category hover, reusing `attachCategoricalLineCrosshair`:
+    resolves the hovered category from the x-axis labels and lists each series'
+    value (works per pane in the faceted figure).
+- **No click-to-pin selection** for point charts in v1.
+
+## Multi-series dodge (dot plot)
+
+When a categorical dot plot has more than one series, the points are **dodged**
+horizontally within each category (a fixed per-series pixel offset centered on the
+band) so the markers sit side by side instead of stacking at the band center.
+Numeric scatter never dodges.
 
 ## Chrome / axes
 
@@ -134,9 +147,10 @@ Unit tests:
 - Legend model: combined-vs-two-group selection given same vs. different
   color/shape columns.
 
-## Deferred (explicit non-goals for v1)
+## Deferred (explicit non-goals)
 
 - L-shaped origin axes (vertical line at x=0, horizontal baseline at y=0).
 - Per-point text/value labels.
 - Hover-dim / pin driven by the shape legend.
+- Click-to-pin selection on point charts.
 - Bubble encoding (marker size as a third channel).

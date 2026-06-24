@@ -21,6 +21,7 @@ import {
   attachSecondaryBandCursor,
   attachCategoricalLineCrosshair,
   attachSecondaryCategoricalLineCursor,
+  attachPointHover,
 } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -652,9 +653,34 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    if (isPoint) {
-      // Point charts: no crosshair in v1 (a shared-x cursor doesn't fit a scatter). Markers are
-      // static; the color legend's hover-dim still works via [data-series] tagging.
+    if (spec.chartType === "scatter") {
+      // Scatter: per-point hover (no shared-x guide — points aren't aligned on x). Markers render
+      // as <path> when a shape channel is active, else <circle>; tag order == dataInScope order.
+      const pointHasShape = !!spec.columns?.shape;
+      const showShape = !!(shapeLegendItems && shapeLegendItems.length);
+      attachPointHover(svg, {
+        points: dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
+        selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+        colors,
+        seriesLabels,
+        shapeLabels: spec.shape_labels,
+        showShape,
+        shapeLabel: shapeLegendTitle ?? "Shape",
+        xLabel: spec.x_axis_title ?? "x",
+        yLabel: spec.y_axis_title ?? "Value",
+        xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+        yFormat: (v) => formatValue(v, units),
+      });
+    } else if (spec.chartType === "dotplot") {
+      // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
+      // value). Reuses the categorical-line crosshair — no bars required.
+      attachCategoricalLineCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units),
+      });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
@@ -876,10 +902,37 @@ function wireFigureSvg(
     onResolve?: (key: unknown) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
-  // Point charts (scatter / dotplot): no crosshair / selection in v1 — static markers + the
-  // grid-level color legend's hover-dim (which works via [data-series] tagging, set up by the
-  // legend handle independently of any per-pane crosshair).
-  if (ctx.spec.chartType === "scatter" || ctx.spec.chartType === "dotplot") return undefined;
+  // Point charts (scatter / dotplot): per-pane hover (no coordinated cursor / selection in v1).
+  // Dot-plot panes get the category hover; scatter panes get per-point hover. Return no driver
+  // (the coordinated-cursor bus stays inactive for point figures).
+  if (ctx.spec.chartType === "dotplot") {
+    attachCategoricalLineCrosshair(svg, {
+      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v) => formatValue(v, ctx.units),
+    });
+    return undefined;
+  }
+  if (ctx.spec.chartType === "scatter") {
+    const cols = ctx.spec.columns ?? {};
+    const pointHasShape = !!cols.shape;
+    attachPointHover(svg, {
+      points: ctx.dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
+      selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      shapeLabels: ctx.spec.shape_labels,
+      showShape: pointHasShape && cols.shape !== cols.series,
+      shapeLabel: ctx.spec.shape_legend_title ?? "Shape",
+      xLabel: ctx.spec.x_axis_title ?? "x",
+      yLabel: ctx.spec.y_axis_title ?? "Value",
+      xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+      yFormat: (v) => formatValue(v, ctx.units),
+    });
+    return undefined;
+  }
 
   const categorical = ctx.spec.xAxisType === "categorical";
   // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so they keep the per-pane
