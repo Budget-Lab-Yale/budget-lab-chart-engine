@@ -1436,37 +1436,81 @@ function detectBandLabelMode(svgEl: SVGSVGElement, plotBottom: number): "single"
   return mode;
 }
 
-/** Draw the active-pane current-category highlight so it matches the axis labels' layout:
- *  single line, wrapped to two lines, or rotated 45° (center-anchored, matching tblBandXAxis). */
+/** Locate the rendered x-axis label for `category` and return its box in SVG user coords (center
+ *  + top/bottom), so the highlight can be aligned exactly to it regardless of mode. Matches on
+ *  whitespace-insensitive text (a wrapped label's tspans concatenate without the space). */
+function findAxisLabelBox(
+  svgEl: SVGSVGElement,
+  plotBottom: number,
+  category: string,
+): { cx: number; cy: number; top: number; bot: number } | null {
+  const svgRect = svgEl.getBoundingClientRect();
+  if (!svgRect.width || !svgRect.height) return null;
+  const vb = svgEl.viewBox?.baseVal;
+  const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const sx = Wd / svgRect.width;
+  const sy = Hd / svgRect.height;
+  const norm = (s: string | null): string => (s ?? "").replace(/\s+/g, "").toLowerCase();
+  const target = norm(category);
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+    if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
+    const r = t.getBoundingClientRect();
+    if (!r.width) continue;
+    if ((r.top - svgRect.top) * sy < plotBottom - 2) continue; // x-axis labels only
+    if (norm(t.textContent) !== target) continue;
+    return {
+      cx: ((r.left + r.right) / 2 - svgRect.left) * sx,
+      cy: ((r.top + r.bottom) / 2 - svgRect.top) * sy,
+      top: (r.top - svgRect.top) * sy,
+      bot: (r.bottom - svgRect.top) * sy,
+    };
+  }
+  return null;
+}
+
+/** Draw the active-pane current-category highlight so it matches the axis labels' layout AND
+ *  position: it locates the actual rendered axis label for the category and overlays it (single
+ *  line / wrapped two lines / rotated 45° about the label's center). Falls back to the row-cluster
+ *  y when the label can't be located (e.g. no layout). */
 function addCoordCategoryHighlight(
   g: SVGGElement,
   doc: Document,
+  svgEl: SVGSVGElement,
+  plotBottom: number,
   cx: number,
   category: string,
   mode: "single" | "wrap" | "rotate",
   axisRows: number[],
 ): void {
-  const rowY = axisRows[0];
-  if (rowY == null) return;
+  const box = findAxisLabelBox(svgEl, plotBottom, category);
+  const anchorX = box?.cx ?? cx;
+  const anchorY = box?.cy ?? axisRows[0];
+  if (anchorY == null) return;
+
   if (mode === "rotate") {
-    // Tilt the whole pill+label 45° about its center, mirroring the rotated axis label.
+    // Tilt the whole pill+label 45° about the label's center, mirroring the rotated axis label.
     const sub = doc.createElementNS(COORD_NS, "g");
-    sub.setAttribute("transform", `rotate(-45 ${cx} ${rowY})`);
-    addCoordAxisLabel(sub, doc, cx, [{ text: category, cy: rowY }]);
+    sub.setAttribute("transform", `rotate(-45 ${anchorX} ${anchorY})`);
+    addCoordAxisLabel(sub, doc, anchorX, [{ text: category, cy: anchorY }]);
     g.appendChild(sub);
     return;
   }
   if (mode === "wrap") {
     const lines = wrapBandLabel(category).split("\n");
     if (lines.length > 1) {
-      addCoordAxisLabel(g, doc, cx, [
-        { text: lines[0]!, cy: rowY - 6.5 },
-        { text: lines.slice(1).join(" "), cy: rowY + 6.5 },
+      // Place the two highlight lines at the two tspan centers (¼ and ¾ of the label box) so it
+      // sits exactly over the wrapped axis label.
+      const top = box?.top ?? anchorY - 6.5;
+      const h = box ? box.bot - box.top : 13;
+      addCoordAxisLabel(g, doc, anchorX, [
+        { text: lines[0]!, cy: top + h * 0.25 },
+        { text: lines.slice(1).join(" "), cy: top + h * 0.75 },
       ]);
       return;
     }
   }
-  addCoordAxisLabel(g, doc, cx, [{ text: category, cy: rowY }]);
+  addCoordAxisLabel(g, doc, anchorX, [{ text: category, cy: anchorY }]);
 }
 
 /**
@@ -1754,7 +1798,7 @@ export function attachSecondaryBandCursor(
       const ys = axisRows.get();
       if (ys.length) {
         const rawCenter = (raw[idx]!.xMin + raw[idx]!.xMax) / 2;
-        addCoordCategoryHighlight(g, doc, rawCenter, category, detectBandLabelMode(svgEl, mt + plotH), ys);
+        addCoordCategoryHighlight(g, doc, svgEl, mt + plotH, rawCenter, category, detectBandLabelMode(svgEl, mt + plotH), ys);
       }
     }
     const valid = (rectsByCat.get(category) ?? [])
@@ -1980,7 +2024,7 @@ export function attachSecondaryCategoricalLineCursor(
     addCoordGuide(g, doc, cx, mt, mt + plotH);
     if (active) {
       const ys = axisRows.get();
-      if (ys.length) addCoordCategoryHighlight(g, doc, cx, category, detectBandLabelMode(svgEl, mt + plotH), ys);
+      if (ys.length) addCoordCategoryHighlight(g, doc, svgEl, mt + plotH, cx, category, detectBandLabelMode(svgEl, mt + plotH), ys);
     }
     const weight = active ? 700 : 600;
     const flip = cx > ml + (W - ml - mr) * 0.72;
