@@ -1,0 +1,28 @@
+name: CI
+
+# Typecheck + test gate for the engine. `npm ci` runs the `prepare` script, which builds dist/.
+# No browser is needed: the golden suite renders under jsdom and the PNG-compare suite builds
+# buffers in-process with pngjs — Playwright is never launched.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
