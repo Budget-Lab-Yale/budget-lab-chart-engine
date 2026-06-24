@@ -280,21 +280,31 @@ export function tblTemporalXAxis(
 // `className` (faceted small-multiples only): tags the label group so the grid chrome collapse
 // can keep the bottom-row copies. Left undefined for single-frame charts so their output stays
 // byte-identical (Plot omits the class attribute entirely).
+/** How categorical band labels are laid out to avoid collision, in escalating order:
+ *  - "single": one horizontal line (default);
+ *  - "wrap":   multi-WORD labels break onto two lines (single-word labels stay one line);
+ *  - "rotate": labels turn 45° (last resort, when even wrapped labels would overlap). */
+export type BandLabelMode = "single" | "wrap" | "rotate";
+
 export function tblBandXAxis(
   categories: string[],
   scaleField: "x" | "fx" = "x",
   className?: string,
-  rotate = false,
+  mode: BandLabelMode = "single",
 ): Mark[] {
   const cls = className ? { className } : {};
-  // When rotated, labels are CENTER-anchored and turned 45° (counter-clockwise, reading
-  // bottom-left → top-right). Center-anchoring keeps each label's bounding-box center on its
-  // tick — so the categorical-line crosshair, which reads label centers, stays accurate — while
-  // the 45° turn shrinks the horizontal footprint (~0.7×) to avoid collisions. `dy` pushes the
-  // label's center far enough below the axis that the whole (rotated) label clears the plot.
-  const rotProps = rotate
-    ? { rotate: -45, textAnchor: "middle" as const, dy: rotatedLabelDy(categories) }
-    : { dy: 12, textAnchor: "middle" as const };
+  const textOf = (s: string): string => (mode === "wrap" ? wrapBandLabel(s) : s);
+  // Per-mode layout props. Rotated labels are CENTER-anchored and turned 45° (counter-clockwise,
+  // reading bottom-left → top-right): center-anchoring keeps each label's bounding-box center on
+  // its tick — so the categorical-line crosshair, which reads label centers, stays accurate —
+  // while the turn shrinks the horizontal footprint to avoid collisions. Wrapped labels stack
+  // two lines downward from the axis (lineAnchor "top"). `dy` clears the axis in each case.
+  const modeProps =
+    mode === "rotate"
+      ? { rotate: -45, textAnchor: "middle" as const, dy: rotatedLabelDy(categories) }
+      : mode === "wrap"
+        ? { textAnchor: "middle" as const, lineAnchor: "top" as const, dy: 9 }
+        : { textAnchor: "middle" as const, dy: 12 };
 
   if (scaleField === "fx") {
     // GROUPED: each category is its own FACET frame. Facet the text mark on `fx` (one label
@@ -304,12 +314,12 @@ export function tblBandXAxis(
     return [
       Plot.text(rows, {
         fx: (d: { c: string }) => d.c,
-        text: (d: { c: string }) => d.c,
+        text: (d: { c: string }) => textOf(d.c),
         frameAnchor: "bottom",
         fill: TBL.color.axis,
         fontSize: TBL.size.axis,
         fontWeight: 500,
-        ...rotProps,
+        ...modeProps,
         ...cls,
       }),
     ];
@@ -322,30 +332,64 @@ export function tblBandXAxis(
   return [
     Plot.text(categories, {
       x: (d: string) => d,
-      text: (d: string) => d,
+      text: (d: string) => textOf(d),
       frameAnchor: "bottom",
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
-      ...rotProps,
+      ...modeProps,
       ...cls,
     }),
   ];
 }
 
-/** Longest estimated category-label width (axis font), used for the rotation decision + layout. */
+/** Longest estimated category-label width (axis font), used for the layout decision. */
 function maxBandLabelWidth(categories: string[]): number {
   return categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c)), 0);
 }
 
-/** Whether categorical band labels should rotate to 45°: only once horizontal labels would
- *  actually OVERLAP. Labels are centered on their ticks, so adjacent labels collide when the
- *  label width exceeds the per-category slot (`plotWidth / n`). Up to that point they're allowed
- *  to sit close. Returns false for <2 categories or non-positive width. */
-export function shouldRotateBandLabels(categories: string[], plotWidth: number): boolean {
-  if (categories.length < 2 || !(plotWidth > 0)) return false;
+/** Width of a label after an optional two-line wrap: for a multi-WORD label, the narrower of the
+ *  balanced two-line splits (max of the two line widths); single-word labels (no spaces — hyphens
+ *  do NOT count) keep their full width. */
+function wrappedLabelWidth(label: string): number {
+  const words = label.split(/\s+/);
+  if (words.length < 2) return estimateLabelWidth(label);
+  let best = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const a = estimateLabelWidth(words.slice(0, i).join(" "));
+    const b = estimateLabelWidth(words.slice(i).join(" "));
+    best = Math.min(best, Math.max(a, b));
+  }
+  return best;
+}
+
+/** Insert a single newline at the balanced split point of a multi-word label (so it renders on
+ *  two lines). Single-word labels are returned unchanged. Hyphens are never broken. */
+export function wrapBandLabel(label: string): string {
+  const words = label.split(/\s+/);
+  if (words.length < 2) return label;
+  let best = Infinity;
+  let bestI = 1;
+  for (let i = 1; i < words.length; i++) {
+    const w = Math.max(
+      estimateLabelWidth(words.slice(0, i).join(" ")),
+      estimateLabelWidth(words.slice(i).join(" ")),
+    );
+    if (w < best) { best = w; bestI = i; }
+  }
+  return `${words.slice(0, bestI).join(" ")}\n${words.slice(bestI).join(" ")}`;
+}
+
+/** Choose the band-label layout for the available width. Labels are centered on their ticks, so
+ *  adjacent labels collide when a label is wider than its per-category slot (`plotWidth / n`).
+ *  When that happens, prefer wrapping multi-word labels to two lines; only rotate if even the
+ *  wrapped labels would overlap. <2 categories or non-positive width → "single". */
+export function bandLabelMode(categories: string[], plotWidth: number): BandLabelMode {
+  if (categories.length < 2 || !(plotWidth > 0)) return "single";
   const step = plotWidth / categories.length;
-  return maxBandLabelWidth(categories) > step;
+  if (maxBandLabelWidth(categories) <= step) return "single";
+  const wrappedMax = Math.max(...categories.map(wrappedLabelWidth));
+  return wrappedMax <= step ? "wrap" : "rotate";
 }
 
 /** Center y-offset (dy) for a rotated band label so the whole 45° label clears the axis. */
@@ -353,9 +397,11 @@ function rotatedLabelDy(categories: string[]): number {
   return Math.round(maxBandLabelWidth(categories) * 0.355 + 12);
 }
 
-/** Bottom margin needed to fit rotated 45° band labels (vs the ~22px horizontal default). */
-export function rotatedBandMarginBottom(categories: string[]): number {
-  return Math.round(Math.min(74, 18 + maxBandLabelWidth(categories) * 0.71));
+/** Bottom margin to fit each band-label layout (vs the ~22px single-line default). */
+export function bandLabelMarginBottom(categories: string[], mode: BandLabelMode): number {
+  if (mode === "rotate") return Math.round(Math.min(74, 18 + maxBandLabelWidth(categories) * 0.71));
+  if (mode === "wrap") return 36; // room for a second line
+  return 22;
 }
 
 // Approximate the rendered px width of a string at the axis font size. No canvas/DOM

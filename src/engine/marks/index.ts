@@ -2,6 +2,7 @@
 // small-multiples later means writing a builder and registering it here — the rest of
 // the engine (data prep, axes, assemble, render) is chart-type agnostic.
 import type { ChartSpec, ChartType } from "../../spec/types";
+import type { BandLabelMode } from "../axes";
 import { buildLineMarks } from "./line";
 import { buildBarMarks } from "./bar";
 import { buildStackedMarks } from "./stacked";
@@ -54,9 +55,9 @@ export interface MarkContext {
    *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
    *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
   pane?: boolean;
-  /** Categorical x-axis: render band labels at 45° to avoid collision (decided in renderChart
-   *  from width + labels). Grouped bars use it for their `fx` group labels. */
-  rotateXLabels?: boolean;
+  /** Categorical x-axis label layout ("wrap" → two lines, "rotate" → 45°), decided in renderChart
+   *  from width + labels to avoid collision. Grouped bars use it for their `fx` group labels. */
+  xLabelMode?: BandLabelMode;
 }
 
 export interface MarkLayers {

@@ -3,7 +3,7 @@
 // to build the per-chart x options (domain, axis marks, bottom margin, tooltip
 // formatters). Generic across chart types — the line builder consumes `xField`.
 import { d3 } from "./vendor";
-import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis, rotatedBandMarginBottom } from "./axes";
+import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis, bandLabelMarginBottom, type BandLabelMode } from "./axes";
 import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseDate, parseQuarter, formatQuarter } from "./parse-time";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
@@ -29,7 +29,7 @@ export interface XAdapter {
   /** Build the per-chart x options. `faceted` (shared-mode small multiples) tags the x-axis
    *  label marks with `X_AXIS_LABEL_CLASS` so the grid chrome collapse can keep the bottom-row
    *  copies and drop the duplicate rows. Default (false) → no class → output byte-identical. */
-  buildXOpts: (data: Array<Record<string, any>>, faceted?: boolean, rotateXLabels?: boolean) => XOpts;
+  buildXOpts: (data: Array<Record<string, any>>, faceted?: boolean, labelMode?: BandLabelMode) => XOpts;
 }
 
 // Margin for the two-line month/year axis vs the collapsed year-only axis.
@@ -108,7 +108,7 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       parseX: (v) => v,
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
-      buildXOpts(data, faceted = false, rotateXLabels = false) {
+      buildXOpts(data, faceted = false, labelMode: BandLabelMode = "single") {
         // Category domain in data-encounter order (Style-Guide: declaration order is
         // authoritative; never auto-sort by magnitude).
         const seen = new Set<string>();
@@ -120,17 +120,17 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
 
         // padding: 0.2 (inner gap between bands). paddingOuter leaves a small inset so
         // groups sit inside the frame. Grouped/stacked builders may override band padding
-        // via mark-layer scale opts in a later task (A6/A7). When labels rotate to 45°, the
-        // bottom margin grows to fit the taller labels.
+        // via mark-layer scale opts in a later task (A6/A7). The bottom margin grows to fit
+        // wrapped (two-line) or rotated (45°) labels.
         return {
-          marginBottom: rotateXLabels ? rotatedBandMarginBottom(categories) : 22,
+          marginBottom: bandLabelMarginBottom(categories, labelMode),
           xPlotOpts: {
             type: "band",
             domain: categories,
             axis: null,
             padding: 0.2,
           },
-          axisMarks: tblBandXAxis(categories, "x", faceted ? X_AXIS_LABEL_CLASS : undefined, rotateXLabels),
+          axisMarks: tblBandXAxis(categories, "x", faceted ? X_AXIS_LABEL_CLASS : undefined, labelMode),
           // Vertical reference markers are meaningless on a band scale.
           markerToX: () => null,
           tooltipXParse: undefined,
