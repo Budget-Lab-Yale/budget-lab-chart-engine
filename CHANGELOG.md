@@ -4,6 +4,15 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] — 2026-06-24
+
+### Fixed
+- `tbl-chart` CLI was a silent no-op (exit 0, no output, no file written) when invoked through
+  its `node_modules/.bin` symlink — i.e. under a normal install, including CI. The entry-point
+  guard compared `import.meta.url` (the realpath) against `process.argv[1]` (the symlink path);
+  these never matched, so `main()` never ran. The guard now resolves `process.argv[1]` through
+  `realpathSync` before comparing.
+
 ## [1.0.0] — 2026-06-24
 
 Initial public release — the launch baseline for the engine.

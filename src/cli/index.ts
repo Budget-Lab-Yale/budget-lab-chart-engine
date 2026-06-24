@@ -4,10 +4,10 @@
 // main() wires them to real disk I/O and process.exit.
 
 import { readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData, validateChart } from "../spec/validate";
 import { loadData } from "../data/load";
@@ -552,11 +552,23 @@ export async function main(argv: string[]): Promise<number> {
 // ---------------------------------------------------------------------------
 
 // Only run when invoked directly (not when imported by tests or other modules).
-// import.meta.url is file:///…/dist/cli/index.js when executed as the binary;
-// process.argv[1] resolves to the same path (after normalization).
-const isMain =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+// `import.meta.url` is the realpath of this module (Node resolves symlinks for ESM), but
+// `process.argv[1]` is the path as launched — which is the `node_modules/.bin/tbl-chart`
+// SYMLINK under a normal install. Resolve argv[1] through realpath before comparing, or the
+// CLI silently no-ops (exit 0, no output) when run via its bin symlink. realpathSync can throw
+// if argv[1] is odd, so guard it.
+function isMainEntry(): boolean {
+  const argv1 = process.argv[1];
+  if (argv1 === undefined) return false;
+  const here = fileURLToPath(import.meta.url);
+  if (argv1 === here) return true;
+  try {
+    return realpathSync(argv1) === here;
+  } catch {
+    return false;
+  }
+}
+const isMain = isMainEntry();
 
 if (isMain) {
   main(process.argv).then(
