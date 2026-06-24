@@ -33,10 +33,14 @@ describe("CSS token fidelity (matches the Style-Guide, not approximations)", () 
 });
 
 describe("standalone HTML font loading", () => {
-  it("requests the full Figtree weight range the CSS uses (incl. 700/800)", () => {
+  it("inlines a variable Figtree covering the full weight range the CSS uses (incl. 700/800)", () => {
     const spec: ChartSpec = { chartType: "line", title: "t", xAxisType: "temporal", data: "d.csv" };
     const rows: TidyRow[] = [{ time: "2021-01-01", series: "a", value: "1" }];
     const html = buildStandaloneHtml({ spec, rows, liveBundleJs: "", css: CHART_CSS });
-    expect(html).toContain("wght@400;500;600;700;800;900");
+    // The inlined @font-face is a variable font spanning 300–900, so every weight the CSS uses
+    // (body 500 … bold 800) resolves from the one embedded file — no Google Fonts request.
+    expect(html).toContain("@font-face");
+    expect(html).toMatch(/font-weight:\s*300 900/);
+    expect(html).not.toContain("fonts.googleapis.com");
   });
 });

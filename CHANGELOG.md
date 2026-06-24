@@ -4,6 +4,14 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] — 2026-06-24
+
+### Changed
+- Standalone chart pages now inline the Figtree font as a base64 `@font-face` instead of loading
+  it from Google Fonts. The page renders in the correct font with **zero external requests**, so
+  corporate firewalls that block the fonts CDN no longer drop charts to a system-font fallback.
+  (The font was already vendored and inlined for PNG export; this reuses it for the live page.)
+
 ## [1.0.3] — 2026-06-24
 
 ### Changed
