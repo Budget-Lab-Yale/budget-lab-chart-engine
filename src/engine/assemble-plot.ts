@@ -338,10 +338,11 @@ export function assemblePlot({
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
   // order its matched elements appear in (DOM order); tag by index. For lines this is the
   // flat dashed-then-solid path order, matching the old per-group loop byte-for-byte.
-  for (const { selector, seriesOrder, shapeOrder } of layers.tagging) {
+  for (const { selector, seriesOrder, shapeOrder, categoryOrder } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
       if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
       if (shapeOrder && i < shapeOrder.length) el.setAttribute("data-shape", shapeOrder[i] as string);
+      if (categoryOrder && i < categoryOrder.length) el.setAttribute("data-category", categoryOrder[i] as string);
     });
   }
 

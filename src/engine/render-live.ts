@@ -685,6 +685,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: (v) => formatValue(v, units),
         bandHighlight: true,
+        centersFromMarks: true,
       });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
@@ -924,6 +925,7 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units),
       bandHighlight: true,
+      centersFromMarks: true,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (dotUseCoord) {
@@ -935,6 +937,7 @@ function wireFigureSvg(
         yFormat: (v) => formatValue(v, ctx.units),
         symbols,
         bandHighlight: true,
+        centersFromMarks: true,
         dodge,
       }) as (key: unknown, active?: boolean) => void;
     }

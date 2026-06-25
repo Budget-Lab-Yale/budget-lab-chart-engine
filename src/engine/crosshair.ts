@@ -1861,6 +1861,31 @@ function readCategoryCentersFromAxis(svgEl: SVGSVGElement, plotBottom: number): 
   return out;
 }
 
+/** Read category centers from the rendered DATA MARKERS (elements carrying data-category): for
+ *  each category, the mean marker x in SVG user coords. Robust to rotated x-axis labels (whose
+ *  bounding-box centers are offset and uneven) and to the dodge (symmetric offsets average back
+ *  to the band center). Dot plots use this instead of the axis-label centers. */
+function readCategoryCentersFromMarks(svgEl: SVGSVGElement): Array<{ category: string; cx: number }> {
+  const svgRect = svgEl.getBoundingClientRect();
+  if (!svgRect.width) return [];
+  const vb = svgEl.viewBox?.baseVal;
+  const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
+  const sx = Wd / svgRect.width;
+  const byCat = new Map<string, number[]>();
+  for (const el of Array.from(svgEl.querySelectorAll<SVGElement>("[data-category]"))) {
+    const cat = el.getAttribute("data-category");
+    if (!cat) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width) continue;
+    const cx = ((r.left + r.right) / 2 - svgRect.left) * sx;
+    (byCat.get(cat) ?? byCat.set(cat, []).get(cat)!).push(cx);
+  }
+  return Array.from(byCat, ([category, xs]) => ({
+    category,
+    cx: xs.reduce((a, b) => a + b, 0) / xs.length,
+  })).sort((a, b) => a.cx - b.cx);
+}
+
 /** Resolve the category whose axis-label center is nearest the cursor x. */
 function nearestCategory(centers: Array<{ category: string; cx: number }>, svgX: number): string | null {
   let best: string | null = null;
@@ -1891,6 +1916,9 @@ export interface CategoricalLineOptions {
    *  coordinated cursor places each series' dot OVER its dodged data point, and lays the value
    *  pills side by side around the center line (both on the same vertical side of the dots). */
   dodge?: Map<string, number>;
+  /** Dot plots: derive category centers from the data markers (data-category) rather than the
+   *  x-axis labels — robust to rotated labels (whose bbox centers are offset / uneven). */
+  centersFromMarks?: boolean;
 }
 
 /**
@@ -1955,7 +1983,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   function update(evt: PointerEvent): void {
     const rect = svgEl.getBoundingClientRect();
     if (!rect.width) return;
-    if (!centers) centers = readCategoryCentersFromAxis(svgEl, plotBottom);
+    if (!centers) centers = opts.centersFromMarks ? readCategoryCentersFromMarks(svgEl) : readCategoryCentersFromAxis(svgEl, plotBottom);
     if (!centers.length) return;
     const svgX = (evt.clientX - rect.left) * (W / rect.width);
     const category = nearestCategory(centers, svgX);
@@ -2050,7 +2078,7 @@ export function attachSecondaryCategoricalLineCursor(
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
     if (category == null) { g.setAttribute("opacity", "0"); return; }
-    if (!centers) centers = readCategoryCentersFromAxis(svgEl, mt + plotH);
+    if (!centers) centers = opts.centersFromMarks ? readCategoryCentersFromMarks(svgEl) : readCategoryCentersFromAxis(svgEl, mt + plotH);
     const c = centers.find((x) => x.category === category);
     const vals = valByCat.get(category);
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
@@ -2082,9 +2110,12 @@ export function attachSecondaryCategoricalLineCursor(
         const maxY = Math.max(...pts.map((p) => p.y));
         const aboveY = minY - 13;
         const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
+        // Offset the anchor by the pill's inner padding (~4px) + a small gap so the rounded rects
+        // sit fully on their own side of the center line — no crossing, no overlap.
+        const PILL_EDGE = 7;
         for (const p of pts) {
           const anchor = p.dx < 0 ? "end" : p.dx > 0 ? "start" : "middle";
-          const ax = p.dx < 0 ? cx - 2 : p.dx > 0 ? cx + 2 : cx;
+          const ax = p.dx < 0 ? cx - PILL_EDGE : p.dx > 0 ? cx + PILL_EDGE : cx;
           addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
         }
       } else {

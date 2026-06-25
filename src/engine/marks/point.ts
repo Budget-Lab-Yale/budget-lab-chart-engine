@@ -103,6 +103,9 @@ export function buildPointMarks(
       selector,
       seriesOrder: taggedData.map((d) => d.series),
       ...(tagShape ? { shapeOrder: taggedData.map((d) => d._shape ?? "") } : {}),
+      // Categorical (dot plot): tag the category so the coordinated cursor can read the true
+      // category centers from the markers (rotation-independent, unlike the axis labels).
+      ...(categorical ? { categoryOrder: taggedData.map((d) => d._xc ?? "") } : {}),
     },
   ];
 
