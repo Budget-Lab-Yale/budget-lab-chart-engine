@@ -1,4 +1,4 @@
-﻿// Pure SVG composition + rasterization for PNG export
+// Pure SVG composition + rasterization for PNG export
 // Port of C:\dev\GitHub\budget-lab-interactives\tools\ai-labor-market-tracker\export-image.js
 
 import type { ChartSpec } from "../spec/types.js";
@@ -6,24 +6,60 @@ import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
 import { sharedColumnWidths } from "../engine/figure.js";
-import { TBL } from "../engine/theme.js";
 import { symbolPathD } from "../engine/symbols.js";
-import { LOGO_DATA_URL, FIGTREE_FONT_FACE, LOGO_ASPECT } from "./assets.js";
+import {
+  SVG_NS,
+  W,
+  H,
+  MARGIN,
+  INNER_W,
+  SCALE,
+  W_BODY,
+  W_SEMI,
+  FONT,
+  NAVY,
+  MUTED,
+  BODY,
+  AXIS,
+  HEADING,
+  svgEl as svgElDoc,
+  textEl as textElDoc,
+  measureText,
+  wrapText,
+  drawLines as drawLinesDoc,
+  createExportRoot,
+  composeTopChrome,
+  bottomChromeHeight,
+  composeBottomChrome,
+} from "./figure-chrome.js";
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-const XLINK_NS = "http://www.w3.org/1999/xlink";
+// ---------------------------------------------------------------------------
+// Document-bound wrappers (this module always draws into the global `document`).
+// ---------------------------------------------------------------------------
 
-// Layout tokens — match the AI Labor Market Tracker export exactly: a fixed 1000×750
-// content frame (→ 2000×1500 PNG at SCALE 2), so every export shares one 4:3 frame and
-// the chart fills whatever height the chrome leaves.
-const W = 1000;
-const H = 750;
-const MARGIN = 40; // outer padding (all sides)
-const INNER_W = W - MARGIN * 2; // 920
-const LOGO_W = 150;
-const LOGO_H = LOGO_W / LOGO_ASPECT; // 37.5 (logo viewBox is 216×54 = 4:1)
-const LOGO_BASELINE_FRAC = 0.87; // wordmark baseline within the logo box
-const SCALE = 2;
+function svgEl(name: string, attrs: Record<string, string | number> = {}): SVGElement {
+  return svgElDoc(document, name, attrs);
+}
+
+function textEl(
+  x: number,
+  y: number,
+  str: string,
+  opts: { size: number; weight?: number; fill?: string; anchor?: string },
+): SVGElement {
+  return textElDoc(document, x, y, str, opts);
+}
+
+function drawLines(
+  root: SVGElement,
+  lines: string[],
+  x: number,
+  firstBaseline: number,
+  lineHeight: number,
+  opt: { size: number; weight?: number; fill?: string; anchor?: string },
+): number {
+  return drawLinesDoc(document, root, lines, x, firstBaseline, lineHeight, opt);
+}
 
 // Small-multiples figure layout tokens.
 const PANE_CHART_H = 240; // per-pane mini-chart height — matches the live PANE_HEIGHT so the
@@ -35,105 +71,9 @@ const PANE_TITLE_H = 18; // per-pane title band height
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
 
-// Typography weights (matching styles.ts Figtree weight scale)
-const W_BODY = 500;
-const W_SEMI = 700;
-const W_BOLD = 800;
-
-const FONT = TBL.font;
-const NAVY = TBL.color.navy;
-const MUTED = TBL.color.muted;
-const BODY = TBL.color.text;
-const AXIS = TBL.color.axis;
-const HEADING = TBL.color.heading;
-
 // ---------------------------------------------------------------------------
-// SVG helpers
+// Legend
 // ---------------------------------------------------------------------------
-
-function svgEl(
-  name: string,
-  attrs: Record<string, string | number> = {},
-): SVGElement {
-  const el = document.createElementNS(SVG_NS, name);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
-  return el;
-}
-
-function textEl(
-  x: number,
-  y: number,
-  str: string,
-  opts: { size: number; weight?: number; fill?: string; anchor?: string },
-): SVGElement {
-  const { size, weight = 400, fill = HEADING, anchor = "start" } = opts;
-  const t = svgEl("text", {
-    x,
-    y,
-    fill,
-    "font-family": FONT,
-    "font-size": size,
-    "font-weight": weight,
-    "text-anchor": anchor,
-  });
-  t.textContent = str;
-  return t;
-}
-
-// ---------------------------------------------------------------------------
-// Text measurement — uses a canvas for accurate width
-// ---------------------------------------------------------------------------
-
-let _measureCtx: CanvasRenderingContext2D | null = null;
-
-function measureText(text: string, font: string): number {
-  if (!_measureCtx) {
-    const canvas = document.createElement("canvas");
-    _measureCtx = canvas.getContext("2d");
-  }
-  if (!_measureCtx) return text.length * 8; // fallback
-  _measureCtx.font = font;
-  return _measureCtx.measureText(text).width;
-}
-
-function wrapText(text: string, font: string, maxWidth: number): string[] {
-  const words = String(text || "")
-    .split(/\s+/)
-    .filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-  for (const w of words) {
-    const trial = line ? `${line} ${w}` : w;
-    if (line && measureText(trial, font) > maxWidth) {
-      lines.push(line);
-      line = w;
-    } else {
-      line = trial;
-    }
-  }
-  if (line) lines.push(line);
-  return lines.length ? lines : [""];
-}
-
-// ---------------------------------------------------------------------------
-// Layout helpers
-// ---------------------------------------------------------------------------
-
-function drawLines(
-  root: SVGElement,
-  lines: string[],
-  x: number,
-  firstBaseline: number,
-  lineHeight: number,
-  opt: { size: number; weight?: number; fill?: string; anchor?: string },
-): number {
-  let by = firstBaseline;
-  for (const line of lines) {
-    root.appendChild(textEl(x, by, line, opt));
-    by += lineHeight;
-  }
-  return lines.length ? by - lineHeight : firstBaseline;
-}
 
 const SHAPE_LEGEND_COLOR = "#555B66";
 
@@ -259,52 +199,12 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   const note = spec.note ?? "";
   const source = spec.source ?? "";
 
-  const root = svgEl("svg", {
-    xmlns: SVG_NS,
-    "xmlns:xlink": XLINK_NS,
-    width: W,
-    height: H,
-  }) as SVGSVGElement;
+  const { root, bgRect } = createExportRoot(document, W, H);
 
-  const defs = svgEl("defs");
-  const style = svgEl("style");
-  style.textContent = FIGTREE_FONT_FACE;
-  defs.appendChild(style);
-  root.appendChild(defs);
-  // Background rect: painted first so it stays behind everything. Its height is patched to the
-  // (possibly extended) figure height once known; the single-chart path keeps the fixed H.
-  const bgRect = svgEl("rect", { x: 0, y: 0, width: W, height: H, fill: "#FFFFFF" });
-  root.appendChild(bgRect);
+  // --- top chrome: title (+ logo), subtitle ---
+  let cursor = composeTopChrome(document, root, { title, subtitle, width: W });
 
-  // --- top chrome: title (+ logo), subtitle, legend ---
-  const titleFirstBaseline = MARGIN + 22;
-  const titleLines = wrapText(title, `${W_BOLD} 22px ${FONT}`, INNER_W - LOGO_W - 24);
-  let cursor = drawLines(root, titleLines, MARGIN, titleFirstBaseline, 28, {
-    size: 22,
-    weight: W_BOLD,
-    fill: NAVY,
-  });
-
-  // Logo: right edge flush with the content-right bound; baseline shared with the title's
-  // first line. Set both href and xlink:href so it rasterizes across browsers.
-  const logoY = titleFirstBaseline - LOGO_H * LOGO_BASELINE_FRAC;
-  const logoEl = svgEl("image", {
-    x: W - MARGIN - LOGO_W,
-    y: logoY,
-    width: LOGO_W,
-    height: LOGO_H,
-    href: LOGO_DATA_URL,
-  });
-  logoEl.setAttributeNS(XLINK_NS, "href", LOGO_DATA_URL);
-  root.appendChild(logoEl);
-
-  if (subtitle) {
-    cursor = drawLines(root, wrapText(subtitle, `${W_SEMI} 14px ${FONT}`, INNER_W), MARGIN, cursor + 24, 19, {
-      size: 14,
-      weight: W_SEMI,
-      fill: MUTED,
-    });
-  }
+  // --- legend(s) + y-axis title (chart-specific chrome) ---
   if (legendItems.length) {
     cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined);
   }
@@ -330,12 +230,8 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   const chartTop = cursor + 14;
 
   // Reserve the bottom-chrome height so the chart fills the rest (total == H).
-  const noteLines = note ? wrapText(note, `${W_BODY} 11px ${FONT}`, INNER_W) : [];
-  let bottomH = 0;
+  let bottomH = bottomChromeHeight({ note, source, width: W });
   if (xAxisTitle) bottomH += 14;
-  if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
-  if (source) bottomH += note ? 15 : 18;
-  bottomH += MARGIN - 15; // bottom padding
 
   // Chart region. `contentHeight` is the height occupied by the chart/figure body below
   // `chartTop`; for the single chart it fills the fixed frame, for a figure it can extend it.
@@ -407,32 +303,13 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     bgRect.setAttribute("height", String(H_eff));
   }
 
-  // --- bottom chrome: x-axis title, note, source ---
+  // --- bottom chrome: x-axis title (chart-specific), note, source ---
   let by = chartTop + contentHeight;
   if (xAxisTitle) {
     by += 14;
     root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
   }
-  if (noteLines.length) {
-    by = drawLines(root, noteLines, MARGIN, by + 18, 15, { size: 11, weight: W_BODY, fill: MUTED });
-  }
-  if (source) {
-    by += note ? 15 : 18;
-    const g = svgEl("text", {
-      x: MARGIN,
-      y: by,
-      fill: MUTED,
-      "font-family": FONT,
-      "font-size": 11,
-      "font-weight": W_BODY,
-      "text-anchor": "start",
-    });
-    const pfx = svgEl("tspan", { "font-weight": W_SEMI });
-    pfx.textContent = "Source: ";
-    g.appendChild(pfx);
-    g.appendChild(document.createTextNode(source));
-    root.appendChild(g);
-  }
+  composeBottomChrome(document, root, by, { note, source, width: W });
 
   return root;
 }
@@ -441,7 +318,7 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
 // rasterize + download
 // ---------------------------------------------------------------------------
 
-async function rasterize(
+export async function rasterize(
   svgElement: SVGSVGElement,
   width: number,
   height: number,
@@ -475,7 +352,7 @@ async function rasterize(
   }
 }
 
-function triggerDownload(blob: Blob, filename: string): void {
+export function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

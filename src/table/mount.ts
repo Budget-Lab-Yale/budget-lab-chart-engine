@@ -10,6 +10,7 @@ import { renderTableHtml } from "./render-html.js";
 import { buildFigureHeader } from "../engine/render-live.js";
 import { renderSourceLine } from "../engine/source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
+import { exportTablePng } from "../embed/export-table-png.js";
 
 // Tray-with-down-arrow glyph — same as in render-live.ts, inlined to avoid a cross-module
 // private-symbol dependency.
@@ -99,9 +100,27 @@ function buildTableDownloadActions(
   });
   downloads.appendChild(dataBtn);
 
-  // TODO (Task 12): Add Image (PNG) button here once exportTablePng is implemented.
-  // const imgBtn = buildImageButton(doc, spec, rows, base);
-  // downloads.appendChild(imgBtn);
+  // ---- Image (PNG) button ----
+  const imgBtn = doc.createElement("button");
+  imgBtn.type = "button";
+  imgBtn.className = "figure-download-btn";
+  imgBtn.setAttribute("aria-label", "Download image (PNG)");
+  imgBtn.innerHTML = `${DOWNLOAD_ICON}<span>Image</span>`;
+  const imgLabel = imgBtn.querySelector("span") as HTMLSpanElement;
+  imgBtn.addEventListener("click", () => {
+    const original = imgLabel.textContent ?? "Image";
+    imgBtn.disabled = true;
+    void exportTablePng(spec, rows, { filename: `${base}.png` })
+      .then(() => {
+        imgBtn.disabled = false;
+      })
+      .catch((err) => {
+        console.error("Image download failed:", err);
+        imgLabel.textContent = "Failed";
+        setTimeout(() => { imgLabel.textContent = original; imgBtn.disabled = false; }, 2000);
+      });
+  });
+  downloads.appendChild(imgBtn);
 
   return downloads;
 }
