@@ -439,6 +439,31 @@ describe("golden SVG — stacked bars", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-cumulative.golden.svg");
   });
 
+  it("barStack.stackOrder moves a series to the bottom of the stack without changing the legend", () => {
+    const rows = parseCsv("./fixtures/stacked-cumulative.csv");
+    // Default order is [Wages, Benefits, Taxes] → Taxes on top. Pin Taxes to the bottom.
+    const spec: ChartSpec = { ...STACKED_CUMULATIVE_SPEC, barStack: { stackOrder: ["Taxes"] } };
+    const { svg, legendItems } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = Array.from(svg.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
+    // The bottom segment of EVERY category (largest y attribute = closest to the baseline in an
+    // all-positive stack) is now Taxes — verified by geometry, independent of DOM emission order.
+    const byCat = new Map<number, SVGRectElement[]>();
+    for (const r of rects) {
+      const key = Math.round(parseFloat(r.getAttribute("x") ?? "0"));
+      (byCat.get(key) ?? byCat.set(key, []).get(key)!).push(r);
+    }
+    expect(byCat.size).toBe(3); // 3 categories
+    for (const group of byCat.values()) {
+      const bottom = group.reduce((a, b) =>
+        parseFloat(a.getAttribute("y") ?? "0") >= parseFloat(b.getAttribute("y") ?? "0") ? a : b,
+      );
+      expect(bottom.getAttribute("data-series")).toBe("Taxes");
+    }
+    // Legend is unchanged by stackOrder (visual-only): identical to the no-stackOrder baseline.
+    const baseLegend = renderChart(STACKED_CUMULATIVE_SPEC, rows, { width: 720, height: 400, document }).legendItems;
+    expect(legendItems?.map((i) => i.series)).toEqual(baseLegend?.map((i) => i.series));
+  });
+
   it("renders a diverging stack with a net dot + signed label and Total legend extra", async () => {
     const rows = parseCsv("./fixtures/stacked-diverging.csv");
     const { svg } = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document });

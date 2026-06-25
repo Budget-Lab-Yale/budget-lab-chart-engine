@@ -94,6 +94,21 @@ export function buildStackedMarks(
     }
   }
 
+  // Visual stack order override (barStack.stackOrder): Plot stacks positives upward from zero in
+  // DATA order, so reordering the rows sets the bottom→top order. Stable-sort by the configured
+  // rank (listed series first, the rest after in series_order); this drives ONLY the visual stack
+  // + rect tagging (both read this `data`), leaving series_order to fix the legend order + colors.
+  // Done after `categories` is built so the category encounter order is unaffected.
+  const stackOrderCfg = spec.barStack?.stackOrder;
+  if (stackOrderCfg && stackOrderCfg.length) {
+    const sRank = new Map<string, number>(seriesNames.map((s, i) => [s, stackOrderCfg.length + i]));
+    stackOrderCfg.forEach((s, i) => sRank.set(s, i));
+    data = data
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => ((sRank.get(a.r.series) ?? 0) - (sRank.get(b.r.series) ?? 0)) || (a.i - b.i))
+      .map((x) => x.r);
+  }
+
   // --- Per-category aggregates (computed INDEPENDENTLY of the stack) ---
   // net (Σ _y), positive sum (visual top of positive stack), negative sum.
   const rank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));

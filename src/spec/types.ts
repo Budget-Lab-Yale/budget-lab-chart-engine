@@ -200,6 +200,11 @@ export interface ChartSpec {
     netLabelColor?: "white" | "black";
     /** Normalize each bar to 100 % (0–1 scale). */
     normalize?: boolean;
+    /** Visual stack order, BOTTOM→TOP among positive segments (negatives mirror it downward from
+     *  zero). Independent of `series_order` (which fixes the legend order + colors), so a series
+     *  can sit at the bottom of the stack while keeping its legend position/color. Series omitted
+     *  here keep their relative `series_order` position after the listed ones. */
+    stackOrder?: string[];
   };
   /** Series keys to visually highlight (dimming all others). */
   highlightSeries?: string[];

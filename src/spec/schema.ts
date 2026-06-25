@@ -220,6 +220,7 @@ export const CHART_SPEC_SCHEMA = {
         },
         netLabelColor: { type: "string", enum: ["white", "black"] },
         normalize: { type: "boolean" },
+        stackOrder: { type: "array", items: { type: "string" } },
       },
     },
     highlightSeries: { type: "array", items: { type: "string" } },
