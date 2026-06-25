@@ -214,6 +214,11 @@ body {
   color: var(--tbl-text-axis);
   text-align: center;
 }
+/* Scatter's numeric x-axis labels sit tighter to the frame than the temporal axis the default
+   was tuned for, so give the x-axis title a little more breathing room. */
+.chart-scatter .figure-x-axis-title {
+  margin-top: 8px;
+}
 .figure-y-axis-title {
   margin: 0 0 4px;
   font: var(--tw-semi) 12px/1.3 var(--tbl-font-sans);

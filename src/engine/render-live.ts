@@ -502,7 +502,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const doc = container.ownerDocument;
 
   const card = doc.createElement("div");
-  card.className = "figure-card";
+  card.className = `figure-card chart-${spec.chartType}`;
 
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
