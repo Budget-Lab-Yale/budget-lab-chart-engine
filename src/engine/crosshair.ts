@@ -2259,9 +2259,7 @@ export function attachHighlightPills(
   const plotH = H - mt - mb;
 
   const valByCat = new Map<string, Map<string, number>>();
-  const allSeries = new Set<string>();
   for (const r of opts.rows) {
-    if (r.series) allSeries.add(r.series);
     if (!r._xc || r._y == null || !Number.isFinite(r._y)) continue;
     if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
     valByCat.get(r._xc)!.set(r.series, r._y);
@@ -2296,8 +2294,9 @@ export function attachHighlightPills(
   function render(): void {
     const active = lastActive;
     while (g.firstChild) g.removeChild(g.firstChild);
-    // No highlight: nothing pinned/hovered, or every series active (the legend doesn't dim then).
-    if (!active || active.size === 0 || active.size >= allSeries.size) {
+    // No highlight = nothing pinned/hovered → no pills. (Selecting EVERY series still shows pills:
+    // "all selected" is a deliberate state, distinct from "none selected".)
+    if (!active || active.size === 0) {
       g.setAttribute("opacity", "0");
       return;
     }
