@@ -888,8 +888,11 @@ const GRID_GAP = 16;
 
 /** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
  *  header so single-chart and figure cards look identical. The eyebrow (figure number) is an
- *  embed-time value supplied by the caller, not read from the spec. */
-function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec, eyebrowText?: string): void {
+ *  embed-time value supplied by the caller, not read from the spec.
+ *
+ *  The spec parameter is typed as `{ title?: string; subtitle?: string }` (a structural subset)
+ *  so both ChartSpec and TableSpec can be passed without casting. */
+export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { title?: string; subtitle?: string }, eyebrowText?: string): void {
   const header = doc.createElement("div");
   header.className = "figure-header";
   if (eyebrowText) {
