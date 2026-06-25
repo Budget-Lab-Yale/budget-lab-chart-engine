@@ -73,11 +73,12 @@ export function buildPointMarks(
     taggedData = data;
   }
 
-  // Categorical x (dotplot): use a POINT scale so markers sit at the category centers with only
-  // a small edge inset (the bar BAND scale's outer padding + half-bandwidth would push the
-  // first/last category well inside the frame). Matches the categorical-line treatment. Numeric
-  // x (scatter) keeps the adapter's linear domain (xScaleOpts undefined).
-  const xScaleOpts = categorical ? { type: "point" as const, padding: 0.18 } : undefined;
+  // Categorical x (dotplot): DON'T override the x scale — use the adapter's BAND scale (the same
+  // one bars use). A band scale divides the plot into equal, non-overlapping bands and Plot
+  // centers each category's dot in its band, so the dodge center line sits at the band center and
+  // the hover highlight (a uniform per-band region) lines up with the data. (A point scale, used
+  // for connecting LINES, only insets the end categories slightly and would leave the end dots
+  // off-center within equal bands.) Numeric scatter likewise uses the adapter's linear domain.
 
   // Symbol scale: distinct marker per shape value, in MARKER_SYMBOLS order. When shape encodes
   // the same field as color (redundant), key the domain off series identity so the chart symbols
@@ -114,7 +115,6 @@ export function buildPointMarks(
     overlay,
     tagging,
     dashedNames: new Set<string>(),
-    ...(xScaleOpts ? { xScaleOpts } : {}),
     ...(symbolScaleOpts ? { symbolScaleOpts } : {}),
     ...(hasShape && shapeNames ? { shapeNames } : {}),
     ...(shapeIsSeries ? { shapeIsSeries: true } : {}),
