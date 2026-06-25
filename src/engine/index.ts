@@ -252,11 +252,14 @@ export function renderPane(
   const dataInScope = data.filter((r) => seriesSet.has(r.series));
   const colors = buildColorMap(seriesNames, spec.series_colors);
 
-  // Y-axis: fold CI band bounds into the computed range when present.
+  // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
+  // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
+  // little headroom instead of sitting flush against the axis edge.
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
+    ...(spec.yAxisPolicy?.markers ?? []).map((m) => m.y),
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
