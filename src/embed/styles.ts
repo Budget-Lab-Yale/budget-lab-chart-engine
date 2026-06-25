@@ -599,6 +599,163 @@ body {
 @container (max-width: 520px) {
   .figure-downloads { flex-direction: column; }
 }
+
+/* =========================================================================
+ * Table — .tbl-table (figure type "table")
+ * Uses --tbl-* tokens throughout; no hardcoded hex values.
+ * ========================================================================= */
+
+/* ---- Table element ---- */
+.tbl-table {
+  font-family: var(--tbl-font-sans);
+  font-weight: var(--tw-body);
+  font-size: 13px;
+  color: var(--tbl-text-body);
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* ---- Column sizing via colgroup/col ---- */
+.tbl-table col { }
+
+/* ---- Header ---- */
+.tbl-table thead th {
+  font-weight: var(--tw-bold);
+  color: var(--tbl-text-heading);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--tbl-axis-stroke);
+  background: var(--tbl-bg);
+  text-align: center;
+  vertical-align: bottom;
+  white-space: nowrap;
+  /* Sticky header: thead stays pinned to the top of the scroll container. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Banner tiers (non-leaf header rows): centered, no bottom border between tiers. */
+.tbl-table thead tr:not(:last-child) th {
+  vertical-align: middle;
+  border-bottom: 1px solid var(--tbl-border);
+}
+
+/* Leaf headers (last header row): bottom-aligned. */
+.tbl-table thead tr:last-child th {
+  vertical-align: bottom;
+}
+
+/* Stub cell in header (corner) */
+.tbl-table thead th.tbl-table-stub {
+  text-align: left;
+}
+
+/* ---- Sub-label: displayed on its own line below the leaf header text ---- */
+.tbl-table-sublabel {
+  display: block;
+  font-size: 10px;
+  font-weight: var(--tw-body);
+  color: var(--tbl-text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ---- Body ---- */
+.tbl-table tbody td,
+.tbl-table tbody th {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--tbl-gridline);
+  font-size: 13px;
+  background: var(--tbl-bg);
+}
+
+/* Numeric cells: right-aligned, tabular figures. */
+td.is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stub (row label) cells: left-aligned. */
+th.tbl-table-stub {
+  text-align: left;
+  font-weight: var(--tw-body);
+  color: var(--tbl-text-body);
+}
+
+/* ---- Row groups ---- */
+/* Group heading row: bold, slightly heavier background, top border to set it off. */
+tr.tbl-table-group th,
+tr.tbl-table-group td {
+  font-weight: var(--tw-bold);
+  color: var(--tbl-text-heading);
+  background: var(--tbl-bg-subtle);
+  border-top: 1px solid var(--tbl-border);
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+/* Group note row: italic, muted, smaller — appears directly below the group heading. */
+tr.tbl-table-group-note th,
+tr.tbl-table-group-note td {
+  font-style: italic;
+  font-size: 11px;
+  color: var(--tbl-text-muted);
+  padding-top: 2px;
+  padding-bottom: 4px;
+  background: var(--tbl-bg-subtle);
+  border-bottom: 1px solid var(--tbl-border);
+}
+
+/* ---- Emphasis ---- */
+.is-emphasis {
+  font-weight: var(--tw-bold);
+  background: var(--tbl-bg-subtle) !important;
+}
+
+/* ---- Positive / negative coloring ---- */
+/* Use categorical green (cat4) and red (cat5) tokens — muted base tones. */
+td.is-pos {
+  color: var(--tbl-cat4);  /* green */
+}
+td.is-neg {
+  color: var(--tbl-cat5);  /* red */
+}
+
+/* ---- Row hover (CSS only — no JS needed) ---- */
+.tbl-table tbody tr:hover td,
+.tbl-table tbody tr:hover th {
+  background: var(--tbl-bg-subtle);
+}
+
+/* ---- Column hover (JS toggles .is-col-hover on [data-col=k] cells) ---- */
+.tbl-table .is-col-hover {
+  background: var(--tbl-bg-highlight) !important;
+}
+
+/* ---- Sticky first column ---- */
+/* Enabled when .tbl-table--sticky-first is present on the table element. */
+.tbl-table--sticky-first th.tbl-table-stub,
+.tbl-table--sticky-first td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  /* Solid background so body content scrolls behind the pinned cell. */
+  background: var(--tbl-bg);
+}
+/* Ensure the thead sticky-first corner cell layers above both axes. */
+.tbl-table--sticky-first thead th.tbl-table-stub {
+  z-index: 3;
+}
+
+/* ---- Footnote superscript ---- */
+.tbl-table sup {
+  font-size: 0.7em;
+  vertical-align: super;
+  line-height: 0;
+  color: var(--tbl-text-muted);
+}
 `;
 
 /** Self-contained chart CSS: the Style-Guide color tokens (generated) followed by the
