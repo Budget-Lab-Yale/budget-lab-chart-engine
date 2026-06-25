@@ -1396,6 +1396,23 @@ describe("value-on-highlight labels", () => {
     btnA.dispatchEvent(new Event("pointerleave"));
     expect(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show").length).toBe(0);
   });
+
+  it("non-active series' value labels are never dimmed (stay fully hidden, not ghosted)", () => {
+    // The dim loop tags every [data-series]; hover-value labels carry data-series too. They
+    // must be EXCLUDED so a pin leaves the other series' labels hidden (opacity 0) rather than
+    // dimmed (opacity 0.15, a visible ghost). Pin A, then assert no .tbl-hl-value text anywhere
+    // picked up .tbl-dimmed — for either series.
+    const container = document.createElement("div");
+    mountChart(container, { spec: GROUPED, rows: GROUPED_ROWS, width: 720 });
+    const btnA = container.querySelector('.tbl-legend-item[data-series="A"]') as HTMLElement;
+    btnA.dispatchEvent(new Event("pointerenter"));
+    const dimmedLabels = container.querySelectorAll(".tbl-hl-value text.tbl-dimmed");
+    expect(dimmedLabels.length).toBe(0);
+    // Meanwhile the bars themselves DO dim (B's rects), confirming dimming still works elsewhere.
+    const bRects = container.querySelectorAll('rect[data-series="B"]');
+    expect(bRects.length).toBeGreaterThan(0);
+    bRects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
+  });
 });
 
 describe("mountChart point charts", () => {

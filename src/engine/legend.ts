@@ -187,6 +187,11 @@ export function renderLegend(
       // A marker stays bright only if it matches the active selection in BOTH dimensions
       // (intersection). Line/bar marks carry only data-series → the shape test is a no-op.
       svg.querySelectorAll("[data-series]").forEach((p) => {
+        // Hover-value labels carry data-series too, but their visibility is driven entirely by
+        // the `-show` toggle below (hidden = opacity 0). Skip them here: dimming would set them
+        // to 0.15 (a faint ghost) instead of fully hidden, so a pinned series would surface
+        // every OTHER series' values as dimmed text — exactly what we don't want.
+        if (p.closest(".tbl-hl-value")) return;
         const s = p.getAttribute("data-series");
         const sh = p.getAttribute("data-shape");
         const colorOk = !dimColor || active.has(s as string);

@@ -304,6 +304,67 @@ function cssAttrEscape(value: string): string {
   return value.replace(/(["\\])/g, "\\$1");
 }
 
+const HL_PILL_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Draw a frosted-glass "pill" behind every currently-revealed value label
+ * (`.tbl-hl-value text.tbl-hl-value-show`), so the value-on-highlight callout matches the
+ * tooltip / coordinated-cursor styling instead of reading as bare on-chart text. Called on
+ * every highlight change (the legend toggles the `-show` class, then fires onHighlight). Clears
+ * any prior pills first so de-highlighting a series removes its pills.
+ *
+ * Each pill is a rounded <rect> inserted as the previous sibling of its label within the same
+ * Plot text group, so it shares the label's coordinate system (no transform math) and paints
+ * behind it. Sized from the label's rendered box via getBBox — a no-op in non-layout
+ * environments (jsdom returns a zero box → skipped), which is why the toggle itself is unit
+ * tested separately. `root` is the chart SVG (single chart) or the figure grid (spans panes).
+ */
+function drawHlPills(root: Element): void {
+  root.querySelectorAll(".tbl-hl-pill").forEach((p) => p.remove());
+  const labels = root.querySelectorAll<SVGTextElement>(
+    ".tbl-hl-value text.tbl-hl-value-show",
+  );
+  labels.forEach((t) => {
+    let bb: DOMRect;
+    try {
+      bb = t.getBBox();
+    } catch {
+      return; // getBBox unsupported (jsdom) — skip pill, label text still shows
+    }
+    if (!(bb.width > 0 && bb.height > 0)) return;
+    const padX = 5;
+    const padY = 2.5;
+    const rect = t.ownerDocument.createElementNS(HL_PILL_NS, "rect");
+    rect.setAttribute("class", "tbl-hl-pill");
+    // getBBox() returns the label geometry in its PRE-transform local space, but each Plot
+    // text positions itself with its own `transform` (translate to the datum). Copy that
+    // transform onto the pill so the rect shares the label's frame, then use the local bbox
+    // directly — otherwise the rect lands at the group origin (a stray box at the top-left).
+    const tf = t.getAttribute("transform");
+    if (tf) rect.setAttribute("transform", tf);
+    rect.setAttribute("x", String(bb.x - padX));
+    rect.setAttribute("y", String(bb.y - padY));
+    rect.setAttribute("width", String(bb.width + padX * 2));
+    rect.setAttribute("height", String(bb.height + padY * 2));
+    rect.setAttribute("rx", "4");
+    rect.setAttribute("ry", "4");
+    rect.setAttribute("fill", "#FFFFFF");
+    rect.setAttribute("fill-opacity", "0.86");
+    rect.setAttribute("stroke", "#C8CDD7");
+    rect.setAttribute("stroke-opacity", "0.7");
+    rect.setAttribute("stroke-width", "1");
+    rect.setAttribute("pointer-events", "none");
+    t.parentNode?.insertBefore(rect, t);
+  });
+}
+
+/** Refresh both highlight-driven overlays for a single SVG: net-total label legibility and the
+ *  frosted value pills. Used as the legend `onHighlight` callback for single charts. */
+function onHighlightSvg(svg: SVGSVGElement): void {
+  recolorNetLabels(svg);
+  drawHlPills(svg);
+}
+
 /** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
  *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
 export function formatValue(v: number, units: string, decimals = 2): string {
@@ -629,7 +690,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         rightLegendSlot!.replaceChildren();
         legendHandle = renderLegend(rightLegendSlot!, orderedItems, {
           svg,
-          onHighlight: () => recolorNetLabels(svg),
+          onHighlight: () => onHighlightSvg(svg),
           ...shapeOpts,
         });
         // Add the vertical-layout class to the rendered legend element (use the handle's
@@ -642,7 +703,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         legendSlot.replaceChildren();
         legendHandle = renderLegend(legendSlot, legendItems ?? [], {
           svg,
-          onHighlight: () => recolorNetLabels(svg),
+          onHighlight: () => onHighlightSvg(svg),
           ...shapeOpts,
         });
       }
@@ -1236,7 +1297,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const handle = fig.legendItems || hasFigShape
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
-          onHighlight: () => { for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg); },
+          onHighlight: () => { for (const p of fig.panes) if (p.svg) onHighlightSvg(p.svg); },
           shapeItems: fig.shapeLegendItems ?? undefined,
           colorTitle: fig.colorLegendTitle,
           shapeTitle: fig.shapeLegendTitle,

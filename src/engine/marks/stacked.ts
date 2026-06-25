@@ -224,13 +224,11 @@ export function buildStackedMarks(
   // dark halo so the value reads on any segment color. Tagged data-series in data order below.
   const hlSel = "g.tbl-hl-value text";
   const hlText = (d: PreparedRow) => segFmt(d._y as number);
+  // Dark text — the live layer draws a frosted pill behind each revealed label, so no halo needed.
   const hlStyle = {
     text: hlText,
     className: "tbl-hl-value",
-    fill: "#ffffff",
-    stroke: "#1A1A2E",
-    strokeWidth: 2.5,
-    paintOrder: "stroke",
+    fill: TBL.color.heading,
     fontSize: TBL_VALUE_LABEL.fontSize,
     fontWeight: TBL_VALUE_LABEL.fontWeight,
     textAnchor: "middle" as const,
