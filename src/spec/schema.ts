@@ -134,6 +134,7 @@ export const CHART_SPEC_SCHEMA = {
     note: { type: "string" },
     x_axis_title: { type: "string" },
     y_axis_title: { type: "string" },
+    tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
 
     // Axes
     xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },

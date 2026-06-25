@@ -113,6 +113,10 @@ export interface ChartSpec {
   /** Y-axis title — a short caption above the axis (left-aligned, horizontal). Coexists with the
    *  units subtitle; the author manages any redundancy. */
   y_axis_title?: string;
+  /** Decimal places for VALUES shown in hover tooltips. Independent of the axis tick labels
+   *  (which round for legibility), so a tooltip can be more precise than the axis — e.g. set 4
+   *  for small magnitudes that round to 0.00 on a 2-decimal axis. Default 2. */
+  tooltip_decimals?: number;
 
   // Axes
   xAxisType: XAxisType;

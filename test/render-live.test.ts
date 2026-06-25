@@ -2,7 +2,7 @@
 //
 // Tests for the embed live-render layer: mountChart + buildStandaloneHtml.
 import { describe, it, expect } from "vitest";
-import { mountChart, computeChartHeight, netLabelFill } from "../src/engine/render-live";
+import { mountChart, computeChartHeight, netLabelFill, formatValue } from "../src/engine/render-live";
 import { renderLegend } from "../src/engine/legend";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
 import { CHART_CSS } from "../src/embed/styles";
@@ -1008,6 +1008,21 @@ describe("renderLegend handle.toggle (single source of truth)", () => {
 // ---------------------------------------------------------------------------
 // Net-total label legibility over dimmed bars (TT7)
 // ---------------------------------------------------------------------------
+
+describe("formatValue tooltip precision", () => {
+  it("defaults to 2 decimals", () => {
+    expect(formatValue(0.0024, "")).toBe("0.00");
+    expect(formatValue(1.5, "%")).toBe("1.50%");
+  });
+  it("honors an explicit decimals count (tooltip more precise than the axis)", () => {
+    expect(formatValue(0.0024, "")).toBe("0.00"); // axis-style
+    expect(formatValue(0.0024, "", 4)).toBe("0.0024"); // tooltip-style
+    expect(formatValue(0.0286, "", 4)).toBe("0.0286");
+  });
+  it("renders an em dash for non-finite values", () => {
+    expect(formatValue(NaN, "", 4)).toBe("—");
+  });
+});
 
 describe("netLabelFill (pure color decision)", () => {
   const DARK = "#1A1A2E"; // tokens.structural.text_heading

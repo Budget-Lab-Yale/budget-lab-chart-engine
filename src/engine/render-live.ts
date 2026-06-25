@@ -304,10 +304,11 @@ function cssAttrEscape(value: string): string {
   return value.replace(/(["\\])/g, "\\$1");
 }
 
-/** Format a numeric value for tooltip display. */
-function formatValue(v: number, units: string): string {
+/** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
+ *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
+export function formatValue(v: number, units: string, decimals = 2): string {
   if (!Number.isFinite(v)) return "—";
-  return `${v.toFixed(2)}${units}`;
+  return `${v.toFixed(decimals)}${units}`;
 }
 
 // Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
@@ -673,7 +674,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         xLabel: spec.x_axis_title ?? "x",
         yLabel: spec.y_axis_title ?? "Value",
         xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
       });
     } else if (spec.chartType === "dotplot") {
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
@@ -683,7 +684,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
         bandHighlight: true,
         centersFromMarks: true,
       });
@@ -695,7 +696,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses
@@ -718,7 +719,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
       });
     } else {
@@ -729,7 +730,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesField: "series",
         xParse: tooltipXParse as ((v: unknown) => number) | undefined,
         xFormat: tooltipXFormat,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
         colors,
         dashedSeries: dashedNames,
         seriesLabels,
@@ -923,7 +924,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       bandHighlight: true,
       centersFromMarks: true,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
@@ -934,7 +935,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units),
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
         symbols,
         bandHighlight: true,
         centersFromMarks: true,
@@ -959,7 +960,7 @@ function wireFigureSvg(
       xLabel: ctx.spec.x_axis_title ?? "x",
       yLabel: ctx.spec.y_axis_title ?? "Value",
       xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
     });
     return undefined;
   }
@@ -986,7 +987,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -1004,7 +1005,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units),
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
         symbols: markerSymbols,
       }) as (key: unknown, active?: boolean) => void;
     }
@@ -1032,7 +1033,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       orientation: horizontal ? "horizontal" : "vertical",
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
@@ -1054,7 +1055,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units),
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -1067,7 +1068,7 @@ function wireFigureSvg(
     seriesField: "series",
     xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
     xFormat: ctx.tooltipXFormat,
-    yFormat: (v) => formatValue(v, ctx.units),
+    yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
     colors: ctx.colors,
     dashedSeries: ctx.dashedNames,
     seriesLabels: ctx.seriesLabels,
@@ -1091,7 +1092,7 @@ function wireFigureSvg(
       seriesField: "series",
       xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
       xFormat: ctx.tooltipXFormat,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
