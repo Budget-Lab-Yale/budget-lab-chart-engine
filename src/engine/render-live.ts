@@ -398,9 +398,9 @@ function downloadSlug(spec: ChartSpec): string {
   try {
     const segs = location.pathname.split("/").filter(Boolean);
     const last = segs[segs.length - 1];
-    // Served at a folder URL (…/f1-grouped-bar/) → that folder is the slug.
+    // Served at a folder URL (…/F1_revenue_headline/) → that folder is the slug.
     if (last && !/\./.test(last)) return last;
-    // Opened as a file (…/f1-grouped-bar/preview.html) → use the PARENT folder as the slug, so
+    // Opened as a file (…/F1_revenue_headline/preview.html) → use the PARENT folder as the slug, so
     // downloads are still named by the chart folder rather than the title.
     const parent = segs[segs.length - 2];
     if (parent && !/\./.test(parent)) return parent;

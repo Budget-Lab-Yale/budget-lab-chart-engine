@@ -12,17 +12,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Render order (the figure numbering).
 const CHARTS = [
-  ["F1", "f1-grouped-bar"],
-  ["F2", "f2-faceted-stacked"],
-  ["F3", "f3-faceted-stacked-instrument"],
-  ["F4", "f4-scatter-real"],
-  ["F5", "f5-faceted-grouped-bar"],
-  ["F6", "f6-dotplot-real"],
-  ["F7", "f7-bar-decile"],
-  ["FA1", "fa1-line-gdp"],
-  ["FA2", "fa2-line-labor-share"],
-  ["FA3", "fa3-scatter-pretax"],
-  ["FA4", "fa4-grouped-bar-debt"],
+  ["F1", "F1_revenue_headline"],
+  ["F2", "F2_revenue_by_income_type"],
+  ["F3", "F3_revenue_by_instrument"],
+  ["F4", "F4_revenue_vs_factor_income"],
+  ["F5", "F5_revenue_fixed_vs_reallocated"],
+  ["F6", "F6_inequality_gini"],
+  ["F7", "F7_atr_by_decile"],
+  ["FA1", "FA1_gdp_growth_history"],
+  ["FA2", "FA2_labor_share_history"],
+  ["FA3", "FA3_revenue_vs_pretax_income"],
+  ["FA4", "FA4_debt_to_gdp"],
 ];
 
 const safeJson = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
