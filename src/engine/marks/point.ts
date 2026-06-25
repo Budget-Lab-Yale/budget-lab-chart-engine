@@ -26,33 +26,44 @@ export function buildPointMarks(
   const r = ctx.pane ? 3.8 : 4.6;
 
   // Categorical x (dotplot) with multiple series: dodge each series horizontally within its
-  // category so markers sit side by side instead of stacking at the band center. A fixed pixel
-  // offset (`dx`) keyed off series order, centered on the category. Numeric scatter never dodges.
+  // category so markers sit side by side instead of stacking at the band center. Plot's `dx` is a
+  // CONSTANT pixel offset per mark (not a per-datum channel), so we emit one dot mark PER SERIES,
+  // each with its own constant `dx` centered on the category. Numeric scatter never dodges.
   const categorical = xField === "_xc";
   const seriesNames = ctx.seriesNames ?? [];
   const dodge = categorical && seriesNames.length > 1;
-  let dxFor: ((d: PreparedRow) => number) | undefined;
+
+  const dotOpts = (extra: Record<string, unknown>): Record<string, unknown> => ({
+    x: xField,
+    y: "_y",
+    fill: "series",
+    ...(hasShape ? { symbol: shapeField } : {}),
+    r,
+    stroke: "#ffffff",
+    strokeWidth: 1,
+    defined: (d: PreparedRow) => Number.isFinite(d._y),
+    ...facetChannels,
+    ...extra,
+  });
+
+  // `taggedData` is the marker DOM order (data order, or per-series-concatenated when dodging) so
+  // the post-render data-series tagging maps each <path>/<circle> to its color series correctly.
+  const overlay: unknown[] = [];
+  let taggedData: PreparedRow[];
   if (dodge) {
     const gap = ctx.pane ? 11 : 14; // px between adjacent series within a category
     const mid = (seriesNames.length - 1) / 2;
-    const offset = new Map(seriesNames.map((s, i) => [s, (i - mid) * gap]));
-    dxFor = (d) => offset.get(d.series) ?? 0;
+    taggedData = [];
+    seriesNames.forEach((s, i) => {
+      const seriesData = data.filter((d) => d.series === s);
+      if (!seriesData.length) return;
+      overlay.push(Plot.dot(seriesData, dotOpts({ dx: (i - mid) * gap })));
+      taggedData.push(...seriesData);
+    });
+  } else {
+    overlay.push(Plot.dot(data, dotOpts({})));
+    taggedData = data;
   }
-
-  const overlay: unknown[] = [
-    Plot.dot(data, {
-      x: xField,
-      y: "_y",
-      fill: "series",
-      ...(hasShape ? { symbol: shapeField } : {}),
-      ...(dxFor ? { dx: dxFor } : {}),
-      r,
-      stroke: "#ffffff",
-      strokeWidth: 1,
-      defined: (d: PreparedRow) => Number.isFinite(d._y),
-      ...facetChannels,
-    }),
-  ];
 
   // Categorical x (dotplot): use a POINT scale so markers sit at the category centers with only
   // a small edge inset (the bar BAND scale's outer padding + half-bandwidth would push the
@@ -76,7 +87,7 @@ export function buildPointMarks(
   // hover-dim / pin works exactly as it does for the other chart types. With a symbol channel Plot
   // renders the dots as <path>; without one, as <circle>.
   const selector = hasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle';
-  const tagging = [{ selector, seriesOrder: data.map((d) => d.series) }];
+  const tagging = [{ selector, seriesOrder: taggedData.map((d) => d.series) }];
 
   return {
     underlay: [],

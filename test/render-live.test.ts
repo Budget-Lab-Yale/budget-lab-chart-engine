@@ -1416,5 +1416,9 @@ describe("mountChart point charts", () => {
     expect(container.querySelectorAll(".tbl-legend-item").length).toBe(2);
     // Markers tagged across panes so the color legend can dim them.
     expect(container.querySelectorAll('.figure-grid g[aria-label="dot"] path[data-series]').length).toBeGreaterThan(1);
+    // Dodge: a 2-series categorical dotplot emits ONE dot mark per series (each with its own
+    // constant dx), so every pane has 2 dot groups — not a single overlapping group.
+    const firstPane = container.querySelector(".figure-pane");
+    expect(firstPane!.querySelectorAll('g[aria-label="dot"]').length).toBe(2);
   });
 });
