@@ -1,0 +1,191 @@
+// @vitest-environment jsdom
+import { describe, it, expect } from "vitest";
+import { buildTableModel } from "../../../src/table/model";
+import { layoutTable } from "../../../src/table/layout";
+import { renderTableHtml } from "../../../src/table/render-html";
+import type { TableSpec } from "../../../src/spec/table-types";
+
+// ---- Inline tidy dataset with 3 header tiers so colspan + rowspan are exercised. ----
+// tier1: "Conv" spans 2 leaves (26-35/$b and Eq/PCE); "Dyn" has blank tier2 → leaf GDP rowspans.
+// stub: single "row" label column (no groups) for simplicity.
+const spec: TableSpec = {
+  title: "Test",
+  data: "d",
+  value: "value",
+  stub: [{ label: "row" }],
+  header: ["tier1", "tier2", "metric"],
+  format: { default: { type: "number", decimals: 2 } },
+  sublabels: { "$b": "billions" },
+};
+
+const rows = [
+  { row: "All", tier1: "Conv", tier2: "26-35", metric: "$b",  value: "2933" },
+  { row: "All", tier1: "Conv", tier2: "Eq",    metric: "PCE", value: "0.0204" },
+  { row: "All", tier1: "Dyn",  tier2: "",      metric: "GDP", value: "-0.80" },
+  { row: "LI",  tier1: "Conv", tier2: "26-35", metric: "$b",  value: "100" },
+  { row: "LI",  tier1: "Conv", tier2: "Eq",    metric: "PCE", value: "0.0050" },
+  { row: "LI",  tier1: "Dyn",  tier2: "",      metric: "GDP", value: "-0.20" },
+] as unknown as import("../../../src/data/index").TidyRow[];
+
+// 2-tier grouped dataset for testing group rows
+const spec2: TableSpec = {
+  title: "Test2",
+  data: "d",
+  value: "val",
+  stub: ["grp", { label: "lab" }],
+  header: ["per"],
+  format: { default: { type: "number", decimals: 1 } },
+};
+
+const rows2 = [
+  { grp: "G1", lab: "r1", per: "2026", val: "1.2" },
+  { grp: "G1", lab: "r2", per: "2026", val: "3.4" },
+  { grp: "G2", lab: "r3", per: "2026", val: "5.6" },
+] as unknown as import("../../../src/data/index").TidyRow[];
+
+function measureText(s: string, _fontPx: number, _weight: number) { return s.length * 7; }
+
+describe("renderTableHtml — 3-tier header", () => {
+  const model = buildTableModel(spec, rows);
+  const layout = layoutTable(model, { width: 800, measureText });
+  let table: HTMLTableElement;
+
+  it("returns an HTMLTableElement", () => {
+    table = renderTableHtml(model, layout, document);
+    expect(table.tagName).toBe("TABLE");
+  });
+
+  it("table has class tbl-table", () => {
+    table = renderTableHtml(model, layout, document);
+    expect(table.classList.contains("tbl-table")).toBe(true);
+  });
+
+  it("has a <colgroup> with per-column <col> elements (stub + leaves)", () => {
+    table = renderTableHtml(model, layout, document);
+    const colgroup = table.querySelector("colgroup");
+    expect(colgroup).not.toBeNull();
+    const cols = colgroup!.querySelectorAll("col");
+    // stub col + one per leaf
+    expect(cols.length).toBe(1 + model.leaves.length);
+    // stub col width matches layout.stubWidth
+    const stubCol = cols[0]!;
+    expect(stubCol.style.width).toBe(`${layout.stubWidth}px`);
+    // leaf col widths match layout.colW
+    model.leaves.forEach((_, i) => {
+      expect(cols[i + 1]!.style.width).toBe(`${layout.colW[i]}px`);
+    });
+  });
+
+  it("<thead> has one <tr> per header tier", () => {
+    table = renderTableHtml(model, layout, document);
+    const thead = table.querySelector("thead");
+    expect(thead).not.toBeNull();
+    const trs = thead!.querySelectorAll("tr");
+    expect(trs.length).toBe(model.headerRows.length);
+  });
+
+  it("header cells carry correct colSpan and rowSpan from the model", () => {
+    table = renderTableHtml(model, layout, document);
+    const thead = table.querySelector("thead")!;
+    const trs = thead.querySelectorAll("tr");
+
+    model.headerRows.forEach((tierCells, tierIdx) => {
+      // Each tier maps to one <tr>; tier 0's first <th> is the stub corner (skip it)
+      const allThs = Array.from(trs[tierIdx]!.querySelectorAll("th"));
+      const dataThs = tierIdx === 0 ? allThs.slice(1) : allThs;
+
+      tierCells.forEach((headerCell, ci) => {
+        const th = dataThs[ci]!;
+        expect(th.colSpan).toBe(headerCell.colSpan);
+        expect(th.rowSpan).toBe(headerCell.rowSpan);
+        expect(th.textContent?.trim().startsWith(headerCell.text)).toBe(true);
+      });
+    });
+  });
+
+  it("stub corner <th> spans all header tiers (rowSpan = tier count)", () => {
+    table = renderTableHtml(model, layout, document);
+    const thead = table.querySelector("thead")!;
+    const firstTr = thead.querySelectorAll("tr")[0]!;
+    const firstTh = firstTr.querySelector("th")!;
+    expect(firstTh.rowSpan).toBe(model.headerRows.length);
+  });
+
+  it("sublabel renders as <span class='tbl-table-sublabel'> inside the leaf header cell", () => {
+    table = renderTableHtml(model, layout, document);
+    const sublabelSpans = table.querySelectorAll("thead .tbl-table-sublabel");
+    // spec has sublabels: { "$b": "billions" }
+    expect(sublabelSpans.length).toBeGreaterThan(0);
+    expect(sublabelSpans[0]!.textContent).toBe("billions");
+  });
+
+  it("<tbody> data rows have <th scope='row'> for stub label", () => {
+    table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const dataRows = tbody.querySelectorAll("tr:not(.tbl-table-group)");
+    expect(dataRows.length).toBe(2); // "All" and "LI"
+    dataRows.forEach((tr) => {
+      const th = tr.querySelector("th[scope='row']");
+      expect(th).not.toBeNull();
+    });
+  });
+
+  it("numeric <td> carry data-col = leaf key and right-align class is-num", () => {
+    table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const firstDataRow = tbody.querySelector("tr:not(.tbl-table-group)")!;
+    const tds = firstDataRow.querySelectorAll("td");
+    expect(tds.length).toBe(model.leaves.length);
+    tds.forEach((td, i) => {
+      expect(td.getAttribute("data-col")).toBe(model.leaves[i]!.key);
+      expect(td.classList.contains("is-num")).toBe(true);
+    });
+  });
+
+  it("rows carry data-row attribute with the row label", () => {
+    table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const dataRows = tbody.querySelectorAll("tr:not(.tbl-table-group)");
+    expect(dataRows[0]!.getAttribute("data-row")).toBe("All");
+    expect(dataRows[1]!.getAttribute("data-row")).toBe("LI");
+  });
+});
+
+describe("renderTableHtml — 2-tier grouped body", () => {
+  const model = buildTableModel(spec2, rows2);
+  const layout = layoutTable(model, { width: 600, measureText });
+
+  it("<tbody> has group rows with class tbl-table-group", () => {
+    const table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const groupRows = tbody.querySelectorAll("tr.tbl-table-group");
+    expect(groupRows.length).toBe(2); // G1 and G2
+  });
+
+  it("group row has <th> spanning all columns", () => {
+    const table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const groupRow = tbody.querySelector("tr.tbl-table-group")!;
+    const th = groupRow.querySelector("th")!;
+    // colSpan = 1 (stub) + leaves.length
+    expect(th.colSpan).toBe(1 + model.leaves.length);
+  });
+
+  it("body order is: group, row, row, group, row", () => {
+    const table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const trs = tbody.querySelectorAll("tr");
+    const kinds = Array.from(trs).map((tr) =>
+      tr.classList.contains("tbl-table-group") ? "group" : "row"
+    );
+    expect(kinds).toEqual(["group", "row", "row", "group", "row"]);
+  });
+
+  it("data rows have data-row attribute", () => {
+    const table = renderTableHtml(model, layout, document);
+    const tbody = table.querySelector("tbody")!;
+    const dataRows = tbody.querySelectorAll("tr:not(.tbl-table-group)");
+    const labels = Array.from(dataRows).map((tr) => tr.getAttribute("data-row"));
+    expect(labels).toEqual(["r1", "r2", "r3"]);
+  });
+});

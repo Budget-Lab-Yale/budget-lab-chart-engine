@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     environment: "node",
+    environmentMatchGlobs: [["test/table/dom/**", "jsdom"]],
     globalSetup: ["./test/setup/global-build.ts"],
     env: { TZ: "UTC" },
   },
