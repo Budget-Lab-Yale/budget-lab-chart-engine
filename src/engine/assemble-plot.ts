@@ -285,7 +285,7 @@ export function assemblePlot({
           frameAnchor: left ? "left" : "right",
           textAnchor: left ? "start" : "end",
           dx: m.labelDx != null ? m.labelDx : left ? 6 : -6,
-          dy: m.labelDy != null ? m.labelDy : -5,
+          dy: m.labelDy != null ? m.labelDy : -7,
           fill: markerColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
