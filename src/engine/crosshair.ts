@@ -1711,50 +1711,67 @@ interface CatRect {
   cx: number;
   y: number;
   h: number;
+  /** Left edge (x) and width — used by horizontal highlight pills to find the bar tip. */
+  x: number;
+  w: number;
 }
 
-/** Bucket the rendered bar rects by category (fx-faceted: one group per category; single-band:
- *  grouped by rounded x). Returns category → its rects {series, cx, y(top), h}. Deterministic
- *  (reads attributes + facet translate; no layout). */
-function buildRectsByCategory(svgEl: SVGSVGElement, opts: SecondaryBandOptions): Map<string, CatRect[]> {
+/** Bucket the rendered bar rects by category. Vertical (default): fx-faceted → one group per
+ *  category, single-band → grouped by rounded x. Horizontal: categories are on Y, so fy-faceted
+ *  → group per facet (translate-y), single-band → grouped by rounded y. Returns category → its
+ *  rects {series, cx, y(top), h, x, w}. Deterministic (reads attributes + facet translate). */
+function buildRectsByCategory(
+  svgEl: SVGSVGElement,
+  opts: SecondaryBandOptions,
+  horizontal = false,
+): Map<string, CatRect[]> {
   const { isFaceted, categories = [] } = opts;
   const out = new Map<string, CatRect[]>();
-  const rectOf = (rect: SVGRectElement, dx: number): CatRect => {
+  const rectOf = (rect: SVGRectElement, dx: number, dy: number): CatRect => {
     const x = parseFloat(rect.getAttribute("x") ?? "0");
     const w = parseFloat(rect.getAttribute("width") ?? "0");
     return {
       series: rect.getAttribute("data-series") ?? "",
       cx: dx + x + w / 2,
-      y: parseFloat(rect.getAttribute("y") ?? "0"),
+      y: dy + parseFloat(rect.getAttribute("y") ?? "0"),
       h: parseFloat(rect.getAttribute("height") ?? "0"),
+      x: dx + x,
+      w,
     };
   };
 
   if (isFaceted) {
+    // Vertical: each category is an fx column (translate-x). Horizontal: an fy row (translate-y).
     const groups = Array.from(svgEl.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g'));
-    const parsed: Array<{ tx: number; g: SVGGElement }> = [];
+    const parsed: Array<{ t: number; g: SVGGElement }> = [];
     for (const gg of groups) {
-      const m = /translate\(\s*([\d.+-]+)/.exec(gg.getAttribute("transform") ?? "");
-      if (m) parsed.push({ tx: parseFloat(m[1]!), g: gg });
+      const tf = gg.getAttribute("transform") ?? "";
+      const m = horizontal
+        ? /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(tf)
+        : /translate\(\s*([\d.+-]+)/.exec(tf);
+      if (m) parsed.push({ t: parseFloat(m[1]!), g: gg });
     }
-    parsed.sort((a, b) => a.tx - b.tx);
+    parsed.sort((a, b) => a.t - b.t);
     parsed.forEach((p, i) => {
       const cat = categories[i] ?? String(i);
-      out.set(cat, Array.from(p.g.querySelectorAll<SVGRectElement>("rect")).map((r) => rectOf(r, p.tx)));
+      const dx = horizontal ? 0 : p.t;
+      const dy = horizontal ? p.t : 0;
+      out.set(cat, Array.from(p.g.querySelectorAll<SVGRectElement>("rect")).map((r) => rectOf(r, dx, dy)));
     });
     return out;
   }
 
+  // Single-band: group by the category axis position — rounded y (horizontal) or x (vertical).
   const allRects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
-  const byX = new Map<number, CatRect[]>();
+  const byKey = new Map<number, CatRect[]>();
   for (const rect of allRects) {
-    const key = Math.round(parseFloat(rect.getAttribute("x") ?? "0"));
-    if (!byX.has(key)) byX.set(key, []);
-    byX.get(key)!.push(rectOf(rect, 0));
+    const key = Math.round(parseFloat(rect.getAttribute(horizontal ? "y" : "x") ?? "0"));
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(rectOf(rect, 0, 0));
   }
-  Array.from(byX.keys())
+  Array.from(byKey.keys())
     .sort((a, b) => a - b)
-    .forEach((k, i) => out.set(categories[i] ?? String(i), byX.get(k)!));
+    .forEach((k, i) => out.set(categories[i] ?? String(i), byKey.get(k)!));
   return out;
 }
 
@@ -2197,6 +2214,8 @@ export interface HighlightPillsOptions {
   yFormat?: (v: number) => string;
   /** Dot-plot dodge offsets (series → px), so pills land beside the dodged dots. */
   dodge?: Map<string, number>;
+  /** Horizontal bars (categories on Y): pills sit beside the bar tip / at the segment center. */
+  horizontal?: boolean;
 }
 
 /**
@@ -2259,7 +2278,19 @@ export function attachHighlightPills(
   svgEl.appendChild(g);
   const doc = svgEl.ownerDocument;
 
-  return (active: Set<string>): void => {
+  // While the pointer is over the chart, the per-category hover affordance (tooltip / coordinated
+  // cursor) is the active indicator, so the series-wide pills are suppressed to avoid two sets of
+  // value callouts overlapping. They re-appear on pointer leave from the current pinned state.
+  let lastActive: Set<string> = new Set();
+  let suppressed = false;
+  const clear = (): void => {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    g.setAttribute("opacity", "0");
+  };
+  svgEl.addEventListener("pointerenter", () => { suppressed = true; clear(); });
+  svgEl.addEventListener("pointerleave", () => { suppressed = false; render(lastActive); });
+
+  function render(active: Set<string>): void {
     while (g.firstChild) g.removeChild(g.firstChild);
     // No highlight: nothing pinned/hovered, or every series active (the legend doesn't dim then).
     if (!active || active.size === 0 || active.size >= allSeries.size) {
@@ -2309,7 +2340,7 @@ export function attachHighlightPills(
       rows: opts.rows,
       isFaceted: opts.isFaceted,
       categories: opts.categories,
-    } as SecondaryBandOptions);
+    } as SecondaryBandOptions, opts.horizontal);
     for (const [category, rects] of rectsByCat) {
       const vals = valByCat.get(category);
       const valid = rects
@@ -2317,7 +2348,20 @@ export function attachHighlightPills(
         .map((rect) => ({ rect, v: vals?.get(rect.series) }))
         .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
       if (!valid.length) continue;
-      if (opts.isStacked) {
+      if (opts.horizontal) {
+        // Categories on Y: stacked → segment center; single/grouped → just past the bar tip,
+        // anchored on the value's side, at the bar's row center.
+        for (const x of valid) {
+          const yc = x.rect.y + x.rect.h / 2;
+          if (opts.isStacked) {
+            addCoordPill(g, doc, x.rect.cx, yc, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
+          } else {
+            const tip = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
+            const [anchor, ax] = x.v >= 0 ? (["start", tip + 6] as const) : (["end", tip - 6] as const);
+            addCoordPill(g, doc, ax, yc, anchor, yFormat(x.v), colorFor(x.rect.series), weight);
+          }
+        }
+      } else if (opts.isStacked) {
         const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
         valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
       } else {
@@ -2334,6 +2378,11 @@ export function attachHighlightPills(
       }
     }
     g.setAttribute("opacity", "1");
+  }
+
+  return (active: Set<string>): void => {
+    lastActive = active;
+    if (!suppressed) render(active);
   };
 }
 

@@ -742,20 +742,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         swatchShape: "rect",
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
       });
-      // Value pills follow the vertical coordinated-cursor layout (above bar / segment center);
-      // horizontal bars have no in-place coordinated cursor, so they keep the floating tooltip only.
-      if (spec.orientation !== "horizontal") {
-        pillDriver = attachHighlightPills(svg, {
-          rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-          chartType: isStacked ? "stacked" : "bar",
-          isStacked,
-          isFaceted,
-          categories: cats,
-          colors,
-          seriesOrder,
-          yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
-        });
-      }
+      pillDriver = attachHighlightPills(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: isStacked ? "stacked" : "bar",
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        horizontal: spec.orientation === "horizontal",
+      });
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -1095,20 +1092,19 @@ function wireFigureSvg(
         if (series) handle.toggle(series);
       });
     }
-    if (!horizontal) {
-      ctx.onPillDriver?.(
-        attachHighlightPills(svg, {
-          rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-          chartType: isStacked ? "stacked" : "bar",
-          isStacked,
-          isFaceted,
-          categories: cats,
-          colors: ctx.colors,
-          seriesOrder: ctx.seriesOrder,
-          yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
-        }),
-      );
-    }
+    ctx.onPillDriver?.(
+      attachHighlightPills(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: isStacked ? "stacked" : "bar",
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors: ctx.colors,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        horizontal,
+      }),
+    );
     if (useCoord) {
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1240,8 +1236,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // fits at common widths instead of collapsing to 2.
   const isPointFigure = spec.chartType === "dotplot" || spec.chartType === "scatter";
   const paneMinWidth = isPointFigure ? 160 : PANE_MIN_WIDTH;
-  // Dot-plot panes render ~33% taller so the vertically-spread points have room to read.
-  const paneHeight = spec.chartType === "dotplot" ? 320 : PANE_HEIGHT;
+  // Dot-plot AND bar/stacked panes render ~33% taller (320) so the marks have room to read;
+  // line/scatter panes keep the default.
+  const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
+  const paneHeight = TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
 
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven

@@ -263,6 +263,7 @@ export function assemblePlot({
     marks.push(
       Plot.ruleY([m.y], {
         stroke: markerColor,
+        strokeOpacity: 0.8,
         strokeDasharray: (m.style || "dashed") === "dashed" ? "4 3" : null,
         strokeWidth: m.strokeWidth || 1.25,
         insetLeft: -effMarginLeft,
