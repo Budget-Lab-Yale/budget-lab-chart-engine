@@ -42,6 +42,10 @@ export interface MountOptions {
   /** Eyebrow line above the title (e.g. "Figure 1"). A property of the article/embed context,
    *  not the chart itself — supplied at mount time. Passing a value shows it; omitting hides it. */
   eyebrow?: string;
+  /** Override the Data/Image download filename slug. Normally derived from the URL (the chart's
+   *  folder); pass this when several charts share one page (e.g. a gallery) so each still gets its
+   *  own name instead of all resolving to the shared page's slug. */
+  downloadName?: string;
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -408,8 +412,8 @@ function downloadSlug(spec: ChartSpec): string {
 
 /** Data (CSV) + Image (PNG) download buttons for the source line. Filenames use the chart's folder
  *  slug (from the URL) rather than the title, which makes for unwieldy filenames. */
-function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): HTMLElement {
-  const base = downloadSlug(spec);
+function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], slugOverride?: string): HTMLElement {
+  const base = slugOverride || downloadSlug(spec);
   const downloads = doc.createElement("div");
   downloads.className = "figure-downloads";
 
@@ -538,7 +542,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
   });
 
   container.appendChild(card);
@@ -1210,7 +1214,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
   });
   container.appendChild(card);
 
