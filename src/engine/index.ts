@@ -269,13 +269,15 @@ export function renderPane(
   let includeZero: boolean;
 
   if (chartType === "bar" || chartType === "stacked") {
-    // Bar/stacked: mandatory zero baseline; axis extent derived from stacked totals +
-    // value-label headroom. Author-supplied yAxisPolicy.min / .max still win (override
-    // the computed bar extent), but we force includeZero so nice() never drops zero.
-    includeZero = true;
+    // Bar/stacked: zero baseline by default (axis extent from stacked totals + value-label
+    // headroom). An explicit yAxisPolicy.min OPTS OUT of the forced zero — a truncated bar axis
+    // (use sparingly; e.g. a level series whose variation is small relative to its magnitude).
+    // Reference-line (markers) values are folded into the extent so a marker stays visible.
+    const markerYs = (spec.yAxisPolicy?.markers ?? []).map((m) => m.y).filter(Number.isFinite);
+    includeZero = policy.min == null;
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
-    const resolvedMin = policy.min ?? barExtent.min;
-    const resolvedMax = policy.max ?? barExtent.max;
+    const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
+    const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
     hardDomain = [resolvedMin, resolvedMax];
   } else {
     // Line (and future non-bar types): unchanged behavior.

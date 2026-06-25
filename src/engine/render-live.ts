@@ -720,6 +720,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        categoryLabels: spec.x_labels,
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
       });
     } else {
@@ -1034,6 +1035,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      categoryLabels: ctx.spec.x_labels,
       orientation: horizontal ? "horizontal" : "vertical",
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),

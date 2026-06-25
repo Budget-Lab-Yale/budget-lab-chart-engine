@@ -639,6 +639,8 @@ export interface BandCrosshairOptions {
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
   yFormat?: (v: number) => string;
+  /** Raw category value → display label for the tooltip header. */
+  categoryLabels?: Record<string, string>;
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -778,9 +780,11 @@ export function buildBandTooltipHtml(
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
+    /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
+    categoryLabels?: Record<string, string>;
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -794,7 +798,7 @@ export function buildBandTooltipHtml(
     ? seriesOrder.filter((s) => valBySeries.has(s))
     : [...valBySeries.keys()];
 
-  let html = `<div class="tbl-tooltip-head">${escapeHtml(category)}</div>`;
+  let html = `<div class="tbl-tooltip-head">${escapeHtml(categoryLabels?.[category] ?? category)}</div>`;
   let total = 0;
   for (const series of orderedSeries) {
     const v = valBySeries.get(series);
@@ -1127,6 +1131,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
+      categoryLabels: opts.categoryLabels,
     });
     tip!.innerHTML = html;
 

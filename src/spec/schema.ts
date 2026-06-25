@@ -71,6 +71,9 @@ const Y_AXIS_POLICY = {
           style: { type: "string", enum: ["dashed", "solid"] },
           color: { type: "string" },
           strokeWidth: { type: "number" },
+          labelSide: { type: "string", enum: ["left", "right"] },
+          labelDx: { type: "number" },
+          labelDy: { type: "number" },
         },
       },
     },
@@ -182,6 +185,7 @@ export const CHART_SPEC_SCHEMA = {
       },
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
+    x_labels: { type: "object", additionalProperties: { type: "string" } },
 
     // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
     shape_order: { type: "array", items: { type: "string" } },

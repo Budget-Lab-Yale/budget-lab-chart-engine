@@ -265,18 +265,20 @@ export function assemblePlot({
     );
     if (m.label) {
       // On an fx-faceted chart (grouped bars), an unfaceted mark repeats in every facet — bind
-      // the label to the LAST fx category so a single right-anchored label renders once.
+      // the label to the appropriate end fx category so a single label renders once.
       const fxDomain = faceted ? (layers.fxScaleOpts?.domain as string[] | undefined) : undefined;
-      const labelFx = fxDomain && fxDomain.length ? fxDomain[fxDomain.length - 1] : undefined;
+      const left = m.labelSide === "left";
+      const labelFx =
+        fxDomain && fxDomain.length ? (left ? fxDomain[0] : fxDomain[fxDomain.length - 1]) : undefined;
       marks.push(
         Plot.text([{ y: m.y, t: m.label, ...(labelFx != null ? { fx: labelFx } : {}) }], {
           y: "y",
           text: "t",
           ...(labelFx != null ? { fx: "fx" } : {}),
-          frameAnchor: "right",
-          textAnchor: "end",
-          dx: -6,
-          dy: -5,
+          frameAnchor: left ? "left" : "right",
+          textAnchor: left ? "start" : "end",
+          dx: m.labelDx != null ? m.labelDx : left ? 6 : -6,
+          dy: m.labelDy != null ? m.labelDy : -5,
           fill: m.color || TBL.color.annotationDim,
           fontSize: TBL.size.annotation,
           fontWeight: 600,

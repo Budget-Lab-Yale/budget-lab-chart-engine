@@ -46,6 +46,13 @@ export interface YAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
+  /** Which side the label sits + anchors to ("right" default → right edge, right-aligned;
+   *  "left" → left edge, left-aligned). */
+  labelSide?: "left" | "right";
+  /** Horizontal nudge (px, signed: + = right) of the label from its anchored edge. */
+  labelDx?: number;
+  /** Vertical nudge (px, signed: + = down) of the label from the line. Default -5 (above). */
+  labelDy?: number;
 }
 
 export interface YAxisPolicy {
@@ -153,6 +160,9 @@ export interface ChartSpec {
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;
+  /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
+   *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
+  x_labels?: Record<string, string>;
 
   // Shape channel (point charts: scatter / dotplot). The shape COLUMN is mapped via
   // `columns.shape`; these mirror the series_* fields for the shape-encoding legend.
