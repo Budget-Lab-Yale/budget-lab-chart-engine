@@ -508,6 +508,10 @@ body {
   height: 11px;
   border-radius: 1px;
 }
+/* Value-on-highlight labels (bars / dot plots): hidden until their series is highlighted in
+   the legend, then revealed. */
+.tbl-hl-value text { opacity: 0; pointer-events: none; transition: opacity 0.1s ease; }
+.tbl-hl-value text.tbl-hl-value-show { opacity: 1; }
 /* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
 .tbl-tooltip-swatch.is-symbol {
   width: 16px;

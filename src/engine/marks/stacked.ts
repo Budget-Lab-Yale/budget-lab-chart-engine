@@ -45,13 +45,22 @@ function makeValueFormatter(
   values: number[],
   units: string,
   signed: boolean,
+  decimals?: number,
 ): (d: number) => string {
-  const maxFrac = values.reduce((max, v) => {
-    if (!Number.isFinite(v)) return max;
-    const s = String(v);
-    const i = s.indexOf(".");
-    return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-  }, 0);
+  // Fixed precision when set; else the minimum the data needs, CAPPED at 2 so raw floats don't
+  // print 15 digits (matches bar.ts).
+  const maxFrac =
+    decimals != null
+      ? decimals
+      : Math.min(
+          2,
+          values.reduce((max, v) => {
+            if (!Number.isFinite(v)) return max;
+            const s = String(v);
+            const i = s.indexOf(".");
+            return Math.max(max, i < 0 ? 0 : s.length - i - 1);
+          }, 0),
+        );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     const mag = Math.abs(d).toFixed(maxFrac);
@@ -121,8 +130,8 @@ export function buildStackedMarks(
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
   // Net text above a cumulative stack is unsigned (always positive); diverging net is signed.
-  const netFmt = makeValueFormatter([...netByCat.values()], units, netMode === "dot");
-  const segFmt = makeValueFormatter(allValues, units, false);
+  const netFmt = makeValueFormatter([...netByCat.values()], units, netMode === "dot", spec.valueLabels?.decimals);
+  const segFmt = makeValueFormatter(allValues, units, false, spec.valueLabels?.decimals);
 
   // --- Color: categorical (default) or monochromatic by stack position ---
   // For mono, segments are colored darkest-at-bottom → lightest-at-top by their VISUAL
@@ -209,6 +218,28 @@ export function buildStackedMarks(
     : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel });
 
   const overlay: unknown[] = [stackMark];
+
+  // Hover-value segment labels (revealed by the legend on hover/pin): one text per segment,
+  // centered via the stack transform, hidden by default (className "tbl-hl-value"). White with a
+  // dark halo so the value reads on any segment color. Tagged data-series in data order below.
+  const hlSel = "g.tbl-hl-value text";
+  const hlText = (d: PreparedRow) => segFmt(d._y as number);
+  const hlStyle = {
+    text: hlText,
+    className: "tbl-hl-value",
+    fill: "#ffffff",
+    stroke: "#1A1A2E",
+    strokeWidth: 2.5,
+    paintOrder: "stroke",
+    fontSize: TBL_VALUE_LABEL.fontSize,
+    fontWeight: TBL_VALUE_LABEL.fontWeight,
+    textAnchor: "middle" as const,
+  };
+  overlay.push(
+    horizontal
+      ? Plot.text(stackData, Plot.stackX({ y: catField, x: "_y", ...hlStyle }))
+      : Plot.text(stackData, Plot.stackY({ x: catField, y: "_y", ...hlStyle })),
+  );
 
   // Small-multiples pane (§6): suppress the net TEXT (the value text above a cumulative stack
   // AND the signed label below the diverging dot) and in-segment labels — panes are small. The
@@ -388,6 +419,7 @@ export function buildStackedMarks(
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+        { selector: hlSel, seriesOrder: rectSeriesOrder },
         ...netTagging,
       ],
       dashedNames: new Set<string>(),
@@ -406,6 +438,7 @@ export function buildStackedMarks(
     overlay,
     tagging: [
       { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+      { selector: hlSel, seriesOrder: rectSeriesOrder },
       ...netTagging,
     ],
     dashedNames: new Set<string>(),

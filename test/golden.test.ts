@@ -435,7 +435,7 @@ describe("golden SVG — stacked bars", () => {
     expect(legendItems?.length).toBe(3);
     // Net text above each stack: stack mark + one net-text mark = a g[aria-label="text"]
     // for the net beyond the chrome (y-tick + band-x = 2) → 3 text groups.
-    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(3);
+    expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(3);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-cumulative.golden.svg");
   });
 
@@ -516,7 +516,7 @@ describe("golden SVG — stacked bars", () => {
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(9);
     // No net text/dot for normalized (every bar tops at 100%). Only chrome text groups
     // (y-tick labels + band x-axis) → 2.
-    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-100.golden.svg");
   });
@@ -533,7 +533,7 @@ describe("golden SVG — stacked bars", () => {
     // No net dot (diverging data would normally produce one).
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
     // No net text above (only chrome text groups: y-tick + band-x = 2).
-    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     // No "Total" legend extra — only the 3 series entries.
     expect(legendItems?.length).toBe(3);
     expect(legendItems?.every((l) => l.series !== TOTAL_SERIES_KEY)).toBe(true);
@@ -1073,7 +1073,7 @@ describe("golden figure — per-pane bar small multiples (renderFigure, task B8)
       expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(3);
       // Value labels SUPPRESSED in panes (§6): the only text groups are the chrome
       // (y-tick-label group + band x-axis group = 2). A value-label Plot.text would add a 3rd.
-      expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+      expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     });
 
     // Single series, single chart-type → no figure legend (single-series bars get none).
@@ -1113,7 +1113,7 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
       expect(svg.querySelectorAll("g.tbl-net-label text").length).toBe(0);
       // Segment labels SUPPRESSED (diverging already suppresses them, and panes too): the only
       // text groups are the chrome (y-tick-label + band x-axis = 2).
-      expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+      expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     });
 
     // Diverging stack → figure legend carries the 4 series (rect swatches) + a Total dot row.

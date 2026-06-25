@@ -1366,6 +1366,38 @@ describe("mountChart small multiples", () => {
 // ---------------------------------------------------------------------------
 // Point charts: scatter (dual encoding) + dotplot (faceted, redundant encoding)
 
+describe("value-on-highlight labels", () => {
+  const GROUPED: ChartSpec = {
+    chartType: "bar",
+    title: "Grouped",
+    xAxisType: "categorical",
+    data: "inline",
+    columns: { x: "g", value: "v", series: "s" },
+    series_order: ["A", "B"],
+    valueLabels: { show: false },
+  };
+  const GROUPED_ROWS: TidyRow[] = [
+    { g: "X", s: "A", v: "3" }, { g: "X", s: "B", v: "5" },
+    { g: "Y", s: "A", v: "2" }, { g: "Y", s: "B", v: "6" },
+  ];
+
+  it("hidden by default; legend hover reveals the active series' value labels", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: GROUPED, rows: GROUPED_ROWS, width: 720 });
+    const labels = container.querySelectorAll(".tbl-hl-value text");
+    expect(labels.length).toBe(4); // one per (group, series)
+    expect(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show").length).toBe(0);
+    // Each label is tagged with its series (the tagging fix guarantees correct mapping).
+    const btnA = container.querySelector('.tbl-legend-item[data-series="A"]') as HTMLElement;
+    btnA.dispatchEvent(new Event("pointerenter"));
+    const shown = Array.from(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show"));
+    expect(shown.length).toBe(2);
+    expect([...new Set(shown.map((t) => t.getAttribute("data-series")))]).toEqual(["A"]);
+    btnA.dispatchEvent(new Event("pointerleave"));
+    expect(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show").length).toBe(0);
+  });
+});
+
 describe("mountChart point charts", () => {
   const SCATTER_SPEC: ChartSpec = {
     chartType: "scatter",

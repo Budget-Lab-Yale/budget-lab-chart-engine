@@ -193,6 +193,12 @@ export function renderLegend(
         const shapeOk = !dimShape || (sh != null && activeShape.has(sh));
         p.classList.toggle("tbl-dimmed", !(colorOk && shapeOk));
       });
+      // Value-on-highlight labels (bars / dot plots): reveal the active series' value labels,
+      // hidden otherwise. Hovering or pinning a legend series surfaces that series' values.
+      svg.querySelectorAll(".tbl-hl-value text").forEach((t) => {
+        const s = t.getAttribute("data-series");
+        t.classList.toggle("tbl-hl-value-show", active.size > 0 && active.has(s as string));
+      });
     }
     legend.querySelectorAll<HTMLElement>(".tbl-legend-item").forEach((btn) => {
       if (btn.dataset.shape != null) {

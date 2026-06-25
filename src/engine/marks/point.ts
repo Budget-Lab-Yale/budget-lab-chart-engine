@@ -4,7 +4,7 @@
 // — point both at the same column for redundant color+shape encoding (the dot-plot default).
 // The generic chrome (gridlines, axes, zero baseline) is added by assemblePlot.
 import { Plot } from "../vendor";
-import { markerSymbolForIndex } from "../theme";
+import { markerSymbolForIndex, TBL, TBL_VALUE_LABEL } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -74,6 +74,31 @@ export function buildPointMarks(
     taggedData = data;
   }
 
+  // Hover-value labels (dot plots): value above each point, dodged to sit over its marker, hidden
+  // until the series is highlighted in the legend (className "tbl-hl-value"). Tagged data-series
+  // in data order below. Only for categorical dot plots (a scatter point has no single "value").
+  let hlTagging: { selector: string; seriesOrder: string[] }[] = [];
+  if (categorical && seriesNames.length > 1) {
+    const off = pointDodgeOffsets(seriesNames, !!ctx.pane);
+    const decimals = _spec.tooltip_decimals ?? 2;
+    overlay.push(
+      Plot.text(data, {
+        x: xField,
+        y: "_y",
+        text: (d: PreparedRow) => (Number.isFinite(d._y) ? (d._y as number).toFixed(decimals) : ""),
+        className: "tbl-hl-value",
+        fill: TBL.color.heading,
+        fontSize: TBL_VALUE_LABEL.fontSize,
+        fontWeight: TBL_VALUE_LABEL.fontWeight,
+        dy: -10,
+        dx: (d: PreparedRow) => off.get(d.series) ?? 0,
+        defined: (d: PreparedRow) => Number.isFinite(d._y),
+        ...facetChannels,
+      }),
+    );
+    hlTagging = [{ selector: 'g.tbl-hl-value text', seriesOrder: data.map((d) => d.series) }];
+  }
+
   // Categorical x (dotplot): DON'T override the x scale — use the adapter's BAND scale (the same
   // one bars use). A band scale divides the plot into equal, non-overlapping bands and Plot
   // centers each category's dot in its band, so the dodge center line sits at the band center and
@@ -109,6 +134,7 @@ export function buildPointMarks(
       // category centers from the markers (rotation-independent, unlike the axis labels).
       ...(categorical ? { categoryOrder: taggedData.map((d) => d._xc ?? "") } : {}),
     },
+    ...hlTagging,
   ];
 
   return {
