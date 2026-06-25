@@ -247,6 +247,24 @@ describe("golden SVG — bars", () => {
     expect(a).toBe(b);
   });
 
+  it("annotation reference line on a grouped (fx-faceted) bar spans the full width (one line)", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const spec: ChartSpec = { ...BAR_MULTI_SPEC, yAxisPolicy: { markers: [{ y: 1.5, label: "Target" }] } };
+    const width = 720;
+    const { svg } = renderChart(spec, rows, { width, height: 400, document });
+    // The per-facet copies are collapsed to ONE line that runs edge-to-edge (absolute 0..width
+    // once the kept group's translate is applied), not three facet-bounded segments.
+    const lines = Array.from(svg.querySelectorAll<SVGLineElement>('g[class*="tbl-annotation-line-"] line'));
+    expect(lines.length).toBe(1);
+    const line = lines[0]!;
+    const tx = (() => {
+      const m = /translate\(\s*(-?[\d.]+)/.exec(line.closest("g[class*='tbl-annotation-line-']")?.getAttribute("transform") ?? "");
+      return m ? Number(m[1]) : 0;
+    })();
+    expect(tx + Number(line.getAttribute("x1"))).toBeCloseTo(0, 0);
+    expect(tx + Number(line.getAttribute("x2"))).toBeCloseTo(width, 0);
+  });
+
   it("renders bars crossing zero (labels above/below)", async () => {
     const rows = parseCsv("./fixtures/bar-negative.csv");
     const { svg } = renderChart(BAR_NEGATIVE_SPEC, rows, { width: 720, height: 400, document });

@@ -15,6 +15,7 @@ import {
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
   X_AXIS_LABEL_CLASS,
+  ANNOTATION_LINE_CLASS,
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
 import { tblColorScale, resolveColor } from "./palette";
@@ -269,6 +270,10 @@ export function assemblePlot({
         insetLeft: -effMarginLeft,
         insetRight: -effMarginRight,
         clip: false,
+        // Findable per-marker class so the fx-facet collapse can stretch the line to the full
+        // plot width (otherwise a grouped/faceted bar repeats it per facet, stopping at each
+        // facet's edge instead of running edge-to-edge like a line chart).
+        className: `${ANNOTATION_LINE_CLASS}-${i}`,
       }),
     );
     if (m.label) {
