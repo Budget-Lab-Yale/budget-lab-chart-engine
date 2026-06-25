@@ -1887,6 +1887,10 @@ export interface CategoricalLineOptions {
    *  drawing a dashed vertical guide line. The band extents are derived from the x-axis label
    *  centers (midpoints to neighbors). */
   bandHighlight?: boolean;
+  /** Dot plots: per-series horizontal dodge offset (px from the band center). When set, the
+   *  coordinated cursor places each series' dot OVER its dodged data point, and lays the value
+   *  pills side by side around the center line (both on the same vertical side of the dots). */
+  dodge?: Map<string, number>;
 }
 
 /**
@@ -2065,15 +2069,31 @@ export function attachSecondaryCategoricalLineCursor(
       if (ys.length) addCoordCategoryHighlight(g, doc, svgEl, mt + plotH, cx, category, detectBandLabelMode(svgEl, mt + plotH), ys);
     }
     const weight = active ? 700 : 600;
-    const flip = cx > ml + (W - ml - mr) * 0.72;
     const toPy = readLinearYScale(svgEl);
     if (toPy) {
-      const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)! }));
-      for (const p of pts) addCoordDot(g, doc, cx, toPy(p.v), opts.colors?.get(p.s) || "#666666", opts.symbols?.get(p.s));
-      const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
-      pts.forEach((p, i) => {
-        addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), opts.colors?.get(p.s) || "#666666", weight);
-      });
+      const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
+      const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, y: toPy(vals.get(s)!), dx: opts.dodge?.get(s) ?? 0 }));
+      // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
+      for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
+      if (opts.dodge) {
+        // Value pills: side by side around the center line (each on its series' side), both on
+        // the SAME vertical side of the dots — above when there's room, else below.
+        const minY = Math.min(...pts.map((p) => p.y));
+        const maxY = Math.max(...pts.map((p) => p.y));
+        const aboveY = minY - 13;
+        const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
+        for (const p of pts) {
+          const anchor = p.dx < 0 ? "end" : p.dx > 0 ? "start" : "middle";
+          const ax = p.dx < 0 ? cx - 2 : p.dx > 0 ? cx + 2 : cx;
+          addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
+        }
+      } else {
+        const flip = cx > ml + (W - ml - mr) * 0.72;
+        const labelYs = spreadLabelYs(pts.map((p) => p.y), COORD_PILL_H, mt, mt + plotH);
+        pts.forEach((p, i) => {
+          addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colorFor(p.s), weight);
+        });
+      }
     }
     g.setAttribute("opacity", "1");
   };

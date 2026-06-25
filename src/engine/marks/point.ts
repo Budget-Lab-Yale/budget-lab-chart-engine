@@ -8,6 +8,15 @@ import { markerSymbolForIndex } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
+/** Per-series horizontal dodge offset (px) for a categorical dot plot, centered on the band.
+ *  Shared by the mark builder (to offset the markers) and the coordinated cursor (to place its
+ *  dots/labels over the actual dodged points). Panes dodge slightly tighter than single charts. */
+export function pointDodgeOffsets(seriesNames: string[], pane: boolean): Map<string, number> {
+  const gap = pane ? 14 : 18;
+  const mid = (seriesNames.length - 1) / 2;
+  return new Map(seriesNames.map((s, i) => [s, (i - mid) * gap]));
+}
+
 export function buildPointMarks(
   data: PreparedRow[],
   _spec: ChartSpec,
@@ -51,13 +60,12 @@ export function buildPointMarks(
   const overlay: unknown[] = [];
   let taggedData: PreparedRow[];
   if (dodge) {
-    const gap = ctx.pane ? 14 : 18; // px between adjacent series within a category (~30% wider)
-    const mid = (seriesNames.length - 1) / 2;
+    const offsets = pointDodgeOffsets(seriesNames, !!ctx.pane);
     taggedData = [];
-    seriesNames.forEach((s, i) => {
+    seriesNames.forEach((s) => {
       const seriesData = data.filter((d) => d.series === s);
       if (!seriesData.length) return;
-      overlay.push(Plot.dot(seriesData, dotOpts({ dx: (i - mid) * gap })));
+      overlay.push(Plot.dot(seriesData, dotOpts({ dx: offsets.get(s) ?? 0 })));
       taggedData.push(...seriesData);
     });
   } else {

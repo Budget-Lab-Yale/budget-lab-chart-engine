@@ -9,6 +9,7 @@ import { resolveColumns } from "../spec/columns.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
+import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { renderFigure } from "./figure.js";
@@ -913,6 +914,9 @@ function wireFigureSvg(
   if (ctx.spec.chartType === "dotplot") {
     const dotUseCoord = ctx.onResolve != null;
     const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const));
+    // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
+    // offsets so they land over the actual points (panes dodge at the pane gap).
+    const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
     attachCategoricalLineCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       colors: ctx.colors,
@@ -931,6 +935,7 @@ function wireFigureSvg(
         yFormat: (v) => formatValue(v, ctx.units),
         symbols,
         bandHighlight: true,
+        dodge,
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
