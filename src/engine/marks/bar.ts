@@ -143,11 +143,6 @@ export function buildBarMarks(
   // Gate on ctx.pane so the px-suppression heuristic doesn't have to be relied on — keeps
   // single-chart (non-pane) output byte-identical.
   const emitValueLabels = showValueLabels && !ctx.pane && estBarPx >= VALUE_LABEL_MIN_PX;
-  // Hover-value labels (revealed by the legend) are emitted for MULTI-series charts when always-on
-  // labels are NOT shown, so a chart without permanent labels still surfaces a series' values on
-  // legend hover/pin. Single-series charts have no legend to highlight, so they get none.
-  const emitHover = isMulti && !emitValueLabels;
-  const hlSel = 'g.tbl-hl-value text';
 
   const allValues = data
     .map((r) => r._y)
@@ -173,8 +168,6 @@ export function buildBarMarks(
     if (emitValueLabels) {
       overlay.push(...buildValueLabelMarks(data, { band: xField }, fmt, horizontal));
     }
-    if (emitHover) overlay.push(hoverValueLabelMark(data, { band: xField }, fmt, horizontal));
-    const hlTag = emitHover ? [{ selector: hlSel, seriesOrder: data.map((d) => d.series) }] : [];
 
     // Rect tagging: Plot emits one <rect> per category in band-domain order (it does not
     // omit rects for null values - it renders them at zero length), so the order is simply
@@ -190,7 +183,7 @@ export function buildBarMarks(
       return {
         underlay: [],
         overlay,
-        tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...hlTag],
+        tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
         xAxisMarks: tblBandYAxis(categories, gutter),
@@ -201,7 +194,7 @@ export function buildBarMarks(
     return {
       underlay: [],
       overlay,
-      tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...hlTag],
+      tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
       dashedNames: new Set<string>(),
       // Refine the adapter's band x with a slightly larger outer pad so bars do not kiss
       // the frame. (Adapter set type:band/domain/axis already.)
@@ -225,7 +218,6 @@ export function buildBarMarks(
         ...buildValueLabelMarks(data, { band: "series", facet: catField }, fmt, horizontal),
       );
     }
-    if (emitHover) overlay.push(hoverValueLabelMark(data, { band: "series", facet: catField }, fmt, horizontal));
 
     // --- Rect tagging order (horizontal grouped) ---
     // Plot emits one <rect> PER DATUM, partitioned by the fy facet (rendered in fy-domain =
@@ -247,7 +239,6 @@ export function buildBarMarks(
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder },
-        ...(emitHover ? [{ selector: hlSel, seriesOrder: hRectSeriesOrder }] : []),
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
@@ -266,7 +257,6 @@ export function buildBarMarks(
       ...buildValueLabelMarks(data, { band: "series", facet: catField }, fmt, horizontal),
     );
   }
-  if (emitHover) overlay.push(hoverValueLabelMark(data, { band: "series", facet: catField }, fmt, horizontal));
 
   // --- Rect tagging order ---
   // Plot emits one <rect> PER DATUM, partitioned by the fx facet (rendered in fx-domain =
@@ -288,7 +278,6 @@ export function buildBarMarks(
     overlay,
     tagging: [
       { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
-      ...(emitHover ? [{ selector: hlSel, seriesOrder: rectSeriesOrder }] : []),
     ],
     dashedNames: new Set<string>(),
     fxScaleOpts: groupBandOpts,
@@ -306,43 +295,6 @@ export function buildBarMarks(
  *  `channels.band` positions the label on the inner band axis (the category field for
  *  single-series, "series" for grouped); `channels.facet` (grouped only) places it in the
  *  right group via Plot's fx/fy faceting. */
-/** A hidden value-label layer (className "tbl-hl-value"), one text PER DATUM in data order so it
- *  can be tagged data-series and revealed by the legend on hover/pin. Single Plot.text (no
- *  pos/neg split) with per-datum offsets, so the DOM order matches the rect tag order. */
-function hoverValueLabelMark(
-  data: PreparedRow[],
-  channels: { band: string; facet?: string },
-  fmt: (d: number) => string,
-  horizontal: boolean,
-): unknown {
-  const text = (d: PreparedRow) => fmt(d._y as number);
-  const common = {
-    text,
-    className: "tbl-hl-value",
-    fill: TBL.color.heading,
-    fontSize: TBL_VALUE_LABEL.fontSize,
-    fontWeight: TBL_VALUE_LABEL.fontWeight,
-  };
-  const { gap, gapBelow } = TBL_VALUE_LABEL;
-  if (horizontal) {
-    return Plot.text(data, {
-      ...common,
-      y: channels.band,
-      ...(channels.facet ? { fy: channels.facet } : {}),
-      x: "_y",
-      textAnchor: (d: PreparedRow) => ((d._y as number) >= 0 ? "start" : "end"),
-      dx: (d: PreparedRow) => ((d._y as number) >= 0 ? gap : -gap),
-    });
-  }
-  return Plot.text(data, {
-    ...common,
-    x: channels.band,
-    ...(channels.facet ? { fx: channels.facet } : {}),
-    y: "_y",
-    dy: (d: PreparedRow) => ((d._y as number) >= 0 ? -gap : gapBelow),
-  });
-}
-
 function buildValueLabelMarks(
   data: PreparedRow[],
   channels: { band: string; facet?: string },

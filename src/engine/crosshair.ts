@@ -2179,6 +2179,165 @@ export function attachSecondaryCategoricalLineCursor(
 }
 
 // ---------------------------------------------------------------------------
+// Legend-highlight value pills — categorical bar / stacked / dot-plot charts
+// ---------------------------------------------------------------------------
+
+export interface HighlightPillsOptions {
+  /** dataInScope rows (each with `_xc` category, `series`, `_y`). */
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+  /** "stacked" → segment-center pills; "bar" → above-bar pills; "dotplot" → beside-dot pills. */
+  chartType: "bar" | "stacked" | "dotplot";
+  isStacked?: boolean;
+  /** Grouped bars use fx-faceted layout (xScaleField === "fx"). */
+  isFaceted?: boolean;
+  /** Ordered category list (declaration / fx-domain order). */
+  categories?: string[];
+  colors?: Map<string, string>;
+  seriesOrder?: string[];
+  yFormat?: (v: number) => string;
+  /** Dot-plot dodge offsets (series → px), so pills land beside the dodged dots. */
+  dodge?: Map<string, number>;
+}
+
+/**
+ * Attach a legend-highlight value-pill renderer to a categorical chart SVG. Returns a driver
+ * `setActive(active)` that draws a value pill for EVERY mark of the active series (across all
+ * categories), then clears when `active` is empty or covers every series (i.e. no highlight).
+ *
+ * The pills are drawn with the SAME primitive (`addCoordPill`) and the SAME positioning rules
+ * as the coordinated-cursor secondary renderer, so a highlighted series' values look identical
+ * to what a hover would show — segment-centered (stacked), above the bar (grouped/single), or
+ * beside the dodged dot (dot plot), color-matched to the series, on the frosted pill.
+ *
+ * Geometry is read lazily on each call (bars: rect attributes; dots: data-category centers +
+ * the y-scale). In non-layout environments (jsdom) the dot path no-ops cleanly; the bar path
+ * still reads rect attributes, so the bar pills render. Lives in its own `.tbl-hl-pills` group
+ * so it never clobbers the cursor's `.tbl-coord` group.
+ */
+export function attachHighlightPills(
+  svgEl: SVGSVGElement,
+  opts: HighlightPillsOptions,
+): (active: Set<string>) => void {
+  const noop = (): void => {};
+  if (!svgEl || !opts.rows?.length) return noop;
+  const yFormat =
+    opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const vb = svgEl.viewBox?.baseVal;
+  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
+  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+  const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
+  const mr = +(svgEl.dataset.marginRight ?? "") || 8;
+  const mt = +(svgEl.dataset.marginTop ?? "") || 18;
+  const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
+  const plotH = H - mt - mb;
+
+  const valByCat = new Map<string, Map<string, number>>();
+  const allSeries = new Set<string>();
+  for (const r of opts.rows) {
+    if (r.series) allSeries.add(r.series);
+    if (!r._xc || r._y == null || !Number.isFinite(r._y)) continue;
+    if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
+    valByCat.get(r._xc)!.set(r.series, r._y);
+  }
+  const colorFor = (s: string): string => opts.colors?.get(s) || COORD_LABEL_DARK;
+  const orderFor = (cat: string, active: Set<string>): string[] => {
+    const vals = valByCat.get(cat);
+    if (!vals) return [];
+    const base = opts.seriesOrder && opts.seriesOrder.length
+      ? opts.seriesOrder.filter((s) => vals.has(s))
+      : [...vals.keys()];
+    return base.filter((s) => active.has(s));
+  };
+
+  // Own group, separate from the cursor's `.tbl-coord`.
+  svgEl.querySelectorAll(".tbl-hl-pills").forEach((el) => el.remove());
+  const g = svgEl.ownerDocument.createElementNS(COORD_NS, "g");
+  g.classList.add("tbl-hl-pills");
+  g.setAttribute("opacity", "0");
+  g.style.pointerEvents = "none";
+  svgEl.appendChild(g);
+  const doc = svgEl.ownerDocument;
+
+  return (active: Set<string>): void => {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    // No highlight: nothing pinned/hovered, or every series active (the legend doesn't dim then).
+    if (!active || active.size === 0 || active.size >= allSeries.size) {
+      g.setAttribute("opacity", "0");
+      return;
+    }
+    const weight = 700;
+
+    if (opts.chartType === "dotplot") {
+      const toPy = readLinearYScale(svgEl);
+      const centers = readCategoryCentersFromMarks(svgEl);
+      if (!toPy || !centers.length) { g.setAttribute("opacity", "0"); return; }
+      for (const c of centers) {
+        const vals = valByCat.get(c.category);
+        if (!vals) continue;
+        const series = orderFor(c.category, active);
+        if (!series.length) continue;
+        const pts = series.map((s) => ({ s, v: vals.get(s)!, y: toPy(vals.get(s)!), dx: opts.dodge?.get(s) ?? 0 }));
+        if (opts.dodge) {
+          // Pills above the cluster, each on its dodge side (matches the coordinated cursor).
+          const minY = Math.min(...pts.map((p) => p.y));
+          const maxY = Math.max(...pts.map((p) => p.y));
+          const aboveY = minY - 13;
+          const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
+          const PILL_GAP = 3;
+          for (const p of pts) {
+            const [anchor, ax] =
+              p.dx < 0 ? (["pill-end", c.cx - PILL_GAP] as const)
+              : p.dx > 0 ? (["pill-start", c.cx + PILL_GAP] as const)
+              : (["middle", c.cx] as const);
+            addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
+          }
+        } else {
+          const flip = c.cx > ml + (W - ml - mr) * 0.72;
+          const labelYs = spreadLabelYs(pts.map((p) => p.y), COORD_PILL_H, mt, mt + plotH);
+          pts.forEach((p, i) => {
+            addCoordPill(g, doc, flip ? c.cx - 10 : c.cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colorFor(p.s), weight);
+          });
+        }
+      }
+      g.setAttribute("opacity", "1");
+      return;
+    }
+
+    // Bars / stacked: read rect geometry per category, draw pills for the active series only.
+    const rectsByCat = buildRectsByCategory(svgEl, {
+      rows: opts.rows,
+      isFaceted: opts.isFaceted,
+      categories: opts.categories,
+    } as SecondaryBandOptions);
+    for (const [category, rects] of rectsByCat) {
+      const vals = valByCat.get(category);
+      const valid = rects
+        .filter((r) => active.has(r.series))
+        .map((rect) => ({ rect, v: vals?.get(rect.series) }))
+        .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
+      if (!valid.length) continue;
+      if (opts.isStacked) {
+        const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+      } else {
+        const ys = staggerBarLabels(
+          valid.map((x) => ({
+            cx: x.rect.cx,
+            w: coordPillWidth(yFormat(x.v)),
+            value: x.v,
+            y: x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9,
+          })),
+          COORD_PILL_H,
+        );
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+      }
+    }
+    g.setAttribute("opacity", "1");
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Per-point hover — scatter charts
 // ---------------------------------------------------------------------------
 

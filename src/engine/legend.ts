@@ -117,7 +117,7 @@ export function renderLegend(
     shapeTitle,
   }: {
     svg?: Element;
-    onHighlight?: () => void;
+    onHighlight?: (active: Set<string>) => void;
     shapeItems?: ShapeLegendEntry[] | null;
     colorTitle?: string;
     shapeTitle?: string;
@@ -187,22 +187,11 @@ export function renderLegend(
       // A marker stays bright only if it matches the active selection in BOTH dimensions
       // (intersection). Line/bar marks carry only data-series → the shape test is a no-op.
       svg.querySelectorAll("[data-series]").forEach((p) => {
-        // Hover-value labels carry data-series too, but their visibility is driven entirely by
-        // the `-show` toggle below (hidden = opacity 0). Skip them here: dimming would set them
-        // to 0.15 (a faint ghost) instead of fully hidden, so a pinned series would surface
-        // every OTHER series' values as dimmed text — exactly what we don't want.
-        if (p.closest(".tbl-hl-value")) return;
         const s = p.getAttribute("data-series");
         const sh = p.getAttribute("data-shape");
         const colorOk = !dimColor || active.has(s as string);
         const shapeOk = !dimShape || (sh != null && activeShape.has(sh));
         p.classList.toggle("tbl-dimmed", !(colorOk && shapeOk));
-      });
-      // Value-on-highlight labels (bars / dot plots): reveal the active series' value labels,
-      // hidden otherwise. Hovering or pinning a legend series surfaces that series' values.
-      svg.querySelectorAll(".tbl-hl-value text").forEach((t) => {
-        const s = t.getAttribute("data-series");
-        t.classList.toggle("tbl-hl-value-show", active.size > 0 && active.has(s as string));
       });
     }
     legend.querySelectorAll<HTMLElement>(".tbl-legend-item").forEach((btn) => {
@@ -219,8 +208,9 @@ export function renderLegend(
     resetBtn.hidden = pinned.size === 0 && pinnedShape.size === 0;
     // Notify after the dim classes are toggled so the callback reads the fresh dim state
     // (e.g. recoloring net-total labels by the behind-segment's dim class). Runs on every
-    // highlight change — pin, hover, focus, blur, and reset.
-    onHighlight?.();
+    // highlight change — pin, hover, focus, blur, and reset. The active color-series set is
+    // passed so the callback can drive the value-pill renderer (an empty set clears it).
+    onHighlight?.(active);
   };
 
   // Shared pin toggle — the single source of truth for both legend-button clicks and

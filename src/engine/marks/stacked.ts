@@ -219,26 +219,6 @@ export function buildStackedMarks(
 
   const overlay: unknown[] = [stackMark];
 
-  // Hover-value segment labels (revealed by the legend on hover/pin): one text per segment,
-  // centered via the stack transform, hidden by default (className "tbl-hl-value"). White with a
-  // dark halo so the value reads on any segment color. Tagged data-series in data order below.
-  const hlSel = "g.tbl-hl-value text";
-  const hlText = (d: PreparedRow) => segFmt(d._y as number);
-  // Dark text — the live layer draws a frosted pill behind each revealed label, so no halo needed.
-  const hlStyle = {
-    text: hlText,
-    className: "tbl-hl-value",
-    fill: TBL.color.heading,
-    fontSize: TBL_VALUE_LABEL.fontSize,
-    fontWeight: TBL_VALUE_LABEL.fontWeight,
-    textAnchor: "middle" as const,
-  };
-  overlay.push(
-    horizontal
-      ? Plot.text(stackData, Plot.stackX({ y: catField, x: "_y", ...hlStyle }))
-      : Plot.text(stackData, Plot.stackY({ x: catField, y: "_y", ...hlStyle })),
-  );
-
   // Small-multiples pane (§6): suppress the net TEXT (the value text above a cumulative stack
   // AND the signed label below the diverging dot) and in-segment labels — panes are small. The
   // diverging net DOT is KEPT (it still carries the net). Gated on ctx.pane so single-chart
@@ -417,7 +397,6 @@ export function buildStackedMarks(
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
-        { selector: hlSel, seriesOrder: rectSeriesOrder },
         ...netTagging,
       ],
       dashedNames: new Set<string>(),
@@ -436,7 +415,6 @@ export function buildStackedMarks(
     overlay,
     tagging: [
       { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
-      { selector: hlSel, seriesOrder: rectSeriesOrder },
       ...netTagging,
     ],
     dashedNames: new Set<string>(),

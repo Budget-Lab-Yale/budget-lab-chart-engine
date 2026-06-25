@@ -23,6 +23,7 @@ import {
   attachCategoricalLineCrosshair,
   attachSecondaryCategoricalLineCursor,
   attachPointHover,
+  attachHighlightPills,
 } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -304,66 +305,6 @@ function cssAttrEscape(value: string): string {
   return value.replace(/(["\\])/g, "\\$1");
 }
 
-const HL_PILL_NS = "http://www.w3.org/2000/svg";
-
-/**
- * Draw a frosted-glass "pill" behind every currently-revealed value label
- * (`.tbl-hl-value text.tbl-hl-value-show`), so the value-on-highlight callout matches the
- * tooltip / coordinated-cursor styling instead of reading as bare on-chart text. Called on
- * every highlight change (the legend toggles the `-show` class, then fires onHighlight). Clears
- * any prior pills first so de-highlighting a series removes its pills.
- *
- * Each pill is a rounded <rect> inserted as the previous sibling of its label within the same
- * Plot text group, so it shares the label's coordinate system (no transform math) and paints
- * behind it. Sized from the label's rendered box via getBBox — a no-op in non-layout
- * environments (jsdom returns a zero box → skipped), which is why the toggle itself is unit
- * tested separately. `root` is the chart SVG (single chart) or the figure grid (spans panes).
- */
-function drawHlPills(root: Element): void {
-  root.querySelectorAll(".tbl-hl-pill").forEach((p) => p.remove());
-  const labels = root.querySelectorAll<SVGTextElement>(
-    ".tbl-hl-value text.tbl-hl-value-show",
-  );
-  labels.forEach((t) => {
-    let bb: DOMRect;
-    try {
-      bb = t.getBBox();
-    } catch {
-      return; // getBBox unsupported (jsdom) — skip pill, label text still shows
-    }
-    if (!(bb.width > 0 && bb.height > 0)) return;
-    const padX = 5;
-    const padY = 2.5;
-    const rect = t.ownerDocument.createElementNS(HL_PILL_NS, "rect");
-    rect.setAttribute("class", "tbl-hl-pill");
-    // getBBox() returns the label geometry in its PRE-transform local space, but each Plot
-    // text positions itself with its own `transform` (translate to the datum). Copy that
-    // transform onto the pill so the rect shares the label's frame, then use the local bbox
-    // directly — otherwise the rect lands at the group origin (a stray box at the top-left).
-    const tf = t.getAttribute("transform");
-    if (tf) rect.setAttribute("transform", tf);
-    rect.setAttribute("x", String(bb.x - padX));
-    rect.setAttribute("y", String(bb.y - padY));
-    rect.setAttribute("width", String(bb.width + padX * 2));
-    rect.setAttribute("height", String(bb.height + padY * 2));
-    rect.setAttribute("rx", "4");
-    rect.setAttribute("ry", "4");
-    rect.setAttribute("fill", "#FFFFFF");
-    rect.setAttribute("fill-opacity", "0.86");
-    rect.setAttribute("stroke", "#C8CDD7");
-    rect.setAttribute("stroke-opacity", "0.7");
-    rect.setAttribute("stroke-width", "1");
-    rect.setAttribute("pointer-events", "none");
-    t.parentNode?.insertBefore(rect, t);
-  });
-}
-
-/** Refresh both highlight-driven overlays for a single SVG: net-total label legibility and the
- *  frosted value pills. Used as the legend `onHighlight` callback for single charts. */
-function onHighlightSvg(svg: SVGSVGElement): void {
-  recolorNetLabels(svg);
-  drawHlPills(svg);
-}
 
 /** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
  *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
@@ -652,6 +593,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, showTotalDot,
       shapeLegendItems, colorLegendTitle, shapeLegendTitle,
     } = built;
+    // Legend-highlight value pills: attached after the crosshair below, but the legend's
+    // onHighlight closure (set when the legend is created) calls through this holder, so the
+    // pill renderer just needs to exist by the time the user interacts.
+    let pillDriver: ((active: Set<string>) => void) | null = null;
+    const onHighlight = (active: Set<string>): void => {
+      recolorNetLabels(svg);
+      pillDriver?.(active);
+    };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
     // legend (the color legend still drives hover-dim, which is independent of the crosshair).
     const isPoint = spec.chartType === "scatter" || spec.chartType === "dotplot";
@@ -690,7 +639,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         rightLegendSlot!.replaceChildren();
         legendHandle = renderLegend(rightLegendSlot!, orderedItems, {
           svg,
-          onHighlight: () => onHighlightSvg(svg),
+          onHighlight,
           ...shapeOpts,
         });
         // Add the vertical-layout class to the rendered legend element (use the handle's
@@ -703,7 +652,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         legendSlot.replaceChildren();
         legendHandle = renderLegend(legendSlot, legendItems ?? [], {
           svg,
-          onHighlight: () => onHighlightSvg(svg),
+          onHighlight,
           ...shapeOpts,
         });
       }
@@ -749,6 +698,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         bandHighlight: true,
         centersFromMarks: true,
       });
+      pillDriver = attachHighlightPills(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: "dotplot",
+        colors,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
+      });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
@@ -785,6 +742,20 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         swatchShape: "rect",
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
       });
+      // Value pills follow the vertical coordinated-cursor layout (above bar / segment center);
+      // horizontal bars have no in-place coordinated cursor, so they keep the floating tooltip only.
+      if (spec.orientation !== "horizontal") {
+        pillDriver = attachHighlightPills(svg, {
+          rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+          chartType: isStacked ? "stacked" : "bar",
+          isStacked,
+          isFaceted,
+          categories: cats,
+          colors,
+          seriesOrder,
+          yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        });
+      }
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -970,6 +941,9 @@ function wireFigureSvg(
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
      *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
     onResolve?: (key: unknown) => void;
+    /** Legend-highlight pills: when set, the pane's value-pill driver is registered here so the
+     *  figure-level legend can fire every pane's pills on highlight. */
+    onPillDriver?: (driver: (active: Set<string>) => void) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
@@ -992,6 +966,16 @@ function wireFigureSvg(
       centersFromMarks: true,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
+    ctx.onPillDriver?.(
+      attachHighlightPills(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: "dotplot",
+        colors: ctx.colors,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        dodge,
+      }),
+    );
     if (dotUseCoord) {
       return attachSecondaryCategoricalLineCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1110,6 +1094,20 @@ function wireFigureSvg(
         const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
         if (series) handle.toggle(series);
       });
+    }
+    if (!horizontal) {
+      ctx.onPillDriver?.(
+        attachHighlightPills(svg, {
+          rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+          chartType: isStacked ? "stacked" : "bar",
+          isStacked,
+          isFaceted,
+          categories: cats,
+          colors: ctx.colors,
+          seriesOrder: ctx.seriesOrder,
+          yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        }),
+      );
     }
     if (useCoord) {
       return attachSecondaryBandCursor(svg, {
@@ -1293,11 +1291,16 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     }
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
+    // Each pane registers its value-pill driver here; the legend fires them all on highlight.
+    const pillDrivers: Array<(active: Set<string>) => void> = [];
     const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
     const handle = fig.legendItems || hasFigShape
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
-          onHighlight: () => { for (const p of fig.panes) if (p.svg) onHighlightSvg(p.svg); },
+          onHighlight: (active) => {
+            for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
+            for (const d of pillDrivers) d(active);
+          },
           shapeItems: fig.shapeLegendItems ?? undefined,
           colorTitle: fig.colorLegendTitle,
           shapeTitle: fig.shapeLegendTitle,
@@ -1332,6 +1335,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
+        onPillDriver: (d) => pillDrivers.push(d),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));

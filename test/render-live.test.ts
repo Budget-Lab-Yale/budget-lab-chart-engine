@@ -1381,37 +1381,36 @@ describe("value-on-highlight labels", () => {
     { g: "Y", s: "A", v: "2" }, { g: "Y", s: "B", v: "6" },
   ];
 
-  it("hidden by default; legend hover reveals the active series' value labels", () => {
+  it("no pills until a series is highlighted; hovering a legend series draws ONLY its pills", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: GROUPED, rows: GROUPED_ROWS, width: 720 });
-    const labels = container.querySelectorAll(".tbl-hl-value text");
-    expect(labels.length).toBe(4); // one per (group, series)
-    expect(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show").length).toBe(0);
-    // Each label is tagged with its series (the tagging fix guarantees correct mapping).
+    // The pill group exists but is empty/hidden until a strict subset is highlighted.
+    const pillGroup = container.querySelector(".tbl-hl-pills") as SVGGElement;
+    expect(pillGroup).not.toBeNull();
+    expect(pillGroup.getAttribute("opacity")).toBe("0");
+
     const btnA = container.querySelector('.tbl-legend-item[data-series="A"]') as HTMLElement;
     btnA.dispatchEvent(new Event("pointerenter"));
-    const shown = Array.from(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show"));
-    expect(shown.length).toBe(2);
-    expect([...new Set(shown.map((t) => t.getAttribute("data-series")))]).toEqual(["A"]);
+    // Pills render in jsdom for bars (rect attributes are present). A's values are 3 (X) and 2 (Y).
+    expect(pillGroup.getAttribute("opacity")).toBe("1");
+    const texts = Array.from(pillGroup.querySelectorAll("text")).map((t) => t.textContent);
+    expect(texts.sort()).toEqual(["2.00", "3.00"]); // ONLY series A's values — not B's 5/6
     btnA.dispatchEvent(new Event("pointerleave"));
-    expect(container.querySelectorAll(".tbl-hl-value text.tbl-hl-value-show").length).toBe(0);
+    expect(pillGroup.getAttribute("opacity")).toBe("0");
+    expect(pillGroup.querySelectorAll("text").length).toBe(0);
   });
 
-  it("non-active series' value labels are never dimmed (stay fully hidden, not ghosted)", () => {
-    // The dim loop tags every [data-series]; hover-value labels carry data-series too. They
-    // must be EXCLUDED so a pin leaves the other series' labels hidden (opacity 0) rather than
-    // dimmed (opacity 0.15, a visible ghost). Pin A, then assert no .tbl-hl-value text anywhere
-    // picked up .tbl-dimmed — for either series.
+  it("pins still dim the non-active series' bars (dimming unchanged)", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: GROUPED, rows: GROUPED_ROWS, width: 720 });
     const btnA = container.querySelector('.tbl-legend-item[data-series="A"]') as HTMLElement;
     btnA.dispatchEvent(new Event("pointerenter"));
-    const dimmedLabels = container.querySelectorAll(".tbl-hl-value text.tbl-dimmed");
-    expect(dimmedLabels.length).toBe(0);
-    // Meanwhile the bars themselves DO dim (B's rects), confirming dimming still works elsewhere.
     const bRects = container.querySelectorAll('rect[data-series="B"]');
     expect(bRects.length).toBeGreaterThan(0);
     bRects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
+    // The pill group's own elements are never tagged as data-series, so they never dim.
+    const pillGroup = container.querySelector(".tbl-hl-pills") as SVGGElement;
+    expect(pillGroup.querySelectorAll(".tbl-dimmed").length).toBe(0);
   });
 });
 
