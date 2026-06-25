@@ -13,10 +13,6 @@ columns:
   shape: labor
 
 series_order: [Slow, Moderate, Rapid]
-series_colors:
-  Slow: "#9DC3E6"
-  Moderate: "#2E75B6"
-  Rapid: "#1F3864"
 
 shape_order: [Compressive, Proportional, Expansive]
 

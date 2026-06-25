@@ -14,9 +14,6 @@ columns:
   facet: shock
 
 series_order: [Aftertax, Pretax]
-series_colors:
-  Aftertax: "#ED7D31"
-  Pretax: "#1F3864"
 
 small_multiples:
   mode: shared
