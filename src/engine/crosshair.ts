@@ -2225,8 +2225,8 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       // "series · shape" on one line (e.g. a navy triangle + "Slow · Compressive").
       const symbolName = (p.shape && opts.symbols?.get(p.shape)) || "circle";
       const swatch =
-        `<span class="tbl-tooltip-swatch is-symbol"><svg width="13" height="13" viewBox="0 0 13 13">` +
-        `<path d="${symbolPathD(symbolName, 40)}" transform="translate(6.5,6.5)" fill="${color}" stroke="#ffffff" stroke-width="0.75"/>` +
+        `<span class="tbl-tooltip-swatch is-symbol"><svg width="16" height="14" viewBox="0 0 16 14">` +
+        `<path d="${symbolPathD(symbolName, 95)}" transform="translate(8,6)" fill="${color}" stroke="#ffffff" stroke-width="1"/>` +
         `</svg></span>`;
       const headText =
         opts.showShape && p.shape

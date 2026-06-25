@@ -504,8 +504,8 @@ body {
 }
 /* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
 .tbl-tooltip-swatch.is-symbol {
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 14px;
   background: none;
   border-radius: 0;
   vertical-align: middle;

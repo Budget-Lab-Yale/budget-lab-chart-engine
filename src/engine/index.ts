@@ -64,8 +64,9 @@ export interface LegendItem {
   color: string | undefined;
   dashed: boolean;
   /** Swatch style: "line"/"rect"/"dot" for line/bar/stacked; "point" for scatter/dotplot — a
-   *  filled colored marker (the `markerSymbol`, default circle) with NO connecting line. */
-  markerShape: "line" | "rect" | "dot" | "point";
+   *  filled colored marker (the `markerSymbol`, default circle); "chip" — a filled rounded-square
+   *  color key (point charts' color-only legend, where a point shape would be ambiguous). */
+  markerShape: "line" | "rect" | "dot" | "point" | "chip";
   /** Line charts with point markers, or point charts with redundant color+shape encoding: the
    *  d3 symbol name for this series (shown on the swatch so series can be told apart by shape,
    *  not just color). */
@@ -438,7 +439,7 @@ export function buildLegendItems(
         return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForIndex(i) };
       }
       if (distinctShape) {
-        return { ...base, markerShape: "rect" as const };
+        return { ...base, markerShape: "chip" as const };
       }
       return { ...base, markerShape: "point" as const, markerSymbol: "circle" };
     });

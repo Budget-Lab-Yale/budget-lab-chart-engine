@@ -31,8 +31,9 @@ export function buildPointMarks(
   // a single shape (Plot's default circle) and no symbol scale / shape legend is emitted.
   const hasShape = !!shapeField;
 
-  // Marker radius: slightly smaller in small-multiples panes (matches the line-point markers).
-  const r = ctx.pane ? 3.8 : 4.6;
+  // Marker radius. Dot plots (and other faceted point panes) use a larger marker so the data
+  // dots read close to the ~11px legend symbols; single-frame scatters stay a touch smaller.
+  const r = ctx.pane ? 5.4 : 4.6;
 
   // Categorical x (dotplot) with multiple series: dodge each series horizontally within its
   // category so markers sit side by side instead of stacking at the band center. Plot's `dx` is a

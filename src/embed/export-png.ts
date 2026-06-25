@@ -200,11 +200,11 @@ function drawLegend(
           "stroke-width": 0.75,
         }),
       );
-    } else if (item.markerShape === "rect") {
-      // Color chip — a filled rounded square (color key), matching the live legend's is-rect.
+    } else if (item.markerShape === "rect" || item.markerShape === "chip") {
+      // Color chip — a filled rounded square (color key), matching the live legend.
       const chip = 13;
       root.appendChild(
-        svgEl("rect", { x: x + (SW - chip) / 2, y: cy - chip / 2, width: chip, height: chip, rx: 2.5, fill: color }),
+        svgEl("rect", { x: x + (SW - chip) / 2, y: cy - chip / 2, width: chip, height: chip, rx: 4, fill: color }),
       );
     } else {
       root.appendChild(

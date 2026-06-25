@@ -59,6 +59,27 @@ function buildPointSwatch(doc: Document, color: string, symbol: string): SVGSVGE
   return svg;
 }
 
+/** Build a color-chip legend swatch (an inline SVG): a filled rounded square in the series color.
+ *  Used for the color-only legend of a point chart, where a point SHAPE would be ambiguous with
+ *  the shape legend's symbols. Same 18×16 box + 1px upward nudge as buildPointSwatch so the chip
+ *  aligns with the shape-legend symbols and the text's optical center. */
+function buildColorChip(doc: Document, color: string): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 18 16");
+  const rect = doc.createElementNS(SVG_NS, "rect");
+  const size = 13;
+  rect.setAttribute("x", String((18 - size) / 2));
+  rect.setAttribute("y", String(7 - size / 2)); // center at y=7 (box center 8, nudged up 1px)
+  rect.setAttribute("width", String(size));
+  rect.setAttribute("height", String(size));
+  rect.setAttribute("rx", "4");
+  rect.setAttribute("fill", color);
+  svg.appendChild(rect);
+  return svg;
+}
+
 /** Neutral gray used for the shape-legend markers (shape conveys the shape-channel value, not a
  *  color — so its swatches are uncolored). */
 const SHAPE_LEGEND_COLOR = "#555B66";
@@ -232,6 +253,10 @@ export function renderLegend(
       // redundant (combined) case, else a plain circle (shape lives in the shape legend).
       swatch.classList.add("is-point");
       swatch.appendChild(buildPointSwatch(doc, color || SHAPE_LEGEND_COLOR, markerSymbol || "circle"));
+    } else if (markerShape === "chip") {
+      // Point chart color-only legend: a filled rounded-square color key (in the is-point box).
+      swatch.classList.add("is-point");
+      swatch.appendChild(buildColorChip(doc, color || SHAPE_LEGEND_COLOR));
     } else if (markerShape === "dot") {
       swatch.classList.add("is-dot");
       // White fill + black stroke via CSS — no inline color needed.
