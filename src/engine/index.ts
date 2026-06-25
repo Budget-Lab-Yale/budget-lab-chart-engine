@@ -421,14 +421,27 @@ export function buildLegendItems(
   // color → no color legend (the shape legend, if any, stands alone).
   if (chartType === "scatter" || chartType === "dotplot") {
     if (seriesNames.length <= 1) return null;
-    return seriesNames.map((name, i) => ({
-      series: name,
-      label: labelFor(name),
-      color: legendColorFor(name),
-      dashed: false,
-      markerShape: "point" as const,
-      markerSymbol: layers.shapeIsSeries ? markerSymbolForIndex(i) : "circle",
-    }));
+    // A SEPARATE shape legend exists when shape is its own channel (distinct values, not the
+    // series). In that case the color legend must NOT use a point shape (a circle/square here
+    // would be ambiguous with the shape legend's symbols) — use a color chip (rounded square)
+    // instead. Redundant encoding → the combined legend shows the actual colored marker shape;
+    // no shape channel → the actual (circle) marker.
+    const distinctShape = !!(layers.shapeNames && layers.shapeNames.length && !layers.shapeIsSeries);
+    return seriesNames.map((name, i) => {
+      const base = {
+        series: name,
+        label: labelFor(name),
+        color: legendColorFor(name),
+        dashed: false,
+      };
+      if (layers.shapeIsSeries) {
+        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForIndex(i) };
+      }
+      if (distinctShape) {
+        return { ...base, markerShape: "rect" as const };
+      }
+      return { ...base, markerShape: "point" as const, markerSymbol: "circle" };
+    });
   }
 
   const markerShape: "line" | "rect" =
