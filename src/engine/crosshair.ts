@@ -1231,7 +1231,7 @@ function addCoordPill(
   doc: Document,
   cx: number,
   cy: number,
-  anchor: "start" | "middle" | "end",
+  anchor: "start" | "middle" | "end" | "pill-end" | "pill-start",
   text: string,
   color: string,
   weight: number,
@@ -1241,7 +1241,19 @@ function addCoordPill(
   const padY = 2.5;
   const w = text.length * fontSize * 0.62 + padX * 2;
   const h = fontSize + padY * 2;
-  const x0 = anchor === "start" ? cx - padX : anchor === "end" ? cx - w + padX : cx - w / 2;
+  // "pill-end"/"pill-start" position the rect by its inner EDGE at cx (right edge / left edge)
+  // and CENTER the text within it — used to lay two pills side by side around a center line
+  // without the edge-anchored text looking unbalanced. Plain start/middle/end keep the legacy
+  // behavior (text anchored about cx).
+  const x0 =
+    anchor === "pill-end" ? cx - w
+    : anchor === "pill-start" ? cx
+    : anchor === "start" ? cx - padX
+    : anchor === "end" ? cx - w + padX
+    : cx - w / 2;
+  // Text x: centered in the rect for the pill-edge modes; otherwise anchored about cx.
+  const textCx = anchor === "pill-end" || anchor === "pill-start" ? x0 + w / 2 : cx;
+  const textAnchor = anchor === "pill-end" || anchor === "pill-start" ? "middle" : anchor;
   const rect = doc.createElementNS(COORD_NS, "rect");
   rect.setAttribute("x", String(x0));
   rect.setAttribute("y", String(cy - h / 2));
@@ -1254,10 +1266,10 @@ function addCoordPill(
   rect.setAttribute("stroke-opacity", "0.7");
   g.appendChild(rect);
   const t = doc.createElementNS(COORD_NS, "text");
-  t.setAttribute("x", String(cx));
+  t.setAttribute("x", String(textCx));
   t.setAttribute("y", String(cy));
   t.setAttribute("dy", "0.32em");
-  t.setAttribute("text-anchor", anchor);
+  t.setAttribute("text-anchor", textAnchor);
   t.setAttribute("fill", color);
   t.setAttribute("font-size", String(fontSize));
   t.setAttribute("font-weight", String(weight));
@@ -1886,6 +1898,27 @@ function readCategoryCentersFromMarks(svgEl: SVGSVGElement): Array<{ category: s
   })).sort((a, b) => a.cx - b.cx);
 }
 
+/** A uniform-width hover band for category `idx`: width = the center-to-center spacing (so every
+ *  category band is the SAME size), centered on the category, shifted inward to stay within
+ *  [lo, hi]. Only one band shows at a time, so the inward shift overlapping a neighbour is never
+ *  visible. Fixes the point-scale outer-padding asymmetry that made edge bands narrower than the
+ *  interior ones. */
+function uniformBand(
+  centers: Array<{ category: string; cx: number }>,
+  idx: number,
+  lo: number,
+  hi: number,
+): { min: number; max: number } {
+  const n = centers.length;
+  if (n < 2) return { min: lo, max: hi };
+  const step = (centers[n - 1]!.cx - centers[0]!.cx) / (n - 1);
+  let min = centers[idx]!.cx - step / 2;
+  let max = centers[idx]!.cx + step / 2;
+  if (min < lo) { max += lo - min; min = lo; }
+  if (max > hi) { min -= max - hi; max = hi; }
+  return { min, max };
+}
+
 /** Resolve the category whose axis-label center is nearest the cursor x. */
 function nearestCategory(centers: Array<{ category: string; cx: number }>, svgX: number): string | null {
   let best: string | null = null;
@@ -1993,10 +2026,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     const idx = centers.findIndex((c) => c.category === category);
     const cx = centers[idx]!.cx;
     if (bandHighlight && hl) {
-      // Shade the category's full band: extents are the midpoints to neighbouring centers
-      // (outer edges extend a symmetric half-step), clamped to the plot's horizontal edges.
-      const bands = widenBandsToMidpoints(centers.map((c) => ({ min: c.cx, max: c.cx })), ml, W - mr);
-      const b = bands[idx]!;
+      // Shade the category's band — a uniform width (the center spacing) so every category band
+      // is the same size, shifted to stay within the plot.
+      const b = uniformBand(centers, idx, ml, W - mr);
       hl.setAttribute("x", String(b.min));
       hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
       hl.setAttribute("opacity", "0.12");
@@ -2084,11 +2116,11 @@ export function attachSecondaryCategoricalLineCursor(
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
     const cx = c.cx;
     if (opts.bandHighlight) {
-      // Shade the category's full band (bar-style) on every pane, matching the primary hover.
-      const bands = widenBandsToMidpoints(centers.map((x) => ({ min: x.cx, max: x.cx })), ml, W - mr);
+      // Shade the category's band (bar-style) on every pane — uniform width (center spacing) so
+      // every category band is the same size, matching the primary hover.
       const idx = centers.findIndex((x) => x.category === category);
-      const b = bands[idx];
-      if (b) addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
+      const b = uniformBand(centers, idx, ml, W - mr);
+      addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
     } else {
       addCoordGuide(g, doc, cx, mt, mt + plotH);
     }
@@ -2110,12 +2142,15 @@ export function attachSecondaryCategoricalLineCursor(
         const maxY = Math.max(...pts.map((p) => p.y));
         const aboveY = minY - 13;
         const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
-        // Offset the anchor by the pill's inner padding (~4px) + a small gap so the rounded rects
-        // sit fully on their own side of the center line — no crossing, no overlap.
-        const PILL_EDGE = 7;
+        // Each pill sits fully on its series' side of the center line, with its inner EDGE a small
+        // gap from center and its TEXT centered within the rect (so short values don't look
+        // unbalanced). A series exactly on the center line falls back to a centered pill.
+        const PILL_GAP = 3;
         for (const p of pts) {
-          const anchor = p.dx < 0 ? "end" : p.dx > 0 ? "start" : "middle";
-          const ax = p.dx < 0 ? cx - PILL_EDGE : p.dx > 0 ? cx + PILL_EDGE : cx;
+          const [anchor, ax] =
+            p.dx < 0 ? (["pill-end", cx - PILL_GAP] as const)
+            : p.dx > 0 ? (["pill-start", cx + PILL_GAP] as const)
+            : (["middle", cx] as const);
           addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
         }
       } else {
