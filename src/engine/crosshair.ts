@@ -1883,6 +1883,10 @@ export interface CategoricalLineOptions {
   onResolve?: (category: string | null) => void;
   /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
   symbols?: Map<string, string>;
+  /** Dot plots: shade the hovered category's full band (like a bar-chart hover) instead of
+   *  drawing a dashed vertical guide line. The band extents are derived from the x-axis label
+   *  centers (midpoints to neighbors). */
+  bandHighlight?: boolean;
 }
 
 /**
@@ -1899,14 +1903,28 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   const vb = svgEl.viewBox?.baseVal;
   const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
   const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
+  const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
+  const mr = +(svgEl.dataset.marginRight ?? "") || 8;
   const mt = +(svgEl.dataset.marginTop ?? "") || 18;
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
   const plotBottom = mt + (H - mt - mb);
+  const bandHighlight = opts.bandHighlight ?? false;
 
   const NS = "http://www.w3.org/2000/svg";
-  svgEl.querySelectorAll(".tbl-catline-hit, .tbl-catline-guide").forEach((el) => el.remove());
+  svgEl.querySelectorAll(".tbl-catline-hit, .tbl-catline-guide, .tbl-catline-hl").forEach((el) => el.remove());
 
-  const guide = emitOnly ? null : svgEl.ownerDocument.createElementNS(NS, "line");
+  // Dot plots shade the hovered category band (bar-style); line charts draw a dashed guide.
+  const hl = emitOnly || !bandHighlight ? null : svgEl.ownerDocument.createElementNS(NS, "rect");
+  if (hl) {
+    hl.classList.add("tbl-catline-hl");
+    hl.setAttribute("fill", TBL.color.annotationDim);
+    hl.setAttribute("y", String(mt));
+    hl.setAttribute("height", String(plotBottom - mt));
+    hl.setAttribute("opacity", "0");
+    hl.style.pointerEvents = "none";
+    svgEl.appendChild(hl);
+  }
+  const guide = emitOnly || bandHighlight ? null : svgEl.ownerDocument.createElementNS(NS, "line");
   if (guide) {
     guide.classList.add("tbl-catline-guide");
     guide.setAttribute("stroke", TBL.color.annotationDim);
@@ -1940,10 +1958,21 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     if (!category) { hide(); return; }
     opts.onResolve?.(category);
     if (emitOnly) return;
-    const cx = centers.find((c) => c.category === category)!.cx;
-    guide!.setAttribute("x1", String(cx));
-    guide!.setAttribute("x2", String(cx));
-    guide!.setAttribute("opacity", "1");
+    const idx = centers.findIndex((c) => c.category === category);
+    const cx = centers[idx]!.cx;
+    if (bandHighlight && hl) {
+      // Shade the category's full band: extents are the midpoints to neighbouring centers
+      // (outer edges extend a symmetric half-step), clamped to the plot's horizontal edges.
+      const bands = widenBandsToMidpoints(centers.map((c) => ({ min: c.cx, max: c.cx })), ml, W - mr);
+      const b = bands[idx]!;
+      hl.setAttribute("x", String(b.min));
+      hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
+      hl.setAttribute("opacity", "0.12");
+    } else if (guide) {
+      guide.setAttribute("x1", String(cx));
+      guide.setAttribute("x2", String(cx));
+      guide.setAttribute("opacity", "1");
+    }
     tip!.innerHTML = buildBandTooltipHtml(category, opts.rows, {
       colors: opts.colors,
       seriesLabels: opts.seriesLabels,
@@ -1962,6 +1991,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   }
   function hide(): void {
     if (guide) guide.setAttribute("opacity", "0");
+    if (hl) hl.setAttribute("opacity", "0");
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
@@ -2053,11 +2083,12 @@ export interface PointHoverOptions {
   colors?: Map<string, string>;
   seriesLabels?: Record<string, string>;
   shapeLabels?: Record<string, string>;
-  /** Show a shape row in the tooltip (dual encoding: shape ≠ color). */
+  /** Combine the shape value into the header line ("series · shape") — dual encoding. */
   showShape?: boolean;
-  /** Row labels for the color / shape / x / y tooltip rows. */
-  colorLabel?: string;
-  shapeLabel?: string;
+  /** shape value → d3 symbol name, so the tooltip header shows the point's actual marker shape
+   *  (filled in the series color). Falls back to a circle. */
+  symbols?: Map<string, string>;
+  /** Row labels for the x / y tooltip rows. */
   xLabel?: string;
   yLabel?: string;
   xFormat?: (v: number) => string;
@@ -2096,11 +2127,18 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
     const show = (evt: PointerEvent): void => {
       const color = opts.colors?.get(p.series) || TBL.color.navy;
       const sLabel = opts.seriesLabels?.[p.series] ?? p.series;
-      let html = `<div class="tbl-tooltip-head"><span class="tbl-tooltip-swatch" style="background:${color}"></span>${escapeHtml(sLabel)}</div>`;
-      if (opts.showShape && p.shape) {
-        const shLabel = opts.shapeLabels?.[p.shape] ?? p.shape;
-        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.shapeLabel ?? "Shape")}:</span> <span class="tbl-tooltip-value">${escapeHtml(shLabel)}</span></span></div>`;
-      }
+      // Header: the point's actual marker (its symbol, filled in the series color) followed by
+      // "series · shape" on one line (e.g. a navy triangle + "Slow · Compressive").
+      const symbolName = (p.shape && opts.symbols?.get(p.shape)) || "circle";
+      const swatch =
+        `<span class="tbl-tooltip-swatch is-symbol"><svg width="13" height="13" viewBox="0 0 13 13">` +
+        `<path d="${symbolPathD(symbolName, 40)}" transform="translate(6.5,6.5)" fill="${color}" stroke="#ffffff" stroke-width="0.75"/>` +
+        `</svg></span>`;
+      const headText =
+        opts.showShape && p.shape
+          ? `${escapeHtml(sLabel)} · ${escapeHtml(opts.shapeLabels?.[p.shape] ?? p.shape)}`
+          : escapeHtml(sLabel);
+      let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;
       html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span> <span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
       if (p.y != null && Number.isFinite(p.y)) {
         html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;

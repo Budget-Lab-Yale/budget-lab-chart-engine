@@ -491,6 +491,15 @@ body {
   background: #fff;
   box-shadow: inset 0 0 0 1.5px #000;
 }
+/* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
+.tbl-tooltip-swatch.is-symbol {
+  width: 13px;
+  height: 13px;
+  background: none;
+  border-radius: 0;
+  vertical-align: middle;
+  margin-right: 5px;
+}
 
 /* =========================================================================
  * Figure header — flex row with title-text left, logo right

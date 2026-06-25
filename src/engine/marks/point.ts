@@ -51,7 +51,7 @@ export function buildPointMarks(
   const overlay: unknown[] = [];
   let taggedData: PreparedRow[];
   if (dodge) {
-    const gap = ctx.pane ? 11 : 14; // px between adjacent series within a category
+    const gap = ctx.pane ? 14 : 18; // px between adjacent series within a category (~30% wider)
     const mid = (seriesNames.length - 1) / 2;
     taggedData = [];
     seriesNames.forEach((s, i) => {
@@ -87,7 +87,16 @@ export function buildPointMarks(
   // hover-dim / pin works exactly as it does for the other chart types. With a symbol channel Plot
   // renders the dots as <path>; without one, as <circle>.
   const selector = hasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle';
-  const tagging = [{ selector, seriesOrder: taggedData.map((d) => d.series) }];
+  // Also tag data-shape so the shape legend can dim by shape value (only when shape ≠ color: a
+  // distinct shape channel; for the redundant case data-series alone suffices).
+  const tagShape = hasShape && !shapeIsSeries;
+  const tagging = [
+    {
+      selector,
+      seriesOrder: taggedData.map((d) => d.series),
+      ...(tagShape ? { shapeOrder: taggedData.map((d) => d._shape ?? "") } : {}),
+    },
+  ];
 
   return {
     underlay: [],

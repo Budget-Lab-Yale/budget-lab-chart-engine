@@ -1386,8 +1386,26 @@ describe("mountChart point charts", () => {
     const titles = Array.from(container.querySelectorAll(".tbl-legend-group-title")).map((e) => e.textContent);
     expect(titles).toContain("Shock");
     expect(titles).toContain("Labor");
-    // Shape group rows are non-interactive.
-    expect(container.querySelectorAll(".tbl-legend-item.is-static").length).toBe(2);
+    // Shape group rows are interactive (data-shape) so they can drive shape-dimension dimming.
+    expect(container.querySelectorAll(".tbl-legend-item[data-shape]").length).toBe(2);
+    // Color group rows carry data-series.
+    expect(container.querySelectorAll(".tbl-legend-item[data-series]").length).toBe(2);
+  });
+
+  it("scatter markers carry data-shape so the shape legend can dim them", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 });
+    const tagged = container.querySelectorAll('g[aria-label="dot"] path[data-shape]');
+    expect(tagged.length).toBe(4);
+    // Hovering a shape legend row dims markers of OTHER shapes (and not the matching ones).
+    const triBtn = container.querySelector('.tbl-legend-item[data-shape="Tri"]') as HTMLElement;
+    triBtn.dispatchEvent(new Event("pointerenter"));
+    const dimmedTri = Array.from(container.querySelectorAll('path[data-shape="Tri"]'))
+      .filter((p) => p.classList.contains("tbl-dimmed")).length;
+    const dimmedDot = Array.from(container.querySelectorAll('path[data-shape="Dot"]'))
+      .filter((p) => p.classList.contains("tbl-dimmed")).length;
+    expect(dimmedTri).toBe(0); // Tri stays bright
+    expect(dimmedDot).toBeGreaterThan(0); // Dot dims
   });
 
   const DOT_SPEC: ChartSpec = {

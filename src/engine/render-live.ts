@@ -658,6 +658,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // as <path> when a shape channel is active, else <circle>; tag order == dataInScope order.
       const pointHasShape = !!spec.columns?.shape;
       const showShape = !!(shapeLegendItems && shapeLegendItems.length);
+      // shape value → its marker symbol (from the shape legend), so the tooltip header marker
+      // matches the chart point.
+      const symbols = new Map((shapeLegendItems ?? []).map((s) => [s.shape, s.markerSymbol] as const));
       attachPointHover(svg, {
         points: dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
         selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
@@ -665,7 +668,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         shapeLabels: spec.shape_labels,
         showShape,
-        shapeLabel: shapeLegendTitle ?? "Shape",
+        symbols,
         xLabel: spec.x_axis_title ?? "x",
         yLabel: spec.y_axis_title ?? "Value",
         xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
@@ -680,6 +683,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, units),
+        bandHighlight: true,
       });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
@@ -912,12 +916,15 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units),
+      bandHighlight: true,
     });
     return undefined;
   }
   if (ctx.spec.chartType === "scatter") {
     const cols = ctx.spec.columns ?? {};
     const pointHasShape = !!cols.shape;
+    // shape value → marker symbol (by shape_order index, matching the chart's symbol scale).
+    const symbols = new Map((ctx.spec.shape_order ?? []).map((s, i) => [s, markerSymbolForIndex(i)] as const));
     attachPointHover(svg, {
       points: ctx.dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
       selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
@@ -925,7 +932,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       shapeLabels: ctx.spec.shape_labels,
       showShape: pointHasShape && cols.shape !== cols.series,
-      shapeLabel: ctx.spec.shape_legend_title ?? "Shape",
+      symbols,
       xLabel: ctx.spec.x_axis_title ?? "x",
       yLabel: ctx.spec.y_axis_title ?? "Value",
       xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
@@ -1141,16 +1148,22 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // and the legend's highlight root is the grid so dimming/pinning spans every pane.
   const isShared = (sm.mode ?? "shared") === "shared";
 
+  // Point-chart panes (dot plots / scatters) carry only markers, so they read fine much narrower
+  // than line/bar panes — use a smaller reflow floor so a configured column count (e.g. 3) still
+  // fits at common widths instead of collapsing to 2.
+  const isPointFigure = spec.chartType === "dotplot" || spec.chartType === "scatter";
+  const paneMinWidth = isPointFigure ? 160 : PANE_MIN_WIDTH;
+
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
-    // Reflow: how many columns fit at >= PANE_MIN_WIDTH each, capped by config and pane count
+    // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
-    const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (PANE_MIN_WIDTH + GRID_GAP)));
+    const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
     const cols = Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     // SHARED mode: pass the TOTAL inner grid width + gap so renderFigure's width helper sizes the
     // unequal columns (labeled col 0 wider, label-less cols narrower) sharing one inner data width.
     // PER-PANE mode: equal panes, one shared pane width (1fr columns).
-    const paneW = Math.max(PANE_MIN_WIDTH, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
+    const paneW = Math.max(paneMinWidth, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
     const sig = isShared ? `s:${cols}:${outerWidth}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
     let fig: FigureRenderResult;

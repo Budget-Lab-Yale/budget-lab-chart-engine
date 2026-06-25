@@ -79,8 +79,10 @@ export interface MarkLayers {
   /** Marks painted on top of the chrome (the lines). */
   overlay: unknown[];
   /** Post-render data-series tagging. For each entry, the elements matched by `selector`
-   *  (in DOM order) are tagged data-series from `seriesOrder` by index. */
-  tagging: { selector: string; seriesOrder: string[] }[];
+   *  (in DOM order) are tagged data-series from `seriesOrder` by index. When `shapeOrder` is
+   *  present (point charts), the same elements are ALSO tagged data-shape by index, so the shape
+   *  legend can dim by shape value independently of the color (series) legend. */
+  tagging: { selector: string; seriesOrder: string[]; shapeOrder?: string[] }[];
   /** Series rendered dashed (drives legend swatches + tooltip styling). */
   dashedNames: Set<string>;
   /** Optional: a mark layer that owns its x-scale (bars) supplies band-scale options here;

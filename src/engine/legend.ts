@@ -62,6 +62,8 @@ const SHAPE_LEGEND_COLOR = "#555B66";
 
 /** One shape-legend row (point charts, dual encoding). */
 export interface ShapeLegendEntry {
+  /** The raw shape-value key — matches markers' data-shape so the row can drive hover-dim/pin. */
+  shape: string;
   label: string;
   markerSymbol: string;
 }
@@ -132,10 +134,15 @@ export function renderLegend(
   }
 
   const safeItems = items ?? [];
-  // Only real (interactive) series participate in hover-dim and pin logic.
+  const safeShapeItems = shapeItems ?? [];
+  // Two independent selection dimensions: COLOR (series) and SHAPE. Point charts with dual
+  // encoding use both; every other chart uses only color (shape sets stay empty → no-op).
   const allSeries = safeItems.filter((i) => !i.nonInteractive).map((i) => i.series);
+  const allShapes = safeShapeItems.map((i) => i.shape);
   const pinned = new Set<string>();
   let hovered: string | null = null;
+  const pinnedShape = new Set<string>();
+  let hoveredShape: string | null = null;
 
   // Circular reset button — declared up front (applyHighlight toggles its visibility) but
   // appended at the END of the legend so it sits after the last item. Hidden until pinned,
@@ -145,22 +152,34 @@ export function renderLegend(
   const applyHighlight = (): void => {
     const active = new Set(pinned);
     if (hovered) active.add(hovered);
-    // Dim only when a subset is highlighted (not everything, not nothing).
-    const dimAll = active.size > 0 && active.size < allSeries.length;
+    const activeShape = new Set(pinnedShape);
+    if (hoveredShape) activeShape.add(hoveredShape);
+    // Dim a dimension only when a strict subset of it is active (not everything, not nothing).
+    const dimColor = active.size > 0 && active.size < allSeries.length;
+    const dimShape = activeShape.size > 0 && activeShape.size < allShapes.length;
     if (svg) {
-      // Dim ALL data-series elements: line charts tag <path>, bar/stacked tag <rect>.
-      // Matching only path[data-series] left bar/stacked hover-dim + click-pin dead.
+      // A marker stays bright only if it matches the active selection in BOTH dimensions
+      // (intersection). Line/bar marks carry only data-series → the shape test is a no-op.
       svg.querySelectorAll("[data-series]").forEach((p) => {
         const s = p.getAttribute("data-series");
-        p.classList.toggle("tbl-dimmed", dimAll && !active.has(s as string));
+        const sh = p.getAttribute("data-shape");
+        const colorOk = !dimColor || active.has(s as string);
+        const shapeOk = !dimShape || (sh != null && activeShape.has(sh));
+        p.classList.toggle("tbl-dimmed", !(colorOk && shapeOk));
       });
     }
     legend.querySelectorAll<HTMLElement>(".tbl-legend-item").forEach((btn) => {
-      const s = btn.dataset.series as string;
-      btn.classList.toggle("is-pinned", pinned.has(s));
-      btn.setAttribute("aria-pressed", String(pinned.has(s)));
+      if (btn.dataset.shape != null) {
+        const sh = btn.dataset.shape;
+        btn.classList.toggle("is-pinned", pinnedShape.has(sh));
+        btn.setAttribute("aria-pressed", String(pinnedShape.has(sh)));
+      } else {
+        const s = btn.dataset.series as string;
+        btn.classList.toggle("is-pinned", pinned.has(s));
+        btn.setAttribute("aria-pressed", String(pinned.has(s)));
+      }
     });
-    resetBtn.hidden = pinned.size === 0;
+    resetBtn.hidden = pinned.size === 0 && pinnedShape.size === 0;
     // Notify after the dim classes are toggled so the callback reads the fresh dim state
     // (e.g. recoloring net-total labels by the behind-segment's dim class). Runs on every
     // highlight change — pin, hover, focus, blur, and reset.
@@ -173,6 +192,12 @@ export function renderLegend(
     if (!allSeries.includes(series)) return;
     if (pinned.has(series)) pinned.delete(series);
     else pinned.add(series);
+    applyHighlight();
+  };
+  const togglePinShape = (shape: string): void => {
+    if (!allShapes.includes(shape)) return;
+    if (pinnedShape.has(shape)) pinnedShape.delete(shape);
+    else pinnedShape.add(shape);
     applyHighlight();
   };
 
@@ -242,24 +267,33 @@ export function renderLegend(
   resetBtn.setAttribute("aria-label", "Clear pinned highlights");
   resetBtn.innerHTML = '<span class="tbl-legend-reset-icon">⟲</span>';
   resetBtn.hidden = true;
-  resetBtn.addEventListener("click", () => { pinned.clear(); applyHighlight(); });
+  resetBtn.addEventListener("click", () => { pinned.clear(); pinnedShape.clear(); applyHighlight(); });
   colorContainer.appendChild(resetBtn);
 
-  // Two-group layout: assemble the color group then the (non-interactive) shape group. The shape
-  // markers are neutral gray — shape conveys the shape-channel value, not a color.
+  // Two-group layout: assemble the color group then the SHAPE group. The shape markers are
+  // neutral gray (shape conveys the shape-channel value, not a color); the rows are interactive
+  // — hovering / clicking one dims markers of other shapes (independent of the color dimension).
   if (twoGroup) {
     if (hasColor && colorContainer !== legend) legend.appendChild(colorContainer);
-    for (const { label, markerSymbol } of shapeItems ?? []) {
-      const row = doc.createElement("span");
-      row.className = "tbl-legend-item is-static";
+    for (const { shape, label, markerSymbol } of safeShapeItems) {
+      const btn = doc.createElement("button");
+      btn.type = "button";
+      btn.className = "tbl-legend-item";
+      btn.dataset.shape = shape;
+      btn.setAttribute("aria-pressed", "false");
       const swatch = doc.createElement("span");
       swatch.className = "tbl-legend-swatch is-point";
       swatch.appendChild(buildPointSwatch(doc, SHAPE_LEGEND_COLOR, markerSymbol));
       const labelEl = doc.createElement("span");
       labelEl.textContent = label;
-      row.appendChild(swatch);
-      row.appendChild(labelEl);
-      shapeGroup!.appendChild(row);
+      btn.appendChild(swatch);
+      btn.appendChild(labelEl);
+      btn.addEventListener("pointerenter", () => { hoveredShape = shape; applyHighlight(); });
+      btn.addEventListener("pointerleave", () => { hoveredShape = null; applyHighlight(); });
+      btn.addEventListener("focus", () => { hoveredShape = shape; applyHighlight(); });
+      btn.addEventListener("blur", () => { hoveredShape = null; applyHighlight(); });
+      btn.addEventListener("click", () => { togglePinShape(shape); });
+      shapeGroup!.appendChild(btn);
     }
     legend.appendChild(shapeGroup!);
   }
