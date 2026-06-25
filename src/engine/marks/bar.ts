@@ -58,6 +58,24 @@ function makeValueFormatter(
   };
 }
 
+/** The series, in the order Plot emits faceted grouped-bar <rect>s: by facet (the category
+ *  band, in `categories` = fx/fy-domain render order), and WITHIN each facet by DATA-ROW order
+ *  (Plot renders one rect per datum in input order, not inner-band order). Used to map each rect
+ *  to its `data-series` so legend hover/pin dims the correct bars. */
+function rectTagOrder(
+  data: PreparedRow[],
+  catField: string,
+  categories: string[],
+): string[] {
+  const order: string[] = [];
+  for (const cat of categories) {
+    for (const r of data) {
+      if ((r as unknown as Record<string, unknown>)[catField] === cat) order.push(r.series);
+    }
+  }
+  return order;
+}
+
 export function buildBarMarks(
   data: PreparedRow[],
   spec: ChartSpec,
@@ -199,18 +217,12 @@ export function buildBarMarks(
     }
 
     // --- Rect tagging order (horizontal grouped) ---
-    // Empirically (Plot 0.6.16, barX faceted on fy with an explicit inner-series band
-    // domain): Plot emits a <rect> for EVERY (group, series) pair of the fy-domain x
-    // y-domain cross-product, in facet-major order (category/fy order, then series in
-    // y-domain order within each facet). A null/missing value does NOT omit the rect — Plot
-    // renders it at zero WIDTH (verified empirically through the engine render path, which
-    // keeps the null-value row in scope). This matches the vertical fx+barY case. The
-    // fy/y domains are pinned (declaration order / seriesNames), so the order is
-    // deterministic and independent of the data rows. We must NOT skip pairs.
-    const hRectSeriesOrder: string[] = [];
-    for (let g = 0; g < categories.length; g++) {
-      for (const s of seriesNames) hRectSeriesOrder.push(s);
-    }
+    // Plot emits one <rect> PER DATUM, partitioned by the fy facet (rendered in fy-domain =
+    // `categories` order) and, WITHIN a facet, in DATA-ROW order — NOT inner-band order. So the
+    // tag order must follow the data, grouped by category in facet order. (Using the series-band
+    // order misaligns whenever a category's rows aren't in seriesNames order — the cause of the
+    // legend→bar highlight mismatch.)
+    const hRectSeriesOrder = rectTagOrder(data, catField, categories);
 
     // Group band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-group
     // padding, no axis (groups labeled via the fy group-label mark). Inner series band on
@@ -242,18 +254,12 @@ export function buildBarMarks(
   }
 
   // --- Rect tagging order ---
-  // Empirically (Plot 0.6.16, barY faceted on fx with an explicit inner-series band
-  // domain): Plot emits a <rect> for EVERY (group, series) pair of the fx-domain x x-domain
-  // cross-product, in facet-major order (fx-domain order, then series in x-domain order
-  // within each facet). A missing/null value does NOT omit the rect - Plot renders it at
-  // zero height. (This is the OPPOSITE of the brief's hypothesis; see the report.) So the
-  // tagging order is the full cross-product - we must NOT skip missing pairs, or every
-  // index after the first gap would shift. The fx/x domains are pinned (declaration order /
-  // seriesNames), so this order is deterministic and independent of the data rows.
-  const rectSeriesOrder: string[] = [];
-  for (let g = 0; g < categories.length; g++) {
-    for (const s of seriesNames) rectSeriesOrder.push(s);
-  }
+  // Plot emits one <rect> PER DATUM, partitioned by the fx facet (rendered in fx-domain =
+  // `categories` order) and, WITHIN a facet, in DATA-ROW order — NOT inner x-band order. So the
+  // tag order must follow the data, grouped by category in facet order. (Using the series-band
+  // order misaligns whenever a category's rows aren't in seriesNames order — the cause of the
+  // legend→bar highlight mismatch.)
+  const rectSeriesOrder = rectTagOrder(data, catField, categories);
 
   // Group band (fx): explicit domain in data-declaration order (Style-Guide sec 9: never
   // auto-sort groups; Plot would otherwise sort the fx domain alphabetically). Inter-group

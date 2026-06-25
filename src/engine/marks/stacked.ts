@@ -329,29 +329,19 @@ export function buildStackedMarks(
   }
 
   // --- Rect tagging order ---
-  // Plot 0.6.16 stacked barY/barX emits one <rect> per (category, series) row that is
-  // PRESENT in the data (a null-value row still yields a zero-height rect; an OMITTED
-  // (cat,series) pair yields no rect — verified empirically, opposite of the faceted bar
-  // case). Rects appear category-major, and within a category in stack/declaration order.
-  // Build the order to match: for each category (declaration order), the present series in
-  // seriesNames order.
-  const presentByCat = new Map<string, Set<string>>();
-  for (const r of data) {
-    const cat = (r as unknown as Record<string, unknown>)[catField] as string;
-    if (!categories.includes(cat)) continue;
-    let set = presentByCat.get(cat);
-    if (!set) {
-      set = new Set<string>();
-      presentByCat.set(cat, set);
-    }
-    set.add(r.series);
-  }
-  const rectSeriesOrder: string[] = [];
-  for (const cat of categories) {
-    const present = presentByCat.get(cat);
-    if (!present) continue;
-    for (const s of seriesNames) if (present.has(s)) rectSeriesOrder.push(s);
-  }
+  // Plot 0.6.16 stacked barY/barX emits one <rect> PER DATUM, in DATA-ROW order (the stack
+  // transform computes y1/y2 but doesn't reorder the mark's data) — NOT category-major /
+  // stack order. So the tag order must follow the data (which may be series-major, e.g. all
+  // "Labor" rows then all "Capital"). Using a category-major order misaligns whenever the data
+  // isn't grouped that way — the cause of the legend→segment highlight mismatch.
+  const seriesSet = new Set(seriesNames);
+  const rectSeriesOrder: string[] = data
+    .filter(
+      (r) =>
+        categories.includes((r as unknown as Record<string, unknown>)[catField] as string) &&
+        seriesSet.has(r.series),
+    )
+    .map((r) => r.series);
 
   // --- Legend extras: diverging stacks add a "Total" dot row (A8 renders it) ---
   // The row carries TOTAL_SERIES_KEY, shared with the net dot/label data-series below, so
