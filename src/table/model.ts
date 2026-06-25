@@ -112,7 +112,7 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       let valueTier = t;
       while (valueTier < T && (leaf.path[valueTier] ?? "") === "") valueTier++;
       if (valueTier >= T) valueTier = t; // all-blank fallback
-      const text = leaf.path[valueTier] ?? "";
+      const rawValue = leaf.path[valueTier] ?? "";
       const rowSpan = valueTier - t + 1;
 
       // Merge adjacent leaves whose path[0..valueTier] are equal into one cell with colSpan.
@@ -126,6 +126,11 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
 
       // The leaf-bottom cell occupies the bottom tier and covers exactly one leaf.
       const isLeafBottom = colSpan === 1 && valueTier === T - 1;
+      // Resolve display label: leaf-bottom cells use the leaf's pre-computed label (which already
+      // applies header_labels → column_labels → raw); banner/upper cells apply header_labels only.
+      const text = isLeafBottom
+        ? leaf.label
+        : (spec.header_labels?.[rawValue] ?? rawValue);
       const cell: HeaderCell = { text, colSpan, rowSpan };
       if (isLeafBottom) cell.leafKey = leaf.key;
       headerRows[t]!.push(cell);

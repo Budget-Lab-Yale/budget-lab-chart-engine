@@ -76,3 +76,38 @@ it("column_order reorders leaves", () => {
   const m = buildTableModel(spec, rows);
   expect(m.leaves.map((l) => l.key)).toEqual(["2027", "2026"]);
 });
+
+it("applies column_labels and header_labels overrides to HeaderCell.text", () => {
+  // Two header tiers: banner (scenario_group) and leaf (scenario).
+  // header_labels overrides a banner value; column_labels overrides a leaf value.
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["banner", "leaf"],
+    format: { default: { type: "number", decimals: 1 } },
+    header_labels: { "Baseline": "BL" },   // banner override
+    column_labels: { "Static": "Stat" },   // leaf override
+  };
+  const rows = [
+    { row: "r1", banner: "Baseline", leaf: "Static",  value: "1.0" },
+    { row: "r1", banner: "Baseline", leaf: "Dynamic", value: "2.0" },
+    { row: "r1", banner: "Reform",   leaf: "Other",   value: "3.0" },
+  ] as any;
+
+  const m = buildTableModel(spec, rows);
+
+  // Banner tier (headerRows[0]): "Baseline" → "BL"; "Reform" stays "Reform" (no override).
+  const bannerTexts = m.headerRows[0]!.map((c) => c.text);
+  expect(bannerTexts).toContain("BL");
+  expect(bannerTexts).toContain("Reform");
+  expect(bannerTexts).not.toContain("Baseline");
+
+  // Leaf tier (headerRows[1]): "Static" leaf → "Stat" via column_labels; "Dynamic" unchanged.
+  const leafTexts = m.headerRows[1]!.map((c) => c.text);
+  expect(leafTexts).toContain("Stat");
+  expect(leafTexts).toContain("Dynamic");
+  expect(leafTexts).not.toContain("Static");
+
+  // Sanity: leaf keys are still the raw values.
+  expect(m.leaves.map((l) => l.key)).toEqual(["Static", "Dynamic", "Other"]);
+});
