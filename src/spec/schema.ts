@@ -28,6 +28,20 @@ const X_AXIS_POLICY = {
         },
       },
     },
+    bands: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["start", "end"],
+        properties: {
+          start: { type: "string" },
+          end: { type: "string" },
+          label: { type: "string" },
+          color: { type: "string" },
+        },
+      },
+    },
   },
 } as const;
 
@@ -44,6 +58,21 @@ const Y_AXIS_POLICY = {
       additionalProperties: false,
       required: ["step"],
       properties: { step: { type: "number" } },
+    },
+    markers: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["y"],
+        properties: {
+          y: { type: "number" },
+          label: { type: "string" },
+          style: { type: "string", enum: ["dashed", "solid"] },
+          color: { type: "string" },
+          strokeWidth: { type: "number" },
+        },
+      },
     },
   },
 } as const;
@@ -171,6 +200,7 @@ export const CHART_SPEC_SCHEMA = {
       properties: {
         show: { type: "boolean" },
         signed: { type: "boolean" },
+        decimals: { type: "integer", minimum: 0, maximum: 10 },
       },
     },
     barStack: {

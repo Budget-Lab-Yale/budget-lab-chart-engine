@@ -138,6 +138,25 @@ export function assemblePlot({
   // per row facet. Same className-tagging discipline; collapsed by collapseFacetChromeY.
   const fyFaceted = layers.fyScaleOpts != null;
 
+  // 0. Shaded x-bands (e.g. recession indicators): vertical regions painted at the very back,
+  //    behind gridlines + data. Spans the full y-domain; x edges parsed via the adapter (numeric
+  //    / temporal only — markerToX returns null for a categorical band scale).
+  for (const band of spec.xAxisPolicy?.bands ?? []) {
+    const x1 = xOpts.markerToX({ x: band.start });
+    const x2 = xOpts.markerToX({ x: band.end });
+    if (x1 == null || x2 == null) continue;
+    marks.push(
+      Plot.rect([{ x1, x2, y1: yDomain[0], y2: yDomain[1] }], {
+        x1: "x1",
+        x2: "x2",
+        y1: "y1",
+        y2: "y2",
+        fill: band.color || TBL.color.annotationDim,
+        fillOpacity: 0.1,
+      }),
+    );
+  }
+
   // 1. Band underlay (behind everything).
   marks.push(...layers.underlay);
 
@@ -230,6 +249,41 @@ export function assemblePlot({
 
   // 6. Line overlay (on top).
   marks.push(...layers.overlay);
+
+  // 6b. Horizontal reference lines (yAxisPolicy.markers): drawn over the data, each with an
+  //     optional right-anchored label sitting just above the line.
+  for (const m of spec.yAxisPolicy?.markers ?? []) {
+    marks.push(
+      Plot.ruleY([m.y], {
+        stroke: m.color || TBL.color.annotationDim,
+        strokeDasharray: (m.style || "dashed") === "dashed" ? "4 3" : null,
+        strokeWidth: m.strokeWidth || 1.25,
+        insetLeft: -effMarginLeft,
+        insetRight: -effMarginRight,
+        clip: false,
+      }),
+    );
+    if (m.label) {
+      // On an fx-faceted chart (grouped bars), an unfaceted mark repeats in every facet — bind
+      // the label to the LAST fx category so a single right-anchored label renders once.
+      const fxDomain = faceted ? (layers.fxScaleOpts?.domain as string[] | undefined) : undefined;
+      const labelFx = fxDomain && fxDomain.length ? fxDomain[fxDomain.length - 1] : undefined;
+      marks.push(
+        Plot.text([{ y: m.y, t: m.label, ...(labelFx != null ? { fx: labelFx } : {}) }], {
+          y: "y",
+          text: "t",
+          ...(labelFx != null ? { fx: "fx" } : {}),
+          frameAnchor: "right",
+          textAnchor: "end",
+          dx: -6,
+          dy: -5,
+          fill: m.color || TBL.color.annotationDim,
+          fontSize: TBL.size.annotation,
+          fontWeight: 600,
+        }),
+      );
+    }
+  }
 
   // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
   //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each

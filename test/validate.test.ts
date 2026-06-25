@@ -57,6 +57,39 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/step/);
   });
 
+  it("accepts xAxisPolicy.bands, yAxisPolicy.markers, and valueLabels.decimals", () => {
+    const r = validateSpec({
+      chartType: "line",
+      title: "Demo",
+      xAxisType: "numeric",
+      data: "data.csv",
+      xAxisPolicy: { bands: [{ start: "2007", end: "2009", label: "GFC" }] },
+      yAxisPolicy: { markers: [{ y: 0.026, label: "Moderate", style: "dashed" }] },
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+    const b = validateSpec({
+      chartType: "bar",
+      title: "Demo",
+      xAxisType: "categorical",
+      data: "data.csv",
+      valueLabels: { show: true, decimals: 1 },
+    });
+    expect(b.valid).toBe(true);
+  });
+
+  it("rejects a band missing start/end and a y-marker missing y", () => {
+    const r1 = validateSpec({
+      chartType: "line", title: "x", xAxisType: "numeric", data: "d",
+      xAxisPolicy: { bands: [{ start: "2007" }] },
+    });
+    expect(r1.valid).toBe(false);
+    const r2 = validateSpec({
+      chartType: "line", title: "x", xAxisType: "numeric", data: "d",
+      yAxisPolicy: { markers: [{ label: "no y" }] },
+    });
+    expect(r2.valid).toBe(false);
+  });
+
   it("accepts a scatter spec with numeric xAxisType and a shape channel", () => {
     const r = validateSpec({
       chartType: "scatter",

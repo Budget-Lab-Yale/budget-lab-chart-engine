@@ -33,13 +33,22 @@ function makeValueFormatter(
   values: number[],
   units: string,
   signed: boolean,
+  decimals?: number,
 ): (d: number) => string {
-  const maxFrac = values.reduce((max, v) => {
-    if (!Number.isFinite(v)) return max;
-    const s = String(v);
-    const i = s.indexOf(".");
-    return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-  }, 0);
+  // Fixed precision when the author sets it; otherwise the minimum the data needs, but CAPPED
+  // at 2 so raw floating-point values (e.g. 4.038639335896420) don't print 15 digits.
+  const maxFrac =
+    decimals != null
+      ? decimals
+      : Math.min(
+          2,
+          values.reduce((max, v) => {
+            if (!Number.isFinite(v)) return max;
+            const s = String(v);
+            const i = s.indexOf(".");
+            return Math.max(max, i < 0 ? 0 : s.length - i - 1);
+          }, 0),
+        );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     const mag = Math.abs(d).toFixed(maxFrac);
@@ -117,7 +126,7 @@ export function buildBarMarks(
   const allValues = data
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
-  const fmt = makeValueFormatter(allValues, units, signed);
+  const fmt = makeValueFormatter(allValues, units, signed, spec.valueLabels?.decimals);
 
   const overlay: unknown[] = [];
 

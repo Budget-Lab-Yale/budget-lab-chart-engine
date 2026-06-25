@@ -20,11 +20,32 @@ export interface XAxisMarker {
   strokeWidth?: number;
 }
 
+/** A shaded vertical region of the x-axis (e.g. a recession band). `start`/`end` are x values
+ *  parsed under the chart's xAxisType (numeric year, date, quarter, or category). */
+export interface XAxisBand {
+  start: string;
+  end: string;
+  label?: string;
+  /** Fill color; defaults to a subtle neutral gray. */
+  color?: ColorRef;
+}
+
 export interface XAxisPolicy {
   /** Numeric axis only: extend the visible domain to include 0. */
   anchorAtZero?: boolean;
   /** Vertical reference lines (e.g. a treatment date). */
   markers?: XAxisMarker[];
+  /** Shaded vertical regions painted behind the data (e.g. recession indicators). */
+  bands?: XAxisBand[];
+}
+
+/** A horizontal reference line at a fixed y value (e.g. a target or assumption line). */
+export interface YAxisMarker {
+  y: number;
+  label?: string;
+  style?: "dashed" | "solid";
+  color?: ColorRef;
+  strokeWidth?: number;
 }
 
 export interface YAxisPolicy {
@@ -34,6 +55,8 @@ export interface YAxisPolicy {
   tickCount?: number;
   /** When data exceeds `max`, round the ceiling up to the next multiple of `step`. */
   autoWiden?: { step: number };
+  /** Horizontal reference lines (e.g. assumption/target lines), drawn over the data. */
+  markers?: YAxisMarker[];
 }
 
 export interface ConfidenceBand {
@@ -151,8 +174,9 @@ export interface ChartSpec {
   // Bar / stacked bar
   /** Chart orientation; defaults to "vertical" (value axis is Y). */
   orientation?: "vertical" | "horizontal";
-  /** In-bar value labels. */
-  valueLabels?: { show?: boolean; signed?: boolean };
+  /** In-bar value labels. `decimals` fixes the label precision; omitted ⇒ the minimum precision
+   *  the data needs, capped at 2 (so raw floats don't print 15 digits). */
+  valueLabels?: { show?: boolean; signed?: boolean; decimals?: number };
   /** Stacked-bar display options. */
   barStack?: {
     /** How to render the net (sum) callout.
