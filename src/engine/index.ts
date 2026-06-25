@@ -347,6 +347,8 @@ export function renderPane(
     seriesNames,
     plotWidth,
     plotHeight,
+    // Truncated bar axis (y-domain excludes 0): clip bars so they don't overflow below the plot.
+    ...((chartType === "bar" || chartType === "stacked") && yDomain[0] > 0 ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
     // Shared-mode small multiples: pass the facet field names so the mark builder binds
     // fx/fy on its marks (they face into the grid). Absent → single frame.

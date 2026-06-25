@@ -71,6 +71,9 @@ export interface MarkContext {
   /** Point charts: true when the shape column IS the series column (redundant color+shape
    *  encoding) — the symbol scale then keys off series identity and the legend is combined. */
   shapeIsSeries?: boolean;
+  /** Bars: clip marks to the plot frame. Set when the y-domain excludes 0 (a truncated/non-zero
+   *  baseline), so bars drawn from 0 don't overflow below the plot into the x-axis labels. */
+  clipMarks?: boolean;
 }
 
 export interface MarkLayers {

@@ -17,6 +17,7 @@ import {
   X_AXIS_LABEL_CLASS,
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
+import { tblColorScale, resolveColor } from "./palette";
 import type { ChartSpec } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
@@ -251,11 +252,17 @@ export function assemblePlot({
   marks.push(...layers.overlay);
 
   // 6b. Horizontal reference lines (yAxisPolicy.markers): drawn over the data, each with an
-  //     optional right-anchored label sitting just above the line.
-  for (const m of spec.yAxisPolicy?.markers ?? []) {
+  //     optional label. By DEFAULT lines + matched labels take categorical colors starting at
+  //     amber (skipping the blue cat-1 slot, which data series usually use); an explicit
+  //     marker.color overrides. The label color always matches its line.
+  const markerList = spec.yAxisPolicy?.markers ?? [];
+  // +1 so index 0 (blue) is skipped → markers start at amber, then violet, green, …
+  const markerPalette = tblColorScale(markerList.length + 1);
+  markerList.forEach((m, i) => {
+    const markerColor = (m.color && (resolveColor(m.color) || m.color)) || markerPalette[i + 1] || TBL.color.annotationDim;
     marks.push(
       Plot.ruleY([m.y], {
-        stroke: m.color || TBL.color.annotationDim,
+        stroke: markerColor,
         strokeDasharray: (m.style || "dashed") === "dashed" ? "4 3" : null,
         strokeWidth: m.strokeWidth || 1.25,
         insetLeft: -effMarginLeft,
@@ -279,13 +286,13 @@ export function assemblePlot({
           textAnchor: left ? "start" : "end",
           dx: m.labelDx != null ? m.labelDx : left ? 6 : -6,
           dy: m.labelDy != null ? m.labelDy : -5,
-          fill: m.color || TBL.color.annotationDim,
+          fill: markerColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
         }),
       );
     }
-  }
+  });
 
   // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
   //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each

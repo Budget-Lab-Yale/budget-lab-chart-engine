@@ -641,6 +641,8 @@ export interface BandCrosshairOptions {
   yFormat?: (v: number) => string;
   /** Raw category value → display label for the tooltip header. */
   categoryLabels?: Record<string, string>;
+  /** Series swatch shape in the tooltip — "rect" for bars (matches the legend), else line. */
+  swatchShape?: "line" | "rect";
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -782,9 +784,11 @@ export function buildBandTooltipHtml(
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
+    /** Series swatch shape — "rect" (filled square, matching a bar legend) or the default line. */
+    swatchShape?: "line" | "rect";
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -806,7 +810,10 @@ export function buildBandTooltipHtml(
     total += v;
     const dot = colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
-    html += `<div class="tbl-tooltip-row"><span class="tbl-tooltip-swatch" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+    // Swatch matches the chart's legend marker: a filled square for bars (default here is the
+    // small line swatch, used by line charts).
+    const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
+    html += `<div class="tbl-tooltip-row"><span class="${swCls}" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
   // Total row: only for stacked charts with 2+ series, and only when showTotalDot is not
@@ -1132,6 +1139,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       seriesOrder: opts.seriesOrder,
       yFormat,
       categoryLabels: opts.categoryLabels,
+      swatchShape: opts.swatchShape,
     });
     tip!.innerHTML = html;
 

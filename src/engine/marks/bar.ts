@@ -85,6 +85,9 @@ export function buildBarMarks(
   const catField = xField;
   const seriesNames = ctx.seriesNames ?? [];
   const horizontal = spec.orientation === "horizontal";
+  // Truncated (non-zero baseline) bars are drawn from 0 and would overflow below the plot; clip
+  // them to the frame. No-op (and byte-identical) for normal zero-baseline bars.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
   const isMulti = seriesNames.length > 1;
 
   // Category (group) domain in data-encounter order - declaration order is authoritative.
@@ -158,8 +161,8 @@ export function buildBarMarks(
 
     overlay.push(
       horizontal
-        ? Plot.barX(data, { y: xField, x: "_y", fill })
-        : Plot.barY(data, { x: xField, y: "_y", fill }),
+        ? Plot.barX(data, { y: xField, x: "_y", fill, ...clipOpt })
+        : Plot.barY(data, { x: xField, y: "_y", fill, ...clipOpt }),
     );
 
     if (emitValueLabels) {
@@ -208,7 +211,7 @@ export function buildBarMarks(
   //     (fx→fy, x-band→y-band, barY→barX). assemblePlot runs the fy facet-chrome collapse
   //     (continuous full-height vertical gridlines + one value-axis label row). ---
   if (horizontal) {
-    overlay.push(Plot.barX(data, { fy: catField, y: "series", x: "_y", fill: fillChannel }));
+    overlay.push(Plot.barX(data, { fy: catField, y: "series", x: "_y", fill: fillChannel, ...clipOpt }));
 
     if (emitValueLabels) {
       overlay.push(
@@ -245,7 +248,7 @@ export function buildBarMarks(
 
   // --- Multi-series grouped (vertical): fx = group (category), x = series within group. ---
 
-  overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel }));
+  overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel, ...clipOpt }));
 
   if (emitValueLabels) {
     overlay.push(

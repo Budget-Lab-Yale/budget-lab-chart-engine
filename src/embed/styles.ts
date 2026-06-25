@@ -502,6 +502,12 @@ body {
   background: #fff;
   box-shadow: inset 0 0 0 1.5px #000;
 }
+/* Bar tooltip swatch: a filled square matching the bar legend (vs the default thin line). */
+.tbl-tooltip-swatch.is-square {
+  width: 11px;
+  height: 11px;
+  border-radius: 1px;
+}
 /* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
 .tbl-tooltip-swatch.is-symbol {
   width: 16px;
