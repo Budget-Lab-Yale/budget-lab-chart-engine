@@ -25,6 +25,7 @@ import {
   attachPointHover,
   attachHighlightPills,
 } from "./crosshair.js";
+import type { HighlightPillsHandle } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
@@ -393,7 +394,12 @@ function downloadSlug(spec: ChartSpec): string {
   try {
     const segs = location.pathname.split("/").filter(Boolean);
     const last = segs[segs.length - 1];
+    // Served at a folder URL (…/f1-grouped-bar/) → that folder is the slug.
     if (last && !/\./.test(last)) return last;
+    // Opened as a file (…/f1-grouped-bar/preview.html) → use the PARENT folder as the slug, so
+    // downloads are still named by the chart folder rather than the title.
+    const parent = segs[segs.length - 2];
+    if (parent && !/\./.test(parent)) return parent;
   } catch {
     /* no location (SSR/jsdom) — fall through */
   }
@@ -596,10 +602,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
     // pill renderer just needs to exist by the time the user interacts.
-    let pillDriver: ((active: Set<string>) => void) | null = null;
+    let pillDriver: ReturnType<typeof attachHighlightPills> | null = null;
     const onHighlight = (active: Set<string>): void => {
       recolorNetLabels(svg);
-      pillDriver?.(active);
+      pillDriver?.setActive(active);
     };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
     // legend (the color legend still drives hover-dim, which is independent of the crosshair).
@@ -938,9 +944,10 @@ function wireFigureSvg(
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
      *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
     onResolve?: (key: unknown) => void;
-    /** Legend-highlight pills: when set, the pane's value-pill driver is registered here so the
-     *  figure-level legend can fire every pane's pills on highlight. */
-    onPillDriver?: (driver: (active: Set<string>) => void) => void;
+    /** Legend-highlight pills: when set, the pane's value-pill handle is registered here so the
+     *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
+     *  can suppress the hovered category's pills. */
+    onPillDriver?: (handle: HighlightPillsHandle) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
@@ -1290,14 +1297,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     // Each pane registers its value-pill driver here; the legend fires them all on highlight.
-    const pillDrivers: Array<(active: Set<string>) => void> = [];
+    const pillDrivers: HighlightPillsHandle[] = [];
     const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
     const handle = fig.legendItems || hasFigShape
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
           onHighlight: (active) => {
             for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
-            for (const d of pillDrivers) d(active);
+            for (const d of pillDrivers) d.setActive(active);
           },
           shapeItems: fig.shapeLegendItems ?? undefined,
           colorTitle: fig.colorLegendTitle,
@@ -1318,6 +1325,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // labels + the x-axis value above); the rest get passive styling. null clears all.
     const emit = (sourceIdx: number, key: unknown): void => {
       for (let i = 0; i < drivers.length; i++) drivers[i]!(key, i === sourceIdx);
+      // Hovering a category surfaces its per-category value pills (coordinated cursor) on every
+      // pane; suppress that same category in the series-highlight pills so they don't double up.
+      // A non-category key (line figures: a numeric x) or null clears the suppression.
+      const cat = typeof key === "string" ? key : null;
+      for (const d of pillDrivers) d.setSuppressedCategory(cat);
     };
 
     fig.panes.forEach((pane, idx) => {

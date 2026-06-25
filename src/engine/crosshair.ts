@@ -2218,6 +2218,13 @@ export interface HighlightPillsOptions {
   horizontal?: boolean;
 }
 
+export interface HighlightPillsHandle {
+  /** Set the active (pinned/hovered) series; redraws pills for all non-suppressed categories. */
+  setActive(active: Set<string>): void;
+  /** Suppress one category's pills (the one under a coordinated-cursor hover), or null to clear. */
+  setSuppressedCategory(cat: string | null): void;
+}
+
 /**
  * Attach a legend-highlight value-pill renderer to a categorical chart SVG. Returns a driver
  * `setActive(active)` that draws a value pill for EVERY mark of the active series (across all
@@ -2236,8 +2243,8 @@ export interface HighlightPillsOptions {
 export function attachHighlightPills(
   svgEl: SVGSVGElement,
   opts: HighlightPillsOptions,
-): (active: Set<string>) => void {
-  const noop = (): void => {};
+): HighlightPillsHandle {
+  const noop: HighlightPillsHandle = { setActive: () => {}, setSuppressedCategory: () => {} };
   if (!svgEl || !opts.rows?.length) return noop;
   const yFormat =
     opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
@@ -2278,19 +2285,16 @@ export function attachHighlightPills(
   svgEl.appendChild(g);
   const doc = svgEl.ownerDocument;
 
-  // While the pointer is over the chart, the per-category hover affordance (tooltip / coordinated
-  // cursor) is the active indicator, so the series-wide pills are suppressed to avoid two sets of
-  // value callouts overlapping. They re-appear on pointer leave from the current pinned state.
+  // `lastActive` is the pinned/hovered series set (driven by the legend). `suppressedCat` is the
+  // category currently under a coordinated-cursor hover: its pills are skipped so the hover's own
+  // per-category value pills don't double up with the series-wide ones. Only the hovered category
+  // is suppressed (not the whole pane), and only the coordinated-cursor path sets it — single-pane
+  // charts (which show a floating tooltip, not in-place pills) never suppress.
   let lastActive: Set<string> = new Set();
-  let suppressed = false;
-  const clear = (): void => {
-    while (g.firstChild) g.removeChild(g.firstChild);
-    g.setAttribute("opacity", "0");
-  };
-  svgEl.addEventListener("pointerenter", () => { suppressed = true; clear(); });
-  svgEl.addEventListener("pointerleave", () => { suppressed = false; render(lastActive); });
+  let suppressedCat: string | null = null;
 
-  function render(active: Set<string>): void {
+  function render(): void {
+    const active = lastActive;
     while (g.firstChild) g.removeChild(g.firstChild);
     // No highlight: nothing pinned/hovered, or every series active (the legend doesn't dim then).
     if (!active || active.size === 0 || active.size >= allSeries.size) {
@@ -2304,6 +2308,7 @@ export function attachHighlightPills(
       const centers = readCategoryCentersFromMarks(svgEl);
       if (!toPy || !centers.length) { g.setAttribute("opacity", "0"); return; }
       for (const c of centers) {
+        if (c.category === suppressedCat) continue;
         const vals = valByCat.get(c.category);
         if (!vals) continue;
         const series = orderFor(c.category, active);
@@ -2342,6 +2347,7 @@ export function attachHighlightPills(
       categories: opts.categories,
     } as SecondaryBandOptions, opts.horizontal);
     for (const [category, rects] of rectsByCat) {
+      if (category === suppressedCat) continue;
       const vals = valByCat.get(category);
       const valid = rects
         .filter((r) => active.has(r.series))
@@ -2380,9 +2386,17 @@ export function attachHighlightPills(
     g.setAttribute("opacity", "1");
   }
 
-  return (active: Set<string>): void => {
-    lastActive = active;
-    if (!suppressed) render(active);
+  return {
+    setActive(active: Set<string>): void {
+      lastActive = active;
+      render();
+    },
+    setSuppressedCategory(cat: string | null): void {
+      const c = cat ?? null;
+      if (c === suppressedCat) return;
+      suppressedCat = c;
+      render();
+    },
   };
 }
 

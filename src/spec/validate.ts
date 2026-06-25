@@ -51,6 +51,21 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   return null;
 }
 
+/** Horizontal small-multiples bar/stacked charts are not supported yet (the faceted-horizontal
+ *  layout — per-pane left gutters, category-on-Y resolution — isn't built). Reject the combo with
+ *  a pointed message rather than rendering a broken figure. May be specced in future. */
+function facetedHorizontalError(spec: {
+  chartType?: unknown;
+  orientation?: unknown;
+  small_multiples?: unknown;
+}): string | null {
+  const isBar = spec.chartType === "bar" || spec.chartType === "stacked";
+  if (isBar && spec.orientation === "horizontal" && spec.small_multiples != null) {
+    return `horizontal orientation is not supported with small_multiples for ${JSON.stringify(spec.chartType)} charts yet — use vertical, or drop small_multiples`;
+  }
+  return null;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -61,6 +76,10 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
+  const fhErr = facetedHorizontalError(
+    spec as { chartType?: unknown; orientation?: unknown; small_multiples?: unknown },
+  );
+  if (fhErr) return { valid: false, errors: [fhErr] };
   return { valid: true, errors: [] };
 }
 

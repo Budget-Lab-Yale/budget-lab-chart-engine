@@ -28,6 +28,9 @@ const SCALE = 2;
 // Small-multiples figure layout tokens.
 const PANE_CHART_H = 240; // per-pane mini-chart height — matches the live PANE_HEIGHT so the
                           // exported panes keep the same (squarer) proportion as on screen.
+// Dot-plot AND bar/stacked panes render taller (matches the live render-live TALL_PANE_TYPES).
+const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
+const TALL_PANE_CHART_H = 320;
 const PANE_TITLE_H = 18; // per-pane title band height
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
@@ -354,6 +357,7 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
+    const paneChartH = TALL_PANE_TYPES.has(spec.chartType) ? TALL_PANE_CHART_H : PANE_CHART_H;
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
@@ -369,15 +373,15 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
       acc += colWidth(c) + COL_GAP;
     }
     const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: PANE_CHART_H, columns: cols })
-      : renderFigure(spec, rows, { width: equalPaneW, height: PANE_CHART_H, columns: cols });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols })
+      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols });
     const gridTop = chartTop;
     fig.panes.forEach((pane, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
       const x = colX[col]!;
       const w = colWidth(col);
-      const y = gridTop + row * (PANE_TITLE_H + PANE_CHART_H + ROW_GAP);
+      const y = gridTop + row * (PANE_TITLE_H + paneChartH + ROW_GAP);
       root.appendChild(
         textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
       );
@@ -386,12 +390,12 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
         ps.setAttribute("x", String(x));
         ps.setAttribute("y", String(y + PANE_TITLE_H));
         ps.setAttribute("width", String(w));
-        ps.setAttribute("height", String(PANE_CHART_H));
+        ps.setAttribute("height", String(paneChartH));
         root.appendChild(ps);
       }
     });
     contentHeight =
-      gridRows * (PANE_TITLE_H + PANE_CHART_H) + (gridRows - 1) * ROW_GAP;
+      gridRows * (PANE_TITLE_H + paneChartH) + (gridRows - 1) * ROW_GAP;
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a

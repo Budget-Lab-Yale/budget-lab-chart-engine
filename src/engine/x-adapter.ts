@@ -62,7 +62,9 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
           ),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
-          tooltipXFormat: (v) => `Month ${v}`,
+          // Match the axis label exactly (plain number, no thousands separator) — numeric x is
+          // most often a year or an index, so a bare value reads correctly in both.
+          tooltipXFormat: (v) => `${+v}`,
         };
       },
     };
