@@ -167,11 +167,11 @@ function drawLegend(
       // Point chart: a filled colored marker (the symbol, default circle) with no line.
       root.appendChild(
         svgEl("path", {
-          d: symbolPathD(item.markerSymbol ?? "circle", 46),
+          d: symbolPathD(item.markerSymbol ?? "circle", 100),
           transform: `translate(${x + SW / 2},${cy})`,
           fill: color,
           stroke: "#ffffff",
-          "stroke-width": 0.75,
+          "stroke-width": 1,
         }),
       );
     } else if (item.dashed) {

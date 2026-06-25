@@ -326,8 +326,8 @@ body {
 }
 /* Point-chart swatch: a filled colored marker (the symbol) with no connecting line. */
 .tbl-legend-swatch.is-point {
-  width: 16px;
-  height: 14px;
+  width: 18px;
+  height: 16px;
   border-radius: 0;
   background: none;
   display: inline-flex;

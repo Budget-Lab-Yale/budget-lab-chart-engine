@@ -43,15 +43,18 @@ function buildSymbolSwatch(
  *  for point charts — colored by series in the color legend, neutral gray in the shape legend. */
 function buildPointSwatch(doc: Document, color: string, symbol: string): SVGSVGElement {
   const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("width", "16");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("viewBox", "0 0 16 14");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 18 16");
   const path = doc.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", symbolPathD(symbol, 46));
-  path.setAttribute("transform", "translate(8,7)");
+  // Larger marker (was ~8px → ~12px) for legibility. Centered at x=9; nudged up to y=7 (box
+  // center is 8) so it sits on the text's optical (cap-height) center rather than the line-box
+  // center, which reads as slightly low for a small marker beside 12px text.
+  path.setAttribute("d", symbolPathD(symbol, 100));
+  path.setAttribute("transform", "translate(9,7)");
   path.setAttribute("fill", color);
   path.setAttribute("stroke", "#ffffff");
-  path.setAttribute("stroke-width", "0.75");
+  path.setAttribute("stroke-width", "1");
   svg.appendChild(path);
   return svg;
 }
