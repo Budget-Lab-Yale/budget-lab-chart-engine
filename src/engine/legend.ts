@@ -110,6 +110,8 @@ export function renderLegend(
   // Two-group layout: a color group + a shape group, each an inline cluster with an optional
   // heading. Single-group (the common case) appends items directly to the legend, unchanged.
   const twoGroup = hasShape;
+  // Two-group (color + shape) point legend stacks the groups on separate lines.
+  if (twoGroup) legend.classList.add("tbl-legend--grouped");
   let colorContainer: HTMLElement = legend;
   let shapeGroup: HTMLElement | null = null;
   if (twoGroup) {

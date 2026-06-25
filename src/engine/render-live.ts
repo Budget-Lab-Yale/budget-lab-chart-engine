@@ -906,10 +906,13 @@ function wireFigureSvg(
     onResolve?: (key: unknown) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
-  // Point charts (scatter / dotplot): per-pane hover (no coordinated cursor / selection in v1).
-  // Dot-plot panes get the category hover; scatter panes get per-point hover. Return no driver
-  // (the coordinated-cursor bus stays inactive for point figures).
+  // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
+  // a category shades that band + shows per-series value pills on EVERY pane (and highlights the
+  // category on the hovered pane). Mirrors the bar/line coordinated path; resolves the category
+  // from axis-label centers (points have no rects). The marker dots take each series' symbol.
   if (ctx.spec.chartType === "dotplot") {
+    const dotUseCoord = ctx.onResolve != null;
+    const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const));
     attachCategoricalLineCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       colors: ctx.colors,
@@ -917,7 +920,19 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units),
       bandHighlight: true,
+      ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
+    if (dotUseCoord) {
+      return attachSecondaryCategoricalLineCursor(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors: ctx.colors,
+        seriesLabels: ctx.seriesLabels,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units),
+        symbols,
+        bandHighlight: true,
+      }) as (key: unknown, active?: boolean) => void;
+    }
     return undefined;
   }
   if (ctx.spec.chartType === "scatter") {
@@ -1153,6 +1168,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // fits at common widths instead of collapsing to 2.
   const isPointFigure = spec.chartType === "dotplot" || spec.chartType === "scatter";
   const paneMinWidth = isPointFigure ? 160 : PANE_MIN_WIDTH;
+  // Dot-plot panes render ~33% taller so the vertically-spread points have room to read.
+  const paneHeight = spec.chartType === "dotplot" ? 320 : PANE_HEIGHT;
 
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
@@ -1172,10 +1189,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         ? renderFigure(spec, rows, {
             gridWidth: outerWidth,
             gridGap: GRID_GAP,
-            height: PANE_HEIGHT,
+            height: paneHeight,
             columns: cols,
           })
-        : renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
+        : renderFigure(spec, rows, { width: paneW, height: paneHeight, columns: cols });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix

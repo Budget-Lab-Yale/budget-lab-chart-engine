@@ -2051,7 +2051,15 @@ export function attachSecondaryCategoricalLineCursor(
     const vals = valByCat.get(category);
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
     const cx = c.cx;
-    addCoordGuide(g, doc, cx, mt, mt + plotH);
+    if (opts.bandHighlight) {
+      // Shade the category's full band (bar-style) on every pane, matching the primary hover.
+      const bands = widenBandsToMidpoints(centers.map((x) => ({ min: x.cx, max: x.cx })), ml, W - mr);
+      const idx = centers.findIndex((x) => x.category === category);
+      const b = bands[idx];
+      if (b) addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
+    } else {
+      addCoordGuide(g, doc, cx, mt, mt + plotH);
+    }
     if (active) {
       const ys = axisRows.get();
       if (ys.length) addCoordCategoryHighlight(g, doc, svgEl, mt + plotH, cx, category, detectBandLabelMode(svgEl, mt + plotH), ys);

@@ -329,7 +329,13 @@ body {
   align-items: center;
   justify-content: center;
 }
-/* Two-group (color + shape) point legend: each group is a labeled inline cluster. */
+/* Two-group (color + shape) point legend: groups STACK on separate lines (color row, then
+   shape row), each group an inline cluster of swatches. */
+.tbl-legend--grouped {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px 0;
+}
 .tbl-legend-group {
   display: inline-flex;
   flex-wrap: wrap;
