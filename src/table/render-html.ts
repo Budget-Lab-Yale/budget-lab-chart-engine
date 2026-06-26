@@ -3,6 +3,10 @@
 import type { TableModel, BodyRow, RowGroup } from "./model";
 import type { TableLayout } from "./layout";
 import { INDENT_STEP } from "./layout";
+
+// Base left padding on stub cells, matching the CSS `.tbl-table tbody th` padding and the SVG
+// renderer's PAD_X — so the corner, group headers, and row labels share one left edge.
+const STUB_BASE_PAD = 8;
 import type { TableSpec } from "../spec/table-types";
 
 /**
@@ -168,7 +172,10 @@ export function renderTableHtml(
       stubTh.scope = "row";
       stubTh.className = "tbl-table-stub";
       stubTh.classList.add(stubWrap ? "is-wrap" : "is-nowrap");
-      stubTh.style.paddingLeft = `${row.level * INDENT_STEP}px`;
+      // Keep the cell's base 8px left padding (matches the corner + group headers) and ADD the
+      // nesting indent on top — setting paddingLeft to just the indent would drop the base padding
+      // for level-0 rows, leaving them flush at the cell edge while the corner sits at 8px.
+      stubTh.style.paddingLeft = `${STUB_BASE_PAD + row.level * INDENT_STEP}px`;
 
       // Row label. When not wrapping, place it in an inner clip block so an over-long label is
       // clipped to the (capped) column — table cells themselves ignore overflow.
