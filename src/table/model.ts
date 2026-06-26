@@ -220,8 +220,10 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
         if (fn != null && fn.trim() !== "") cell.footnote = fn.trim();
       }
 
-      // Sign coloring.
-      if ((spec.sign_color || rule.signColor) && value != null && value !== 0) {
+      // Sign coloring. `rule.signColor` already folds in the global default (resolveFormat), so a
+      // per-column `signColor:false` correctly wins over global `sign_color:true`. Test the resolved
+      // rule ONLY — ORing the global flag back in here would defeat that per-column override.
+      if (rule.signColor && value != null && value !== 0) {
         cell.signClass = value > 0 ? "pos" : "neg";
       }
       return cell;

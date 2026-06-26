@@ -97,4 +97,30 @@ describe("mountTable", () => {
     const labels = Array.from(buttons).map((b) => b.textContent?.trim());
     expect(labels.some((l) => l?.includes("Data"))).toBe(true);
   });
+
+  it("renders the footnote definition list below the table", () => {
+    const fnSpec: TableSpec = {
+      ...SPEC,
+      footnote_column: "fn",
+      footnotes: { a: "Provisional estimate." },
+    };
+    const fnRows: TidyRow[] = [
+      { row: "Revenue", metric: "2024", value: "4500", fn: "a" },
+      { row: "Revenue", metric: "2025", value: "4700", fn: "" },
+      { row: "Outlays", metric: "2024", value: "6100", fn: "" },
+      { row: "Outlays", metric: "2025", value: "6400", fn: "" },
+    ];
+    const container = document.createElement("div");
+    mountTable(container, { spec: fnSpec, rows: fnRows });
+    const block = container.querySelector(".tbl-table-footnotes");
+    expect(block).not.toBeNull();
+    expect(block?.querySelector("sup")?.textContent).toBe("a");
+    expect(block?.textContent).toContain("Provisional estimate.");
+  });
+
+  it("omits the footnote list when the spec has no footnotes", () => {
+    const container = document.createElement("div");
+    mountTable(container, { spec: SPEC, rows: ROWS });
+    expect(container.querySelector(".tbl-table-footnotes")).toBeNull();
+  });
 });

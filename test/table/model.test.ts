@@ -77,6 +77,32 @@ it("column_order reorders leaves", () => {
   expect(m.leaves.map((l) => l.key)).toEqual(["2027", "2026"]);
 });
 
+it("per-column signColor:false overrides global sign_color:true", () => {
+  // Global sign_color is on, but column "B" opts out via format.columns.B.signColor=false.
+  // Cells in column B must carry NO signClass; cells in column A still do.
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    sign_color: true,
+    format: {
+      default: { type: "number", decimals: 1 },
+      columns: { B: { signColor: false } },
+    },
+  };
+  const rows = [
+    { row: "r1", metric: "A", value: "1.0" },
+    { row: "r1", metric: "B", value: "-2.0" },
+  ] as any;
+  const m = buildTableModel(spec, rows);
+  expect(m.leaves.map((l) => l.key)).toEqual(["A", "B"]);
+  const r1 = m.body.find((b) => b.kind === "row") as any;
+  // Column A (index 0): global default applies → signClass present.
+  expect(r1.row.cells[0].signClass).toBe("pos");
+  // Column B (index 1): per-column override wins → no signClass despite negative value.
+  expect(r1.row.cells[1].signClass).toBeUndefined();
+});
+
 it("applies column_labels and header_labels overrides to HeaderCell.text", () => {
   // Two header tiers: banner (scenario_group) and leaf (scenario).
   // header_labels overrides a banner value; column_labels overrides a leaf value.

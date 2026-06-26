@@ -805,6 +805,23 @@ td.is-neg {
   background: var(--tbl-bg);
 }
 
+/* ---- Opt-out of the sticky column header ---- */
+/* Added to the table element when spec.sticky.header === false. Pins nothing — header scrolls
+   with the body. */
+.tbl-table.tbl-table--no-sticky-header thead th {
+  position: static;
+}
+
+/* ---- Footnote definition list ---- */
+/* Rendered after the table by mount.ts when the spec has footnotes. Small + muted, one line per
+   footnote (a leading <sup> marker, then the text). */
+.tbl-table-footnotes {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--tbl-text-muted);
+}
+
 /* ---- Footnote superscript ---- */
 .tbl-table sup {
   font-size: 0.7em;

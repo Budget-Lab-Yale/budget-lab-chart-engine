@@ -133,6 +133,30 @@ describe("renderTableSvg — golden bodies", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/tariff.golden.svg");
   });
 
+  it("renders the footnote list as <text> rows below the body", () => {
+    const spec: TableSpec = {
+      ...BUDGET_SPEC,
+      footnote_column: "fn",
+      footnotes: { a: "Provisional estimate." },
+    };
+    const rows = parseCsv("./fixtures/budget.csv");
+    // Tag the first data row so a footnote marker is referenced (the list renders from
+    // spec.footnotes regardless, but this mirrors real usage).
+    if (rows[0]) rows[0].fn = "a";
+    const model = buildTableModel(spec, rows);
+    const layout = layoutTable(model, layoutOpts);
+    const svg = renderTableSvg(model, layout, { document });
+
+    const fnTexts = Array.from(svg.querySelectorAll("g.tbl-table-footnotes text")).map(
+      (t) => t.textContent,
+    );
+    expect(fnTexts.length).toBe(1);
+    expect(fnTexts[0]).toContain("Provisional estimate.");
+    expect(fnTexts[0]).toContain("a");
+    // Layout reserves height for the footnote block.
+    expect(layout.footnotesHeight).toBeGreaterThan(0);
+  });
+
   it("is deterministic: rendering twice is byte-identical", () => {
     const rows = parseCsv("./fixtures/budget.csv");
     const m = buildTableModel(BUDGET_SPEC, rows);

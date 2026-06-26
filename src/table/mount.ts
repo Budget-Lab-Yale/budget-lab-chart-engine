@@ -11,6 +11,7 @@ import { buildFigureHeader } from "../engine/render-live.js";
 import { renderSourceLine } from "../engine/source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { exportTablePng } from "../embed/export-table-png.js";
+import { makeMeasureText } from "./measure.js";
 
 // Tray-with-down-arrow glyph — same as in render-live.ts, inlined to avoid a cross-module
 // private-symbol dependency.
@@ -28,32 +29,6 @@ export interface MountTableOptions {
   eyebrow?: string;
   /** Override the Data download filename slug. */
   downloadName?: string;
-}
-
-/**
- * Build a canvas `measureText` function that uses a cached 2D context when available
- * (real browsers) and falls back to a character-count estimate when canvas/context is
- * absent (jsdom, SSR). The fallback is `s.length * fontPx * 0.6`.
- */
-function makeMeasureText(): (s: string, fontPx: number, weight: number) => number {
-  let ctx: CanvasRenderingContext2D | null = null;
-  try {
-    const canvas = document.createElement("canvas");
-    ctx = canvas.getContext("2d");
-  } catch {
-    // Ignore — canvas unavailable (jsdom default config).
-  }
-  return (s: string, fontPx: number, weight: number): number => {
-    if (ctx) {
-      try {
-        ctx.font = `${weight} ${fontPx}px Figtree, sans-serif`;
-        return ctx.measureText(s).width;
-      } catch {
-        // Fall through to estimate if measureText somehow fails.
-      }
-    }
-    return s.length * fontPx * 0.6;
-  };
 }
 
 /** Data (CSV) download button for the table source line. */
@@ -165,6 +140,7 @@ function attachTableInteractivity(table: HTMLTableElement, model: TableModel, sp
 
   // ---- Column hover (event delegation; robust across re-renders) ----
   // Escape for use inside a double-quoted attribute selector (CSS.escape is absent in jsdom).
+  // TODO: this minimal escaper only handles `"` and `\`; real browsers should prefer CSS.escape.
   const escAttr = (s: string): string => s.replace(/["\\]/g, "\\$&");
   const colCells = (key: string): HTMLElement[] =>
     Array.from(table.querySelectorAll(`[data-col="${escAttr(key)}"]`));
@@ -332,6 +308,22 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     const layout = layoutTable(model, { width, measureText });
     const table = renderTableHtml(model, layout, doc);
     canvasScroll.replaceChildren(table);
+    // Footnote definition list, listed below the table (spec §8). Built here (not in
+    // render-html) so it re-renders alongside the table on each draw. One line per footnote:
+    // a <sup> marker followed by the text.
+    if (model.footnotes.length > 0) {
+      const fnBlock = doc.createElement("div");
+      fnBlock.className = "tbl-table-footnotes";
+      for (const fn of model.footnotes) {
+        const line = doc.createElement("div");
+        const sup = doc.createElement("sup");
+        sup.textContent = fn.marker;
+        line.appendChild(sup);
+        line.appendChild(doc.createTextNode(` ${fn.text}`));
+        fnBlock.appendChild(line);
+      }
+      canvasScroll.appendChild(fnBlock);
+    }
     // The ResizeObserver re-render replaces the table DOM, so interactivity (which holds
     // references to the live elements) must be re-attached against the fresh table each time.
     attachTableInteractivity(table, model, spec);

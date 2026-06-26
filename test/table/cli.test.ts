@@ -13,7 +13,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runValidate, runRender } from "../../src/cli/index";
+import { runValidate, runRender, runSnapshot } from "../../src/cli/index";
+import { BUNDLE_PATH } from "../setup/global-build";
+import { CHART_CSS } from "../../src/embed/styles";
 
 // Stub bundle — just needs to expose BudgetLabChart.mountTable and mountChart stubs.
 const STUB_BUNDLE = `var BudgetLabChart={mountChart:function(el,opts){el.innerHTML='<p>chart</p>';},mountTable:function(el,opts){el.innerHTML='<p>table</p>';}}`;
@@ -156,4 +158,39 @@ describe("runRender — table spec", () => {
     expect(html).not.toContain("BudgetLabChart.mountChart");
     expect(html).toContain("Test Table");
   });
+});
+
+// ---------------------------------------------------------------------------
+// runSnapshot — table dispatch (renders via real headless Chromium)
+// ---------------------------------------------------------------------------
+
+describe("runSnapshot — table spec", () => {
+  // Renders through Playwright; allow generous time for browser launch.
+  it("renders a table.yaml to a PNG baseline (--update)", async () => {
+    const dir = join(tmpdir(), `cli-table-snapshot-${Date.now()}`);
+    const { specPath, csvPath } = makeTableFixture(dir);
+    const baselinePath = join(dir, "baseline.png");
+    tempFiles.push(specPath, csvPath, baselinePath);
+
+    // The snapshot path mounts the real bundle in a browser, so use the IIFE built by
+    // globalSetup rather than the stub (which never produces a real DOM/PNG).
+    const liveBundleJs = readFileSync(BUNDLE_PATH, "utf8");
+
+    const result = await runSnapshot(specPath, {
+      baselinePath,
+      update: true,
+      liveBundleJs,
+      css: CHART_CSS,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/Updated baseline/i);
+    expect(existsSync(baselinePath)).toBe(true);
+    // Verify it is a real PNG (magic bytes) and non-trivially sized.
+    const png = readFileSync(baselinePath);
+    expect(png.length).toBeGreaterThan(100);
+    expect(png.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  }, 60_000);
 });

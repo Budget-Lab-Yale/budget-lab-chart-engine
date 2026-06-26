@@ -13,6 +13,7 @@ export interface TableLayout {
   totalWidth: number; totalHeight: number;
   stubWidth: number; colX: number[]; colW: number[];        // per leaf
   headerHeight: number; rowHeight: number;
+  footnotesHeight: number;          // reserved height for the footnote list below the body (0 if none)
   header: Array<{ cell: HeaderCell; rect: CellRect; tier: number }[]>;
   rows: Array<{ row: BodyRow; rect: CellRect; cellRects: CellRect[] } | { group: RowGroup; rect: CellRect }>;
 }
@@ -26,7 +27,12 @@ const padX = 16;            // total horizontal padding per cell (left + right)
 const tierHeight = 24;      // one header tier's row height
 const sublabelLine = 14;    // extra height on the bottom tier when any leaf has a sublabel
 const rowHeight = 22;       // one body row's height
-const indentStep = 14;      // per-level indentation of stub labels
+// Per-level indentation of stub labels. Exported so the HTML and SVG renderers indent identically.
+export const INDENT_STEP = 14;
+// Footnote list (below the body): a top gap plus one line per footnote. Exported so the SVG
+// renderer places each footnote text row at the same baseline the layout reserved.
+export const FOOTNOTE_TOP_GAP = 8;
+export const FOOTNOTE_LINE_HEIGHT = 16;
 
 export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout {
   const { measureText } = opts;
@@ -56,12 +62,12 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     if (b.kind === "group") {
       stubNatural = Math.max(
         stubNatural,
-        measureText(b.group.label, bodyFontPx, headerWeight) + b.group.level * indentStep,
+        measureText(b.group.label, bodyFontPx, headerWeight) + b.group.level * INDENT_STEP,
       );
     } else {
       stubNatural = Math.max(
         stubNatural,
-        measureText(b.row.label, bodyFontPx, bodyWeight) + b.row.level * indentStep,
+        measureText(b.row.label, bodyFontPx, bodyWeight) + b.row.level * INDENT_STEP,
       );
     }
   }
@@ -126,12 +132,19 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     return { row: entry.row, rect: rowRect, cellRects };
   });
 
-  const totalHeight = headerHeight + model.body.length * rowHeight;
+  // Footnote list height: a top gap plus one line per footnote (0 if there are none).
+  const footnotesHeight =
+    model.footnotes.length > 0
+      ? FOOTNOTE_TOP_GAP + model.footnotes.length * FOOTNOTE_LINE_HEIGHT
+      : 0;
+
+  const totalHeight = headerHeight + model.body.length * rowHeight + footnotesHeight;
 
   return {
     totalWidth, totalHeight,
     stubWidth, colX, colW,
     headerHeight, rowHeight,
+    footnotesHeight,
     header, rows,
   };
 }

@@ -8,6 +8,7 @@ import type { TidyRow } from "../data/index.js";
 import { buildTableModel } from "../table/model.js";
 import { layoutTable } from "../table/layout.js";
 import { renderTableSvg } from "../table/render-svg.js";
+import { makeMeasureText } from "../table/measure.js";
 import {
   W,
   MARGIN,
@@ -21,31 +22,6 @@ import { rasterize, triggerDownload } from "./export-png.js";
 
 // Gap (px) between the bottom of the top chrome and the top of the table body.
 const BODY_TOP_GAP = 14;
-
-/**
- * Build a canvas `measureText` for table layout, with a character-count fallback when canvas is
- * unavailable (jsdom/SSR). Mirrors mount.ts's `makeMeasureText` (fallback = s.length*fontPx*0.6).
- */
-function makeMeasureText(): (s: string, fontPx: number, weight: number) => number {
-  let ctx: CanvasRenderingContext2D | null = null;
-  try {
-    const canvas = document.createElement("canvas");
-    ctx = canvas.getContext("2d");
-  } catch {
-    // Canvas unavailable — fall back to the estimate below.
-  }
-  return (s: string, fontPx: number, weight: number): number => {
-    if (ctx) {
-      try {
-        ctx.font = `${weight} ${fontPx}px Figtree, sans-serif`;
-        return ctx.measureText(s).width;
-      } catch {
-        // Fall through to the estimate.
-      }
-    }
-    return s.length * fontPx * 0.6;
-  };
-}
 
 /** Slug a title for a default download filename. */
 function slugify(title: string): string {

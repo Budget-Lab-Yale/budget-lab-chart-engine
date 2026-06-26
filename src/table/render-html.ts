@@ -2,6 +2,7 @@
 // The document argument lets callers pass any DOM (browser or jsdom) without importing globals.
 import type { TableModel, BodyRow, RowGroup } from "./model";
 import type { TableLayout } from "./layout";
+import { INDENT_STEP } from "./layout";
 
 /**
  * Build a semantic HTML <table> from a TableModel + TableLayout.
@@ -133,7 +134,7 @@ export function renderTableHtml(
       const stubTh = doc.createElement("th");
       stubTh.scope = "row";
       stubTh.className = "tbl-table-stub";
-      stubTh.style.paddingLeft = `${row.level * 14}px`;
+      stubTh.style.paddingLeft = `${row.level * INDENT_STEP}px`;
 
       // Label text (with footnote superscript if any row-level footnote key present)
       stubTh.textContent = row.label;

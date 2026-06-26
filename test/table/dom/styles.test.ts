@@ -48,6 +48,16 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toMatch(/tr\.tbl-table-group th\s*\{[^}]*position:\s*sticky/);
   });
 
+  it("makes the header non-sticky under .tbl-table--no-sticky-header", () => {
+    expect(CHART_CSS).toMatch(
+      /\.tbl-table\.tbl-table--no-sticky-header thead th\s*\{[^}]*position:\s*static/,
+    );
+  });
+
+  it("contains .tbl-table-footnotes (footnote list block)", () => {
+    expect(CHART_CSS).toContain(".tbl-table-footnotes");
+  });
+
   it("declares the sticky z-index ladder for the pinned first column", () => {
     // corner z 4, stub column z 3, thead z 2, body z 0.
     expect(CHART_CSS).toContain("z-index: 4");

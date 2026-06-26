@@ -6,6 +6,7 @@
 // `document` via opts so it works under jsdom (tests) and in the browser (export).
 import type { TableModel } from "./model";
 import type { TableLayout, CellRect } from "./layout";
+import { INDENT_STEP, FOOTNOTE_TOP_GAP, FOOTNOTE_LINE_HEIGHT } from "./layout";
 import { TBL } from "../engine/theme";
 import { tokens } from "../theme/tokens";
 
@@ -17,7 +18,6 @@ const BODY_FONT = TBL.size.legend; // 12
 const SUBLABEL_FONT = TBL.size.annotation; // 11
 const NOTE_FONT = TBL.size.annotation; // 11
 const TIER_HEIGHT = 24; // matches layout.tierHeight
-const INDENT_STEP = 14; // matches layout.indentStep
 const PAD_X = 8; // half of layout.padX — inset from a cell edge
 const FOOTNOTE_DY = -4; // superscript rise
 
@@ -214,6 +214,23 @@ export function renderTableSvg(
     bodyG.appendChild(rg);
   }
   svg.appendChild(bodyG);
+
+  // ---- Footnotes (listed below the table body, per spec §8) ----
+  if (model.footnotes.length > 0) {
+    const bodyBottom = layout.headerHeight + layout.rows.length * layout.rowHeight;
+    const fg = el("g", { class: "tbl-table-footnotes" });
+    model.footnotes.forEach((fn, i) => {
+      const y = bodyBottom + FOOTNOTE_TOP_GAP + i * FOOTNOTE_LINE_HEIGHT + NOTE_FONT;
+      const t = text(PAD_X, y, `${fn.marker} ${fn.text}`, {
+        anchor: "start",
+        weight: 400,
+        fill: TBL.color.muted,
+        size: NOTE_FONT,
+      });
+      fg.appendChild(t);
+    });
+    svg.appendChild(fg);
+  }
 
   return svg;
 }

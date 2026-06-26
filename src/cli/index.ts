@@ -361,35 +361,69 @@ export async function runSnapshot(
     };
   }
 
-  const structural = validateSpec(spec);
-  if (!structural.valid) {
-    const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
-    return { exitCode: 1, message: lines };
-  }
+  // --- Table path: validate via the table validators and build the table standalone HTML. ---
+  let html: string;
+  if (isTableSpec(spec)) {
+    const structuralTable = validateTableSpec(spec);
+    if (!structuralTable.valid) {
+      const lines = structuralTable.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
 
-  let rows: TidyRow[];
-  try {
-    rows = await loadData((spec as ChartSpec).data, { baseDir: specDir });
-  } catch (err) {
-    return {
-      exitCode: 1,
-      message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
-    };
-  }
+    let tableRows: TidyRow[];
+    try {
+      tableRows = await loadData(spec.data, { baseDir: specDir });
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+      };
+    }
 
-  const result = validateChart(spec, rows);
-  if (!result.valid) {
-    const lines = result.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
-    return { exitCode: 1, message: lines };
-  }
+    const dataResult = validateTableData(spec, tableRows);
+    if (!dataResult.valid) {
+      const lines = dataResult.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
 
-  const typedSpec = spec as ChartSpec;
-  const html = buildStandaloneHtml({
-    spec: typedSpec,
-    rows,
-    liveBundleJs: opts.liveBundleJs,
-    css: opts.css,
-  });
+    html = buildStandaloneHtml({
+      spec: spec as unknown as ChartSpec,
+      rows: tableRows,
+      liveBundleJs: opts.liveBundleJs,
+      css: opts.css,
+      mountFn: "mountTable",
+    });
+  } else {
+    const structural = validateSpec(spec);
+    if (!structural.valid) {
+      const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    let rows: TidyRow[];
+    try {
+      rows = await loadData((spec as ChartSpec).data, { baseDir: specDir });
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+      };
+    }
+
+    const result = validateChart(spec, rows);
+    if (!result.valid) {
+      const lines = result.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    const typedSpec = spec as ChartSpec;
+    html = buildStandaloneHtml({
+      spec: typedSpec,
+      rows,
+      liveBundleJs: opts.liveBundleJs,
+      css: opts.css,
+    });
+  }
 
   // Render to PNG via headless browser.
   let pngBuffer: Buffer;
