@@ -4,6 +4,7 @@
 import type { ChartSpec, ChartType } from "../../spec/types";
 import type { BandLabelMode } from "../axes";
 import { buildLineMarks } from "./line";
+import { buildAreaMarks } from "./area";
 import { buildBarMarks } from "./bar";
 import { buildStackedMarks } from "./stacked";
 import { buildPointMarks } from "./point";
@@ -153,6 +154,7 @@ export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContex
 
 const REGISTRY: Record<ChartType, MarkBuilder> = {
   line: buildLineMarks,
+  area: buildAreaMarks,
   bar: buildBarMarks,
   stacked: buildStackedMarks,
   // Both point types share one builder; it branches on x-scale (numeric vs categorical point).

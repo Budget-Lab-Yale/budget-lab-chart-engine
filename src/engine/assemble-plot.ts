@@ -19,6 +19,7 @@ import {
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
 import { tblColorScale, resolveColor } from "./palette";
+import { resolveAnnotations } from "../spec/annotations";
 import type { ChartSpec } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
@@ -143,7 +144,8 @@ export function assemblePlot({
   // 0. Shaded x-bands (e.g. recession indicators): vertical regions painted at the very back,
   //    behind gridlines + data. Spans the full y-domain; x edges parsed via the adapter (numeric
   //    / temporal only — markerToX returns null for a categorical band scale).
-  for (const band of spec.xAxisPolicy?.bands ?? []) {
+  const ann = resolveAnnotations(spec);
+  for (const band of ann.bands) {
     const x1 = xOpts.markerToX({ x: band.start });
     const x2 = xOpts.markerToX({ x: band.end });
     if (x1 == null || x2 == null) continue;
@@ -157,6 +159,23 @@ export function assemblePlot({
         fillOpacity: 0.1,
       }),
     );
+    if (band.label) {
+      // Band label at the top of the region, just inside its left edge.
+      marks.push(
+        Plot.text([{ x: x1, y: yDomain[1], t: band.label }], {
+          x: "x",
+          y: "y",
+          text: "t",
+          frameAnchor: "top",
+          textAnchor: "start",
+          dx: 6,
+          dy: 4,
+          fill: TBL.color.axis,
+          fontSize: TBL.size.annotation,
+          fontWeight: 600,
+        }),
+      );
+    }
   }
 
   // 1. Band underlay (behind everything).
@@ -236,17 +255,34 @@ export function assemblePlot({
     }
   }
 
-  // 5. Reference markers (vertical rules, e.g. a treatment date).
-  for (const m of spec.xAxisPolicy?.markers ?? []) {
+  // 5. Reference markers (vertical rules, e.g. a treatment date) + optional labels at the top.
+  for (const m of ann.xAxis) {
     const mx = xOpts.markerToX(m);
     if (mx == null) continue;
+    const mColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
     marks.push(
       Plot.ruleX([mx], {
-        stroke: m.color || TBL.color.annotationDim,
+        stroke: mColor,
         strokeDasharray: (m.style || "dashed") === "dashed" ? "3 2" : null,
         strokeWidth: m.strokeWidth || 1,
       }),
     );
+    if (m.label) {
+      const anchor = m.labelAnchor ?? "start";
+      marks.push(
+        Plot.text([{ x: mx, t: m.label }], {
+          x: "x",
+          text: "t",
+          frameAnchor: "top",
+          textAnchor: anchor,
+          dx: m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4,
+          dy: m.labelDy != null ? m.labelDy : 4,
+          fill: mColor,
+          fontSize: TBL.size.annotation,
+          fontWeight: 600,
+        }),
+      );
+    }
   }
 
   // 6. Line overlay (on top).
@@ -256,7 +292,7 @@ export function assemblePlot({
   //     optional label. By DEFAULT lines + matched labels take categorical colors starting at
   //     amber (skipping the blue cat-1 slot, which data series usually use); an explicit
   //     marker.color overrides. The label color always matches its line.
-  const markerList = spec.yAxisPolicy?.markers ?? [];
+  const markerList = ann.yAxis;
   // +1 so index 0 (blue) is skipped → markers start at amber, then violet, green, …
   const markerPalette = tblColorScale(markerList.length + 1);
   markerList.forEach((m, i) => {
@@ -299,6 +335,33 @@ export function assemblePlot({
       );
     }
   });
+
+  // 6c. Point callouts: a label at a data coordinate (x, y), with an optional dot at the point.
+  //     v1 requires an explicit y (series-snap — y from a series' value at x — is a follow-up).
+  for (const p of ann.points) {
+    const px = xOpts.markerToX({ x: p.x });
+    if (px == null || !Number.isFinite(p.y as number)) continue;
+    const py = p.y as number;
+    const pColor = (p.color && (resolveColor(p.color) || p.color)) || TBL.color.heading;
+    const dx = p.dx != null ? p.dx : 6;
+    const dy = p.dy != null ? p.dy : -6;
+    if (p.connector) {
+      marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
+    }
+    marks.push(
+      Plot.text([{ x: px, y: py, t: p.label }], {
+        x: "x",
+        y: "y",
+        text: "t",
+        dx,
+        dy,
+        textAnchor: dx < 0 ? "end" : "start",
+        fill: pColor,
+        fontSize: TBL.size.annotation,
+        fontWeight: 600,
+      }),
+    );
+  }
 
   // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
   //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each

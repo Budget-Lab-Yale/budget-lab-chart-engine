@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line" | "bar" | "stacked" | "scatter" | "dotplot";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -18,6 +18,12 @@ export interface XAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
+  /** Label horizontal alignment relative to the line ("start" = right of line, default). */
+  labelAnchor?: "start" | "middle" | "end";
+  /** Vertical nudge (px, signed: + = down) of the label from the top of the plot. Default 0. */
+  labelDy?: number;
+  /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
+  labelDx?: number;
 }
 
 /** A shaded vertical region of the x-axis (e.g. a recession band). `start`/`end` are x values
@@ -64,6 +70,30 @@ export interface YAxisPolicy {
   autoWiden?: { step: number };
   /** Horizontal reference lines (e.g. assumption/target lines), drawn over the data. */
   markers?: YAxisMarker[];
+}
+
+/** A callout pointing at a data coordinate. `y` may be omitted when `series` is given (the label
+ *  snaps to that series' value at `x`; for a stacked area, the cumulative top through that series).
+ *  `dx`/`dy` nudge the label from the point; `connector` draws a short leader line to it. */
+export interface PointCallout {
+  x: string;
+  y?: number;
+  series?: string;
+  label: string;
+  color?: ColorRef;
+  dx?: number;
+  dy?: number;
+  connector?: boolean;
+}
+
+/** Unified annotation block: vertical reference lines (xAxis), horizontal reference lines (yAxis),
+ *  shaded vertical regions (bands), and point callouts (points). When present, these take
+ *  precedence over the legacy xAxisPolicy.markers/bands and yAxisPolicy.markers fields. */
+export interface AnnotationsBlock {
+  xAxis?: XAxisMarker[];
+  yAxis?: YAxisMarker[];
+  bands?: XAxisBand[];
+  points?: PointCallout[];
 }
 
 export interface ConfidenceBand {
@@ -152,6 +182,10 @@ export interface ChartSpec {
   xAxisType: XAxisType;
   xAxisPolicy?: XAxisPolicy;
   yAxisPolicy?: YAxisPolicy;
+
+  /** Unified annotations (vertical/horizontal reference lines, shaded bands, point callouts).
+   *  Takes precedence over the legacy xAxisPolicy/yAxisPolicy marker+band fields. */
+  annotations?: AnnotationsBlock;
 
   // Series (the series COLUMN is mapped via `columns.series`)
   /** Render order; also an inclusion filter when set. */

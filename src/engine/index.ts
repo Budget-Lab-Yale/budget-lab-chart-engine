@@ -7,6 +7,7 @@
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
 import { resolveColumns, SINGLE_SERIES_KEY } from "../spec/columns";
+import { resolveAnnotations } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
@@ -255,11 +256,13 @@ export function renderPane(
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
   // little headroom instead of sitting flush against the axis edge.
+  const ann = resolveAnnotations(spec);
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
-    ...(spec.yAxisPolicy?.markers ?? []).map((m) => m.y),
+    ...ann.yAxis.map((m) => m.y),
+    ...ann.points.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
@@ -273,11 +276,31 @@ export function renderPane(
     // headroom). An explicit yAxisPolicy.min OPTS OUT of the forced zero — a truncated bar axis
     // (use sparingly; e.g. a level series whose variation is small relative to its magnitude).
     // Reference-line (markers) values are folded into the extent so a marker stays visible.
-    const markerYs = (spec.yAxisPolicy?.markers ?? []).map((m) => m.y).filter(Number.isFinite);
+    const markerYs = ann.yAxis.map((m) => m.y).filter(Number.isFinite);
     includeZero = policy.min == null;
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
     const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
+    hardDomain = [resolvedMin, resolvedMax];
+  } else if (chartType === "area") {
+    // Stacked area: zero baseline; the axis extent comes from the per-x STACKED TOTAL (the
+    // cumulative top), not individual series values. Annotation y values are folded in for headroom.
+    includeZero = true;
+    const markerYs = [
+      ...ann.yAxis.map((m) => m.y),
+      ...ann.points.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+    ].filter(Number.isFinite);
+    const totalByX = new Map<string, number>();
+    let minVal = 0;
+    for (const r of dataInScope) {
+      if (!Number.isFinite(r._y as number)) continue;
+      const k = r.time || String(r._xn ?? r._xc ?? "");
+      totalByX.set(k, (totalByX.get(k) ?? 0) + (r._y as number));
+      if ((r._y as number) < minVal) minVal = r._y as number;
+    }
+    const stackMax = totalByX.size ? Math.max(...totalByX.values()) : 0;
+    const resolvedMin = policy.min ?? Math.min(0, minVal, ...markerYs);
+    const resolvedMax = Math.max(policy.max ?? stackMax, ...markerYs);
     hardDomain = [resolvedMin, resolvedMax];
   } else {
     // Line (and future non-bar types): unchanged behavior.
