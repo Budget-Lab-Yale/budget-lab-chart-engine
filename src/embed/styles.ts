@@ -416,12 +416,6 @@ body {
 .figure-grid svg .tbl-dimmed {
   opacity: 0.15;
 }
-/* Area restack morph: bands transition their geometry to the new stack position so a selection
-   visibly slides into place. Applied transiently by animateAreaRestack; no-op where the d-property
-   transition is not supported (the path just snaps). */
-.figure-canvas svg path.tbl-area-animating {
-  transition: d 0.3s ease;
-}
 /* The diverging net-total LABEL is a wide text over the bar center; it is tagged with the
    Total key so it DIMS with the dot, but it must not steal clicks from the segments beneath
    it. Make it non-interactive so clicks fall through to the segment — only the small net

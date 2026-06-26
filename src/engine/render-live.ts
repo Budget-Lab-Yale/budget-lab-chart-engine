@@ -514,32 +514,60 @@ function captureAreaDs(svg: SVGSVGElement): Map<string, string> {
   return m;
 }
 
+// Match the numbers in a path `d` string (handles decimals, signs, exponents).
+const D_NUM_RE = /-?\d*\.?\d+(?:e-?\d+)?/g;
+
 /** Brief restack morph: the stacked total is order-invariant, so only the band paths' geometry
- *  changes. Start each re-rendered band at its OLD `d`, then transition to the new `d` (CSS
- *  `transition: d` via .tbl-area-animating) so the bands visibly slide into their new positions.
- *  Degrades to an instant change where `d` transitions aren't supported. */
+ *  changes. We interpolate each band's `d` from its OLD to its NEW value over ~320ms (the two
+ *  share an identical command structure — same x points — so the numbers line up), so the bands
+ *  visibly slide into their new stack positions. Snaps if the structures don't match. Pure JS, so
+ *  it works regardless of CSS `d`-transition support. */
 function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
-  const paths = [...svg.querySelectorAll('g[aria-label="area"] path[data-series]')];
-  const targets: Array<[Element, string]> = [];
-  for (const p of paths) {
+  type Anim = { p: Element; newD: string; from: number[]; to: number[] };
+  const anims: Anim[] = [];
+  for (const p of svg.querySelectorAll('g[aria-label="area"] path[data-series]')) {
     const s = p.getAttribute("data-series");
-    const target = p.getAttribute("d");
-    const old = s ? oldDs.get(s) : undefined;
-    if (s && target && old && old !== target) {
-      p.setAttribute("d", old);
-      p.classList.add("tbl-area-animating");
-      targets.push([p, target]);
-    }
+    const newD = p.getAttribute("d");
+    const oldD = s ? oldDs.get(s) : undefined;
+    if (!s || !newD || !oldD || oldD === newD) continue;
+    const from = oldD.match(D_NUM_RE)?.map(Number);
+    const to = newD.match(D_NUM_RE)?.map(Number);
+    if (!from || !to || from.length !== to.length) continue; // structure differs → leave at new (snap)
+    p.setAttribute("d", oldD); // start at the old geometry
+    anims.push({ p, newD, from, to });
   }
-  if (!targets.length) return;
-  void (svg as SVGElement).getBoundingClientRect(); // commit the start state before transitioning
-  const win = svg.ownerDocument?.defaultView ?? undefined;
-  const raf =
-    win?.requestAnimationFrame?.bind(win) ?? ((cb: (t: number) => void) => setTimeout(() => cb(0), 16));
-  raf(() => raf(() => { for (const [p, target] of targets) p.setAttribute("d", target); }));
-  (win?.setTimeout ?? setTimeout)(() => {
-    for (const [p] of targets) p.classList.remove("tbl-area-animating");
-  }, 360);
+  if (!anims.length) return;
+  const win = svg.ownerDocument?.defaultView;
+  const raf = win?.requestAnimationFrame?.bind(win);
+  if (!raf) {
+    for (const a of anims) a.p.setAttribute("d", a.newD); // no rAF (SSR) → just apply the new geometry
+    return;
+  }
+  const DUR = 320;
+  const ease = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2);
+  let start = -1;
+  const step = (now: number): void => {
+    if (start < 0) start = now;
+    const t = Math.min(1, (now - start) / DUR);
+    const e = ease(t);
+    for (const a of anims) {
+      if (t >= 1) {
+        a.p.setAttribute("d", a.newD);
+        continue;
+      }
+      let k = 0;
+      a.p.setAttribute(
+        "d",
+        a.newD.replace(D_NUM_RE, () => {
+          const v = a.from[k]! + (a.to[k]! - a.from[k]!) * e;
+          k++;
+          return v.toFixed(2);
+        }),
+      );
+    }
+    if (t < 1) raf(step);
+  };
+  raf(step);
 }
 
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
