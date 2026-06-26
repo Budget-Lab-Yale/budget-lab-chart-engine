@@ -685,27 +685,35 @@ th.tbl-table-stub {
 }
 
 /* ---- Row groups ---- */
-/* Group heading row: bold, slightly heavier background, top border to set it off. */
+/* Group heading: bold, no fill. A single hairline rule ABOVE the heading separates groups;
+   extra top padding gives breathing room (the rule + space does the grouping, not a fill band). */
 tr.tbl-table-group th,
 tr.tbl-table-group td {
+  text-align: left;
   font-weight: var(--tw-bold);
   color: var(--tbl-text-heading);
-  background: var(--tbl-bg-subtle);
   border-top: 1px solid var(--tbl-border);
-  padding-top: 7px;
-  padding-bottom: 7px;
+  padding-top: 14px;
+  padding-bottom: 3px;
+}
+/* The first group has no rows above it, so its top rule is redundant — drop it. */
+.tbl-table tbody tr.tbl-table-group:first-child th,
+.tbl-table tbody tr.tbl-table-group:first-child td {
+  border-top: none;
+  padding-top: 4px;
 }
 
-/* Group note row: italic, muted, smaller — appears directly below the group heading. */
+/* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */
 tr.tbl-table-group-note th,
-tr.tbl-table-group-note td {
+tr.tbl-table-group-note td,
+.tbl-table-group-note {
+  text-align: left;
   font-style: italic;
+  font-weight: var(--tw-body);
   font-size: 11px;
   color: var(--tbl-text-muted);
-  padding-top: 2px;
-  padding-bottom: 4px;
-  background: var(--tbl-bg-subtle);
-  border-bottom: 1px solid var(--tbl-border);
+  padding-top: 0;
+  padding-bottom: 6px;
 }
 
 /* ---- Emphasis ---- */
@@ -730,8 +738,9 @@ td.is-neg {
 }
 
 /* ---- Column hover (JS toggles .is-col-hover on [data-col=k] cells) ---- */
+/* Same subtle grey as the row hover so the crosshair reads gently, not as a bold blue band. */
 .tbl-table .is-col-hover {
-  background: var(--tbl-bg-highlight) !important;
+  background: var(--tbl-bg-subtle) !important;
 }
 
 /* ---- Sticky first column ---- */
