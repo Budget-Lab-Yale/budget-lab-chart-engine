@@ -1,0 +1,9 @@
+chartType: line
+title: Sample Chart
+subtitle: Percent
+source: Test source
+xAxisType: temporal
+series_order:
+  - A
+  - B
+data: data.csv

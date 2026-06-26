@@ -4,14 +4,57 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] — 2026-06-26
 
-### Added
-- `x_order` spec field for categorical x-axis charts: fixes the render order of the x-axis
-  categories (bar, stacked, dotplot). Listed categories come first in the given order; any
-  unlisted categories follow in data-encounter order. Order-only — unlike `series_order`, it does
-  not filter. No-op off the categorical x-axis. Validation flags any listed category absent from
-  the data.
+A major feature release: three new chart types (scatter, dot plot, area), a new tables figure
+type, a unified annotation system, and richer interactivity. All additions are
+backward-compatible — existing chart specs render unchanged.
+
+### Added — chart types
+
+- **Scatter** (`chartType: "scatter"`, numeric x) and **dot plot** (`chartType: "dotplot"`,
+  categorical x) point charts. Optional dual **color + shape** encoding (`columns.shape`,
+  `shape_order`, `shape_labels`, with separate `color_legend_title` / `shape_legend_title`),
+  category dodge, per-point hover tooltips, and a coordinated cursor.
+- **Area** (`chartType: "area"`). Stacked areas, with a single series filling to the zero
+  baseline. The hover tooltip adds a cumulative **Total** row. **Click-to-restack**: selecting
+  series animates them to the bottom of the stack (in click order) so they can be read against
+  zero; deselecting restores the default order.
+
+### Added — tables
+
+- A new **`table.yaml`** figure type rendering an interactive HTML table plus a self-contained
+  PNG, themed to the Style-Guide.
+- Tidy/long data pivoted into data-driven multi-tier column headers (colspan + blank-tier
+  rowspan), with per-default / per-column / per-group / per-row number formats and verbatim
+  **text-string cells**.
+- Footnotes, per-row / per-cell emphasis, sign coloring, and indented sub-rows.
+- Interactivity: sortable columns (within row groups), row + column hover, a sticky first column,
+  and responsive horizontal scroll.
+- Layout controls: `stub_width`, `stub_min_width`, `stub_wrap`, `stub_nowrap`, `stub_header`,
+  `column_width`, `header_max_lines`, `spanner_rules`, `header_tier_rules`.
+- **Multi-pane tables**: a `pane` column splits one CSV into vertically stacked sub-tables (each
+  with its own column headers), with `pane_order` / `pane_titles` and shared stub-width alignment.
+
+### Added — annotations & interactivity
+
+- **Unified `annotations` block.** One place for `xAxis` (vertical reference lines, with labels),
+  `yAxis` (horizontal reference lines), `bands` (shaded x-regions), and `points` (callouts).
+  Point callouts can snap to a series' value at x (the cumulative stack top for area charts) and
+  draw a leader arrow. Labels auto-stagger to avoid collisions and carry a white halo for
+  legibility. The legacy `xAxisPolicy` / `yAxisPolicy` marker + band fields are still honored.
+- **Legend-highlight value pills** — pinned or hovered series show value pills that match the
+  coordinated cursor, in both vertical and horizontal orientations.
+- **`x_order`** — fixes the render order of categorical x-axis categories (bar, stacked, dot
+  plot). Listed categories come first in the given order; any unlisted categories follow in
+  data-encounter order. Order-only — unlike `series_order`, it does not filter. No-op off the
+  categorical x-axis. Validation flags any listed category absent from the data.
+
+### Changed
+
+- Vertical reference-line (`xAxis` marker) labels are now rendered (previously only the rule was
+  drawn), with `labelAnchor` / `labelDx` / `labelDy` placement controls.
+- Annotation reference lines span the full plot width on faceted (small-multiples) bar charts.
 
 ## [1.0.4] — 2026-06-24
 

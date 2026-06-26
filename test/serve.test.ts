@@ -14,11 +14,10 @@ import * as http from "node:http";
 import { findCharts, createRequestHandler } from "../src/cli/serve";
 
 // ---------------------------------------------------------------------------
-// Repo root — used to locate the real example chart
+// Repo root — used to prove findCharts discovers chart.yaml files in the tree
 // ---------------------------------------------------------------------------
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const EXAMPLE_CHART = join(REPO_ROOT, "examples", "augmented-occupations", "chart.yaml");
 
 // ---------------------------------------------------------------------------
 // Stub injection
@@ -97,12 +96,10 @@ function fakeRequest(
 // ---------------------------------------------------------------------------
 
 describe("findCharts", () => {
-  it("discovers the example chart.yaml under the repo root", () => {
+  it("discovers chart.yaml files under the repo root", () => {
     const found = findCharts(REPO_ROOT);
     const normalized = found.map((p) => p.replace(/\\/g, "/"));
-    expect(normalized.some((p) => p.endsWith("examples/augmented-occupations/chart.yaml"))).toBe(
-      true,
-    );
+    expect(normalized.some((p) => p.endsWith("test/fixtures/sample-chart/chart.yaml"))).toBe(true);
   });
 
   it("skips node_modules, dist, and .git directories", () => {
@@ -154,8 +151,8 @@ describe("GET / — index page", () => {
     const { status, body } = await fakeRequest(handler, "/");
     expect(status).toBe(200);
     expect(body).toContain("<!doctype html");
-    // Example chart title
-    expect(body).toContain("Proportion of Workers");
+    // Fixture chart title (the gallery lists chart.yaml files found under the root)
+    expect(body).toContain("Sample Chart");
   });
 
   it("shows 'No chart.yaml files found' when the dir is empty", async () => {
@@ -180,12 +177,12 @@ describe("GET /chart/<relpath> — valid chart", () => {
       css: STUB_CSS,
     });
 
-    // Relative path from repo root to the example chart (posix-style)
-    const rel = "examples/augmented-occupations/chart.yaml";
+    // Relative path from repo root to a chart (posix-style)
+    const rel = "test/fixtures/sample-chart/chart.yaml";
     const { status, body } = await fakeRequest(handler, `/chart/${rel}`);
     expect(status).toBe(200);
     expect(body).toContain("<!doctype html");
-    expect(body).toContain("Proportion of Workers");
+    expect(body).toContain("Sample Chart");
   });
 
   it("includes the injected bundle JS in the response", async () => {
@@ -195,7 +192,7 @@ describe("GET /chart/<relpath> — valid chart", () => {
       css: STUB_CSS,
     });
 
-    const rel = "examples/augmented-occupations/chart.yaml";
+    const rel = "test/fixtures/sample-chart/chart.yaml";
     const { status, body } = await fakeRequest(handler, `/chart/${rel}`);
     expect(status).toBe(200);
     expect(body).toContain("BudgetLabChart");
