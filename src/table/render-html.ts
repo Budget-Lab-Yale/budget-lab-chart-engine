@@ -63,11 +63,18 @@ export function renderTableHtml(
       th.scope = "col";
       th.colSpan = hCell.colSpan;
       th.rowSpan = hCell.rowSpan;
-      th.textContent = hCell.text;
 
-      // Banner cells (spanning >1 column) get flanking rules via the .is-spanner CSS treatment.
+      // Banner cells (spanning >1 column) get flanking rules. The flex layout that draws the
+      // rules MUST live on an inner wrapper, not the <th> itself — `display:flex` on a table
+      // cell drops its `table-cell` box and breaks colspan/column alignment.
       if (hCell.colSpan > 1) {
         th.classList.add("is-spanner");
+        const inner = doc.createElement("span");
+        inner.className = "tbl-table-spanner";
+        inner.textContent = hCell.text;
+        th.appendChild(inner);
+      } else {
+        th.textContent = hCell.text;
       }
 
       // If this is a leaf-bottom cell (has leafKey) and the leaf has a sublabel, append it
@@ -100,15 +107,21 @@ export function renderTableHtml(
 
       const th = doc.createElement("th");
       th.colSpan = totalCols;
-      th.textContent = group.label;
+      // Wrap the label (+ note) in a sticky-left inner block so the group title stays anchored at
+      // the left edge during horizontal scroll (it labels the pinned rows) instead of scrolling
+      // off and clipping under the sticky first column.
+      const inner = doc.createElement("div");
+      inner.className = "tbl-table-group-inner";
+      inner.textContent = group.label;
 
       if (group.note != null) {
         const noteDiv = doc.createElement("div");
         noteDiv.className = "tbl-table-group-note";
         noteDiv.textContent = group.note;
-        th.appendChild(noteDiv);
+        inner.appendChild(noteDiv);
       }
 
+      th.appendChild(inner);
       tr.appendChild(th);
       tbody.appendChild(tr);
     } else {

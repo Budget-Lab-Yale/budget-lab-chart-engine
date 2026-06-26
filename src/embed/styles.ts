@@ -649,14 +649,15 @@ body {
 
 /* Banner cells (colSpan > 1): centered label flanked by hairline rules extending to the cell's
    edges, showing the columns the banner governs. Leaf headers (colSpan 1) are unaffected. */
-.tbl-table thead th.is-spanner {
+.tbl-table thead th.is-spanner { text-align: center; }
+.tbl-table thead th.is-spanner > .tbl-table-spanner {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
-.tbl-table thead th.is-spanner::before,
-.tbl-table thead th.is-spanner::after {
+.tbl-table thead th.is-spanner > .tbl-table-spanner::before,
+.tbl-table thead th.is-spanner > .tbl-table-spanner::after {
   content: "";
   flex: 1 1 auto;
   border-top: 1px solid var(--tbl-border);
@@ -730,6 +731,13 @@ tr.tbl-table-group td {
   top: var(--tbl-thead-h, 0px);
   z-index: 1;
   background: var(--tbl-bg);
+}
+/* Keep the group title anchored at the left during horizontal scroll (it labels the pinned
+   rows), instead of scrolling off and clipping under the sticky first column. */
+.tbl-table-group-inner {
+  position: sticky;
+  left: 0;
+  display: inline-block;
 }
 
 /* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */

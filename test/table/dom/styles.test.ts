@@ -35,10 +35,12 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toMatch(/td\.is-num\s*\{[^}]*text-align:\s*center/);
   });
 
-  it("contains the banner spanner treatment (.is-spanner with flanking rules)", () => {
+  it("contains the banner spanner treatment (.is-spanner with inner-wrapper flanking rules)", () => {
+    // The flanking-rule flex lives on an inner `.tbl-table-spanner` span, NOT the <th> itself
+    // (display:flex on a table cell breaks colspan/column alignment).
     expect(CHART_CSS).toContain("th.is-spanner");
-    expect(CHART_CSS).toContain("th.is-spanner::before");
-    expect(CHART_CSS).toContain("th.is-spanner::after");
+    expect(CHART_CSS).toContain(".tbl-table-spanner::before");
+    expect(CHART_CSS).toContain(".tbl-table-spanner::after");
   });
 
   it("makes row-group titles sticky below the header block (--tbl-thead-h)", () => {
