@@ -73,22 +73,25 @@ export function renderTableHtml(
       // rules MUST live on an inner wrapper, not the <th> itself — `display:flex` on a table
       // cell drops its `table-cell` box and breaks colspan/column alignment.
       // When spanner_rules === false, render banners as plain centered text (no is-spanner hook).
+      // Leaf-header line clamp: cap the label to N lines. Like the spanner flex, the
+      // -webkit-box/-line-clamp MUST live on an inner wrapper, not the <th> — applying it to the
+      // table cell drops its `table-cell` box and breaks column alignment.
       const spannerRules = spec?.spanner_rules !== false;
+      const clamp = headerMaxLines != null && hCell.leafKey != null;
       if (hCell.colSpan > 1 && spannerRules) {
         th.classList.add("is-spanner");
         const inner = doc.createElement("span");
         inner.className = "tbl-table-spanner";
         inner.textContent = hCell.text;
         th.appendChild(inner);
+      } else if (clamp) {
+        const inner = doc.createElement("span");
+        inner.className = "tbl-table-header-clamp";
+        inner.style.setProperty("--tbl-header-lines", String(headerMaxLines));
+        inner.textContent = hCell.text;
+        th.appendChild(inner);
       } else {
         th.textContent = hCell.text;
-      }
-
-      // Leaf-header line clamp: cap the label to N lines (wrap rest). The CSS class carries the
-      // -webkit-line-clamp; we stamp the line count so a per-table value can drive it.
-      if (headerMaxLines != null && hCell.leafKey != null) {
-        th.classList.add("tbl-table-header-clamp");
-        th.style.setProperty("--tbl-header-lines", String(headerMaxLines));
       }
 
       // If this is a leaf-bottom cell (has leafKey) and the leaf has a sublabel, append it

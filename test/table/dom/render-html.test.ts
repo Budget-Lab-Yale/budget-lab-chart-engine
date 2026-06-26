@@ -222,7 +222,8 @@ describe("renderTableHtml — config hooks", () => {
     const m = buildTableModel(spec, rows);
     const l = layoutTable(m, { width: 800, measureText, headerMaxLines: 2 });
     const table = renderTableHtml(m, l, document, { ...spec, header_max_lines: 2 });
-    const clamped = table.querySelector("thead th.tbl-table-header-clamp") as HTMLElement;
+    // The clamp lives on an inner span (not the <th>) so it doesn't break the table-cell layout.
+    const clamped = table.querySelector("thead th .tbl-table-header-clamp") as HTMLElement;
     expect(clamped).not.toBeNull();
     expect(clamped.style.getPropertyValue("--tbl-header-lines")).toBe("2");
   });

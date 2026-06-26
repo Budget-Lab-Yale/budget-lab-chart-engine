@@ -658,8 +658,9 @@ body {
 }
 
 /* Leaf-header line clamp (header_max_lines): wrap the label to N lines, ellipsis-free overflow
-   hidden. --tbl-header-lines is set per-th by render-html. */
-.tbl-table thead th.tbl-table-header-clamp {
+   hidden. The clamp lives on an INNER span (not the th) so the webkit-box display does not drop
+   the table cell box and break column alignment. --tbl-header-lines is set per-span. */
+.tbl-table thead th .tbl-table-header-clamp {
   white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: var(--tbl-header-lines, 2);
