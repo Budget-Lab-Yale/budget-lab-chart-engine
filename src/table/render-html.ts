@@ -31,24 +31,25 @@ export function renderTableHtml(
   const table = doc.createElement("table");
   table.className = "tbl-table";
   table.style.tableLayout = "fixed";
-  // Size the table to its content width (sum of column widths), NOT 100% of the card. Under
-  // table-layout:fixed, width:100% would turn the per-column px into ratios and redistribute any
-  // freed space — defeating stub_max_width and other caps — and would also diverge from the PNG,
-  // which always uses this exact width. Narrow tables stay content-width; wide ones overflow+scroll.
-  table.style.width = `${layout.totalWidth}px`;
+  // By default the table fills the card (CSS width:100%): under table-layout:fixed the column px
+  // act as ratios, so a table narrower than the card stretches to fill it (the normal look). For
+  // stub_wrap that stretching would re-widen the stub and defeat the wrap, so there we pin the stub
+  // column to its exact width and leave the data columns flexible — the stub stays narrow (labels
+  // wrap) while the data columns absorb any extra width and the table still fills the card.
 
   // ---- <colgroup> ----
   const colgroup = doc.createElement("colgroup");
 
-  // Stub column
+  // Stub column — always pinned to its computed width.
   const stubCol = doc.createElement("col");
   stubCol.style.width = `${stubWidth}px`;
   colgroup.appendChild(stubCol);
 
-  // One <col> per leaf
+  // One <col> per leaf. With stub_wrap the data columns are left flexible (no width) so the freed
+  // space flows to them rather than re-widening the pinned stub.
   leaves.forEach((_, i) => {
     const col = doc.createElement("col");
-    col.style.width = `${colW[i]}px`;
+    if (!stubWrap) col.style.width = `${colW[i]}px`;
     colgroup.appendChild(col);
   });
   table.appendChild(colgroup);
