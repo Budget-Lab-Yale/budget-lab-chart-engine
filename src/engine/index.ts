@@ -257,6 +257,18 @@ export function renderPane(
   const dataInScope = data.filter((r) => seriesSet.has(r.series));
   const colors = buildColorMap(seriesNames, spec.series_colors);
 
+  // Categorical x render order. Every downstream consumer (the band scale via adapter.buildXOpts,
+  // the mark builders, the x-label collision check) reads the category order from dataInScope's
+  // row order, so a single stable sort here fixes the order everywhere. Listed categories first in
+  // x_order; unlisted ones keep their encounter order after (order-only — unlike series_order,
+  // x_order does NOT filter). Stable sort preserves within-category row order. No-op off the
+  // categorical axis.
+  if (spec.xAxisType === "categorical" && spec.x_order && spec.x_order.length) {
+    const rank = new Map(spec.x_order.map((c, i) => [c, i] as const));
+    const last = spec.x_order.length;
+    dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
+  }
+
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
   // little headroom instead of sitting flush against the axis edge.

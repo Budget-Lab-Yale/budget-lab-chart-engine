@@ -194,6 +194,10 @@ export interface ChartSpec {
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;
+  /** Categorical x: render order for the x-axis categories. Listed categories come first in this
+   *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
+   *  series_order, this does NOT filter. Ignored off the categorical x-axis. */
+  x_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
   x_labels?: Record<string, string>;

@@ -4,6 +4,15 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `x_order` spec field for categorical x-axis charts: fixes the render order of the x-axis
+  categories (bar, stacked, dotplot). Listed categories come first in the given order; any
+  unlisted categories follow in data-encounter order. Order-only — unlike `series_order`, it does
+  not filter. No-op off the categorical x-axis. Validation flags any listed category absent from
+  the data.
+
 ## [1.0.4] — 2026-06-24
 
 ### Changed

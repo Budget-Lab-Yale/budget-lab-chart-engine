@@ -195,6 +195,30 @@ describe("golden SVG — bars", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-single.golden.svg");
   });
 
+  it("orders categorical x-axis categories by x_order (overriding data-encounter order)", () => {
+    const rows = parseCsv("./fixtures/bar-single.csv"); // data order: Northeast, Midwest, South, West
+    const spec: ChartSpec = { ...BAR_SINGLE_SPEC, x_order: ["West", "South", "Northeast", "Midwest"] };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const labelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
+      Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
+    );
+    const labels = Array.from(labelG?.querySelectorAll("text") ?? []);
+    expect(labels.map((t) => t.textContent)).toEqual(["West", "South", "Northeast", "Midwest"]);
+  });
+
+  it("x_order is order-only: unlisted categories keep encounter order after the listed ones", () => {
+    const rows = parseCsv("./fixtures/bar-single.csv"); // data order: Northeast, Midwest, South, West
+    // Only two of four categories listed. Unlike series_order, x_order does NOT filter: the
+    // unlisted categories (Northeast, Midwest — original encounter order) follow, none dropped.
+    const spec: ChartSpec = { ...BAR_SINGLE_SPEC, x_order: ["West", "South"] };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const labelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
+      Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
+    );
+    const labels = Array.from(labelG?.querySelectorAll("text") ?? []);
+    expect(labels.map((t) => t.textContent)).toEqual(["West", "South", "Northeast", "Midwest"]);
+  });
+
   it("renders a 3-group x 3-series grouped bar chart via fx", async () => {
     const rows = parseCsv("./fixtures/bar-multi.csv");
     const { svg } = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document });

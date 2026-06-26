@@ -221,6 +221,19 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // Cross-reference: every category named by x_order must appear in the categorical x column.
+  // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
+  // typo. Only checked on a categorical x-axis (it is a no-op for numeric/temporal x).
+  if (spec.xAxisType === "categorical" && spec.x_order?.length) {
+    const xValues = new Set(rows.map((r) => r[cols.x] as string));
+    const unknown = spec.x_order.filter((v) => !xValues.has(v));
+    if (unknown.length) {
+      errors.push(
+        `x_order names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+      );
+    }
+  }
+
   // Cross-reference: small_multiples pane_order / pane_titles keys must correspond to actual
   // distinct values in the facet column. (The facet column's existence is already enforced above
   // via the resolved-columns check, which bails before this point if it's missing.)

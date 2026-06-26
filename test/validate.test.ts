@@ -351,6 +351,26 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     expect(r.errors.join("\n")).toMatch(/series_order names series \["missing"\]/);
   });
 
+  it("flags an x_order value absent from the categorical x column", () => {
+    const rows: TidyRow[] = [
+      { time: "Northeast", series: "a", value: "1" },
+      { time: "South", series: "a", value: "2" },
+    ];
+    const spec: ChartSpec = { ...VALID, xAxisType: "categorical", x_order: ["Northeast", "typo"] };
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/x_order names categories \["typo"\]/);
+  });
+
+  it("accepts x_order that lists a subset of the categories (order-only, no filter)", () => {
+    const rows: TidyRow[] = [
+      { time: "Northeast", series: "a", value: "1" },
+      { time: "South", series: "a", value: "2" },
+    ];
+    const spec: ChartSpec = { ...VALID, xAxisType: "categorical", x_order: ["South"] };
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
   it("flags a time value that doesn't parse under xAxisType", () => {
     const r = validateChartData(VALID, [{ time: "2021/01/01", series: "a", value: "1" }]);
     expect(r.valid).toBe(false);

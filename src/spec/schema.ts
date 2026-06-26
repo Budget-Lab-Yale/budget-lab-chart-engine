@@ -227,6 +227,7 @@ export const CHART_SPEC_SCHEMA = {
       },
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
+    x_order: { type: "array", items: { type: "string" } },
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 
     // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
