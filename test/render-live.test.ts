@@ -1503,3 +1503,48 @@ describe("mountChart point charts", () => {
     expect(firstPane!.querySelectorAll('g[aria-label="dot"]').length).toBe(2);
   });
 });
+
+describe("mountChart — area click-to-restack", () => {
+  const AREA_SPEC: ChartSpec = {
+    chartType: "area",
+    title: "Area",
+    subtitle: "Percent",
+    xAxisType: "temporal",
+    series_order: ["A", "B", "C"],
+    data: "inline",
+  };
+  const AREA_ROWS: TidyRow[] = ["2024-01-01", "2024-02-01"].flatMap((t) => [
+    { time: t, series: "A", value: "1" },
+    { time: t, series: "B", value: "2" },
+    { time: t, series: "C", value: "3" },
+  ]);
+  // Paths are emitted in stack order, so the first area path is the bottom series.
+  const bottom = (c: HTMLElement): string | null | undefined =>
+    c.querySelector('g[aria-label="area"] path[data-series]')?.getAttribute("data-series");
+  const legendItem = (c: HTMLElement, s: string): HTMLElement | undefined =>
+    [...c.querySelectorAll<HTMLElement>(".tbl-legend-item")].find((b) => b.getAttribute("data-series") === s);
+
+  it("moves a selected series to the bottom of the stack and restores on deselect", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: AREA_SPEC, rows: AREA_ROWS });
+    expect(bottom(container)).toBe("A"); // default: first in series_order is the bottom
+
+    legendItem(container, "C")!.click();
+    expect(bottom(container)).toBe("C"); // selected series dropped to the bottom
+
+    legendItem(container, "C")!.click(); // re-query: the legend was rebuilt
+    expect(bottom(container)).toBe("A"); // restored to the default order
+  });
+
+  it("stacks multiple selections in click order at the bottom", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: AREA_SPEC, rows: AREA_ROWS });
+    legendItem(container, "C")!.click();
+    legendItem(container, "B")!.click();
+    // C clicked first → very bottom; B next → above C.
+    const order = [...container.querySelectorAll('g[aria-label="area"] path[data-series]')].map((p) =>
+      p.getAttribute("data-series"),
+    );
+    expect(order.slice(0, 2)).toEqual(["C", "B"]);
+  });
+});

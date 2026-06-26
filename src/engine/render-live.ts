@@ -556,6 +556,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // Track the current effective legendPosition so we can rebuild layout on first call.
   let currentLegendPos: "top" | "right" | null = null;
 
+  // Area click-to-restack: the live visual stack order (selected series to the bottom, in click
+  // order), the latest legend handle + full series list, and a re-entrancy guard so re-applying
+  // pins after a rebuild doesn't recurse. Non-area charts never touch any of this.
+  let restackOrder: string[] | undefined;
+  let suppressRestack = false;
+  let currentLegendHandle: LegendHandle | null = null;
+  let currentSeriesNames: string[] = [];
+
   /**
    * Order legendItems for the right-legend column to match the VISUAL top→bottom stack:
    *   - When the engine supplies `legendVisualOrder` (stacked charts), series rows follow
@@ -593,7 +601,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     let built;
     try {
-      built = renderChart(spec, rows, { width: target, height });
+      built = renderChart(spec, rows, { width: target, height, ...(restackOrder ? { stackOrder: restackOrder } : {}) });
     } catch (e) {
       canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return;
@@ -606,10 +614,29 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
     // pill renderer just needs to exist by the time the user interacts.
+    currentSeriesNames = seriesOrder;
     let pillDriver: ReturnType<typeof attachHighlightPills> | null = null;
     const onHighlight = (active: Set<string>): void => {
       recolorNetLabels(svg);
       pillDriver?.setActive(active);
+      // Area click-to-restack: pinned series move to the BOTTOM of the stack (in click order) so a
+      // user can read them against zero; unpinning restores the default order. Driven off PINS
+      // (not hover), so this only fires on an actual selection change. Re-renders the whole chart
+      // via draw() and re-applies the pins to the freshly built legend.
+      if (spec.chartType === "area" && !suppressRestack) {
+        const pins = currentLegendHandle?.pinnedSeries() ?? [];
+        const next = pins.length
+          ? [...pins, ...currentSeriesNames.filter((s) => !pins.includes(s))]
+          : undefined;
+        if (JSON.stringify(next) !== JSON.stringify(restackOrder)) {
+          restackOrder = next;
+          suppressRestack = true;
+          lastWidth = -1; // force draw() past its same-width early return
+          draw(card.clientWidth || target, currentLegendPos ?? legendPos);
+          if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
+          suppressRestack = false;
+        }
+      }
     };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
     // legend (the color legend still drives hover-dim, which is independent of the crosshair).
@@ -667,6 +694,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         });
       }
     }
+
+    // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
+    currentLegendHandle = legendHandle;
 
     // Set the initial label colors from the current (un-dimmed) state. No-op unless this is a
     // diverging/dot-mode stacked chart (the only case with tbl-net-label elements). Detection

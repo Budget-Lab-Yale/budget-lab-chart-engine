@@ -99,6 +99,11 @@ export interface LegendHandle {
   element: HTMLElement;
   /** Toggle a series' pinned state (no-op for an unknown/non-interactive series). */
   toggle(series: string): void;
+  /** Pinned series in click order (the live layer uses this to compute a restack order). */
+  pinnedSeries(): string[];
+  /** Re-point the hover-dim root to a new SVG (after the chart body is re-rendered) and re-apply
+   *  the current highlight to it, so dim/pin state carries over to the swapped-in SVG. */
+  rebind(svg: Element): void;
 }
 
 export function renderLegend(
@@ -110,7 +115,7 @@ export function renderLegend(
   // Point charts with DUAL color/shape encoding pass `shapeItems` (+ optional group titles) to
   // render a second, non-interactive SHAPE legend group beside the color legend.
   {
-    svg,
+    svg: initialSvg,
     onHighlight,
     shapeItems,
     colorTitle,
@@ -128,6 +133,9 @@ export function renderLegend(
   if (!hasColor && !hasShape) return null;
 
   const doc = parent.ownerDocument;
+  // Mutable highlight root: re-pointed by handle.rebind() when the chart body is re-rendered
+  // (area restack), so dim/pin keeps targeting the live SVG.
+  let svg = initialSvg;
   const legend = doc.createElement("div");
   legend.className = "tbl-legend";
 
@@ -330,5 +338,13 @@ export function renderLegend(
   }
 
   parent.appendChild(legend);
-  return { element: legend, toggle: togglePin };
+  return {
+    element: legend,
+    toggle: togglePin,
+    pinnedSeries: () => [...pinned],
+    rebind: (newSvg: Element) => {
+      svg = newSvg;
+      applyHighlight();
+    },
+  };
 }
