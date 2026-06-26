@@ -33,13 +33,22 @@ function makeValueFormatter(
   values: number[],
   units: string,
   signed: boolean,
+  decimals?: number,
 ): (d: number) => string {
-  const maxFrac = values.reduce((max, v) => {
-    if (!Number.isFinite(v)) return max;
-    const s = String(v);
-    const i = s.indexOf(".");
-    return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-  }, 0);
+  // Fixed precision when the author sets it; otherwise the minimum the data needs, but CAPPED
+  // at 2 so raw floating-point values (e.g. 4.038639335896420) don't print 15 digits.
+  const maxFrac =
+    decimals != null
+      ? decimals
+      : Math.min(
+          2,
+          values.reduce((max, v) => {
+            if (!Number.isFinite(v)) return max;
+            const s = String(v);
+            const i = s.indexOf(".");
+            return Math.max(max, i < 0 ? 0 : s.length - i - 1);
+          }, 0),
+        );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     const mag = Math.abs(d).toFixed(maxFrac);
@@ -47,6 +56,24 @@ function makeValueFormatter(
     if (!signed) return body;
     return d < 0 ? `−${body}` : `+${body}`;
   };
+}
+
+/** The series, in the order Plot emits faceted grouped-bar <rect>s: by facet (the category
+ *  band, in `categories` = fx/fy-domain render order), and WITHIN each facet by DATA-ROW order
+ *  (Plot renders one rect per datum in input order, not inner-band order). Used to map each rect
+ *  to its `data-series` so legend hover/pin dims the correct bars. */
+function rectTagOrder(
+  data: PreparedRow[],
+  catField: string,
+  categories: string[],
+): string[] {
+  const order: string[] = [];
+  for (const cat of categories) {
+    for (const r of data) {
+      if ((r as unknown as Record<string, unknown>)[catField] === cat) order.push(r.series);
+    }
+  }
+  return order;
 }
 
 export function buildBarMarks(
@@ -58,6 +85,9 @@ export function buildBarMarks(
   const catField = xField;
   const seriesNames = ctx.seriesNames ?? [];
   const horizontal = spec.orientation === "horizontal";
+  // Truncated (non-zero baseline) bars are drawn from 0 and would overflow below the plot; clip
+  // them to the frame. No-op (and byte-identical) for normal zero-baseline bars.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
   const isMulti = seriesNames.length > 1;
 
   // Category (group) domain in data-encounter order - declaration order is authoritative.
@@ -117,7 +147,7 @@ export function buildBarMarks(
   const allValues = data
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
-  const fmt = makeValueFormatter(allValues, units, signed);
+  const fmt = makeValueFormatter(allValues, units, signed, spec.valueLabels?.decimals);
 
   const overlay: unknown[] = [];
 
@@ -131,8 +161,8 @@ export function buildBarMarks(
 
     overlay.push(
       horizontal
-        ? Plot.barX(data, { y: xField, x: "_y", fill })
-        : Plot.barY(data, { x: xField, y: "_y", fill }),
+        ? Plot.barX(data, { y: xField, x: "_y", fill, ...clipOpt })
+        : Plot.barY(data, { x: xField, y: "_y", fill, ...clipOpt }),
     );
 
     if (emitValueLabels) {
@@ -181,7 +211,7 @@ export function buildBarMarks(
   //     (fx→fy, x-band→y-band, barY→barX). assemblePlot runs the fy facet-chrome collapse
   //     (continuous full-height vertical gridlines + one value-axis label row). ---
   if (horizontal) {
-    overlay.push(Plot.barX(data, { fy: catField, y: "series", x: "_y", fill: fillChannel }));
+    overlay.push(Plot.barX(data, { fy: catField, y: "series", x: "_y", fill: fillChannel, ...clipOpt }));
 
     if (emitValueLabels) {
       overlay.push(
@@ -190,18 +220,12 @@ export function buildBarMarks(
     }
 
     // --- Rect tagging order (horizontal grouped) ---
-    // Empirically (Plot 0.6.16, barX faceted on fy with an explicit inner-series band
-    // domain): Plot emits a <rect> for EVERY (group, series) pair of the fy-domain x
-    // y-domain cross-product, in facet-major order (category/fy order, then series in
-    // y-domain order within each facet). A null/missing value does NOT omit the rect — Plot
-    // renders it at zero WIDTH (verified empirically through the engine render path, which
-    // keeps the null-value row in scope). This matches the vertical fx+barY case. The
-    // fy/y domains are pinned (declaration order / seriesNames), so the order is
-    // deterministic and independent of the data rows. We must NOT skip pairs.
-    const hRectSeriesOrder: string[] = [];
-    for (let g = 0; g < categories.length; g++) {
-      for (const s of seriesNames) hRectSeriesOrder.push(s);
-    }
+    // Plot emits one <rect> PER DATUM, partitioned by the fy facet (rendered in fy-domain =
+    // `categories` order) and, WITHIN a facet, in DATA-ROW order — NOT inner-band order. So the
+    // tag order must follow the data, grouped by category in facet order. (Using the series-band
+    // order misaligns whenever a category's rows aren't in seriesNames order — the cause of the
+    // legend→bar highlight mismatch.)
+    const hRectSeriesOrder = rectTagOrder(data, catField, categories);
 
     // Group band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-group
     // padding, no axis (groups labeled via the fy group-label mark). Inner series band on
@@ -213,7 +237,9 @@ export function buildBarMarks(
     return {
       underlay: [],
       overlay,
-      tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder }],
+      tagging: [
+        { selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder },
+      ],
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
       fyScaleOpts: fyGroupOpts,
@@ -224,7 +250,7 @@ export function buildBarMarks(
 
   // --- Multi-series grouped (vertical): fx = group (category), x = series within group. ---
 
-  overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel }));
+  overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel, ...clipOpt }));
 
   if (emitValueLabels) {
     overlay.push(
@@ -233,18 +259,12 @@ export function buildBarMarks(
   }
 
   // --- Rect tagging order ---
-  // Empirically (Plot 0.6.16, barY faceted on fx with an explicit inner-series band
-  // domain): Plot emits a <rect> for EVERY (group, series) pair of the fx-domain x x-domain
-  // cross-product, in facet-major order (fx-domain order, then series in x-domain order
-  // within each facet). A missing/null value does NOT omit the rect - Plot renders it at
-  // zero height. (This is the OPPOSITE of the brief's hypothesis; see the report.) So the
-  // tagging order is the full cross-product - we must NOT skip missing pairs, or every
-  // index after the first gap would shift. The fx/x domains are pinned (declaration order /
-  // seriesNames), so this order is deterministic and independent of the data rows.
-  const rectSeriesOrder: string[] = [];
-  for (let g = 0; g < categories.length; g++) {
-    for (const s of seriesNames) rectSeriesOrder.push(s);
-  }
+  // Plot emits one <rect> PER DATUM, partitioned by the fx facet (rendered in fx-domain =
+  // `categories` order) and, WITHIN a facet, in DATA-ROW order — NOT inner x-band order. So the
+  // tag order must follow the data, grouped by category in facet order. (Using the series-band
+  // order misaligns whenever a category's rows aren't in seriesNames order — the cause of the
+  // legend→bar highlight mismatch.)
+  const rectSeriesOrder = rectTagOrder(data, catField, categories);
 
   // Group band (fx): explicit domain in data-declaration order (Style-Guide sec 9: never
   // auto-sort groups; Plot would otherwise sort the fx domain alphabetically). Inter-group
@@ -256,7 +276,9 @@ export function buildBarMarks(
   return {
     underlay: [],
     overlay,
-    tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder }],
+    tagging: [
+      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+    ],
     dashedNames: new Set<string>(),
     fxScaleOpts: groupBandOpts,
     xScaleOpts: innerBandOpts,

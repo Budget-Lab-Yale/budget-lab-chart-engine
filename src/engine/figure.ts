@@ -12,8 +12,8 @@ import type { ChartSpec } from "../spec/types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildLegendItems } from "./index";
-import type { LegendItem, RenderOptions } from "./index";
+import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
+import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
 
@@ -111,6 +111,10 @@ export interface FigureRenderResult {
    *  the panes out the same way. Undefined for per-pane mode (equal `1fr` columns). */
   columnWidths?: number[];
   legendItems: LegendItem[] | null;
+  /** Point-chart figures with dual color/shape encoding: the SHAPE legend rows (else null). */
+  shapeLegendItems?: ShapeLegendItem[] | null;
+  colorLegendTitle?: string;
+  shapeLegendTitle?: string;
   seriesLabels: Record<string, string>;
   // Fields render-live / export read (mirrors RenderResult's interaction surface).
   colors: Map<string, string>;
@@ -233,6 +237,9 @@ export function renderFigure(
       columns,
       rows: gridRows,
       legendItems,
+      shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
+      colorLegendTitle: spec.color_legend_title,
+      shapeLegendTitle: spec.shape_legend_title,
       seriesLabels,
       colors: first?.colors ?? new Map(),
       seriesOrder: first?.seriesOrder ?? [],
@@ -336,6 +343,9 @@ export function renderFigure(
     rows: gridRows,
     columnWidths: colWidths,
     legendItems,
+    shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
+    colorLegendTitle: spec.color_legend_title,
+    shapeLegendTitle: spec.shape_legend_title,
     seriesLabels,
     colors: first?.colors ?? new Map(),
     seriesOrder: first?.seriesOrder ?? [],

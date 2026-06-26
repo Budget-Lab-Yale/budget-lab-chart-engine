@@ -54,10 +54,17 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
         return {
           marginBottom: 22,
           xPlotOpts: { label: null, axis: null, domain: [xMin, xMax] },
-          axisMarks: tblXAxis({}, faceted ? X_AXIS_LABEL_CLASS : undefined),
+          // Plain numeric tick labels with NO thousands separator — years (1960, 2030) and
+          // index axes read better ungrouped than "1,960".
+          axisMarks: tblXAxis(
+            { xTickFormat: (d: unknown) => `${+(d as number)}` },
+            faceted ? X_AXIS_LABEL_CLASS : undefined,
+          ),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
-          tooltipXFormat: (v) => `Month ${v}`,
+          // Match the axis label exactly (plain number, no thousands separator) — numeric x is
+          // most often a year or an index, so a bare value reads correctly in both.
+          tooltipXFormat: (v) => `${+v}`,
         };
       },
     };

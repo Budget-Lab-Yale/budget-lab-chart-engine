@@ -38,12 +38,49 @@ function formatAjvError(e: ErrorObject): string {
   return `${path}: ${e.message ?? "invalid"}`;
 }
 
-/** Layer 1: structural validation against the JSON schema. */
+/** Point charts constrain the x-axis type: a scatter plots two NUMERIC axes; a dot plot puts
+ *  a CATEGORICAL axis on x. The JSON schema can't express this cross-field rule cleanly, so it
+ *  is checked here once structural validation has confirmed both fields are present + well-typed. */
+function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
+  if (spec.chartType === "scatter" && spec.xAxisType !== "numeric") {
+    return `chartType "scatter" requires xAxisType "numeric" (got ${JSON.stringify(spec.xAxisType)})`;
+  }
+  if (spec.chartType === "dotplot" && spec.xAxisType !== "categorical") {
+    return `chartType "dotplot" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
+  }
+  return null;
+}
+
+/** Horizontal small-multiples bar/stacked charts are not supported yet (the faceted-horizontal
+ *  layout — per-pane left gutters, category-on-Y resolution — isn't built). Reject the combo with
+ *  a pointed message rather than rendering a broken figure. May be specced in future. */
+function facetedHorizontalError(spec: {
+  chartType?: unknown;
+  orientation?: unknown;
+  small_multiples?: unknown;
+}): string | null {
+  const isBar = spec.chartType === "bar" || spec.chartType === "stacked";
+  if (isBar && spec.orientation === "horizontal" && spec.small_multiples != null) {
+    return `horizontal orientation is not supported with small_multiples for ${JSON.stringify(spec.chartType)} charts yet — use vertical, or drop small_multiples`;
+  }
+  return null;
+}
+
+/** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
+ *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
   const ok = validateStructural(spec);
-  if (ok) return { valid: true, errors: [] };
-  const errors = (validateStructural.errors ?? []).map(formatAjvError);
-  return { valid: false, errors };
+  if (!ok) {
+    const errors = (validateStructural.errors ?? []).map(formatAjvError);
+    return { valid: false, errors };
+  }
+  const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
+  if (axisErr) return { valid: false, errors: [axisErr] };
+  const fhErr = facetedHorizontalError(
+    spec as { chartType?: unknown; orientation?: unknown; small_multiples?: unknown },
+  );
+  if (fhErr) return { valid: false, errors: [fhErr] };
+  return { valid: true, errors: [] };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -90,6 +127,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     ["value", cols.value],
   ];
   if (cols.series) requiredRoles.push(["series", cols.series]);
+  if (cols.shape) requiredRoles.push(["shape", cols.shape]);
   if (spec.small_multiples) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);
@@ -122,8 +160,9 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // just repeat the same missing-column failure for every row.
   if (errors.length) return { valid: false, errors };
 
-  // Per-row: x parses under xAxisType; value + CI numeric-or-empty. Collect the series set.
+  // Per-row: x parses under xAxisType; value + CI numeric-or-empty. Collect the series + shape sets.
   const seriesSeen = new Set<string>();
+  const shapeSeen = new Set<string>();
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i] as TidyRow;
     const rowNum = i + 2; // row 1 = header, data starts at 2
@@ -138,6 +177,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       if (!isNumericOrEmpty(v)) errors.push(`row ${rowNum}: ${col} ${JSON.stringify(v)} is not numeric`);
     }
     if (cols.series) seriesSeen.add(row[cols.series] as string);
+    if (cols.shape) shapeSeen.add(row[cols.shape] as string);
   }
 
   // Cross-reference: every config-named series must appear in the data.
@@ -156,10 +196,40 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   checkSeries(spec.series_colors, "series_colors");
   checkSeries(spec.series_styles, "series_styles");
   checkSeries(spec.series_labels, "series_labels");
+
+  // Cross-reference: every config-named shape value must appear in the shape column's data.
+  if (cols.shape) {
+    const knownShapes = JSON.stringify([...shapeSeen].sort());
+    const checkShapes = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
+      if (!named) return;
+      const keys = Array.isArray(named) ? named : Object.keys(named);
+      const unknown = keys.filter((k) => !shapeSeen.has(k));
+      if (unknown.length) {
+        errors.push(
+          `${source} names shape values ${JSON.stringify(unknown)} not found in the data (data shapes: ${knownShapes})`,
+        );
+      }
+    };
+    checkShapes(spec.shape_order, "shape_order");
+    checkShapes(spec.shape_labels, "shape_labels");
+  }
   for (const b of spec.confidence_bands ?? []) {
     if (!seriesSeen.has(b.series)) {
       errors.push(
         `confidence_bands names series ${JSON.stringify(b.series)} not found in the data (data series: ${knownSeries})`,
+      );
+    }
+  }
+
+  // Cross-reference: every category named by x_order must appear in the categorical x column.
+  // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
+  // typo. Only checked on a categorical x-axis (it is a no-op for numeric/temporal x).
+  if (spec.xAxisType === "categorical" && spec.x_order?.length) {
+    const xValues = new Set(rows.map((r) => r[cols.x] as string));
+    const unknown = spec.x_order.filter((v) => !xValues.has(v));
+    if (unknown.length) {
+      errors.push(
+        `x_order names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
       );
     }
   }

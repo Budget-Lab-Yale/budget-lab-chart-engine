@@ -10,6 +10,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData, validateChart } from "../spec/validate";
+import { validateTableSpec, validateTableData } from "../spec/table-validate";
 import { loadData } from "../data/load";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
 import { CHART_CSS } from "../embed/styles";
@@ -17,8 +18,27 @@ import { createServer, findCharts } from "./serve";
 import { renderChartPng } from "../snapshot/render-png";
 import { comparePng } from "../snapshot/compare";
 import type { ChartSpec } from "../spec/types";
+import type { TableSpec } from "../spec/table-types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
+
+// ---------------------------------------------------------------------------
+// Table detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the parsed YAML looks like a table spec.
+ * Detection is content-based (not filename-based) and intentionally generous:
+ * any spec that has a `stub` field is treated as a table — chart specs never use that key.
+ * This means partially-invalid table specs (e.g. missing `value`) are still routed to the
+ * table validator, which produces the correct error rather than falling through to the chart
+ * validator and emitting confusing "chartType required" messages.
+ */
+function isTableSpec(parsed: unknown): parsed is TableSpec {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const p = parsed as Record<string, unknown>;
+  return p["stub"] !== undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -82,6 +102,38 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
   const specText = await readTextFile(absSpecPath);
   const spec = parseYamlSpec(specText, absSpecPath);
 
+  // --- Table path ---
+  if (isTableSpec(spec)) {
+    const structural = validateTableSpec(spec);
+    if (!structural.valid) {
+      const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    const baseDir = dirname(absSpecPath);
+    let rows: TidyRow[];
+    try {
+      rows = await loadData(spec.data, { baseDir });
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+      };
+    }
+
+    const dataResult = validateTableData(spec, rows);
+    if (!dataResult.valid) {
+      const lines = dataResult.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    return {
+      exitCode: 0,
+      message: `OK: ${absSpecPath} (${rows.length} rows, table)`,
+    };
+  }
+
+  // --- Chart path ---
   const structural = validateSpec(spec);
   if (!structural.valid) {
     const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
@@ -153,6 +205,59 @@ export async function runRender(
   const specText = await readTextFile(absSpecPath);
   const spec = parseYamlSpec(specText, absSpecPath);
 
+  // Determine output path (shared between chart and table paths).
+  const specBase = basename(absSpecPath, extname(absSpecPath));
+  const outPath = opts.outPath
+    ? resolve(opts.outPath)
+    : resolve(process.cwd(), `${specBase}.html`);
+
+  // --- Table path ---
+  if (isTableSpec(spec)) {
+    const structural = validateTableSpec(spec);
+    if (!structural.valid) {
+      const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    const baseDir = dirname(absSpecPath);
+    let rows: TidyRow[];
+    try {
+      rows = await loadData(spec.data, { baseDir });
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+      };
+    }
+
+    const dataResult = validateTableData(spec, rows);
+    if (!dataResult.valid) {
+      const lines = dataResult.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    const html = buildStandaloneHtml({
+      spec: spec as unknown as ChartSpec,
+      rows,
+      liveBundleJs: opts.liveBundleJs,
+      css: opts.css,
+      eyebrow: opts.eyebrow,
+      mountFn: "mountTable",
+    });
+
+    try {
+      await writeFile(outPath, html, "utf8");
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `cannot write output: ${outPath}: ${(err as NodeJS.ErrnoException).message}`,
+      };
+    }
+
+    return { exitCode: 0, message: `Wrote ${outPath}`, htmlPath: outPath };
+  }
+
+  // --- Chart path ---
   const structural = validateSpec(spec);
   if (!structural.valid) {
     const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
@@ -184,12 +289,6 @@ export async function runRender(
     css: opts.css,
     eyebrow: opts.eyebrow,
   });
-
-  // Determine output path.
-  const specBase = basename(absSpecPath, extname(absSpecPath));
-  const outPath = opts.outPath
-    ? resolve(opts.outPath)
-    : resolve(process.cwd(), `${specBase}.html`);
 
   try {
     await writeFile(outPath, html, "utf8");
@@ -262,35 +361,69 @@ export async function runSnapshot(
     };
   }
 
-  const structural = validateSpec(spec);
-  if (!structural.valid) {
-    const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
-    return { exitCode: 1, message: lines };
-  }
+  // --- Table path: validate via the table validators and build the table standalone HTML. ---
+  let html: string;
+  if (isTableSpec(spec)) {
+    const structuralTable = validateTableSpec(spec);
+    if (!structuralTable.valid) {
+      const lines = structuralTable.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
 
-  let rows: TidyRow[];
-  try {
-    rows = await loadData((spec as ChartSpec).data, { baseDir: specDir });
-  } catch (err) {
-    return {
-      exitCode: 1,
-      message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
-    };
-  }
+    let tableRows: TidyRow[];
+    try {
+      tableRows = await loadData(spec.data, { baseDir: specDir });
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+      };
+    }
 
-  const result = validateChart(spec, rows);
-  if (!result.valid) {
-    const lines = result.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
-    return { exitCode: 1, message: lines };
-  }
+    const dataResult = validateTableData(spec, tableRows);
+    if (!dataResult.valid) {
+      const lines = dataResult.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
 
-  const typedSpec = spec as ChartSpec;
-  const html = buildStandaloneHtml({
-    spec: typedSpec,
-    rows,
-    liveBundleJs: opts.liveBundleJs,
-    css: opts.css,
-  });
+    html = buildStandaloneHtml({
+      spec: spec as unknown as ChartSpec,
+      rows: tableRows,
+      liveBundleJs: opts.liveBundleJs,
+      css: opts.css,
+      mountFn: "mountTable",
+    });
+  } else {
+    const structural = validateSpec(spec);
+    if (!structural.valid) {
+      const lines = structural.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    let rows: TidyRow[];
+    try {
+      rows = await loadData((spec as ChartSpec).data, { baseDir: specDir });
+    } catch (err) {
+      return {
+        exitCode: 1,
+        message: `${absSpecPath}: data load failed: ${(err as Error).message}`,
+      };
+    }
+
+    const result = validateChart(spec, rows);
+    if (!result.valid) {
+      const lines = result.errors.map((e) => `${absSpecPath}: ${e}`).join("\n");
+      return { exitCode: 1, message: lines };
+    }
+
+    const typedSpec = spec as ChartSpec;
+    html = buildStandaloneHtml({
+      spec: typedSpec,
+      rows,
+      liveBundleJs: opts.liveBundleJs,
+      css: opts.css,
+    });
+  }
 
   // Render to PNG via headless browser.
   let pngBuffer: Buffer;

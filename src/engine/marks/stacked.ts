@@ -45,13 +45,22 @@ function makeValueFormatter(
   values: number[],
   units: string,
   signed: boolean,
+  decimals?: number,
 ): (d: number) => string {
-  const maxFrac = values.reduce((max, v) => {
-    if (!Number.isFinite(v)) return max;
-    const s = String(v);
-    const i = s.indexOf(".");
-    return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-  }, 0);
+  // Fixed precision when set; else the minimum the data needs, CAPPED at 2 so raw floats don't
+  // print 15 digits (matches bar.ts).
+  const maxFrac =
+    decimals != null
+      ? decimals
+      : Math.min(
+          2,
+          values.reduce((max, v) => {
+            if (!Number.isFinite(v)) return max;
+            const s = String(v);
+            const i = s.indexOf(".");
+            return Math.max(max, i < 0 ? 0 : s.length - i - 1);
+          }, 0),
+        );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     const mag = Math.abs(d).toFixed(maxFrac);
@@ -83,6 +92,21 @@ export function buildStackedMarks(
         categories.push(cat);
       }
     }
+  }
+
+  // Visual stack order override (barStack.stackOrder): Plot stacks positives upward from zero in
+  // DATA order, so reordering the rows sets the bottom→top order. Stable-sort by the configured
+  // rank (listed series first, the rest after in series_order); this drives ONLY the visual stack
+  // + rect tagging (both read this `data`), leaving series_order to fix the legend order + colors.
+  // Done after `categories` is built so the category encounter order is unaffected.
+  const stackOrderCfg = spec.barStack?.stackOrder;
+  if (stackOrderCfg && stackOrderCfg.length) {
+    const sRank = new Map<string, number>(seriesNames.map((s, i) => [s, stackOrderCfg.length + i]));
+    stackOrderCfg.forEach((s, i) => sRank.set(s, i));
+    data = data
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => ((sRank.get(a.r.series) ?? 0) - (sRank.get(b.r.series) ?? 0)) || (a.i - b.i))
+      .map((x) => x.r);
   }
 
   // --- Per-category aggregates (computed INDEPENDENTLY of the stack) ---
@@ -121,8 +145,8 @@ export function buildStackedMarks(
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
   // Net text above a cumulative stack is unsigned (always positive); diverging net is signed.
-  const netFmt = makeValueFormatter([...netByCat.values()], units, netMode === "dot");
-  const segFmt = makeValueFormatter(allValues, units, false);
+  const netFmt = makeValueFormatter([...netByCat.values()], units, netMode === "dot", spec.valueLabels?.decimals);
+  const segFmt = makeValueFormatter(allValues, units, false, spec.valueLabels?.decimals);
 
   // --- Color: categorical (default) or monochromatic by stack position ---
   // For mono, segments are colored darkest-at-bottom → lightest-at-top by their VISUAL
@@ -329,29 +353,19 @@ export function buildStackedMarks(
   }
 
   // --- Rect tagging order ---
-  // Plot 0.6.16 stacked barY/barX emits one <rect> per (category, series) row that is
-  // PRESENT in the data (a null-value row still yields a zero-height rect; an OMITTED
-  // (cat,series) pair yields no rect — verified empirically, opposite of the faceted bar
-  // case). Rects appear category-major, and within a category in stack/declaration order.
-  // Build the order to match: for each category (declaration order), the present series in
-  // seriesNames order.
-  const presentByCat = new Map<string, Set<string>>();
-  for (const r of data) {
-    const cat = (r as unknown as Record<string, unknown>)[catField] as string;
-    if (!categories.includes(cat)) continue;
-    let set = presentByCat.get(cat);
-    if (!set) {
-      set = new Set<string>();
-      presentByCat.set(cat, set);
-    }
-    set.add(r.series);
-  }
-  const rectSeriesOrder: string[] = [];
-  for (const cat of categories) {
-    const present = presentByCat.get(cat);
-    if (!present) continue;
-    for (const s of seriesNames) if (present.has(s)) rectSeriesOrder.push(s);
-  }
+  // Plot 0.6.16 stacked barY/barX emits one <rect> PER DATUM, in DATA-ROW order (the stack
+  // transform computes y1/y2 but doesn't reorder the mark's data) — NOT category-major /
+  // stack order. So the tag order must follow the data (which may be series-major, e.g. all
+  // "Labor" rows then all "Capital"). Using a category-major order misaligns whenever the data
+  // isn't grouped that way — the cause of the legend→segment highlight mismatch.
+  const seriesSet = new Set(seriesNames);
+  const rectSeriesOrder: string[] = data
+    .filter(
+      (r) =>
+        categories.includes((r as unknown as Record<string, unknown>)[catField] as string) &&
+        seriesSet.has(r.series),
+    )
+    .map((r) => r.series);
 
   // --- Legend extras: diverging stacks add a "Total" dot row (A8 renders it) ---
   // The row carries TOTAL_SERIES_KEY, shared with the net dot/label data-series below, so

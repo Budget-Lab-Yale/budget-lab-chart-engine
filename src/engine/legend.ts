@@ -39,6 +39,59 @@ function buildSymbolSwatch(
   return svg;
 }
 
+/** Build a point-marker legend swatch (an inline SVG): just the filled symbol, no line. Used
+ *  for point charts — colored by series in the color legend, neutral gray in the shape legend. */
+function buildPointSwatch(doc: Document, color: string, symbol: string): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 18 16");
+  const path = doc.createElementNS(SVG_NS, "path");
+  // Larger marker (was ~8px → ~12px) for legibility. Centered at x=9; nudged up to y=7 (box
+  // center is 8) so it sits on the text's optical (cap-height) center rather than the line-box
+  // center, which reads as slightly low for a small marker beside 12px text.
+  path.setAttribute("d", symbolPathD(symbol, 100));
+  path.setAttribute("transform", "translate(9,7)");
+  path.setAttribute("fill", color);
+  path.setAttribute("stroke", "#ffffff");
+  path.setAttribute("stroke-width", "1");
+  svg.appendChild(path);
+  return svg;
+}
+
+/** Build a color-chip legend swatch (an inline SVG): a filled rounded square in the series color.
+ *  Used for the color-only legend of a point chart, where a point SHAPE would be ambiguous with
+ *  the shape legend's symbols. Same 18×16 box + 1px upward nudge as buildPointSwatch so the chip
+ *  aligns with the shape-legend symbols and the text's optical center. */
+function buildColorChip(doc: Document, color: string): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 18 16");
+  const rect = doc.createElementNS(SVG_NS, "rect");
+  const size = 13;
+  rect.setAttribute("x", String((18 - size) / 2));
+  rect.setAttribute("y", String(7 - size / 2)); // center at y=7 (box center 8, nudged up 1px)
+  rect.setAttribute("width", String(size));
+  rect.setAttribute("height", String(size));
+  rect.setAttribute("rx", "4");
+  rect.setAttribute("fill", color);
+  svg.appendChild(rect);
+  return svg;
+}
+
+/** Neutral gray used for the shape-legend markers (shape conveys the shape-channel value, not a
+ *  color — so its swatches are uncolored). */
+const SHAPE_LEGEND_COLOR = "#555B66";
+
+/** One shape-legend row (point charts, dual encoding). */
+export interface ShapeLegendEntry {
+  /** The raw shape-value key — matches markers' data-shape so the row can drive hover-dim/pin. */
+  shape: string;
+  label: string;
+  markerSymbol: string;
+}
+
 /** Handle returned by renderLegend: the rendered element plus a `toggle(series)` that
  *  flips the SAME pin state a legend-button click would, keeping ONE source of truth
  *  (the internal `pinned` Set) so the chart can act as a second selection input. */
@@ -46,6 +99,11 @@ export interface LegendHandle {
   element: HTMLElement;
   /** Toggle a series' pinned state (no-op for an unknown/non-interactive series). */
   toggle(series: string): void;
+  /** Pinned series in click order (the live layer uses this to compute a restack order). */
+  pinnedSeries(): string[];
+  /** Re-point the hover-dim root to a new SVG (after the chart body is re-rendered) and re-apply
+   *  the current highlight to it, so dim/pin state carries over to the swapped-in SVG. */
+  rebind(svg: Element): void;
 }
 
 export function renderLegend(
@@ -53,18 +111,72 @@ export function renderLegend(
   items: LegendItem[],
   // `svg` is the highlight ROOT queried for `[data-series]` on dim — an SVG for a single
   // chart, or a container (e.g. the figure grid) so dimming spans every pane's SVG.
-  { svg, onHighlight }: { svg?: Element; onHighlight?: () => void } = {},
+  //
+  // Point charts with DUAL color/shape encoding pass `shapeItems` (+ optional group titles) to
+  // render a second, non-interactive SHAPE legend group beside the color legend.
+  {
+    svg: initialSvg,
+    onHighlight,
+    shapeItems,
+    colorTitle,
+    shapeTitle,
+  }: {
+    svg?: Element;
+    onHighlight?: (active: Set<string>) => void;
+    shapeItems?: ShapeLegendEntry[] | null;
+    colorTitle?: string;
+    shapeTitle?: string;
+  } = {},
 ): LegendHandle | null {
-  if (!items?.length) return null;
+  const hasColor = !!items?.length;
+  const hasShape = !!shapeItems?.length;
+  if (!hasColor && !hasShape) return null;
 
   const doc = parent.ownerDocument;
+  // Mutable highlight root: re-pointed by handle.rebind() when the chart body is re-rendered
+  // (area restack), so dim/pin keeps targeting the live SVG.
+  let svg = initialSvg;
   const legend = doc.createElement("div");
   legend.className = "tbl-legend";
 
-  // Only real (interactive) series participate in hover-dim and pin logic.
-  const allSeries = items.filter((i) => !i.nonInteractive).map((i) => i.series);
+  // Two-group layout: a color group + a shape group, each an inline cluster with an optional
+  // heading. Single-group (the common case) appends items directly to the legend, unchanged.
+  const twoGroup = hasShape;
+  // Two-group (color + shape) point legend stacks the groups on separate lines.
+  if (twoGroup) legend.classList.add("tbl-legend--grouped");
+  let colorContainer: HTMLElement = legend;
+  let shapeGroup: HTMLElement | null = null;
+  if (twoGroup) {
+    if (hasColor) {
+      colorContainer = doc.createElement("div");
+      colorContainer.className = "tbl-legend-group";
+      if (colorTitle) {
+        const h = doc.createElement("span");
+        h.className = "tbl-legend-group-title";
+        h.textContent = colorTitle;
+        colorContainer.appendChild(h);
+      }
+    }
+    shapeGroup = doc.createElement("div");
+    shapeGroup.className = "tbl-legend-group";
+    if (shapeTitle) {
+      const h = doc.createElement("span");
+      h.className = "tbl-legend-group-title";
+      h.textContent = shapeTitle;
+      shapeGroup.appendChild(h);
+    }
+  }
+
+  const safeItems = items ?? [];
+  const safeShapeItems = shapeItems ?? [];
+  // Two independent selection dimensions: COLOR (series) and SHAPE. Point charts with dual
+  // encoding use both; every other chart uses only color (shape sets stay empty → no-op).
+  const allSeries = safeItems.filter((i) => !i.nonInteractive).map((i) => i.series);
+  const allShapes = safeShapeItems.map((i) => i.shape);
   const pinned = new Set<string>();
   let hovered: string | null = null;
+  const pinnedShape = new Set<string>();
+  let hoveredShape: string | null = null;
 
   // Circular reset button — declared up front (applyHighlight toggles its visibility) but
   // appended at the END of the legend so it sits after the last item. Hidden until pinned,
@@ -74,26 +186,39 @@ export function renderLegend(
   const applyHighlight = (): void => {
     const active = new Set(pinned);
     if (hovered) active.add(hovered);
-    // Dim only when a subset is highlighted (not everything, not nothing).
-    const dimAll = active.size > 0 && active.size < allSeries.length;
+    const activeShape = new Set(pinnedShape);
+    if (hoveredShape) activeShape.add(hoveredShape);
+    // Dim a dimension only when a strict subset of it is active (not everything, not nothing).
+    const dimColor = active.size > 0 && active.size < allSeries.length;
+    const dimShape = activeShape.size > 0 && activeShape.size < allShapes.length;
     if (svg) {
-      // Dim ALL data-series elements: line charts tag <path>, bar/stacked tag <rect>.
-      // Matching only path[data-series] left bar/stacked hover-dim + click-pin dead.
+      // A marker stays bright only if it matches the active selection in BOTH dimensions
+      // (intersection). Line/bar marks carry only data-series → the shape test is a no-op.
       svg.querySelectorAll("[data-series]").forEach((p) => {
         const s = p.getAttribute("data-series");
-        p.classList.toggle("tbl-dimmed", dimAll && !active.has(s as string));
+        const sh = p.getAttribute("data-shape");
+        const colorOk = !dimColor || active.has(s as string);
+        const shapeOk = !dimShape || (sh != null && activeShape.has(sh));
+        p.classList.toggle("tbl-dimmed", !(colorOk && shapeOk));
       });
     }
     legend.querySelectorAll<HTMLElement>(".tbl-legend-item").forEach((btn) => {
-      const s = btn.dataset.series as string;
-      btn.classList.toggle("is-pinned", pinned.has(s));
-      btn.setAttribute("aria-pressed", String(pinned.has(s)));
+      if (btn.dataset.shape != null) {
+        const sh = btn.dataset.shape;
+        btn.classList.toggle("is-pinned", pinnedShape.has(sh));
+        btn.setAttribute("aria-pressed", String(pinnedShape.has(sh)));
+      } else {
+        const s = btn.dataset.series as string;
+        btn.classList.toggle("is-pinned", pinned.has(s));
+        btn.setAttribute("aria-pressed", String(pinned.has(s)));
+      }
     });
-    resetBtn.hidden = pinned.size === 0;
+    resetBtn.hidden = pinned.size === 0 && pinnedShape.size === 0;
     // Notify after the dim classes are toggled so the callback reads the fresh dim state
     // (e.g. recoloring net-total labels by the behind-segment's dim class). Runs on every
-    // highlight change — pin, hover, focus, blur, and reset.
-    onHighlight?.();
+    // highlight change — pin, hover, focus, blur, and reset. The active color-series set is
+    // passed so the callback can drive the value-pill renderer (an empty set clears it).
+    onHighlight?.(active);
   };
 
   // Shared pin toggle — the single source of truth for both legend-button clicks and
@@ -104,8 +229,14 @@ export function renderLegend(
     else pinned.add(series);
     applyHighlight();
   };
+  const togglePinShape = (shape: string): void => {
+    if (!allShapes.includes(shape)) return;
+    if (pinnedShape.has(shape)) pinnedShape.delete(shape);
+    else pinnedShape.add(shape);
+    applyHighlight();
+  };
 
-  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, nonInteractive } of items) {
+  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, nonInteractive } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -126,6 +257,15 @@ export function renderLegend(
     if (markerShape === "rect") {
       swatch.classList.add("is-rect");
       if (color) swatch.style.background = color;
+    } else if (markerShape === "point") {
+      // Point chart: a filled colored marker (no line). The symbol is the series' shape in the
+      // redundant (combined) case, else a plain circle (shape lives in the shape legend).
+      swatch.classList.add("is-point");
+      swatch.appendChild(buildPointSwatch(doc, color || SHAPE_LEGEND_COLOR, markerSymbol || "circle"));
+    } else if (markerShape === "chip") {
+      // Point chart color-only legend: a filled rounded-square color key (in the is-point box).
+      swatch.classList.add("is-point");
+      swatch.appendChild(buildColorChip(doc, color || SHAPE_LEGEND_COLOR));
     } else if (markerShape === "dot") {
       swatch.classList.add("is-dot");
       // White fill + black stroke via CSS — no inline color needed.
@@ -158,7 +298,7 @@ export function renderLegend(
       btn.addEventListener("click", () => { togglePin(series); });
     }
 
-    legend.appendChild(btn);
+    colorContainer.appendChild(btn);
   }
 
   resetBtn.type = "button";
@@ -166,9 +306,45 @@ export function renderLegend(
   resetBtn.setAttribute("aria-label", "Clear pinned highlights");
   resetBtn.innerHTML = '<span class="tbl-legend-reset-icon">⟲</span>';
   resetBtn.hidden = true;
-  resetBtn.addEventListener("click", () => { pinned.clear(); applyHighlight(); });
-  legend.appendChild(resetBtn);
+  resetBtn.addEventListener("click", () => { pinned.clear(); pinnedShape.clear(); applyHighlight(); });
+  colorContainer.appendChild(resetBtn);
+
+  // Two-group layout: assemble the color group then the SHAPE group. The shape markers are
+  // neutral gray (shape conveys the shape-channel value, not a color); the rows are interactive
+  // — hovering / clicking one dims markers of other shapes (independent of the color dimension).
+  if (twoGroup) {
+    if (hasColor && colorContainer !== legend) legend.appendChild(colorContainer);
+    for (const { shape, label, markerSymbol } of safeShapeItems) {
+      const btn = doc.createElement("button");
+      btn.type = "button";
+      btn.className = "tbl-legend-item";
+      btn.dataset.shape = shape;
+      btn.setAttribute("aria-pressed", "false");
+      const swatch = doc.createElement("span");
+      swatch.className = "tbl-legend-swatch is-point";
+      swatch.appendChild(buildPointSwatch(doc, SHAPE_LEGEND_COLOR, markerSymbol));
+      const labelEl = doc.createElement("span");
+      labelEl.textContent = label;
+      btn.appendChild(swatch);
+      btn.appendChild(labelEl);
+      btn.addEventListener("pointerenter", () => { hoveredShape = shape; applyHighlight(); });
+      btn.addEventListener("pointerleave", () => { hoveredShape = null; applyHighlight(); });
+      btn.addEventListener("focus", () => { hoveredShape = shape; applyHighlight(); });
+      btn.addEventListener("blur", () => { hoveredShape = null; applyHighlight(); });
+      btn.addEventListener("click", () => { togglePinShape(shape); });
+      shapeGroup!.appendChild(btn);
+    }
+    legend.appendChild(shapeGroup!);
+  }
 
   parent.appendChild(legend);
-  return { element: legend, toggle: togglePin };
+  return {
+    element: legend,
+    toggle: togglePin,
+    pinnedSeries: () => [...pinned],
+    rebind: (newSvg: Element) => {
+      svg = newSvg;
+      applyHighlight();
+    },
+  };
 }

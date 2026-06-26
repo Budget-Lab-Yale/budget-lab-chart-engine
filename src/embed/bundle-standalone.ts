@@ -6,7 +6,7 @@ import type { TidyRow } from "../data/index";
 import { FIGTREE_FONT_FACE } from "./assets.js";
 
 export interface StandaloneInput {
-  spec: ChartSpec;
+  spec: ChartSpec | Record<string, unknown>;
   rows: TidyRow[];
   /** The pre-built browser IIFE bundle (dist/embed/live.js contents). */
   liveBundleJs: string;
@@ -17,6 +17,8 @@ export interface StandaloneInput {
    *  is baked into the page and shown by default; the embed can suppress it at view time with
    *  `?eyebrow=off` in the URL. Omitted → the chart renders with no eyebrow. */
   eyebrow?: string;
+  /** Which BudgetLabChart method to call on mount. Defaults to "mountChart". */
+  mountFn?: "mountChart" | "mountTable";
 }
 
 /**
@@ -38,8 +40,8 @@ function safeJsonForScript(value: unknown): string {
  * - Calls mountChart with the serialized spec and rows.
  */
 export function buildStandaloneHtml(input: StandaloneInput): string {
-  const { spec, rows, liveBundleJs, css, title, eyebrow } = input;
-  const pageTitle = title ?? spec.title ?? "Chart";
+  const { spec, rows, liveBundleJs, css, title, eyebrow, mountFn = "mountChart" } = input;
+  const pageTitle = title ?? (spec as { title?: string }).title ?? "Chart";
 
   const specJson = safeJsonForScript(spec);
   const rowsJson = safeJsonForScript(rows);
@@ -79,7 +81,7 @@ ${css}
 ${safeBundle}
 </script>
 <script>
-BudgetLabChart.mountChart(document.getElementById("chart"), {
+BudgetLabChart.${mountFn}(document.getElementById("chart"), {
   spec: ${specJson},
   rows: ${rowsJson},${eyebrowMount}
 });

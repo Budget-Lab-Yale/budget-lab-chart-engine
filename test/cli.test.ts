@@ -14,7 +14,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { runValidate, runRender } from "../src/cli/index";
 
 const EXAMPLE_SPEC = resolve(
-  fileURLToPath(new URL("../examples/augmented-occupations/chart.yaml", import.meta.url)),
+  fileURLToPath(new URL("./fixtures/sample-chart/chart.yaml", import.meta.url)),
 );
 
 // Stub live bundle — just needs to be a non-empty JS string.
@@ -140,8 +140,8 @@ describe("runRender — success", () => {
     const html = readFileSync(outPath, "utf8");
     expect(html).toMatch(/<!doctype html/i);
     expect(html).toContain("BudgetLabChart.mountChart");
-    // The example spec title starts with "Proportion of Workers"
-    expect(html).toContain("Proportion of Workers");
+    // The fixture spec title
+    expect(html).toContain("Sample Chart");
   });
 
   it("defaults output path to <specBasename>.html in cwd when -o is omitted", async () => {

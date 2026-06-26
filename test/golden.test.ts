@@ -195,6 +195,30 @@ describe("golden SVG — bars", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-single.golden.svg");
   });
 
+  it("orders categorical x-axis categories by x_order (overriding data-encounter order)", () => {
+    const rows = parseCsv("./fixtures/bar-single.csv"); // data order: Northeast, Midwest, South, West
+    const spec: ChartSpec = { ...BAR_SINGLE_SPEC, x_order: ["West", "South", "Northeast", "Midwest"] };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const labelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
+      Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
+    );
+    const labels = Array.from(labelG?.querySelectorAll("text") ?? []);
+    expect(labels.map((t) => t.textContent)).toEqual(["West", "South", "Northeast", "Midwest"]);
+  });
+
+  it("x_order is order-only: unlisted categories keep encounter order after the listed ones", () => {
+    const rows = parseCsv("./fixtures/bar-single.csv"); // data order: Northeast, Midwest, South, West
+    // Only two of four categories listed. Unlike series_order, x_order does NOT filter: the
+    // unlisted categories (Northeast, Midwest — original encounter order) follow, none dropped.
+    const spec: ChartSpec = { ...BAR_SINGLE_SPEC, x_order: ["West", "South"] };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const labelG = Array.from(svg.querySelectorAll('g[aria-label="text"]')).find((g) =>
+      Array.from(g.querySelectorAll("text")).some((t) => t.textContent === "Northeast"),
+    );
+    const labels = Array.from(labelG?.querySelectorAll("text") ?? []);
+    expect(labels.map((t) => t.textContent)).toEqual(["West", "South", "Northeast", "Midwest"]);
+  });
+
   it("renders a 3-group x 3-series grouped bar chart via fx", async () => {
     const rows = parseCsv("./fixtures/bar-multi.csv");
     const { svg } = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document });
@@ -245,6 +269,24 @@ describe("golden SVG — bars", () => {
     const a = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+
+  it("annotation reference line on a grouped (fx-faceted) bar spans the full width (one line)", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const spec: ChartSpec = { ...BAR_MULTI_SPEC, yAxisPolicy: { markers: [{ y: 1.5, label: "Target" }] } };
+    const width = 720;
+    const { svg } = renderChart(spec, rows, { width, height: 400, document });
+    // The per-facet copies are collapsed to ONE line that runs edge-to-edge (absolute 0..width
+    // once the kept group's translate is applied), not three facet-bounded segments.
+    const lines = Array.from(svg.querySelectorAll<SVGLineElement>('g[class*="tbl-annotation-line-"] line'));
+    expect(lines.length).toBe(1);
+    const line = lines[0]!;
+    const tx = (() => {
+      const m = /translate\(\s*(-?[\d.]+)/.exec(line.closest("g[class*='tbl-annotation-line-']")?.getAttribute("transform") ?? "");
+      return m ? Number(m[1]) : 0;
+    })();
+    expect(tx + Number(line.getAttribute("x1"))).toBeCloseTo(0, 0);
+    expect(tx + Number(line.getAttribute("x2"))).toBeCloseTo(width, 0);
   });
 
   it("renders bars crossing zero (labels above/below)", async () => {
@@ -435,8 +477,33 @@ describe("golden SVG — stacked bars", () => {
     expect(legendItems?.length).toBe(3);
     // Net text above each stack: stack mark + one net-text mark = a g[aria-label="text"]
     // for the net beyond the chrome (y-tick + band-x = 2) → 3 text groups.
-    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(3);
+    expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(3);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-cumulative.golden.svg");
+  });
+
+  it("barStack.stackOrder moves a series to the bottom of the stack without changing the legend", () => {
+    const rows = parseCsv("./fixtures/stacked-cumulative.csv");
+    // Default order is [Wages, Benefits, Taxes] → Taxes on top. Pin Taxes to the bottom.
+    const spec: ChartSpec = { ...STACKED_CUMULATIVE_SPEC, barStack: { stackOrder: ["Taxes"] } };
+    const { svg, legendItems } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = Array.from(svg.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
+    // The bottom segment of EVERY category (largest y attribute = closest to the baseline in an
+    // all-positive stack) is now Taxes — verified by geometry, independent of DOM emission order.
+    const byCat = new Map<number, SVGRectElement[]>();
+    for (const r of rects) {
+      const key = Math.round(parseFloat(r.getAttribute("x") ?? "0"));
+      (byCat.get(key) ?? byCat.set(key, []).get(key)!).push(r);
+    }
+    expect(byCat.size).toBe(3); // 3 categories
+    for (const group of byCat.values()) {
+      const bottom = group.reduce((a, b) =>
+        parseFloat(a.getAttribute("y") ?? "0") >= parseFloat(b.getAttribute("y") ?? "0") ? a : b,
+      );
+      expect(bottom.getAttribute("data-series")).toBe("Taxes");
+    }
+    // Legend is unchanged by stackOrder (visual-only): identical to the no-stackOrder baseline.
+    const baseLegend = renderChart(STACKED_CUMULATIVE_SPEC, rows, { width: 720, height: 400, document }).legendItems;
+    expect(legendItems?.map((i) => i.series)).toEqual(baseLegend?.map((i) => i.series));
   });
 
   it("renders a diverging stack with a net dot + signed label and Total legend extra", async () => {
@@ -516,7 +583,7 @@ describe("golden SVG — stacked bars", () => {
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(9);
     // No net text/dot for normalized (every bar tops at 100%). Only chrome text groups
     // (y-tick labels + band x-axis) → 2.
-    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stacked-100.golden.svg");
   });
@@ -533,7 +600,7 @@ describe("golden SVG — stacked bars", () => {
     // No net dot (diverging data would normally produce one).
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(0);
     // No net text above (only chrome text groups: y-tick + band-x = 2).
-    expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+    expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     // No "Total" legend extra — only the 3 series entries.
     expect(legendItems?.length).toBe(3);
     expect(legendItems?.every((l) => l.series !== TOTAL_SERIES_KEY)).toBe(true);
@@ -1073,7 +1140,7 @@ describe("golden figure — per-pane bar small multiples (renderFigure, task B8)
       expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(3);
       // Value labels SUPPRESSED in panes (§6): the only text groups are the chrome
       // (y-tick-label group + band x-axis group = 2). A value-label Plot.text would add a 3rd.
-      expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+      expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     });
 
     // Single series, single chart-type → no figure legend (single-series bars get none).
@@ -1113,7 +1180,7 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
       expect(svg.querySelectorAll("g.tbl-net-label text").length).toBe(0);
       // Segment labels SUPPRESSED (diverging already suppresses them, and panes too): the only
       // text groups are the chrome (y-tick-label + band x-axis = 2).
-      expect(svg.querySelectorAll('g[aria-label="text"]').length).toBe(2);
+      expect(svg.querySelectorAll('g[aria-label="text"]:not(.tbl-hl-value)').length).toBe(2);
     });
 
     // Diverging stack → figure legend carries the 4 series (rect swatches) + a Total dot row.

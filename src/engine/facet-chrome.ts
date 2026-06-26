@@ -23,6 +23,10 @@ export const Y_TICK_LABEL_CLASS = "tbl-y-tick-label";
 /** ClassName stamped on the value-axis tick-label text mark in the HORIZONTAL (fy) layout
  *  (assemble-plot) so the fy collapse can find the per-facet copies. */
 export const X_TICK_LABEL_CLASS = "tbl-x-tick-label";
+/** ClassName PREFIX stamped on each yAxisPolicy reference-line ruleY (assemble-plot appends a
+ *  per-marker index). The fx-facet collapse stretches each to the full plot width so the line
+ *  runs edge-to-edge like a line chart instead of stopping at each facet's frame. */
+export const ANNOTATION_LINE_CLASS = "tbl-annotation-line";
 
 export interface CollapseFacetChromeOptions {
   /** Outer SVG width in px. Gridlines are stretched to span 0..width (the full pane,
@@ -116,6 +120,22 @@ export function collapseFacetChrome(
     const leftLocalX = 0 - tx;
     const rightLocalX = width - tx;
     stretchLinesToFullWidth(group, leftLocalX, rightLocalX);
+  }
+
+  // 4. Annotation reference lines (yAxisPolicy.markers): each marker is its own indexed class
+  // (tbl-annotation-line-N), repeated per facet. Collapse each to its leftmost facet and stretch
+  // to the full plot width so the line reads edge-to-edge (matching a non-faceted/line chart).
+  const annoClasses = new Set<string>();
+  for (const g of Array.from(svg.querySelectorAll<SVGGElement>(`g[class*="${ANNOTATION_LINE_CLASS}-"]`))) {
+    for (const c of Array.from(g.classList)) {
+      if (c.startsWith(`${ANNOTATION_LINE_CLASS}-`)) annoClasses.add(c);
+    }
+  }
+  for (const cls of annoClasses) {
+    const group = collapseDuplicateGroups(cls)[0];
+    if (!group) continue;
+    const tx = readTranslateX(group);
+    stretchLinesToFullWidth(group, 0 - tx, width - tx);
   }
 }
 

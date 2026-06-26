@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line" | "bar" | "stacked";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -18,6 +18,22 @@ export interface XAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
+  /** Label horizontal alignment relative to the line ("start" = right of line, default). */
+  labelAnchor?: "start" | "middle" | "end";
+  /** Vertical nudge (px, signed: + = down) of the label from the top of the plot. Default 0. */
+  labelDy?: number;
+  /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
+  labelDx?: number;
+}
+
+/** A shaded vertical region of the x-axis (e.g. a recession band). `start`/`end` are x values
+ *  parsed under the chart's xAxisType (numeric year, date, quarter, or category). */
+export interface XAxisBand {
+  start: string;
+  end: string;
+  label?: string;
+  /** Fill color; defaults to a subtle neutral gray. */
+  color?: ColorRef;
 }
 
 export interface XAxisPolicy {
@@ -25,6 +41,24 @@ export interface XAxisPolicy {
   anchorAtZero?: boolean;
   /** Vertical reference lines (e.g. a treatment date). */
   markers?: XAxisMarker[];
+  /** Shaded vertical regions painted behind the data (e.g. recession indicators). */
+  bands?: XAxisBand[];
+}
+
+/** A horizontal reference line at a fixed y value (e.g. a target or assumption line). */
+export interface YAxisMarker {
+  y: number;
+  label?: string;
+  style?: "dashed" | "solid";
+  color?: ColorRef;
+  strokeWidth?: number;
+  /** Which side the label sits + anchors to ("right" default → right edge, right-aligned;
+   *  "left" → left edge, left-aligned). */
+  labelSide?: "left" | "right";
+  /** Horizontal nudge (px, signed: + = right) of the label from its anchored edge. */
+  labelDx?: number;
+  /** Vertical nudge (px, signed: + = down) of the label from the line. Default -5 (above). */
+  labelDy?: number;
 }
 
 export interface YAxisPolicy {
@@ -34,6 +68,32 @@ export interface YAxisPolicy {
   tickCount?: number;
   /** When data exceeds `max`, round the ceiling up to the next multiple of `step`. */
   autoWiden?: { step: number };
+  /** Horizontal reference lines (e.g. assumption/target lines), drawn over the data. */
+  markers?: YAxisMarker[];
+}
+
+/** A callout pointing at a data coordinate. `y` may be omitted when `series` is given (the label
+ *  snaps to that series' value at `x`; for a stacked area, the cumulative top through that series).
+ *  `dx`/`dy` nudge the label from the point; `connector` draws a short leader line to it. */
+export interface PointCallout {
+  x: string;
+  y?: number;
+  series?: string;
+  label: string;
+  color?: ColorRef;
+  dx?: number;
+  dy?: number;
+  connector?: boolean;
+}
+
+/** Unified annotation block: vertical reference lines (xAxis), horizontal reference lines (yAxis),
+ *  shaded vertical regions (bands), and point callouts (points). When present, these take
+ *  precedence over the legacy xAxisPolicy.markers/bands and yAxisPolicy.markers fields. */
+export interface AnnotationsBlock {
+  xAxis?: XAxisMarker[];
+  yAxis?: YAxisMarker[];
+  bands?: XAxisBand[];
+  points?: PointCallout[];
 }
 
 export interface ConfidenceBand {
@@ -90,6 +150,10 @@ export interface ColumnMap {
   series?: string;
   /** Column whose distinct values split small-multiples panes. */
   facet?: string;
+  /** Point charts (scatter / dotplot): column driving the marker SHAPE — an encoding channel
+   *  independent of `series` (which drives color). Point both at the same column for redundant
+   *  color+shape encoding (the dot-plot default). Omit ⇒ a single shape (circle), no shape legend. */
+  shape?: string;
 }
 
 export interface ChartSpec {
@@ -109,11 +173,19 @@ export interface ChartSpec {
   /** Y-axis title — a short caption above the axis (left-aligned, horizontal). Coexists with the
    *  units subtitle; the author manages any redundancy. */
   y_axis_title?: string;
+  /** Decimal places for VALUES shown in hover tooltips. Independent of the axis tick labels
+   *  (which round for legibility), so a tooltip can be more precise than the axis — e.g. set 4
+   *  for small magnitudes that round to 0.00 on a 2-decimal axis. Default 2. */
+  tooltip_decimals?: number;
 
   // Axes
   xAxisType: XAxisType;
   xAxisPolicy?: XAxisPolicy;
   yAxisPolicy?: YAxisPolicy;
+
+  /** Unified annotations (vertical/horizontal reference lines, shaded bands, point callouts).
+   *  Takes precedence over the legacy xAxisPolicy/yAxisPolicy marker+band fields. */
+  annotations?: AnnotationsBlock;
 
   // Series (the series COLUMN is mapped via `columns.series`)
   /** Render order; also an inclusion filter when set. */
@@ -122,6 +194,25 @@ export interface ChartSpec {
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;
+  /** Categorical x: render order for the x-axis categories. Listed categories come first in this
+   *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
+   *  series_order, this does NOT filter. Ignored off the categorical x-axis. */
+  x_order?: string[];
+  /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
+   *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
+  x_labels?: Record<string, string>;
+
+  // Shape channel (point charts: scatter / dotplot). The shape COLUMN is mapped via
+  // `columns.shape`; these mirror the series_* fields for the shape-encoding legend.
+  /** Shape render order; also an inclusion filter when set. */
+  shape_order?: string[];
+  /** Short shape-value key → display label for the shape legend. */
+  shape_labels?: Record<string, string>;
+  /** Heading shown above the color (series) legend group — used when color and shape encode
+   *  two different fields, so each legend is labeled (e.g. "Shock variant"). */
+  color_legend_title?: string;
+  /** Heading shown above the shape legend group (e.g. "Labor map"). */
+  shape_legend_title?: string;
 
   confidence_bands?: ConfidenceBand[];
 
@@ -131,8 +222,9 @@ export interface ChartSpec {
   // Bar / stacked bar
   /** Chart orientation; defaults to "vertical" (value axis is Y). */
   orientation?: "vertical" | "horizontal";
-  /** In-bar value labels. */
-  valueLabels?: { show?: boolean; signed?: boolean };
+  /** In-bar value labels. `decimals` fixes the label precision; omitted ⇒ the minimum precision
+   *  the data needs, capped at 2 (so raw floats don't print 15 digits). */
+  valueLabels?: { show?: boolean; signed?: boolean; decimals?: number };
   /** Stacked-bar display options. */
   barStack?: {
     /** How to render the net (sum) callout.
@@ -146,6 +238,11 @@ export interface ChartSpec {
     netLabelColor?: "white" | "black";
     /** Normalize each bar to 100 % (0–1 scale). */
     normalize?: boolean;
+    /** Visual stack order, BOTTOM→TOP among positive segments (negatives mirror it downward from
+     *  zero). Independent of `series_order` (which fixes the legend order + colors), so a series
+     *  can sit at the bottom of the stack while keeping its legend position/color. Series omitted
+     *  here keep their relative `series_order` position after the listed ones. */
+    stackOrder?: string[];
   };
   /** Series keys to visually highlight (dimming all others). */
   highlightSeries?: string[];

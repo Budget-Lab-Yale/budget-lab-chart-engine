@@ -7,3 +7,4 @@
 // assigns the module's exports to `var BudgetLabChart`, which would clobber any
 // manual globalThis assignment with the (then-empty) exports object.
 export { mountChart } from "../engine/render-live";
+export { mountTable } from "../table/mount";

@@ -8,26 +8,98 @@
 // This must stay in lockstep with spec/types.ts (the TS contract). Both describe the same
 // shape; the type is for authoring, the schema for runtime validation.
 
+// Shared annotation fragments — reused by the legacy axis policies AND the unified `annotations`
+// block, so both accept the same shapes.
+const X_MARKER_ARRAY = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["x"],
+    properties: {
+      x: { type: "string" },
+      label: { type: "string" },
+      style: { type: "string", enum: ["dashed", "solid"] },
+      color: { type: "string" },
+      strokeWidth: { type: "number" },
+      labelAnchor: { type: "string", enum: ["start", "middle", "end"] },
+      labelDx: { type: "number" },
+      labelDy: { type: "number" },
+    },
+  },
+} as const;
+
+const X_BAND_ARRAY = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["start", "end"],
+    properties: {
+      start: { type: "string" },
+      end: { type: "string" },
+      label: { type: "string" },
+      color: { type: "string" },
+    },
+  },
+} as const;
+
+const Y_MARKER_ARRAY = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["y"],
+    properties: {
+      y: { type: "number" },
+      label: { type: "string" },
+      style: { type: "string", enum: ["dashed", "solid"] },
+      color: { type: "string" },
+      strokeWidth: { type: "number" },
+      labelSide: { type: "string", enum: ["left", "right"] },
+      labelDx: { type: "number" },
+      labelDy: { type: "number" },
+    },
+  },
+} as const;
+
+const POINT_CALLOUT_ARRAY = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["x", "label"],
+    properties: {
+      x: { type: "string" },
+      y: { type: "number" },
+      series: { type: "string" },
+      label: { type: "string" },
+      color: { type: "string" },
+      dx: { type: "number" },
+      dy: { type: "number" },
+      connector: { type: "boolean" },
+    },
+  },
+} as const;
+
+const ANNOTATIONS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    xAxis: X_MARKER_ARRAY,
+    yAxis: Y_MARKER_ARRAY,
+    bands: X_BAND_ARRAY,
+    points: POINT_CALLOUT_ARRAY,
+  },
+} as const;
+
 const X_AXIS_POLICY = {
   type: "object",
   additionalProperties: false,
   properties: {
     anchorAtZero: { type: "boolean" },
-    markers: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["x"],
-        properties: {
-          x: { type: "string" },
-          label: { type: "string" },
-          style: { type: "string", enum: ["dashed", "solid"] },
-          color: { type: "string" },
-          strokeWidth: { type: "number" },
-        },
-      },
-    },
+    markers: X_MARKER_ARRAY,
+    bands: X_BAND_ARRAY,
   },
 } as const;
 
@@ -45,6 +117,7 @@ const Y_AXIS_POLICY = {
       required: ["step"],
       properties: { step: { type: "number" } },
     },
+    markers: Y_MARKER_ARRAY,
   },
 } as const;
 
@@ -111,7 +184,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "bar", "stacked"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -122,6 +195,7 @@ export const CHART_SPEC_SCHEMA = {
         value: { type: "string" },
         series: { type: "string" },
         facet: { type: "string" },
+        shape: { type: "string" },
       },
     },
 
@@ -133,11 +207,13 @@ export const CHART_SPEC_SCHEMA = {
     note: { type: "string" },
     x_axis_title: { type: "string" },
     y_axis_title: { type: "string" },
+    tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
 
     // Axes
     xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },
     xAxisPolicy: X_AXIS_POLICY,
     yAxisPolicy: Y_AXIS_POLICY,
+    annotations: ANNOTATIONS,
 
     // Series (the series COLUMN is mapped via `columns.series`)
     series_order: { type: "array", items: { type: "string" } },
@@ -151,6 +227,14 @@ export const CHART_SPEC_SCHEMA = {
       },
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
+    x_order: { type: "array", items: { type: "string" } },
+    x_labels: { type: "object", additionalProperties: { type: "string" } },
+
+    // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
+    shape_order: { type: "array", items: { type: "string" } },
+    shape_labels: { type: "object", additionalProperties: { type: "string" } },
+    color_legend_title: { type: "string" },
+    shape_legend_title: { type: "string" },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
     points: { type: "boolean" },
@@ -163,6 +247,7 @@ export const CHART_SPEC_SCHEMA = {
       properties: {
         show: { type: "boolean" },
         signed: { type: "boolean" },
+        decimals: { type: "integer", minimum: 0, maximum: 10 },
       },
     },
     barStack: {
@@ -178,6 +263,7 @@ export const CHART_SPEC_SCHEMA = {
         },
         netLabelColor: { type: "string", enum: ["white", "black"] },
         normalize: { type: "boolean" },
+        stackOrder: { type: "array", items: { type: "string" } },
       },
     },
     highlightSeries: { type: "array", items: { type: "string" } },

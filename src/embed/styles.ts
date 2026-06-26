@@ -214,6 +214,11 @@ body {
   color: var(--tbl-text-axis);
   text-align: center;
 }
+/* Scatter's numeric x-axis labels sit tighter to the frame than the temporal axis the default
+   was tuned for, so give the x-axis title a little more breathing room. */
+.chart-scatter .figure-x-axis-title {
+  margin-top: 8px;
+}
 .figure-y-axis-title {
   margin: 0 0 4px;
   font: var(--tw-semi) 12px/1.3 var(--tbl-font-sans);
@@ -318,6 +323,45 @@ body {
   background: none;
   display: inline-flex;
   align-items: center;
+}
+/* Point-chart swatch: a filled colored marker (the symbol) with no connecting line. */
+.tbl-legend-swatch.is-point {
+  width: 18px;
+  height: 16px;
+  border-radius: 0;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Two-group (color + shape) point legend: groups STACK on separate lines (color row, then
+   shape row), each group an inline cluster of swatches. */
+.tbl-legend--grouped {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px 0;
+}
+.tbl-legend-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+}
+.tbl-legend-group-title {
+  font: var(--tw-semi, 600) 11px/1.2 var(--tbl-font-sans-compact, var(--tbl-font-sans));
+  color: var(--tbl-text-muted, var(--tbl-text-axis));
+  text-transform: none;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+/* Shape-legend rows are non-interactive in v1: plain markers + labels, no hover affordance. */
+.tbl-legend-item.is-static {
+  cursor: default;
+  padding: 4px 8px 3px 6px;
+}
+.tbl-legend-item.is-static:hover {
+  background: transparent;
+  color: var(--tbl-text-body);
 }
 
 /* =========================================================================
@@ -458,6 +502,21 @@ body {
   background: #fff;
   box-shadow: inset 0 0 0 1.5px #000;
 }
+/* Bar tooltip swatch: a filled square matching the bar legend (vs the default thin line). */
+.tbl-tooltip-swatch.is-square {
+  width: 11px;
+  height: 11px;
+  border-radius: 1px;
+}
+/* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
+.tbl-tooltip-swatch.is-symbol {
+  width: 16px;
+  height: 14px;
+  background: none;
+  border-radius: 0;
+  vertical-align: middle;
+  margin-right: 5px;
+}
 
 /* =========================================================================
  * Figure header — flex row with title-text left, logo right
@@ -539,6 +598,297 @@ body {
  * ========================================================================= */
 @container (max-width: 520px) {
   .figure-downloads { flex-direction: column; }
+}
+
+/* =========================================================================
+ * Table — .tbl-table (figure type "table")
+ * Uses --tbl-* tokens throughout; no hardcoded hex values.
+ * ========================================================================= */
+
+/* ---- Table element ---- */
+.tbl-table {
+  font-family: var(--tbl-font-sans);
+  font-weight: var(--tw-body);
+  font-size: 13px;
+  color: var(--tbl-text-body);
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* ---- Multi-pane: stacked sub-tables, each with its own subheading ---- */
+.tbl-pane { margin-top: 20px; }
+.tbl-pane:first-of-type { margin-top: 8px; }
+.tbl-pane-title {
+  font-family: var(--tbl-font-sans);
+  font-weight: var(--tw-bold);
+  color: var(--tbl-text-heading);
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+/* ---- Column sizing via colgroup/col ---- */
+.tbl-table col { }
+
+/* ---- Header ---- */
+.tbl-table thead th {
+  font-weight: var(--tw-bold);
+  color: var(--tbl-text-heading);
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--tbl-bg);
+  text-align: center;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+/* Header→body separator (bug #4): a single continuous rule under the WHOLE header block,
+   including the stub corner. Applied to the bottom-tier <th> AND the rowspanning corner so it
+   does not break over the stub in multi-tier tables. */
+.tbl-table thead tr:last-child th,
+.tbl-table thead th.tbl-table-stub-header {
+  border-bottom: 1px solid var(--tbl-axis-stroke);
+}
+
+/* Banner tiers (non-leaf header rows): centered. Inter-tier rules are OFF by default; they are
+   drawn only when the table has .tbl-table--header-tier-rules (spec header_tier_rules: true). */
+.tbl-table thead tr:not(:last-child) th {
+  vertical-align: middle;
+}
+.tbl-table.tbl-table--header-tier-rules thead tr:not(:last-child) th {
+  border-bottom: 1px solid var(--tbl-border);
+}
+
+/* Leaf headers (last header row): bottom-aligned, centered (inherits text-align:center). */
+.tbl-table thead tr:last-child th {
+  vertical-align: bottom;
+}
+
+/* Leaf-header line clamp (header_max_lines): wrap the label to N lines, ellipsis-free overflow
+   hidden. The clamp lives on an INNER span (not the th) so the webkit-box display does not drop
+   the table cell box and break column alignment. --tbl-header-lines is set per-span. */
+.tbl-table thead th .tbl-table-header-clamp {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: var(--tbl-header-lines, 2);
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Banner cells (colSpan > 1): centered label flanked by hairline rules extending to the cell's
+   edges, showing the columns the banner governs. Leaf headers (colSpan 1) are unaffected. */
+.tbl-table thead th.is-spanner { text-align: center; }
+.tbl-table thead th.is-spanner > .tbl-table-spanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tbl-table thead th.is-spanner > .tbl-table-spanner::before,
+.tbl-table thead th.is-spanner > .tbl-table-spanner::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--tbl-border);
+}
+
+/* Stub cell in header (corner) — left-aligned. The corner <th> carries class
+   tbl-table-stub-header in the rendered HTML. */
+.tbl-table thead th.tbl-table-stub-header {
+  text-align: left;
+}
+
+/* Leaf header over a text column — left-aligned to match its left-aligned cells. */
+.tbl-table thead th.is-text {
+  text-align: left;
+}
+
+/* ---- Sub-label: displayed on its own line below the leaf header text ---- */
+.tbl-table-sublabel {
+  display: block;
+  font-size: 10px;
+  font-weight: var(--tw-body);
+  color: var(--tbl-text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ---- Body ---- */
+.tbl-table tbody td,
+.tbl-table tbody th {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--tbl-gridline);
+  font-size: 13px;
+  background: var(--tbl-bg);
+  /* Base of the sticky stacking ladder: scrolling body cells sit below the sticky thead (z 2)
+     and the pinned first column (z 3) / header corner (z 4). */
+  position: relative;
+  z-index: 0;
+}
+
+/* Numeric cells: centered by default, tabular figures. */
+td.is-num {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text cells: left-aligned, wrapping (for prose values like notes/descriptions). */
+td.is-text {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Stub (row label) cells: left-aligned. */
+th.tbl-table-stub {
+  text-align: left;
+  font-weight: var(--tw-body);
+  color: var(--tbl-text-body);
+}
+
+/* Stub on one line. By default the column is sized to the longest label so nothing is clipped;
+   when capped narrower (stub_max_width / stub_width) the label is clipped to the column. The clip
+   lives on an inner block (table cells don't honor overflow) — see .tbl-table-stub-clip. */
+th.tbl-table-stub.is-nowrap,
+.tbl-table-group-inner.is-nowrap {
+  white-space: nowrap;
+}
+/* stub_wrap: allow the row label to wrap onto multiple lines within the (capped) column. */
+th.tbl-table-stub.is-wrap {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+/* Inner clip box for a non-wrapping stub label (table cells ignore overflow, so the cell content
+   is wrapped in this block which does clip). */
+.tbl-table-stub.is-nowrap > .tbl-table-stub-clip {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ---- Row groups ---- */
+/* Group heading: bold, no fill. A single hairline rule ABOVE the heading separates groups;
+   extra top padding gives breathing room (the rule + space does the grouping, not a fill band). */
+tr.tbl-table-group th,
+tr.tbl-table-group td {
+  text-align: left;
+  font-weight: var(--tw-bold);
+  color: var(--tbl-text-heading);
+  border-top: 1px solid var(--tbl-border);
+  padding-top: 14px;
+  padding-bottom: 3px;
+}
+/* The first group has no rows above it, so its top rule is redundant — drop it. */
+.tbl-table tbody tr.tbl-table-group:first-child th,
+.tbl-table tbody tr.tbl-table-group:first-child td {
+  border-top: none;
+  padding-top: 4px;
+}
+/* Keep the group title anchored at the left during horizontal scroll (it labels the pinned
+   rows), instead of scrolling off and clipping under the sticky first column. Gated on the SAME
+   sticky-first flag as the row stubs, so the two behave consistently — without it, a group title
+   would pin while its row labels scrolled, which reads as a bug. */
+.tbl-table--sticky-first .tbl-table-group-inner {
+  position: sticky;
+  /* Pin at the cell's 8px left padding — its natural rest position — so it does NOT visibly shift
+     left before sticking, and stays aligned with the stub label text (also indented 8px). */
+  left: 8px;
+  display: inline-block;
+}
+
+/* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */
+tr.tbl-table-group-note th,
+tr.tbl-table-group-note td,
+.tbl-table-group-note {
+  text-align: left;
+  font-style: italic;
+  font-weight: var(--tw-body);
+  font-size: 11px;
+  color: var(--tbl-text-muted);
+  padding-top: 0;
+  padding-bottom: 6px;
+}
+
+/* ---- Emphasis ---- */
+.is-emphasis {
+  font-weight: var(--tw-bold);
+  background: var(--tbl-bg-subtle) !important;
+}
+
+/* ---- Positive / negative coloring ---- */
+/* Use categorical green (cat4) and red (cat5) tokens — muted base tones. */
+td.is-pos {
+  color: var(--tbl-cat4);  /* green */
+}
+td.is-neg {
+  color: var(--tbl-cat5);  /* red */
+}
+
+/* ---- Row hover (CSS only — no JS needed) ---- */
+.tbl-table tbody tr:hover td,
+.tbl-table tbody tr:hover th {
+  background: var(--tbl-bg-subtle);
+}
+
+/* ---- Column hover (JS toggles .is-col-hover on [data-col=k] cells) ---- */
+/* Same subtle grey as the row hover so the crosshair reads gently, not as a bold blue band. */
+.tbl-table .is-col-hover {
+  background: var(--tbl-bg-subtle) !important;
+}
+
+/* ---- Sticky first column ---- */
+/* Enabled when .tbl-table--sticky-first is present on the table element. The pinned stub column
+   and its header corner are positioned (sticky) so they paint ABOVE the static, scrolling header
+   + body cells — column headers are clipped by the pinned column at the same moment their data
+   cells slide under it:
+     body cells         z 0  (set above)
+     sticky stub column z 3  (body stub cells + leaf-tier stub <th>)
+     header corner      z 4  (the rowspanning corner, pinned left). */
+.tbl-table--sticky-first td:first-child,
+.tbl-table--sticky-first th.tbl-table-stub {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  /* Opaque background so scrolling cells pass behind the pinned column. */
+  background: var(--tbl-bg);
+}
+/* The header corner is pinned at the left and must sit above the scrolling thead so header cells
+   disappear under it in lockstep with their data column. */
+.tbl-table--sticky-first thead th.tbl-table-stub-header {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--tbl-bg);
+}
+
+/* ---- Disable the sticky first column at phone widths ---- */
+/* Below ~420px a pinned stub eats too much of the viewport, leaving the data columns cramped and
+   illegible. Drop the horizontal pin (left:auto neutralizes the sticky constraint) so the whole
+   table scrolls freely. */
+@media (max-width: 419px) {
+  .tbl-table--sticky-first td:first-child,
+  .tbl-table--sticky-first th.tbl-table-stub,
+  .tbl-table--sticky-first thead th.tbl-table-stub-header,
+  .tbl-table--sticky-first .tbl-table-group-inner {
+    left: auto;
+  }
+}
+
+/* ---- Footnote definition list ---- */
+/* Rendered after the table by mount.ts when the spec has footnotes. Small + muted, one line per
+   footnote (a leading <sup> marker, then the text). */
+.tbl-table-footnotes {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--tbl-text-muted);
+}
+
+/* ---- Footnote superscript ---- */
+.tbl-table sup {
+  font-size: 0.7em;
+  vertical-align: super;
+  line-height: 0;
+  color: var(--tbl-text-muted);
 }
 `;
 

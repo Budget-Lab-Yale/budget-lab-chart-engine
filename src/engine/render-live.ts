@@ -9,6 +9,7 @@ import { resolveColumns } from "../spec/columns.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
+import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { renderFigure } from "./figure.js";
@@ -21,7 +22,10 @@ import {
   attachSecondaryBandCursor,
   attachCategoricalLineCrosshair,
   attachSecondaryCategoricalLineCursor,
+  attachPointHover,
+  attachHighlightPills,
 } from "./crosshair.js";
+import type { HighlightPillsHandle } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
@@ -38,6 +42,10 @@ export interface MountOptions {
   /** Eyebrow line above the title (e.g. "Figure 1"). A property of the article/embed context,
    *  not the chart itself — supplied at mount time. Passing a value shows it; omitting hides it. */
   eyebrow?: string;
+  /** Override the Data/Image download filename slug. Normally derived from the URL (the chart's
+   *  folder); pass this when several charts share one page (e.g. a gallery) so each still gets its
+   *  own name instead of all resolving to the shared page's slug. */
+  downloadName?: string;
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -302,10 +310,12 @@ function cssAttrEscape(value: string): string {
   return value.replace(/(["\\])/g, "\\$1");
 }
 
-/** Format a numeric value for tooltip display. */
-function formatValue(v: number, units: string): string {
+
+/** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
+ *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
+export function formatValue(v: number, units: string, decimals = 2): string {
   if (!Number.isFinite(v)) return "—";
-  return `${v.toFixed(2)}${units}`;
+  return `${v.toFixed(decimals)}${units}`;
 }
 
 // Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
@@ -388,7 +398,12 @@ function downloadSlug(spec: ChartSpec): string {
   try {
     const segs = location.pathname.split("/").filter(Boolean);
     const last = segs[segs.length - 1];
+    // Served at a folder URL (…/F1_revenue_headline/) → that folder is the slug.
     if (last && !/\./.test(last)) return last;
+    // Opened as a file (…/F1_revenue_headline/preview.html) → use the PARENT folder as the slug, so
+    // downloads are still named by the chart folder rather than the title.
+    const parent = segs[segs.length - 2];
+    if (parent && !/\./.test(parent)) return parent;
   } catch {
     /* no location (SSR/jsdom) — fall through */
   }
@@ -397,8 +412,8 @@ function downloadSlug(spec: ChartSpec): string {
 
 /** Data (CSV) + Image (PNG) download buttons for the source line. Filenames use the chart's folder
  *  slug (from the URL) rather than the title, which makes for unwieldy filenames. */
-function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): HTMLElement {
-  const base = downloadSlug(spec);
+function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], slugOverride?: string): HTMLElement {
+  const base = slugOverride || downloadSlug(spec);
   const downloads = doc.createElement("div");
   downloads.className = "figure-downloads";
 
@@ -488,6 +503,73 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[]): 
  *   there is no resize feedback loop. (Same discipline as the existing canvasScroll
  *   observer for the SVG-widening case.)
  */
+/** Snapshot each area band's data-series → its current `d`, so a restack can morph from it. */
+function captureAreaDs(svg: SVGSVGElement): Map<string, string> {
+  const m = new Map<string, string>();
+  svg.querySelectorAll('g[aria-label="area"] path[data-series]').forEach((p) => {
+    const s = p.getAttribute("data-series");
+    const d = p.getAttribute("d");
+    if (s && d) m.set(s, d);
+  });
+  return m;
+}
+
+// Match the numbers in a path `d` string (handles decimals, signs, exponents).
+const D_NUM_RE = /-?\d*\.?\d+(?:e-?\d+)?/g;
+
+/** Brief restack morph: the stacked total is order-invariant, so only the band paths' geometry
+ *  changes. We interpolate each band's `d` from its OLD to its NEW value over ~320ms (the two
+ *  share an identical command structure — same x points — so the numbers line up), so the bands
+ *  visibly slide into their new stack positions. Snaps if the structures don't match. Pure JS, so
+ *  it works regardless of CSS `d`-transition support. */
+function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
+  type Anim = { p: Element; newD: string; from: number[]; to: number[] };
+  const anims: Anim[] = [];
+  for (const p of svg.querySelectorAll('g[aria-label="area"] path[data-series]')) {
+    const s = p.getAttribute("data-series");
+    const newD = p.getAttribute("d");
+    const oldD = s ? oldDs.get(s) : undefined;
+    if (!s || !newD || !oldD || oldD === newD) continue;
+    const from = oldD.match(D_NUM_RE)?.map(Number);
+    const to = newD.match(D_NUM_RE)?.map(Number);
+    if (!from || !to || from.length !== to.length) continue; // structure differs → leave at new (snap)
+    p.setAttribute("d", oldD); // start at the old geometry
+    anims.push({ p, newD, from, to });
+  }
+  if (!anims.length) return;
+  const win = svg.ownerDocument?.defaultView;
+  const raf = win?.requestAnimationFrame?.bind(win);
+  if (!raf) {
+    for (const a of anims) a.p.setAttribute("d", a.newD); // no rAF (SSR) → just apply the new geometry
+    return;
+  }
+  const DUR = 320;
+  const ease = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2);
+  let start = -1;
+  const step = (now: number): void => {
+    if (start < 0) start = now;
+    const t = Math.min(1, (now - start) / DUR);
+    const e = ease(t);
+    for (const a of anims) {
+      if (t >= 1) {
+        a.p.setAttribute("d", a.newD);
+        continue;
+      }
+      let k = 0;
+      a.p.setAttribute(
+        "d",
+        a.newD.replace(D_NUM_RE, () => {
+          const v = a.from[k]! + (a.to[k]! - a.from[k]!) * e;
+          k++;
+          return v.toFixed(2);
+        }),
+      );
+    }
+    if (t < 1) raf(step);
+  };
+  raf(step);
+}
+
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
@@ -500,7 +582,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const doc = container.ownerDocument;
 
   const card = doc.createElement("div");
-  card.className = "figure-card";
+  card.className = `figure-card chart-${spec.chartType}`;
 
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
@@ -527,7 +609,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
   });
 
   container.appendChild(card);
@@ -540,6 +622,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let rightLegendSlot: HTMLElement | null = null;
   // Track the current effective legendPosition so we can rebuild layout on first call.
   let currentLegendPos: "top" | "right" | null = null;
+
+  // Area click-to-restack: the live visual stack order (selected series to the bottom, in click
+  // order), the latest legend handle + full series list, and a re-entrancy guard so re-applying
+  // pins after a rebuild doesn't recurse. Non-area charts never touch any of this.
+  let restackOrder: string[] | undefined;
+  let suppressRestack = false;
+  let currentLegendHandle: LegendHandle | null = null;
+  let currentSeriesNames: string[] = [];
 
   /**
    * Order legendItems for the right-legend column to match the VISUAL top→bottom stack:
@@ -578,7 +668,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     let built;
     try {
-      built = renderChart(spec, rows, { width: target, height });
+      built = renderChart(spec, rows, { width: target, height, ...(restackOrder ? { stackOrder: restackOrder } : {}) });
     } catch (e) {
       canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return;
@@ -586,7 +676,43 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const {
       svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, units,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, showTotalDot,
+      shapeLegendItems, colorLegendTitle, shapeLegendTitle,
     } = built;
+    // Legend-highlight value pills: attached after the crosshair below, but the legend's
+    // onHighlight closure (set when the legend is created) calls through this holder, so the
+    // pill renderer just needs to exist by the time the user interacts.
+    currentSeriesNames = seriesOrder;
+    let pillDriver: ReturnType<typeof attachHighlightPills> | null = null;
+    const onHighlight = (active: Set<string>): void => {
+      recolorNetLabels(svg);
+      pillDriver?.setActive(active);
+      // Area click-to-restack: pinned series move to the BOTTOM of the stack (in click order) so a
+      // user can read them against zero; unpinning restores the default order. Driven off PINS
+      // (not hover), so this only fires on an actual selection change. Re-renders the whole chart
+      // via draw() and re-applies the pins to the freshly built legend.
+      if (spec.chartType === "area" && !suppressRestack) {
+        const pins = currentLegendHandle?.pinnedSeries() ?? [];
+        const next = pins.length
+          ? [...pins, ...currentSeriesNames.filter((s) => !pins.includes(s))]
+          : undefined;
+        if (JSON.stringify(next) !== JSON.stringify(restackOrder)) {
+          // Capture the current bands' geometry so the re-rendered ones can morph from it.
+          const oldDs = captureAreaDs(svg);
+          restackOrder = next;
+          suppressRestack = true;
+          lastWidth = -1; // force draw() past its same-width early return
+          draw(card.clientWidth || target, currentLegendPos ?? legendPos);
+          if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
+          suppressRestack = false;
+          // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
+          const newSvg = canvas.querySelector("svg");
+          if (newSvg) animateAreaRestack(newSvg, oldDs);
+        }
+      }
+    };
+    // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
+    // legend (the color legend still drives hover-dim, which is independent of the crosshair).
+    const isPoint = spec.chartType === "scatter" || spec.chartType === "dotplot";
 
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
     // overflows into the scroll wrapper below the floor instead of being CSS-scaled down.
@@ -595,8 +721,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
     // --- Legend layout ---
+    const shapeOpts = {
+      shapeItems: shapeLegendItems ?? undefined,
+      colorTitle: colorLegendTitle,
+      shapeTitle: shapeLegendTitle,
+    };
     let legendHandle: LegendHandle | null = null;
-    if (legendItems) {
+    if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
         if (currentLegendPos !== "right") {
@@ -613,11 +744,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // Top legend slot stays in the DOM but is now empty (no content added).
         }
         // Render the right-side vertical legend with reversed series order.
-        const orderedItems = orderForRightLegend(legendItems, legendVisualOrder);
+        const orderedItems = orderForRightLegend(legendItems ?? [], legendVisualOrder);
         rightLegendSlot!.replaceChildren();
         legendHandle = renderLegend(rightLegendSlot!, orderedItems, {
           svg,
-          onHighlight: () => recolorNetLabels(svg),
+          onHighlight,
+          ...shapeOpts,
         });
         // Add the vertical-layout class to the rendered legend element (use the handle's
         // element directly rather than re-querying the slot).
@@ -625,14 +757,18 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // Ensure top legend slot stays empty.
         legendSlot.replaceChildren();
       } else {
-        // Top legend (default behavior — unchanged).
+        // Top legend (default behavior — unchanged for non-point charts).
         legendSlot.replaceChildren();
-        legendHandle = renderLegend(legendSlot, legendItems, {
+        legendHandle = renderLegend(legendSlot, legendItems ?? [], {
           svg,
-          onHighlight: () => recolorNetLabels(svg),
+          onHighlight,
+          ...shapeOpts,
         });
       }
     }
+
+    // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
+    currentLegendHandle = legendHandle;
 
     // Set the initial label colors from the current (un-dimmed) state. No-op unless this is a
     // diverging/dot-mode stacked chart (the only case with tbl-net-label elements). Detection
@@ -641,7 +777,48 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    if (spec.xAxisType === "categorical" && spec.chartType === "line") {
+    if (spec.chartType === "scatter") {
+      // Scatter: per-point hover (no shared-x guide — points aren't aligned on x). Markers render
+      // as <path> when a shape channel is active, else <circle>; tag order == dataInScope order.
+      const pointHasShape = !!spec.columns?.shape;
+      const showShape = !!(shapeLegendItems && shapeLegendItems.length);
+      // shape value → its marker symbol (from the shape legend), so the tooltip header marker
+      // matches the chart point.
+      const symbols = new Map((shapeLegendItems ?? []).map((s) => [s.shape, s.markerSymbol] as const));
+      attachPointHover(svg, {
+        points: dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
+        selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+        colors,
+        seriesLabels,
+        shapeLabels: spec.shape_labels,
+        showShape,
+        symbols,
+        xLabel: spec.x_axis_title ?? "x",
+        yLabel: spec.y_axis_title ?? "Value",
+        xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+      });
+    } else if (spec.chartType === "dotplot") {
+      // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
+      // value). Reuses the categorical-line crosshair — no bars required.
+      attachCategoricalLineCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        bandHighlight: true,
+        centersFromMarks: true,
+      });
+      pillDriver = attachHighlightPills(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: "dotplot",
+        colors,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
+      });
+    } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
       attachCategoricalLineCrosshair(svg, {
@@ -649,7 +826,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses
@@ -672,8 +849,21 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        categoryLabels: spec.x_labels,
+        swatchShape: "rect",
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+      });
+      pillDriver = attachHighlightPills(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: isStacked ? "stacked" : "bar",
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        horizontal: spec.orientation === "horizontal",
       });
     } else {
       attachCrosshair(svg, {
@@ -683,11 +873,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesField: "series",
         xParse: tooltipXParse as ((v: unknown) => number) | undefined,
         xFormat: tooltipXFormat,
-        yFormat: (v) => formatValue(v, units),
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
         colors,
         dashedSeries: dashedNames,
         seriesLabels,
         seriesOrder,
+        // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
+        showTotal: spec.chartType === "area",
       });
     }
 
@@ -701,7 +893,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // TRANSPARENT full-SVG hit rect on top of the marks (pointer-events:all), so a plain
     // click lands on that overlay, not the bar — hit-test THROUGH it with
     // elementsFromPoint and find the first [data-series] mark beneath the cursor.
-    if (legendHandle) {
+    if (legendHandle && !isPoint) {
       const handle = legendHandle; // capture the non-null value for the click closure
       card.classList.add("is-selectable");
       // Line charts: the visible lines are thin ~2px strokes that elementsFromPoint rarely
@@ -800,8 +992,11 @@ const GRID_GAP = 16;
 
 /** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
  *  header so single-chart and figure cards look identical. The eyebrow (figure number) is an
- *  embed-time value supplied by the caller, not read from the spec. */
-function buildFigureHeader(card: HTMLElement, doc: Document, spec: ChartSpec, eyebrowText?: string): void {
+ *  embed-time value supplied by the caller, not read from the spec.
+ *
+ *  The spec parameter is typed as `{ title?: string; subtitle?: string }` (a structural subset)
+ *  so both ChartSpec and TableSpec can be passed without casting. */
+export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { title?: string; subtitle?: string }, eyebrowText?: string): void {
   const header = doc.createElement("div");
   header.className = "figure-header";
   if (eyebrowText) {
@@ -860,8 +1055,78 @@ function wireFigureSvg(
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
      *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
     onResolve?: (key: unknown) => void;
+    /** Legend-highlight pills: when set, the pane's value-pill handle is registered here so the
+     *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
+     *  can suppress the hovered category's pills. */
+    onPillDriver?: (handle: HighlightPillsHandle) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
+  // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
+  // a category shades that band + shows per-series value pills on EVERY pane (and highlights the
+  // category on the hovered pane). Mirrors the bar/line coordinated path; resolves the category
+  // from axis-label centers (points have no rects). The marker dots take each series' symbol.
+  if (ctx.spec.chartType === "dotplot") {
+    const dotUseCoord = ctx.onResolve != null;
+    const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const));
+    // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
+    // offsets so they land over the actual points (panes dodge at the pane gap).
+    const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
+    attachCategoricalLineCrosshair(svg, {
+      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      bandHighlight: true,
+      centersFromMarks: true,
+      ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+    });
+    ctx.onPillDriver?.(
+      attachHighlightPills(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: "dotplot",
+        colors: ctx.colors,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        dodge,
+      }),
+    );
+    if (dotUseCoord) {
+      return attachSecondaryCategoricalLineCursor(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors: ctx.colors,
+        seriesLabels: ctx.seriesLabels,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        symbols,
+        bandHighlight: true,
+        centersFromMarks: true,
+        dodge,
+      }) as (key: unknown, active?: boolean) => void;
+    }
+    return undefined;
+  }
+  if (ctx.spec.chartType === "scatter") {
+    const cols = ctx.spec.columns ?? {};
+    const pointHasShape = !!cols.shape;
+    // shape value → marker symbol (by shape_order index, matching the chart's symbol scale).
+    const symbols = new Map((ctx.spec.shape_order ?? []).map((s, i) => [s, markerSymbolForIndex(i)] as const));
+    attachPointHover(svg, {
+      points: ctx.dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
+      selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      shapeLabels: ctx.spec.shape_labels,
+      showShape: pointHasShape && cols.shape !== cols.series,
+      symbols,
+      xLabel: ctx.spec.x_axis_title ?? "x",
+      yLabel: ctx.spec.y_axis_title ?? "Value",
+      xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+    });
+    return undefined;
+  }
+
   const categorical = ctx.spec.xAxisType === "categorical";
   // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so they keep the per-pane
   // tooltip instead. `useCoord` gates the no-tooltip emitOnly + coordinated-renderer path.
@@ -884,7 +1149,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -902,7 +1167,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units),
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
         symbols: markerSymbols,
       }) as (key: unknown, active?: boolean) => void;
     }
@@ -930,7 +1195,9 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      categoryLabels: ctx.spec.x_labels,
+      swatchShape: "rect",
       orientation: horizontal ? "horizontal" : "vertical",
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
@@ -943,6 +1210,19 @@ function wireFigureSvg(
         if (series) handle.toggle(series);
       });
     }
+    ctx.onPillDriver?.(
+      attachHighlightPills(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: isStacked ? "stacked" : "bar",
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors: ctx.colors,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        horizontal,
+      }),
+    );
     if (useCoord) {
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -952,7 +1232,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units),
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -965,7 +1245,7 @@ function wireFigureSvg(
     seriesField: "series",
     xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
     xFormat: ctx.tooltipXFormat,
-    yFormat: (v) => formatValue(v, ctx.units),
+    yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
     colors: ctx.colors,
     dashedSeries: ctx.dashedNames,
     seriesLabels: ctx.seriesLabels,
@@ -989,7 +1269,7 @@ function wireFigureSvg(
       seriesField: "series",
       xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
       xFormat: ctx.tooltipXFormat,
-      yFormat: (v) => formatValue(v, ctx.units),
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
@@ -1041,7 +1321,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
   });
   container.appendChild(card);
 
@@ -1069,16 +1349,26 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // and the legend's highlight root is the grid so dimming/pinning spans every pane.
   const isShared = (sm.mode ?? "shared") === "shared";
 
+  // Point-chart panes (dot plots / scatters) carry only markers, so they read fine much narrower
+  // than line/bar panes — use a smaller reflow floor so a configured column count (e.g. 3) still
+  // fits at common widths instead of collapsing to 2.
+  const isPointFigure = spec.chartType === "dotplot" || spec.chartType === "scatter";
+  const paneMinWidth = isPointFigure ? 160 : PANE_MIN_WIDTH;
+  // Dot-plot AND bar/stacked panes render ~33% taller (320) so the marks have room to read;
+  // line/scatter panes keep the default.
+  const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
+  const paneHeight = TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
+
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
-    // Reflow: how many columns fit at >= PANE_MIN_WIDTH each, capped by config and pane count
+    // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
-    const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (PANE_MIN_WIDTH + GRID_GAP)));
+    const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
     const cols = Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     // SHARED mode: pass the TOTAL inner grid width + gap so renderFigure's width helper sizes the
     // unequal columns (labeled col 0 wider, label-less cols narrower) sharing one inner data width.
     // PER-PANE mode: equal panes, one shared pane width (1fr columns).
-    const paneW = Math.max(PANE_MIN_WIDTH, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
+    const paneW = Math.max(paneMinWidth, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
     const sig = isShared ? `s:${cols}:${outerWidth}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
     let fig: FigureRenderResult;
@@ -1087,10 +1377,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         ? renderFigure(spec, rows, {
             gridWidth: outerWidth,
             gridGap: GRID_GAP,
-            height: PANE_HEIGHT,
+            height: paneHeight,
             columns: cols,
           })
-        : renderFigure(spec, rows, { width: paneW, height: PANE_HEIGHT, columns: cols });
+        : renderFigure(spec, rows, { width: paneW, height: paneHeight, columns: cols });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
@@ -1117,10 +1407,19 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     }
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
-    const handle = fig.legendItems
-      ? renderLegend(legendSlot, fig.legendItems, {
+    // Each pane registers its value-pill driver here; the legend fires them all on highlight.
+    const pillDrivers: HighlightPillsHandle[] = [];
+    const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
+    const handle = fig.legendItems || hasFigShape
+      ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
-          onHighlight: () => { for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg); },
+          onHighlight: (active) => {
+            for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
+            for (const d of pillDrivers) d.setActive(active);
+          },
+          shapeItems: fig.shapeLegendItems ?? undefined,
+          colorTitle: fig.colorLegendTitle,
+          shapeTitle: fig.shapeLegendTitle,
         })
       : null;
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
@@ -1137,6 +1436,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // labels + the x-axis value above); the rest get passive styling. null clears all.
     const emit = (sourceIdx: number, key: unknown): void => {
       for (let i = 0; i < drivers.length; i++) drivers[i]!(key, i === sourceIdx);
+      // Hovering a category surfaces its per-category value pills (coordinated cursor) on every
+      // pane; suppress that same category in the series-highlight pills so they don't double up.
+      // A non-category key (line figures: a numeric x) or null clears the suppression.
+      const cat = typeof key === "string" ? key : null;
+      for (const d of pillDrivers) d.setSuppressedCategory(cat);
     };
 
     fig.panes.forEach((pane, idx) => {
@@ -1152,6 +1456,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
+        onPillDriver: (d) => pillDrivers.push(d),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));

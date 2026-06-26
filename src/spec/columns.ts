@@ -16,6 +16,8 @@ export interface ResolvedColumns {
   series: string | null;
   /** Column splitting small-multiples panes, or null. */
   facet: string | null;
+  /** Column driving marker shape (point charts), or null. */
+  shape: string | null;
 }
 
 /**
@@ -34,6 +36,7 @@ export function resolveColumns(
   const x = c.x ?? "time";
   const value = c.value ?? "value";
   const facet = c.facet ?? null;
+  const shape = c.shape != null && c.shape !== "" ? c.shape : null;
 
   let series: string | null;
   if (c.series != null && c.series !== "") {
@@ -44,5 +47,5 @@ export function resolveColumns(
     series = "series";
   }
 
-  return { x, value, series, facet };
+  return { x, value, series, facet, shape };
 }

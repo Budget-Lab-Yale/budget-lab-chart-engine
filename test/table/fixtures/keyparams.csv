@@ -1,0 +1,13 @@
+group,parameter,scenario_group,scenario,value
+Tax rates,Top marginal rate,Baseline,Baseline static,0.37
+Tax rates,Top marginal rate,Baseline,Baseline moderate,0.39
+Tax rates,Top marginal rate,Reform,Reform static,0.42
+Tax rates,Corporate rate,Baseline,Baseline static,0.21
+Tax rates,Corporate rate,Baseline,Baseline moderate,0.23
+Tax rates,Corporate rate,Reform,Reform static,0.28
+Elasticities,Labor supply,Baseline,Baseline static,0.25
+Elasticities,Labor supply,Baseline,Baseline moderate,0.30
+Elasticities,Labor supply,Reform,Reform static,0.35
+Elasticities,Capital,Baseline,Baseline static,0.50
+Elasticities,Capital,Baseline,Baseline moderate,0.55
+Elasticities,Capital,Reform,Reform static,0.60

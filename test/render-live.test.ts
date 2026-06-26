@@ -2,7 +2,7 @@
 //
 // Tests for the embed live-render layer: mountChart + buildStandaloneHtml.
 import { describe, it, expect } from "vitest";
-import { mountChart, computeChartHeight, netLabelFill } from "../src/engine/render-live";
+import { mountChart, computeChartHeight, netLabelFill, formatValue } from "../src/engine/render-live";
 import { renderLegend } from "../src/engine/legend";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
 import { CHART_CSS } from "../src/embed/styles";
@@ -1009,6 +1009,21 @@ describe("renderLegend handle.toggle (single source of truth)", () => {
 // Net-total label legibility over dimmed bars (TT7)
 // ---------------------------------------------------------------------------
 
+describe("formatValue tooltip precision", () => {
+  it("defaults to 2 decimals", () => {
+    expect(formatValue(0.0024, "")).toBe("0.00");
+    expect(formatValue(1.5, "%")).toBe("1.50%");
+  });
+  it("honors an explicit decimals count (tooltip more precise than the axis)", () => {
+    expect(formatValue(0.0024, "")).toBe("0.00"); // axis-style
+    expect(formatValue(0.0024, "", 4)).toBe("0.0024"); // tooltip-style
+    expect(formatValue(0.0286, "", 4)).toBe("0.0286");
+  });
+  it("renders an em dash for non-finite values", () => {
+    expect(formatValue(NaN, "", 4)).toBe("—");
+  });
+});
+
 describe("netLabelFill (pure color decision)", () => {
   const DARK = "#1A1A2E"; // tokens.structural.text_heading
   const WHITE = "#FFFFFF";
@@ -1345,5 +1360,191 @@ describe("mountChart small multiples", () => {
     container.querySelectorAll('.figure-grid rect[data-series="2019"]').forEach((r) =>
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Point charts: scatter (dual encoding) + dotplot (faceted, redundant encoding)
+
+describe("value-on-highlight labels", () => {
+  const GROUPED: ChartSpec = {
+    chartType: "bar",
+    title: "Grouped",
+    xAxisType: "categorical",
+    data: "inline",
+    columns: { x: "g", value: "v", series: "s" },
+    series_order: ["A", "B"],
+    valueLabels: { show: false },
+  };
+  const GROUPED_ROWS: TidyRow[] = [
+    { g: "X", s: "A", v: "3" }, { g: "X", s: "B", v: "5" },
+    { g: "Y", s: "A", v: "2" }, { g: "Y", s: "B", v: "6" },
+  ];
+
+  it("no pills until a series is highlighted; hovering a legend series draws ONLY its pills", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: GROUPED, rows: GROUPED_ROWS, width: 720 });
+    // The pill group exists but is empty/hidden until a strict subset is highlighted.
+    const pillGroup = container.querySelector(".tbl-hl-pills") as SVGGElement;
+    expect(pillGroup).not.toBeNull();
+    expect(pillGroup.getAttribute("opacity")).toBe("0");
+
+    const btnA = container.querySelector('.tbl-legend-item[data-series="A"]') as HTMLElement;
+    btnA.dispatchEvent(new Event("pointerenter"));
+    // Pills render in jsdom for bars (rect attributes are present). A's values are 3 (X) and 2 (Y).
+    expect(pillGroup.getAttribute("opacity")).toBe("1");
+    const texts = Array.from(pillGroup.querySelectorAll("text")).map((t) => t.textContent);
+    expect(texts.sort()).toEqual(["2.00", "3.00"]); // ONLY series A's values — not B's 5/6
+    btnA.dispatchEvent(new Event("pointerleave"));
+    expect(pillGroup.getAttribute("opacity")).toBe("0");
+    expect(pillGroup.querySelectorAll("text").length).toBe(0);
+  });
+
+  it("pins still dim the non-active series' bars (dimming unchanged)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: GROUPED, rows: GROUPED_ROWS, width: 720 });
+    const btnA = container.querySelector('.tbl-legend-item[data-series="A"]') as HTMLElement;
+    btnA.dispatchEvent(new Event("pointerenter"));
+    const bRects = container.querySelectorAll('rect[data-series="B"]');
+    expect(bRects.length).toBeGreaterThan(0);
+    bRects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
+    // The pill group's own elements are never tagged as data-series, so they never dim.
+    const pillGroup = container.querySelector(".tbl-hl-pills") as SVGGElement;
+    expect(pillGroup.querySelectorAll(".tbl-dimmed").length).toBe(0);
+  });
+});
+
+describe("mountChart point charts", () => {
+  const SCATTER_SPEC: ChartSpec = {
+    chartType: "scatter",
+    title: "Scatter",
+    xAxisType: "numeric",
+    data: "inline",
+    columns: { x: "gx", value: "gy", series: "color", shape: "shp" },
+    series_order: ["Slow", "Fast"],
+    shape_order: ["Tri", "Dot"],
+    color_legend_title: "Shock",
+    shape_legend_title: "Labor",
+  };
+  const SCATTER_ROWS: TidyRow[] = [
+    { gx: "10", gy: "5", color: "Slow", shp: "Tri" },
+    { gx: "20", gy: "9", color: "Slow", shp: "Dot" },
+    { gx: "300", gy: "80", color: "Fast", shp: "Tri" },
+    { gx: "320", gy: "110", color: "Fast", shp: "Dot" },
+  ];
+
+  it("scatter mounts without throwing and tags each marker by color series", () => {
+    const container = document.createElement("div");
+    expect(() => mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 })).not.toThrow();
+    // Shape channel active → markers render as <path> tagged with the color series.
+    const markers = container.querySelectorAll('g[aria-label="dot"] path[data-series]');
+    expect(markers.length).toBe(4);
+  });
+
+  it("scatter renders TWO legend groups with headings (dual encoding)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 });
+    const groups = container.querySelectorAll(".tbl-legend-group");
+    expect(groups.length).toBe(2);
+    const titles = Array.from(container.querySelectorAll(".tbl-legend-group-title")).map((e) => e.textContent);
+    expect(titles).toContain("Shock");
+    expect(titles).toContain("Labor");
+    // Shape group rows are interactive (data-shape) so they can drive shape-dimension dimming.
+    expect(container.querySelectorAll(".tbl-legend-item[data-shape]").length).toBe(2);
+    // Color group rows carry data-series.
+    expect(container.querySelectorAll(".tbl-legend-item[data-series]").length).toBe(2);
+  });
+
+  it("scatter markers carry data-shape so the shape legend can dim them", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 });
+    const tagged = container.querySelectorAll('g[aria-label="dot"] path[data-shape]');
+    expect(tagged.length).toBe(4);
+    // Hovering a shape legend row dims markers of OTHER shapes (and not the matching ones).
+    const triBtn = container.querySelector('.tbl-legend-item[data-shape="Tri"]') as HTMLElement;
+    triBtn.dispatchEvent(new Event("pointerenter"));
+    const dimmedTri = Array.from(container.querySelectorAll('path[data-shape="Tri"]'))
+      .filter((p) => p.classList.contains("tbl-dimmed")).length;
+    const dimmedDot = Array.from(container.querySelectorAll('path[data-shape="Dot"]'))
+      .filter((p) => p.classList.contains("tbl-dimmed")).length;
+    expect(dimmedTri).toBe(0); // Tri stays bright
+    expect(dimmedDot).toBeGreaterThan(0); // Dot dims
+  });
+
+  const DOT_SPEC: ChartSpec = {
+    chartType: "dotplot",
+    title: "Dots",
+    xAxisType: "categorical",
+    data: "inline",
+    columns: { x: "cat", value: "v", series: "m", shape: "m", facet: "g" },
+    series_order: ["After", "Pre"],
+    small_multiples: { columns: 2, mode: "shared", pane_order: ["G1", "G2"] },
+  };
+  const DOT_ROWS: TidyRow[] = [];
+  for (const g of ["G1", "G2"]) {
+    for (const cat of ["Low", "High"]) {
+      DOT_ROWS.push({ g, cat, m: "After", v: "0.01" } as TidyRow);
+      DOT_ROWS.push({ g, cat, m: "Pre", v: "0.012" } as TidyRow);
+    }
+  }
+
+  it("faceted dotplot mounts a grid; redundant encoding → one combined legend (no shape group)", () => {
+    const container = document.createElement("div");
+    expect(() => mountChart(container, { spec: DOT_SPEC, rows: DOT_ROWS, width: 800 })).not.toThrow();
+    expect(container.querySelectorAll(".figure-pane").length).toBe(2);
+    // Combined (shape == series): a single flat legend, no two-group split.
+    expect(container.querySelectorAll(".tbl-legend-group").length).toBe(0);
+    expect(container.querySelectorAll(".tbl-legend-item").length).toBe(2);
+    // Markers tagged across panes so the color legend can dim them.
+    expect(container.querySelectorAll('.figure-grid g[aria-label="dot"] path[data-series]').length).toBeGreaterThan(1);
+    // Dodge: a 2-series categorical dotplot emits ONE dot mark per series (each with its own
+    // constant dx), so every pane has 2 dot groups — not a single overlapping group.
+    const firstPane = container.querySelector(".figure-pane");
+    expect(firstPane!.querySelectorAll('g[aria-label="dot"]').length).toBe(2);
+  });
+});
+
+describe("mountChart — area click-to-restack", () => {
+  const AREA_SPEC: ChartSpec = {
+    chartType: "area",
+    title: "Area",
+    subtitle: "Percent",
+    xAxisType: "temporal",
+    series_order: ["A", "B", "C"],
+    data: "inline",
+  };
+  const AREA_ROWS: TidyRow[] = ["2024-01-01", "2024-02-01"].flatMap((t) => [
+    { time: t, series: "A", value: "1" },
+    { time: t, series: "B", value: "2" },
+    { time: t, series: "C", value: "3" },
+  ]);
+  // Paths are emitted in stack order, so the first area path is the bottom series.
+  const bottom = (c: HTMLElement): string | null | undefined =>
+    c.querySelector('g[aria-label="area"] path[data-series]')?.getAttribute("data-series");
+  const legendItem = (c: HTMLElement, s: string): HTMLElement | undefined =>
+    [...c.querySelectorAll<HTMLElement>(".tbl-legend-item")].find((b) => b.getAttribute("data-series") === s);
+
+  it("moves a selected series to the bottom of the stack and restores on deselect", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: AREA_SPEC, rows: AREA_ROWS });
+    expect(bottom(container)).toBe("A"); // default: first in series_order is the bottom
+
+    legendItem(container, "C")!.click();
+    expect(bottom(container)).toBe("C"); // selected series dropped to the bottom
+
+    legendItem(container, "C")!.click(); // re-query: the legend was rebuilt
+    expect(bottom(container)).toBe("A"); // restored to the default order
+  });
+
+  it("stacks multiple selections in click order at the bottom", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: AREA_SPEC, rows: AREA_ROWS });
+    legendItem(container, "C")!.click();
+    legendItem(container, "B")!.click();
+    // C clicked first → very bottom; B next → above C.
+    const order = [...container.querySelectorAll('g[aria-label="area"] path[data-series]')].map((p) =>
+      p.getAttribute("data-series"),
+    );
+    expect(order.slice(0, 2)).toEqual(["C", "B"]);
   });
 });

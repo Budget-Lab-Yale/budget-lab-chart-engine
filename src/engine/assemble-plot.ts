@@ -4,7 +4,7 @@
 // line overlay — then returns the SVG with margin metadata stamped on for the
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
-import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
+import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
 import { tblPlotDefaults, gridAndYLabels, paneTitleMark } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
@@ -15,9 +15,12 @@ import {
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
   X_AXIS_LABEL_CLASS,
+  ANNOTATION_LINE_CLASS,
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
-import type { ChartSpec } from "../spec/types";
+import { tblColorScale, resolveColor } from "./palette";
+import { resolveAnnotations } from "../spec/annotations";
+import type { ChartSpec, PointCallout } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
 
@@ -26,6 +29,10 @@ import type { MarkLayers } from "./marks/index";
 // When a pane suffix is supplied (multi-pane figures), append it so each pane's Plot
 // class + clip-path ids are unique-but-deterministic; absent → exactly "tblchart".
 const PLOT_CLASS = "tblchart";
+
+// A subtle white halo behind annotation text (paint-order: stroke → the white stroke paints
+// behind the fill) so labels stay legible over annotation lines, bands, and dense data.
+const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
 
 export interface AssembleOptions {
   layers: MarkLayers;
@@ -36,6 +43,12 @@ export interface AssembleOptions {
   seriesNames: string[];
   colors: Map<string, string>;
   spec: ChartSpec;
+  /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
+   *  present, used instead of spec.annotations.points so the snap values render. */
+  points?: PointCallout[];
+  /** Numeric extent [min,max] of the parsed x values (ms for dates) — used to estimate label px
+   *  positions for annotation-label collision avoidance. Absent → no auto-stagger. */
+  xExtent?: [number, number];
   width?: number;
   height?: number;
   marginRight?: number;
@@ -92,6 +105,8 @@ export function assemblePlot({
   seriesNames,
   colors,
   spec,
+  points,
+  xExtent,
   width,
   height,
   marginRight,
@@ -137,6 +152,90 @@ export function assemblePlot({
   // repeats the VALUE chrome (vertical gridlines + value-tick labels + vertical zero rule)
   // per row facet. Same className-tagging discipline; collapsed by collapseFacetChromeY.
   const fyFaceted = layers.fyScaleOpts != null;
+
+  // 0. Shaded x-bands (e.g. recession indicators): vertical regions painted at the very back,
+  //    behind gridlines + data. Spans the full y-domain; x edges parsed via the adapter (numeric
+  //    / temporal only — markerToX returns null for a categorical band scale).
+  const ann = resolveAnnotations(spec);
+
+  // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
+  // label's px position/width and greedily push overlapping labels onto stacked rows so they don't
+  // collide. Deterministic (no layout/getBBox), so it applies uniformly to live HTML, PNG, and SSR.
+  // A marker with an explicit labelDy opts out (manual placement wins); bands are always auto.
+  const LABEL_BASE_DY = 4;
+  const LABEL_ROW_H = 13;
+  const LABEL_GAP = 6;
+  const LABEL_CHAR_PX = 6.2; // ~annotation font advance
+  const staggerDy = new Map<string, number>();
+  if (xExtent && xExtent[1] > xExtent[0] && width != null) {
+    const innerW = width - effMarginLeft - effMarginRight;
+    const toPx = (v: number | Date | null): number | null => {
+      if (v == null) return null;
+      const n = typeof v === "number" ? v : v.getTime();
+      return effMarginLeft + ((n - xExtent[0]) / (xExtent[1] - xExtent[0])) * innerW;
+    };
+    type L = { id: string; left: number; right: number };
+    const labels: L[] = [];
+    ann.bands.forEach((b, i) => {
+      if (!b.label) return;
+      const px = toPx(xOpts.markerToX({ x: b.start }));
+      if (px == null) return;
+      const w = b.label.length * LABEL_CHAR_PX;
+      labels.push({ id: `b${i}`, left: px + 6, right: px + 6 + w });
+    });
+    ann.xAxis.forEach((m, i) => {
+      if (!m.label || m.labelDy != null) return;
+      const px = toPx(xOpts.markerToX(m));
+      if (px == null) return;
+      const anchor = m.labelAnchor ?? "start";
+      const dx = m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4;
+      const w = m.label.length * LABEL_CHAR_PX;
+      const left = anchor === "end" ? px + dx - w : anchor === "middle" ? px + dx - w / 2 : px + dx;
+      labels.push({ id: `m${i}`, left, right: left + w });
+    });
+    labels.sort((a, b) => a.left - b.left);
+    const rowRight: number[] = [];
+    for (const l of labels) {
+      let r = 0;
+      while (r < rowRight.length && rowRight[r]! > l.left - LABEL_GAP) r++;
+      rowRight[r] = l.right;
+      staggerDy.set(l.id, LABEL_BASE_DY + r * LABEL_ROW_H);
+    }
+  }
+
+  ann.bands.forEach((band, bandIdx) => {
+    const x1 = xOpts.markerToX({ x: band.start });
+    const x2 = xOpts.markerToX({ x: band.end });
+    if (x1 == null || x2 == null) return;
+    marks.push(
+      Plot.rect([{ x1, x2, y1: yDomain[0], y2: yDomain[1] }], {
+        x1: "x1",
+        x2: "x2",
+        y1: "y1",
+        y2: "y2",
+        fill: band.color || TBL.color.annotationDim,
+        fillOpacity: 0.1,
+      }),
+    );
+    if (band.label) {
+      // Band label at the top of the region, just inside its left edge (auto-staggered).
+      marks.push(
+        Plot.text([{ x: x1, y: yDomain[1], t: band.label }], {
+          x: "x",
+          y: "y",
+          text: "t",
+          frameAnchor: "top",
+          textAnchor: "start",
+          dx: 6,
+          dy: staggerDy.get(`b${bandIdx}`) ?? 4,
+          fill: TBL.color.axis,
+          fontSize: TBL.size.annotation,
+          fontWeight: 600,
+          ...LABEL_HALO,
+        }),
+      );
+    }
+  });
 
   // 1. Band underlay (behind everything).
   marks.push(...layers.underlay);
@@ -215,21 +314,146 @@ export function assemblePlot({
     }
   }
 
-  // 5. Reference markers (vertical rules, e.g. a treatment date).
-  for (const m of spec.xAxisPolicy?.markers ?? []) {
+  // 5. Reference markers (vertical rules, e.g. a treatment date) + optional labels at the top.
+  //    Labels auto-stagger to avoid collisions (an explicit labelDy opts out).
+  ann.xAxis.forEach((m, markerIdx) => {
     const mx = xOpts.markerToX(m);
-    if (mx == null) continue;
+    if (mx == null) return;
+    const mColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
     marks.push(
       Plot.ruleX([mx], {
-        stroke: m.color || TBL.color.annotationDim,
+        stroke: mColor,
         strokeDasharray: (m.style || "dashed") === "dashed" ? "3 2" : null,
         strokeWidth: m.strokeWidth || 1,
       }),
     );
-  }
+    if (m.label) {
+      const anchor = m.labelAnchor ?? "start";
+      const autoDy = staggerDy.get(`m${markerIdx}`) ?? 4;
+      marks.push(
+        Plot.text([{ x: mx, t: m.label }], {
+          x: "x",
+          text: "t",
+          frameAnchor: "top",
+          textAnchor: anchor,
+          dx: m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4,
+          dy: m.labelDy != null ? m.labelDy : autoDy,
+          fill: mColor,
+          fontSize: TBL.size.annotation,
+          fontWeight: 600,
+          ...LABEL_HALO,
+        }),
+      );
+    }
+  });
 
   // 6. Line overlay (on top).
   marks.push(...layers.overlay);
+
+  // 6b. Horizontal reference lines (yAxisPolicy.markers): drawn over the data, each with an
+  //     optional label. By DEFAULT lines + matched labels take categorical colors starting at
+  //     amber (skipping the blue cat-1 slot, which data series usually use); an explicit
+  //     marker.color overrides. The label color always matches its line.
+  const markerList = ann.yAxis;
+  // +1 so index 0 (blue) is skipped → markers start at amber, then violet, green, …
+  const markerPalette = tblColorScale(markerList.length + 1);
+  markerList.forEach((m, i) => {
+    const markerColor = (m.color && (resolveColor(m.color) || m.color)) || markerPalette[i + 1] || TBL.color.annotationDim;
+    marks.push(
+      Plot.ruleY([m.y], {
+        stroke: markerColor,
+        strokeOpacity: 0.8,
+        strokeDasharray: (m.style || "dashed") === "dashed" ? "4 3" : null,
+        strokeWidth: m.strokeWidth || 1.25,
+        insetLeft: -effMarginLeft,
+        insetRight: -effMarginRight,
+        clip: false,
+        // Findable per-marker class so the fx-facet collapse can stretch the line to the full
+        // plot width (otherwise a grouped/faceted bar repeats it per facet, stopping at each
+        // facet's edge instead of running edge-to-edge like a line chart).
+        className: `${ANNOTATION_LINE_CLASS}-${i}`,
+      }),
+    );
+    if (m.label) {
+      // On an fx-faceted chart (grouped bars), an unfaceted mark repeats in every facet — bind
+      // the label to the appropriate end fx category so a single label renders once.
+      const fxDomain = faceted ? (layers.fxScaleOpts?.domain as string[] | undefined) : undefined;
+      const left = m.labelSide === "left";
+      const labelFx =
+        fxDomain && fxDomain.length ? (left ? fxDomain[0] : fxDomain[fxDomain.length - 1]) : undefined;
+      marks.push(
+        Plot.text([{ y: m.y, t: m.label, ...(labelFx != null ? { fx: labelFx } : {}) }], {
+          y: "y",
+          text: "t",
+          ...(labelFx != null ? { fx: "fx" } : {}),
+          frameAnchor: left ? "left" : "right",
+          textAnchor: left ? "start" : "end",
+          dx: m.labelDx != null ? m.labelDx : left ? 6 : -6,
+          dy: m.labelDy != null ? m.labelDy : -7,
+          fill: markerColor,
+          fontSize: TBL.size.annotation,
+          fontWeight: 600,
+          ...LABEL_HALO,
+        }),
+      );
+    }
+  });
+
+  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
+  //     (series-snap). With connector, draw a leader arrow from the label to the point — the label
+  //     offset (dx/dy px) is converted to a second data coordinate via the x/y extents so the arrow
+  //     lands exactly on the point. The arrowhead marks the point (no separate dot).
+  const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
+  const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
+  for (const p of points ?? ann.points) {
+    const px = xOpts.markerToX({ x: p.x });
+    if (px == null || !Number.isFinite(p.y as number)) continue;
+    const py = p.y as number;
+    const pColor = (p.color && (resolveColor(p.color) || p.color)) || TBL.color.heading;
+    // Default offset is larger when a connector is drawn, so the leader is visible.
+    const dx = p.dx != null ? p.dx : 0;
+    const dy = p.dy != null ? p.dy : p.connector ? -28 : -6;
+    const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
+    const canLeader =
+      p.connector && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null;
+    if (canLeader) {
+      // Label position in DATA space: shift the point by the px offset using the per-px data deltas.
+      const dppx = (xExtent![1] - xExtent![0]) / innerWForPx!;
+      const dppy = (yDomain[1] - yDomain[0]) / innerHForPx!;
+      const baseN = typeof px === "number" ? px : px.getTime();
+      const labelN = baseN + dx * dppx;
+      const labelX = typeof px === "number" ? labelN : new Date(labelN);
+      const labelY = py - dy * dppy;
+      marks.push(
+        Plot.arrow([{ x1: labelX, y1: labelY, x2: px, y2: py }], {
+          x1: "x1",
+          y1: "y1",
+          x2: "x2",
+          y2: "y2",
+          stroke: pColor,
+          strokeWidth: 1,
+          headLength: 6,
+          insetEnd: 4, // stop just short of the point
+        }),
+      );
+    } else if (p.connector) {
+      marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
+    }
+    marks.push(
+      Plot.text([{ x: px, y: py, t: p.label }], {
+        x: "x",
+        y: "y",
+        text: "t",
+        dx,
+        dy,
+        textAnchor: anchor,
+        fill: pColor,
+        fontSize: TBL.size.annotation,
+        fontWeight: 600,
+        ...LABEL_HALO,
+      }),
+    );
+  }
 
   // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
   //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each
@@ -338,9 +562,11 @@ export function assemblePlot({
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
   // order its matched elements appear in (DOM order); tag by index. For lines this is the
   // flat dashed-then-solid path order, matching the old per-group loop byte-for-byte.
-  for (const { selector, seriesOrder } of layers.tagging) {
+  for (const { selector, seriesOrder, shapeOrder, categoryOrder } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
       if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
+      if (shapeOrder && i < shapeOrder.length) el.setAttribute("data-shape", shapeOrder[i] as string);
+      if (categoryOrder && i < categoryOrder.length) el.setAttribute("data-category", categoryOrder[i] as string);
     });
   }
 
