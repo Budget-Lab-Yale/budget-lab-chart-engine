@@ -4,7 +4,7 @@
 // line overlay — then returns the SVG with margin metadata stamped on for the
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
-import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
+import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
 import { tblPlotDefaults, gridAndYLabels, paneTitleMark } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
@@ -392,16 +392,44 @@ export function assemblePlot({
     }
   });
 
-  // 6c. Point callouts: a label at a data coordinate (x, y), with an optional dot at the point.
-  //     y is either explicit or resolved by index.ts (series-snap to a series' value/stack top).
+  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
+  //     (series-snap). With connector, draw a leader arrow from the label to the point — the label
+  //     offset (dx/dy px) is converted to a second data coordinate via the x/y extents so the arrow
+  //     lands exactly on the point. The arrowhead marks the point (no separate dot).
+  const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
+  const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
   for (const p of points ?? ann.points) {
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
     const pColor = (p.color && (resolveColor(p.color) || p.color)) || TBL.color.heading;
-    const dx = p.dx != null ? p.dx : 6;
-    const dy = p.dy != null ? p.dy : -6;
-    if (p.connector) {
+    // Default offset is larger when a connector is drawn, so the leader is visible.
+    const dx = p.dx != null ? p.dx : 0;
+    const dy = p.dy != null ? p.dy : p.connector ? -28 : -6;
+    const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
+    const canLeader =
+      p.connector && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null;
+    if (canLeader) {
+      // Label position in DATA space: shift the point by the px offset using the per-px data deltas.
+      const dppx = (xExtent![1] - xExtent![0]) / innerWForPx!;
+      const dppy = (yDomain[1] - yDomain[0]) / innerHForPx!;
+      const baseN = typeof px === "number" ? px : px.getTime();
+      const labelN = baseN + dx * dppx;
+      const labelX = typeof px === "number" ? labelN : new Date(labelN);
+      const labelY = py - dy * dppy;
+      marks.push(
+        Plot.arrow([{ x1: labelX, y1: labelY, x2: px, y2: py }], {
+          x1: "x1",
+          y1: "y1",
+          x2: "x2",
+          y2: "y2",
+          stroke: pColor,
+          strokeWidth: 1,
+          headLength: 6,
+          insetEnd: 4, // stop just short of the point
+        }),
+      );
+    } else if (p.connector) {
       marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
     }
     marks.push(
@@ -411,7 +439,7 @@ export function assemblePlot({
         text: "t",
         dx,
         dy,
-        textAnchor: dx < 0 ? "end" : "start",
+        textAnchor: anchor,
         fill: pColor,
         fontSize: TBL.size.annotation,
         fontWeight: 600,

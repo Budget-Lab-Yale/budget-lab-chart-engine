@@ -503,6 +503,45 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], s
  *   there is no resize feedback loop. (Same discipline as the existing canvasScroll
  *   observer for the SVG-widening case.)
  */
+/** Snapshot each area band's data-series → its current `d`, so a restack can morph from it. */
+function captureAreaDs(svg: SVGSVGElement): Map<string, string> {
+  const m = new Map<string, string>();
+  svg.querySelectorAll('g[aria-label="area"] path[data-series]').forEach((p) => {
+    const s = p.getAttribute("data-series");
+    const d = p.getAttribute("d");
+    if (s && d) m.set(s, d);
+  });
+  return m;
+}
+
+/** Brief restack morph: the stacked total is order-invariant, so only the band paths' geometry
+ *  changes. Start each re-rendered band at its OLD `d`, then transition to the new `d` (CSS
+ *  `transition: d` via .tbl-area-animating) so the bands visibly slide into their new positions.
+ *  Degrades to an instant change where `d` transitions aren't supported. */
+function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
+  const paths = [...svg.querySelectorAll('g[aria-label="area"] path[data-series]')];
+  const targets: Array<[Element, string]> = [];
+  for (const p of paths) {
+    const s = p.getAttribute("data-series");
+    const target = p.getAttribute("d");
+    const old = s ? oldDs.get(s) : undefined;
+    if (s && target && old && old !== target) {
+      p.setAttribute("d", old);
+      p.classList.add("tbl-area-animating");
+      targets.push([p, target]);
+    }
+  }
+  if (!targets.length) return;
+  void (svg as SVGElement).getBoundingClientRect(); // commit the start state before transitioning
+  const win = svg.ownerDocument?.defaultView ?? undefined;
+  const raf =
+    win?.requestAnimationFrame?.bind(win) ?? ((cb: (t: number) => void) => setTimeout(() => cb(0), 16));
+  raf(() => raf(() => { for (const [p, target] of targets) p.setAttribute("d", target); }));
+  (win?.setTimeout ?? setTimeout)(() => {
+    for (const [p] of targets) p.classList.remove("tbl-area-animating");
+  }, 360);
+}
+
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
@@ -629,12 +668,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           ? [...pins, ...currentSeriesNames.filter((s) => !pins.includes(s))]
           : undefined;
         if (JSON.stringify(next) !== JSON.stringify(restackOrder)) {
+          // Capture the current bands' geometry so the re-rendered ones can morph from it.
+          const oldDs = captureAreaDs(svg);
           restackOrder = next;
           suppressRestack = true;
           lastWidth = -1; // force draw() past its same-width early return
           draw(card.clientWidth || target, currentLegendPos ?? legendPos);
           if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
           suppressRestack = false;
+          // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
+          const newSvg = canvas.querySelector("svg");
+          if (newSvg) animateAreaRestack(newSvg, oldDs);
         }
       }
     };
