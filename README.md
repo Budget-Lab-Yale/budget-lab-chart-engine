@@ -16,6 +16,7 @@ that pins a version of this engine.
 
 | Path | Purpose |
 |---|---|
+| `CONFIG-SPEC.md` | The figure config specification — every `chart.yaml` / `table.yaml` field the engine accepts (mirrors `src/spec/`). The source of truth that consuming repos vendor as their author-facing config reference. |
 | `src/engine/` | Pure, framework-free chart engine: `spec + data + theme → SVG`. Headless-safe. |
 | `src/data/` | Data loading + normalization to one tidy long format (local CSV, remote URL/JSON). |
 | `src/spec/` | `ChartSpec` type + ajv schema + validation (one chart = one spec). |
