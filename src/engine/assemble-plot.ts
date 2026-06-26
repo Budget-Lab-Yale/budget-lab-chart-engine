@@ -20,7 +20,7 @@ import {
 import { makeTickFormatter } from "./scales";
 import { tblColorScale, resolveColor } from "./palette";
 import { resolveAnnotations } from "../spec/annotations";
-import type { ChartSpec } from "../spec/types";
+import type { ChartSpec, PointCallout } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
 
@@ -39,6 +39,9 @@ export interface AssembleOptions {
   seriesNames: string[];
   colors: Map<string, string>;
   spec: ChartSpec;
+  /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
+   *  present, used instead of spec.annotations.points so the snap values render. */
+  points?: PointCallout[];
   width?: number;
   height?: number;
   marginRight?: number;
@@ -95,6 +98,7 @@ export function assemblePlot({
   seriesNames,
   colors,
   spec,
+  points,
   width,
   height,
   marginRight,
@@ -337,8 +341,8 @@ export function assemblePlot({
   });
 
   // 6c. Point callouts: a label at a data coordinate (x, y), with an optional dot at the point.
-  //     v1 requires an explicit y (series-snap — y from a series' value at x — is a follow-up).
-  for (const p of ann.points) {
+  //     y is either explicit or resolved by index.ts (series-snap to a series' value/stack top).
+  for (const p of points ?? ann.points) {
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;

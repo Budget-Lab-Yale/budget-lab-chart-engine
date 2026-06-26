@@ -257,12 +257,45 @@ export function renderPane(
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
   // little headroom instead of sitting flush against the axis edge.
   const ann = resolveAnnotations(spec);
+
+  // Point callouts: resolve a y for any callout that gives a `series` but omits `y` — snap to that
+  // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
+  // band; otherwise the series' own value. Rows are matched at x by the raw time / numeric key.
+  const stackedChart = spec.chartType === "area" || spec.chartType === "stacked";
+  const seriesRank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
+  const resolvedPoints = ann.points.map((p) => {
+    if (Number.isFinite(p.y as number) || !p.series) return p;
+    const atX = dataInScope.filter((r) => r.time === p.x || String(r._xn ?? "") === p.x);
+    const targetRank = seriesRank.get(p.series);
+    if (targetRank == null) return p;
+    let y: number | undefined;
+    if (stackedChart) {
+      let sum = 0;
+      let found = false;
+      for (const r of atX) {
+        const rr = seriesRank.get(r.series);
+        if (rr != null && rr <= targetRank && Number.isFinite(r._y as number)) {
+          sum += r._y as number;
+          found = true;
+        }
+      }
+      if (found) y = sum;
+    } else {
+      const row = atX.find((r) => r.series === p.series);
+      if (row && Number.isFinite(row._y as number)) y = row._y as number;
+    }
+    return y != null ? { ...p, y } : p;
+  });
+
+  // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
+  // reference-line (yAxis markers) values + point-callout y values so an annotation at/beyond the
+  // data extent gets a little headroom instead of sitting flush against the axis edge.
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
     ...ann.yAxis.map((m) => m.y),
-    ...ann.points.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+    ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
@@ -288,7 +321,7 @@ export function renderPane(
     includeZero = true;
     const markerYs = [
       ...ann.yAxis.map((m) => m.y),
-      ...ann.points.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+      ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
     ].filter(Number.isFinite);
     const totalByX = new Map<string, number>();
     let minVal = 0;
@@ -405,6 +438,7 @@ export function renderPane(
     seriesNames,
     colors,
     spec,
+    points: resolvedPoints,
     width: opts.width,
     height: opts.height,
     marginRight: opts.marginRight,
