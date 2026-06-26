@@ -1,6 +1,11 @@
 // Pure table geometry. Given a `TableModel` and a `measureText` callback, compute the pixel
 // layout (column widths, stub width, header/body rects) so the HTML and SVG renderers can share
 // an identical layout. No Date/random — fully deterministic for a given model + measureText.
+//
+// All text wrapping (leaf-header lines, group notes) is resolved HERE using the caller's
+// measureText, and the resulting line arrays are stored on the layout — so the SVG renderer draws
+// exactly the lines this module measured, and the two cannot disagree on line counts (which would
+// otherwise mismatch the reserved height and overlap neighboring rows).
 import type { TableModel, HeaderCell, BodyRow, RowGroup } from "./model";
 import { TBL } from "../engine/theme";
 
@@ -17,41 +22,91 @@ export interface LayoutOptions {
   headerMaxLines?: number;
 }
 export interface CellRect { x: number; y: number; w: number; h: number; }
+export interface HeaderEntry { cell: HeaderCell; rect: CellRect; tier: number; lines?: string[]; }
+export type RowEntry =
+  | { row: BodyRow; rect: CellRect; cellRects: CellRect[] }
+  | { group: RowGroup; rect: CellRect; noteLines: string[]; topGap: number; isFirst: boolean };
 export interface TableLayout {
   totalWidth: number; totalHeight: number;
   stubWidth: number; colX: number[]; colW: number[];        // per leaf
   headerHeight: number; rowHeight: number;
+  tierY: number[];                  // y offset of each header tier (length = tier count)
   footnotesHeight: number;          // reserved height for the footnote list below the body (0 if none)
-  header: Array<{ cell: HeaderCell; rect: CellRect; tier: number }[]>;
-  rows: Array<{ row: BodyRow; rect: CellRect; cellRects: CellRect[] } | { group: RowGroup; rect: CellRect }>;
+  header: HeaderEntry[][];
+  rows: RowEntry[];
 }
 
 // ---- Local geometry constants (kept small + explicit; type sizes pulled from TBL where sensible). ----
+// Type sizes mirror the live HTML (styles.ts): header 12px, body 13px.
 const headerFontPx = TBL.size.legend;       // 12 — header label type size
-const bodyFontPx = TBL.size.legend;         // 12 — body cell type size
+const bodyFontPx = 13;                       // 13 — body cell type size (matches HTML td/th)
+const noteFontPx = TBL.size.annotation;      // 11 — group-note / sublabel type size
 const headerWeight = 700;
 const bodyWeight = 400;
 const padX = 16;            // total horizontal padding per cell (left + right)
-const tierHeight = 24;      // one header tier's row height
+const tierHeight = 26;      // one banner tier's row height (HTML header ≈ 12px + 6+6 padding)
 const sublabelLine = 14;    // extra height on the bottom tier when any leaf has a sublabel
 // Flanking-rule gap on a banner cell (one side). Mirrors the SVG renderer's PAD_X inset (8px),
 // so the banner-width fit reserves room for the rule gaps on both sides of the centered text.
 const spannerGap = 8;
 // Per-line height for wrapped leaf-header labels (header_max_lines). Lines beyond the first
 // add this much to the bottom tier.
-const headerLineHeight = 14;
-const rowHeight = 22;       // one body row's height
+const headerLineHeight = 15;
+const rowHeight = 26;       // one body row's height (HTML td ≈ 13px + 5+5 padding + border)
+// Row-group breathing room (HTML: border-top + padding-top 14px above a heading, 4px for the
+// first group; an italic note sits below the label).
+const groupTopGap = 14;
+const groupFirstTopGap = 4;
+const groupLabelLine = 18;
+const groupNoteLineHeight = 15;
+const groupNoteGap = 1;
+const groupBottomPad = 4;
 // Per-level indentation of stub labels. Exported so the HTML and SVG renderers indent identically.
 export const INDENT_STEP = 14;
 // Footnote list (below the body): a top gap plus one line per footnote. Exported so the SVG
 // renderer places each footnote text row at the same baseline the layout reserved.
 export const FOOTNOTE_TOP_GAP = 8;
 export const FOOTNOTE_LINE_HEIGHT = 16;
+// Shared with render-svg so drawn text aligns with the heights reserved here.
+export const HEADER_LINE_HEIGHT = headerLineHeight;
+export const SUBLABEL_LINE = sublabelLine;
+export const GROUP_LABEL_LINE = groupLabelLine;
+export const GROUP_NOTE_GAP = groupNoteGap;
+export const GROUP_NOTE_LINE_HEIGHT = groupNoteLineHeight;
+// Horizontal inset used for wrapping group notes to the table width (mirrors render-svg PAD_X*2).
+const NOTE_WRAP_PAD = 16;
+const NOTE_WRAP_MAX_LINES = 4;
+
+/** Greedy word-wrap into at most `maxLines` lines that each fit `maxWidth` px (via `measure`).
+ * The final line absorbs any overflow rather than dropping words, so no text is lost. Returns a
+ * single-element array when the text fits on one line. */
+function wrapToLines(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
+  if (maxLines <= 1 || measure(s) <= maxWidth) return [s];
+  const words = s.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (measure(next) <= maxWidth || cur === "") {
+      cur = next;
+    } else {
+      lines.push(cur);
+      cur = w;
+      if (lines.length === maxLines - 1) break;
+    }
+  }
+  const consumed = lines.join(" ").split(/\s+/).filter(Boolean).length;
+  const rest = words.slice(consumed).join(" ");
+  if (rest) lines.push(rest);
+  return lines.length ? lines.slice(0, maxLines) : [s];
+}
 
 export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout {
   const { measureText } = opts;
   const leaves = model.leaves;
   const headerMaxLines = opts.headerMaxLines;
+  const measureHeader = (s: string) => measureText(s, headerFontPx, headerWeight);
+  const measureNote = (s: string) => measureText(s, noteFontPx, bodyWeight);
 
   // Body rows only (group entries don't have per-leaf cells).
   const bodyRows = model.body
@@ -73,7 +128,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
   const colW = leaves.map((leaf, i) => {
     const override = colWidthOverride(leaf.key);
     if (override != null) return override;
-    let natural = headerMaxLines != null ? 0 : measureText(leaf.label, headerFontPx, headerWeight);
+    let natural = headerMaxLines != null ? 0 : measureHeader(leaf.label);
     if (leaf.sublabel != null) {
       natural = Math.max(natural, measureText(leaf.sublabel, headerFontPx, bodyWeight));
     }
@@ -98,8 +153,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       }
       const end = start + cell.colSpan - 1;
       if (cell.colSpan > 1) {
-        const required =
-          measureText(cell.text, headerFontPx, headerWeight) + padX + 2 * spannerGap;
+        const required = measureHeader(cell.text) + padX + 2 * spannerGap;
         let spanned = 0;
         for (let k = start; k <= end && k < colW.length; k++) spanned += colW[k]!;
         if (required > spanned) {
@@ -114,7 +168,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
   // ---- Stub width = max(group labels, row labels + indent) + padding. ----
   // With stub_nowrap the longest label must fit on one line — same natural-width computation,
   // but the renderers add `white-space:nowrap` so it isn't clipped.
-  let stubNatural = measureText(model.stubHeader, headerFontPx, headerWeight);
+  let stubNatural = measureHeader(model.stubHeader);
   for (const b of model.body) {
     if (b.kind === "group") {
       stubNatural = Math.max(
@@ -137,61 +191,73 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
 
   const totalWidth = stubWidth + colW.reduce((a, b) => a + b, 0);
 
-  // ---- Header height: tiers × tierHeight, plus a sublabel line if any leaf has a sublabel, plus
-  // extra lines on the bottom tier when leaf labels wrap (header_max_lines). ----
+  // ---- Leaf-header wrapping (header_max_lines): resolve the actual lines per leaf now, using the
+  // final column widths, so the renderer draws exactly these. ----
+  const leafLines: (string[] | null)[] = leaves.map((leaf, i) => {
+    if (headerMaxLines == null || headerMaxLines <= 1) return null;
+    const avail = Math.max(1, colW[i]! - padX);
+    const lines = wrapToLines(leaf.label, avail, headerMaxLines, measureHeader);
+    return lines.length > 1 ? lines : null;
+  });
+  const maxLeafLines = leafLines.reduce((m, l) => Math.max(m, l ? l.length : 1), 1);
+
+  // ---- Header tier heights. The bottom (leaf) tier is taller to hold any wrapped lines + the
+  // sublabel line; banner tiers above stay one tier tall. Non-uniform tiers mean a leaf that
+  // rowSpans up through a blank tier gets the sum of the tier heights it covers. ----
   const tiers = model.headerRows.length;
   const hasSublabel = leaves.some((l) => l.sublabel != null);
-  // Extra height for wrapped leaf headers: count the lines actually needed (capped at N), so a
-  // single-line label doesn't inflate the header. Estimate lines from text width vs. column width.
-  let headerWrapExtra = 0;
-  if (headerMaxLines != null && headerMaxLines > 1) {
-    let maxLines = 1;
-    leaves.forEach((leaf, i) => {
-      const avail = Math.max(1, colW[i]! - padX);
-      const textW = measureText(leaf.label, headerFontPx, headerWeight);
-      const lines = Math.min(headerMaxLines, Math.max(1, Math.ceil(textW / avail)));
-      if (lines > maxLines) maxLines = lines;
-    });
-    headerWrapExtra = (maxLines - 1) * headerLineHeight;
-  }
-  const headerHeight =
-    tiers * tierHeight + (hasSublabel ? sublabelLine : 0) + headerWrapExtra;
+  const leafTierHeight =
+    tierHeight + (maxLeafLines - 1) * headerLineHeight + (hasSublabel ? sublabelLine : 0);
+  const tierH: number[] = Array.from({ length: tiers }, (_, t) =>
+    t === tiers - 1 ? leafTierHeight : tierHeight,
+  );
+  const tierY: number[] = [];
+  { let acc = 0; for (const h of tierH) { tierY.push(acc); acc += h; } }
+  const headerHeight = tierH.reduce((a, b) => a + b, 0);
 
   // ---- Header cell rects. Walk each tier left→right, accumulating colSpans to map each
   // HeaderCell to the leaf-index range it spans. A cell with `leafKey` set is anchored at that
-  // exact leaf index (so blank-tier rowSpans land on the right column). ----
-  const header: TableLayout["header"] = model.headerRows.map((tierCells, tier) => {
+  // exact leaf index (so blank-tier rowSpans land on the right column). Height = the sum of the
+  // tier heights the cell's rowSpan covers. ----
+  const header: HeaderEntry[][] = model.headerRows.map((tierCells, tier) => {
     let leafIdx = 0;
     return tierCells.map((cell) => {
-      // Anchor leafKey-bearing cells to their leaf; otherwise consume from the running cursor.
       let start = leafIdx;
       if (cell.leafKey != null) {
         const found = leaves.findIndex((l) => l.key === cell.leafKey);
         if (found >= 0) start = found;
       }
-      const span = cell.colSpan;
-      const end = start + span - 1; // inclusive last leaf index
+      const end = start + cell.colSpan - 1; // inclusive last leaf index
       const xStart = colX[start] ?? stubWidth;
       let w = 0;
       for (let i = start; i <= end && i < colW.length; i++) w += colW[i]!;
-      const rect: CellRect = {
-        x: xStart,
-        y: tier * tierHeight,
-        w,
-        h: cell.rowSpan * tierHeight,
-      };
+      let h = 0;
+      for (let r = 0; r < cell.rowSpan && tier + r < tiers; r++) h += tierH[tier + r]!;
+      const rect: CellRect = { x: xStart, y: tierY[tier]!, w, h };
+      const lines = cell.leafKey != null ? leafLines[start] : null;
       leafIdx = end + 1;
-      return { cell, rect, tier };
+      return lines ? { cell, rect, tier, lines } : { cell, rect, tier };
     });
   });
 
-  // ---- Body rows: group entries get a full-width band; data rows get a stub rect + cellRects. ----
+  // ---- Body rows: group entries get a full-width band (with breathing room + an optional wrapped
+  // note); data rows get a stub rect + cellRects. Heights vary per entry. ----
   let y = headerHeight;
-  const rows: TableLayout["rows"] = model.body.map((entry) => {
+  let firstGroupSeen = false;
+  const rows: RowEntry[] = model.body.map((entry) => {
     if (entry.kind === "group") {
-      const rect: CellRect = { x: 0, y, w: totalWidth, h: rowHeight };
-      y += rowHeight;
-      return { group: entry.group, rect };
+      const isFirst = !firstGroupSeen;
+      firstGroupSeen = true;
+      const topGap = isFirst ? groupFirstTopGap : groupTopGap;
+      const noteLines =
+        entry.group.note != null
+          ? wrapToLines(entry.group.note, totalWidth - NOTE_WRAP_PAD, NOTE_WRAP_MAX_LINES, measureNote)
+          : [];
+      const noteH = noteLines.length ? groupNoteGap + noteLines.length * groupNoteLineHeight : 0;
+      const h = topGap + groupLabelLine + noteH + groupBottomPad;
+      const rect: CellRect = { x: 0, y, w: totalWidth, h };
+      y += h;
+      return { group: entry.group, rect, noteLines, topGap, isFirst };
     }
     const rowRect: CellRect = { x: 0, y, w: stubWidth, h: rowHeight };
     const cellRects: CellRect[] = leaves.map((_, i) => ({
@@ -210,12 +276,13 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       ? FOOTNOTE_TOP_GAP + model.footnotes.length * FOOTNOTE_LINE_HEIGHT
       : 0;
 
-  const totalHeight = headerHeight + model.body.length * rowHeight + footnotesHeight;
+  const totalHeight = y + footnotesHeight;
 
   return {
     totalWidth, totalHeight,
     stubWidth, colX, colW,
     headerHeight, rowHeight,
+    tierY,
     footnotesHeight,
     header, rows,
   };

@@ -119,10 +119,14 @@ describe("renderTableSvg — golden bodies", () => {
 
     const headerTexts = svg.querySelectorAll("g.tbl-table-header text");
     expect(headerTexts.length).toBe(headerCellCount(model));
-    // The "CPI impact" leaf has a blank tier2: its leaf cell rowSpans up, so there is exactly
-    // one header cell whose rect is taller than a single tier (h > tierHeight).
+    // The "CPI impact" leaf has a blank tier2: its leaf cell rowSpans up, so there is at least one
+    // header cell whose rect is taller than any single tier (it sums ≥2 tier heights).
+    const tierHeights = layout.tierY.map((y, i) =>
+      i < layout.tierY.length - 1 ? layout.tierY[i + 1]! - y : layout.headerHeight - y,
+    );
+    const maxTier = Math.max(...tierHeights);
     const tallCells = Array.from(svg.querySelectorAll<SVGRectElement>("g.tbl-table-header rect.tbl-table-header-bg"))
-      .filter((r) => Number(r.getAttribute("height")) > 24);
+      .filter((r) => Number(r.getAttribute("height")) > maxTier);
     expect(tallCells.length).toBeGreaterThan(0);
 
     // Numeric cells centered.
@@ -162,8 +166,8 @@ describe("renderTableSvg — golden bodies", () => {
     const model = buildTableModel(TARIFF_SPEC, rows);
     const layout = layoutTable(model, layoutOpts);
 
-    // A horizontal line at an inter-tier boundary (y = 24, before the header bottom).
-    const interTierY = 24;
+    // A horizontal line at an inter-tier boundary (the first tier's bottom, before the header bottom).
+    const interTierY = layout.tierY[1]!;
     const hasLineAt = (svg: SVGSVGElement, y: number): boolean =>
       Array.from(svg.querySelectorAll("g.tbl-table-header line")).some(
         (l) =>

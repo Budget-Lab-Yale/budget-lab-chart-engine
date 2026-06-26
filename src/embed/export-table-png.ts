@@ -23,6 +23,10 @@ import { rasterize, triggerDownload } from "./export-png.js";
 // Gap (px) between the bottom of the top chrome and the top of the table body.
 const BODY_TOP_GAP = 14;
 
+// Minimum export frame width: enough for the title column beside the right-flush logo so neither
+// is cramped on a narrow table. Tables wider than this drive the frame width directly.
+const MIN_TABLE_FRAME = 560;
+
 /** Slug a title for a default download filename. */
 function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -52,8 +56,10 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
     ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
   });
 
-  // Frame width: standard frame, widened if the table itself is wider than the inner content box.
-  const width = Math.max(W, layout.totalWidth + MARGIN * 2);
+  // Frame width is content-driven: the table's natural width plus margins — a narrow table yields
+  // a narrow PNG instead of being stranded in a fixed 1000px frame. Floored at MIN_TABLE_FRAME so
+  // the title + right-flush logo always have room (the title wraps if the table is narrower).
+  const width = Math.max(MIN_TABLE_FRAME, layout.totalWidth + MARGIN * 2);
 
   // Provisional root (height patched once known) — needed so chrome can be drawn and measured.
   const { root, bgRect } = createExportRoot(document, width, 1);

@@ -2,11 +2,22 @@
 // chrome is composed separately by the PNG export (Task 12); this produces only the gridded
 // table content so the same geometry (from `layoutTable`) backs both the HTML and PNG paths.
 //
+// All wrapping (leaf-header lines, group notes) and all heights come from `layoutTable`; this
+// module only draws what the layout measured, so the two cannot disagree.
+//
 // Fully deterministic: no Date/random, attributes set in a fixed order. Takes the target
 // `document` via opts so it works under jsdom (tests) and in the browser (export).
 import type { TableModel } from "./model";
 import type { TableLayout, CellRect } from "./layout";
-import { INDENT_STEP, FOOTNOTE_TOP_GAP, FOOTNOTE_LINE_HEIGHT } from "./layout";
+import {
+  INDENT_STEP,
+  FOOTNOTE_TOP_GAP,
+  FOOTNOTE_LINE_HEIGHT,
+  HEADER_LINE_HEIGHT,
+  SUBLABEL_LINE,
+  GROUP_NOTE_GAP,
+  GROUP_NOTE_LINE_HEIGHT,
+} from "./layout";
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
 import { tokens } from "../theme/tokens";
@@ -15,12 +26,13 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Type sizes mirror layout.ts so text fits the rects it computed.
 const HEADER_FONT = TBL.size.legend; // 12
-const BODY_FONT = TBL.size.legend; // 12
+const BODY_FONT = 13; // matches layout bodyFontPx + HTML td/th
 const SUBLABEL_FONT = TBL.size.annotation; // 11
 const NOTE_FONT = TBL.size.annotation; // 11
-const TIER_HEIGHT = 24; // matches layout.tierHeight
 const PAD_X = 8; // half of layout.padX — inset from a cell edge
 const FOOTNOTE_DY = -4; // superscript rise
+const LEAF_BOTTOM_PAD = 7; // gap from the leaf label's last line down to the sublabel / header rule
+const SUBLABEL_BOTTOM_PAD = 6; // gap from the sublabel baseline to the header→body rule
 
 // Sign coloring (no dedicated structural token; use brand green/red categorical bases).
 const SIGN_POS = tokens.categorical[3]!.base; // green
@@ -35,7 +47,6 @@ export function renderTableSvg(
   const spec = opts.spec;
   const headerTierRules = spec?.header_tier_rules === true; // default: no inter-tier rules
   const spannerRules = spec?.spanner_rules !== false; // default: draw flanking rules
-  const headerMaxLines = spec?.header_max_lines;
 
   const el = (name: string, attrs: Record<string, string | number> = {}): SVGElement => {
     const node = doc.createElementNS(SVG_NS, name);
@@ -63,11 +74,20 @@ export function renderTableSvg(
     t.textContent = str;
     return t;
   };
-  const line = (x1: number, y1: number, x2: number, y2: number): SVGElement =>
-    el("line", { x1, y1, x2, y2, stroke: TBL.color.axisStroke, "stroke-width": 1 });
+  // Rule helpers — three weights mirroring the HTML (border-collapse) hierarchy:
+  //   strong (#999) header→body separator; group (#E5E5E5) divider above a row group;
+  //   row    (#F0F0F0) the light gridline between data rows.
+  const rule = (x1: number, y1: number, x2: number, y2: number, stroke: string): SVGElement =>
+    el("line", { x1, y1, x2, y2, stroke, "stroke-width": 1 });
+  const ruleStrong = (x1: number, y1: number, x2: number, y2: number) =>
+    rule(x1, y1, x2, y2, TBL.color.axisStroke);
+  const ruleGroup = (x1: number, y1: number, x2: number, y2: number) =>
+    rule(x1, y1, x2, y2, TBL.color.border);
+  const ruleRow = (x1: number, y1: number, x2: number, y2: number) =>
+    rule(x1, y1, x2, y2, TBL.color.gridline);
   // Hairline rule in the lighter border tone, used for the inline flanking rules on banner cells.
   const spannerLine = (x1: number, y1: number, x2: number, y2: number): SVGElement =>
-    el("line", { x1, y1, x2, y2, stroke: TBL.color.border, "stroke-width": 1 });
+    rule(x1, y1, x2, y2, TBL.color.border);
 
   const svg = el("svg", {
     xmlns: SVG_NS,
@@ -78,8 +98,15 @@ export function renderTableSvg(
 
   // ---- Header ----
   const headerG = el("g", { class: "tbl-table-header" });
+  const hasSublabel = model.leaves.some((l) => l.sublabel != null);
+  // All leaf labels share one bottom baseline (HTML vertical-align:bottom), so multi-line labels
+  // grow upward into the taller leaf tier without disturbing the row of column labels.
+  const leafLabelBottom = layout.headerHeight - (hasSublabel ? SUBLABEL_LINE : 0) - LEAF_BOTTOM_PAD;
+  const sublabelBaseline = layout.headerHeight - SUBLABEL_BOTTOM_PAD;
+
   for (const tier of layout.header) {
-    for (const { cell, rect } of tier) {
+    for (const entry of tier) {
+      const { cell, rect } = entry;
       // Subtle bg rect behind each header cell (also the rowspan-detection hook for tests).
       headerG.appendChild(
         el("rect", {
@@ -93,96 +120,105 @@ export function renderTableSvg(
       );
       const cx = rect.x + rect.w / 2;
       const isLeaf = cell.leafKey != null;
-      const leaf = isLeaf ? model.leaves.find((l) => l.key === cell.leafKey) : undefined;
-      // A leaf cell with a sublabel reserves a line below the label for it.
-      const labelY = rect.y + rect.h / 2 + HEADER_FONT / 3 - (leaf?.sublabel != null ? 7 : 0);
 
-      // Leaf header label wrapping: when header_max_lines is set, wrap the leaf label to ≤ N
-      // lines (tspans) to fit the column width. Banner/upper cells are never wrapped.
-      const wrapLines =
-        isLeaf && headerMaxLines != null
-          ? wrapToLines(cell.text, rect.w - PAD_X * 2, headerMaxLines)
-          : null;
-      if (wrapLines && wrapLines.length > 1) {
-        const lineH = HEADER_FONT + 2;
-        // Bottom-anchor the block: last line sits at labelY, earlier lines stack above.
-        const t = el("text", {
-          x: cx,
-          y: labelY - (wrapLines.length - 1) * lineH,
-          "text-anchor": "middle",
-          "font-family": TBL.font,
-          "font-size": HEADER_FONT,
-          "font-weight": 700,
-          fill: TBL.color.heading,
-        });
-        wrapLines.forEach((ln, li) => {
-          const ts = el("tspan", { x: cx, dy: li === 0 ? 0 : lineH });
-          ts.textContent = ln;
-          t.appendChild(ts);
-        });
-        headerG.appendChild(t);
+      if (isLeaf) {
+        // Bottom-aligned leaf label (one or more lines, as wrapped by the layout).
+        const lines = entry.lines ?? [cell.text];
+        if (lines.length > 1) {
+          const t = el("text", {
+            x: cx,
+            y: leafLabelBottom - (lines.length - 1) * HEADER_LINE_HEIGHT,
+            "text-anchor": "middle",
+            "font-family": TBL.font,
+            "font-size": HEADER_FONT,
+            "font-weight": 700,
+            fill: TBL.color.heading,
+          });
+          lines.forEach((ln, li) => {
+            const ts = el("tspan", { x: cx, dy: li === 0 ? 0 : HEADER_LINE_HEIGHT });
+            ts.textContent = ln;
+            t.appendChild(ts);
+          });
+          headerG.appendChild(t);
+        } else {
+          headerG.appendChild(
+            text(cx, leafLabelBottom, lines[0] ?? "", {
+              anchor: "middle",
+              weight: 700,
+              fill: TBL.color.heading,
+              size: HEADER_FONT,
+            }),
+          );
+        }
+        const leaf = model.leaves.find((l) => l.key === cell.leafKey);
+        if (leaf?.sublabel != null) {
+          headerG.appendChild(
+            text(cx, sublabelBaseline, leaf.sublabel, {
+              anchor: "middle",
+              weight: 400,
+              fill: TBL.color.muted,
+              size: SUBLABEL_FONT,
+              cls: "tbl-table-sublabel",
+            }),
+          );
+        }
       } else {
+        // Banner / upper-tier cell: vertically centered in its rect.
+        const by = rect.y + rect.h / 2 + HEADER_FONT / 3;
         headerG.appendChild(
-          text(cx, labelY, cell.text, {
+          text(cx, by, cell.text, {
             anchor: "middle",
             weight: 700,
             fill: TBL.color.heading,
             size: HEADER_FONT,
           }),
         );
-      }
-      // Banner cells (colSpan > 1) get horizontal rules flanking the centered label, extending
-      // to the cell's edges, to show the columns they govern. Disabled when spanner_rules:false.
-      if (cell.colSpan > 1 && spannerRules) {
-        const ruleY = rect.y + rect.h / 2;
-        const halfText = (measureish(cell.text) / 2) + PAD_X;
-        headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
-        headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
-      }
-      if (leaf?.sublabel != null) {
-        headerG.appendChild(
-          text(cx, labelY + SUBLABEL_FONT + 1, leaf.sublabel, {
-            anchor: "middle",
-            weight: 400,
-            fill: TBL.color.muted,
-            size: SUBLABEL_FONT,
-            cls: "tbl-table-sublabel",
-          }),
-        );
+        // Banner cells (colSpan > 1) get horizontal rules flanking the centered label, extending
+        // to the cell's edges, to show the columns they govern. Disabled when spanner_rules:false.
+        if (cell.colSpan > 1 && spannerRules) {
+          const ruleY = rect.y + rect.h / 2;
+          const halfText = measureish(cell.text) / 2 + PAD_X;
+          headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
+          headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
+        }
       }
     }
   }
-  // Tier separators: thin lines between header tiers are OFF by default — drawn only when
-  // header_tier_rules is enabled. The header→body bottom rule below always stays and spans the
-  // FULL width (x=0 → totalWidth), so it crosses the stub corner continuously (bug #4).
+  // Inter-tier rules are OFF by default; drawn (in the medium border tone) only when
+  // header_tier_rules is enabled, at the actual tier boundaries.
   const tiers = model.headerRows.length;
   if (headerTierRules) {
     for (let t = 1; t < tiers; t++) {
-      headerG.appendChild(line(0, t * TIER_HEIGHT, layout.totalWidth, t * TIER_HEIGHT));
+      headerG.appendChild(ruleGroup(0, layout.tierY[t]!, layout.totalWidth, layout.tierY[t]!));
     }
   }
-  headerG.appendChild(line(0, layout.headerHeight, layout.totalWidth, layout.headerHeight));
+  // The header→body rule always stays and spans the FULL width (x=0 → totalWidth), so it crosses
+  // the stub corner continuously (bug #4).
+  headerG.appendChild(ruleStrong(0, layout.headerHeight, layout.totalWidth, layout.headerHeight));
   svg.appendChild(headerG);
 
   // ---- Body ----
   const bodyG = el("g", { class: "tbl-table-body" });
-  for (const entry of layout.rows) {
+  layout.rows.forEach((entry, idx) => {
     if ("group" in entry) {
-      const { group, rect } = entry;
+      const { group, rect, noteLines, topGap, isFirst } = entry;
       const g = el("g", { class: "tbl-table-group" });
-      const baseY = rect.y + BODY_FONT + 4;
+      // Divider above the group (medium border tone); the first group has no rule (HTML).
+      if (!isFirst) g.appendChild(ruleGroup(0, rect.y, layout.totalWidth, rect.y));
       const x = PAD_X + group.level * INDENT_STEP;
+      const labelBaseline = rect.y + topGap + BODY_FONT;
       g.appendChild(
-        text(x, baseY, group.label, {
+        text(x, labelBaseline, group.label, {
           anchor: "start",
           weight: 700,
           fill: TBL.color.heading,
           size: BODY_FONT,
         }),
       );
-      if (group.note != null) {
+      // Group note: italic + muted, wrapped onto its own line(s) below the label.
+      noteLines.forEach((ln, li) => {
         g.appendChild(
-          text(x + measureish(group.label) + 8, baseY, group.note, {
+          text(x, labelBaseline + GROUP_NOTE_GAP + NOTE_FONT + li * GROUP_NOTE_LINE_HEIGHT, ln, {
             anchor: "start",
             weight: 400,
             fill: TBL.color.muted,
@@ -190,11 +226,9 @@ export function renderTableSvg(
             italic: true,
           }),
         );
-      }
-      // Separator under the group heading.
-      g.appendChild(line(0, rect.y + rect.h, layout.totalWidth, rect.y + rect.h));
+      });
       bodyG.appendChild(g);
-      continue;
+      return;
     }
 
     const { row, rect, cellRects } = entry;
@@ -244,15 +278,20 @@ export function renderTableSvg(
       rg.appendChild(cg);
     });
 
-    // Thin row separator.
-    rg.appendChild(line(0, rect.y + rect.h, layout.totalWidth, rect.y + rect.h));
+    // Row separator: the light gridline between data rows. Suppressed when the next entry is a
+    // group — that group draws its own (medium) divider, so the boundary shows a single rule.
+    const next = layout.rows[idx + 1];
+    const nextIsGroup = next != null && "group" in next;
+    if (!nextIsGroup) {
+      rg.appendChild(ruleRow(0, rect.y + rect.h, layout.totalWidth, rect.y + rect.h));
+    }
     bodyG.appendChild(rg);
-  }
+  });
   svg.appendChild(bodyG);
 
   // ---- Footnotes (listed below the table body, per spec §8) ----
   if (model.footnotes.length > 0) {
-    const bodyBottom = layout.headerHeight + layout.rows.length * layout.rowHeight;
+    const bodyBottom = layout.totalHeight - layout.footnotesHeight;
     const fg = el("g", { class: "tbl-table-footnotes" });
     model.footnotes.forEach((fn, i) => {
       const y = bodyBottom + FOOTNOTE_TOP_GAP + i * FOOTNOTE_LINE_HEIGHT + NOTE_FONT;
@@ -270,33 +309,8 @@ export function renderTableSvg(
   return svg;
 }
 
-// Deterministic rough text width for placing a group note after its label (no canvas needed;
-// matches the test's measureText heuristic of ~7px/char).
+// Deterministic rough text width for placing the flanking rules on a banner cell (no canvas
+// needed; matches the test's measureText heuristic of ~7px/char).
 function measureish(s: string): number {
   return s.length * 7;
-}
-
-// Greedy word-wrap into at most `maxLines` lines that each fit `maxWidth` px (using the same
-// ~7px/char heuristic as measureish). The last line absorbs any overflow rather than dropping
-// words, so no text is lost. Returns a single-element array when the label fits on one line.
-function wrapToLines(s: string, maxWidth: number, maxLines: number): string[] {
-  if (maxLines <= 1 || measureish(s) <= maxWidth) return [s];
-  const words = s.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    const next = cur ? `${cur} ${w}` : w;
-    if (measureish(next) <= maxWidth || cur === "") {
-      cur = next;
-    } else {
-      lines.push(cur);
-      cur = w;
-      if (lines.length === maxLines - 1) break;
-    }
-  }
-  // Remaining words (including the in-progress line) go onto the final line.
-  const consumed = lines.join(" ").split(/\s+/).filter(Boolean).length;
-  const rest = words.slice(consumed).join(" ");
-  if (rest) lines.push(rest);
-  return lines.length ? lines.slice(0, maxLines) : [s];
 }
