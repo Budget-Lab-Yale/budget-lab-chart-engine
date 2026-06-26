@@ -177,15 +177,17 @@ export function renderTableHtml(
       // for level-0 rows, leaving them flush at the cell edge while the corner sits at 8px.
       stubTh.style.paddingLeft = `${STUB_BASE_PAD + row.level * INDENT_STEP}px`;
 
-      // Row label. When not wrapping, place it in an inner clip block so an over-long label is
-      // clipped to the (capped) column — table cells themselves ignore overflow.
-      if (stubWrap) {
-        stubTh.textContent = row.label;
-      } else {
+      // Row label. Only a deliberately-narrow fixed stub_width clips (via an inner overflow:hidden
+      // block) — auto-sized / stub_min_width columns are sized to fit, so clipping them would cut
+      // text on sub-pixel measurement differences. Mirrors the SVG, which also clips only for a
+      // fixed stub_width.
+      if (!stubWrap && spec?.stub_width != null) {
         const clip = doc.createElement("span");
         clip.className = "tbl-table-stub-clip";
         clip.textContent = row.label;
         stubTh.appendChild(clip);
+      } else {
+        stubTh.textContent = row.label;
       }
 
       tr.appendChild(stubTh);
