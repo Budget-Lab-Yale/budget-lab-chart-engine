@@ -57,6 +57,10 @@ export interface RenderOptions {
   /** SHARED-mode small multiples: the inter-column gap (px) used by the per-column width math.
    *  Must match the live grid's column-gap. Absent → 0. */
   gridGap?: number;
+  /** Area charts: visual stack order bottom→top (overrides series_order for stacking only —
+   *  legend order + colors stay series_order). The live layer passes a reordered list when series
+   *  are selected (selected-to-bottom in click order) so a user can read a series against zero. */
+  stackOrder?: string[];
 }
 
 export interface LegendItem {
@@ -414,6 +418,9 @@ export function renderPane(
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),
+    // Dynamic stack order (area): the live layer passes a reordered list when a series is selected
+    // (selected-to-bottom); the mark stacks in this order while legend/colors stay series_order.
+    ...(opts.stackOrder ? { stackOrder: opts.stackOrder } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.

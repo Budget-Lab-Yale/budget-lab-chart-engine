@@ -37,6 +37,9 @@ export interface CrosshairOptions {
   /** series → marker symbol name (line charts with point markers). When set, the coordinated
    *  hover dot takes the series' shape so it matches the static marker. */
   symbols?: Map<string, string>;
+  /** Append a cumulative "Total" row (sum of the shown series at the hovered x) to the tooltip —
+   *  used for stacked area, where the stack height is the meaningful aggregate. */
+  showTotal?: boolean;
 }
 
 let activeTooltip: HTMLElement | null = null; // single shared tooltip element
@@ -182,16 +185,24 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       seriesOrder && seriesOrder.length
         ? seriesOrder.filter((s) => bySeries.has(s))
         : [...bySeries.keys()];
+    let total = 0;
+    let totalAny = false;
     for (const series of tipSeries) {
       const m = bySeries.get(series)!;
       const v = m.get(snap);
       if (v == null || Number.isNaN(v)) continue;
+      total += v;
+      totalAny = true;
       const dot = colors?.get(series) || "currentColor";
       const isDashed = dashedSeries?.has(series);
       const display = (seriesLabels && seriesLabels[series]) || series;
       const swatchClass = isDashed ? "tbl-tooltip-swatch is-dashed" : "tbl-tooltip-swatch";
       const swatchStyle = isDashed ? `--swatch-color: ${dot}` : `background: ${dot}`;
       html += `<div class="tbl-tooltip-row"><span class="${swatchClass}" style="${swatchStyle}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    }
+    // Cumulative total (stacked area): a bold summary row, set off by a top rule.
+    if (opts.showTotal && totalAny) {
+      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600"><span class="tbl-tooltip-swatch" style="background:transparent"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
     }
     tip!.innerHTML = html;
 

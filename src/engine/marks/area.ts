@@ -16,12 +16,18 @@ export function buildAreaMarks(
   const facetChannels = fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
   const seriesNames = ctx.seriesNames ?? [];
-  const rank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
+  // Stacking order (bottom→top): the dynamic stackOrder when the live layer supplies one
+  // (selected-to-bottom restacking), else series_order. Any series missing from stackOrder keeps
+  // its series_order position after the listed ones.
+  const stackSeq =
+    ctx.stackOrder && ctx.stackOrder.length
+      ? [...ctx.stackOrder, ...seriesNames.filter((s) => !ctx.stackOrder!.includes(s))]
+      : seriesNames;
+  const rank = new Map<string, number>(stackSeq.map((s, i) => [s, i]));
 
-  // Stack order = series_order, bottom→top: stable-sort the rows by series rank so the
-  // first-declared series is encountered first and stacks at the bottom (Plot stacks z groups in
-  // first-appearance order). The within-series x order is preserved (input is time-sorted), so each
-  // area path connects its points correctly.
+  // Stable-sort the rows by stack rank so the bottom series is encountered first and stacks at the
+  // bottom (Plot stacks z groups in first-appearance order). The within-series x order is preserved
+  // (input is time-sorted), so each area path connects its points correctly.
   const sorted = data
     .map((r, i) => ({ r, i }))
     .sort((a, b) => (rank.get(a.r.series) ?? 0) - (rank.get(b.r.series) ?? 0) || a.i - b.i)
@@ -44,9 +50,9 @@ export function buildAreaMarks(
     }),
   ];
 
-  // Plot emits one <path> per z group in stack order; tag each with its series so legend
-  // hover/pin/dim works like the other chart types.
-  const present = seriesNames.filter((s) => sorted.some((r) => r.series === s));
+  // Plot emits one <path> per z group in STACK order; tag each with its series so legend
+  // hover/pin/dim maps correctly even after a restack.
+  const present = stackSeq.filter((s) => sorted.some((r) => r.series === s));
   const tagging = [{ selector: 'g[aria-label="area"] path', seriesOrder: present }];
 
   // Categorical x: areas span a point scale (small edge inset) rather than the bar band scale,

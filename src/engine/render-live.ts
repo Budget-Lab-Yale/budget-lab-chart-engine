@@ -776,6 +776,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         dashedSeries: dashedNames,
         seriesLabels,
         seriesOrder,
+        // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
+        showTotal: spec.chartType === "area",
       });
     }
 

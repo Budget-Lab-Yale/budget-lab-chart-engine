@@ -75,6 +75,9 @@ export interface MarkContext {
   /** Bars: clip marks to the plot frame. Set when the y-domain excludes 0 (a truncated/non-zero
    *  baseline), so bars drawn from 0 don't overflow below the plot into the x-axis labels. */
   clipMarks?: boolean;
+  /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
+   *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */
+  stackOrder?: string[];
 }
 
 export interface MarkLayers {

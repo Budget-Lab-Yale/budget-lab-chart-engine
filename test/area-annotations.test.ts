@@ -27,6 +27,15 @@ describe("buildAreaMarks", () => {
     expect(layers.tagging[0]!.seriesOrder).toEqual(["A", "B"]); // bottom→top = series_order
   });
 
+  it("stackOrder reorders the stack (and path tagging) without changing series_order", () => {
+    const reordered = buildAreaMarks(rows, { chartType: "area" } as ChartSpec, {
+      ...ctx,
+      stackOrder: ["B", "A"], // B to the bottom
+    } as MarkContext);
+    // Paths are emitted in stack order, so tagging follows the new bottom→top order.
+    expect(reordered.tagging[0]!.seriesOrder).toEqual(["B", "A"]);
+  });
+
   it("handles a single series (fill to zero) without error", () => {
     const single = rows.filter((r) => r.series === "A");
     const layers = buildAreaMarks(single, { chartType: "area" } as ChartSpec, {
