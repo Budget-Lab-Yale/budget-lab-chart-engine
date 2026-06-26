@@ -697,6 +697,11 @@ body {
   text-align: left;
 }
 
+/* Leaf header over a text column — left-aligned to match its left-aligned cells. */
+.tbl-table thead th.is-text {
+  text-align: left;
+}
+
 /* ---- Sub-label: displayed on its own line below the leaf header text ---- */
 .tbl-table-sublabel {
   display: block;

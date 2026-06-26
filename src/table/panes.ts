@@ -2,6 +2,10 @@
 // one untitled pane holding all rows, so callers can treat both cases uniformly.
 import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
+import type { TableModel } from "./model";
+import type { TableLayout } from "./layout";
+import { buildTableModel } from "./model";
+import { layoutTable, layoutOptionsFromSpec } from "./layout";
 
 export interface Pane {
   /** The pane column value (empty string for a single-table spec). */
@@ -44,4 +48,53 @@ export function splitPanes(spec: TableSpec, rows: TidyRow[]): Pane[] {
     title: spec.pane_titles?.[v] ?? v,
     rows: groups.get(v) ?? [],
   }));
+}
+
+/** Resolve the corner (stub header) label for a given pane: a string applies to all panes; a map
+ *  is keyed by pane value. */
+export function resolveStubHeader(spec: TableSpec, paneValue: string): string {
+  const sh = spec.stub_header;
+  if (sh == null) return "";
+  return typeof sh === "string" ? sh : (sh[paneValue] ?? "");
+}
+
+export interface LaidPane { value: string; title: string; model: TableModel; layout: TableLayout; }
+
+/**
+ * Build + lay out every pane with a SHARED stub width (the widest pane's stub), so the first column
+ * lines up across panes. When `fill` is set, also stretch each pane's data columns to a shared total
+ * width so the right edges align too (for the PNG); the HTML instead fills the card and only needs
+ * the shared stub. Pane corner labels (stub_header) are resolved per pane. Footnotes are stripped
+ * from pane models when `fill` (the PNG lists them once at figure level).
+ */
+export function layoutPanes(
+  spec: TableSpec,
+  rows: TidyRow[],
+  measureText: (s: string, fontPx: number, weight: number) => number,
+  fill: boolean,
+): LaidPane[] {
+  const opts = layoutOptionsFromSpec(spec);
+  const panes = splitPanes(spec, rows);
+
+  // Pass 1: natural layouts to discover the shared stub width and (for fill) the shared total.
+  const natural = panes.map((p) => {
+    const model = buildTableModel(spec, p.rows);
+    model.stubHeader = resolveStubHeader(spec, p.value);
+    return { p, model, layout: layoutTable(model, { width: 720, measureText, ...opts }) };
+  });
+  const sharedStub = Math.max(...natural.map((n) => n.layout.stubWidth));
+  const sharedTotal = Math.max(...natural.map((n) => sharedStub + (n.layout.totalWidth - n.layout.stubWidth)));
+
+  // Pass 2: re-lay each pane with the shared stub (and shared total when filling).
+  return natural.map(({ p, model }) => {
+    const m = fill ? { ...model, footnotes: [] } : model;
+    const layout = layoutTable(m, {
+      width: 720,
+      measureText,
+      ...opts,
+      stubWidth: sharedStub,
+      ...(fill ? { fillWidth: sharedTotal } : {}),
+    });
+    return { value: p.value, title: p.title, model: m, layout };
+  });
 }

@@ -7,7 +7,7 @@ import type { TableModel } from "./model.js";
 import { buildTableModel } from "./model.js";
 import { layoutTable, layoutOptionsFromSpec } from "./layout.js";
 import { renderTableHtml } from "./render-html.js";
-import { splitPanes } from "./panes.js";
+import { splitPanes, layoutPanes } from "./panes.js";
 import { buildFigureHeader } from "../engine/render-live.js";
 import { renderSourceLine } from "../engine/source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -408,15 +408,16 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
   const fnBlock = doc.createElement("div");
   fnBlock.className = "tbl-table-footnotes";
 
-  function drawAll(width: number): void {
+  function drawAll(_width: number): void {
     const fnMap = new Map<string, string>();
-    panes.forEach((pane, i) => {
-      const model = buildTableModel(spec, pane.rows);
-      const layout = layoutTable(model, { width, measureText, ...layoutOptionsFromSpec(spec) });
-      const table = renderTableHtml(model, layout, doc, spec);
+    // Panes share a stub width (planned across panes) so their first columns align; data columns
+    // stay flexible to fill the card.
+    const laid = layoutPanes(spec, rows, measureText, false);
+    laid.forEach((lp, i) => {
+      const table = renderTableHtml(lp.model, lp.layout, doc, spec, { flexDataCols: true });
       paneScrolls[i]!.replaceChildren(table);
-      attachTableInteractivity(table, model, spec);
-      for (const fn of model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
+      attachTableInteractivity(table, lp.model, spec);
+      for (const fn of lp.model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
     });
     fnBlock.replaceChildren();
     if (fnMap.size > 0) {

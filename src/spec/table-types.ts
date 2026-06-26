@@ -29,6 +29,9 @@ export interface TableSpec {
   /** Stub columns (row nesting): each entry is a column name or {label: "display name"}.
    *  The last entry holds the row label. */
   stub: Array<string | { label: string }>;
+  /** Top-left corner label above the row labels. A string applies to all panes; a { paneValue:
+   *  label } map sets it per pane (multi-pane). Omit for a blank corner. */
+  stub_header?: string | Record<string, string>;
   /** Header columns (column nesting): each entry is a column name.
    *  The last entry holds the leaf metric key. */
   header: string[];

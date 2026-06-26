@@ -281,16 +281,15 @@ describe("layoutTable — width + wrap config (5c)", () => {
     expect(flooredRow.stubLines).toBeUndefined();
   });
 
-  it("fillWidth stretches the table to a shared width, scaling stub + columns proportionally", () => {
+  it("fillWidth widens the data columns to a shared total, leaving the stub unchanged", () => {
     const { model, layout } = build();
     const target = layout.totalWidth + 200;
     const filled = layoutTable(model, { width: 800, measureText, fillWidth: target });
-    expect(filled.totalWidth).toBe(target);
-    const f = target / layout.totalWidth;
-    expect(filled.stubWidth).toBeCloseTo(layout.stubWidth * f, 5);
-    filled.colW.forEach((w, i) => expect(w).toBeCloseTo(layout.colW[i]! * f, 5));
-    // The last cell's right edge reaches the shared width; heights are unchanged.
-    expect(filled.colX[filled.colX.length - 1]! + filled.colW[filled.colW.length - 1]!).toBeCloseTo(target, 5);
+    expect(filled.totalWidth).toBeCloseTo(target, 5);
+    expect(filled.stubWidth).toBe(layout.stubWidth); // stub stays put
+    const dataBefore = layout.colW.reduce((a, b) => a + b, 0);
+    const dataAfter = filled.colW.reduce((a, b) => a + b, 0);
+    expect(dataAfter).toBeCloseTo(dataBefore + 200, 5); // data columns absorbed the extra
     expect(filled.totalHeight).toBe(layout.totalHeight);
     // fillWidth ≤ natural is a no-op.
     const noop = layoutTable(model, { width: 800, measureText, fillWidth: layout.totalWidth - 50 });

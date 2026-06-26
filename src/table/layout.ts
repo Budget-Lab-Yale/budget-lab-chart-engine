@@ -228,6 +228,18 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
         ? Math.max(opts.stubMinWidth ?? 0, widestWord + padX)
         : Math.max(naturalStubW, opts.stubMinWidth ?? 0);
 
+  // ---- fillWidth: stretch the table to a shared total by widening the DATA columns only (the stub
+  // stays put). Used to align multi-pane sub-tables, which pin the stub to a shared width and then
+  // fill — so both the stub column and the right edge line up across panes. ----
+  const dataNatural = colW.reduce((a, b) => a + b, 0);
+  if (opts.fillWidth != null && dataNatural > 0) {
+    const targetData = opts.fillWidth - stubWidth;
+    if (targetData > dataNatural) {
+      const f = targetData / dataNatural;
+      for (let i = 0; i < colW.length; i++) colW[i]! *= f;
+    }
+  }
+
   // ---- Column x offsets, starting after the stub column. ----
   const colX: number[] = [];
   let x = stubWidth;
@@ -340,30 +352,6 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       : 0;
 
   const totalHeight = y + footnotesHeight;
-
-  // Optional horizontal stretch to a shared width (multi-pane alignment): scale every x/width by a
-  // single factor so columns keep their relative proportions. Heights are untouched.
-  if (opts.fillWidth != null && opts.fillWidth > totalWidth) {
-    const f = opts.fillWidth / totalWidth;
-    const sxRect = (r: CellRect): CellRect => ({ ...r, x: r.x * f, w: r.w * f });
-    return {
-      totalWidth: opts.fillWidth,
-      totalHeight,
-      stubWidth: stubWidth * f,
-      colX: colX.map((n) => n * f),
-      colW: colW.map((n) => n * f),
-      headerHeight,
-      rowHeight,
-      tierY,
-      footnotesHeight,
-      header: header.map((tier) => tier.map((e) => ({ ...e, rect: sxRect(e.rect) }))),
-      rows: rows.map((e) =>
-        "group" in e
-          ? { ...e, rect: sxRect(e.rect) }
-          : { ...e, rect: sxRect(e.rect), cellRects: e.cellRects.map(sxRect) },
-      ),
-    };
-  }
 
   return {
     totalWidth, totalHeight,

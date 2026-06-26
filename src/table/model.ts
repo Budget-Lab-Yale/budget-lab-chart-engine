@@ -2,7 +2,7 @@ import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
 import { resolveFormat, formatCell } from "./format";
 
-export interface LeafColumn { key: string; path: string[]; label: string; sublabel?: string; }
+export interface LeafColumn { key: string; path: string[]; label: string; sublabel?: string; isText?: boolean; }
 export interface HeaderCell { text: string; colSpan: number; rowSpan: number; leafKey?: string; }
 export interface Cell { value: number | null; text: string; isText?: boolean; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
 export interface BodyRow { stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; }   // cells aligned to leaves
@@ -250,11 +250,27 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
     ? Object.entries(spec.footnotes).map(([marker, text]) => ({ marker, text }))
     : [];
 
+  // Mark a leaf as a text column when all its non-empty cells are text (no numbers) — drives
+  // left alignment of both the cells and the column header.
+  leaves.forEach((leaf, i) => {
+    let hasText = false;
+    let hasNum = false;
+    for (const b of body) {
+      if (b.kind !== "row") continue;
+      const c = b.row.cells[i];
+      if (c?.isText) hasText = true;
+      else if (c && c.value != null) hasNum = true;
+    }
+    if (hasText && !hasNum) leaf.isText = true;
+  });
+
   return {
     leaves,
     headerRows,
     body,
-    stubHeader: "",
+    // Corner (top-left) label. A string applies to every pane; a per-pane map is resolved by the
+    // multi-pane layer, which overrides this afterward.
+    stubHeader: typeof spec.stub_header === "string" ? spec.stub_header : "",
     footnotes,
   };
 }

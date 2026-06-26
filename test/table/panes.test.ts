@@ -46,3 +46,33 @@ describe("splitPanes", () => {
     expect(panes.find((p) => p.value === "B")!.title).toBe("B");
   });
 });
+
+import { resolveStubHeader, layoutPanes } from "../../src/table/panes";
+
+describe("resolveStubHeader", () => {
+  it("string applies to all panes; map keys by pane value; default empty", () => {
+    expect(resolveStubHeader({ ...base, stub_header: "X" }, "A")).toBe("X");
+    expect(resolveStubHeader({ ...base, stub_header: { A: "Alpha" } }, "A")).toBe("Alpha");
+    expect(resolveStubHeader({ ...base, stub_header: { A: "Alpha" } }, "B")).toBe("");
+    expect(resolveStubHeader(base, "A")).toBe("");
+  });
+});
+
+describe("layoutPanes", () => {
+  const measureText = (s: string) => (s ?? "").length * 7;
+  const rows2 = [
+    { section: "A", row: "x", metric: "m", value: "1" },
+    { section: "B", row: "a very long row label", metric: "m", value: "2" },
+  ] as any;
+
+  it("aligns the stub width across panes", () => {
+    const laid = layoutPanes({ ...base, pane: "section" }, rows2, measureText, false);
+    expect(laid.length).toBe(2);
+    expect(laid[0]!.layout.stubWidth).toBe(laid[1]!.layout.stubWidth);
+  });
+
+  it("with fill, aligns the total widths across panes", () => {
+    const laid = layoutPanes({ ...base, pane: "section" }, rows2, measureText, true);
+    expect(laid[0]!.layout.totalWidth).toBeCloseTo(laid[1]!.layout.totalWidth, 5);
+  });
+});

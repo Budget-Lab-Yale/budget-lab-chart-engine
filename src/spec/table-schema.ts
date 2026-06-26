@@ -39,6 +39,7 @@ export const TABLE_SPEC_SCHEMA = {
     subtitle: { type: "string" },
     data: { type: "string", minLength: 1 },
     stub: { type: "array", items: STUB_ITEM },
+    stub_header: { anyOf: [{ type: "string" }, { type: "object", additionalProperties: { type: "string" } }] },
     header: { type: "array", items: { type: "string" } },
     value: { type: "string" },
     pane: { type: "string" },

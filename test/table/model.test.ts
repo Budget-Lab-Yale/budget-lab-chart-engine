@@ -165,3 +165,32 @@ it("keeps non-numeric values as text cells (verbatim, no numeric formatting)", (
   // Blank: stays a null numeric cell, not text.
   expect(cells[2].isText).toBeUndefined();
 });
+
+it("flags a pure-text column as isText (mixed/numeric columns are not)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 0 } },
+  };
+  const pureText = [
+    { row: "a", metric: "Details", value: "free text" },
+    { row: "b", metric: "Details", value: "more text" },
+  ] as any;
+  expect(buildTableModel(spec, pureText).leaves[0]!.isText).toBe(true);
+
+  const mixed = [
+    { row: "a", metric: "Details", value: "free text" },
+    { row: "b", metric: "Details", value: "42" },
+  ] as any;
+  expect(buildTableModel(spec, mixed).leaves[0]!.isText).toBeUndefined();
+});
+
+it("sets the stub corner from stub_header (string form)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value", stub_header: "Parameter",
+    stub: [{ label: "row" }], header: ["metric"],
+  };
+  const m = buildTableModel(spec, [{ row: "a", metric: "M", value: "1" }] as any);
+  expect(m.stubHeader).toBe("Parameter");
+});

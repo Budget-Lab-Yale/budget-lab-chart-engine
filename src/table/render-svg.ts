@@ -135,39 +135,43 @@ export function renderTableSvg(
       const isLeaf = cell.leafKey != null;
 
       if (isLeaf) {
-        // Bottom-aligned leaf label (one or more lines, as wrapped by the layout).
+        // Leaf label, bottom-aligned. Over a text column it left-aligns to match the cells;
+        // otherwise it is centered.
+        const leaf = model.leaves.find((l) => l.key === cell.leafKey);
+        const isTextCol = leaf?.isText === true;
+        const hx = isTextCol ? rect.x + PAD_X : cx;
+        const anchor = isTextCol ? "start" : "middle";
         const lines = entry.lines ?? [cell.text];
         if (lines.length > 1) {
           const t = el("text", {
-            x: cx,
+            x: hx,
             y: leafLabelBottom - (lines.length - 1) * HEADER_LINE_HEIGHT,
-            "text-anchor": "middle",
+            "text-anchor": anchor,
             "font-family": TBL.font,
             "font-size": HEADER_FONT,
             "font-weight": 700,
             fill: TBL.color.heading,
           });
           lines.forEach((ln, li) => {
-            const ts = el("tspan", { x: cx, dy: li === 0 ? 0 : HEADER_LINE_HEIGHT });
+            const ts = el("tspan", { x: hx, dy: li === 0 ? 0 : HEADER_LINE_HEIGHT });
             ts.textContent = ln;
             t.appendChild(ts);
           });
           headerG.appendChild(t);
         } else {
           headerG.appendChild(
-            text(cx, leafLabelBottom, lines[0] ?? "", {
-              anchor: "middle",
+            text(hx, leafLabelBottom, lines[0] ?? "", {
+              anchor,
               weight: 700,
               fill: TBL.color.heading,
               size: HEADER_FONT,
             }),
           );
         }
-        const leaf = model.leaves.find((l) => l.key === cell.leafKey);
         if (leaf?.sublabel != null) {
           headerG.appendChild(
-            text(cx, sublabelBaseline, leaf.sublabel, {
-              anchor: "middle",
+            text(hx, sublabelBaseline, leaf.sublabel, {
+              anchor,
               weight: 400,
               fill: TBL.color.muted,
               size: SUBLABEL_FONT,
@@ -196,6 +200,17 @@ export function renderTableSvg(
         }
       }
     }
+  }
+  // Stub corner label (stub_header), left-aligned and bottom-aligned with the leaf headers.
+  if (model.stubHeader) {
+    headerG.appendChild(
+      text(PAD_X, leafLabelBottom, model.stubHeader, {
+        anchor: "start",
+        weight: 700,
+        fill: TBL.color.heading,
+        size: HEADER_FONT,
+      }),
+    );
   }
   // Inter-tier rules are OFF by default; drawn (in the medium border tone) only when
   // header_tier_rules is enabled, at the actual tier boundaries.

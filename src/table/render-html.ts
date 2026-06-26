@@ -19,6 +19,7 @@ export function renderTableHtml(
   layout: TableLayout,
   doc: Document,
   spec?: TableSpec,
+  opts?: { flexDataCols?: boolean },
 ): HTMLTableElement {
   const { leaves, headerRows, body } = model;
   const { stubWidth, colW } = layout;
@@ -27,6 +28,9 @@ export function renderTableHtml(
   // Stub wraps only when explicitly opted in (and not also forced nowrap); otherwise it stays on
   // one line and is clipped to the column when capped narrower than the label.
   const stubWrap = spec?.stub_wrap === true && !stubNowrap;
+  // Flexible data columns: pin only the stub, let data columns absorb the card width. Used for
+  // stub_wrap and for multi-pane (so all panes share the pinned stub and align).
+  const flexData = stubWrap || opts?.flexDataCols === true;
 
   const table = doc.createElement("table");
   table.className = "tbl-table";
@@ -49,7 +53,7 @@ export function renderTableHtml(
   // space flows to them rather than re-widening the pinned stub.
   leaves.forEach((_, i) => {
     const col = doc.createElement("col");
-    if (!stubWrap) col.style.width = `${colW[i]}px`;
+    if (!flexData) col.style.width = `${colW[i]}px`;
     colgroup.appendChild(col);
   });
   table.appendChild(colgroup);
@@ -77,6 +81,9 @@ export function renderTableHtml(
       th.scope = "col";
       th.colSpan = hCell.colSpan;
       th.rowSpan = hCell.rowSpan;
+      // A leaf header over a text column left-aligns to match its (left-aligned) cells.
+      const leafForCell = hCell.leafKey != null ? leaves.find((l) => l.key === hCell.leafKey) : undefined;
+      if (leafForCell?.isText) th.classList.add("is-text");
 
       // Banner cells (spanning >1 column) get flanking rules. The flex layout that draws the
       // rules MUST live on an inner wrapper, not the <th> itself — `display:flex` on a table

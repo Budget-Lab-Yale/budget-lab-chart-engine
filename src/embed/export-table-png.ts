@@ -9,7 +9,7 @@ import { buildTableModel } from "../table/model.js";
 import { layoutTable, layoutOptionsFromSpec } from "../table/layout.js";
 import { renderTableSvg } from "../table/render-svg.js";
 import { makeMeasureText } from "../table/measure.js";
-import { splitPanes } from "../table/panes.js";
+import { layoutPanes } from "../table/panes.js";
 import {
   W,
   MARGIN,
@@ -109,28 +109,16 @@ function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElemen
   const note = Array.isArray(spec.notes) ? spec.notes.join("  ") : (spec.notes ?? "");
 
   const measureText = makeMeasureText();
-  const opts = layoutOptionsFromSpec(spec);
-  const panes = splitPanes(spec, rows);
+  // Panes laid out with a shared stub width and stretched to a shared total width so their left
+  // edges, first columns, and right edges all align. Pane models have footnotes stripped (listed
+  // once at the figure level below).
+  const laid = layoutPanes(spec, rows, measureText, true);
+  const sharedTableW = Math.max(...laid.map((l) => l.layout.totalWidth));
 
-  // First pass: natural layouts to find the shared width across panes.
-  const natural = panes.map((p) => {
-    const model = buildTableModel(spec, p.rows);
-    return { pane: p, model, layout: layoutTable(model, { width: INNER_W, measureText, ...opts }) };
-  });
-  const sharedTableW = Math.max(...natural.map((b) => b.layout.totalWidth));
-
-  // Figure-level footnotes: union across panes, deduped by marker, in first-seen order.
-  const fnMap = new Map<string, string>();
-  for (const b of natural) for (const fn of b.model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
-  const figFootnotes = [...fnMap].map(([marker, text]) => ({ marker, text }));
-
-  // Second pass: re-lay each pane to the shared width, with footnotes stripped (rendered once below
-  // all panes at the figure level).
-  const laid = natural.map((b) => {
-    const model = { ...b.model, footnotes: [] };
-    const layout = layoutTable(model, { width: INNER_W, measureText, fillWidth: sharedTableW, ...opts });
-    return { pane: b.pane, model, layout };
-  });
+  // Figure-level footnotes (spec defines them once; the same set applies to every pane).
+  const figFootnotes = spec.footnotes
+    ? Object.entries(spec.footnotes).map(([marker, text]) => ({ marker, text }))
+    : [];
 
   const width = Math.max(MIN_TABLE_FRAME, sharedTableW + MARGIN * 2);
   const { root, bgRect } = createExportRoot(document, width, 1);
@@ -138,12 +126,12 @@ function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElemen
   const topCursor = composeTopChrome(document, root, { title, subtitle, width });
   let cursor = topCursor + BODY_TOP_GAP;
 
-  laid.forEach(({ pane, model, layout }, i) => {
+  laid.forEach(({ title, model, layout }, i) => {
     if (i > 0) cursor += PANE_GAP;
-    if (pane.title) {
+    if (title) {
       cursor += PANE_TITLE_RISE;
       root.appendChild(
-        textEl(document, MARGIN, cursor, pane.title, { size: PANE_TITLE_SIZE, weight: W_BOLD, fill: HEADING }),
+        textEl(document, MARGIN, cursor, title, { size: PANE_TITLE_SIZE, weight: W_BOLD, fill: HEADING }),
       );
       cursor += PANE_TITLE_GAP;
     }
