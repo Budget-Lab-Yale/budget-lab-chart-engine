@@ -203,3 +203,35 @@ describe("renderTableHtml — 2-tier grouped body", () => {
     expect(labels).toEqual(["r1", "r2", "r3"]);
   });
 });
+
+describe("renderTableHtml — config hooks", () => {
+  it("spanner_rules:false drops the is-spanner class (plain banner text)", () => {
+    const m = buildTableModel(spec, rows);
+    const l = layoutTable(m, { width: 800, measureText });
+    const withRules = renderTableHtml(m, l, document, spec);
+    expect(withRules.querySelector("thead th.is-spanner")).not.toBeNull();
+
+    const noRules = renderTableHtml(m, l, document, { ...spec, spanner_rules: false });
+    expect(noRules.querySelector("thead th.is-spanner")).toBeNull();
+    // The banner text is still present (as a plain <th>).
+    const banners = Array.from(noRules.querySelectorAll("thead th")).map((t) => t.textContent);
+    expect(banners.some((t) => t?.includes("Conv"))).toBe(true);
+  });
+
+  it("header_max_lines adds the clamp class + --tbl-header-lines on leaf headers", () => {
+    const m = buildTableModel(spec, rows);
+    const l = layoutTable(m, { width: 800, measureText, headerMaxLines: 2 });
+    const table = renderTableHtml(m, l, document, { ...spec, header_max_lines: 2 });
+    const clamped = table.querySelector("thead th.tbl-table-header-clamp") as HTMLElement;
+    expect(clamped).not.toBeNull();
+    expect(clamped.style.getPropertyValue("--tbl-header-lines")).toBe("2");
+  });
+
+  it("stub_nowrap adds the is-nowrap class on stub cells and group inners", () => {
+    const m = buildTableModel(spec2, rows2);
+    const l = layoutTable(m, { width: 600, measureText, stubNowrap: true });
+    const table = renderTableHtml(m, l, document, { ...spec2, stub_nowrap: true });
+    expect(table.querySelector("tbody th.tbl-table-stub.is-nowrap")).not.toBeNull();
+    expect(table.querySelector(".tbl-table-group-inner.is-nowrap")).not.toBeNull();
+  });
+});

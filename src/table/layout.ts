@@ -7,6 +7,14 @@ import { TBL } from "../engine/theme";
 export interface LayoutOptions {
   width: number;
   measureText: (s: string, fontPx: number, weight: number) => number;
+  /** Fixed px width for the stub column (overrides the computed width). */
+  stubWidth?: number;
+  /** When true, size the stub to the longest label (no wrapping). */
+  stubNowrap?: boolean;
+  /** Fixed px width for data columns: a single number (all leaves) or per-leaf-key map. */
+  columnWidth?: number | Record<string, number>;
+  /** Wrap bottom-tier (leaf) header labels to at most N lines. */
+  headerMaxLines?: number;
 }
 export interface CellRect { x: number; y: number; w: number; h: number; }
 export interface TableLayout {
@@ -26,6 +34,12 @@ const bodyWeight = 400;
 const padX = 16;            // total horizontal padding per cell (left + right)
 const tierHeight = 24;      // one header tier's row height
 const sublabelLine = 14;    // extra height on the bottom tier when any leaf has a sublabel
+// Flanking-rule gap on a banner cell (one side). Mirrors the SVG renderer's PAD_X inset (8px),
+// so the banner-width fit reserves room for the rule gaps on both sides of the centered text.
+const spannerGap = 8;
+// Per-line height for wrapped leaf-header labels (header_max_lines). Lines beyond the first
+// add this much to the bottom tier.
+const headerLineHeight = 14;
 const rowHeight = 22;       // one body row's height
 // Per-level indentation of stub labels. Exported so the HTML and SVG renderers indent identically.
 export const INDENT_STEP = 14;
@@ -37,15 +51,29 @@ export const FOOTNOTE_LINE_HEIGHT = 16;
 export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout {
   const { measureText } = opts;
   const leaves = model.leaves;
+  const headerMaxLines = opts.headerMaxLines;
 
   // Body rows only (group entries don't have per-leaf cells).
   const bodyRows = model.body
     .filter((b): b is { kind: "row"; row: BodyRow } => b.kind === "row")
     .map((b) => b.row);
 
+  // Resolve a per-leaf width override from opts.columnWidth (single number or per-key map).
+  const colWidthOverride = (leafKey: string): number | undefined => {
+    const cw = opts.columnWidth;
+    if (cw == null) return undefined;
+    if (typeof cw === "number") return cw;
+    return cw[leafKey];
+  };
+
   // ---- Per-leaf natural width = max(label, sublabel, every body cell text) + padding. ----
+  // When header_max_lines is set, the leaf header label is allowed to WRAP, so it does NOT force
+  // the column wide enough for the full label (only the sublabel + body cells do). A per-leaf
+  // columnWidth override always wins.
   const colW = leaves.map((leaf, i) => {
-    let natural = measureText(leaf.label, headerFontPx, headerWeight);
+    const override = colWidthOverride(leaf.key);
+    if (override != null) return override;
+    let natural = headerMaxLines != null ? 0 : measureText(leaf.label, headerFontPx, headerWeight);
     if (leaf.sublabel != null) {
       natural = Math.max(natural, measureText(leaf.sublabel, headerFontPx, bodyWeight));
     }
@@ -56,7 +84,36 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     return natural + padX;
   });
 
+  // ---- Banner fit: a banner (colSpan>1) whose text is wider than the columns it spans widens
+  // them. Required width = text + padX + 2*spannerGap (room for the flanking rules). If that
+  // exceeds the spanned leaves' total colW, distribute the deficit evenly across them. ----
+  for (const tierCells of model.headerRows) {
+    let cursor = 0;
+    for (const cell of tierCells) {
+      // Anchor leafKey-bearing cells; otherwise consume from the running cursor.
+      let start = cursor;
+      if (cell.leafKey != null) {
+        const found = leaves.findIndex((l) => l.key === cell.leafKey);
+        if (found >= 0) start = found;
+      }
+      const end = start + cell.colSpan - 1;
+      if (cell.colSpan > 1) {
+        const required =
+          measureText(cell.text, headerFontPx, headerWeight) + padX + 2 * spannerGap;
+        let spanned = 0;
+        for (let k = start; k <= end && k < colW.length; k++) spanned += colW[k]!;
+        if (required > spanned) {
+          const add = (required - spanned) / cell.colSpan;
+          for (let k = start; k <= end && k < colW.length; k++) colW[k]! += add;
+        }
+      }
+      cursor = end + 1;
+    }
+  }
+
   // ---- Stub width = max(group labels, row labels + indent) + padding. ----
+  // With stub_nowrap the longest label must fit on one line — same natural-width computation,
+  // but the renderers add `white-space:nowrap` so it isn't clipped.
   let stubNatural = measureText(model.stubHeader, headerFontPx, headerWeight);
   for (const b of model.body) {
     if (b.kind === "group") {
@@ -71,7 +128,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       );
     }
   }
-  const stubWidth = stubNatural + padX;
+  const stubWidth = opts.stubWidth != null ? opts.stubWidth : stubNatural + padX;
 
   // ---- Column x offsets, starting after the stub column. ----
   const colX: number[] = [];
@@ -80,10 +137,25 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
 
   const totalWidth = stubWidth + colW.reduce((a, b) => a + b, 0);
 
-  // ---- Header height: tiers × tierHeight, plus a sublabel line if any leaf has a sublabel. ----
+  // ---- Header height: tiers × tierHeight, plus a sublabel line if any leaf has a sublabel, plus
+  // extra lines on the bottom tier when leaf labels wrap (header_max_lines). ----
   const tiers = model.headerRows.length;
   const hasSublabel = leaves.some((l) => l.sublabel != null);
-  const headerHeight = tiers * tierHeight + (hasSublabel ? sublabelLine : 0);
+  // Extra height for wrapped leaf headers: count the lines actually needed (capped at N), so a
+  // single-line label doesn't inflate the header. Estimate lines from text width vs. column width.
+  let headerWrapExtra = 0;
+  if (headerMaxLines != null && headerMaxLines > 1) {
+    let maxLines = 1;
+    leaves.forEach((leaf, i) => {
+      const avail = Math.max(1, colW[i]! - padX);
+      const textW = measureText(leaf.label, headerFontPx, headerWeight);
+      const lines = Math.min(headerMaxLines, Math.max(1, Math.ceil(textW / avail)));
+      if (lines > maxLines) maxLines = lines;
+    });
+    headerWrapExtra = (maxLines - 1) * headerLineHeight;
+  }
+  const headerHeight =
+    tiers * tierHeight + (hasSublabel ? sublabelLine : 0) + headerWrapExtra;
 
   // ---- Header cell rects. Walk each tier left→right, accumulating colSpans to map each
   // HeaderCell to the leaf-index range it spans. A cell with `leafKey` set is anchored at that

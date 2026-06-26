@@ -3,6 +3,7 @@
 import type { TableModel, BodyRow, RowGroup } from "./model";
 import type { TableLayout } from "./layout";
 import { INDENT_STEP } from "./layout";
+import type { TableSpec } from "../spec/table-types";
 
 /**
  * Build a semantic HTML <table> from a TableModel + TableLayout.
@@ -17,9 +18,12 @@ export function renderTableHtml(
   model: TableModel,
   layout: TableLayout,
   doc: Document,
+  spec?: TableSpec,
 ): HTMLTableElement {
   const { leaves, headerRows, body } = model;
   const { stubWidth, colW } = layout;
+  const headerMaxLines = spec?.header_max_lines;
+  const stubNowrap = spec?.stub_nowrap === true;
 
   const table = doc.createElement("table");
   table.className = "tbl-table";
@@ -68,7 +72,9 @@ export function renderTableHtml(
       // Banner cells (spanning >1 column) get flanking rules. The flex layout that draws the
       // rules MUST live on an inner wrapper, not the <th> itself — `display:flex` on a table
       // cell drops its `table-cell` box and breaks colspan/column alignment.
-      if (hCell.colSpan > 1) {
+      // When spanner_rules === false, render banners as plain centered text (no is-spanner hook).
+      const spannerRules = spec?.spanner_rules !== false;
+      if (hCell.colSpan > 1 && spannerRules) {
         th.classList.add("is-spanner");
         const inner = doc.createElement("span");
         inner.className = "tbl-table-spanner";
@@ -76,6 +82,13 @@ export function renderTableHtml(
         th.appendChild(inner);
       } else {
         th.textContent = hCell.text;
+      }
+
+      // Leaf-header line clamp: cap the label to N lines (wrap rest). The CSS class carries the
+      // -webkit-line-clamp; we stamp the line count so a per-table value can drive it.
+      if (headerMaxLines != null && hCell.leafKey != null) {
+        th.classList.add("tbl-table-header-clamp");
+        th.style.setProperty("--tbl-header-lines", String(headerMaxLines));
       }
 
       // If this is a leaf-bottom cell (has leafKey) and the leaf has a sublabel, append it
@@ -113,6 +126,7 @@ export function renderTableHtml(
       // off and clipping under the sticky first column.
       const inner = doc.createElement("div");
       inner.className = "tbl-table-group-inner";
+      if (stubNowrap) inner.classList.add("is-nowrap");
       inner.textContent = group.label;
 
       if (group.note != null) {
@@ -134,6 +148,7 @@ export function renderTableHtml(
       const stubTh = doc.createElement("th");
       stubTh.scope = "row";
       stubTh.className = "tbl-table-stub";
+      if (stubNowrap) stubTh.classList.add("is-nowrap");
       stubTh.style.paddingLeft = `${row.level * INDENT_STEP}px`;
 
       // Label text (with footnote superscript if any row-level footnote key present)

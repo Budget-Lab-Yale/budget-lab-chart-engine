@@ -115,6 +115,10 @@ function attachTableInteractivity(table: HTMLTableElement, model: TableModel, sp
   if (spec.sticky?.firstColumn) {
     table.classList.add("tbl-table--sticky-first");
   }
+  // Inter-tier header rules are off by default; opt in via spec.header_tier_rules.
+  if (spec.header_tier_rules) {
+    table.classList.add("tbl-table--header-tier-rules");
+  }
 
   // ---- Tag leaf header cells with data-col ----
   // render-html doesn't carry a key on header cells, so walk the model's header lattice
@@ -300,20 +304,50 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
   canvasScroll.className = "figure-canvas-scroll";
   card.appendChild(canvasScroll);
 
+  // Footnote definition list lives OUTSIDE the horizontal-scroll wrapper (appended to the card
+  // after it) so it stays put during horizontal scroll instead of sliding sideways with the data.
+  // Created here for a stable position (after the scroll wrapper, before the source line) but only
+  // attached to the card when the model actually has footnotes.
+  const fnBlock = doc.createElement("div");
+  fnBlock.className = "tbl-table-footnotes";
+
   const measureText = makeMeasureText();
+
+  // Track the live table so the deferred font-ready re-measure targets the current DOM.
+  let liveTable: HTMLTableElement | null = null;
+
+  /** Measure the rendered header height and expose it as --tbl-thead-h so sticky row-group
+   * titles stick exactly under the column-header block. Uses sub-pixel getBoundingClientRect
+   * (rounded) — measured AFTER fonts load to avoid a pre-font-load shift. Under jsdom there is
+   * no layout (height 0), a harmless 0px fallback. */
+  function measureTheadH(): void {
+    const table = liveTable;
+    if (!table) return;
+    const thead = table.querySelector("thead");
+    const theadH =
+      thead instanceof HTMLElement ? Math.round(thead.getBoundingClientRect().height) : 0;
+    table.style.setProperty("--tbl-thead-h", `${theadH}px`);
+  }
 
   /** Render (or re-render) the table at the given width, then re-wire interactivity. */
   function draw(width: number): void {
     const model = buildTableModel(spec, rows);
-    const layout = layoutTable(model, { width, measureText });
-    const table = renderTableHtml(model, layout, doc);
+    const layout = layoutTable(model, {
+      width,
+      measureText,
+      ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
+      ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
+      ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
+      ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
+    });
+    const table = renderTableHtml(model, layout, doc, spec);
     canvasScroll.replaceChildren(table);
-    // Footnote definition list, listed below the table (spec §8). Built here (not in
-    // render-html) so it re-renders alongside the table on each draw. One line per footnote:
-    // a <sup> marker followed by the text.
+    liveTable = table;
+    // Footnote definition list (spec §8) — rebuilt each draw into the card-level block, which is
+    // attached only when there are footnotes (so an empty block never appears in the DOM). It is
+    // inserted right after the scroll wrapper so it sits above the source line.
+    fnBlock.replaceChildren();
     if (model.footnotes.length > 0) {
-      const fnBlock = doc.createElement("div");
-      fnBlock.className = "tbl-table-footnotes";
       for (const fn of model.footnotes) {
         const line = doc.createElement("div");
         const sup = doc.createElement("sup");
@@ -322,22 +356,28 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
         line.appendChild(doc.createTextNode(` ${fn.text}`));
         fnBlock.appendChild(line);
       }
-      canvasScroll.appendChild(fnBlock);
+      if (fnBlock.parentNode == null) canvasScroll.insertAdjacentElement("afterend", fnBlock);
+    } else if (fnBlock.parentNode != null) {
+      fnBlock.remove();
     }
     // The ResizeObserver re-render replaces the table DOM, so interactivity (which holds
     // references to the live elements) must be re-attached against the fresh table each time.
     attachTableInteractivity(table, model, spec);
-    // Measure the rendered header height and expose it as --tbl-thead-h so sticky row-group
-    // titles stick exactly at the column-header block's bottom. Under jsdom there is no layout
-    // (offsetHeight === 0), which is a harmless 0px fallback.
-    const thead = table.querySelector("thead");
-    const theadH = thead instanceof HTMLElement ? thead.offsetHeight : 0;
-    table.style.setProperty("--tbl-thead-h", `${theadH}px`);
+    // Synchronous measure (correct once fonts are cached); the font-ready handler below corrects
+    // any pre-font-load discrepancy.
+    measureTheadH();
   }
 
   // Initial render — use the provided width, the container's current width, or a default.
   const initialWidth = opts.width ?? (container.clientWidth || 720);
   draw(initialWidth);
+
+  // Re-measure the header height once web-fonts are loaded — the initial offset is measured
+  // before fonts swap in, so the group title would otherwise shift slightly when it sticks.
+  const fonts = (doc as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
+  if (fonts?.ready) {
+    void fonts.ready.then(() => measureTheadH());
+  }
 
   // Source/notes footer with Data download.
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;

@@ -142,8 +142,107 @@ describe("layoutTable", () => {
     expect(rowLayout.rect.w).toBe(layout.stubWidth);
   });
 
-  it("totalHeight = headerHeight + body entries × rowHeight", () => {
+  it("totalHeight = headerHeight + body entries × rowHeight (+ footnotes)", () => {
     const { model, layout } = build();
-    expect(layout.totalHeight).toBe(layout.headerHeight + model.body.length * layout.rowHeight);
+    expect(layout.totalHeight).toBe(
+      layout.headerHeight + model.body.length * layout.rowHeight + layout.footnotesHeight,
+    );
+  });
+});
+
+describe("layoutTable — banner width fit (bug #3)", () => {
+  // A wide banner over three narrow columns: the banner text is much wider than the sum of the
+  // Slow/Moderate/Rapid leaf widths, so those leaves must widen to fit it.
+  const wideSpec: TableSpec = {
+    title: "T",
+    data: "d",
+    value: "value",
+    stub: [{ label: "row" }],
+    header: ["banner", "scenario"],
+    format: { default: { type: "number", decimals: 1 } },
+  };
+  const BANNER = "AI Adoption Scenarios via Karger et al. (2026)";
+  const wideRows = [
+    { row: "r", banner: BANNER, scenario: "Slow", value: "1.0" },
+    { row: "r", banner: BANNER, scenario: "Moderate", value: "2.0" },
+    { row: "r", banner: BANNER, scenario: "Rapid", value: "3.0" },
+  ] as any;
+
+  it("widens spanned columns so their sum ≥ the banner's required width", () => {
+    const model = buildTableModel(wideSpec, wideRows);
+    const layout = layoutTable(model, { width: 800, measureText });
+    // The three leaves all sit under the single banner.
+    const sumColW = layout.colW.reduce((a, b) => a + b, 0);
+    // required width = text + padX(16) + 2*spannerGap(8) = +32
+    const required = measureText(BANNER) + 32;
+    expect(sumColW).toBeGreaterThanOrEqual(required);
+    // colX/totalWidth re-derived consistently after the widening.
+    expect(layout.totalWidth).toBe(layout.stubWidth + sumColW);
+    expect(layout.colX[0]).toBe(layout.stubWidth);
+    for (let i = 1; i < layout.colX.length; i++) {
+      expect(layout.colX[i]).toBe(layout.colX[i - 1]! + layout.colW[i - 1]!);
+    }
+  });
+});
+
+describe("layoutTable — width + wrap config (5c)", () => {
+  const cfgSpec: TableSpec = {
+    title: "T",
+    data: "d",
+    value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 1 } },
+  };
+  const cfgRows = [
+    { row: "Alpha", metric: "x", value: "1.0" },
+    { row: "Beta", metric: "x", value: "2.0" },
+  ] as any;
+
+  it("stub_width overrides the computed stub column width", () => {
+    const model = buildTableModel(cfgSpec, cfgRows);
+    const layout = layoutTable(model, { width: 800, measureText, stubWidth: 300 });
+    expect(layout.stubWidth).toBe(300);
+    expect(layout.colX[0]).toBe(300);
+  });
+
+  it("column_width (single number) overrides every leaf colW", () => {
+    const model = buildTableModel(cfgSpec, cfgRows);
+    const layout = layoutTable(model, { width: 800, measureText, columnWidth: 120 });
+    layout.colW.forEach((w) => expect(w).toBe(120));
+  });
+
+  it("column_width (per-key map) overrides the named leaf only", () => {
+    const model = buildTableModel(cfgSpec, cfgRows);
+    const layout = layoutTable(model, { width: 800, measureText, columnWidth: { x: 200 } });
+    const idx = model.leaves.findIndex((l) => l.key === "x");
+    expect(layout.colW[idx]).toBe(200);
+  });
+
+  it("header_max_lines lets a long leaf header wrap and increases header height", () => {
+    const longSpec: TableSpec = {
+      title: "T",
+      data: "d",
+      value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      column_width: { m: 60 },
+      format: { default: { type: "number", decimals: 1 } },
+    };
+    const longRows = [
+      { row: "r", metric: "m", value: "1.0" },
+    ] as any;
+    // The leaf label "m" is short, but column_labels makes it long so it must wrap at width 60.
+    longSpec.column_labels = { m: "A very long header label that needs wrapping" };
+    const model = buildTableModel(longSpec, longRows);
+    const noWrap = layoutTable(model, { width: 800, measureText, columnWidth: { m: 60 } });
+    const wrapped = layoutTable(model, {
+      width: 800,
+      measureText,
+      columnWidth: { m: 60 },
+      headerMaxLines: 3,
+    });
+    // The column is pinned to 60 either way; the wrapped layout reserves more header height.
+    expect(wrapped.headerHeight).toBeGreaterThan(noWrap.headerHeight);
   });
 });

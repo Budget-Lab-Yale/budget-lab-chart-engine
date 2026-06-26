@@ -43,7 +43,14 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
   // (wide tables scroll on screen); the export frame grows to fit it.
   const measureText = makeMeasureText();
   const model = buildTableModel(spec, rows);
-  const layout = layoutTable(model, { width: INNER_W, measureText });
+  const layout = layoutTable(model, {
+    width: INNER_W,
+    measureText,
+    ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
+    ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
+    ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
+    ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
+  });
 
   // Frame width: standard frame, widened if the table itself is wider than the inner content box.
   const width = Math.max(W, layout.totalWidth + MARGIN * 2);
@@ -56,7 +63,7 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
   const bodyTop = topCursor + BODY_TOP_GAP;
 
   // Table body SVG, positioned below the chrome and inset by the left margin.
-  const bodySvg = renderTableSvg(model, layout, { document });
+  const bodySvg = renderTableSvg(model, layout, { document, spec });
   bodySvg.setAttribute("x", String(MARGIN));
   bodySvg.setAttribute("y", String(bodyTop));
   bodySvg.setAttribute("width", String(layout.totalWidth));

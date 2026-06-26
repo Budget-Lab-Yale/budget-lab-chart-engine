@@ -71,6 +71,17 @@ export const TABLE_SPEC_SCHEMA = {
         firstColumn: { type: "boolean" },
       },
     },
+    header_tier_rules: { type: "boolean" },
+    spanner_rules: { type: "boolean" },
+    stub_width: { type: "number" },
+    stub_nowrap: { type: "boolean" },
+    column_width: {
+      anyOf: [
+        { type: "number" },
+        { type: "object", additionalProperties: { type: "number" } },
+      ],
+    },
+    header_max_lines: { type: "number" },
     source: { type: "string" },
     notes: {
       anyOf: [

@@ -7,6 +7,7 @@
 import type { TableModel } from "./model";
 import type { TableLayout, CellRect } from "./layout";
 import { INDENT_STEP, FOOTNOTE_TOP_GAP, FOOTNOTE_LINE_HEIGHT } from "./layout";
+import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
 import { tokens } from "../theme/tokens";
 
@@ -28,9 +29,13 @@ const SIGN_NEG = tokens.categorical[4]!.base; // red
 export function renderTableSvg(
   model: TableModel,
   layout: TableLayout,
-  opts: { document: Document },
+  opts: { document: Document; spec?: TableSpec },
 ): SVGSVGElement {
   const doc = opts.document;
+  const spec = opts.spec;
+  const headerTierRules = spec?.header_tier_rules === true; // default: no inter-tier rules
+  const spannerRules = spec?.spanner_rules !== false; // default: draw flanking rules
+  const headerMaxLines = spec?.header_max_lines;
 
   const el = (name: string, attrs: Record<string, string | number> = {}): SVGElement => {
     const node = doc.createElementNS(SVG_NS, name);
@@ -91,17 +96,44 @@ export function renderTableSvg(
       const leaf = isLeaf ? model.leaves.find((l) => l.key === cell.leafKey) : undefined;
       // A leaf cell with a sublabel reserves a line below the label for it.
       const labelY = rect.y + rect.h / 2 + HEADER_FONT / 3 - (leaf?.sublabel != null ? 7 : 0);
-      headerG.appendChild(
-        text(cx, labelY, cell.text, {
-          anchor: "middle",
-          weight: 700,
+
+      // Leaf header label wrapping: when header_max_lines is set, wrap the leaf label to ≤ N
+      // lines (tspans) to fit the column width. Banner/upper cells are never wrapped.
+      const wrapLines =
+        isLeaf && headerMaxLines != null
+          ? wrapToLines(cell.text, rect.w - PAD_X * 2, headerMaxLines)
+          : null;
+      if (wrapLines && wrapLines.length > 1) {
+        const lineH = HEADER_FONT + 2;
+        // Bottom-anchor the block: last line sits at labelY, earlier lines stack above.
+        const t = el("text", {
+          x: cx,
+          y: labelY - (wrapLines.length - 1) * lineH,
+          "text-anchor": "middle",
+          "font-family": TBL.font,
+          "font-size": HEADER_FONT,
+          "font-weight": 700,
           fill: TBL.color.heading,
-          size: HEADER_FONT,
-        }),
-      );
+        });
+        wrapLines.forEach((ln, li) => {
+          const ts = el("tspan", { x: cx, dy: li === 0 ? 0 : lineH });
+          ts.textContent = ln;
+          t.appendChild(ts);
+        });
+        headerG.appendChild(t);
+      } else {
+        headerG.appendChild(
+          text(cx, labelY, cell.text, {
+            anchor: "middle",
+            weight: 700,
+            fill: TBL.color.heading,
+            size: HEADER_FONT,
+          }),
+        );
+      }
       // Banner cells (colSpan > 1) get horizontal rules flanking the centered label, extending
-      // to the cell's edges, to show the columns they govern.
-      if (cell.colSpan > 1) {
+      // to the cell's edges, to show the columns they govern. Disabled when spanner_rules:false.
+      if (cell.colSpan > 1 && spannerRules) {
         const ruleY = rect.y + rect.h / 2;
         const halfText = (measureish(cell.text) / 2) + PAD_X;
         headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
@@ -120,11 +152,14 @@ export function renderTableSvg(
       }
     }
   }
-  // Tier separators: a thin line at the bottom of each banner tier (T-1 of them) and one
-  // heavier line under the whole header.
+  // Tier separators: thin lines between header tiers are OFF by default — drawn only when
+  // header_tier_rules is enabled. The header→body bottom rule below always stays and spans the
+  // FULL width (x=0 → totalWidth), so it crosses the stub corner continuously (bug #4).
   const tiers = model.headerRows.length;
-  for (let t = 1; t < tiers; t++) {
-    headerG.appendChild(line(0, t * TIER_HEIGHT, layout.totalWidth, t * TIER_HEIGHT));
+  if (headerTierRules) {
+    for (let t = 1; t < tiers; t++) {
+      headerG.appendChild(line(0, t * TIER_HEIGHT, layout.totalWidth, t * TIER_HEIGHT));
+    }
   }
   headerG.appendChild(line(0, layout.headerHeight, layout.totalWidth, layout.headerHeight));
   svg.appendChild(headerG);
@@ -239,4 +274,29 @@ export function renderTableSvg(
 // matches the test's measureText heuristic of ~7px/char).
 function measureish(s: string): number {
   return s.length * 7;
+}
+
+// Greedy word-wrap into at most `maxLines` lines that each fit `maxWidth` px (using the same
+// ~7px/char heuristic as measureish). The last line absorbs any overflow rather than dropping
+// words, so no text is lost. Returns a single-element array when the label fits on one line.
+function wrapToLines(s: string, maxWidth: number, maxLines: number): string[] {
+  if (maxLines <= 1 || measureish(s) <= maxWidth) return [s];
+  const words = s.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (measureish(next) <= maxWidth || cur === "") {
+      cur = next;
+    } else {
+      lines.push(cur);
+      cur = w;
+      if (lines.length === maxLines - 1) break;
+    }
+  }
+  // Remaining words (including the in-progress line) go onto the final line.
+  const consumed = lines.join(" ").split(/\s+/).filter(Boolean).length;
+  const rest = words.slice(consumed).join(" ");
+  if (rest) lines.push(rest);
+  return lines.length ? lines.slice(0, maxLines) : [s];
 }

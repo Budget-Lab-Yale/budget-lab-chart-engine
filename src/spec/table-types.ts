@@ -67,6 +67,18 @@ export interface TableSpec {
   sort?: boolean;
   /** Sticky positioning: header (top), firstColumn (left). */
   sticky?: { header?: boolean; firstColumn?: boolean };
+  /** Draw horizontal rules between header tiers. Default false (the single header→body rule always stays). */
+  header_tier_rules?: boolean;
+  /** Draw the flanking horizontal rules on multi-column banners. Default true; false → plain centered text. */
+  spanner_rules?: boolean;
+  /** Fixed px width for the stub column (overrides the computed width). */
+  stub_width?: number;
+  /** When true, stub labels do not wrap; the stub is sized to the longest label. Default false. */
+  stub_nowrap?: boolean;
+  /** Fixed px width for data columns: one number applies to all leaves, or a { leafKey: px } map. */
+  column_width?: number | Record<string, number>;
+  /** Wrap bottom-tier (leaf) header labels to at most N lines. */
+  header_max_lines?: number;
   /** Data source line (e.g. "U.S. Bureau of Labor Statistics"). */
   source?: string;
   /** Explanatory notes. String or array of strings (each rendered as a paragraph). */

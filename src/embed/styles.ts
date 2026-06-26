@@ -625,7 +625,6 @@ body {
   color: var(--tbl-text-heading);
   font-size: 12px;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--tbl-axis-stroke);
   background: var(--tbl-bg);
   text-align: center;
   vertical-align: bottom;
@@ -636,15 +635,36 @@ body {
   z-index: 2;
 }
 
-/* Banner tiers (non-leaf header rows): centered, no bottom border between tiers. */
+/* Header→body separator (bug #4): a single continuous rule under the WHOLE header block,
+   including the stub corner. Applied to the bottom-tier <th> AND the rowspanning corner so it
+   does not break over the stub in multi-tier tables. */
+.tbl-table thead tr:last-child th,
+.tbl-table thead th.tbl-table-stub-header {
+  border-bottom: 1px solid var(--tbl-axis-stroke);
+}
+
+/* Banner tiers (non-leaf header rows): centered. Inter-tier rules are OFF by default; they are
+   drawn only when the table has .tbl-table--header-tier-rules (spec header_tier_rules: true). */
 .tbl-table thead tr:not(:last-child) th {
   vertical-align: middle;
+}
+.tbl-table.tbl-table--header-tier-rules thead tr:not(:last-child) th {
   border-bottom: 1px solid var(--tbl-border);
 }
 
 /* Leaf headers (last header row): bottom-aligned, centered (inherits text-align:center). */
 .tbl-table thead tr:last-child th {
   vertical-align: bottom;
+}
+
+/* Leaf-header line clamp (header_max_lines): wrap the label to N lines, ellipsis-free overflow
+   hidden. --tbl-header-lines is set per-th by render-html. */
+.tbl-table thead th.tbl-table-header-clamp {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: var(--tbl-header-lines, 2);
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* Banner cells (colSpan > 1): centered label flanked by hairline rules extending to the cell's
@@ -703,6 +723,13 @@ th.tbl-table-stub {
   text-align: left;
   font-weight: var(--tw-body);
   color: var(--tbl-text-body);
+}
+
+/* stub_nowrap: keep stub labels + group titles on one line (the layout sizes the stub to the
+   longest label so nothing is clipped). */
+th.tbl-table-stub.is-nowrap,
+.tbl-table-group-inner.is-nowrap {
+  white-space: nowrap;
 }
 
 /* ---- Row groups ---- */

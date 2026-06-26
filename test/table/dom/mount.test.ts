@@ -123,4 +123,47 @@ describe("mountTable", () => {
     mountTable(container, { spec: SPEC, rows: ROWS });
     expect(container.querySelector(".tbl-table-footnotes")).toBeNull();
   });
+
+  it("renders the footnote list OUTSIDE the scroll wrapper, before the source line (bug #1)", () => {
+    const fnSpec: TableSpec = {
+      ...SPEC,
+      footnote_column: "fn",
+      footnotes: { a: "Provisional estimate." },
+    };
+    const fnRows: TidyRow[] = [
+      { row: "Revenue", metric: "2024", value: "4500", fn: "a" },
+      { row: "Outlays", metric: "2024", value: "6100", fn: "" },
+    ];
+    const container = document.createElement("div");
+    mountTable(container, { spec: fnSpec, rows: fnRows });
+    const block = container.querySelector(".tbl-table-footnotes")!;
+    // Not a descendant of the horizontal-scroll wrapper (so it doesn't scroll sideways).
+    expect(block.closest(".figure-canvas-scroll")).toBeNull();
+    // Sits directly after the scroll wrapper, before the source/meta line.
+    const card = container.querySelector(".figure-card")!;
+    const kids = Array.from(card.children);
+    const scrollIdx = kids.findIndex((k) => k.classList.contains("figure-canvas-scroll"));
+    const fnIdx = kids.indexOf(block as Element);
+    const metaIdx = kids.findIndex((k) => k.classList.contains("figure-meta"));
+    expect(fnIdx).toBe(scrollIdx + 1);
+    expect(metaIdx).toBeGreaterThan(fnIdx);
+  });
+
+  it("adds tbl-table--header-tier-rules only when spec.header_tier_rules is true (5a)", () => {
+    const off = document.createElement("div");
+    mountTable(off, { spec: SPEC, rows: ROWS });
+    expect(
+      (off.querySelector("table.tbl-table") as HTMLElement).classList.contains(
+        "tbl-table--header-tier-rules",
+      ),
+    ).toBe(false);
+
+    const on = document.createElement("div");
+    mountTable(on, { spec: { ...SPEC, header_tier_rules: true }, rows: ROWS });
+    expect(
+      (on.querySelector("table.tbl-table") as HTMLElement).classList.contains(
+        "tbl-table--header-tier-rules",
+      ),
+    ).toBe(true);
+  });
 });

@@ -63,4 +63,23 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toContain("z-index: 4");
     expect(CHART_CSS).toContain("z-index: 3");
   });
+
+  it("puts the header→body bottom rule on the bottom-tier th AND the stub corner (bug #4)", () => {
+    expect(CHART_CSS).toMatch(
+      /thead tr:last-child th,\s*\.tbl-table thead th\.tbl-table-stub-header\s*\{[^}]*border-bottom/,
+    );
+  });
+
+  it("gates inter-tier header rules behind .tbl-table--header-tier-rules (5a)", () => {
+    expect(CHART_CSS).toContain(".tbl-table--header-tier-rules thead tr:not(:last-child) th");
+  });
+
+  it("contains the header_max_lines clamp hook (5c)", () => {
+    expect(CHART_CSS).toContain("tbl-table-header-clamp");
+    expect(CHART_CSS).toContain("-webkit-line-clamp");
+  });
+
+  it("contains the stub_nowrap hook (5c)", () => {
+    expect(CHART_CSS).toMatch(/\.tbl-table-stub\.is-nowrap[\s\S]*white-space:\s*nowrap/);
+  });
 });

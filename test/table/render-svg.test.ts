@@ -157,6 +157,86 @@ describe("renderTableSvg — golden bodies", () => {
     expect(layout.footnotesHeight).toBeGreaterThan(0);
   });
 
+  it("draws NO inter-tier rules by default; tier rules appear only with header_tier_rules", () => {
+    const rows = parseCsv("./fixtures/tariff.csv");
+    const model = buildTableModel(TARIFF_SPEC, rows);
+    const layout = layoutTable(model, layoutOpts);
+
+    // A horizontal line at an inter-tier boundary (y = 24, before the header bottom).
+    const interTierY = 24;
+    const hasLineAt = (svg: SVGSVGElement, y: number): boolean =>
+      Array.from(svg.querySelectorAll("g.tbl-table-header line")).some(
+        (l) =>
+          Number(l.getAttribute("x1")) === 0 &&
+          Number(l.getAttribute("y1")) === y &&
+          Number(l.getAttribute("y2")) === y,
+      );
+
+    const off = renderTableSvg(model, layout, { document });
+    expect(hasLineAt(off, interTierY)).toBe(false);
+
+    const on = renderTableSvg(model, layout, { document, spec: { ...TARIFF_SPEC, header_tier_rules: true } });
+    expect(hasLineAt(on, interTierY)).toBe(true);
+  });
+
+  it("header→body bottom rule spans the FULL width including the stub (bug #4)", () => {
+    const rows = parseCsv("./fixtures/tariff.csv");
+    const model = buildTableModel(TARIFF_SPEC, rows);
+    const layout = layoutTable(model, layoutOpts);
+    const svg = renderTableSvg(model, layout, { document });
+    // The rule at y = headerHeight must run x=0 → totalWidth (across the stub corner).
+    const bottom = Array.from(svg.querySelectorAll("g.tbl-table-header line")).find(
+      (l) => Number(l.getAttribute("y1")) === layout.headerHeight,
+    );
+    expect(bottom).toBeTruthy();
+    expect(Number(bottom!.getAttribute("x1"))).toBe(0);
+    expect(Number(bottom!.getAttribute("x2"))).toBe(layout.totalWidth);
+  });
+
+  it("spanner_rules:false renders banners as plain text (no flanking lines)", () => {
+    const rows = parseCsv("./fixtures/keyparams.csv");
+    const model = buildTableModel(KEYPARAMS_SPEC, rows);
+    const layout = layoutTable(model, layoutOpts);
+
+    // The flanking lines use the lighter border tone (#E5E5E5); count them with/without rules.
+    const flankCount = (svg: SVGSVGElement): number =>
+      Array.from(svg.querySelectorAll("g.tbl-table-header line")).filter(
+        (l) => l.getAttribute("stroke") === "#E5E5E5",
+      ).length;
+
+    const withRules = renderTableSvg(model, layout, { document });
+    expect(flankCount(withRules)).toBeGreaterThan(0);
+
+    const noRules = renderTableSvg(model, layout, { document, spec: { ...KEYPARAMS_SPEC, spanner_rules: false } });
+    expect(flankCount(noRules)).toBe(0);
+  });
+
+  it("header_max_lines wraps a long leaf header into ≤ N tspans", () => {
+    const spec: TableSpec = {
+      title: "T",
+      data: "d",
+      value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      column_labels: { m: "A very long header label that needs wrapping across lines" },
+      column_width: { m: 60 },
+      header_max_lines: 3,
+      format: { default: { type: "number", decimals: 1 } },
+    };
+    const rows = [{ row: "r", metric: "m", value: "1.0" }] as unknown as TidyRow[];
+    const model = buildTableModel(spec, rows);
+    const layout = layoutTable(model, { width: 720, measureText: (s: string) => s.length * 7, columnWidth: { m: 60 }, headerMaxLines: 3 });
+    const svg = renderTableSvg(model, layout, { document, spec });
+    // The leaf header <text> should carry multiple <tspan> lines, ≤ 3.
+    const leafText = Array.from(svg.querySelectorAll("g.tbl-table-header text")).find(
+      (t) => t.querySelectorAll("tspan").length > 0,
+    );
+    expect(leafText).toBeTruthy();
+    const tspans = leafText!.querySelectorAll("tspan");
+    expect(tspans.length).toBeGreaterThan(1);
+    expect(tspans.length).toBeLessThanOrEqual(3);
+  });
+
   it("is deterministic: rendering twice is byte-identical", () => {
     const rows = parseCsv("./fixtures/budget.csv");
     const m = buildTableModel(BUDGET_SPEC, rows);
