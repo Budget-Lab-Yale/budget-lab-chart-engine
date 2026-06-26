@@ -32,7 +32,7 @@ export interface LayoutOptions {
 export interface CellRect { x: number; y: number; w: number; h: number; }
 export interface HeaderEntry { cell: HeaderCell; rect: CellRect; tier: number; lines?: string[]; }
 export type RowEntry =
-  | { row: BodyRow; rect: CellRect; cellRects: CellRect[]; stubLines?: string[] }
+  | { row: BodyRow; rect: CellRect; cellRects: CellRect[]; stubLines?: string[]; cellLines?: (string[] | undefined)[] }
   | { group: RowGroup; rect: CellRect; noteLines: string[]; topGap: number; isFirst: boolean };
 export interface TableLayout {
   totalWidth: number; totalHeight: number;
@@ -303,23 +303,34 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       y += h;
       return { group: entry.group, rect, noteLines, topGap, isFirst };
     }
-    // When stub_wrap is on, wrap the row label to the (capped) stub width and grow the row to fit.
+    // Row height grows to fit the tallest wrapped content: the row label (when stub_wrap is on) and
+    // any text cells that wrap to their column width.
+    const measureBody = (s: string) => measureText(s, bodyFontPx, bodyWeight);
+    let maxLines = 1;
     let stubLines: string[] | undefined;
-    let h = rowHeight;
     if (opts.stubWrap) {
       const avail = Math.max(1, stubWidth - padX - entry.row.level * INDENT_STEP);
-      const lines = wrapToLines(entry.row.label, avail, 99, (s) => measureText(s, bodyFontPx, bodyWeight));
-      if (lines.length > 1) {
-        stubLines = lines;
-        h = lines.length * STUB_LINE_HEIGHT + (rowHeight - STUB_LINE_HEIGHT);
-      }
+      const lines = wrapToLines(entry.row.label, avail, 99, measureBody);
+      if (lines.length > 1) { stubLines = lines; maxLines = Math.max(maxLines, lines.length); }
     }
+    let cellLines: (string[] | undefined)[] | undefined;
+    entry.row.cells.forEach((cell, i) => {
+      if (!cell.isText || cell.text === "") return;
+      const lines = wrapToLines(cell.text, Math.max(1, colW[i]! - padX), 99, measureBody);
+      if (lines.length > 1) {
+        if (!cellLines) cellLines = leaves.map(() => undefined);
+        cellLines[i] = lines;
+        maxLines = Math.max(maxLines, lines.length);
+      }
+    });
+    const h = maxLines > 1 ? maxLines * STUB_LINE_HEIGHT + (rowHeight - STUB_LINE_HEIGHT) : rowHeight;
     const rowRect: CellRect = { x: 0, y, w: stubWidth, h };
     const cellRects: CellRect[] = leaves.map((_, i) => ({ x: colX[i]!, y, w: colW[i]!, h }));
     y += h;
-    return stubLines
-      ? { row: entry.row, rect: rowRect, cellRects, stubLines }
-      : { row: entry.row, rect: rowRect, cellRects };
+    const rowEntry: Extract<RowEntry, { row: BodyRow }> = { row: entry.row, rect: rowRect, cellRects };
+    if (stubLines) rowEntry.stubLines = stubLines;
+    if (cellLines) rowEntry.cellLines = cellLines;
+    return rowEntry;
   });
 
   // Footnote list height: a top gap plus one line per footnote (0 if there are none).

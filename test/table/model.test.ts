@@ -137,3 +137,31 @@ it("applies column_labels and header_labels overrides to HeaderCell.text", () =>
   // Sanity: leaf keys are still the raw values.
   expect(m.leaves.map((l) => l.key)).toEqual(["Static", "Dynamic", "Other"]);
 });
+
+it("keeps non-numeric values as text cells (verbatim, no numeric formatting)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 1 } },
+  };
+  const rows = [
+    { row: "Rate", metric: "Details", value: "10% flat rate" },
+    { row: "Count", metric: "Details", value: "42" },
+    { row: "Blank", metric: "Details", value: "" },
+  ] as any;
+  const m = buildTableModel(spec, rows);
+  const cells = m.body
+    .filter((b) => b.kind === "row")
+    .map((b) => (b as any).row.cells[0]);
+  // Text value: kept verbatim, flagged isText, value null.
+  expect(cells[0].isText).toBe(true);
+  expect(cells[0].text).toBe("10% flat rate");
+  expect(cells[0].value).toBeNull();
+  // Numeric value: formatted, not text.
+  expect(cells[1].isText).toBeUndefined();
+  expect(cells[1].value).toBe(42);
+  expect(cells[1].text).toBe("42.0");
+  // Blank: stays a null numeric cell, not text.
+  expect(cells[2].isText).toBeUndefined();
+});

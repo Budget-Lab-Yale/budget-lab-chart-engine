@@ -179,7 +179,8 @@ export function renderTableHtml(
       // One <td> per leaf cell
       row.cells.forEach((cell, i) => {
         const td = doc.createElement("td");
-        td.className = "is-num";
+        // Text cells are left-aligned and wrap (is-text); numeric cells are centered tabular (is-num).
+        td.className = cell.isText ? "is-text" : "is-num";
         td.setAttribute("data-col", leaves[i]!.key);
 
         // Sign class

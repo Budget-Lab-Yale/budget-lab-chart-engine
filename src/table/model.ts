@@ -4,7 +4,7 @@ import { resolveFormat, formatCell } from "./format";
 
 export interface LeafColumn { key: string; path: string[]; label: string; sublabel?: string; }
 export interface HeaderCell { text: string; colSpan: number; rowSpan: number; leafKey?: string; }
-export interface Cell { value: number | null; text: string; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
+export interface Cell { value: number | null; text: string; isText?: boolean; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
 export interface BodyRow { stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; }   // cells aligned to leaves
 export interface RowGroup { label: string; level: number; note?: string; }
 export interface TableModel {
@@ -205,10 +205,15 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
     const inner = cellIndex.get(path.join(SEP));
     const cells: Cell[] = leaves.map((leaf) => {
       const r = inner?.get(leaf.path.join(SEP));
-      const value = r ? parseValue(r[spec.value]) : null;
+      const raw = r ? r[spec.value] : undefined;
+      const value = parseValue(raw);
+      const rawTrim = raw?.trim() ?? "";
+      // A non-empty, non-numeric value is a text cell: kept verbatim, left-aligned, no number
+      // formatting or sign coloring. Blank/missing stays a null numeric cell.
+      const isText = value == null && rawTrim !== "";
       const rule = resolveFormat({ leafKey: leaf.key, groupKeys: groupPath, rowLabel: label, spec });
-      const text = formatCell(value, rule);
-      const cell: Cell = { value, text };
+      const text = isText ? rawTrim : formatCell(value, rule);
+      const cell: Cell = isText ? { value: null, text, isText: true } : { value, text };
 
       // Emphasis: row in emphasis_rows OR emphasis_column truthy on the source row.
       const colEmph = spec.emphasis_column && r ? isTruthy(r[spec.emphasis_column]) : false;

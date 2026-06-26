@@ -281,7 +281,8 @@ export function renderTableSvg(
       rg.appendChild(st);
     }
 
-    // One cell <text> per leaf, centered in the cell rect.
+    // One cell per leaf: numeric cells centered; text cells left-aligned (and wrapped when the
+    // layout wrapped them to the column width).
     row.cells.forEach((cell, i) => {
       const cr = cellRects[i] as CellRect;
       const cg = el("g", { class: "tbl-table-cell" });
@@ -299,9 +300,36 @@ export function renderTableSvg(
       }
       const fill =
         cell.signClass === "pos" ? SIGN_POS : cell.signClass === "neg" ? SIGN_NEG : TBL.color.text;
+      const weight = cell.emphasis ? 700 : 400;
+      const cellLines = entry.cellLines?.[i];
+      if (cell.isText) {
+        const tx = cr.x + PAD_X;
+        if (cellLines && cellLines.length > 1) {
+          const blockH = (cellLines.length - 1) * STUB_LINE_HEIGHT;
+          const t = el("text", {
+            x: tx,
+            y: cr.y + cr.h / 2 - blockH / 2 + BODY_FONT / 3,
+            "text-anchor": "start",
+            "font-family": TBL.font,
+            "font-size": BODY_FONT,
+            "font-weight": weight,
+            fill: TBL.color.text,
+          });
+          cellLines.forEach((ln, li) => {
+            const ts = el("tspan", { x: tx, dy: li === 0 ? 0 : STUB_LINE_HEIGHT });
+            ts.textContent = ln;
+            t.appendChild(ts);
+          });
+          cg.appendChild(t);
+        } else {
+          cg.appendChild(text(tx, baseY, cell.text, { anchor: "start", weight, fill: TBL.color.text, size: BODY_FONT }));
+        }
+        rg.appendChild(cg);
+        return;
+      }
       const t = text(cr.x + cr.w / 2, baseY, cell.text, {
         anchor: "middle",
-        weight: cell.emphasis ? 700 : 400,
+        weight,
         fill,
         size: BODY_FONT,
       });

@@ -726,6 +726,13 @@ td.is-num {
   font-variant-numeric: tabular-nums;
 }
 
+/* Text cells: left-aligned, wrapping (for prose values like notes/descriptions). */
+td.is-text {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 /* Stub (row label) cells: left-aligned. */
 th.tbl-table-stub {
   text-align: left;
