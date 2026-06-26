@@ -42,6 +42,9 @@ export interface AssembleOptions {
   /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
    *  present, used instead of spec.annotations.points so the snap values render. */
   points?: PointCallout[];
+  /** Numeric extent [min,max] of the parsed x values (ms for dates) — used to estimate label px
+   *  positions for annotation-label collision avoidance. Absent → no auto-stagger. */
+  xExtent?: [number, number];
   width?: number;
   height?: number;
   marginRight?: number;
@@ -99,6 +102,7 @@ export function assemblePlot({
   colors,
   spec,
   points,
+  xExtent,
   width,
   height,
   marginRight,
@@ -149,10 +153,56 @@ export function assemblePlot({
   //    behind gridlines + data. Spans the full y-domain; x edges parsed via the adapter (numeric
   //    / temporal only — markerToX returns null for a categorical band scale).
   const ann = resolveAnnotations(spec);
-  for (const band of ann.bands) {
+
+  // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
+  // label's px position/width and greedily push overlapping labels onto stacked rows so they don't
+  // collide. Deterministic (no layout/getBBox), so it applies uniformly to live HTML, PNG, and SSR.
+  // A marker with an explicit labelDy opts out (manual placement wins); bands are always auto.
+  const LABEL_BASE_DY = 4;
+  const LABEL_ROW_H = 13;
+  const LABEL_GAP = 6;
+  const LABEL_CHAR_PX = 6.2; // ~annotation font advance
+  const staggerDy = new Map<string, number>();
+  if (xExtent && xExtent[1] > xExtent[0] && width != null) {
+    const innerW = width - effMarginLeft - effMarginRight;
+    const toPx = (v: number | Date | null): number | null => {
+      if (v == null) return null;
+      const n = typeof v === "number" ? v : v.getTime();
+      return effMarginLeft + ((n - xExtent[0]) / (xExtent[1] - xExtent[0])) * innerW;
+    };
+    type L = { id: string; left: number; right: number };
+    const labels: L[] = [];
+    ann.bands.forEach((b, i) => {
+      if (!b.label) return;
+      const px = toPx(xOpts.markerToX({ x: b.start }));
+      if (px == null) return;
+      const w = b.label.length * LABEL_CHAR_PX;
+      labels.push({ id: `b${i}`, left: px + 6, right: px + 6 + w });
+    });
+    ann.xAxis.forEach((m, i) => {
+      if (!m.label || m.labelDy != null) return;
+      const px = toPx(xOpts.markerToX(m));
+      if (px == null) return;
+      const anchor = m.labelAnchor ?? "start";
+      const dx = m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4;
+      const w = m.label.length * LABEL_CHAR_PX;
+      const left = anchor === "end" ? px + dx - w : anchor === "middle" ? px + dx - w / 2 : px + dx;
+      labels.push({ id: `m${i}`, left, right: left + w });
+    });
+    labels.sort((a, b) => a.left - b.left);
+    const rowRight: number[] = [];
+    for (const l of labels) {
+      let r = 0;
+      while (r < rowRight.length && rowRight[r]! > l.left - LABEL_GAP) r++;
+      rowRight[r] = l.right;
+      staggerDy.set(l.id, LABEL_BASE_DY + r * LABEL_ROW_H);
+    }
+  }
+
+  ann.bands.forEach((band, bandIdx) => {
     const x1 = xOpts.markerToX({ x: band.start });
     const x2 = xOpts.markerToX({ x: band.end });
-    if (x1 == null || x2 == null) continue;
+    if (x1 == null || x2 == null) return;
     marks.push(
       Plot.rect([{ x1, x2, y1: yDomain[0], y2: yDomain[1] }], {
         x1: "x1",
@@ -164,7 +214,7 @@ export function assemblePlot({
       }),
     );
     if (band.label) {
-      // Band label at the top of the region, just inside its left edge.
+      // Band label at the top of the region, just inside its left edge (auto-staggered).
       marks.push(
         Plot.text([{ x: x1, y: yDomain[1], t: band.label }], {
           x: "x",
@@ -173,14 +223,14 @@ export function assemblePlot({
           frameAnchor: "top",
           textAnchor: "start",
           dx: 6,
-          dy: 4,
+          dy: staggerDy.get(`b${bandIdx}`) ?? 4,
           fill: TBL.color.axis,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
         }),
       );
     }
-  }
+  });
 
   // 1. Band underlay (behind everything).
   marks.push(...layers.underlay);
@@ -260,9 +310,10 @@ export function assemblePlot({
   }
 
   // 5. Reference markers (vertical rules, e.g. a treatment date) + optional labels at the top.
-  for (const m of ann.xAxis) {
+  //    Labels auto-stagger to avoid collisions (an explicit labelDy opts out).
+  ann.xAxis.forEach((m, markerIdx) => {
     const mx = xOpts.markerToX(m);
-    if (mx == null) continue;
+    if (mx == null) return;
     const mColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
     marks.push(
       Plot.ruleX([mx], {
@@ -273,6 +324,7 @@ export function assemblePlot({
     );
     if (m.label) {
       const anchor = m.labelAnchor ?? "start";
+      const autoDy = staggerDy.get(`m${markerIdx}`) ?? 4;
       marks.push(
         Plot.text([{ x: mx, t: m.label }], {
           x: "x",
@@ -280,14 +332,14 @@ export function assemblePlot({
           frameAnchor: "top",
           textAnchor: anchor,
           dx: m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4,
-          dy: m.labelDy != null ? m.labelDy : 4,
+          dy: m.labelDy != null ? m.labelDy : autoDy,
           fill: mColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
         }),
       );
     }
-  }
+  });
 
   // 6. Line overlay (on top).
   marks.push(...layers.overlay);

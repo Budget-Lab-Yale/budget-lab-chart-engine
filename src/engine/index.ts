@@ -436,6 +436,17 @@ export function renderPane(
       }
     : undefined;
 
+  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
+  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
+  const xExtentVals = dataInScope
+    .map((r) =>
+      adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
+    )
+    .filter((v): v is number => Number.isFinite(v as number));
+  const xExtent: [number, number] | undefined = xExtentVals.length
+    ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
+    : undefined;
+
   const svg = assemblePlot({
     layers,
     yDomain,
@@ -446,6 +457,7 @@ export function renderPane(
     colors,
     spec,
     points: resolvedPoints,
+    ...(xExtent ? { xExtent } : {}),
     width: opts.width,
     height: opts.height,
     marginRight: opts.marginRight,
