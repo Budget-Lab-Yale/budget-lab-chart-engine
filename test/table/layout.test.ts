@@ -245,4 +245,39 @@ describe("layoutTable — width + wrap config (5c)", () => {
     // The column is pinned to 60 either way; the wrapped layout reserves more header height.
     expect(wrapped.headerHeight).toBeGreaterThan(noWrap.headerHeight);
   });
+
+  it("stub_max_width caps the stub width; stub_wrap wraps long labels and grows the row", () => {
+    const s: TableSpec = {
+      title: "T",
+      data: "d",
+      value: "v",
+      stub: [{ label: "row" }],
+      header: ["m"],
+      format: { default: { type: "number", decimals: 0 } },
+    };
+    const r = [
+      { row: "Annual GDP growth under AI", m: "x", v: "1" },
+      { row: "GDP", m: "x", v: "2" },
+    ] as any;
+    const model = buildTableModel(s, r);
+    const uncapped = layoutTable(model, { width: 800, measureText });
+    const capped = layoutTable(model, { width: 800, measureText, stubMaxWidth: 120, stubWrap: true });
+
+    expect(capped.stubWidth).toBeLessThanOrEqual(120);
+    expect(capped.stubWidth).toBeLessThan(uncapped.stubWidth);
+
+    const longRow = capped.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
+    expect(longRow.stubLines.length).toBeGreaterThan(1);
+    expect(longRow.rect.h).toBeGreaterThan(capped.rowHeight);
+
+    const shortRow = capped.rows.find((e) => "row" in e && e.row.label === "GDP") as any;
+    expect(shortRow.stubLines).toBeUndefined();
+    expect(shortRow.rect.h).toBe(capped.rowHeight);
+
+    // Cap without stub_wrap: width still capped, but labels are not wrapped (single line → clipped).
+    const clipped = layoutTable(model, { width: 800, measureText, stubMaxWidth: 120 });
+    expect(clipped.stubWidth).toBeLessThanOrEqual(120);
+    const clipRow = clipped.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
+    expect(clipRow.stubLines).toBeUndefined();
+  });
 });

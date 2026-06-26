@@ -73,6 +73,8 @@ export const TABLE_SPEC_SCHEMA = {
     header_tier_rules: { type: "boolean" },
     spanner_rules: { type: "boolean" },
     stub_width: { type: "number" },
+    stub_max_width: { type: "number" },
+    stub_wrap: { type: "boolean" },
     stub_nowrap: { type: "boolean" },
     column_width: {
       anyOf: [

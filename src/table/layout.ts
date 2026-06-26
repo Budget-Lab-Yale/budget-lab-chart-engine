@@ -20,11 +20,15 @@ export interface LayoutOptions {
   columnWidth?: number | Record<string, number>;
   /** Wrap bottom-tier (leaf) header labels to at most N lines. */
   headerMaxLines?: number;
+  /** Cap the auto-computed stub width at this many px. */
+  stubMaxWidth?: number;
+  /** Allow stub (row-label) cells to wrap when the column is narrower than the label. */
+  stubWrap?: boolean;
 }
 export interface CellRect { x: number; y: number; w: number; h: number; }
 export interface HeaderEntry { cell: HeaderCell; rect: CellRect; tier: number; lines?: string[]; }
 export type RowEntry =
-  | { row: BodyRow; rect: CellRect; cellRects: CellRect[] }
+  | { row: BodyRow; rect: CellRect; cellRects: CellRect[]; stubLines?: string[] }
   | { group: RowGroup; rect: CellRect; noteLines: string[]; topGap: number; isFirst: boolean };
 export interface TableLayout {
   totalWidth: number; totalHeight: number;
@@ -73,6 +77,7 @@ export const SUBLABEL_LINE = sublabelLine;
 export const GROUP_LABEL_LINE = groupLabelLine;
 export const GROUP_NOTE_GAP = groupNoteGap;
 export const GROUP_NOTE_LINE_HEIGHT = groupNoteLineHeight;
+export const STUB_LINE_HEIGHT = 16; // per-line height for a wrapped stub label
 // Horizontal inset used for wrapping group notes to the table width (mirrors render-svg PAD_X*2).
 const NOTE_WRAP_PAD = 16;
 const NOTE_WRAP_MAX_LINES = 4;
@@ -182,7 +187,11 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       );
     }
   }
-  const stubWidth = opts.stubWidth != null ? opts.stubWidth : stubNatural + padX;
+  // A fixed stub_width wins outright; otherwise auto-size to content, capped by stub_max_width.
+  const stubWidth =
+    opts.stubWidth != null
+      ? opts.stubWidth
+      : Math.min(stubNatural + padX, opts.stubMaxWidth ?? Number.POSITIVE_INFINITY);
 
   // ---- Column x offsets, starting after the stub column. ----
   const colX: number[] = [];
@@ -259,15 +268,23 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       y += h;
       return { group: entry.group, rect, noteLines, topGap, isFirst };
     }
-    const rowRect: CellRect = { x: 0, y, w: stubWidth, h: rowHeight };
-    const cellRects: CellRect[] = leaves.map((_, i) => ({
-      x: colX[i]!,
-      y,
-      w: colW[i]!,
-      h: rowHeight,
-    }));
-    y += rowHeight;
-    return { row: entry.row, rect: rowRect, cellRects };
+    // When stub_wrap is on, wrap the row label to the (capped) stub width and grow the row to fit.
+    let stubLines: string[] | undefined;
+    let h = rowHeight;
+    if (opts.stubWrap) {
+      const avail = Math.max(1, stubWidth - padX - entry.row.level * INDENT_STEP);
+      const lines = wrapToLines(entry.row.label, avail, 99, (s) => measureText(s, bodyFontPx, bodyWeight));
+      if (lines.length > 1) {
+        stubLines = lines;
+        h = lines.length * STUB_LINE_HEIGHT + (rowHeight - STUB_LINE_HEIGHT);
+      }
+    }
+    const rowRect: CellRect = { x: 0, y, w: stubWidth, h };
+    const cellRects: CellRect[] = leaves.map((_, i) => ({ x: colX[i]!, y, w: colW[i]!, h }));
+    y += h;
+    return stubLines
+      ? { row: entry.row, rect: rowRect, cellRects, stubLines }
+      : { row: entry.row, rect: rowRect, cellRects };
   });
 
   // Footnote list height: a top gap plus one line per footnote (0 if there are none).

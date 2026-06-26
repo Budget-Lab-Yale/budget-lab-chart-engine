@@ -54,6 +54,8 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
     ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
     ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
     ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
+    ...(spec.stub_max_width != null ? { stubMaxWidth: spec.stub_max_width } : {}),
+    ...(spec.stub_wrap != null ? { stubWrap: spec.stub_wrap } : {}),
   });
 
   // Frame width is content-driven: the table's natural width plus margins — a narrow table yields

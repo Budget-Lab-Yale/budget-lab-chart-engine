@@ -17,6 +17,7 @@ import {
   SUBLABEL_LINE,
   GROUP_NOTE_GAP,
   GROUP_NOTE_LINE_HEIGHT,
+  STUB_LINE_HEIGHT,
 } from "./layout";
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
@@ -95,6 +96,19 @@ export function renderTableSvg(
     height: layout.totalHeight,
     viewBox: `0 0 ${layout.totalWidth} ${layout.totalHeight}`,
   }) as SVGSVGElement;
+
+  // Stub wrapping / clipping. When stub_wrap is off and the column is capped (stub_max_width /
+  // stub_width), single-line labels are clipped to the stub column via this clipPath.
+  const stubWrap = spec?.stub_wrap === true && spec?.stub_nowrap !== true;
+  const stubCapped = spec?.stub_max_width != null || spec?.stub_width != null;
+  const clipStub = !stubWrap && stubCapped;
+  if (clipStub) {
+    const defs = el("defs");
+    const cp = el("clipPath", { id: "tbl-stub-clip" });
+    cp.appendChild(el("rect", { x: 0, y: 0, width: layout.stubWidth, height: layout.totalHeight }));
+    defs.appendChild(cp);
+    svg.appendChild(defs);
+  }
 
   // ---- Header ----
   const headerG = el("g", { class: "tbl-table-header" });
@@ -234,16 +248,39 @@ export function renderTableSvg(
     const { row, rect, cellRects } = entry;
     const rg = el("g", { class: "tbl-table-row" });
     const baseY = rect.y + rect.h / 2 + BODY_FONT / 3;
+    const stubWeight = row.cells.some((c) => c.emphasis) ? 700 : 400;
+    const stubX = PAD_X + row.level * INDENT_STEP;
 
-    // Stub label, left-aligned, indented by level.
-    rg.appendChild(
-      text(PAD_X + row.level * INDENT_STEP, baseY, row.label, {
+    // Stub label, left-aligned, indented by level. Wrapped onto multiple lines when the layout
+    // wrapped it (stub_wrap); otherwise a single line, clipped to the column when capped.
+    const stubLines = entry.stubLines;
+    if (stubLines && stubLines.length > 1) {
+      const blockH = (stubLines.length - 1) * STUB_LINE_HEIGHT;
+      const t = el("text", {
+        x: stubX,
+        y: rect.y + rect.h / 2 - blockH / 2 + BODY_FONT / 3,
+        "text-anchor": "start",
+        "font-family": TBL.font,
+        "font-size": BODY_FONT,
+        "font-weight": stubWeight,
+        fill: TBL.color.text,
+      });
+      stubLines.forEach((ln, li) => {
+        const ts = el("tspan", { x: stubX, dy: li === 0 ? 0 : STUB_LINE_HEIGHT });
+        ts.textContent = ln;
+        t.appendChild(ts);
+      });
+      rg.appendChild(t);
+    } else {
+      const st = text(stubX, baseY, row.label, {
         anchor: "start",
-        weight: row.cells.some((c) => c.emphasis) ? 700 : 400,
+        weight: stubWeight,
         fill: TBL.color.text,
         size: BODY_FONT,
-      }),
-    );
+      });
+      if (clipStub) st.setAttribute("clip-path", "url(#tbl-stub-clip)");
+      rg.appendChild(st);
+    }
 
     // One cell <text> per leaf, centered in the cell rect.
     row.cells.forEach((cell, i) => {

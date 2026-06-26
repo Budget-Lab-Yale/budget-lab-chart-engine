@@ -722,10 +722,23 @@ th.tbl-table-stub {
   color: var(--tbl-text-body);
 }
 
-/* stub_nowrap: keep stub labels + group titles on one line (the layout sizes the stub to the
-   longest label so nothing is clipped). */
+/* Stub on one line. By default the column is sized to the longest label so nothing is clipped;
+   when capped narrower (stub_max_width / stub_width) the label is clipped to the column. The clip
+   lives on an inner block (table cells don't honor overflow) — see .tbl-table-stub-clip. */
 th.tbl-table-stub.is-nowrap,
 .tbl-table-group-inner.is-nowrap {
+  white-space: nowrap;
+}
+/* stub_wrap: allow the row label to wrap onto multiple lines within the (capped) column. */
+th.tbl-table-stub.is-wrap {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+/* Inner clip box for a non-wrapping stub label (table cells ignore overflow, so the cell content
+   is wrapped in this block which does clip). */
+.tbl-table-stub.is-nowrap > .tbl-table-stub-clip {
+  display: block;
+  overflow: hidden;
   white-space: nowrap;
 }
 

@@ -73,6 +73,12 @@ export interface TableSpec {
   spanner_rules?: boolean;
   /** Fixed px width for the stub column (overrides the computed width). */
   stub_width?: number;
+  /** Maximum px width for the stub column: it auto-sizes to content but never exceeds this. A
+   * label longer than the cap wraps when stub_wrap is set, otherwise it is clipped. */
+  stub_max_width?: number;
+  /** Allow row-label (stub) cells to wrap onto multiple lines when the column is too narrow for the
+   * label (e.g. under stub_max_width / stub_width). Default false — labels stay on one line. */
+  stub_wrap?: boolean;
   /** When true, stub labels do not wrap; the stub is sized to the longest label. Default false. */
   stub_nowrap?: boolean;
   /** Fixed px width for data columns: one number applies to all leaves, or a { leafKey: px } map. */

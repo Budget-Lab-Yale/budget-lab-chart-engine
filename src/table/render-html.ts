@@ -24,10 +24,18 @@ export function renderTableHtml(
   const { stubWidth, colW } = layout;
   const headerMaxLines = spec?.header_max_lines;
   const stubNowrap = spec?.stub_nowrap === true;
+  // Stub wraps only when explicitly opted in (and not also forced nowrap); otherwise it stays on
+  // one line and is clipped to the column when capped narrower than the label.
+  const stubWrap = spec?.stub_wrap === true && !stubNowrap;
 
   const table = doc.createElement("table");
   table.className = "tbl-table";
   table.style.tableLayout = "fixed";
+  // Size the table to its content width (sum of column widths), NOT 100% of the card. Under
+  // table-layout:fixed, width:100% would turn the per-column px into ratios and redistribute any
+  // freed space — defeating stub_max_width and other caps — and would also diverge from the PNG,
+  // which always uses this exact width. Narrow tables stay content-width; wide ones overflow+scroll.
+  table.style.width = `${layout.totalWidth}px`;
 
   // ---- <colgroup> ----
   const colgroup = doc.createElement("colgroup");
@@ -151,11 +159,19 @@ export function renderTableHtml(
       const stubTh = doc.createElement("th");
       stubTh.scope = "row";
       stubTh.className = "tbl-table-stub";
-      if (stubNowrap) stubTh.classList.add("is-nowrap");
+      stubTh.classList.add(stubWrap ? "is-wrap" : "is-nowrap");
       stubTh.style.paddingLeft = `${row.level * INDENT_STEP}px`;
 
-      // Label text (with footnote superscript if any row-level footnote key present)
-      stubTh.textContent = row.label;
+      // Row label. When not wrapping, place it in an inner clip block so an over-long label is
+      // clipped to the (capped) column — table cells themselves ignore overflow.
+      if (stubWrap) {
+        stubTh.textContent = row.label;
+      } else {
+        const clip = doc.createElement("span");
+        clip.className = "tbl-table-stub-clip";
+        clip.textContent = row.label;
+        stubTh.appendChild(clip);
+      }
 
       tr.appendChild(stubTh);
 
