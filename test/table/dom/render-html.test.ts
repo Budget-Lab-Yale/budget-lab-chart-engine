@@ -103,6 +103,20 @@ describe("renderTableHtml — 3-tier header", () => {
     });
   });
 
+  it("banner header cells (colSpan > 1) get the is-spanner class; leaf cells do not", () => {
+    table = renderTableHtml(model, layout, document);
+    const thead = table.querySelector("thead")!;
+    const ths = Array.from(thead.querySelectorAll("th")) as HTMLTableCellElement[];
+    // Every spanner <th> must have colSpan > 1; every colSpan>1 data <th> must be a spanner.
+    ths.forEach((th) => {
+      if (th.classList.contains("tbl-table-stub-header")) return; // corner uses rowSpan, not a banner
+      if (th.colSpan > 1) expect(th.classList.contains("is-spanner")).toBe(true);
+      else expect(th.classList.contains("is-spanner")).toBe(false);
+    });
+    // The "Conv" banner spans 2 leaves, so at least one spanner exists.
+    expect(ths.some((th) => th.classList.contains("is-spanner"))).toBe(true);
+  });
+
   it("stub corner <th> spans all header tiers (rowSpan = tier count)", () => {
     table = renderTableHtml(model, layout, document);
     const thead = table.querySelector("thead")!;
@@ -130,7 +144,7 @@ describe("renderTableHtml — 3-tier header", () => {
     });
   });
 
-  it("numeric <td> carry data-col = leaf key and right-align class is-num", () => {
+  it("numeric <td> carry data-col = leaf key and class is-num", () => {
     table = renderTableHtml(model, layout, document);
     const tbody = table.querySelector("tbody")!;
     const firstDataRow = tbody.querySelector("tr:not(.tbl-table-group)")!;

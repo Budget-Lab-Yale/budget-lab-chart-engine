@@ -138,4 +138,27 @@ describe("table interactivity — sticky", () => {
     const table = container.querySelector("table.tbl-table") as HTMLTableElement;
     expect(table.classList.contains("tbl-table--sticky-first")).toBe(false);
   });
+
+  // Real horizontal/vertical scroll clipping can't be exercised under jsdom (no layout), so
+  // assert the structural hooks the sticky z-index ladder targets are present.
+  it("exposes the structural hooks for the sticky column clip (corner + stub cells)", () => {
+    const container = document.createElement("div");
+    mountTable(container, { spec: { ...SPEC, sticky: { firstColumn: true } }, rows: ROWS });
+    const table = container.querySelector("table.tbl-table") as HTMLTableElement;
+    // Header corner cell the z-4 rule targets.
+    expect(table.querySelector("thead th.tbl-table-stub-header")).not.toBeNull();
+    // Body stub cells the z-3 rule targets.
+    expect(table.querySelector("tbody th.tbl-table-stub")).not.toBeNull();
+    // Sticky header thead cells (z-2) and group titles exist.
+    expect(table.querySelector("thead th")).not.toBeNull();
+    expect(table.querySelector("tbody tr.tbl-table-group th")).not.toBeNull();
+  });
+
+  it("sets --tbl-thead-h on the table for sticky group-title offset", () => {
+    const container = document.createElement("div");
+    mountTable(container, { spec: SPEC, rows: ROWS });
+    const table = container.querySelector("table.tbl-table") as HTMLTableElement;
+    // jsdom has no layout, so the measured height is 0px — but the property must be set.
+    expect(table.style.getPropertyValue("--tbl-thead-h")).toBe("0px");
+  });
 });

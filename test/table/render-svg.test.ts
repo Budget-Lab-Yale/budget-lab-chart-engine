@@ -67,7 +67,7 @@ const TARIFF_SPEC: TableSpec = {
 };
 
 describe("renderTableSvg — golden bodies", () => {
-  it("budget: 1-tier header, signed numbers right-aligned", async () => {
+  it("budget: 1-tier header, signed numbers centered", async () => {
     const rows = parseCsv("./fixtures/budget.csv");
     const model = buildTableModel(BUDGET_SPEC, rows);
     const layout = layoutTable(model, layoutOpts);
@@ -77,10 +77,10 @@ describe("renderTableSvg — golden bodies", () => {
     // Header <text> count equals the number of distinct header cells.
     const headerTexts = svg.querySelectorAll("g.tbl-table-header text");
     expect(headerTexts.length).toBe(headerCellCount(model));
-    // Numeric body cells are right-aligned.
+    // Numeric body cells are centered.
     const cellTexts = svg.querySelectorAll("g.tbl-table-cell text");
     expect(cellTexts.length).toBeGreaterThan(0);
-    cellTexts.forEach((t) => expect(t.getAttribute("text-anchor")).toBe("end"));
+    cellTexts.forEach((t) => expect(t.getAttribute("text-anchor")).toBe("middle"));
     // The group heading text appears (proposal level = group rows).
     const groupTexts = Array.from(svg.querySelectorAll("g.tbl-table-group text")).map((t) => t.textContent);
     expect(groupTexts).toContain("Lower rates");
@@ -125,9 +125,9 @@ describe("renderTableSvg — golden bodies", () => {
       .filter((r) => Number(r.getAttribute("height")) > 24);
     expect(tallCells.length).toBeGreaterThan(0);
 
-    // Numeric cells right-aligned.
+    // Numeric cells centered.
     svg.querySelectorAll("g.tbl-table-cell text").forEach((t) =>
-      expect(t.getAttribute("text-anchor")).toBe("end"),
+      expect(t.getAttribute("text-anchor")).toBe("middle"),
     );
 
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/tariff.golden.svg");

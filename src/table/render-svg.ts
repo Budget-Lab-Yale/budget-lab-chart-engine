@@ -60,6 +60,9 @@ export function renderTableSvg(
   };
   const line = (x1: number, y1: number, x2: number, y2: number): SVGElement =>
     el("line", { x1, y1, x2, y2, stroke: TBL.color.axisStroke, "stroke-width": 1 });
+  // Hairline rule in the lighter border tone, used for the inline flanking rules on banner cells.
+  const spannerLine = (x1: number, y1: number, x2: number, y2: number): SVGElement =>
+    el("line", { x1, y1, x2, y2, stroke: TBL.color.border, "stroke-width": 1 });
 
   const svg = el("svg", {
     xmlns: SVG_NS,
@@ -96,6 +99,14 @@ export function renderTableSvg(
           size: HEADER_FONT,
         }),
       );
+      // Banner cells (colSpan > 1) get horizontal rules flanking the centered label, extending
+      // to the cell's edges, to show the columns they govern.
+      if (cell.colSpan > 1) {
+        const ruleY = rect.y + rect.h / 2;
+        const halfText = (measureish(cell.text) / 2) + PAD_X;
+        headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
+        headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
+      }
       if (leaf?.sublabel != null) {
         headerG.appendChild(
           text(cx, labelY + SUBLABEL_FONT + 1, leaf.sublabel, {
@@ -165,7 +176,7 @@ export function renderTableSvg(
       }),
     );
 
-    // One cell <text> per leaf, right-aligned at the cell's right edge.
+    // One cell <text> per leaf, centered in the cell rect.
     row.cells.forEach((cell, i) => {
       const cr = cellRects[i] as CellRect;
       const cg = el("g", { class: "tbl-table-cell" });
@@ -183,8 +194,8 @@ export function renderTableSvg(
       }
       const fill =
         cell.signClass === "pos" ? SIGN_POS : cell.signClass === "neg" ? SIGN_NEG : TBL.color.text;
-      const t = text(cr.x + cr.w - PAD_X, baseY, cell.text, {
-        anchor: "end",
+      const t = text(cr.x + cr.w / 2, baseY, cell.text, {
+        anchor: "middle",
         weight: cell.emphasis ? 700 : 400,
         fill,
         size: BODY_FONT,

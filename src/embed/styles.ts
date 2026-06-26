@@ -642,13 +642,29 @@ body {
   border-bottom: 1px solid var(--tbl-border);
 }
 
-/* Leaf headers (last header row): bottom-aligned. */
+/* Leaf headers (last header row): bottom-aligned, centered (inherits text-align:center). */
 .tbl-table thead tr:last-child th {
   vertical-align: bottom;
 }
 
-/* Stub cell in header (corner) */
-.tbl-table thead th.tbl-table-stub {
+/* Banner cells (colSpan > 1): centered label flanked by hairline rules extending to the cell's
+   edges, showing the columns the banner governs. Leaf headers (colSpan 1) are unaffected. */
+.tbl-table thead th.is-spanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tbl-table thead th.is-spanner::before,
+.tbl-table thead th.is-spanner::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--tbl-border);
+}
+
+/* Stub cell in header (corner) — left-aligned. The corner <th> carries class
+   tbl-table-stub-header in the rendered HTML. */
+.tbl-table thead th.tbl-table-stub-header {
   text-align: left;
 }
 
@@ -669,11 +685,15 @@ body {
   border-bottom: 1px solid var(--tbl-gridline);
   font-size: 13px;
   background: var(--tbl-bg);
+  /* Base of the sticky stacking ladder: scrolling body cells sit below the sticky thead (z 2)
+     and the pinned first column (z 3) / header corner (z 4). */
+  position: relative;
+  z-index: 0;
 }
 
-/* Numeric cells: right-aligned, tabular figures. */
+/* Numeric cells: centered by default, tabular figures. */
 td.is-num {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
@@ -701,6 +721,15 @@ tr.tbl-table-group td {
 .tbl-table tbody tr.tbl-table-group:first-child td {
   border-top: none;
   padding-top: 4px;
+}
+/* Sticky row-group titles: the group heading sticks just below the sticky column-header block
+   as the page scrolls vertically. --tbl-thead-h is measured + set by mount.ts (0 fallback under
+   jsdom, which has no layout). Opaque bg so body rows scroll under the stuck title. */
+.tbl-table tbody tr.tbl-table-group th {
+  position: sticky;
+  top: var(--tbl-thead-h, 0px);
+  z-index: 1;
+  background: var(--tbl-bg);
 }
 
 /* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */
@@ -744,18 +773,28 @@ td.is-neg {
 }
 
 /* ---- Sticky first column ---- */
-/* Enabled when .tbl-table--sticky-first is present on the table element. */
-.tbl-table--sticky-first th.tbl-table-stub,
-.tbl-table--sticky-first td:first-child {
+/* Enabled when .tbl-table--sticky-first is present on the table element. A z-index ladder keeps
+   the pinned stub column ABOVE the scrolling header + body so column headers are clipped by the
+   pinned column at the same moment their data cells slide under it:
+     body cells            z 0  (set above)
+     sticky thead th (top) z 2
+     sticky stub column    z 3  (body stub cells + leaf-tier stub <th>)
+     header corner         z 4  (sticky top + left). */
+.tbl-table--sticky-first td:first-child,
+.tbl-table--sticky-first th.tbl-table-stub {
   position: sticky;
   left: 0;
-  z-index: 1;
-  /* Solid background so body content scrolls behind the pinned cell. */
+  z-index: 3;
+  /* Opaque background so scrolling cells pass behind the pinned column. */
   background: var(--tbl-bg);
 }
-/* Ensure the thead sticky-first corner cell layers above both axes. */
-.tbl-table--sticky-first thead th.tbl-table-stub {
-  z-index: 3;
+/* The header corner is pinned at both top and left, and must sit above the scrolling thead so
+   header cells disappear under it in lockstep with their data column. */
+.tbl-table--sticky-first thead th.tbl-table-stub-header {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--tbl-bg);
 }
 
 /* ---- Footnote superscript ---- */

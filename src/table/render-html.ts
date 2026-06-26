@@ -65,6 +65,11 @@ export function renderTableHtml(
       th.rowSpan = hCell.rowSpan;
       th.textContent = hCell.text;
 
+      // Banner cells (spanning >1 column) get flanking rules via the .is-spanner CSS treatment.
+      if (hCell.colSpan > 1) {
+        th.classList.add("is-spanner");
+      }
+
       // If this is a leaf-bottom cell (has leafKey) and the leaf has a sublabel, append it
       if (hCell.leafKey != null) {
         const leaf = leaves.find((l) => l.key === hCell.leafKey);

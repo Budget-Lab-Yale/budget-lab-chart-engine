@@ -335,6 +335,12 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     // The ResizeObserver re-render replaces the table DOM, so interactivity (which holds
     // references to the live elements) must be re-attached against the fresh table each time.
     attachTableInteractivity(table, model, spec);
+    // Measure the rendered header height and expose it as --tbl-thead-h so sticky row-group
+    // titles stick exactly at the column-header block's bottom. Under jsdom there is no layout
+    // (offsetHeight === 0), which is a harmless 0px fallback.
+    const thead = table.querySelector("thead");
+    const theadH = thead instanceof HTMLElement ? thead.offsetHeight : 0;
+    table.style.setProperty("--tbl-thead-h", `${theadH}px`);
   }
 
   // Initial render — use the provided width, the container's current width, or a default.

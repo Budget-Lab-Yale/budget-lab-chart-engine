@@ -30,4 +30,25 @@ describe("CHART_CSS — table rules", () => {
   it("contains .is-col-hover (column hover hook)", () => {
     expect(CHART_CSS).toContain(".is-col-hover");
   });
+
+  it("centers numeric body cells", () => {
+    expect(CHART_CSS).toMatch(/td\.is-num\s*\{[^}]*text-align:\s*center/);
+  });
+
+  it("contains the banner spanner treatment (.is-spanner with flanking rules)", () => {
+    expect(CHART_CSS).toContain("th.is-spanner");
+    expect(CHART_CSS).toContain("th.is-spanner::before");
+    expect(CHART_CSS).toContain("th.is-spanner::after");
+  });
+
+  it("makes row-group titles sticky below the header block (--tbl-thead-h)", () => {
+    expect(CHART_CSS).toContain("--tbl-thead-h");
+    expect(CHART_CSS).toMatch(/tr\.tbl-table-group th\s*\{[^}]*position:\s*sticky/);
+  });
+
+  it("declares the sticky z-index ladder for the pinned first column", () => {
+    // corner z 4, stub column z 3, thead z 2, body z 0.
+    expect(CHART_CSS).toContain("z-index: 4");
+    expect(CHART_CSS).toContain("z-index: 3");
+  });
 });
