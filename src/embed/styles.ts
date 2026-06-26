@@ -766,7 +766,9 @@ tr.tbl-table-group td {
    would pin while its row labels scrolled, which reads as a bug. */
 .tbl-table--sticky-first .tbl-table-group-inner {
   position: sticky;
-  left: 0;
+  /* Pin at the cell's 8px left padding — its natural rest position — so it does NOT visibly shift
+     left before sticking, and stays aligned with the stub label text (also indented 8px). */
+  left: 8px;
   display: inline-block;
 }
 
@@ -840,6 +842,20 @@ td.is-neg {
    with the body. */
 .tbl-table.tbl-table--no-sticky-header thead th {
   position: static;
+}
+
+/* ---- Disable the sticky first column at phone widths ---- */
+/* Below ~420px a pinned stub eats too much of the viewport, leaving the data columns cramped and
+   illegible. Drop the horizontal pin (left:auto neutralizes the sticky constraint) so the whole
+   table scrolls freely. The corner keeps its top:0 from the base rule, so the column header stays
+   vertically sticky if enabled. */
+@media (max-width: 419px) {
+  .tbl-table--sticky-first td:first-child,
+  .tbl-table--sticky-first th.tbl-table-stub,
+  .tbl-table--sticky-first thead th.tbl-table-stub-header,
+  .tbl-table--sticky-first .tbl-table-group-inner {
+    left: auto;
+  }
 }
 
 /* ---- Footnote definition list ---- */
