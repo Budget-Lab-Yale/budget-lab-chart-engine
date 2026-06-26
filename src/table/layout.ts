@@ -20,9 +20,9 @@ export interface LayoutOptions {
   columnWidth?: number | Record<string, number>;
   /** Wrap bottom-tier (leaf) header labels to at most N lines. */
   headerMaxLines?: number;
-  /** Cap the auto-computed stub width at this many px. */
-  stubMaxWidth?: number;
-  /** Allow stub (row-label) cells to wrap when the column is narrower than the label. */
+  /** Minimum px width for the stub column (a floor; or the wrap target when stubWrap is set). */
+  stubMinWidth?: number;
+  /** Allow stub (row-label) cells to wrap, shrinking the column toward stubMinWidth. */
   stubWrap?: boolean;
 }
 export interface CellRect { x: number; y: number; w: number; h: number; }
@@ -187,11 +187,29 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       );
     }
   }
-  // A fixed stub_width wins outright; otherwise auto-size to content, capped by stub_max_width.
+  // Widest single (unbreakable) word among row labels — the narrowest the stub can wrap to without
+  // a word overflowing its line. Only needed when wrapping.
+  let widestWord = 0;
+  if (opts.stubWrap) {
+    for (const b of model.body) {
+      if (b.kind !== "row") continue;
+      for (const w of b.row.label.split(/\s+/).filter(Boolean)) {
+        widestWord = Math.max(widestWord, measureText(w, bodyFontPx, bodyWeight) + b.row.level * INDENT_STEP);
+      }
+    }
+  }
+  // Stub width:
+  // - fixed stub_width wins outright;
+  // - with stub_wrap, shrink toward stub_min_width so long labels wrap (never below the widest
+  //   word, so no word overflows; a min ≥ the natural width simply means nothing wraps);
+  // - otherwise size to the longest label, floored at stub_min_width.
+  const naturalStubW = stubNatural + padX;
   const stubWidth =
     opts.stubWidth != null
       ? opts.stubWidth
-      : Math.min(stubNatural + padX, opts.stubMaxWidth ?? Number.POSITIVE_INFINITY);
+      : opts.stubWrap
+        ? Math.max(opts.stubMinWidth ?? 0, widestWord + padX)
+        : Math.max(naturalStubW, opts.stubMinWidth ?? 0);
 
   // ---- Column x offsets, starting after the stub column. ----
   const colX: number[] = [];

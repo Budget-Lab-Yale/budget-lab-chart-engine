@@ -97,11 +97,10 @@ export function renderTableSvg(
     viewBox: `0 0 ${layout.totalWidth} ${layout.totalHeight}`,
   }) as SVGSVGElement;
 
-  // Stub wrapping / clipping. When stub_wrap is off and the column is capped (stub_max_width /
-  // stub_width), single-line labels are clipped to the stub column via this clipPath.
+  // Stub wrapping / clipping. A non-wrapping stub is normally sized to fit its longest label, so it
+  // only needs clipping when a fixed stub_width is set narrower than a label — clip to the column.
   const stubWrap = spec?.stub_wrap === true && spec?.stub_nowrap !== true;
-  const stubCapped = spec?.stub_max_width != null || spec?.stub_width != null;
-  const clipStub = !stubWrap && stubCapped;
+  const clipStub = !stubWrap && spec?.stub_width != null;
   if (clipStub) {
     const defs = el("defs");
     const cp = el("clipPath", { id: "tbl-stub-clip" });

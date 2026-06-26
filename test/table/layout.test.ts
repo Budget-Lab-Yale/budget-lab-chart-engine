@@ -246,7 +246,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
     expect(wrapped.headerHeight).toBeGreaterThan(noWrap.headerHeight);
   });
 
-  it("stub_max_width caps the stub width; stub_wrap wraps long labels and grows the row", () => {
+  it("stub_min_width floors the stub; stub_wrap shrinks it toward the min and wraps long labels", () => {
     const s: TableSpec = {
       title: "T",
       data: "d",
@@ -260,24 +260,24 @@ describe("layoutTable — width + wrap config (5c)", () => {
       { row: "GDP", m: "x", v: "2" },
     ] as any;
     const model = buildTableModel(s, r);
-    const uncapped = layoutTable(model, { width: 800, measureText });
-    const capped = layoutTable(model, { width: 800, measureText, stubMaxWidth: 120, stubWrap: true });
+    const natural = layoutTable(model, { width: 800, measureText }); // sized to the longest label
 
-    expect(capped.stubWidth).toBeLessThanOrEqual(120);
-    expect(capped.stubWidth).toBeLessThan(uncapped.stubWidth);
-
-    const longRow = capped.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
+    // stub_wrap + stub_min_width: stub shrinks to the min, long label wraps, that row grows.
+    const wrapped = layoutTable(model, { width: 800, measureText, stubMinWidth: 120, stubWrap: true });
+    expect(wrapped.stubWidth).toBe(120);
+    expect(wrapped.stubWidth).toBeLessThan(natural.stubWidth);
+    const longRow = wrapped.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
     expect(longRow.stubLines.length).toBeGreaterThan(1);
-    expect(longRow.rect.h).toBeGreaterThan(capped.rowHeight);
-
-    const shortRow = capped.rows.find((e) => "row" in e && e.row.label === "GDP") as any;
+    expect(longRow.rect.h).toBeGreaterThan(wrapped.rowHeight);
+    const shortRow = wrapped.rows.find((e) => "row" in e && e.row.label === "GDP") as any;
     expect(shortRow.stubLines).toBeUndefined();
-    expect(shortRow.rect.h).toBe(capped.rowHeight);
+    expect(shortRow.rect.h).toBe(wrapped.rowHeight);
 
-    // Cap without stub_wrap: width still capped, but labels are not wrapped (single line → clipped).
-    const clipped = layoutTable(model, { width: 800, measureText, stubMaxWidth: 120 });
-    expect(clipped.stubWidth).toBeLessThanOrEqual(120);
-    const clipRow = clipped.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
-    expect(clipRow.stubLines).toBeUndefined();
+    // Without stub_wrap, stub_min_width is just a floor: a min wider than natural widens the stub;
+    // labels never wrap.
+    const floored = layoutTable(model, { width: 800, measureText, stubMinWidth: natural.stubWidth + 80 });
+    expect(floored.stubWidth).toBe(natural.stubWidth + 80);
+    const flooredRow = floored.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
+    expect(flooredRow.stubLines).toBeUndefined();
   });
 });
