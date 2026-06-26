@@ -219,9 +219,10 @@ export function bottomChromeHeight(opts: { note?: string; source?: string; width
   const note = opts.note ?? "";
   const source = opts.source ?? "";
   const noteLines = note ? wrapText(note, `${W_BODY} 11px ${FONT}`, innerW) : [];
+  const sourceLines = source ? wrapText(`Source: ${source}`, `${W_BODY} 11px ${FONT}`, innerW) : [];
   let bottomH = 0;
   if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
-  if (source) bottomH += note ? 15 : 18;
+  if (sourceLines.length) bottomH += (note ? 15 : 18) + (sourceLines.length - 1) * 15;
   bottomH += MARGIN - 15; // bottom padding
   return bottomH;
 }
@@ -247,20 +248,31 @@ export function composeBottomChrome(
   }
   if (source) {
     by += note ? 15 : 18;
-    const g = svgEl(doc, "text", {
-      x: MARGIN,
-      y: by,
-      fill: MUTED,
-      "font-family": FONT,
-      "font-size": 11,
-      "font-weight": W_BODY,
-      "text-anchor": "start",
+    // Wrap the whole "Source: …" string to the content width; the "Source: " prefix stays bold on
+    // the first line (the rest of that line, and any continuation lines, are regular weight).
+    const PREFIX = "Source: ";
+    const sourceLines = wrapText(`${PREFIX}${source}`, `${W_BODY} 11px ${FONT}`, innerW);
+    sourceLines.forEach((ln, i) => {
+      const g = svgEl(doc, "text", {
+        x: MARGIN,
+        y: by + i * 15,
+        fill: MUTED,
+        "font-family": FONT,
+        "font-size": 11,
+        "font-weight": W_BODY,
+        "text-anchor": "start",
+      });
+      if (i === 0 && ln.startsWith(PREFIX)) {
+        const pfx = svgEl(doc, "tspan", { "font-weight": W_SEMI });
+        pfx.textContent = PREFIX;
+        g.appendChild(pfx);
+        g.appendChild(doc.createTextNode(ln.slice(PREFIX.length)));
+      } else {
+        g.textContent = ln;
+      }
+      root.appendChild(g);
     });
-    const pfx = svgEl(doc, "tspan", { "font-weight": W_SEMI });
-    pfx.textContent = "Source: ";
-    g.appendChild(pfx);
-    g.appendChild(doc.createTextNode(source));
-    root.appendChild(g);
+    by += (sourceLines.length - 1) * 15;
   }
   return by;
 }
