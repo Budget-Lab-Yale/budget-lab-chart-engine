@@ -1,22 +1,27 @@
 // Self-contained PNG export for table figures (option B: redraw the table as SVG and reuse the
 // chart rasterizer). Composes the same title/subtitle/logo/source/notes chrome as the chart
 // export (via figure-chrome), then places the pure table-body SVG (renderTableSvg) below it,
-// sizing the frame to fit chrome + table.
+// sizing the frame to fit chrome + table. Multi-pane specs stack one sub-table per pane.
 
 import type { TableSpec } from "../spec/table-types.js";
 import type { TidyRow } from "../data/index.js";
 import { buildTableModel } from "../table/model.js";
-import { layoutTable } from "../table/layout.js";
+import { layoutTable, layoutOptionsFromSpec } from "../table/layout.js";
 import { renderTableSvg } from "../table/render-svg.js";
 import { makeMeasureText } from "../table/measure.js";
+import { splitPanes } from "../table/panes.js";
 import {
   W,
   MARGIN,
   INNER_W,
+  HEADING,
+  MUTED,
+  W_BOLD,
   createExportRoot,
   composeTopChrome,
   bottomChromeHeight,
   composeBottomChrome,
+  textEl,
 } from "./figure-chrome.js";
 import { rasterize, triggerDownload } from "./export-png.js";
 
@@ -26,6 +31,17 @@ const BODY_TOP_GAP = 14;
 // Minimum export frame width: enough for the title column beside the right-flush logo so neither
 // is cramped on a narrow table. Tables wider than this drive the frame width directly.
 const MIN_TABLE_FRAME = 560;
+
+// Pane subheading geometry (multi-pane).
+const PANE_TITLE_SIZE = 14;
+const PANE_TITLE_RISE = 16; // baseline drop from the cursor to the subheading
+const PANE_TITLE_GAP = 8; // gap from the subheading down to its table
+const PANE_GAP = 22; // gap between one pane's table and the next pane's subheading
+
+// Figure-level footnote list geometry.
+const FN_TOP_GAP = 10;
+const FN_LINE = 16;
+const FN_FONT = 11;
 
 /** Slug a title for a default download filename. */
 function slugify(title: string): string {
@@ -38,6 +54,8 @@ function slugify(title: string): string {
  * the natural table width; the height fits chrome + table + bottom chrome.
  */
 export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElement {
+  if (spec.pane != null) return buildMultiPaneExportSvg(spec, rows);
+
   const title = spec.title ?? "";
   const subtitle = spec.subtitle ?? "";
   const source = spec.source ?? "";
@@ -47,20 +65,9 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
   // (wide tables scroll on screen); the export frame grows to fit it.
   const measureText = makeMeasureText();
   const model = buildTableModel(spec, rows);
-  const layout = layoutTable(model, {
-    width: INNER_W,
-    measureText,
-    ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
-    ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
-    ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
-    ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
-    ...(spec.stub_min_width != null ? { stubMinWidth: spec.stub_min_width } : {}),
-    ...(spec.stub_wrap != null ? { stubWrap: spec.stub_wrap } : {}),
-  });
+  const layout = layoutTable(model, { width: INNER_W, measureText, ...layoutOptionsFromSpec(spec) });
 
-  // Frame width is content-driven: the table's natural width plus margins — a narrow table yields
-  // a narrow PNG instead of being stranded in a fixed 1000px frame. Floored at MIN_TABLE_FRAME so
-  // the title + right-flush logo always have room (the title wraps if the table is narrower).
+  // Frame width: standard frame, widened if the table itself is wider than the inner content box.
   const width = Math.max(MIN_TABLE_FRAME, layout.totalWidth + MARGIN * 2);
 
   // Provisional root (height patched once known) — needed so chrome can be drawn and measured.
@@ -83,6 +90,83 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
   composeBottomChrome(document, root, by, { note, source, width });
 
   // Final frame height = body bottom + reserved bottom-chrome space.
+  const height = Math.round(by + bottomChromeHeight({ note, source, width }));
+  root.setAttribute("height", String(height));
+  bgRect.setAttribute("height", String(height));
+
+  return root;
+}
+
+/**
+ * Multi-pane export: one sub-table per pane, stacked vertically, each under its subheading. All
+ * panes are stretched to a shared width so their left/right edges align. Footnotes are collected
+ * across panes and listed once at the figure level (above the source line).
+ */
+function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElement {
+  const title = spec.title ?? "";
+  const subtitle = spec.subtitle ?? "";
+  const source = spec.source ?? "";
+  const note = Array.isArray(spec.notes) ? spec.notes.join("  ") : (spec.notes ?? "");
+
+  const measureText = makeMeasureText();
+  const opts = layoutOptionsFromSpec(spec);
+  const panes = splitPanes(spec, rows);
+
+  // First pass: natural layouts to find the shared width across panes.
+  const natural = panes.map((p) => {
+    const model = buildTableModel(spec, p.rows);
+    return { pane: p, model, layout: layoutTable(model, { width: INNER_W, measureText, ...opts }) };
+  });
+  const sharedTableW = Math.max(...natural.map((b) => b.layout.totalWidth));
+
+  // Figure-level footnotes: union across panes, deduped by marker, in first-seen order.
+  const fnMap = new Map<string, string>();
+  for (const b of natural) for (const fn of b.model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
+  const figFootnotes = [...fnMap].map(([marker, text]) => ({ marker, text }));
+
+  // Second pass: re-lay each pane to the shared width, with footnotes stripped (rendered once below
+  // all panes at the figure level).
+  const laid = natural.map((b) => {
+    const model = { ...b.model, footnotes: [] };
+    const layout = layoutTable(model, { width: INNER_W, measureText, fillWidth: sharedTableW, ...opts });
+    return { pane: b.pane, model, layout };
+  });
+
+  const width = Math.max(MIN_TABLE_FRAME, sharedTableW + MARGIN * 2);
+  const { root, bgRect } = createExportRoot(document, width, 1);
+
+  const topCursor = composeTopChrome(document, root, { title, subtitle, width });
+  let cursor = topCursor + BODY_TOP_GAP;
+
+  laid.forEach(({ pane, model, layout }, i) => {
+    if (i > 0) cursor += PANE_GAP;
+    if (pane.title) {
+      cursor += PANE_TITLE_RISE;
+      root.appendChild(
+        textEl(document, MARGIN, cursor, pane.title, { size: PANE_TITLE_SIZE, weight: W_BOLD, fill: HEADING }),
+      );
+      cursor += PANE_TITLE_GAP;
+    }
+    const bodySvg = renderTableSvg(model, layout, { document, spec });
+    bodySvg.setAttribute("x", String(MARGIN));
+    bodySvg.setAttribute("y", String(cursor));
+    bodySvg.setAttribute("width", String(layout.totalWidth));
+    bodySvg.setAttribute("height", String(layout.totalHeight));
+    root.appendChild(bodySvg);
+    cursor += layout.totalHeight;
+  });
+
+  // Figure-level footnote list.
+  if (figFootnotes.length) {
+    cursor += FN_TOP_GAP;
+    for (const fn of figFootnotes) {
+      cursor += FN_LINE;
+      root.appendChild(textEl(document, MARGIN, cursor, `${fn.marker} ${fn.text}`, { size: FN_FONT, fill: MUTED }));
+    }
+  }
+
+  const by = cursor;
+  composeBottomChrome(document, root, by, { note, source, width });
   const height = Math.round(by + bottomChromeHeight({ note, source, width }));
   root.setAttribute("height", String(height));
   bgRect.setAttribute("height", String(height));

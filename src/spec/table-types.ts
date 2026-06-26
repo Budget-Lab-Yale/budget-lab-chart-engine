@@ -34,6 +34,14 @@ export interface TableSpec {
   header: string[];
   /** Value column name (holds numbers or null). */
   value: string;
+  /** Multi-pane: column whose values split the data into separate stacked sub-tables. Each pane is
+   *  rendered from its own row subset, so panes can have different rows AND column headers. The
+   *  other roles (stub/header/value) and all formatting apply to every pane. Omit for one table. */
+  pane?: string;
+  /** Pane render order + inclusion filter (values not listed are dropped). Default: first-seen. */
+  pane_order?: string[];
+  /** Pane value → subheading shown above that pane. Defaults to the pane value itself. */
+  pane_titles?: Record<string, string>;
   /** Render order for rows (optional); omitted entries appear in first-seen order. */
   row_order?: string[];
   /** Render order for columns (optional); leaf keys not listed appear in first-seen order. */

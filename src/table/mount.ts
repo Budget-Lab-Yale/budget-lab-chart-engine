@@ -5,8 +5,9 @@ import type { TableSpec } from "../spec/table-types.js";
 import type { TidyRow } from "../data/index.js";
 import type { TableModel } from "./model.js";
 import { buildTableModel } from "./model.js";
-import { layoutTable } from "./layout.js";
+import { layoutTable, layoutOptionsFromSpec } from "./layout.js";
 import { renderTableHtml } from "./render-html.js";
+import { splitPanes } from "./panes.js";
 import { buildFigureHeader } from "../engine/render-live.js";
 import { renderSourceLine } from "../engine/source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -287,6 +288,7 @@ function attachTableInteractivity(table: HTMLTableElement, model: TableModel, sp
  *     div.figure-meta              note + source + Data download button
  */
 export function mountTable(container: HTMLElement, opts: MountTableOptions): () => void {
+  if (opts.spec.pane != null) return mountMultiPaneTable(container, opts);
   const { spec, rows } = opts;
   const doc = container.ownerDocument;
 
@@ -313,16 +315,7 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
   /** Render (or re-render) the table at the given width, then re-wire interactivity. */
   function draw(width: number): void {
     const model = buildTableModel(spec, rows);
-    const layout = layoutTable(model, {
-      width,
-      measureText,
-      ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
-      ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
-      ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
-      ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
-      ...(spec.stub_min_width != null ? { stubMinWidth: spec.stub_min_width } : {}),
-      ...(spec.stub_wrap != null ? { stubWrap: spec.stub_wrap } : {}),
-    });
+    const layout = layoutTable(model, { width, measureText, ...layoutOptionsFromSpec(spec) });
     const table = renderTableHtml(model, layout, doc, spec);
     canvasScroll.replaceChildren(table);
     // Footnote definition list (spec §8) — rebuilt each draw into the card-level block, which is
@@ -367,6 +360,97 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     ro = new ResizeObserver(() => {
       const w = card.clientWidth;
       if (w > 0) draw(w);
+    });
+    ro.observe(card);
+  }
+
+  return () => {
+    ro?.disconnect();
+    card.remove();
+  };
+}
+
+/**
+ * Multi-pane variant: one sub-table per pane (split by spec.pane), stacked vertically under the
+ * shared figure header, each with its own subheading and independent column headers / interactivity.
+ * Footnotes are collected across panes and listed once below them; one source line + Data/Image
+ * download serve the whole figure (the PNG export stacks the panes the same way).
+ */
+function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): () => void {
+  const { spec, rows } = opts;
+  const doc = container.ownerDocument;
+  const measureText = makeMeasureText();
+
+  const card = doc.createElement("div");
+  card.className = "figure-card";
+  buildFigureHeader(card, doc, spec, opts.eyebrow);
+
+  const panes = splitPanes(spec, rows);
+
+  // Stable per-pane scroll wrappers; tables are (re)rendered into them on resize.
+  const paneScrolls = panes.map((pane) => {
+    const paneEl = doc.createElement("div");
+    paneEl.className = "tbl-pane";
+    if (pane.title) {
+      const h = doc.createElement("div");
+      h.className = "tbl-pane-title";
+      h.textContent = pane.title;
+      paneEl.appendChild(h);
+    }
+    const scroll = doc.createElement("div");
+    scroll.className = "figure-canvas-scroll";
+    paneEl.appendChild(scroll);
+    card.appendChild(paneEl);
+    return scroll;
+  });
+
+  // Figure-level footnote list (union across panes), placed after the panes, before the source line.
+  const fnBlock = doc.createElement("div");
+  fnBlock.className = "tbl-table-footnotes";
+
+  function drawAll(width: number): void {
+    const fnMap = new Map<string, string>();
+    panes.forEach((pane, i) => {
+      const model = buildTableModel(spec, pane.rows);
+      const layout = layoutTable(model, { width, measureText, ...layoutOptionsFromSpec(spec) });
+      const table = renderTableHtml(model, layout, doc, spec);
+      paneScrolls[i]!.replaceChildren(table);
+      attachTableInteractivity(table, model, spec);
+      for (const fn of model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
+    });
+    fnBlock.replaceChildren();
+    if (fnMap.size > 0) {
+      for (const [marker, text] of fnMap) {
+        const line = doc.createElement("div");
+        const sup = doc.createElement("sup");
+        sup.textContent = marker;
+        line.appendChild(sup);
+        line.appendChild(doc.createTextNode(` ${text}`));
+        fnBlock.appendChild(line);
+      }
+      if (fnBlock.parentNode == null) card.appendChild(fnBlock);
+    } else if (fnBlock.parentNode != null) {
+      fnBlock.remove();
+    }
+  }
+
+  const initialWidth = opts.width ?? (container.clientWidth || 720);
+  drawAll(initialWidth);
+
+  const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
+  renderSourceLine(card, {
+    note,
+    source: spec.source,
+    actions: buildTableDownloadActions(doc, spec, rows, opts.downloadName),
+  });
+
+  container.appendChild(card);
+
+  let ro: ResizeObserver | undefined;
+  if (typeof ResizeObserver !== "undefined") {
+    ro = new ResizeObserver(() => {
+      const w = card.clientWidth;
+      if (w > 0) drawAll(w);
     });
     ro.observe(card);
   }

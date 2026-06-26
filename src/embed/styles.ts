@@ -616,6 +616,17 @@ body {
   width: 100%;
 }
 
+/* ---- Multi-pane: stacked sub-tables, each with its own subheading ---- */
+.tbl-pane { margin-top: 20px; }
+.tbl-pane:first-of-type { margin-top: 8px; }
+.tbl-pane-title {
+  font-family: var(--tbl-font-sans);
+  font-weight: var(--tw-bold);
+  color: var(--tbl-text-heading);
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
 /* ---- Column sizing via colgroup/col ---- */
 .tbl-table col { }
 

@@ -167,3 +167,56 @@ describe("mountTable", () => {
     ).toBe(true);
   });
 });
+
+describe("mountTable — multi-pane", () => {
+  const PANE_SPEC: TableSpec = {
+    title: "Two Panes",
+    data: "inline",
+    pane: "section",
+    pane_titles: { dist: "Distribution" },
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    value: "value",
+    source: "CBO",
+    format: { default: { type: "number", decimals: 1 } },
+  };
+  const PANE_ROWS: TidyRow[] = [
+    { section: "budget", row: "Lower rates", metric: "2026", value: "1.2" },
+    { section: "budget", row: "Lower rates", metric: "2027", value: "1.4" },
+    { section: "dist", row: "Lower rates", metric: "Bottom", value: "2.1" },
+    { section: "dist", row: "Lower rates", metric: "Top", value: "9.0" },
+  ];
+
+  it("renders one .tbl-pane per pane, each with its own table", () => {
+    const c = document.createElement("div");
+    mountTable(c, { spec: PANE_SPEC, rows: PANE_ROWS });
+    const panes = c.querySelectorAll(".tbl-pane");
+    expect(panes.length).toBe(2);
+    panes.forEach((p) => expect(p.querySelector("table.tbl-table")).not.toBeNull());
+  });
+
+  it("shows a subheading per pane (pane_titles override, else the value)", () => {
+    const c = document.createElement("div");
+    mountTable(c, { spec: PANE_SPEC, rows: PANE_ROWS });
+    const titles = Array.from(c.querySelectorAll(".tbl-pane-title")).map((t) => t.textContent);
+    expect(titles).toEqual(["budget", "Distribution"]);
+  });
+
+  it("gives panes independent column headers", () => {
+    const c = document.createElement("div");
+    mountTable(c, { spec: PANE_SPEC, rows: PANE_ROWS });
+    const tables = c.querySelectorAll("table.tbl-table");
+    const heads = Array.from(tables).map((t) =>
+      Array.from(t.querySelectorAll("thead th")).map((th) => th.textContent).join("|"),
+    );
+    expect(heads[0]).toContain("2026");
+    expect(heads[1]).toContain("Bottom");
+    expect(heads[1]).not.toContain("2026");
+  });
+
+  it("renders a single shared source line for the whole figure", () => {
+    const c = document.createElement("div");
+    mountTable(c, { spec: PANE_SPEC, rows: PANE_ROWS });
+    expect(c.querySelectorAll(".figure-source").length).toBe(1);
+  });
+});

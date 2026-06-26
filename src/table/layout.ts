@@ -7,6 +7,7 @@
 // exactly the lines this module measured, and the two cannot disagree on line counts (which would
 // otherwise mismatch the reserved height and overlap neighboring rows).
 import type { TableModel, HeaderCell, BodyRow, RowGroup } from "./model";
+import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
 
 export interface LayoutOptions {
@@ -24,6 +25,9 @@ export interface LayoutOptions {
   stubMinWidth?: number;
   /** Allow stub (row-label) cells to wrap, shrinking the column toward stubMinWidth. */
   stubWrap?: boolean;
+  /** Stretch the table to exactly this total width (stub + columns scaled proportionally). Used to
+   *  align multi-pane sub-tables to a shared width. Ignored when ≤ the natural width. */
+  fillWidth?: number;
 }
 export interface CellRect { x: number; y: number; w: number; h: number; }
 export interface HeaderEntry { cell: HeaderCell; rect: CellRect; tier: number; lines?: string[]; }
@@ -104,6 +108,19 @@ function wrapToLines(s: string, maxWidth: number, maxLines: number, measure: (s:
   const rest = words.slice(consumed).join(" ");
   if (rest) lines.push(rest);
   return lines.length ? lines.slice(0, maxLines) : [s];
+}
+
+/** Translate the per-table spec sizing fields into LayoutOptions (shared by the HTML and PNG
+ * paths so they size columns identically). */
+export function layoutOptionsFromSpec(spec: TableSpec): Partial<LayoutOptions> {
+  return {
+    ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
+    ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
+    ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
+    ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
+    ...(spec.stub_min_width != null ? { stubMinWidth: spec.stub_min_width } : {}),
+    ...(spec.stub_wrap != null ? { stubWrap: spec.stub_wrap } : {}),
+  };
 }
 
 export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout {
@@ -312,6 +329,30 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       : 0;
 
   const totalHeight = y + footnotesHeight;
+
+  // Optional horizontal stretch to a shared width (multi-pane alignment): scale every x/width by a
+  // single factor so columns keep their relative proportions. Heights are untouched.
+  if (opts.fillWidth != null && opts.fillWidth > totalWidth) {
+    const f = opts.fillWidth / totalWidth;
+    const sxRect = (r: CellRect): CellRect => ({ ...r, x: r.x * f, w: r.w * f });
+    return {
+      totalWidth: opts.fillWidth,
+      totalHeight,
+      stubWidth: stubWidth * f,
+      colX: colX.map((n) => n * f),
+      colW: colW.map((n) => n * f),
+      headerHeight,
+      rowHeight,
+      tierY,
+      footnotesHeight,
+      header: header.map((tier) => tier.map((e) => ({ ...e, rect: sxRect(e.rect) }))),
+      rows: rows.map((e) =>
+        "group" in e
+          ? { ...e, rect: sxRect(e.rect) }
+          : { ...e, rect: sxRect(e.rect), cellRects: e.cellRects.map(sxRect) },
+      ),
+    };
+  }
 
   return {
     totalWidth, totalHeight,

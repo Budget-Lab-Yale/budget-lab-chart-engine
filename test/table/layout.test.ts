@@ -280,4 +280,20 @@ describe("layoutTable — width + wrap config (5c)", () => {
     const flooredRow = floored.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
     expect(flooredRow.stubLines).toBeUndefined();
   });
+
+  it("fillWidth stretches the table to a shared width, scaling stub + columns proportionally", () => {
+    const { model, layout } = build();
+    const target = layout.totalWidth + 200;
+    const filled = layoutTable(model, { width: 800, measureText, fillWidth: target });
+    expect(filled.totalWidth).toBe(target);
+    const f = target / layout.totalWidth;
+    expect(filled.stubWidth).toBeCloseTo(layout.stubWidth * f, 5);
+    filled.colW.forEach((w, i) => expect(w).toBeCloseTo(layout.colW[i]! * f, 5));
+    // The last cell's right edge reaches the shared width; heights are unchanged.
+    expect(filled.colX[filled.colX.length - 1]! + filled.colW[filled.colW.length - 1]!).toBeCloseTo(target, 5);
+    expect(filled.totalHeight).toBe(layout.totalHeight);
+    // fillWidth ≤ natural is a no-op.
+    const noop = layoutTable(model, { width: 800, measureText, fillWidth: layout.totalWidth - 50 });
+    expect(noop.totalWidth).toBe(layout.totalWidth);
+  });
 });

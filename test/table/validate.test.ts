@@ -28,4 +28,27 @@ describe("validateTableData", () => {
     const r = validateTableData(ok, dup);
     expect(r.valid).toBe(false); expect(r.errors.join()).toMatch(/duplicate/i);
   });
+
+  it("fails when the pane column is missing", () => {
+    const r = validateTableData({ ...ok, pane: "section" }, rows);
+    expect(r.valid).toBe(false); expect(r.errors.join()).toMatch(/section/);
+  });
+
+  it("allows the same stub+header coordinate across different panes", () => {
+    const paned = [
+      { section: "A", g: "G", lab: "r1", per: "2026", val: "1" },
+      { section: "B", g: "G", lab: "r1", per: "2026", val: "2" }, // same coord, different pane → OK
+    ] as any;
+    const r = validateTableData({ ...ok, pane: "section" }, paned);
+    expect(r.valid).toBe(true);
+  });
+
+  it("still catches a duplicate within one pane", () => {
+    const paned = [
+      { section: "A", g: "G", lab: "r1", per: "2026", val: "1" },
+      { section: "A", g: "G", lab: "r1", per: "2026", val: "9" }, // dup within pane A
+    ] as any;
+    const r = validateTableData({ ...ok, pane: "section" }, paned);
+    expect(r.valid).toBe(false); expect(r.errors.join()).toMatch(/duplicate/i);
+  });
 });
