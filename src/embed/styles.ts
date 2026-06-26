@@ -761,8 +761,10 @@ tr.tbl-table-group td {
   background: var(--tbl-bg);
 }
 /* Keep the group title anchored at the left during horizontal scroll (it labels the pinned
-   rows), instead of scrolling off and clipping under the sticky first column. */
-.tbl-table-group-inner {
+   rows), instead of scrolling off and clipping under the sticky first column. Gated on the SAME
+   sticky-first flag as the row stubs, so the two behave consistently — without it, a group title
+   would pin while its row labels scrolled, which reads as a bug. */
+.tbl-table--sticky-first .tbl-table-group-inner {
   position: sticky;
   left: 0;
   display: inline-block;
