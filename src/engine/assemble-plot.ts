@@ -30,6 +30,10 @@ import type { MarkLayers } from "./marks/index";
 // class + clip-path ids are unique-but-deterministic; absent → exactly "tblchart".
 const PLOT_CLASS = "tblchart";
 
+// A subtle white halo behind annotation text (paint-order: stroke → the white stroke paints
+// behind the fill) so labels stay legible over annotation lines, bands, and dense data.
+const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
+
 export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
@@ -227,6 +231,7 @@ export function assemblePlot({
           fill: TBL.color.axis,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
+          ...LABEL_HALO,
         }),
       );
     }
@@ -336,6 +341,7 @@ export function assemblePlot({
           fill: mColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
+          ...LABEL_HALO,
         }),
       );
     }
@@ -387,6 +393,7 @@ export function assemblePlot({
           fill: markerColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
+          ...LABEL_HALO,
         }),
       );
     }
@@ -443,6 +450,7 @@ export function assemblePlot({
         fill: pColor,
         fontSize: TBL.size.annotation,
         fontWeight: 600,
+        ...LABEL_HALO,
       }),
     );
   }
