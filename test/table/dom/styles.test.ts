@@ -23,7 +23,7 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toContain("td.is-num");
   });
 
-  it("contains position: sticky (header/first-col sticky)", () => {
+  it("contains position: sticky (first-column sticky)", () => {
     expect(CHART_CSS).toContain("position: sticky");
   });
 
@@ -43,14 +43,9 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toContain(".tbl-table-spanner::after");
   });
 
-  it("makes row-group titles sticky below the header block (--tbl-thead-h)", () => {
-    expect(CHART_CSS).toContain("--tbl-thead-h");
-    expect(CHART_CSS).toMatch(/tr\.tbl-table-group th\s*\{[^}]*position:\s*sticky/);
-  });
-
-  it("makes the header non-sticky under .tbl-table--no-sticky-header", () => {
+  it("pins the group title at the left during horizontal scroll (sticky-first only)", () => {
     expect(CHART_CSS).toMatch(
-      /\.tbl-table\.tbl-table--no-sticky-header thead th\s*\{[^}]*position:\s*static/,
+      /\.tbl-table--sticky-first \.tbl-table-group-inner\s*\{[^}]*position:\s*sticky/,
     );
   });
 
@@ -59,7 +54,7 @@ describe("CHART_CSS — table rules", () => {
   });
 
   it("declares the sticky z-index ladder for the pinned first column", () => {
-    // corner z 4, stub column z 3, thead z 2, body z 0.
+    // corner z 4, stub column z 3, body z 0.
     expect(CHART_CSS).toContain("z-index: 4");
     expect(CHART_CSS).toContain("z-index: 3");
   });

@@ -67,7 +67,6 @@ export const TABLE_SPEC_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        header: { type: "boolean" },
         firstColumn: { type: "boolean" },
       },
     },

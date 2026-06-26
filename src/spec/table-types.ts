@@ -65,8 +65,8 @@ export interface TableSpec {
   sign_color?: boolean;
   /** Allow interactive column sort (ascending/descending/none, per-group). */
   sort?: boolean;
-  /** Sticky positioning: header (top), firstColumn (left). */
-  sticky?: { header?: boolean; firstColumn?: boolean };
+  /** Sticky positioning: pin the first column (row labels) during horizontal scroll. */
+  sticky?: { firstColumn?: boolean };
   /** Draw horizontal rules between header tiers. Default false (the single header→body rule always stays). */
   header_tier_rules?: boolean;
   /** Draw the flanking horizontal rules on multi-column banners. Default true; false → plain centered text. */

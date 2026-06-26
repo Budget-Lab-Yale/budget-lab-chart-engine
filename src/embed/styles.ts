@@ -629,10 +629,6 @@ body {
   text-align: center;
   vertical-align: bottom;
   white-space: nowrap;
-  /* Sticky header: thead stays pinned to the top of the scroll container. */
-  position: sticky;
-  top: 0;
-  z-index: 2;
 }
 
 /* Header→body separator (bug #4): a single continuous rule under the WHOLE header block,
@@ -751,15 +747,6 @@ tr.tbl-table-group td {
   border-top: none;
   padding-top: 4px;
 }
-/* Sticky row-group titles: the group heading sticks just below the sticky column-header block
-   as the page scrolls vertically. --tbl-thead-h is measured + set by mount.ts (0 fallback under
-   jsdom, which has no layout). Opaque bg so body rows scroll under the stuck title. */
-.tbl-table tbody tr.tbl-table-group th {
-  position: sticky;
-  top: var(--tbl-thead-h, 0px);
-  z-index: 1;
-  background: var(--tbl-bg);
-}
 /* Keep the group title anchored at the left during horizontal scroll (it labels the pinned
    rows), instead of scrolling off and clipping under the sticky first column. Gated on the SAME
    sticky-first flag as the row stubs, so the two behave consistently — without it, a group title
@@ -813,13 +800,13 @@ td.is-neg {
 }
 
 /* ---- Sticky first column ---- */
-/* Enabled when .tbl-table--sticky-first is present on the table element. A z-index ladder keeps
-   the pinned stub column ABOVE the scrolling header + body so column headers are clipped by the
-   pinned column at the same moment their data cells slide under it:
-     body cells            z 0  (set above)
-     sticky thead th (top) z 2
-     sticky stub column    z 3  (body stub cells + leaf-tier stub <th>)
-     header corner         z 4  (sticky top + left). */
+/* Enabled when .tbl-table--sticky-first is present on the table element. The pinned stub column
+   and its header corner are positioned (sticky) so they paint ABOVE the static, scrolling header
+   + body cells — column headers are clipped by the pinned column at the same moment their data
+   cells slide under it:
+     body cells         z 0  (set above)
+     sticky stub column z 3  (body stub cells + leaf-tier stub <th>)
+     header corner      z 4  (the rowspanning corner, pinned left). */
 .tbl-table--sticky-first td:first-child,
 .tbl-table--sticky-first th.tbl-table-stub {
   position: sticky;
@@ -828,8 +815,8 @@ td.is-neg {
   /* Opaque background so scrolling cells pass behind the pinned column. */
   background: var(--tbl-bg);
 }
-/* The header corner is pinned at both top and left, and must sit above the scrolling thead so
-   header cells disappear under it in lockstep with their data column. */
+/* The header corner is pinned at the left and must sit above the scrolling thead so header cells
+   disappear under it in lockstep with their data column. */
 .tbl-table--sticky-first thead th.tbl-table-stub-header {
   position: sticky;
   left: 0;
@@ -837,18 +824,10 @@ td.is-neg {
   background: var(--tbl-bg);
 }
 
-/* ---- Opt-out of the sticky column header ---- */
-/* Added to the table element when spec.sticky.header === false. Pins nothing — header scrolls
-   with the body. */
-.tbl-table.tbl-table--no-sticky-header thead th {
-  position: static;
-}
-
 /* ---- Disable the sticky first column at phone widths ---- */
 /* Below ~420px a pinned stub eats too much of the viewport, leaving the data columns cramped and
    illegible. Drop the horizontal pin (left:auto neutralizes the sticky constraint) so the whole
-   table scrolls freely. The corner keeps its top:0 from the base rule, so the column header stays
-   vertically sticky if enabled. */
+   table scrolls freely. */
 @media (max-width: 419px) {
   .tbl-table--sticky-first td:first-child,
   .tbl-table--sticky-first th.tbl-table-stub,
