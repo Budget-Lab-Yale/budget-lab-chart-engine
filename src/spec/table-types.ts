@@ -51,6 +51,13 @@ export interface TableSpec {
   column_order?: string[];
   /** Leaf column key → display label (overrides the raw header value). */
   column_labels?: Record<string, string>;
+  /** Row label (last stub value) → display label (overrides the raw CSV value). Lets math/markup
+   *  live in the spec while the CSV keeps short plain keys. Keying (row_order, emphasis_rows,
+   *  format.rows) still uses the raw CSV value. */
+  row_labels?: Record<string, string>;
+  /** Group value (any non-last stub value) → display label (overrides the raw CSV value). Keying
+   *  (group_notes, format.groups) still uses the raw CSV value. */
+  group_labels?: Record<string, string>;
   /** Leaf column key → secondary label (e.g. units). Rendered below the column label. */
   sublabels?: Record<string, string>;
   /** Header value → display label (applied to banner tiers above the leaves). */

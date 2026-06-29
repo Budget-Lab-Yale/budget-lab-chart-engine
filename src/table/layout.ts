@@ -9,6 +9,7 @@
 import type { TableModel, HeaderCell, BodyRow, RowGroup } from "./model";
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
+import { richWidth } from "./richtext";
 
 export interface LayoutOptions {
   width: number;
@@ -67,7 +68,7 @@ const groupTopGap = 14;
 const groupFirstTopGap = 4;
 const groupLabelLine = 18;
 const groupNoteLineHeight = 15;
-const groupNoteGap = 1;
+const groupNoteGap = 7;
 const groupBottomPad = 4;
 // Per-level indentation of stub labels. Exported so the HTML and SVG renderers indent identically.
 export const INDENT_STEP = 14;
@@ -127,8 +128,10 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
   const { measureText } = opts;
   const leaves = model.leaves;
   const headerMaxLines = opts.headerMaxLines;
-  const measureHeader = (s: string) => measureText(s, headerFontPx, headerWeight);
-  const measureNote = (s: string) => measureText(s, noteFontPx, bodyWeight);
+  // Rich-aware measurers: text without math delimiters measures exactly as before, so plain
+  // tables size identically; math markup measures at its RENDERED width (not the raw source).
+  const measureHeader = (s: string) => richWidth(s, headerFontPx, headerWeight, measureText);
+  const measureNote = (s: string) => richWidth(s, noteFontPx, bodyWeight, measureText);
 
   // Body rows only (group entries don't have per-leaf cells).
   const bodyRows = model.body
@@ -152,11 +155,11 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     if (override != null) return override;
     let natural = headerMaxLines != null ? 0 : measureHeader(leaf.label);
     if (leaf.sublabel != null) {
-      natural = Math.max(natural, measureText(leaf.sublabel, headerFontPx, bodyWeight));
+      natural = Math.max(natural, richWidth(leaf.sublabel, headerFontPx, bodyWeight, measureText));
     }
     for (const row of bodyRows) {
       const cell = row.cells[i];
-      if (cell) natural = Math.max(natural, measureText(cell.text, bodyFontPx, bodyWeight));
+      if (cell) natural = Math.max(natural, richWidth(cell.text, bodyFontPx, bodyWeight, measureText));
     }
     return natural + padX;
   });
@@ -195,12 +198,12 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     if (b.kind === "group") {
       stubNatural = Math.max(
         stubNatural,
-        measureText(b.group.label, bodyFontPx, headerWeight) + b.group.level * INDENT_STEP,
+        richWidth(b.group.label, bodyFontPx, headerWeight, measureText) + b.group.level * INDENT_STEP,
       );
     } else {
       stubNatural = Math.max(
         stubNatural,
-        measureText(b.row.label, bodyFontPx, bodyWeight) + b.row.level * INDENT_STEP,
+        richWidth(b.row.label, bodyFontPx, bodyWeight, measureText) + b.row.level * INDENT_STEP,
       );
     }
   }
@@ -211,7 +214,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     for (const b of model.body) {
       if (b.kind !== "row") continue;
       for (const w of b.row.label.split(/\s+/).filter(Boolean)) {
-        widestWord = Math.max(widestWord, measureText(w, bodyFontPx, bodyWeight) + b.row.level * INDENT_STEP);
+        widestWord = Math.max(widestWord, richWidth(w, bodyFontPx, bodyWeight, measureText) + b.row.level * INDENT_STEP);
       }
     }
   }
@@ -317,7 +320,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     }
     // Row height grows to fit the tallest wrapped content: the row label (when stub_wrap is on) and
     // any text cells that wrap to their column width.
-    const measureBody = (s: string) => measureText(s, bodyFontPx, bodyWeight);
+    const measureBody = (s: string) => richWidth(s, bodyFontPx, bodyWeight, measureText);
     let maxLines = 1;
     let stubLines: string[] | undefined;
     if (opts.stubWrap) {

@@ -4,6 +4,28 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-06-29
+
+### Added — inline math in tables
+
+- Table text now supports **inline math / special characters** using the same MathJax
+  delimiters as the TBL website: `\( … \)` for inline math (also `\[ … \]` / `$$ … $$`), and
+  `\$` for a literal dollar sign. Inside a delimiter, the **linear** LaTeX subset is supported:
+  Greek letters (`\sigma`, `\theta`, …), sub/superscripts (`_{}`, `^{}`, including **stacked**
+  sub+super like `\theta_1^K`), inline italics (`\textit{}` / `\mathit{}`), and common
+  operator/relation symbols (`\cdot`, `\leq`, `\sum`, …).
+- Works across every text field — cell values, row/stub labels, column headers, sublabels,
+  group labels & notes, the stub-header corner — in both the live HTML and the PNG export, which
+  measure and stack identically.
+- 2-D constructs (`\frac`, `\sqrt`, …) are **rejected at validation** with a clear message
+  rather than silently mis-rendered.
+- Because the markers only carry meaning inside their delimiters, text without them passes
+  through verbatim — bare `$ _ ^ *` stay literal, and existing tables render unchanged.
+- New **`row_labels`** and **`group_labels`** spec maps (mirroring `column_labels` /
+  `header_labels`) override a row label or group heading by its raw CSV value — so labels
+  (including inline math) can live in the spec while the CSV keeps short plain keys. Ordering,
+  emphasis, formats, and notes still key off the raw value.
+
 ## [1.1.0] — 2026-06-26
 
 A major feature release: three new chart types (scatter, dot plot, area), a new tables figure

@@ -8,6 +8,7 @@ import { INDENT_STEP } from "./layout";
 // renderer's PAD_X — so the corner, group headers, and row labels share one left edge.
 const STUB_BASE_PAD = 8;
 import type { TableSpec } from "../spec/table-types";
+import { appendRichHtml } from "./richtext";
 
 /**
  * Build a semantic HTML <table> from a TableModel + TableLayout.
@@ -75,7 +76,7 @@ export function renderTableHtml(
       const cornerTh = doc.createElement("th");
       cornerTh.rowSpan = tierCount;
       cornerTh.className = "tbl-table-stub-header";
-      cornerTh.textContent = model.stubHeader;
+      appendRichHtml(cornerTh, model.stubHeader, doc);
       tr.appendChild(cornerTh);
     }
 
@@ -102,16 +103,16 @@ export function renderTableHtml(
         th.classList.add("is-spanner");
         const inner = doc.createElement("span");
         inner.className = "tbl-table-spanner";
-        inner.textContent = hCell.text;
+        appendRichHtml(inner, hCell.text, doc);
         th.appendChild(inner);
       } else if (clamp) {
         const inner = doc.createElement("span");
         inner.className = "tbl-table-header-clamp";
         inner.style.setProperty("--tbl-header-lines", String(headerMaxLines));
-        inner.textContent = hCell.text;
+        appendRichHtml(inner, hCell.text, doc);
         th.appendChild(inner);
       } else {
-        th.textContent = hCell.text;
+        appendRichHtml(th, hCell.text, doc);
       }
 
       // If this is a leaf-bottom cell (has leafKey) and the leaf has a sublabel, append it
@@ -120,7 +121,7 @@ export function renderTableHtml(
         if (leaf?.sublabel != null) {
           const span = doc.createElement("span");
           span.className = "tbl-table-sublabel";
-          span.textContent = leaf.sublabel;
+          appendRichHtml(span, leaf.sublabel, doc);
           th.appendChild(span);
         }
       }
@@ -150,12 +151,12 @@ export function renderTableHtml(
       const inner = doc.createElement("div");
       inner.className = "tbl-table-group-inner";
       if (stubNowrap) inner.classList.add("is-nowrap");
-      inner.textContent = group.label;
+      appendRichHtml(inner, group.label, doc);
 
       if (group.note != null) {
         const noteDiv = doc.createElement("div");
         noteDiv.className = "tbl-table-group-note";
-        noteDiv.textContent = group.note;
+        appendRichHtml(noteDiv, group.note, doc);
         inner.appendChild(noteDiv);
       }
 
@@ -184,10 +185,10 @@ export function renderTableHtml(
       if (!stubWrap && spec?.stub_width != null) {
         const clip = doc.createElement("span");
         clip.className = "tbl-table-stub-clip";
-        clip.textContent = row.label;
+        appendRichHtml(clip, row.label, doc);
         stubTh.appendChild(clip);
       } else {
-        stubTh.textContent = row.label;
+        appendRichHtml(stubTh, row.label, doc);
       }
 
       tr.appendChild(stubTh);
@@ -209,7 +210,7 @@ export function renderTableHtml(
         }
 
         // Cell text, with footnote superscript if present
-        td.textContent = cell.text;
+        appendRichHtml(td, cell.text, doc);
         if (cell.footnote != null) {
           const sup = doc.createElement("sup");
           sup.textContent = cell.footnote;
