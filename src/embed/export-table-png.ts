@@ -78,7 +78,7 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
   const bodyTop = topCursor + BODY_TOP_GAP;
 
   // Table body SVG, positioned below the chrome and inset by the left margin.
-  const bodySvg = renderTableSvg(model, layout, { document, spec });
+  const bodySvg = renderTableSvg(model, layout, { document, spec, measure: measureText });
   bodySvg.setAttribute("x", String(MARGIN));
   bodySvg.setAttribute("y", String(bodyTop));
   bodySvg.setAttribute("width", String(layout.totalWidth));
@@ -135,7 +135,7 @@ function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElemen
       );
       cursor += PANE_TITLE_GAP;
     }
-    const bodySvg = renderTableSvg(model, layout, { document, spec });
+    const bodySvg = renderTableSvg(model, layout, { document, spec, measure: measureText });
     bodySvg.setAttribute("x", String(MARGIN));
     bodySvg.setAttribute("y", String(cursor));
     bodySvg.setAttribute("width", String(layout.totalWidth));

@@ -194,7 +194,9 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       const gKey = groupPath.slice(0, lvl + 1).join(SEP);
       if (!emittedGroup.has(gKey)) {
         emittedGroup.add(gKey);
-        const group: RowGroup = { label: gLabel, level: lvl };
+        // Display label may be overridden in the spec (so math/markup can live in YAML); the raw
+        // CSV value `gLabel` stays the key for group_notes and format.groups.
+        const group: RowGroup = { label: spec.group_labels?.[gLabel] ?? gLabel, level: lvl };
         const note = spec.group_notes?.[gLabel];
         if (note != null) group.note = note;
         body.push({ kind: "group", group });
@@ -238,7 +240,9 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       kind: "row",
       row: {
         stubPath: path,
-        label,
+        // Display label may be overridden in the spec; raw `label` (above) stays the key for
+        // emphasis_rows, format.rows, and row_order.
+        label: spec.row_labels?.[label] ?? label,
         level: groupPath.length,
         groupKeys: groupPath,
         cells,

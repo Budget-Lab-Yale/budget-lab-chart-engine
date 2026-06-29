@@ -206,6 +206,8 @@ text string.
 |---|---|---|
 | `stub_header` | string \| object | Top-left corner label above the row labels. A string applies to all panes; a `{ <paneValue>: label }` map sets it per pane. |
 | `column_labels` | object | `{ <leafKey>: "Display label" }` — overrides a leaf column's raw header value. |
+| `row_labels` | object | `{ <rowValue>: "Display label" }` — overrides a row label (last stub value). Lets math/markup live in the spec while the CSV keeps short plain keys; `row_order`, `emphasis_rows`, and `format.rows` still key off the raw CSV value. |
+| `group_labels` | object | `{ <groupValue>: "Display label" }` — overrides a row-group heading (any non-last stub value); `group_notes` and `format.groups` still key off the raw CSV value. |
 | `header_labels` | object | `{ <headerValue>: "Display label" }` — applied to banner tiers above the leaves. |
 | `sublabels` | object | `{ <leafKey>: "secondary" }` — a small second line under a column label (e.g. units). |
 
@@ -273,6 +275,34 @@ formatting).
 | `subtitle` | string | Below the title. |
 | `source` | string | Source line below the table. |
 | `notes` | string \| array | Explanatory note(s); each string renders as a paragraph. |
+
+### Inline math & special characters
+
+Any table text — cell values, row/column labels, headers, sublabels, group labels & notes, the
+stub-header corner — may contain inline math using the **same MathJax delimiters as the TBL
+website**:
+
+- `\( … \)` — inline math (also `\[ … \]` and `$$ … $$`).
+- `\$` — a literal dollar sign.
+- Bare `$`, `_`, `^`, `*` are **only** special inside a delimiter, so ordinary text (including
+  currency like `$2.50`) needs no escaping and renders unchanged.
+
+Inside a delimiter, the supported **linear** subset of LaTeX is:
+
+| Feature | Syntax | Example → render |
+|---|---|---|
+| Greek letters | `\sigma`, `\theta`, `\Sigma`, … | `\(\sigma\)` → σ |
+| Subscript | `_{…}` / `_x` | `\(r_{ai}\)` → r with subscript *ai* |
+| Superscript | `^{…}` / `^x` | `\(x^2\)` → x² |
+| Stacked sub+super | `_{}^{}` on one base | `\(\theta_1^K\)` → θ with K above, 1 below |
+| Inline italic | `\textit{…}` / `\mathit{…}` | `\(\textit{abc}\)` → *abc* |
+| Operators / relations | `\cdot \times \leq \geq \approx \pm \sum \int …` | `\(\sigma \leq 1\)` → σ ≤ 1 |
+
+Latin letters and lowercase Greek render italic (math variables); digits, uppercase Greek, and symbols upright.
+
+**Not supported:** two-dimensional constructs — `\frac`, `\sqrt`, matrices, `\binom`, over/under
+braces. These are **rejected at validation** with a clear message (they are never silently
+mis-rendered). For displayed equations needing them, use a real MathJax block on the page.
 
 ---
 

@@ -22,6 +22,7 @@ import {
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
 import { tokens } from "../theme/tokens";
+import { hasMath, renderRichSvgText, richToPlain } from "./richtext";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -42,10 +43,13 @@ const SIGN_NEG = tokens.categorical[4]!.base; // red
 export function renderTableSvg(
   model: TableModel,
   layout: TableLayout,
-  opts: { document: Document; spec?: TableSpec },
+  opts: { document: Document; spec?: TableSpec; measure?: (s: string, fontPx: number, weight: number) => number },
 ): SVGSVGElement {
   const doc = opts.document;
   const spec = opts.spec;
+  // Text measurer for placing rich (math) runs. Only used on strings that contain math markup;
+  // plain text never reaches it. Falls back to the SSR char-estimate when not supplied (tests).
+  const measure = opts.measure ?? ((s: string, fontPx: number) => s.length * fontPx * 0.6);
   const headerTierRules = spec?.header_tier_rules === true; // default: no inter-tier rules
   const spannerRules = spec?.spanner_rules !== false; // default: draw flanking rules
 
@@ -74,6 +78,47 @@ export function renderTableSvg(
     const t = el("text", attrs);
     t.textContent = str;
     return t;
+  };
+  // Rich-aware single-line text: routes strings with math markup through the rich emitter
+  // (tspans + stacked sub/super), otherwise the plain `text()` above — so non-math output is
+  // byte-identical to before. `italic` sets the root font-style (used for group notes).
+  const drawText = (
+    x: number,
+    y: number,
+    str: string,
+    o: { anchor: "start" | "middle" | "end"; weight: number; fill: string; size: number; cls?: string; italic?: boolean },
+  ): SVGElement => {
+    if (!hasMath(str)) return text(x, y, str, o);
+    const rich = renderRichSvgText(doc, str, {
+      x, baselineY: y, anchor: o.anchor, fontFamily: TBL.font, fontSize: o.size, weight: o.weight, fill: o.fill, measure,
+      ...(o.cls ? { cls: o.cls } : {}),
+    });
+    if (o.italic) rich.setAttribute("font-style", "italic");
+    return rich;
+  };
+  // Multi-line text. With no math on any line it emits the original single <text> + per-line
+  // <tspan> (byte-identical to before); if any line has math, each line becomes its own rich
+  // <text> at the same baseline so the math renders correctly.
+  const drawLines = (
+    lines: string[],
+    x: number,
+    firstBaselineY: number,
+    lineHeight: number,
+    o: { anchor: "start" | "middle" | "end"; weight: number; fill: string; size: number },
+  ): SVGElement[] => {
+    if (!lines.some(hasMath)) {
+      const t = el("text", {
+        x, y: firstBaselineY, "text-anchor": o.anchor,
+        "font-family": TBL.font, "font-size": o.size, "font-weight": o.weight, fill: o.fill,
+      });
+      lines.forEach((ln, li) => {
+        const ts = el("tspan", { x, dy: li === 0 ? 0 : lineHeight });
+        ts.textContent = ln;
+        t.appendChild(ts);
+      });
+      return [t];
+    }
+    return lines.map((ln, li) => drawText(x, firstBaselineY + li * lineHeight, ln, o));
   };
   // Rule helpers — three weights mirroring the HTML (border-collapse) hierarchy:
   //   strong (#999) header→body separator; group (#E5E5E5) divider above a row group;
@@ -143,24 +188,13 @@ export function renderTableSvg(
         const anchor = isTextCol ? "start" : "middle";
         const lines = entry.lines ?? [cell.text];
         if (lines.length > 1) {
-          const t = el("text", {
-            x: hx,
-            y: leafLabelBottom - (lines.length - 1) * HEADER_LINE_HEIGHT,
-            "text-anchor": anchor,
-            "font-family": TBL.font,
-            "font-size": HEADER_FONT,
-            "font-weight": 700,
-            fill: TBL.color.heading,
-          });
-          lines.forEach((ln, li) => {
-            const ts = el("tspan", { x: hx, dy: li === 0 ? 0 : HEADER_LINE_HEIGHT });
-            ts.textContent = ln;
-            t.appendChild(ts);
-          });
-          headerG.appendChild(t);
+          const firstBaseline = leafLabelBottom - (lines.length - 1) * HEADER_LINE_HEIGHT;
+          for (const el2 of drawLines(lines, hx, firstBaseline, HEADER_LINE_HEIGHT, {
+            anchor, weight: 700, fill: TBL.color.heading, size: HEADER_FONT,
+          })) headerG.appendChild(el2);
         } else {
           headerG.appendChild(
-            text(hx, leafLabelBottom, lines[0] ?? "", {
+            drawText(hx, leafLabelBottom, lines[0] ?? "", {
               anchor,
               weight: 700,
               fill: TBL.color.heading,
@@ -170,7 +204,7 @@ export function renderTableSvg(
         }
         if (leaf?.sublabel != null) {
           headerG.appendChild(
-            text(hx, sublabelBaseline, leaf.sublabel, {
+            drawText(hx, sublabelBaseline, leaf.sublabel, {
               anchor,
               weight: 400,
               fill: TBL.color.muted,
@@ -183,7 +217,7 @@ export function renderTableSvg(
         // Banner / upper-tier cell: vertically centered in its rect.
         const by = rect.y + rect.h / 2 + HEADER_FONT / 3;
         headerG.appendChild(
-          text(cx, by, cell.text, {
+          drawText(cx, by, cell.text, {
             anchor: "middle",
             weight: 700,
             fill: TBL.color.heading,
@@ -194,7 +228,7 @@ export function renderTableSvg(
         // to the cell's edges, to show the columns they govern. Disabled when spanner_rules:false.
         if (cell.colSpan > 1 && spannerRules) {
           const ruleY = rect.y + rect.h / 2;
-          const halfText = measureish(cell.text) / 2 + PAD_X;
+          const halfText = measureish(richToPlain(cell.text)) / 2 + PAD_X;
           headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
           headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
         }
@@ -204,7 +238,7 @@ export function renderTableSvg(
   // Stub corner label (stub_header), left-aligned and bottom-aligned with the leaf headers.
   if (model.stubHeader) {
     headerG.appendChild(
-      text(PAD_X, leafLabelBottom, model.stubHeader, {
+      drawText(PAD_X, leafLabelBottom, model.stubHeader, {
         anchor: "start",
         weight: 700,
         fill: TBL.color.heading,
@@ -236,7 +270,7 @@ export function renderTableSvg(
       const x = PAD_X + group.level * INDENT_STEP;
       const labelBaseline = rect.y + topGap + BODY_FONT;
       g.appendChild(
-        text(x, labelBaseline, group.label, {
+        drawText(x, labelBaseline, group.label, {
           anchor: "start",
           weight: 700,
           fill: TBL.color.heading,
@@ -246,7 +280,7 @@ export function renderTableSvg(
       // Group note: italic + muted, wrapped onto its own line(s) below the label.
       noteLines.forEach((ln, li) => {
         g.appendChild(
-          text(x, labelBaseline + GROUP_NOTE_GAP + NOTE_FONT + li * GROUP_NOTE_LINE_HEIGHT, ln, {
+          drawText(x, labelBaseline + GROUP_NOTE_GAP + NOTE_FONT + li * GROUP_NOTE_LINE_HEIGHT, ln, {
             anchor: "start",
             weight: 400,
             fill: TBL.color.muted,
@@ -270,23 +304,12 @@ export function renderTableSvg(
     const stubLines = entry.stubLines;
     if (stubLines && stubLines.length > 1) {
       const blockH = (stubLines.length - 1) * STUB_LINE_HEIGHT;
-      const t = el("text", {
-        x: stubX,
-        y: rect.y + rect.h / 2 - blockH / 2 + BODY_FONT / 3,
-        "text-anchor": "start",
-        "font-family": TBL.font,
-        "font-size": BODY_FONT,
-        "font-weight": stubWeight,
-        fill: TBL.color.text,
-      });
-      stubLines.forEach((ln, li) => {
-        const ts = el("tspan", { x: stubX, dy: li === 0 ? 0 : STUB_LINE_HEIGHT });
-        ts.textContent = ln;
-        t.appendChild(ts);
-      });
-      rg.appendChild(t);
+      const firstBaseline = rect.y + rect.h / 2 - blockH / 2 + BODY_FONT / 3;
+      for (const el2 of drawLines(stubLines, stubX, firstBaseline, STUB_LINE_HEIGHT, {
+        anchor: "start", weight: stubWeight, fill: TBL.color.text, size: BODY_FONT,
+      })) rg.appendChild(el2);
     } else {
-      const st = text(stubX, baseY, row.label, {
+      const st = drawText(stubX, baseY, row.label, {
         anchor: "start",
         weight: stubWeight,
         fill: TBL.color.text,
@@ -321,28 +344,17 @@ export function renderTableSvg(
         const tx = cr.x + PAD_X;
         if (cellLines && cellLines.length > 1) {
           const blockH = (cellLines.length - 1) * STUB_LINE_HEIGHT;
-          const t = el("text", {
-            x: tx,
-            y: cr.y + cr.h / 2 - blockH / 2 + BODY_FONT / 3,
-            "text-anchor": "start",
-            "font-family": TBL.font,
-            "font-size": BODY_FONT,
-            "font-weight": weight,
-            fill: TBL.color.text,
-          });
-          cellLines.forEach((ln, li) => {
-            const ts = el("tspan", { x: tx, dy: li === 0 ? 0 : STUB_LINE_HEIGHT });
-            ts.textContent = ln;
-            t.appendChild(ts);
-          });
-          cg.appendChild(t);
+          const firstBaseline = cr.y + cr.h / 2 - blockH / 2 + BODY_FONT / 3;
+          for (const el2 of drawLines(cellLines, tx, firstBaseline, STUB_LINE_HEIGHT, {
+            anchor: "start", weight, fill: TBL.color.text, size: BODY_FONT,
+          })) cg.appendChild(el2);
         } else {
-          cg.appendChild(text(tx, baseY, cell.text, { anchor: "start", weight, fill: TBL.color.text, size: BODY_FONT }));
+          cg.appendChild(drawText(tx, baseY, cell.text, { anchor: "start", weight, fill: TBL.color.text, size: BODY_FONT }));
         }
         rg.appendChild(cg);
         return;
       }
-      const t = text(cr.x + cr.w / 2, baseY, cell.text, {
+      const t = drawText(cr.x + cr.w / 2, baseY, cell.text, {
         anchor: "middle",
         weight,
         fill,
@@ -374,7 +386,7 @@ export function renderTableSvg(
     const fg = el("g", { class: "tbl-table-footnotes" });
     model.footnotes.forEach((fn, i) => {
       const y = bodyBottom + FOOTNOTE_TOP_GAP + i * FOOTNOTE_LINE_HEIGHT + NOTE_FONT;
-      const t = text(PAD_X, y, `${fn.marker} ${fn.text}`, {
+      const t = drawText(PAD_X, y, `${fn.marker} ${fn.text}`, {
         anchor: "start",
         weight: 400,
         fill: TBL.color.muted,
