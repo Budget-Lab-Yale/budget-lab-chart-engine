@@ -15,6 +15,7 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
+import { horizontalLeftGutter } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
@@ -24,6 +25,27 @@ export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 /** Default grid-column count for `n` panes: ≈ ceil(sqrt(n)), capped at 4. */
 function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
+}
+
+/** The category (band) values in render order, SHARED across every pane (so each pane's category
+ *  band — and the left-gutter sizing — match): x_order first when set, then data-encounter order.
+ *  Used by faceted horizontal bars to size the one shared category gutter. */
+function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): string[] {
+  const seen: string[] = [];
+  const set = new Set<string>();
+  for (const r of rows) {
+    const v = r[xField] as string;
+    if (v != null && v !== "" && !set.has(v)) {
+      set.add(v);
+      seen.push(v);
+    }
+  }
+  if (spec.x_order && spec.x_order.length) {
+    const order = spec.x_order;
+    const rank = new Map(order.map((c, i) => [c, i] as const));
+    seen.sort((a, b) => (rank.get(a) ?? order.length) - (rank.get(b) ?? order.length));
+  }
+  return seen;
 }
 
 /** SHARED-mode small-multiples per-row width math (the single source of truth, reused by the
@@ -48,8 +70,11 @@ export function sharedColumnWidths(
   availW: number,
   columns: number,
   gap: number,
+  leftMargin: number = TBL_MARGIN_LEFT,
 ): { dataW: number; colWidths: number[]; marginLeft: number[] } {
-  const LM = TBL_MARGIN_LEFT;
+  // The leftmost (labeled) column's left margin. For vertical charts this is the y-label gutter
+  // (TBL_MARGIN_LEFT); for faceted horizontal bars the caller passes the wider category gutter.
+  const LM = leftMargin;
   const lm = SHARED_LABELLESS_MARGIN_LEFT;
   const R = TBL_MARGIN_RIGHT;
   const C = Math.max(1, columns);
@@ -280,17 +305,34 @@ export function renderFigure(
   }
   const sharedYDomain: [number, number] = [yLo, yHi];
 
-  // 2. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
-  //    columns drop the ~44px label gutter for a small left margin; column OUTER widths are made
-  //    unequal so the inner DATA width is IDENTICAL across a row (labeled col 0 wider, label-less
-  //    cols narrower). The TOTAL inner grid width is `opts.gridWidth` (live grid) else `opts.width`
+  // 2. Horizontal bars: the CATEGORY axis is the left gutter (not the value axis). Size the
+  //    gutter once to the longest category label over the SHARED category set so every pane uses
+  //    the same gutter and the rows align; the value (x) axis is shared via sharedYDomain. Category
+  //    labels show on the leftmost pane only (suppressed elsewhere via hideCategoryLabels). Vertical
+  //    charts keep the default y-label gutter (TBL_MARGIN_LEFT).
+  const isHorizontalBar = spec.chartType === "bar" && spec.orientation === "horizontal";
+  const hGutter = isHorizontalBar
+    ? horizontalLeftGutter(orderedCategories(rows, resolveColumns(spec, rows).x, spec))
+    : TBL_MARGIN_LEFT;
+
+  // 3. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
+  //    columns drop the label gutter for a small left margin; column OUTER widths are made unequal
+  //    so the inner DATA width is IDENTICAL across a row (labeled col 0 wider, label-less cols
+  //    narrower). The TOTAL inner grid width is `opts.gridWidth` (live grid) else `opts.width`
   //    (e.g. golden tests pass a single width as the row total); the gap matches the live grid.
   const gridGap = opts.gridGap ?? 0;
   const availW = opts.gridWidth ?? opts.width ?? 720;
-  const { colWidths, marginLeft: colMarginLeft } = sharedColumnWidths(availW, columns, gridGap);
+  const { colWidths, marginLeft: colMarginLeft } = sharedColumnWidths(
+    availW,
+    columns,
+    gridGap,
+    hGutter,
+  );
 
-  // 3. Render each pane as its own single frame at its column's OUTER width + left margin,
-  //    forcing the shared y-domain and hiding the y-tick labels on every non-leftmost column.
+  // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
+  //    the shared y-domain. Vertical panes hide the y-tick LABELS on non-leftmost columns; horizontal
+  //    bars instead pass the shared category gutter + suppress the CATEGORY labels there (and let the
+  //    bar layer own the left margin, so the gutter sizing in the mark builder is authoritative).
   let firstLayers: MarkLayers | undefined;
   const panes: FigurePane[] = paneValues.map((value, i) => {
     const col = i % columns;
@@ -302,9 +344,16 @@ export function renderFigure(
         ...opts,
         pane: true,
         yDomain: sharedYDomain,
-        hideYAxisLabels: col > 0,
         width: colWidths[col],
-        marginLeft: colMarginLeft[col],
+        ...(isHorizontalBar
+          ? {
+              categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
+              hideCategoryLabels: col > 0,
+            }
+          : {
+              hideYAxisLabels: col > 0,
+              marginLeft: colMarginLeft[col],
+            }),
       },
       `p${i}`,
     );

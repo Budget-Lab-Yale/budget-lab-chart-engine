@@ -418,6 +418,63 @@ describe("bar builder — faceted-horizontal label signals", () => {
   });
 });
 
+// --- Faceted horizontal bars (Figure 7: scenario panes, grouped Pre/Post bars) ---
+
+const FIG7_FACETED_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Consumer Price Effects by PCE Spending Category",
+  subtitle: "Percent change in consumer prices",
+  xAxisType: "categorical",
+  orientation: "horizontal",
+  series_order: ["Pre-Substitution", "Post-Substitution"],
+  columns: { x: "category", value: "value", series: "series", facet: "facet" },
+  small_multiples: {
+    columns: 2,
+    mode: "shared",
+    pane_order: ["Section 122 Expires", "Section 122 Extended"],
+  },
+  data: "figure7-tariff.csv",
+};
+
+describe("figure — faceted horizontal bars (shared mode)", () => {
+  it("leftmost pane has a wide gutter; others suppress labels; value axis is shared", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document });
+    expect(fig.panes.length).toBe(2);
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    // Leftmost gutter wide enough for the longest label (well over the 44px default).
+    expect(Number(p0.dataset.marginLeft)).toBeGreaterThan(120);
+    // Non-leftmost pane: tiny margin, no category labels.
+    expect(Number(p1.dataset.marginLeft)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
+    const catLabels = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll("text")).filter((t) =>
+        /Motor vehicles/.test(t.textContent ?? ""),
+      ).length;
+    expect(catLabels(p0)).toBe(1);
+    expect(catLabels(p1)).toBe(0);
+    // Each pane: 20 categories × 2 series = 40 rects.
+    expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    // Shared value (x) axis: both panes show the same max value tick.
+    const maxTick = (svg: SVGSVGElement) =>
+      Math.max(
+        ...Array.from(svg.querySelectorAll("text"))
+          .map((t) => parseFloat((t.textContent ?? "").replace("%", "")))
+          .filter((v) => Number.isFinite(v)),
+      );
+    expect(maxTick(p0)).toBe(maxTick(p1));
+  });
+
+  it("faceted horizontal figure is deterministic and matches the golden", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const a = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document }));
+    const b = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document }));
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff.golden.svg");
+  });
+});
+
 // --- Stacked bars (task A7) ---
 
 const STACKED_CUMULATIVE_SPEC: ChartSpec = {
