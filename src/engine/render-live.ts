@@ -1155,10 +1155,12 @@ function wireFigureSvg(
   }
 
   const categorical = ctx.spec.xAxisType === "categorical";
-  // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so they keep the per-pane
-  // tooltip instead. `useCoord` gates the no-tooltip emitOnly + coordinated-renderer path.
+  // Coordinated cursor: the band crosshair resolves a CATEGORY (works for both orientations —
+  // categories on X for vertical, on Y for horizontal), so horizontal bars get the coordinated
+  // row-highlight + value pills too (not a per-pane tooltip). `useCoord` gates the no-tooltip
+  // emitOnly + coordinated-renderer path.
   const horizontal = ctx.spec.orientation === "horizontal";
-  const useCoord = ctx.onResolve != null && !horizontal;
+  const useCoord = ctx.onResolve != null;
   // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
   // match the static marker. Keyed by series index, matching the chart's symbol scale.
   const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
@@ -1260,6 +1262,7 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        horizontal,
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;

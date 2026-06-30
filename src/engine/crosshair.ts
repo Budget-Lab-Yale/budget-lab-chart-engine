@@ -1714,6 +1714,9 @@ export interface SecondaryBandOptions {
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
   yFormat?: (v: number) => string;
+  /** Horizontal bars: categories on the Y axis. The coordinated cursor then shades the category
+   *  ROW (a horizontal strip) and places value pills at each bar's tip (x = value). */
+  horizontal?: boolean;
 }
 
 /** A rendered bar rect's geometry + series, for one category. */
@@ -1817,7 +1820,9 @@ export function attachSecondaryBandCursor(
     if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
     valByCat.get(r._xc)!.set(r.series, r._y);
   }
-  const rectsByCat = buildRectsByCategory(svgEl, opts);
+  const horizontal = opts.horizontal === true;
+  const rectsByCat = buildRectsByCategory(svgEl, opts, horizontal);
+  const plotW = W - ml - mr;
 
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
@@ -1827,6 +1832,45 @@ export function attachSecondaryBandCursor(
     while (g.firstChild) g.removeChild(g.firstChild);
     if (category == null) {
       g.setAttribute("opacity", "0");
+      return;
+    }
+    if (horizontal) {
+      // Horizontal bars: categories on Y. Shade the category ROW (a full-width strip widened to
+      // the band midpoints) and place a value pill at each bar's tip (to the right of a positive
+      // bar's end, left of a negative one). No x-axis category highlight (categories are on Y).
+      const rawH = readCategoryBandsH(svgEl, {
+        rows: opts.rows,
+        isFaceted: opts.isFaceted,
+        categories: opts.categories,
+      } as BandCrosshairOptions);
+      const idx = rawH.findIndex((b) => b.category === category);
+      const vals = valByCat.get(category);
+      if (idx < 0 || !vals) {
+        g.setAttribute("opacity", "0");
+        return;
+      }
+      const wide = widenBandsToMidpoints(rawH.map((b) => ({ min: b.yMin, max: b.yMax })), mt, mt + plotH)[idx]!;
+      addCoordRegion(g, doc, ml, plotW, wide.min, wide.max - wide.min);
+      const weight = active ? 700 : 600;
+      const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
+      const valid = (rectsByCat.get(category) ?? [])
+        .map((rect) => ({ rect, v: vals.get(rect.series) }))
+        .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
+      for (const x of valid) {
+        const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
+        const cy = x.rect.y + x.rect.h / 2;
+        addCoordPill(
+          g,
+          doc,
+          tipX + (x.v >= 0 ? 4 : -4),
+          cy,
+          x.v >= 0 ? "start" : "end",
+          yFormat(x.v),
+          colorFor(x.rect.series),
+          weight,
+        );
+      }
+      g.setAttribute("opacity", "1");
       return;
     }
     const raw = readCategoryBands(svgEl, {
