@@ -477,6 +477,8 @@ export function assemblePlot({
         : layers.marginLeft != null
           ? { marginLeft: layers.marginLeft }
           : {}),
+      // Sectioned horizontal bars request extra top margin for the first section's header.
+      ...(layers.marginTop != null ? { marginTop: layers.marginTop } : {}),
     }),
     ...(width ? { width } : {}),
     className: classNameSuffix ? `${PLOT_CLASS}-${classNameSuffix}` : PLOT_CLASS,

@@ -135,6 +135,10 @@ export interface MarkLayers {
    *  axes.horizontalLeftGutter); assemblePlot passes it to the Plot marginLeft so the labels
    *  are not clipped. Left undefined by vertical charts (they keep the default margin). */
   marginLeft?: number;
+  /** Optional: a TOP margin (px) the layer wants applied. Sectioned horizontal bars set this to
+   *  make room for the first section's header (which sits in the top margin, above the first bar).
+   *  Left undefined otherwise → assemblePlot keeps the default marginTop. */
+  marginTop?: number;
   /** Optional: x-axis label marks supplied by the layer (grouped bars label the `fx`
    *  group scale, not the adapter's `x` scale). When present, used INSTEAD of the
    *  adapter's `xOpts.axisMarks` in assemblePlot. */

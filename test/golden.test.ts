@@ -564,7 +564,7 @@ describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
     const p1 = fig.panes[1]!.svg as SVGSVGElement;
     const headers = (svg: SVGSVGElement) =>
       Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
-    expect(headers(p0)).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+    expect(headers(p0).sort()).toEqual(["Durable goods", "Nondurable goods", "Services"]);
     // Suppressed on the non-leftmost pane (only its bars + value ticks show).
     expect(headers(p1)).not.toContain("Durable goods");
     // Both panes keep all bars (20 categories × 2 series).

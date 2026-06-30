@@ -223,9 +223,9 @@ describe("computeChartHeight", () => {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
       series_order: ["X", "Y", "Z"], data: "x",
     };
-    // 6 categories x 3 series = 18 rows → 18*34 + 80 = 692, above the floor.
+    // 6 categories, grouped → each category slot = 3 series × 22px = 66px → 6×66 + 80 = 476.
     const h = computeChartHeight(spec, catRows(["a", "b", "c", "d", "e", "f"], ["X", "Y", "Z"]));
-    expect(h).toBe(18 * 34 + 80);
+    expect(h).toBe(6 * 66 + 80);
     expect(h).toBeGreaterThan(400);
   });
 
@@ -234,29 +234,28 @@ describe("computeChartHeight", () => {
       chartType: "stacked", title: "h", xAxisType: "categorical", orientation: "horizontal",
       series_order: ["X", "Y", "Z"], data: "x",
     };
-    // 12 categories, stacked → 12 rows → 12*34 + 80 = 488.
-    const h = computeChartHeight(
-      spec,
-      catRows(["a","b","c","d","e","f","g","h","i","j","k","l"], ["X", "Y", "Z"]),
-    );
-    expect(h).toBe(12 * 34 + 80);
+    // 24 categories, stacked → one 22px slot per category → 24×22 + 80 = 608.
+    const cats = Array.from({ length: 24 }, (_, i) => `c${i}`);
+    expect(computeChartHeight(spec, catRows(cats, ["X", "Y", "Z"]))).toBe(24 * 22 + 80);
   });
 
-  it("adds height for section spacer rows", () => {
-    const spec: ChartSpec = {
+  it("adds height for section spacer rows (first section has no spacer)", () => {
+    const base: ChartSpec = {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
-      series_order: ["X", "Y"], columns: { x: "time", series: "series", section: "sec" },
-      data: "x",
+      series_order: ["X", "Y"], data: "x",
     };
+    const cats = Array.from({ length: 10 }, (_, i) => `c${i}`);
     const rows: TidyRow[] = [];
-    // 4 categories across 2 sections; grouped 2-series.
-    const secOf: Record<string, string> = { a: "P", b: "P", c: "Q", d: "Q" };
-    for (const s of ["X", "Y"]) for (const c of ["a", "b", "c", "d"]) {
-      rows.push({ time: c, series: s, sec: secOf[c], value: "1" } as TidyRow);
+    for (const s of ["X", "Y"]) for (let i = 0; i < 10; i++) {
+      rows.push({ time: cats[i], series: s, sec: i < 5 ? "P" : "Q", value: "1" } as TidyRow);
     }
-    // 4 cats × 2 series = 8 bar-rows; + 2 section spacer slots (each = a 2-bar category slot = 2 rows).
-    // height = (4 cats + 2 spacers) × (2×34) + 80 = 6×68 + 80 = 488.
-    expect(computeChartHeight(spec, rows)).toBe(6 * 68 + 80);
+    const unsectioned = computeChartHeight(base, rows);
+    const sectioned = computeChartHeight(
+      { ...base, columns: { x: "time", series: "series", section: "sec" } },
+      rows,
+    );
+    // 2 sections → 1 spacer slot (44px) + 16px top header → sectioned is taller.
+    expect(sectioned).toBe(unsectioned + 44 + 16);
   });
 });
 

@@ -31,10 +31,12 @@ function defaultColumns(n: number): number {
 // figure). A horizontal bar/figure grows with the number of category band SLOTS so the bars stay
 // legible and the rows aren't cramped; the stakeholder blessed very tall horizontals.
 /** Per-bar vertical budget (px): a grouped category reserves this PER SERIES, a single/stacked
- *  category reserves one. Matches the single-chart live height (kept identical for back-compat). */
-export const HORIZONTAL_PX_PER_BAR = 34;
+ *  category reserves one. Tuned for legible-but-compact rows in tall horizontal charts. */
+export const HORIZONTAL_PX_PER_BAR = 22;
 /** Top/bottom margins + value-axis label row + a little slack. */
 export const HORIZONTAL_CHROME_PX = 80;
+/** Extra top margin reserved for a sectioned chart's first section header (sits above the first bar). */
+export const SECTION_HEADER_TOP_PX = 16;
 /** Estimated wrapped-label line height (px) at the axis font size. */
 const HORIZONTAL_LABEL_LINE_PX = 13;
 /** Floor so a short horizontal chart isn't smaller than a vertical one. */
@@ -49,8 +51,10 @@ export function horizontalBarHeight(opts: {
   grouped: boolean;
   nSpacers: number;
   maxLabelLines: number;
+  /** Extra top-margin px (sectioned charts reserve room for the first section header). */
+  extraTopPx?: number;
 }): number {
-  const { nCategories, nSeries, grouped, nSpacers, maxLabelLines } = opts;
+  const { nCategories, nSeries, grouped, nSpacers, maxLabelLines, extraTopPx = 0 } = opts;
   const barsPerCat = grouped ? Math.max(1, nSeries) : 1;
   const catBarPx = barsPerCat * HORIZONTAL_PX_PER_BAR;
   const labelPx = Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6;
@@ -58,7 +62,7 @@ export function horizontalBarHeight(opts: {
   // the bar budget and the wrapped-label budget so neither is clipped.
   const slotPx = Math.max(catBarPx, labelPx);
   const inner = (nCategories + Math.max(0, nSpacers)) * slotPx;
-  return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX));
+  return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx));
 }
 
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
@@ -251,7 +255,9 @@ export function renderFigure(
       spec.series_order && spec.series_order.length
         ? spec.series_order.length
         : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
-    const nSpacers = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
+    // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1.
+    const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
+    const nSpacers = Math.max(0, nSections - 1);
     const maxPx = hGutter - GUTTER_TEXT_PAD;
     const maxLabelLines = sharedCategories.reduce((m, c) => Math.max(m, labelLineCount(c, maxPx)), 1);
     autoHeight = horizontalBarHeight({
@@ -260,6 +266,7 @@ export function renderFigure(
       grouped: nSeries > 1,
       nSpacers,
       maxLabelLines,
+      extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
     });
   }
   const effHeight = opts.height ?? autoHeight;

@@ -12,7 +12,7 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
-import { renderFigure, horizontalBarHeight } from "./figure.js";
+import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figure.js";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
@@ -88,22 +88,31 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
       ? spec.series_order.length
       : Math.max(1, series.size);
   const grouped = spec.chartType === "bar" && nSeries > 1;
-  // Section spacer slots (distinct sections present, filtered by section_order when set).
-  let nSpacers = 0;
+  // Section count (distinct sections present, filtered by section_order when set). The first
+  // section has no spacer slot (its header sits in the top margin), so spacers = sections − 1.
+  let nSections = 0;
   if (cols.section) {
     const present = new Set(catList.map((c) => sectionOf.get(c) ?? ""));
-    nSpacers =
+    nSections =
       spec.section_order && spec.section_order.length
         ? spec.section_order.filter((s) => present.has(s)).length
         : present.size;
   }
+  const nSpacers = Math.max(0, nSections - 1);
   // Tallest wrapped category label at the gutter width.
   const gutter = horizontalLeftGutter(catList);
   const maxLabelLines = catList.reduce(
     (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD)),
     1,
   );
-  return horizontalBarHeight({ nCategories: nCats, nSeries, grouped, nSpacers, maxLabelLines });
+  return horizontalBarHeight({
+    nCategories: nCats,
+    nSeries,
+    grouped,
+    nSpacers,
+    maxLabelLines,
+    extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
+  });
 }
 
 // Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px

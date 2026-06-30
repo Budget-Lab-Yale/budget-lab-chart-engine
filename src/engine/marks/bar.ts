@@ -20,6 +20,7 @@ import {
   tblBandYAxis,
   tblFacetGroupYAxis,
   tblSectionHeaderYAxis,
+  tblSectionTopHeader,
   sectionSpacer,
   horizontalLeftGutter,
 } from "../axes";
@@ -27,6 +28,10 @@ import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
+
+// Top margin (px) for a sectioned horizontal chart, leaving room for the first section's header
+// above the first bar. Applied to EVERY pane (incl. label-hidden ones) so the band rows align.
+const SECTION_TOP_MARGIN = 34;
 
 // Px width below which value labels can't fit cleanly on a bar - drop them entirely
 // (Style-Guide bar-grouped sec 6 suppression rule, slide half-scale 25px threshold).
@@ -111,12 +116,14 @@ export function buildBarMarks(
     }
   }
 
-  // Sectioned horizontal category axis (columns.section): order the categories grouped by section,
-  // inserting an empty spacer band slot before each section to carry its bold header. Only for
-  // horizontal; vertical and unsectioned output is unchanged (bandDomain === categories, no headers).
+  // Sectioned horizontal category axis (columns.section): order the categories grouped by section.
+  // Sections AFTER the first get an empty spacer band slot above them carrying a bold header; the
+  // FIRST section has no spacer (its header sits in the top margin) so the figure doesn't open with
+  // a big empty gap. Only for horizontal; vertical / unsectioned output is unchanged.
   const sectioned = horizontal && data.some((r) => r._section != null);
   let bandDomain = categories;
   const sectionHeaders: { value: string; label: string }[] = [];
+  let topSectionHeader: { category: string; label: string } | null = null;
   if (sectioned) {
     // category → its section (first row wins; categories belong to one section).
     const sectionOf = new Map<string, string>();
@@ -140,11 +147,19 @@ export function buildBarMarks(
         : encountered;
     const labels = spec.section_labels ?? {};
     const domain: string[] = [];
+    let firstRendered = false;
     for (const s of order) {
-      const spacer = sectionSpacer(s);
-      domain.push(spacer);
-      sectionHeaders.push({ value: spacer, label: labels[s] ?? s });
-      for (const cat of categories) if ((sectionOf.get(cat) ?? "") === s) domain.push(cat);
+      const catsInSection = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
+      if (!catsInSection.length) continue;
+      if (!firstRendered) {
+        topSectionHeader = { category: catsInSection[0] as string, label: labels[s] ?? s };
+        firstRendered = true;
+      } else {
+        const spacer = sectionSpacer(s);
+        domain.push(spacer);
+        sectionHeaders.push({ value: spacer, label: labels[s] ?? s });
+      }
+      for (const cat of catsInSection) domain.push(cat);
     }
     bandDomain = domain;
   }
@@ -239,8 +254,14 @@ export function buildBarMarks(
         yScaleOpts: { type: "band", domain: bandDomain, padding: 0.2, axis: null },
         xAxisMarks: ctx.hideCategoryLabels
           ? []
-          : [...tblBandYAxis(categories, gutter), ...tblSectionHeaderYAxis(sectionHeaders, gutter)],
+          : [
+              ...tblBandYAxis(categories, gutter),
+              ...tblSectionHeaderYAxis(sectionHeaders, gutter),
+              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter) : []),
+            ],
         marginLeft: gutter,
+        // Sectioned: reserve top-margin room for the first header on EVERY pane so rows align.
+        ...(sectioned ? { marginTop: SECTION_TOP_MARGIN } : {}),
       };
     }
 
@@ -302,8 +323,13 @@ export function buildBarMarks(
       fyScaleOpts: fyGroupOpts,
       xAxisMarks: ctx.hideCategoryLabels
         ? []
-        : [...tblFacetGroupYAxis(categories, gutter), ...tblSectionHeaderYAxis(sectionHeaders, gutter)],
+        : [
+            ...tblFacetGroupYAxis(categories, gutter),
+            ...tblSectionHeaderYAxis(sectionHeaders, gutter),
+            ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter) : []),
+          ],
       marginLeft: gutter,
+      ...(sectioned ? { marginTop: SECTION_TOP_MARGIN } : {}),
     };
   }
 

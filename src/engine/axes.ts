@@ -532,25 +532,51 @@ export function isSectionSpacer(v: string): boolean {
   return v.startsWith(SECTION_SPACER_PREFIX);
 }
 
-// Section headers for a sectioned HORIZONTAL bar axis: a bold label at each section's spacer band
-// slot, left-justified at svg x=0 (pushed left by `marginLeft` so its `textAnchor:"start"` origin
-// lands at the canvas left edge, flush with the title above). Faceted on `fy` (the spacer value),
-// mirroring tblFacetGroupYAxis's facet binding. `dy` nudges it to sit just above the section's bars.
+// Section headers for a sectioned HORIZONTAL bar axis: a bold label left-justified at svg x=0
+// (pushed left by `marginLeft` so its `textAnchor:"start"` origin lands at the canvas left edge,
+// flush with the title above). Each spacer-based header is faceted on its empty spacer band slot
+// (which sits ABOVE its section) and anchored to the slot's BOTTOM, so it hugs the section's first
+// bar while the empty space above separates this section from the previous one.
 export function tblSectionHeaderYAxis(
   spacers: { value: string; label: string }[],
   marginLeft: number = TBL_MARGIN_LEFT,
+  fontSize: number = TBL.size.axis,
 ): Mark[] {
   if (!spacers.length) return [];
   return [
     Plot.text(spacers, {
       fy: (d: { value: string }) => d.value,
       text: (d: { label: string }) => d.label,
-      frameAnchor: "left",
+      frameAnchor: "bottom-left",
       dx: -marginLeft,
-      dy: -1,
+      dy: -3,
       textAnchor: "start",
       fill: TBL.color.heading,
-      fontSize: TBL.size.axis,
+      fontSize,
+      fontWeight: 700,
+    }),
+  ];
+}
+
+// The FIRST section has no leading spacer slot (so the figure doesn't open with a big empty gap);
+// its header is faceted on that section's FIRST CATEGORY and lifted up into the (enlarged) top
+// margin via a negative dy, so it sits just above the section's first bar at the very top.
+export function tblSectionTopHeader(
+  header: { category: string; label: string },
+  marginLeft: number = TBL_MARGIN_LEFT,
+  lift = 14,
+  fontSize: number = TBL.size.axis,
+): Mark[] {
+  return [
+    Plot.text([header], {
+      fy: (d: { category: string }) => d.category,
+      text: (d: { label: string }) => d.label,
+      frameAnchor: "top-left",
+      dx: -marginLeft,
+      dy: -lift,
+      textAnchor: "start",
+      fill: TBL.color.heading,
+      fontSize,
       fontWeight: 700,
     }),
   ];
