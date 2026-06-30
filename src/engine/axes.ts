@@ -473,6 +473,47 @@ export function tblFacetGroupYAxis(
   ];
 }
 
+// --- Sectioned horizontal category axis ---------------------------------------------------
+// A sectioned category axis (columns.section) groups categories into contiguous sections along the
+// `fy`/`y` band. An empty SPACER band slot is inserted before each section — it carries no data
+// rows (so no bars render in it) and holds the section's bold header. The sentinel prefix uses a
+// leading space so it never collides with a real category value (which the engine trims/ignores).
+
+/** Sentinel prefix marking a section's empty spacer band slot. */
+export const SECTION_SPACER_PREFIX = " section:";
+/** The spacer band value for a section. */
+export function sectionSpacer(section: string): string {
+  return SECTION_SPACER_PREFIX + section;
+}
+/** Whether a band value is a section spacer sentinel (not a real category). */
+export function isSectionSpacer(v: string): boolean {
+  return v.startsWith(SECTION_SPACER_PREFIX);
+}
+
+// Section headers for a sectioned HORIZONTAL bar axis: a bold label at each section's spacer band
+// slot, left-justified at svg x=0 (pushed left by `marginLeft` so its `textAnchor:"start"` origin
+// lands at the canvas left edge, flush with the title above). Faceted on `fy` (the spacer value),
+// mirroring tblFacetGroupYAxis's facet binding. `dy` nudges it to sit just above the section's bars.
+export function tblSectionHeaderYAxis(
+  spacers: { value: string; label: string }[],
+  marginLeft: number = TBL_MARGIN_LEFT,
+): Mark[] {
+  if (!spacers.length) return [];
+  return [
+    Plot.text(spacers, {
+      fy: (d: { value: string }) => d.value,
+      text: (d: { label: string }) => d.label,
+      frameAnchor: "left",
+      dx: -marginLeft,
+      dy: -1,
+      textAnchor: "start",
+      fill: TBL.color.heading,
+      fontSize: TBL.size.axis,
+      fontWeight: 700,
+    }),
+  ];
+}
+
 /** Make a Plot-produced SVG responsive: swap fixed width/height for a viewBox so it
  * scales to its container. (Used by the live, non-overflowing render path.) */
 export function makeResponsive(svg: SVGSVGElement): SVGSVGElement {
