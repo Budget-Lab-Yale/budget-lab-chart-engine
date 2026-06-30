@@ -453,11 +453,21 @@ export const GUTTER_TEXT_PAD = 8;
 // swallow the whole canvas. `pad` reserves a small gap between the label and the bars.
 export function horizontalLeftGutter(
   categories: string[],
-  { pad = 10, min = TBL_MARGIN_LEFT, max = 240 }: { pad?: number; min?: number; max?: number } = {},
+  {
+    pad = 10,
+    min = TBL_MARGIN_LEFT,
+    max = 240,
+    fontSize = TBL.size.axis,
+  }: { pad?: number; min?: number; max?: number; fontSize?: number } = {},
 ): number {
-  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c)), 0);
+  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c, fontSize)), 0);
   return Math.round(Math.max(min, Math.min(max, longest + pad)));
 }
+
+/** Category-label font size (px) for FACETED horizontal bars. Larger than the single-chart axis
+ *  size so the labels read at the same prominence they would in a standalone chart (the faceted
+ *  figure is much taller, which makes the default 10.5px look small). */
+export const FACETED_CAT_LABEL_PX = 13;
 
 // Band (categorical) y-axis for HORIZONTAL bars: one label per category at the band's
 // left edge in the label margin (svg x=0), vertically centered on its band. No ticks.
@@ -466,20 +476,21 @@ export function horizontalLeftGutter(
 export function tblBandYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
+  fontSize: number = TBL.size.axis,
 ): Mark[] {
   // Wrap labels that would overflow the gutter onto multiple lines (prevents collision with the
   // bars). Labels that fit return unchanged (no "\n"), so non-wrapping output stays byte-identical.
   const maxPx = marginLeft - GUTTER_TEXT_PAD;
-  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx).includes("\n"));
+  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx, fontSize).includes("\n"));
   return [
     Plot.text(categories, {
       y: (d: string) => d,
-      text: (d: string) => wrapToWidth(d, maxPx),
+      text: (d: string) => wrapToWidth(d, maxPx, fontSize),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
-      fontSize: TBL.size.axis,
+      fontSize,
       fontWeight: 500,
       // Center the wrapped block on the band only when multi-line (keeps single-line byte-identical).
       ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
@@ -496,19 +507,20 @@ export function tblBandYAxis(
 export function tblFacetGroupYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
+  fontSize: number = TBL.size.axis,
 ): Mark[] {
   const rows = categories.map((c) => ({ c }));
   const maxPx = marginLeft - GUTTER_TEXT_PAD;
-  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx).includes("\n"));
+  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx, fontSize).includes("\n"));
   return [
     Plot.text(rows, {
       fy: (d: { c: string }) => d.c,
-      text: (d: { c: string }) => wrapToWidth(d.c, maxPx),
+      text: (d: { c: string }) => wrapToWidth(d.c, maxPx, fontSize),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
-      fontSize: TBL.size.axis,
+      fontSize,
       fontWeight: 500,
       ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
     }),

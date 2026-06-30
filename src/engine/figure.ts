@@ -15,7 +15,7 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD } from "./axes";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
@@ -37,8 +37,8 @@ export const HORIZONTAL_PX_PER_BAR = 22;
 export const HORIZONTAL_CHROME_PX = 80;
 /** Extra top margin reserved for a sectioned chart's first section header (sits above the first bar). */
 export const SECTION_HEADER_TOP_PX = 16;
-/** Estimated wrapped-label line height (px) at the axis font size. */
-const HORIZONTAL_LABEL_LINE_PX = 13;
+/** Estimated wrapped-label line height (px), sized for the faceted category-label font. */
+const HORIZONTAL_LABEL_LINE_PX = 16;
 /** Floor so a short horizontal chart isn't smaller than a vertical one. */
 const HORIZONTAL_HEIGHT_FLOOR = 400;
 
@@ -247,7 +247,10 @@ export function renderFigure(
   // panes. (Vertical / non-bar figures keep the default chrome + caller height.)
   const isHorizontalBar = spec.chartType === "bar" && spec.orientation === "horizontal";
   const sharedCategories = isHorizontalBar ? orderedCategories(rows, cols.x, spec) : [];
-  const hGutter = isHorizontalBar ? horizontalLeftGutter(sharedCategories) : TBL_MARGIN_LEFT;
+  // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
+  const hGutter = isHorizontalBar
+    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
+    : TBL_MARGIN_LEFT;
   // Auto-height: grow the panes with the row count when the caller doesn't force a height.
   let autoHeight: number | undefined;
   if (isHorizontalBar && opts.height == null) {
@@ -259,7 +262,10 @@ export function renderFigure(
     const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
     const nSpacers = Math.max(0, nSections - 1);
     const maxPx = hGutter - GUTTER_TEXT_PAD;
-    const maxLabelLines = sharedCategories.reduce((m, c) => Math.max(m, labelLineCount(c, maxPx)), 1);
+    const maxLabelLines = sharedCategories.reduce(
+      (m, c) => Math.max(m, labelLineCount(c, maxPx, FACETED_CAT_LABEL_PX)),
+      1,
+    );
     autoHeight = horizontalBarHeight({
       nCategories: sharedCategories.length,
       nSeries: Math.max(1, nSeries),

@@ -8,7 +8,7 @@ import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
-import { wrapBandLabel } from "./axes";
+import { wrapBandLabel, wrapToWidth, GUTTER_TEXT_PAD } from "./axes";
 
 type Row = Record<string, unknown>;
 
@@ -958,6 +958,9 @@ function readCategoryBandsH(svgEl: SVGSVGElement, opts: BandCrosshairOptions): C
     if (groups.length) {
       const parsed: Array<{ y: number; g: SVGGElement }> = [];
       for (const g of groups) {
+        // Skip empty facet groups (sectioned axes emit an empty fy facet per section spacer slot);
+        // they carry no bars and would otherwise shift the facet→category index mapping.
+        if (!g.querySelector("rect")) continue;
         const transform = g.getAttribute("transform") ?? "";
         const m = /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(transform);
         const ty = m ? parseFloat(m[1]!) : 0;
@@ -1717,6 +1720,19 @@ export interface SecondaryBandOptions {
   /** Horizontal bars: categories on the Y axis. The coordinated cursor then shades the category
    *  ROW (a horizontal strip) and places value pills at each bar's tip (x = value). */
   horizontal?: boolean;
+  /** Horizontal: start the shaded row at the SVG's left edge (x=0) so it covers the category
+   *  label gutter too, making the highlight read as one continuous row. Default false (starts at
+   *  the plot's left margin). */
+  regionFromLeftEdge?: boolean;
+  /** Horizontal: extend the shaded row this many px past the plot's right edge — used to bridge
+   *  the inter-pane grid gap so the row looks continuous across panes. Default 0. */
+  regionExtendRight?: number;
+  /** Horizontal: when set, re-draw the hovered category's Y-axis label in bold/dark (accent),
+   *  matching the vertical cursor's x-axis category highlight. Only the label-bearing (leftmost)
+   *  pane passes this; `font` is the label size (the gutter is the pane's own left margin). */
+  accentLabel?: { font: number };
+  /** Gap (px) between a bar's tip and its value pill. Default 6. */
+  pillGap?: number;
 }
 
 /** A rendered bar rect's geometry + series, for one category. */
@@ -1759,6 +1775,8 @@ function buildRectsByCategory(
     const groups = Array.from(svgEl.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g'));
     const parsed: Array<{ t: number; g: SVGGElement }> = [];
     for (const gg of groups) {
+      // Skip empty facet groups (section spacer slots) so they don't shift the facet→category map.
+      if (!gg.querySelector("rect")) continue;
       const tf = gg.getAttribute("transform") ?? "";
       const m = horizontal
         ? /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(tf)
@@ -1828,8 +1846,30 @@ export function attachSecondaryBandCursor(
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
 
+  // Accent (bold/dark) the hovered category's Y-axis label by mutating the EXISTING label element
+  // (pixel-perfect alignment, vs drawing a duplicate). The label's textContent is the wrapped lines
+  // joined with no separator; map category → that form so we can find it. Track + restore on clear.
+  const accentFont = opts.accentLabel?.font;
+  const labelKey = (cat: string): string =>
+    accentFont ? wrapToWidth(cat, ml - GUTTER_TEXT_PAD, accentFont).replace(/\n/g, "") : cat;
+  const labelEls = new Map<string, SVGTextElement>();
+  if (opts.accentLabel) {
+    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+      labelEls.set((t.textContent ?? "").trim(), t);
+    }
+  }
+  let accented: SVGTextElement | null = null;
+  const restoreAccent = (): void => {
+    if (accented) {
+      accented.setAttribute("font-weight", "500");
+      accented.setAttribute("fill", TBL.color.axis);
+      accented = null;
+    }
+  };
+
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
+    restoreAccent();
     if (category == null) {
       g.setAttribute("opacity", "0");
       return;
@@ -1850,9 +1890,23 @@ export function attachSecondaryBandCursor(
         return;
       }
       const wide = widenBandsToMidpoints(rawH.map((b) => ({ min: b.yMin, max: b.yMax })), mt, mt + plotH)[idx]!;
-      addCoordRegion(g, doc, ml, plotW, wide.min, wide.max - wide.min);
+      // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
+      // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
+      const regX0 = opts.regionFromLeftEdge ? 0 : ml;
+      const regX1 = W - mr + (opts.regionExtendRight ?? 0);
+      addCoordRegion(g, doc, regX0, regX1 - regX0, wide.min, wide.max - wide.min);
       const weight = active ? 700 : 600;
       const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
+      // Accent the hovered category's Y label (bold/dark), matching the vertical x-axis highlight.
+      if (opts.accentLabel) {
+        const el = labelEls.get(labelKey(category));
+        if (el) {
+          el.setAttribute("font-weight", "700");
+          el.setAttribute("fill", COORD_LABEL_DARK);
+          accented = el;
+        }
+      }
+      const pillGap = opts.pillGap ?? 6;
       const valid = (rectsByCat.get(category) ?? [])
         .map((rect) => ({ rect, v: vals.get(rect.series) }))
         .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
@@ -1862,7 +1916,7 @@ export function attachSecondaryBandCursor(
         addCoordPill(
           g,
           doc,
-          tipX + (x.v >= 0 ? 4 : -4),
+          tipX + (x.v >= 0 ? pillGap : -pillGap),
           cy,
           x.v >= 0 ? "start" : "end",
           yFormat(x.v),

@@ -23,6 +23,7 @@ import {
   tblSectionTopHeader,
   sectionSpacer,
   horizontalLeftGutter,
+  FACETED_CAT_LABEL_PX,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { inferUnitsFromSubtitle } from "../util";
@@ -30,8 +31,9 @@ import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
 // Top margin (px) for a sectioned horizontal chart, leaving room for the first section's header
-// above the first bar. Applied to EVERY pane (incl. label-hidden ones) so the band rows align.
-const SECTION_TOP_MARGIN = 34;
+// above the first bar (kept tight so the pane title sits close to the data). Applied to EVERY
+// pane (incl. label-hidden ones) so the band rows align.
+const SECTION_TOP_MARGIN = 22;
 
 // Px width below which value labels can't fit cleanly on a bar - drop them entirely
 // (Style-Guide bar-grouped sec 6 suppression rule, slide half-scale 25px threshold).
@@ -98,6 +100,9 @@ export function buildBarMarks(
   const catField = xField;
   const seriesNames = ctx.seriesNames ?? [];
   const horizontal = spec.orientation === "horizontal";
+  // Faceted horizontal panes use a larger category-label font (the figure is tall, so the default
+  // axis size looks small); single charts keep the axis size so their goldens stay byte-identical.
+  const catFont = ctx.pane && horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
   // Truncated (non-zero baseline) bars are drawn from 0 and would overflow below the plot; clip
   // them to the frame. No-op (and byte-identical) for normal zero-baseline bars.
   const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
@@ -255,9 +260,9 @@ export function buildBarMarks(
         xAxisMarks: ctx.hideCategoryLabels
           ? []
           : [
-              ...tblBandYAxis(categories, gutter),
-              ...tblSectionHeaderYAxis(sectionHeaders, gutter),
-              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter) : []),
+              ...tblBandYAxis(categories, gutter, catFont),
+              ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont),
+              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, 10, catFont) : []),
             ],
         marginLeft: gutter,
         // Sectioned: reserve top-margin room for the first header on EVERY pane so rows align.
@@ -324,9 +329,9 @@ export function buildBarMarks(
       xAxisMarks: ctx.hideCategoryLabels
         ? []
         : [
-            ...tblFacetGroupYAxis(categories, gutter),
-            ...tblSectionHeaderYAxis(sectionHeaders, gutter),
-            ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter) : []),
+            ...tblFacetGroupYAxis(categories, gutter, catFont),
+            ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont),
+            ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, 10, catFont) : []),
           ],
       marginLeft: gutter,
       ...(sectioned ? { marginTop: SECTION_TOP_MARGIN } : {}),

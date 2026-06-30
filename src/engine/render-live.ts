@@ -13,7 +13,7 @@ import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figure.js";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD } from "./axes.js";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import {
@@ -1086,6 +1086,12 @@ function wireFigureSvg(
      *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
      *  can suppress the hovered category's pills. */
     onPillDriver?: (handle: HighlightPillsHandle) => void;
+    /** Horizontal coordinated cursor: extend the shaded row this many px past the plot's right edge
+     *  to bridge the inter-pane gap (so the highlight reads as one continuous row). */
+    coordExtendRight?: number;
+    /** Horizontal coordinated cursor: this pane shows the category labels (leftmost), so accent the
+     *  hovered category's label on hover. */
+    coordAccentLabel?: boolean;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
@@ -1215,6 +1221,25 @@ function wireFigureSvg(
       const cat = r._xc;
       if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
     }
+    // Sectioned horizontal bars render categories grouped by section, so the bands' VISUAL order
+    // differs from data-encounter order. The crosshair maps facet rows → categories by index, so
+    // reorder `cats` to match the rendered (section) order. Stable sort keeps within-section order.
+    const sectionCol = ctx.spec.columns?.section;
+    if (sectionCol) {
+      const sectionOf = new Map<string, string>();
+      for (const r of ctx.dataInScope) {
+        if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
+      }
+      const secOrder =
+        ctx.spec.section_order && ctx.spec.section_order.length
+          ? ctx.spec.section_order
+          : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
+      const rankOf = (c: string): number => {
+        const i = secOrder.indexOf(sectionOf.get(c) ?? "");
+        return i < 0 ? secOrder.length : i;
+      };
+      cats.sort((a, b) => rankOf(a) - rankOf(b));
+    }
     attachBandCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
@@ -1263,6 +1288,13 @@ function wireFigureSvg(
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
         horizontal,
+        ...(horizontal
+          ? {
+              regionFromLeftEdge: true,
+              regionExtendRight: ctx.coordExtendRight ?? 0,
+              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
+            }
+          : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -1486,6 +1518,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
     fig.panes.forEach((pane, idx) => {
       if (!pane.svg) { drivers.push(() => {}); return; }
+      const col = idx % fig.columns;
       const driver = wireFigureSvg(pane.svg, handle, {
         spec,
         dataInScope: pane.dataInScope ?? [],
@@ -1498,6 +1531,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
         onPillDriver: (d) => pillDrivers.push(d),
+        // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
+        // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
+        ...(isHorizontalBarFig
+          ? {
+              coordExtendRight: col < fig.columns - 1 ? GRID_GAP : 0,
+              coordAccentLabel: col === 0,
+            }
+          : {}),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));
