@@ -218,6 +218,33 @@ describe("small_multiples config", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts faceted horizontal BAR charts (now supported)", () => {
+    const r = validateSpec({
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: { facet: "scenario" },
+      small_multiples: { mode: "shared" },
+      data: "d.csv",
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("still rejects faceted horizontal STACKED charts (not built)", () => {
+    const r = validateSpec({
+      chartType: "stacked",
+      title: "t",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: { facet: "scenario" },
+      small_multiples: { mode: "shared" },
+      data: "d.csv",
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/stacked/);
+  });
+
   it("accepts a boolean points flag", () => {
     expect(validateSpec({ ...VALID, points: true }).valid).toBe(true);
   });
