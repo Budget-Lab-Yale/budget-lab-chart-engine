@@ -18,6 +18,8 @@ export interface ResolvedColumns {
   facet: string | null;
   /** Column driving marker shape (point charts), or null. */
   shape: string | null;
+  /** Column grouping categories into sections (horizontal bars), or null. */
+  section: string | null;
 }
 
 /**
@@ -37,6 +39,7 @@ export function resolveColumns(
   const value = c.value ?? "value";
   const facet = c.facet ?? null;
   const shape = c.shape != null && c.shape !== "" ? c.shape : null;
+  const section = c.section != null && c.section !== "" ? c.section : null;
 
   let series: string | null;
   if (c.series != null && c.series !== "") {
@@ -47,5 +50,5 @@ export function resolveColumns(
     series = "series";
   }
 
-  return { x, value, series, facet, shape };
+  return { x, value, series, facet, shape, section };
 }

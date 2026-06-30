@@ -154,6 +154,10 @@ export interface ColumnMap {
    *  independent of `series` (which drives color). Point both at the same column for redundant
    *  color+shape encoding (the dot-plot default). Omit ⇒ a single shape (circle), no shape legend. */
   shape?: string;
+  /** Horizontal bar charts: column whose distinct values group the categories into labeled
+   *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
+   *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
+  section?: string;
 }
 
 export interface ChartSpec {
@@ -201,6 +205,12 @@ export interface ChartSpec {
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
   x_labels?: Record<string, string>;
+
+  // Section axis (horizontal bars; the section COLUMN is mapped via `columns.section`).
+  /** Section render order along the category axis; also an inclusion filter (like series_order). */
+  section_order?: string[];
+  /** Section value → display label for the section header. */
+  section_labels?: Record<string, string>;
 
   // Shape channel (point charts: scatter / dotplot). The shape COLUMN is mapped via
   // `columns.shape`; these mirror the series_* fields for the shape-encoding legend.

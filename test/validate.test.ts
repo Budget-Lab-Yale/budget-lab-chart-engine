@@ -57,6 +57,22 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/step/);
   });
 
+  it("accepts columns.section + section_order + section_labels", () => {
+    const r = validateSpec({
+      ...VALID,
+      columns: { section: "toplevel" },
+      section_order: ["Durable goods", "Services"],
+      section_labels: { "Durable goods": "Durables" },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects a section_order of the wrong type", () => {
+    const r = validateSpec({ ...VALID, section_order: "Durable goods" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/section_order/);
+  });
+
   it("accepts xAxisPolicy.bands, yAxisPolicy.markers, and valueLabels.decimals", () => {
     const r = validateSpec({
       chartType: "line",

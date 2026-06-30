@@ -196,6 +196,7 @@ export const CHART_SPEC_SCHEMA = {
         series: { type: "string" },
         facet: { type: "string" },
         shape: { type: "string" },
+        section: { type: "string" },
       },
     },
 
@@ -227,6 +228,10 @@ export const CHART_SPEC_SCHEMA = {
       },
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
+
+    // Section axis (horizontal bars; the section COLUMN is mapped via columns.section).
+    section_order: { type: "array", items: { type: "string" } },
+    section_labels: { type: "object", additionalProperties: { type: "string" } },
     x_order: { type: "array", items: { type: "string" } },
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 
