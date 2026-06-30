@@ -526,6 +526,39 @@ describe("bar builder — sectioned horizontal category axis", () => {
   });
 });
 
+// --- Figure 7: the full faceted + sectioned horizontal bar chart ---
+
+const FIG7_SECTIONED_SPEC: ChartSpec = {
+  ...FIG7_FACETED_SPEC,
+  columns: { x: "category", value: "value", series: "series", facet: "facet", section: "toplevel" },
+  section_order: ["Durable goods", "Nondurable goods", "Services"],
+};
+
+describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
+  it("section headers render once (leftmost pane only); categories are section-grouped", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, height: 820, document });
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    const headers = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
+    expect(headers(p0)).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+    // Suppressed on the non-leftmost pane (only its bars + value ticks show).
+    expect(headers(p1)).not.toContain("Durable goods");
+    // Both panes keep all bars (20 categories × 2 series).
+    expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("faceted + sectioned figure is deterministic and matches the golden", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const a = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, height: 820, document }));
+    const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, height: 820, document }));
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-sectioned.golden.svg");
+  });
+});
+
 // --- Stacked bars (task A7) ---
 
 const STACKED_CUMULATIVE_SPEC: ChartSpec = {
