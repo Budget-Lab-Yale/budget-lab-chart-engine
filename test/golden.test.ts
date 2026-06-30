@@ -19,7 +19,7 @@ import type { TidyRow } from "../src/data/index";
 import { assemblePlot } from "../src/engine/assemble-plot";
 import { Plot, d3 } from "../src/engine/vendor";
 import { TBL, SHARED_LABELLESS_MARGIN_LEFT } from "../src/engine/theme";
-import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
+import { paneTitleMark, temporalXTicks, isSectionSpacer } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
@@ -472,6 +472,57 @@ describe("figure — faceted horizontal bars (shared mode)", () => {
     const b = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document }));
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff.golden.svg");
+  });
+});
+
+// --- Sectioned horizontal category axis (columns.section) ---
+
+describe("bar builder — sectioned horizontal category axis", () => {
+  const SECTIONED_SINGLE: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    subtitle: "Percent change in consumer prices",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    series_order: ["Pre-Substitution", "Post-Substitution"],
+    columns: { x: "category", value: "value", series: "series", section: "toplevel" },
+    section_order: ["Durable goods", "Nondurable goods", "Services"],
+    data: "figure7-tariff.csv",
+  };
+
+  it("orders categories by section and renders bold section headers", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const { svg } = renderChart(SECTIONED_SINGLE, rows, { width: 520, height: 760, document });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+    // Section headers present.
+    expect(texts).toContain("Durable goods");
+    expect(texts).toContain("Nondurable goods");
+    expect(texts).toContain("Services");
+    // Headers are bold (700).
+    const bold = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map(
+      (t) => t.textContent ?? "",
+    );
+    expect(bold).toContain("Durable goods");
+    // The spacer sentinel never leaks into rendered text.
+    expect(texts.some((t) => isSectionSpacer(t))).toBe(false);
+    // Still one rect per (category × series): 20 × 2 = 40.
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("section_labels overrides the header text", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const spec: ChartSpec = {
+      ...SECTIONED_SINGLE,
+      section_labels: { "Durable goods": "Durables" },
+    };
+    const { svg } = renderChart(spec, rows, { width: 520, height: 760, document });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+    expect(texts).toContain("Durables");
+    expect(texts).not.toContain("Durable goods");
   });
 });
 

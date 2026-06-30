@@ -15,7 +15,14 @@
 // Horizontal single-series puts categories on a band `y` (the value axis moves to `x`).
 import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
-import { tblBandXAxis, tblBandYAxis, tblFacetGroupYAxis, horizontalLeftGutter } from "../axes";
+import {
+  tblBandXAxis,
+  tblBandYAxis,
+  tblFacetGroupYAxis,
+  tblSectionHeaderYAxis,
+  sectionSpacer,
+  horizontalLeftGutter,
+} from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
@@ -102,6 +109,44 @@ export function buildBarMarks(
         categories.push(cat);
       }
     }
+  }
+
+  // Sectioned horizontal category axis (columns.section): order the categories grouped by section,
+  // inserting an empty spacer band slot before each section to carry its bold header. Only for
+  // horizontal; vertical and unsectioned output is unchanged (bandDomain === categories, no headers).
+  const sectioned = horizontal && data.some((r) => r._section != null);
+  let bandDomain = categories;
+  const sectionHeaders: { value: string; label: string }[] = [];
+  if (sectioned) {
+    // category → its section (first row wins; categories belong to one section).
+    const sectionOf = new Map<string, string>();
+    for (const r of data) {
+      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
+      if (cat && r._section != null && !sectionOf.has(cat)) sectionOf.set(cat, r._section);
+    }
+    // Section order: spec.section_order (filter + order) else section-encounter order.
+    const encountered: string[] = [];
+    const seenSec = new Set<string>();
+    for (const cat of categories) {
+      const s = sectionOf.get(cat) ?? "";
+      if (!seenSec.has(s)) {
+        seenSec.add(s);
+        encountered.push(s);
+      }
+    }
+    const order =
+      spec.section_order && spec.section_order.length
+        ? spec.section_order.filter((s) => seenSec.has(s))
+        : encountered;
+    const labels = spec.section_labels ?? {};
+    const domain: string[] = [];
+    for (const s of order) {
+      const spacer = sectionSpacer(s);
+      domain.push(spacer);
+      sectionHeaders.push({ value: spacer, label: labels[s] ?? s });
+      for (const cat of categories) if ((sectionOf.get(cat) ?? "") === s) domain.push(cat);
+    }
+    bandDomain = domain;
   }
 
   // Units suffix for value labels (matches the y-tick units inference upstream).
@@ -191,8 +236,10 @@ export function buildBarMarks(
         overlay,
         tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
         dashedNames: new Set<string>(),
-        yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-        xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter),
+        yScaleOpts: { type: "band", domain: bandDomain, padding: 0.2, axis: null },
+        xAxisMarks: ctx.hideCategoryLabels
+          ? []
+          : [...tblBandYAxis(categories, gutter), ...tblSectionHeaderYAxis(sectionHeaders, gutter)],
         marginLeft: gutter,
       };
     }
@@ -236,7 +283,7 @@ export function buildBarMarks(
     // Group band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-group
     // padding, no axis (groups labeled via the fy group-label mark). Inner series band on
     // `y`: domain in series order, padding 0 so bars touch within the group.
-    const fyGroupOpts = { domain: categories, padding: 0.2, paddingOuter: 0.2, axis: null };
+    const fyGroupOpts = { domain: bandDomain, padding: 0.2, paddingOuter: 0.2, axis: null };
     const innerYBandOpts = { type: "band", domain: seriesNames, padding: 0, axis: null };
 
     // Faceted horizontal small multiples: use the shared gutter from the figure (so panes align)
@@ -253,7 +300,9 @@ export function buildBarMarks(
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
       fyScaleOpts: fyGroupOpts,
-      xAxisMarks: ctx.hideCategoryLabels ? [] : tblFacetGroupYAxis(categories, gutter),
+      xAxisMarks: ctx.hideCategoryLabels
+        ? []
+        : [...tblFacetGroupYAxis(categories, gutter), ...tblSectionHeaderYAxis(sectionHeaders, gutter)],
       marginLeft: gutter,
     };
   }
