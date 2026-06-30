@@ -227,6 +227,7 @@ export function renderPane(
       // Point charts: the independent shape-encoding value (drives marker symbol). When the shape
       // column IS the series column (redundant encoding) this simply mirrors `series`.
       if (cols.shape) row._shape = r[cols.shape] ?? "";
+      if (cols.section) row._section = r[cols.section] ?? "";
       (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {

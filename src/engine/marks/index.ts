@@ -26,6 +26,9 @@ export interface PreparedRow {
   /** Point charts (scatter / dotplot): the raw shape-encoding value (from columns.shape).
    *  Drives the marker symbol independently of `series` (color). Absent ⇒ no shape channel. */
   _shape?: string;
+  /** Horizontal sectioned bars: the row's section value (from columns.section). Drives the
+   *  section-ordered category band + section headers. Absent ⇒ no sections. */
+  _section?: string;
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
    *  facet_field that splits this row's pane). */
   _facet?: string;
