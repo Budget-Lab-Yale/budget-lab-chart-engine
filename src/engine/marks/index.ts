@@ -78,6 +78,15 @@ export interface MarkContext {
   /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
    *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */
   stackOrder?: string[];
+  /** Horizontal bars in shared-mode small multiples, non-leftmost panes: omit the category
+   *  (y-band) labels so they show only on the leftmost pane. The category band domain is shared,
+   *  so rows still align. Absent → labels emitted (single-chart + leftmost pane unchanged). */
+  hideCategoryLabels?: boolean;
+  /** Horizontal bars in shared-mode small multiples: the shared left-gutter width (px) to use for
+   *  the category labels + plot left margin, computed once by the figure orchestrator over the
+   *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
+   *  via horizontalLeftGutter (single-chart unchanged). */
+  categoryGutter?: number;
 }
 
 export interface MarkLayers {

@@ -61,6 +61,13 @@ export interface RenderOptions {
    *  legend order + colors stay series_order). The live layer passes a reordered list when series
    *  are selected (selected-to-bottom in click order) so a user can read a series against zero. */
   stackOrder?: string[];
+  /** Shared-mode small multiples, horizontal bars, non-leftmost panes: omit the category labels
+   *  (the horizontal analog of hideYAxisLabels, which only affects the vertical value axis).
+   *  Threaded into MarkContext.hideCategoryLabels. Absent → labels emitted. */
+  hideCategoryLabels?: boolean;
+  /** Shared-mode small multiples, horizontal bars: the shared category-gutter width (px) every
+   *  pane should use. Threaded into MarkContext.categoryGutter. Absent → builder computes its own. */
+  categoryGutter?: number;
 }
 
 export interface LegendItem {
@@ -433,6 +440,9 @@ export function renderPane(
     // Dynamic stack order (area): the live layer passes a reordered list when a series is selected
     // (selected-to-bottom); the mark stacks in this order while legend/colors stay series_order.
     ...(opts.stackOrder ? { stackOrder: opts.stackOrder } : {}),
+    // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
+    ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
+    ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.
