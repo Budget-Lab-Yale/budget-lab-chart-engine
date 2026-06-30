@@ -16,6 +16,7 @@
 import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { tblBandXAxis, tblBandYAxis, tblFacetGroupYAxis, horizontalLeftGutter } from "../axes";
+import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -179,14 +180,19 @@ export function buildBarMarks(
       // Categories on the band `y`; value on `x` (assemblePlot moves the value domain to
       // `x` when yScaleOpts is present). Supply the y band + its left-edge labels, and a
       // responsive left gutter wide enough for the longest category label (else it clips).
-      const gutter = horizontalLeftGutter(categories);
+      // Faceted horizontal small multiples: the figure passes the shared gutter (categoryGutter)
+      // so every pane aligns, and hideCategoryLabels suppresses the labels on non-leftmost panes
+      // (the band domain is shared, so rows still line up).
+      const gutter = ctx.hideCategoryLabels
+        ? SHARED_LABELLESS_MARGIN_LEFT
+        : ctx.categoryGutter ?? horizontalLeftGutter(categories);
       return {
         underlay: [],
         overlay,
         tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-        xAxisMarks: tblBandYAxis(categories, gutter),
+        xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter),
         marginLeft: gutter,
       };
     }
@@ -233,7 +239,11 @@ export function buildBarMarks(
     const fyGroupOpts = { domain: categories, padding: 0.2, paddingOuter: 0.2, axis: null };
     const innerYBandOpts = { type: "band", domain: seriesNames, padding: 0, axis: null };
 
-    const gutter = horizontalLeftGutter(categories);
+    // Faceted horizontal small multiples: use the shared gutter from the figure (so panes align)
+    // and suppress category labels on non-leftmost panes.
+    const gutter = ctx.hideCategoryLabels
+      ? SHARED_LABELLESS_MARGIN_LEFT
+      : ctx.categoryGutter ?? horizontalLeftGutter(categories);
     return {
       underlay: [],
       overlay,
@@ -243,7 +253,7 @@ export function buildBarMarks(
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
       fyScaleOpts: fyGroupOpts,
-      xAxisMarks: tblFacetGroupYAxis(categories, gutter),
+      xAxisMarks: ctx.hideCategoryLabels ? [] : tblFacetGroupYAxis(categories, gutter),
       marginLeft: gutter,
     };
   }

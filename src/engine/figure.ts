@@ -15,16 +15,16 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
+
+// Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
+// without a module cycle through figure.ts).
+export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
 /** Default grid-column count for `n` panes: ≈ ceil(sqrt(n)), capped at 4. */
 function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
 }
-
-/** Label-less (non-leftmost) columns get a small left margin instead of the ~44px y-label
- *  gutter, so the series doesn't render with a big blank strip on its left. */
-export const SHARED_LABELLESS_MARGIN_LEFT = 2;
 
 /** SHARED-mode small-multiples per-row width math (the single source of truth, reused by the
  *  live grid and the PNG export). Given the TOTAL inner grid width `availW` (the width the row

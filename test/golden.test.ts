@@ -18,7 +18,7 @@ import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { assemblePlot } from "../src/engine/assemble-plot";
 import { Plot, d3 } from "../src/engine/vendor";
-import { TBL } from "../src/engine/theme";
+import { TBL, SHARED_LABELLESS_MARGIN_LEFT } from "../src/engine/theme";
 import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { computeYAxis } from "../src/engine/scales";
@@ -377,6 +377,44 @@ describe("golden SVG — bars", () => {
     const a = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+// --- Faceted-horizontal label/gutter signals (hideCategoryLabels + categoryGutter) ---
+
+describe("bar builder — faceted-horizontal label signals", () => {
+  const HBASE: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    series_order: ["2019", "2022", "2025"],
+    data: "bar-multi.csv",
+  };
+
+  it("hideCategoryLabels omits the y-band labels for grouped horizontal", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const shown = renderChart(HBASE, rows, { width: 400, height: 400, document });
+    const hidden = renderChart(HBASE, rows, {
+      width: 400,
+      height: 400,
+      document,
+      hideCategoryLabels: true,
+    });
+    const labelCount = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll("text")).filter((t) =>
+        /Northeast|Midwest|South/.test(t.textContent ?? ""),
+      ).length;
+    expect(labelCount(shown.svg)).toBeGreaterThan(0);
+    expect(labelCount(hidden.svg)).toBe(0);
+    expect(Number(hidden.svg.dataset.marginLeft)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
+  });
+
+  it("categoryGutter overrides the computed gutter (plot margin follows it)", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const r = renderChart(HBASE, rows, { width: 400, height: 400, document, categoryGutter: 180 });
+    expect(Number(r.svg.dataset.marginLeft)).toBe(180);
   });
 });
 
