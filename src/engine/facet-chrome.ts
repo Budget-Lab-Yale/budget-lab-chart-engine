@@ -289,10 +289,12 @@ export function collapseFacetChromeY(
   }
 
   // 1b. Top value-axis tick labels (x_axis_ticks "top"/"both"): keep the first facet's row and move
-  //     it up to the whole-plot TOP (it currently sits at the first facet's top, below the outer
-  //     padding). Mirror of the bottom-tick re-translation, using the gridline's local top (y1).
+  //     it to near the SVG TOP (just under the pane title) — not the plot-area top, which would
+  //     leave a big empty band above the ticks. The first facet's local top comes from the gridline
+  //     y1; we re-translate so the ticks land at TOP_TICK_PLACE.
   const topLabelGroups = Array.from(svg.querySelectorAll<SVGGElement>(`g.${X_TICK_LABEL_TOP_CLASS}`));
   if (topLabelGroups.length) {
+    const TOP_TICK_PLACE = 12; // facet-top target; the ticks' own dy (−8) lands the text ~4px down
     const kept = topLabelGroups[0] as SVGGElement;
     for (let i = 1; i < topLabelGroups.length; i++) topLabelGroups[i]?.remove();
     const ty = readTranslateY(kept);
@@ -302,7 +304,7 @@ export function collapseFacetChromeY(
       const gl = firstGrid.querySelector<SVGLineElement>("line");
       if (gl) facetTopLocal = Number(gl.getAttribute("y1") ?? facetTopLocal);
     }
-    const dy = topAbs - (ty + facetTopLocal);
+    const dy = TOP_TICK_PLACE - (ty + facetTopLocal);
     if (dy !== 0) {
       const tx = readTranslateX(kept);
       kept.setAttribute("transform", `translate(${tx},${ty + dy})`);

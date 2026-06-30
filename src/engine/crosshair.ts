@@ -1894,14 +1894,23 @@ export function attachSecondaryBandCursor(
         g.setAttribute("opacity", "0");
         return;
       }
-      const wide = widenBandsToMidpoints(rawH.map((b) => ({ min: b.yMin, max: b.yMax })), mt, mt + plotH)[idx]!;
+      // EQUAL-height row for every category: use the UNIFORM band step (centred on each category),
+      // not the neighbour-midpoint widening — otherwise categories at a section boundary (whose
+      // neighbour is a spacer-gap away) get a taller strip than the rest.
+      const centers = rawH.map((bb) => (bb.yMin + bb.yMax) / 2);
+      let step = Infinity;
+      for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
+      if (!Number.isFinite(step)) step = rawH[idx]!.yMax - rawH[idx]!.yMin + 8;
+      const c = centers[idx]!;
+      const regYmin = Math.max(mt, c - step / 2);
+      const regYmax = Math.min(mt + plotH, c + step / 2);
       // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
       // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
       const regX0 = opts.regionFromLeftEdge ? 0 : ml;
       // Cover the pane's full width (incl. the right margin) and, for non-last panes, bridge the
       // inter-pane grid gap (SVG overflow is visible) so the row reads as one continuous strip.
       const regX1 = W + (opts.regionExtendRight ?? 0);
-      addCoordRegion(g, doc, regX0, regX1 - regX0, wide.min, wide.max - wide.min);
+      addCoordRegion(g, doc, regX0, regX1 - regX0, regYmin, regYmax - regYmin);
       const weight = active ? 700 : 600;
       const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
       // Accent the hovered category's Y label (bold/dark), matching the vertical x-axis highlight.
@@ -1918,11 +1927,17 @@ export function attachSecondaryBandCursor(
             /* no layout (jsdom) → skip the pill */
           }
           if (bb) {
+            // getBBox excludes the element's OWN transform; the label text carries a translate
+            // (its gutter/band position), so add it back or the pill lands up-and-left of the label.
+            const tf = el.getAttribute("transform") ?? "";
+            const tm = /translate\(\s*([\d.+-]+)[ ,]\s*([\d.+-]+)/.exec(tf);
+            const tlx = tm ? parseFloat(tm[1]!) : 0;
+            const tly = tm ? parseFloat(tm[2]!) : 0;
             const padX = 5;
             const padY = 2;
             const pill = doc.createElementNS(COORD_NS, "rect");
-            pill.setAttribute("x", String(bb.x - padX));
-            pill.setAttribute("y", String(bb.y - padY));
+            pill.setAttribute("x", String(bb.x - padX + tlx));
+            pill.setAttribute("y", String(bb.y - padY + tly));
             pill.setAttribute("width", String(bb.width + padX * 2));
             pill.setAttribute("height", String(bb.height + padY * 2));
             pill.setAttribute("rx", "3");

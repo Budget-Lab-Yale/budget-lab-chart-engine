@@ -33,10 +33,13 @@ import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 // Horizontal value-axis margins. The category axis is on the LEFT, so the bottom margin only needs
 // to fit the value-tick row (not the inherited categorical-label margin). The top margin fits the
 // optional top tick row + the first section header band.
-const HVALUE_TICK_PX = 24; // one value-tick row
+const HVALUE_TICK_PX = 18; // one value-tick row (top)
 const HSECTION_HEADER_BAND = 18; // room for the first section header (sits above the first bar)
 const HMARGIN_BOTTOM_TICKS = 26;
 const HMARGIN_BOTTOM_BARE = 8;
+// Outer padding fraction for the horizontal category band, with `align: 0` so the (small) outer
+// pad goes to the BOTTOM only — the first bar then sits flush at marginTop (no empty band above it).
+const HBAND_PADDING_OUTER = 0.02;
 
 // Px width below which value labels can't fit cleanly on a bar - drop them entirely
 // (Style-Guide bar-grouped sec 6 suppression rule, slide half-scale 25px threshold).
@@ -179,8 +182,8 @@ export function buildBarMarks(
   const hBottomTicks = xTicksMode !== "top";
   const hMarginTop = (hTopTicks ? HVALUE_TICK_PX : 0) + (sectioned ? HSECTION_HEADER_BAND : 8);
   const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
-  // First section header sits in the top margin, below the top ticks (if any) and above the bars.
-  const topHeaderLift = HSECTION_HEADER_BAND - 4;
+  // First section header baseline sits just below the top ticks (if any). lift = marginTop − that.
+  const topHeaderLift = hMarginTop - ((hTopTicks ? HVALUE_TICK_PX : 0) + 13);
 
   // Units suffix for value labels (matches the y-tick units inference upstream).
   const units = inferUnitsFromSubtitle(spec.subtitle);
@@ -269,7 +272,7 @@ export function buildBarMarks(
         overlay,
         tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
         dashedNames: new Set<string>(),
-        yScaleOpts: { type: "band", domain: bandDomain, padding: 0.2, axis: null },
+        yScaleOpts: { type: "band", domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
         xAxisMarks: ctx.hideCategoryLabels
           ? []
           : [
@@ -322,7 +325,7 @@ export function buildBarMarks(
     // Group band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-group
     // padding, no axis (groups labeled via the fy group-label mark). Inner series band on
     // `y`: domain in series order, padding 0 so bars touch within the group.
-    const fyGroupOpts = { domain: bandDomain, padding: 0.2, paddingOuter: 0.2, axis: null };
+    const fyGroupOpts = { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null };
     const innerYBandOpts = { type: "band", domain: seriesNames, padding: 0, axis: null };
 
     // Faceted horizontal small multiples: use the shared gutter from the figure (so panes align)
