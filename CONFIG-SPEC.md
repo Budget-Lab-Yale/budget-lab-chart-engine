@@ -46,6 +46,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. |
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
+| `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
 
 ### Text
 
@@ -155,6 +156,24 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.pane_order` | array | Pane render order + inclusion filter. |
 | `small_multiples.pane_titles` | object | `{ <facetValue>: "Display title" }`. Falls back to the raw facet value. |
 | `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. |
+
+**Faceted horizontal bars.** `orientation: horizontal` combines with `small_multiples` to produce a
+faceted horizontal bar chart: each pane is one facet value, the panes share a single value (x) axis,
+and the category labels form a shared left gutter sized to the longest label — shown on the leftmost
+pane only, so the rows line up across panes. Works with single-series and grouped (multi-series)
+bars. Use `shared` mode (the default) so the value axis is comparable across panes.
+
+### Section axis (horizontal bars)
+
+Set `columns.section` to group the category axis into labeled sections (horizontal bar charts only).
+Categories are ordered so each section is contiguous, with a bold section header in the left gutter
+and a gap between sections. Combines with `small_multiples` (the headers show on the leftmost pane).
+
+| field | type | notes |
+|---|---|---|
+| `columns.section` | string | Column whose distinct values define the sections. |
+| `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`). |
+| `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
 ### Data
 
@@ -333,7 +352,8 @@ the engine expects `time`, `series`, `value`.
 | value | Numeric y-value. May be empty for missing observations. |
 
 Optional chart columns: confidence-bound columns (if `confidence_bands` references them), the facet
-column (if `columns.facet` is set), and the shape column (if `columns.shape` is set).
+column (if `columns.facet` is set), the shape column (if `columns.shape` is set), and the section
+column (if `columns.section` is set).
 
 **Tables** also use tidy/long data: one row per cell, with the `stub`, `header`, and `value`
 columns (plus optional `pane`, `emphasis_column`, `footnote_column`). The `value` column may hold
