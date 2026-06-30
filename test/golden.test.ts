@@ -439,7 +439,7 @@ const FIG7_FACETED_SPEC: ChartSpec = {
 describe("figure — faceted horizontal bars (shared mode)", () => {
   it("leftmost pane has a wide gutter; others suppress labels; value axis is shared", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document });
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
     expect(fig.panes.length).toBe(2);
     const p0 = fig.panes[0]!.svg as SVGSVGElement;
     const p1 = fig.panes[1]!.svg as SVGSVGElement;
@@ -466,10 +466,32 @@ describe("figure — faceted horizontal bars (shared mode)", () => {
     expect(maxTick(p0)).toBe(maxTick(p1));
   });
 
+  it("auto-grows the figure height with the row count when no height is given", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const h0 = Number((fig.panes[0]!.svg as SVGSVGElement).getAttribute("height"));
+    const h1 = Number((fig.panes[1]!.svg as SVGSVGElement).getAttribute("height"));
+    // 20 categories × 2 series → far taller than the 320 fixed pane height, and shared across panes.
+    expect(h0).toBeGreaterThan(900);
+    expect(h1).toBe(h0);
+  });
+
+  it("wraps long category labels onto multiple lines (no overflow into the plot)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    // The longest label wraps: its <text> carries multiple <tspan> lines.
+    const wrapped = Array.from(p0.querySelectorAll("text")).find((t) =>
+      (t.textContent ?? "").startsWith("Food and beverages"),
+    );
+    expect(wrapped).toBeTruthy();
+    expect(wrapped!.querySelectorAll("tspan").length).toBeGreaterThan(1);
+  });
+
   it("faceted horizontal figure is deterministic and matches the golden", async () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const a = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document }));
-    const b = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, height: 760, document }));
+    const a = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document }));
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff.golden.svg");
   });
@@ -537,7 +559,7 @@ const FIG7_SECTIONED_SPEC: ChartSpec = {
 describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
   it("section headers render once (leftmost pane only); categories are section-grouped", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const fig = renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, height: 820, document });
+    const fig = renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document });
     const p0 = fig.panes[0]!.svg as SVGSVGElement;
     const p1 = fig.panes[1]!.svg as SVGSVGElement;
     const headers = (svg: SVGSVGElement) =>
@@ -552,8 +574,8 @@ describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
 
   it("faceted + sectioned figure is deterministic and matches the golden", async () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const a = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, height: 820, document }));
-    const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, height: 820, document }));
+    const a = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-sectioned.golden.svg");
   });

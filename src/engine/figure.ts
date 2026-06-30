@@ -15,7 +15,7 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
-import { horizontalLeftGutter } from "./axes";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
@@ -25,6 +25,63 @@ export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 /** Default grid-column count for `n` panes: ≈ ceil(sqrt(n)), capped at 4. */
 function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
+}
+
+// Horizontal-bar height model (shared by the single-chart computeChartHeight and the faceted
+// figure). A horizontal bar/figure grows with the number of category band SLOTS so the bars stay
+// legible and the rows aren't cramped; the stakeholder blessed very tall horizontals.
+/** Per-bar vertical budget (px): a grouped category reserves this PER SERIES, a single/stacked
+ *  category reserves one. Matches the single-chart live height (kept identical for back-compat). */
+export const HORIZONTAL_PX_PER_BAR = 34;
+/** Top/bottom margins + value-axis label row + a little slack. */
+export const HORIZONTAL_CHROME_PX = 80;
+/** Estimated wrapped-label line height (px) at the axis font size. */
+const HORIZONTAL_LABEL_LINE_PX = 13;
+/** Floor so a short horizontal chart isn't smaller than a vertical one. */
+const HORIZONTAL_HEIGHT_FLOOR = 400;
+
+/** Intrinsic height (px) of a horizontal bar chart / faceted figure. Each category band slot is
+ *  tall enough for its bars (grouped → nSeries bars) OR its wrapped label, whichever is taller;
+ *  section spacer slots add one slot each. Floored at the vertical default. */
+export function horizontalBarHeight(opts: {
+  nCategories: number;
+  nSeries: number;
+  grouped: boolean;
+  nSpacers: number;
+  maxLabelLines: number;
+}): number {
+  const { nCategories, nSeries, grouped, nSpacers, maxLabelLines } = opts;
+  const barsPerCat = grouped ? Math.max(1, nSeries) : 1;
+  const catBarPx = barsPerCat * HORIZONTAL_PX_PER_BAR;
+  const labelPx = Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6;
+  // Uniform band → every slot (category or spacer) is the same height; size it to the taller of
+  // the bar budget and the wrapped-label budget so neither is clipped.
+  const slotPx = Math.max(catBarPx, labelPx);
+  const inner = (nCategories + Math.max(0, nSpacers)) * slotPx;
+  return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX));
+}
+
+/** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
+ *  — i.e. the number of section spacer slots a sectioned horizontal axis inserts. */
+function countSections(
+  rows: TidyRow[],
+  xField: string,
+  sectionField: string,
+  spec: ChartSpec,
+  categories: string[],
+): number {
+  const sectionOf = new Map<string, string>();
+  for (const r of rows) {
+    const cat = r[xField] as string;
+    const sec = r[sectionField] as string;
+    if (cat && sec != null && !sectionOf.has(cat)) sectionOf.set(cat, sec);
+  }
+  const present = new Set<string>();
+  for (const c of categories) present.add(sectionOf.get(c) ?? "");
+  if (spec.section_order && spec.section_order.length) {
+    return spec.section_order.filter((s) => present.has(s)).length;
+  }
+  return present.size;
 }
 
 /** The category (band) values in render order, SHARED across every pane (so each pane's category
@@ -174,10 +231,38 @@ export function renderFigure(
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
 
-  const facetField = resolveColumns(spec, rows).facet;
+  const cols = resolveColumns(spec, rows);
+  const facetField = cols.facet;
   if (!facetField) {
     throw new Error("small_multiples requires a facet column (set columns.facet).");
   }
+
+  // Horizontal bars: the category axis runs down the left gutter (shared across panes). Compute the
+  // shared category set, gutter, section-spacer count and tallest wrapped label ONCE here, so the
+  // gutter sizing, category-label suppression and the auto-grown figure HEIGHT all agree across
+  // panes. (Vertical / non-bar figures keep the default chrome + caller height.)
+  const isHorizontalBar = spec.chartType === "bar" && spec.orientation === "horizontal";
+  const sharedCategories = isHorizontalBar ? orderedCategories(rows, cols.x, spec) : [];
+  const hGutter = isHorizontalBar ? horizontalLeftGutter(sharedCategories) : TBL_MARGIN_LEFT;
+  // Auto-height: grow the panes with the row count when the caller doesn't force a height.
+  let autoHeight: number | undefined;
+  if (isHorizontalBar && opts.height == null) {
+    const nSeries =
+      spec.series_order && spec.series_order.length
+        ? spec.series_order.length
+        : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
+    const nSpacers = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
+    const maxPx = hGutter - GUTTER_TEXT_PAD;
+    const maxLabelLines = sharedCategories.reduce((m, c) => Math.max(m, labelLineCount(c, maxPx)), 1);
+    autoHeight = horizontalBarHeight({
+      nCategories: sharedCategories.length,
+      nSeries: Math.max(1, nSeries),
+      grouped: nSeries > 1,
+      nSpacers,
+      maxLabelLines,
+    });
+  }
+  const effHeight = opts.height ?? autoHeight;
 
   // 1. Partition + order panes. Distinct facet values in data-encounter order, then reorder +
   //    filter by pane_order when set (pane_order names the included panes, in order).
@@ -227,7 +312,7 @@ export function renderFigure(
       // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
       // renders a standalone single frame for these rows only.
       const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-      const p = renderPane(spec, paneRows, { ...opts, pane: true }, `p${i}`);
+      const p = renderPane(spec, paneRows, { ...opts, height: effHeight, pane: true }, `p${i}`);
       if (i === 0) firstLayers = p.layers;
       return {
         value,
@@ -299,21 +384,14 @@ export function renderFigure(
   let yHi = -Infinity;
   for (const value of paneValues) {
     const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-    const [lo, hi] = renderPane(spec, paneRows, { ...opts, pane: true }, "probe").yDomain;
+    const [lo, hi] = renderPane(spec, paneRows, { ...opts, height: effHeight, pane: true }, "probe").yDomain;
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }
   const sharedYDomain: [number, number] = [yLo, yHi];
 
-  // 2. Horizontal bars: the CATEGORY axis is the left gutter (not the value axis). Size the
-  //    gutter once to the longest category label over the SHARED category set so every pane uses
-  //    the same gutter and the rows align; the value (x) axis is shared via sharedYDomain. Category
-  //    labels show on the leftmost pane only (suppressed elsewhere via hideCategoryLabels). Vertical
-  //    charts keep the default y-label gutter (TBL_MARGIN_LEFT).
-  const isHorizontalBar = spec.chartType === "bar" && spec.orientation === "horizontal";
-  const hGutter = isHorizontalBar
-    ? horizontalLeftGutter(orderedCategories(rows, resolveColumns(spec, rows).x, spec))
-    : TBL_MARGIN_LEFT;
+  // (isHorizontalBar / hGutter / effHeight were computed once at the top so the gutter, label
+  //  suppression and the auto-grown height all agree across panes.)
 
   // 3. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
   //    columns drop the label gutter for a small left margin; column OUTER widths are made unequal
@@ -342,6 +420,7 @@ export function renderFigure(
       paneRows,
       {
         ...opts,
+        height: effHeight,
         pane: true,
         yDomain: sharedYDomain,
         width: colWidths[col],

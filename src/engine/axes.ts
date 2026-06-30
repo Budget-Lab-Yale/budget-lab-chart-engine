@@ -413,6 +413,39 @@ export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axi
   return text.length * fontSize * AVG_CHAR_EM;
 }
 
+/** Greedily word-wrap a label into as many lines as needed so each line's estimated width is
+ *  ≤ `maxPx` (a single over-long word still gets its own line). Returns the lines joined by "\n"
+ *  (Plot renders that as multi-line text). A label that already fits returns unchanged (no "\n"),
+ *  so callers that only sometimes wrap stay byte-identical for the labels that don't. */
+export function wrapToWidth(
+  label: string,
+  maxPx: number,
+  fontSize: number = TBL.size.axis,
+): string {
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return label;
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const trial = cur ? `${cur} ${w}` : w;
+    if (!cur || estimateLabelWidth(trial, fontSize) <= maxPx) cur = trial;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.join("\n");
+}
+
+/** Number of lines `label` wraps to at `maxPx` (≥ 1). */
+export function labelLineCount(label: string, maxPx: number, fontSize: number = TBL.size.axis): number {
+  return wrapToWidth(label, maxPx, fontSize).split("\n").length;
+}
+
+/** Padding (px) reserved between the wrapped category label and the bars in the left gutter. */
+export const GUTTER_TEXT_PAD = 8;
+
 // Responsive LEFT GUTTER for horizontal bars: the y-axis category labels live in the left
 // margin (left-justified at svg x=0), so the margin must be wide enough for the LONGEST
 // label or it clips into the plot. Derived from the longest category at the axis font size
@@ -434,16 +467,22 @@ export function tblBandYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
 ): Mark[] {
+  // Wrap labels that would overflow the gutter onto multiple lines (prevents collision with the
+  // bars). Labels that fit return unchanged (no "\n"), so non-wrapping output stays byte-identical.
+  const maxPx = marginLeft - GUTTER_TEXT_PAD;
+  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx).includes("\n"));
   return [
     Plot.text(categories, {
       y: (d: string) => d,
-      text: (d: string) => d,
+      text: (d: string) => wrapToWidth(d, maxPx),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
+      // Center the wrapped block on the band only when multi-line (keeps single-line byte-identical).
+      ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
     }),
   ];
 }
@@ -459,16 +498,19 @@ export function tblFacetGroupYAxis(
   marginLeft: number = TBL_MARGIN_LEFT,
 ): Mark[] {
   const rows = categories.map((c) => ({ c }));
+  const maxPx = marginLeft - GUTTER_TEXT_PAD;
+  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx).includes("\n"));
   return [
     Plot.text(rows, {
       fy: (d: { c: string }) => d.c,
-      text: (d: { c: string }) => d.c,
+      text: (d: { c: string }) => wrapToWidth(d.c, maxPx),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
+      ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
     }),
   ];
 }

@@ -241,6 +241,23 @@ describe("computeChartHeight", () => {
     );
     expect(h).toBe(12 * 34 + 80);
   });
+
+  it("adds height for section spacer rows", () => {
+    const spec: ChartSpec = {
+      chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
+      series_order: ["X", "Y"], columns: { x: "time", series: "series", section: "sec" },
+      data: "x",
+    };
+    const rows: TidyRow[] = [];
+    // 4 categories across 2 sections; grouped 2-series.
+    const secOf: Record<string, string> = { a: "P", b: "P", c: "Q", d: "Q" };
+    for (const s of ["X", "Y"]) for (const c of ["a", "b", "c", "d"]) {
+      rows.push({ time: c, series: s, sec: secOf[c], value: "1" } as TidyRow);
+    }
+    // 4 cats × 2 series = 8 bar-rows; + 2 section spacer slots (each = a 2-bar category slot = 2 rows).
+    // height = (4 cats + 2 spacers) × (2×34) + 80 = 6×68 + 80 = 488.
+    expect(computeChartHeight(spec, rows)).toBe(6 * 68 + 80);
+  });
 });
 
 // ---------------------------------------------------------------------------

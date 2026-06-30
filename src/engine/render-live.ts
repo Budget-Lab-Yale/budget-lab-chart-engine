@@ -12,7 +12,8 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
-import { renderFigure } from "./figure.js";
+import { renderFigure, horizontalBarHeight } from "./figure.js";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import {
@@ -53,39 +54,56 @@ export interface MountOptions {
 const MIN_CHART_WIDTH = 390;
 const FIXED_CHART_HEIGHT = 400;
 
-// Horizontal bars grow taller with the bar/row count (the stakeholder blessed taller
-// horizontals). Per-row pixel budget + chrome headroom, floored at the vertical default so
-// short horizontals don't shrink. Vertical charts keep the fixed height.
-const HORIZONTAL_PX_PER_ROW = 34; // per bar (single/stacked: 1 per category; grouped: per series-in-group)
-const HORIZONTAL_CHROME_PX = 80; // top/bottom margins + value-axis label row + a little slack
-
-/** Compute the live-mount height for a chart. Horizontal bars scale with the number of bars
- *  (rows): single-series / stacked → one row per category; grouped → categories x series.
- *  Vertical charts (and non-bar types) return the fixed default. Floored at
- *  FIXED_CHART_HEIGHT so short horizontals are not smaller than a vertical chart. */
+/** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
+ *  band slots (grouped → nSeries bars per category; stacked/single → one), plus section spacer
+ *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarHeight`,
+ *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
+ *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
     return FIXED_CHART_HEIGHT;
   }
   const cols = resolveColumns(spec, rows);
-  const cats = new Set<string>();
+  const catList: string[] = [];
+  const catSeen = new Set<string>();
   const series = new Set<string>();
+  const sectionOf = new Map<string, string>();
   for (const r of rows) {
     const cat = r[cols.x];
-    if (typeof cat === "string" && cat !== "") cats.add(cat);
+    if (typeof cat === "string" && cat !== "" && !catSeen.has(cat)) {
+      catSeen.add(cat);
+      catList.push(cat);
+    }
     const s = cols.series ? r[cols.series] : null;
     if (typeof s === "string" && s !== "") series.add(s);
+    if (cols.section && typeof cat === "string" && cat !== "" && !sectionOf.has(cat)) {
+      const sec = r[cols.section];
+      if (typeof sec === "string") sectionOf.set(cat, sec);
+    }
   }
-  const nCats = Math.max(1, cats.size);
+  const nCats = Math.max(1, catList.length);
   // series_order, when present, is the authoritative series count (it filters/orders).
   const nSeries =
     spec.series_order && spec.series_order.length
       ? spec.series_order.length
       : Math.max(1, series.size);
-  // Stacked stacks all series into one row per category; grouped clusters one row per series.
   const grouped = spec.chartType === "bar" && nSeries > 1;
-  const rowCount = grouped ? nCats * nSeries : nCats;
-  return Math.max(FIXED_CHART_HEIGHT, Math.round(rowCount * HORIZONTAL_PX_PER_ROW + HORIZONTAL_CHROME_PX));
+  // Section spacer slots (distinct sections present, filtered by section_order when set).
+  let nSpacers = 0;
+  if (cols.section) {
+    const present = new Set(catList.map((c) => sectionOf.get(c) ?? ""));
+    nSpacers =
+      spec.section_order && spec.section_order.length
+        ? spec.section_order.filter((s) => present.has(s)).length
+        : present.size;
+  }
+  // Tallest wrapped category label at the gutter width.
+  const gutter = horizontalLeftGutter(catList);
+  const maxLabelLines = catList.reduce(
+    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD)),
+    1,
+  );
+  return horizontalBarHeight({ nCategories: nCats, nSeries, grouped, nSpacers, maxLabelLines });
 }
 
 // Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px
@@ -1358,6 +1376,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // line/scatter panes keep the default.
   const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
   const paneHeight = TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
+  // Horizontal bar figures grow their height with the row count — let renderFigure compute it
+  // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
+  const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+  const figHeight = isHorizontalBarFig ? undefined : paneHeight;
 
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
@@ -1377,10 +1399,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         ? renderFigure(spec, rows, {
             gridWidth: outerWidth,
             gridGap: GRID_GAP,
-            height: paneHeight,
+            height: figHeight,
             columns: cols,
           })
-        : renderFigure(spec, rows, { width: paneW, height: paneHeight, columns: cols });
+        : renderFigure(spec, rows, { width: paneW, height: figHeight, columns: cols });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
@@ -1401,6 +1423,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       const title = doc.createElement("div");
       title.className = "figure-pane-title";
       title.textContent = pane.title;
+      // Faceted horizontal bars: the leftmost pane reserves a wide category gutter on its left, so
+      // align the pane title with the DATA area (offset by that pane's left margin) instead of
+      // letting it sit over the category labels. Other panes have a negligible margin (no shift).
+      if (isHorizontalBarFig && pane.svg) {
+        const ml = Number((pane.svg as SVGSVGElement).dataset.marginLeft) || 0;
+        if (ml > 0) title.style.paddingInlineStart = `${ml}px`;
+      }
       cell.appendChild(title);
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);

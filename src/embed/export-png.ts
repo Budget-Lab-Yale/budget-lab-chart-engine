@@ -254,6 +254,9 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
     const paneChartH = TALL_PANE_TYPES.has(spec.chartType) ? TALL_PANE_CHART_H : PANE_CHART_H;
+    // Horizontal bar figures grow with their row count — let renderFigure compute the pane height
+    // (pass undefined) and read it back from the rendered SVG for the layout math below.
+    const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
@@ -269,29 +272,40 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
       acc += colWidth(c) + COL_GAP;
     }
     const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols })
-      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols })
+      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols });
+    // Effective pane height: the renderFigure-computed height for horizontal bars (read from the
+    // rendered SVG), else the fixed pane height.
+    const effPaneH =
+      isHorizontalBarFig && fig.panes[0]?.svg
+        ? Number((fig.panes[0].svg as SVGSVGElement).getAttribute("height")) || paneChartH
+        : paneChartH;
     const gridTop = chartTop;
     fig.panes.forEach((pane, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
       const x = colX[col]!;
       const w = colWidth(col);
-      const y = gridTop + row * (PANE_TITLE_H + paneChartH + ROW_GAP);
+      const y = gridTop + row * (PANE_TITLE_H + effPaneH + ROW_GAP);
+      // Horizontal bars: align the pane title with the DATA area (offset by the pane's left gutter)
+      // rather than over the category labels.
+      const titleDx = isHorizontalBarFig
+        ? Number((pane.svg as SVGSVGElement | undefined)?.dataset.marginLeft) || 0
+        : 0;
       root.appendChild(
-        textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
+        textEl(x + titleDx, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
       );
       if (pane.svg) {
         const ps = pane.svg;
         ps.setAttribute("x", String(x));
         ps.setAttribute("y", String(y + PANE_TITLE_H));
         ps.setAttribute("width", String(w));
-        ps.setAttribute("height", String(paneChartH));
+        ps.setAttribute("height", String(effPaneH));
         root.appendChild(ps);
       }
     });
     contentHeight =
-      gridRows * (PANE_TITLE_H + paneChartH) + (gridRows - 1) * ROW_GAP;
+      gridRows * (PANE_TITLE_H + effPaneH) + (gridRows - 1) * ROW_GAP;
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
