@@ -14,6 +14,7 @@ import {
   GRIDLINE_CLASS,
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
+  X_TICK_LABEL_TOP_CLASS,
   X_AXIS_LABEL_CLASS,
   ANNOTATION_LINE_CLASS,
 } from "./facet-chrome";
@@ -242,8 +243,11 @@ export function assemblePlot({
 
   if (horizontal) {
     // 2h. Vertical gridlines + x value-tick labels (skip 0 from the light grid; baseline
-    //     is painted darker below).
+    //     is painted darker below). Tick labels go at the bottom (default), top, or both.
     const xTickFmt = makeTickFormatter(yTicks, units);
+    const xTicksMode = spec.x_axis_ticks ?? "bottom";
+    const showBottomTicks = xTicksMode !== "top";
+    const showTopTicks = xTicksMode === "top" || xTicksMode === "both";
     marks.push(
       Plot.ruleX(
         yTicks.filter((t) => t !== 0),
@@ -254,18 +258,37 @@ export function assemblePlot({
           ...(fyFaceted ? { className: GRIDLINE_CLASS } : {}),
         },
       ),
-      Plot.text(yTicks, {
-        x: (d: number) => d,
-        text: xTickFmt,
-        frameAnchor: "bottom",
-        dy: 12,
-        textAnchor: "middle",
-        fill: TBL.color.axis,
-        fontSize: TBL.size.axis,
-        fontWeight: 500,
-        ...(fyFaceted ? { className: X_TICK_LABEL_CLASS } : {}),
-      }),
     );
+    if (showBottomTicks) {
+      marks.push(
+        Plot.text(yTicks, {
+          x: (d: number) => d,
+          text: xTickFmt,
+          frameAnchor: "bottom",
+          dy: 12,
+          textAnchor: "middle",
+          fill: TBL.color.axis,
+          fontSize: TBL.size.axis,
+          fontWeight: 500,
+          ...(fyFaceted ? { className: X_TICK_LABEL_CLASS } : {}),
+        }),
+      );
+    }
+    if (showTopTicks) {
+      marks.push(
+        Plot.text(yTicks, {
+          x: (d: number) => d,
+          text: xTickFmt,
+          frameAnchor: "top",
+          dy: -8,
+          textAnchor: "middle",
+          fill: TBL.color.axis,
+          fontSize: TBL.size.axis,
+          fontWeight: 500,
+          ...(fyFaceted ? { className: X_TICK_LABEL_TOP_CLASS } : {}),
+        }),
+      );
+    }
     // 3h. Category labels (single-stack: y band; grouped: fy group facets) — layer-supplied.
     marks.push(...(layers.xAxisMarks ?? []));
     // 4h. Vertical zero baseline.
@@ -464,7 +487,9 @@ export function assemblePlot({
 
   const plotOpts: Record<string, unknown> = {
     ...tblPlotDefaults({
-      marginBottom: xOpts.marginBottom,
+      // Horizontal bars override marginBottom (the value-tick row is short; the inherited
+      // categorical-label bottom margin would leave a big empty band under the axis).
+      marginBottom: layers.marginBottom ?? xOpts.marginBottom,
       ...(height != null ? { height } : {}),
       ...(marginRight != null ? { marginRight } : {}),
       // Horizontal bars supply a responsive left gutter sized to their longest category

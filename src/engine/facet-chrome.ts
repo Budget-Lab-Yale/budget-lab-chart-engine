@@ -23,6 +23,9 @@ export const Y_TICK_LABEL_CLASS = "tbl-y-tick-label";
 /** ClassName stamped on the value-axis tick-label text mark in the HORIZONTAL (fy) layout
  *  (assemble-plot) so the fy collapse can find the per-facet copies. */
 export const X_TICK_LABEL_CLASS = "tbl-x-tick-label";
+/** Horizontal value-axis tick labels drawn at the TOP (x_axis_ticks "top"/"both"). Collapsed to a
+ *  single row at the plot top by collapseFacetChromeY (the first facet's row is already at the top). */
+export const X_TICK_LABEL_TOP_CLASS = "tbl-x-tick-label-top";
 /** ClassName PREFIX stamped on each yAxisPolicy reference-line ruleY (assemble-plot appends a
  *  per-marker index). The fx-facet collapse stretches each to the full plot width so the line
  *  runs edge-to-edge like a line chart instead of stopping at each facet's frame. */
@@ -279,6 +282,27 @@ export function collapseFacetChromeY(
     }
     const facetBottomAbs = ty + facetBottomLocal;
     const dy = bottomAbs - facetBottomAbs;
+    if (dy !== 0) {
+      const tx = readTranslateX(kept);
+      kept.setAttribute("transform", `translate(${tx},${ty + dy})`);
+    }
+  }
+
+  // 1b. Top value-axis tick labels (x_axis_ticks "top"/"both"): keep the first facet's row and move
+  //     it up to the whole-plot TOP (it currently sits at the first facet's top, below the outer
+  //     padding). Mirror of the bottom-tick re-translation, using the gridline's local top (y1).
+  const topLabelGroups = Array.from(svg.querySelectorAll<SVGGElement>(`g.${X_TICK_LABEL_TOP_CLASS}`));
+  if (topLabelGroups.length) {
+    const kept = topLabelGroups[0] as SVGGElement;
+    for (let i = 1; i < topLabelGroups.length; i++) topLabelGroups[i]?.remove();
+    const ty = readTranslateY(kept);
+    const firstGrid = svg.querySelector<SVGGElement>(`g.${GRIDLINE_CLASS}`);
+    let facetTopLocal = topAbs - ty; // fallback
+    if (firstGrid) {
+      const gl = firstGrid.querySelector<SVGLineElement>("line");
+      if (gl) facetTopLocal = Number(gl.getAttribute("y1") ?? facetTopLocal);
+    }
+    const dy = topAbs - (ty + facetTopLocal);
     if (dy !== 0) {
       const tx = readTranslateX(kept);
       kept.setAttribute("transform", `translate(${tx},${ty + dy})`);

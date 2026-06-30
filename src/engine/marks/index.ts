@@ -139,6 +139,10 @@ export interface MarkLayers {
    *  make room for the first section's header (which sits in the top margin, above the first bar).
    *  Left undefined otherwise → assemblePlot keeps the default marginTop. */
   marginTop?: number;
+  /** Optional: a BOTTOM margin (px) the layer wants applied. Horizontal bars set this small (the
+   *  category axis is on the LEFT, so the inherited categorical-label bottom margin is wasted —
+   *  only the value-tick row needs room). Left undefined otherwise → default marginBottom. */
+  marginBottom?: number;
   /** Optional: x-axis label marks supplied by the layer (grouped bars label the `fx`
    *  group scale, not the adapter's `x` scale). When present, used INSTEAD of the
    *  adapter's `xOpts.axisMarks` in assemblePlot. */

@@ -30,10 +30,13 @@ import { inferUnitsFromSubtitle } from "../util";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
-// Top margin (px) for a sectioned horizontal chart, leaving room for the first section's header
-// above the first bar (kept tight so the pane title sits close to the data). Applied to EVERY
-// pane (incl. label-hidden ones) so the band rows align.
-const SECTION_TOP_MARGIN = 22;
+// Horizontal value-axis margins. The category axis is on the LEFT, so the bottom margin only needs
+// to fit the value-tick row (not the inherited categorical-label margin). The top margin fits the
+// optional top tick row + the first section header band.
+const HVALUE_TICK_PX = 24; // one value-tick row
+const HSECTION_HEADER_BAND = 18; // room for the first section header (sits above the first bar)
+const HMARGIN_BOTTOM_TICKS = 26;
+const HMARGIN_BOTTOM_BARE = 8;
 
 // Px width below which value labels can't fit cleanly on a bar - drop them entirely
 // (Style-Guide bar-grouped sec 6 suppression rule, slide half-scale 25px threshold).
@@ -169,6 +172,16 @@ export function buildBarMarks(
     bandDomain = domain;
   }
 
+  // Horizontal value-axis margins, driven by where the value-tick labels go (bottom/top/both) and
+  // whether the chart is sectioned (the first section header sits in the top margin).
+  const xTicksMode = spec.x_axis_ticks ?? "bottom";
+  const hTopTicks = xTicksMode === "top" || xTicksMode === "both";
+  const hBottomTicks = xTicksMode !== "top";
+  const hMarginTop = (hTopTicks ? HVALUE_TICK_PX : 0) + (sectioned ? HSECTION_HEADER_BAND : 8);
+  const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
+  // First section header sits in the top margin, below the top ticks (if any) and above the bars.
+  const topHeaderLift = HSECTION_HEADER_BAND - 4;
+
   // Units suffix for value labels (matches the y-tick units inference upstream).
   const units = inferUnitsFromSubtitle(spec.subtitle);
   const showValueLabels = spec.valueLabels?.show !== false;
@@ -262,11 +275,11 @@ export function buildBarMarks(
           : [
               ...tblBandYAxis(categories, gutter, catFont),
               ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont),
-              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, 10, catFont) : []),
+              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
             ],
         marginLeft: gutter,
-        // Sectioned: reserve top-margin room for the first header on EVERY pane so rows align.
-        ...(sectioned ? { marginTop: SECTION_TOP_MARGIN } : {}),
+        marginTop: hMarginTop,
+        marginBottom: hMarginBottom,
       };
     }
 
@@ -331,10 +344,11 @@ export function buildBarMarks(
         : [
             ...tblFacetGroupYAxis(categories, gutter, catFont),
             ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont),
-            ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, 10, catFont) : []),
+            ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
           ],
       marginLeft: gutter,
-      ...(sectioned ? { marginTop: SECTION_TOP_MARGIN } : {}),
+      marginTop: hMarginTop,
+      marginBottom: hMarginBottom,
     };
   }
 

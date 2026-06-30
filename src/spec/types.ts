@@ -174,6 +174,10 @@ export interface ChartSpec {
   source?: string;
   note?: string;
   x_axis_title?: string;
+  /** Where to place the x-axis (value-axis, for horizontal bars) TICK LABELS: "bottom" (default),
+   *  "top", or "both". "both" repeats the scale at top and bottom — useful for very tall horizontal
+   *  charts so the scale is readable without scrolling. */
+  x_axis_ticks?: "bottom" | "top" | "both";
   /** Y-axis title — a short caption above the axis (left-aligned, horizontal). Coexists with the
    *  units subtitle; the author manages any redundancy. */
   y_axis_title?: string;

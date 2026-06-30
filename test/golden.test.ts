@@ -488,6 +488,20 @@ describe("figure — faceted horizontal bars (shared mode)", () => {
     expect(wrapped!.querySelectorAll("tspan").length).toBeGreaterThan(1);
   });
 
+  it("x_axis_ticks 'both' draws value-tick labels at the top AND bottom of each pane", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const bottomOnly = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const both = renderFigure({ ...FIG7_FACETED_SPEC, x_axis_ticks: "both" }, rows, { width: 900, document });
+    const bp = bottomOnly.panes[0]!.svg as SVGSVGElement;
+    const tp = both.panes[0]!.svg as SVGSVGElement;
+    // Default: one bottom tick-label group, no top group.
+    expect(bp.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
+    expect(bp.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(0);
+    // "both": one bottom group AND one top group (per pane, after the facet-chrome collapse).
+    expect(tp.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
+    expect(tp.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(1);
+  });
+
   it("faceted horizontal figure is deterministic and matches the golden", async () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
     const a = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document }));

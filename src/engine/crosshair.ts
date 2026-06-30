@@ -1859,11 +1859,16 @@ export function attachSecondaryBandCursor(
     }
   }
   let accented: SVGTextElement | null = null;
+  let accentPill: SVGRectElement | null = null;
   const restoreAccent = (): void => {
     if (accented) {
       accented.setAttribute("font-weight", "500");
       accented.setAttribute("fill", TBL.color.axis);
       accented = null;
+    }
+    if (accentPill) {
+      accentPill.remove();
+      accentPill = null;
     }
   };
 
@@ -1893,7 +1898,9 @@ export function attachSecondaryBandCursor(
       // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
       // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
       const regX0 = opts.regionFromLeftEdge ? 0 : ml;
-      const regX1 = W - mr + (opts.regionExtendRight ?? 0);
+      // Cover the pane's full width (incl. the right margin) and, for non-last panes, bridge the
+      // inter-pane grid gap (SVG overflow is visible) so the row reads as one continuous strip.
+      const regX1 = W + (opts.regionExtendRight ?? 0);
       addCoordRegion(g, doc, regX0, regX1 - regX0, wide.min, wide.max - wide.min);
       const weight = active ? 700 : 600;
       const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
@@ -1901,6 +1908,31 @@ export function attachSecondaryBandCursor(
       if (opts.accentLabel) {
         const el = labelEls.get(labelKey(category));
         if (el) {
+          // Pill behind the label (matches the vertical cursor's axis-label pill), inserted as the
+          // label's previous sibling so it paints behind the text; then bold+darken the label itself.
+          let bb: { x: number; y: number; width: number; height: number } | null = null;
+          try {
+            const r = el.getBBox();
+            if (r.width && r.height) bb = r;
+          } catch {
+            /* no layout (jsdom) → skip the pill */
+          }
+          if (bb) {
+            const padX = 5;
+            const padY = 2;
+            const pill = doc.createElementNS(COORD_NS, "rect");
+            pill.setAttribute("x", String(bb.x - padX));
+            pill.setAttribute("y", String(bb.y - padY));
+            pill.setAttribute("width", String(bb.width + padX * 2));
+            pill.setAttribute("height", String(bb.height + padY * 2));
+            pill.setAttribute("rx", "3");
+            pill.setAttribute("fill", "#ffffff");
+            pill.setAttribute("fill-opacity", "0.82");
+            pill.setAttribute("stroke", "#c8cdd7");
+            pill.setAttribute("stroke-opacity", "0.7");
+            el.parentNode?.insertBefore(pill, el);
+            accentPill = pill;
+          }
           el.setAttribute("font-weight", "700");
           el.setAttribute("fill", COORD_LABEL_DARK);
           accented = el;

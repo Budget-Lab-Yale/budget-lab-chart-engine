@@ -207,6 +207,7 @@ export const CHART_SPEC_SCHEMA = {
     source: { type: "string" },
     note: { type: "string" },
     x_axis_title: { type: "string" },
+    x_axis_ticks: { type: "string", enum: ["bottom", "top", "both"] },
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
 

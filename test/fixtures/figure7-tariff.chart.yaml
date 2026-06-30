@@ -7,6 +7,7 @@ note: >-
   effect. Post-substitution = after partial-equilibrium trade substitution.
 xAxisType: categorical
 orientation: horizontal
+x_axis_ticks: both
 columns:
   x: category
   value: value
