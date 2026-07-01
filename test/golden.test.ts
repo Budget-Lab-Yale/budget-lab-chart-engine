@@ -173,7 +173,7 @@ const BAR_GROUPED_HORIZONTAL_SPEC: ChartSpec = {
 };
 
 describe("golden SVG — bars", () => {
-  it("renders a single-series bar chart (brand.blue, value labels)", async () => {
+  it("renders a single-series bar chart (brand.blue)", async () => {
     const rows = parseCsv("./fixtures/bar-single.csv");
     const { svg } = renderChart(BAR_SINGLE_SPEC, rows, { width: 720, height: 400, document });
     // 4 bars rendered.
@@ -296,15 +296,14 @@ describe("golden SVG — bars", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-negative.golden.svg");
   });
 
-  it("suppresses value labels when bars are too thin", async () => {
+  it("emits no in-bar value labels (the feature was removed)", async () => {
     const rows = parseCsv("./fixtures/bar-thin.csv");
     const { svg } = renderChart(BAR_THIN_SPEC, rows, { width: 720, height: 400, document });
     // Bars still render...
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(24);
-    // ...but the value-label text mark is omitted entirely. When suppressed, only the chrome
-    // text groups are present: the y-tick-label group and the band x-axis group (2 total).
-    // A value-label Plot.text call would add a third g[aria-label="text"]. This assertion is
-    // robust to label content — it counts groups, not specific text strings.
+    // ...with NO value-label text mark: only the chrome text groups are present — the y-tick-label
+    // group and the band x-axis group (2 total). A value-label Plot.text call would add a third
+    // g[aria-label="text"]. (Counts groups, not specific text strings, so it's content-robust.)
     const textGroups = svg.querySelectorAll('g[aria-label="text"]');
     expect(textGroups.length).toBe(2);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-thin.golden.svg");
