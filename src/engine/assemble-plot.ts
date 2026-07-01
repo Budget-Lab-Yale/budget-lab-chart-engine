@@ -140,6 +140,11 @@ export function assemblePlot({
   }
 
   const marks: unknown[] = [];
+  // Annotation LABEL text marks are collected here and pushed LAST (after every band rect, gridline,
+  // axis rule, data overlay and reference line), because Plot paints in array order — a line pushed
+  // after a label would paint over it, and the white halo can't rescue text drawn under a later
+  // stroke. "All lines/rects, then all annotation text" keeps every label legible.
+  const labelMarks: unknown[] = [];
   // Horizontal bars (layer owns the y band scale): the value axis runs along x, so the
   // chrome flips — vertical gridlines + x value-tick labels + a vertical zero baseline,
   // and the layer supplies its own category labels on the y band via xAxisMarks.
@@ -219,8 +224,9 @@ export function assemblePlot({
       }),
     );
     if (band.label) {
-      // Band label at the top of the region, just inside its left edge (auto-staggered).
-      marks.push(
+      // Band label at the top of the region, just inside its left edge (auto-staggered). Deferred
+      // to labelMarks so it paints over the axis rules that cross it.
+      labelMarks.push(
         Plot.text([{ x: x1, y: yDomain[1], t: band.label }], {
           x: "x",
           y: "y",
@@ -353,7 +359,7 @@ export function assemblePlot({
     if (m.label) {
       const anchor = m.labelAnchor ?? "start";
       const autoDy = staggerDy.get(`m${markerIdx}`) ?? 4;
-      marks.push(
+      labelMarks.push(
         Plot.text([{ x: mx, t: m.label }], {
           x: "x",
           text: "t",
@@ -404,7 +410,7 @@ export function assemblePlot({
       const left = m.labelSide === "left";
       const labelFx =
         fxDomain && fxDomain.length ? (left ? fxDomain[0] : fxDomain[fxDomain.length - 1]) : undefined;
-      marks.push(
+      labelMarks.push(
         Plot.text([{ y: m.y, t: m.label, ...(labelFx != null ? { fx: labelFx } : {}) }], {
           y: "y",
           text: "t",
@@ -484,6 +490,10 @@ export function assemblePlot({
   if (gridFaceted && facet) {
     marks.push(...paneTitleMark(facet.cells));
   }
+
+  // 8. Annotation labels LAST — on top of every band rect, gridline, axis rule, data line and
+  //    reference line, so no later stroke paints over them.
+  marks.push(...labelMarks);
 
   const plotOpts: Record<string, unknown> = {
     ...tblPlotDefaults({
