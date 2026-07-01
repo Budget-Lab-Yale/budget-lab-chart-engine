@@ -399,7 +399,10 @@ function rotatedLabelDy(categories: string[]): number {
 
 /** Bottom margin to fit each band-label layout (vs the ~22px single-line default). */
 export function bandLabelMarginBottom(categories: string[], mode: BandLabelMode): number {
-  if (mode === "rotate") return Math.round(Math.min(74, 18 + maxBandLabelWidth(categories) * 0.71));
+  // A 45° label drops by ~sin(45)·width below the axis; reserve that (plus a little padding) so it
+  // isn't clipped by the frame. Cap high enough for realistic long labels (~24 chars) — beyond that
+  // the author should shorten the category or rely on pane titles rather than have a giant margin.
+  if (mode === "rotate") return Math.round(Math.min(120, 18 + maxBandLabelWidth(categories) * 0.71));
   if (mode === "wrap") return 36; // room for a second line
   return 22;
 }

@@ -163,6 +163,33 @@ export function sharedColumnWidths(
   return { dataW: firstDataW, colWidths, marginLeft };
 }
 
+/** PER-PANE-mode column widths. Unlike shared mode, EVERY pane draws its own y-axis, so every
+ *  column reserves the full label gutter (TBL_MARGIN_LEFT) — not just col 0. The inner DATA width
+ *  is split among the columns by `weights` (default all-ones ⇒ equal). Columns tile `availW`
+ *  exactly, leaving the inter-column gaps:
+ *    totalDataW = availW − C·LM − C·R − (C−1)·G
+ *    colW[c]    = totalDataW·(w[c]/Σw) + LM + R
+ *  For C=1 there is a single column: colW[0] = availW. */
+export function perPaneColumnWidths(
+  availW: number,
+  columns: number,
+  gap: number,
+  weights?: number[],
+): { colWidths: number[] } {
+  const LM = TBL_MARGIN_LEFT;
+  const R = TBL_MARGIN_RIGHT;
+  const C = Math.max(1, columns);
+  const totalDataW = availW - C * LM - C * R - (C - 1) * gap;
+  const w = weights && weights.length === C ? weights : Array.from({ length: C }, () => 1);
+  const sumW = w.reduce((a, b) => a + (b > 0 ? b : 0), 0) || C;
+  const colWidths: number[] = [];
+  for (let c = 0; c < C; c++) {
+    const dataW = (totalDataW * Math.max(0, w[c] as number)) / sumW;
+    colWidths.push(dataW + LM + R);
+  }
+  return { colWidths };
+}
+
 /** A pane's identity + its standalone SVG and per-pane interaction metadata. BOTH modes
  *  populate every field the same way (each pane is its OWN single-frame SVG with its own
  *  crosshair / dimming / selection); shared mode only forces a common y-domain and hides the
@@ -325,6 +352,62 @@ export function renderFigure(
   const titleFor = (value: string): string => titles[value] ?? value;
   const seriesLabels = spec.series_labels ?? {};
 
+  // Variable pane widths (`pane_widths`) — used by BOTH modes. Resolve the per-column weight
+  // vector once here: a proportion array is used directly; "equal-bar" weights each column by its
+  // busiest pane's bar count; "equal"/unset ⇒ undefined (uniform). The TOTAL inner grid width is
+  // `opts.gridWidth` (live grid) else `opts.width` (golden tests pass one width as the row total).
+  const gridGap = opts.gridGap ?? 0;
+  const availW = opts.gridWidth ?? opts.width ?? 720;
+  let colWeights: number[] | undefined;
+  {
+    const pw = sm.pane_widths;
+    if (Array.isArray(pw) && pw.length === columns) {
+      colWeights = pw;
+    } else if (pw === "equal-bar") {
+      const barCount = (value: string): number => {
+        const pr = rows.filter((r) => (r[facetField] as string) === value);
+        const catSet = new Set<string>();
+        const serSet = new Set<string>();
+        for (const r of pr) {
+          const c = r[cols.x] as string;
+          if (c) catSet.add(c);
+          const s = cols.series ? (r[cols.series] as string) : "";
+          if (s) serSet.add(s);
+        }
+        return Math.max(1, catSet.size) * Math.max(1, serSet.size);
+      };
+      const weights = Array.from({ length: columns }, () => 0);
+      paneValues.forEach((v, i) => {
+        const col = i % columns;
+        weights[col] = Math.max(weights[col] as number, barCount(v));
+      });
+      colWeights = weights;
+    }
+  }
+
+  // Vertical categorical facets: coordinate the x-axis label layout so panes' baselines align — used
+  // by BOTH modes. Each pane would otherwise pick single/wrap/rotate from ITS own width + category
+  // count, so a pane that rotates (or has longer labels) reserves a taller bottom margin and drops
+  // its baseline below the others'. Given each column's inner DATA width, force (a) the WORST-CASE
+  // mode across panes for a consistent look, and (b) the MAX bottom margin so every pane reserves
+  // the same space. Returns {} for horizontal bars / non-categorical x (no coordination needed).
+  const coordinateXLabels = (
+    dataWByCol: number[],
+  ): { mode?: BandLabelMode; marginBottom?: number } => {
+    if (isHorizontalBar || spec.xAxisType !== "categorical") return {};
+    const rank: Record<BandLabelMode, number> = { single: 0, wrap: 1, rotate: 2 };
+    const paneCats = paneValues.map((value, i) => {
+      const col = i % columns;
+      const catList = Array.from(
+        new Set(rows.filter((r) => (r[facetField] as string) === value).map((r) => r[cols.x] as string).filter(Boolean)),
+      );
+      return { cats: catList, mode: bandLabelMode(catList, dataWByCol[col] ?? 0) };
+    });
+    let worst: BandLabelMode = "single";
+    for (const p of paneCats) if (rank[p.mode] > rank[worst]) worst = p.mode;
+    return { mode: worst, marginBottom: Math.max(...paneCats.map((p) => bandLabelMarginBottom(p.cats, worst))) };
+  };
+
   // PER-PANE mode: each pane is its OWN single-frame SVG with an independent y-scale, units,
   // and x-domain (Plot faceting can't give independent y-scales, so we render + compose N
   // mini-SVGs instead of one faceted SVG). Each pane gets a distinct deterministic
@@ -334,12 +417,38 @@ export function renderFigure(
     // Keep the first pane's full PaneResult so the figure-level legend reads its real mark
     // layers (rect swatches for bar/stacked, the diverging-stack "Total" extra, mono/categorical
     // seriesColors). Line panes carry a dashedNames-only layer, so this is a no-op for them.
+    // Variable pane widths in per-pane mode: distribute the inner data width by the resolved
+    // weights, but EVERY column keeps its own full y-label gutter (independent axes). Absent
+    // (equal) ⇒ leave widths undefined so the live grid uses equal `1fr` columns as before.
+    const perPaneWidths = variableWidths
+      ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
+      : undefined;
+    // Coordinate x-label rotation/wrap + bottom margin across panes so their baselines align — each
+    // pane draws its own x-axis, so a pane with longer/rotated labels would otherwise sit lower.
+    // Data width per column: the variable per-pane widths, else the single equal pane width.
+    const perPaneDataW = perPaneWidths
+      ? perPaneWidths.map((w) => w - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT)
+      : Array.from({ length: columns }, () => (opts.width ?? availW) - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT);
+    const { mode: ppXLabelMode, marginBottom: ppMarginBottom } = coordinateXLabels(perPaneDataW);
     let firstLayers: MarkLayers | undefined;
     const panes: FigurePane[] = paneValues.map((value, i) => {
       // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
       // renders a standalone single frame for these rows only.
       const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-      const p = renderPane(spec, paneRows, { ...opts, height: effHeight, pane: true }, `p${i}`);
+      const col = i % columns;
+      const p = renderPane(
+        spec,
+        paneRows,
+        {
+          ...opts,
+          height: effHeight,
+          pane: true,
+          ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
+          ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
+          ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
+        },
+        `p${i}`,
+      );
       if (i === 0) firstLayers = p.layers;
       return {
         value,
@@ -373,6 +482,7 @@ export function renderFigure(
       panes,
       columns,
       rows: gridRows,
+      ...(perPaneWidths ? { columnWidths: perPaneWidths } : {}),
       legendItems,
       shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
       colorLegendTitle: spec.color_legend_title,
@@ -423,37 +533,7 @@ export function renderFigure(
   // 3. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
   //    columns drop the label gutter for a small left margin; column OUTER widths are made unequal
   //    so the inner DATA width is IDENTICAL across a row (labeled col 0 wider, label-less cols
-  //    narrower). The TOTAL inner grid width is `opts.gridWidth` (live grid) else `opts.width`
-  //    (e.g. golden tests pass a single width as the row total); the gap matches the live grid.
-  const gridGap = opts.gridGap ?? 0;
-  const availW = opts.gridWidth ?? opts.width ?? 720;
-  // Per-column width weights (pane_widths). "equal"/unset → undefined (uniform). A proportion array
-  // (length === columns) is used directly. "equal-bar" → each column's bar count; for a column with
-  // several panes (multi-row) take the MAX so the busiest pane's bars stay legible.
-  let colWeights: number[] | undefined;
-  const pw = sm.pane_widths;
-  if (Array.isArray(pw) && pw.length === columns) {
-    colWeights = pw;
-  } else if (pw === "equal-bar") {
-    const barCount = (value: string): number => {
-      const pr = rows.filter((r) => (r[facetField] as string) === value);
-      const catSet = new Set<string>();
-      const serSet = new Set<string>();
-      for (const r of pr) {
-        const c = r[cols.x] as string;
-        if (c) catSet.add(c);
-        const s = cols.series ? (r[cols.series] as string) : "";
-        if (s) serSet.add(s);
-      }
-      return Math.max(1, catSet.size) * Math.max(1, serSet.size);
-    };
-    const weights = Array.from({ length: columns }, () => 0);
-    paneValues.forEach((v, i) => {
-      const col = i % columns;
-      weights[col] = Math.max(weights[col] as number, barCount(v));
-    });
-    colWeights = weights;
-  }
+  //    narrower). `availW`/`gridGap`/`colWeights` were resolved once above (shared by both modes).
   const { colWidths, marginLeft: colMarginLeft } = sharedColumnWidths(
     availW,
     columns,
@@ -462,28 +542,12 @@ export function renderFigure(
     colWeights,
   );
 
-  // 3b. Vertical categorical facets: coordinate the x-axis label layout so panes' baselines align.
-  //     Each pane would otherwise pick single/wrap/rotate from ITS width + category count — a pane
-  //     that rotates (or has longer labels) reserves a taller bottom margin, dropping its baseline
-  //     below the others'. Force (a) the WORST-CASE mode across panes for a consistent look, and
-  //     (b) the MAX bottom margin so every pane reserves the same space and the baselines line up.
-  let forcedXLabelMode: BandLabelMode | undefined;
-  let forcedMarginBottom: number | undefined;
-  if (!isHorizontalBar && spec.xAxisType === "categorical") {
-    const rank: Record<BandLabelMode, number> = { single: 0, wrap: 1, rotate: 2 };
-    const paneCats = paneValues.map((value, i) => {
-      const col = i % columns;
-      const catList = Array.from(
-        new Set(rows.filter((r) => (r[facetField] as string) === value).map((r) => r[cols.x] as string).filter(Boolean)),
-      );
-      const dataW = (colWidths[col] as number) - (colMarginLeft[col] as number) - TBL_MARGIN_RIGHT;
-      return { cats: catList, mode: bandLabelMode(catList, dataW) };
-    });
-    let worst: BandLabelMode = "single";
-    for (const p of paneCats) if (rank[p.mode] > rank[worst]) worst = p.mode;
-    forcedXLabelMode = worst;
-    forcedMarginBottom = Math.max(...paneCats.map((p) => bandLabelMarginBottom(p.cats, worst)));
-  }
+  // 3b. Vertical categorical facets: coordinate the x-axis label layout so panes' baselines align
+  //     (shared by both modes — see coordinateXLabels). Data width per column: the shared-mode
+  //     column outer width minus its own left margin + the right margin.
+  const { mode: forcedXLabelMode, marginBottom: forcedMarginBottom } = coordinateXLabels(
+    colWidths.map((w, c) => w - (colMarginLeft[c] as number) - TBL_MARGIN_RIGHT),
+  );
 
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
   //    the shared y-domain. Vertical panes hide the y-tick LABELS on non-leftmost columns; horizontal

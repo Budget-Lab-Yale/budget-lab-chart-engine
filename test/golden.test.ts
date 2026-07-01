@@ -1517,3 +1517,79 @@ describe("axes primitives — pane titles + tick density (task B3)", () => {
     expect(typeof d3.timeFormat).toBe("function");
   });
 });
+
+describe("figure — per-pane mode with variable pane widths (independent y-axes)", () => {
+  // Two facets with deliberately different value ranges → different y-domains and different zero
+  // points (one all-positive, one spanning negatives). Per-pane mode gives each its own y-axis.
+  const ROWS: TidyRow[] = [
+    { facet: "All positive", category: "A", value: "20" },
+    { facet: "All positive", category: "B", value: "80" },
+    { facet: "Signed", category: "A", value: "-40" },
+    { facet: "Signed", category: "B", value: "35" },
+  ];
+  const SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "Per-pane widths",
+    xAxisType: "categorical",
+    columns: { x: "category", value: "value", facet: "facet" },
+    small_multiples: { mode: "per-pane", pane_order: ["All positive", "Signed"], pane_widths: [3, 1] },
+    data: "x",
+  };
+
+  // Category labels ("A"/"B") and the title are non-numeric → filtered out, leaving the y ticks.
+  const numericYTicks = (svg: SVGSVGElement): number[] =>
+    Array.from(svg.querySelectorAll("text"))
+      .map((t) => parseFloat(t.textContent ?? ""))
+      .filter((v) => Number.isFinite(v));
+
+  it("distributes column widths 3:1 while every pane keeps its own y-axis gutter", () => {
+    const fig = renderFigure(SPEC, ROWS, { gridWidth: 900, gridGap: 16, document });
+    expect(fig.mode).toBe("per-pane");
+    expect(fig.columnWidths?.length).toBe(2);
+    const R = TBL_MARGIN_RIGHT;
+    const LM = TBL_MARGIN_LEFT;
+    const d0 = fig.columnWidths![0]! - LM - R;
+    const d1 = fig.columnWidths![1]! - LM - R;
+    expect(d0).toBeCloseTo(3 * d1, 3);
+    // Both panes carry the full label gutter (independent axes → col 1 is NOT the shared-mode
+    // narrow label-less margin).
+    expect(Number((fig.panes[0]!.svg as SVGSVGElement).dataset.marginLeft)).toBe(LM);
+    expect(Number((fig.panes[1]!.svg as SVGSVGElement).dataset.marginLeft)).toBe(LM);
+  });
+
+  it("gives each pane an independent y-domain (different zero points)", () => {
+    const fig = renderFigure(SPEC, ROWS, { gridWidth: 900, gridGap: 16, document });
+    const pos = numericYTicks(fig.panes[0]!.svg as SVGSVGElement);
+    const signed = numericYTicks(fig.panes[1]!.svg as SVGSVGElement);
+    // All-positive pane: no negative ticks. Signed pane: has a negative tick (zero sits mid-axis).
+    expect(Math.min(...pos)).toBeGreaterThanOrEqual(0);
+    expect(Math.min(...signed)).toBeLessThan(0);
+    // The domains genuinely differ (per-pane, not one shared scale).
+    expect(Math.max(...pos)).toBeGreaterThan(Math.max(...signed));
+  });
+
+  it("coordinates x-label rotation across panes so their baselines align", () => {
+    // One pane has short labels, the other has long labels that would rotate on their own. Both
+    // panes must reserve the SAME bottom margin (worst-case mode) so the baselines line up.
+    const rows: TidyRow[] = [
+      { facet: "Short", category: "A", value: "10" },
+      { facet: "Short", category: "B", value: "20" },
+      { facet: "Long", category: "Administrative and support services", value: "12" },
+      { facet: "Long", category: "Professional and technical services", value: "18" },
+    ];
+    const spec: ChartSpec = {
+      chartType: "bar",
+      title: "Coordinated rotation",
+      xAxisType: "categorical",
+      columns: { x: "category", value: "value", facet: "facet" },
+      small_multiples: { mode: "per-pane", pane_order: ["Short", "Long"], pane_widths: [1, 1] },
+      data: "x",
+    };
+    const fig = renderFigure(spec, rows, { gridWidth: 700, gridGap: 16, document });
+    const mb0 = Number((fig.panes[0]!.svg as SVGSVGElement).dataset.marginBottom);
+    const mb1 = Number((fig.panes[1]!.svg as SVGSVGElement).dataset.marginBottom);
+    expect(mb0).toBe(mb1);
+    // The long-label pane forces a taller margin than a short-only single-line axis would need.
+    expect(mb0).toBeGreaterThan(28);
+  });
+});

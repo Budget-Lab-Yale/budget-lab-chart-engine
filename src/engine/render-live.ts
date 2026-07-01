@@ -1453,15 +1453,16 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const minPerPane = isHorizontalBarFig ? 300 : paneMinWidth;
     const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? 200 : 0);
     const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
-    // SHARED mode: pass the TOTAL inner grid width + gap so renderFigure's width helper sizes the
-    // unequal columns (labeled col 0 wider, label-less cols narrower) sharing one inner data width.
-    // PER-PANE mode: equal panes, one shared pane width (1fr columns).
+    // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
+    // — SHARED mode (unequal labeled/label-less columns) OR variable pane_widths in either mode.
+    // Otherwise (equal per-pane) pass one shared pane width for 1fr columns.
+    const useGridWidth = isShared || variableWidths;
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
-    const sig = isShared ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
+    const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
     let fig: FigureRenderResult;
     try {
-      fig = isShared
+      fig = useGridWidth
         ? renderFigure(spec, rows, {
             gridWidth: gridW,
             gridGap: GRID_GAP,
@@ -1474,9 +1475,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
     }
     lastSig = sig; // commit only after a successful render
-    // SHARED mode: explicit unequal column px widths (the panes are rendered at those widths, so
-    // the grid template must match). PER-PANE mode: equal 1fr columns via --figure-cols.
-    if (isShared && fig.columnWidths && fig.columnWidths.length) {
+    // Explicit per-column px widths (shared mode, or variable pane_widths in either mode): the
+    // panes were rendered at those widths, so the grid template must match. Else equal 1fr columns.
+    if (fig.columnWidths && fig.columnWidths.length) {
       grid.style.gridTemplateColumns = fig.columnWidths.map((w) => `${w}px`).join(" ");
     } else {
       grid.style.gridTemplateColumns = "";

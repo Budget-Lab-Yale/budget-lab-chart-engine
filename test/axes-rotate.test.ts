@@ -77,6 +77,9 @@ describe("bandLabelMarginBottom", () => {
     const cats = ["Total", "Physical care", "Reading"];
     expect(bandLabelMarginBottom(cats, "single")).toBe(22);
     expect(bandLabelMarginBottom(cats, "wrap")).toBeGreaterThan(22);
-    expect(bandLabelMarginBottom(["A very very long single category label"], "rotate")).toBeLessThanOrEqual(74);
+    // A realistic ~20-char label reserves enough drop to clear the 45° footprint (was clipped at
+    // the old 74px cap); very long labels are still capped so the margin can't dominate the chart.
+    expect(bandLabelMarginBottom(["Manufacturing output"], "rotate")).toBeGreaterThan(74);
+    expect(bandLabelMarginBottom(["A very very long single category label"], "rotate")).toBeLessThanOrEqual(120);
   });
 });

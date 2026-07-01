@@ -180,14 +180,42 @@ export function assemblePlot({
       const n = typeof v === "number" ? v : v.getTime();
       return effMarginLeft + ((n - xExtent[0]) / (xExtent[1] - xExtent[0])) * innerW;
     };
-    type L = { id: string; left: number; right: number };
+    type Iv = [number, number];
+    // Two labels in the same stagger row collide when their px spans come within LABEL_GAP.
+    const hit = (a: Iv, b: Iv): boolean => a[0] < b[1] + LABEL_GAP && b[0] < a[1] + LABEL_GAP;
+    // Per-row occupied x-spans. Seeded FIRST with the y-axis reference-line labels: those sit at a
+    // fixed data-y (they can't move), so the top-anchored x-marker / band labels flow AROUND them,
+    // dropping to a lower row when they would otherwise overlap — e.g. a right-edge "Section 122
+    // expiry" x-marker vs. a near-top right-anchored "Assumed ceiling" y-marker at the same corner.
+    const rowsOcc: Iv[][] = [];
+    const reserve = (row: number, iv: Iv): void => {
+      while (rowsOcc.length <= row) rowsOcc.push([]);
+      rowsOcc[row]!.push(iv);
+    };
+    // Vertical scale (needs height) → the stagger row each fixed y-marker label lands in.
+    const innerHForRows = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
+    if (innerHForRows != null && innerHForRows > 0 && yDomain[1] > yDomain[0]) {
+      for (const m of ann.yAxis) {
+        if (!m.label) continue;
+        const py = TBL_MARGIN_TOP + ((yDomain[1] - m.y) / (yDomain[1] - yDomain[0])) * innerHForRows;
+        const ly = py + (m.labelDy != null ? m.labelDy : -7);
+        const row = Math.max(0, Math.round((ly - TBL_MARGIN_TOP - LABEL_BASE_DY) / LABEL_ROW_H));
+        const w = m.label.length * LABEL_CHAR_PX;
+        const left = m.labelSide === "left";
+        const dx = m.labelDx != null ? m.labelDx : left ? 6 : -6;
+        const edge = left ? effMarginLeft : width - effMarginRight;
+        const l = left ? edge + dx : edge + dx - w;
+        reserve(row, [l, l + w]);
+      }
+    }
+    type L = { id: string; iv: Iv };
     const labels: L[] = [];
     ann.bands.forEach((b, i) => {
       if (!b.label) return;
       const px = toPx(xOpts.markerToX({ x: b.start }));
       if (px == null) return;
       const w = b.label.length * LABEL_CHAR_PX;
-      labels.push({ id: `b${i}`, left: px + 6, right: px + 6 + w });
+      labels.push({ id: `b${i}`, iv: [px + 6, px + 6 + w] });
     });
     ann.xAxis.forEach((m, i) => {
       if (!m.label || m.labelDy != null) return;
@@ -197,14 +225,13 @@ export function assemblePlot({
       const dx = m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4;
       const w = m.label.length * LABEL_CHAR_PX;
       const left = anchor === "end" ? px + dx - w : anchor === "middle" ? px + dx - w / 2 : px + dx;
-      labels.push({ id: `m${i}`, left, right: left + w });
+      labels.push({ id: `m${i}`, iv: [left, left + w] });
     });
-    labels.sort((a, b) => a.left - b.left);
-    const rowRight: number[] = [];
+    labels.sort((a, b) => a.iv[0] - b.iv[0]);
     for (const l of labels) {
       let r = 0;
-      while (r < rowRight.length && rowRight[r]! > l.left - LABEL_GAP) r++;
-      rowRight[r] = l.right;
+      while (rowsOcc[r]?.some((o) => hit(o, l.iv))) r++;
+      reserve(r, l.iv);
       staggerDy.set(l.id, LABEL_BASE_DY + r * LABEL_ROW_H);
     }
   }
