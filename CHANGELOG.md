@@ -4,6 +4,18 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-07-01
+
+### Fixed
+
+- **Faceted horizontal bars no longer force horizontal scrolling at normal widths.** The live
+  layer's per-pane minimum for horizontal bar facets was 300px, so a two-pane figure demanded a
+  natural width of ~816px (2×300 + gap + gutter reserve) — wider than a typical embedded content
+  column, making it scroll sideways even on wide screens. The per-pane minimum is now 240px (the
+  same as vertical facets; horizontal panes read fine at that width), lowering the natural width
+  to ~700px. Pane layout itself is unchanged — this only relaxes the width below which the grid
+  overflows into the horizontal scroll wrapper.
+
 ## [1.2.0] — 2026-07-01
 
 Adds faceted horizontal bar charts with sectioned category axes, variable pane widths for
