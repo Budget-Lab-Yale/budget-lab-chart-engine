@@ -18,14 +18,14 @@ export interface XAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
-  /** Which side of the line the label sits on — the same "which side" field yAxis markers use, so
-   *  the two marker types stay consistent. "right" = label to the right of the line, "left" = to
-   *  the left. `labelAnchor` (below) takes precedence when set, and adds a "middle" option. */
-  labelSide?: "left" | "right";
-  /** Fine-grained horizontal alignment relative to the line ("start" = right of line, default;
-   *  "middle" = centered; "end" = left of line). Wins over `labelSide` when both are set. */
-  labelAnchor?: "start" | "middle" | "end";
-  /** Vertical nudge (px, signed: + = down) of the label from the top of the plot. Default 0. */
+  /** Which SIDE of the (vertical) line the label sits — its relation to the line: "right" (default)
+   *  = to the right of the line, "left" = to the left, "middle" = centered on the line. */
+  labelSide?: "left" | "middle" | "right";
+  /** WHERE along the (vertical) line the label sits, relative to the x-axis: "top" (default) = top
+   *  of the plot (auto-staggered to avoid collisions), "middle" = vertical center, "bottom" = just
+   *  above the x-axis. `labelDy` still nudges from there. */
+  labelPosition?: "top" | "middle" | "bottom";
+  /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default 0. */
   labelDy?: number;
   /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
   labelDx?: number;
@@ -58,12 +58,15 @@ export interface YAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
-  /** Which side the label sits + anchors to ("right" default → right edge, right-aligned;
-   *  "left" → left edge, left-aligned). */
-  labelSide?: "left" | "right";
+  /** Which SIDE of the (horizontal) line the label sits — its relation to the line: "top" (default)
+   *  = above the line, "middle" = centered on the line, "bottom" = below the line. */
+  labelSide?: "top" | "middle" | "bottom";
+  /** WHERE along the (horizontal) line the label sits: "right" (default) = right edge, right-aligned;
+   *  "left" = left edge, left-aligned; "middle" = horizontally centered. */
+  labelPosition?: "left" | "middle" | "right";
   /** Horizontal nudge (px, signed: + = right) of the label from its anchored edge. */
   labelDx?: number;
-  /** Vertical nudge (px, signed: + = down) of the label from the line. Default -5 (above). */
+  /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default above. */
   labelDy?: number;
 }
 
@@ -87,7 +90,9 @@ export interface PointCallout {
   series?: string;
   label: string;
   color?: ColorRef;
+  /** Horizontal nudge (px, signed: + = right) of the label from the point. */
   dx?: number;
+  /** Vertical nudge (px, signed: + = UP) of the label from the point. */
   dy?: number;
   connector?: boolean;
 }

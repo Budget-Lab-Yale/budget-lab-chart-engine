@@ -198,13 +198,21 @@ export function assemblePlot({
       for (const m of ann.yAxis) {
         if (!m.label) continue;
         const py = TBL_MARGIN_TOP + ((yDomain[1] - m.y) / (yDomain[1] - yDomain[0])) * innerHForRows;
-        const ly = py + (m.labelDy != null ? m.labelDy : -7);
+        // Applied SVG dy = labelSide base (top -7 / middle 0 / bottom +6) minus labelDy (+ = UP).
+        const relSide = m.labelSide ?? "top";
+        const baseDy = relSide === "middle" ? 0 : relSide === "bottom" ? 6 : -7;
+        const ly = py + baseDy - (m.labelDy ?? 0);
         const row = Math.max(0, Math.round((ly - TBL_MARGIN_TOP - LABEL_BASE_DY) / LABEL_ROW_H));
         const w = m.label.length * LABEL_CHAR_PX;
-        const left = m.labelSide === "left";
-        const dx = m.labelDx != null ? m.labelDx : left ? 6 : -6;
-        const edge = left ? effMarginLeft : width - effMarginRight;
-        const l = left ? edge + dx : edge + dx - w;
+        const alongPos = m.labelPosition ?? "right";
+        const left = alongPos === "left";
+        const mid = alongPos === "middle";
+        const dx = m.labelDx != null ? m.labelDx : mid ? 0 : left ? 6 : -6;
+        const l = mid
+          ? effMarginLeft + innerW / 2 + dx - w / 2
+          : left
+            ? effMarginLeft + dx
+            : width - effMarginRight + dx - w;
         reserve(row, [l, l + w]);
       }
     }
@@ -218,10 +226,12 @@ export function assemblePlot({
       labels.push({ id: `b${i}`, iv: [px + 6, px + 6 + w] });
     });
     ann.xAxis.forEach((m, i) => {
-      if (!m.label || m.labelDy != null) return;
+      // Only "top" labels live in the top band and auto-stagger; middle/bottom sit elsewhere.
+      if (!m.label || (m.labelPosition ?? "top") !== "top") return;
       const px = toPx(xOpts.markerToX(m));
       if (px == null) return;
-      const anchor = m.labelAnchor ?? "start";
+      const side = m.labelSide ?? "right";
+      const anchor = side === "left" ? "end" : side === "middle" ? "middle" : "start";
       const dx = m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4;
       const w = m.label.length * LABEL_CHAR_PX;
       const left = anchor === "end" ? px + dx - w : anchor === "middle" ? px + dx - w / 2 : px + dx;
@@ -384,19 +394,26 @@ export function assemblePlot({
       }),
     );
     if (m.label) {
-      // Accept the same "which side" field yAxis markers use: labelSide left/right maps to end/start
-      // (label left/right of the line). Explicit labelAnchor wins (and adds "middle").
-      const anchor =
-        m.labelAnchor ?? (m.labelSide === "left" ? "end" : m.labelSide === "right" ? "start" : "start");
-      const autoDy = staggerDy.get(`m${markerIdx}`) ?? 4;
+      // labelSide = which SIDE of the vertical line the label sits (its relation to the line):
+      // left → left of the line, middle → centered on it, right → right of it (default).
+      const side = m.labelSide ?? "right";
+      const anchor = side === "left" ? "end" : side === "middle" ? "middle" : "start";
+      // labelPosition places the label ALONG the vertical line, relative to the x-axis: top (top of
+      // plot, auto-staggered) / middle (vertical center) / bottom (just above the x-axis). frameAnchor
+      // supplies the vertical dimension (x channel keeps the horizontal). labelDy (+ = UP) nudges it.
+      const pos = m.labelPosition ?? "top";
+      const vAnchor = pos === "middle" ? "middle" : pos === "bottom" ? "bottom" : "top";
+      // Base SVG dy (+ = down): top uses the auto-stagger row; bottom lifts up off the bottom edge.
+      const baseDy = pos === "top" ? (staggerDy.get(`m${markerIdx}`) ?? 4) : pos === "bottom" ? -6 : 0;
+      const nudge = m.labelDy != null ? -m.labelDy : 0;
       labelMarks.push(
         Plot.text([{ x: mx, t: m.label }], {
           x: "x",
           text: "t",
-          frameAnchor: "top",
+          frameAnchor: vAnchor,
           textAnchor: anchor,
           dx: m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4,
-          dy: m.labelDy != null ? m.labelDy : autoDy,
+          dy: baseDy + nudge,
           fill: mColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
@@ -437,18 +454,36 @@ export function assemblePlot({
       // On an fx-faceted chart (grouped bars), an unfaceted mark repeats in every facet — bind
       // the label to the appropriate end fx category so a single label renders once.
       const fxDomain = faceted ? (layers.fxScaleOpts?.domain as string[] | undefined) : undefined;
-      const left = m.labelSide === "left";
+      // labelPosition = position ALONG the horizontal line: left / middle / right (default right).
+      const alongPos = m.labelPosition ?? "right";
+      const left = alongPos === "left";
+      const mid = alongPos === "middle";
       const labelFx =
-        fxDomain && fxDomain.length ? (left ? fxDomain[0] : fxDomain[fxDomain.length - 1]) : undefined;
+        fxDomain && fxDomain.length
+          ? mid
+            ? fxDomain[Math.floor(fxDomain.length / 2)]
+            : left
+              ? fxDomain[0]
+              : fxDomain[fxDomain.length - 1]
+          : undefined;
+      // labelSide = which SIDE of the horizontal line (its relation to the line): top (default, sits
+      // over the line) / middle (centered ON it) / bottom (under it). lineAnchor sets the vertical
+      // baseline; baseDy the small gap; labelDy (+ = UP) nudges. "top" keeps the historical -7 (no
+      // lineAnchor) so existing charts render byte-identically.
+      const relSide = m.labelSide ?? "top";
+      const lineAnchor = relSide === "middle" ? "middle" : relSide === "bottom" ? "top" : undefined;
+      const baseDy = relSide === "middle" ? 0 : relSide === "bottom" ? 6 : -7;
       labelMarks.push(
         Plot.text([{ y: m.y, t: m.label, ...(labelFx != null ? { fx: labelFx } : {}) }], {
           y: "y",
           text: "t",
           ...(labelFx != null ? { fx: "fx" } : {}),
-          frameAnchor: left ? "left" : "right",
-          textAnchor: left ? "start" : "end",
-          dx: m.labelDx != null ? m.labelDx : left ? 6 : -6,
-          dy: m.labelDy != null ? m.labelDy : -7,
+          frameAnchor: mid ? "middle" : left ? "left" : "right",
+          textAnchor: mid ? "middle" : left ? "start" : "end",
+          ...(lineAnchor ? { lineAnchor } : {}),
+          dx: m.labelDx != null ? m.labelDx : mid ? 0 : left ? 6 : -6,
+          // labelDy is + = UP → subtract it from the side's base SVG dy.
+          dy: baseDy - (m.labelDy ?? 0),
           fill: markerColor,
           fontSize: TBL.size.annotation,
           fontWeight: 600,
@@ -469,9 +504,10 @@ export function assemblePlot({
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
     const pColor = (p.color && (resolveColor(p.color) || p.color)) || TBL.color.heading;
-    // Default offset is larger when a connector is drawn, so the leader is visible.
+    // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
+    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28).
     const dx = p.dx != null ? p.dx : 0;
-    const dy = p.dy != null ? p.dy : p.connector ? -28 : -6;
+    const dy = p.dy != null ? -p.dy : p.connector ? -28 : -6;
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
     const canLeader =
       p.connector && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null;

@@ -81,7 +81,7 @@ describe("schema", () => {
       xAxisType: "temporal",
       data: "d.csv",
       annotations: {
-        xAxis: [{ x: "2025-04-02", label: "Event", labelDy: 20, labelAnchor: "end" }],
+        xAxis: [{ x: "2025-04-02", label: "Event", labelDy: 20, labelSide: "left" }],
         yAxis: [{ y: 10, label: "Target" }],
         bands: [{ start: "2026-04-01", end: "2026-12-31", label: "Future" }],
         points: [{ x: "2025-04-11", y: 21, label: "Peak", connector: true }],

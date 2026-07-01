@@ -58,7 +58,7 @@ describe("annotation paint order", () => {
     expect(firstLabel).toBeGreaterThan(lastLineOrRect);
   });
 
-  it("xAxis markers accept labelSide (the same field yAxis uses) → maps to text-anchor", () => {
+  it("x-marker labelSide (side of the line) maps to text-anchor: left→end, right→start", () => {
     const anchorOf = (marker: object): string | null => {
       const s: ChartSpec = {
         chartType: "line",
@@ -69,12 +69,86 @@ describe("annotation paint order", () => {
       };
       const { svg } = renderChart(s, rows, { width: 720, height: 400, document });
       const t = Array.from(svg.querySelectorAll("text")).find((e) => e.textContent === "LBL");
-      // Plot puts text-anchor on the wrapping <g>.
+      // Plot puts text-anchor on the wrapping <g>; "middle" is the SVG default so it's omitted.
       return t?.closest("g[text-anchor]")?.getAttribute("text-anchor") ?? t?.getAttribute("text-anchor") ?? null;
     };
     expect(anchorOf({ labelSide: "left" })).toBe("end"); // label to the LEFT of the line
     expect(anchorOf({ labelSide: "right" })).toBe("start"); // to the RIGHT
-    // labelAnchor wins over labelSide: "right" (→ start) is overridden by an explicit "end".
-    expect(anchorOf({ labelSide: "right", labelAnchor: "end" })).toBe("end");
+    expect(anchorOf({ labelSide: "middle" })).toBe(null); // centered → "middle" (omitted)
+  });
+});
+
+// The translate-Y of an element's own transform (0 when absent). Plot puts the base position on the
+// <text> transform and the dx/dy nudge on the wrapping <g> transform, so we sum both.
+function transY(el: Element | null): number {
+  const m = /translate\(\s*[-\d.]+\s*,\s*([-\d.]+)\s*\)/.exec(el?.getAttribute("transform") ?? "");
+  return m ? Number(m[1]) : 0;
+}
+function transX(el: Element | null): number {
+  const m = /translate\(\s*([-\d.]+)\s*,/.exec(el?.getAttribute("transform") ?? "");
+  return m ? Number(m[1]) : 0;
+}
+function findLabel(spec: object, text: string): SVGTextElement {
+  const s = { chartType: "line", title: "t", xAxisType: "numeric", data: "x", ...spec } as ChartSpec;
+  const { svg } = renderChart(s, rows, { width: 720, height: 400, document });
+  return Array.from(svg.querySelectorAll("text")).find((e) => e.textContent === text)! as unknown as SVGTextElement;
+}
+// Effective on-screen vertical position (larger = lower) of an x-marker label under `marker`.
+function xLabelY(marker: object): number {
+  const t = findLabel({ annotations: { xAxis: [{ x: "2021", label: "LBL", ...marker }] } }, "LBL");
+  return transY(t) + transY(t.parentElement);
+}
+// Same, for a y-marker label at y=2.
+function yLabelY(marker: object): number {
+  const t = findLabel({ annotations: { yAxis: [{ y: 2, label: "YM", ...marker }] } }, "YM");
+  return transY(t) + transY(t.parentElement);
+}
+
+describe("annotation label placement + sign conventions", () => {
+  it("x-marker labelPosition places the label top / middle / bottom (relative to the x-axis)", () => {
+    const top = xLabelY({ labelPosition: "top" });
+    const middle = xLabelY({ labelPosition: "middle" });
+    const bottom = xLabelY({ labelPosition: "bottom" });
+    expect(top).toBeLessThan(middle);
+    expect(middle).toBeLessThan(bottom);
+    // Default (unset) matches "top".
+    expect(xLabelY({})).toBeCloseTo(top, 3);
+  });
+
+  it("y-marker labelSide places the label top / middle / bottom (its side of the line)", () => {
+    const top = yLabelY({ labelSide: "top" });
+    const middle = yLabelY({ labelSide: "middle" });
+    const bottom = yLabelY({ labelSide: "bottom" });
+    expect(top).toBeLessThan(middle); // above the line = higher on screen (smaller y)
+    expect(middle).toBeLessThan(bottom); // below the line = lower on screen
+    // Default (unset) matches "top".
+    expect(yLabelY({})).toBeCloseTo(top, 3);
+  });
+
+  it("labelDy is + = UP: a positive nudge raises the label, negative lowers it", () => {
+    const base = xLabelY({ labelPosition: "middle" });
+    const up = xLabelY({ labelPosition: "middle", labelDy: 12 });
+    const down = xLabelY({ labelPosition: "middle", labelDy: -12 });
+    expect(up).toBeLessThan(base); // + = up (smaller y)
+    expect(down).toBeGreaterThan(base); // - = down
+    expect(base - up).toBeCloseTo(12, 3);
+    expect(down - base).toBeCloseTo(12, 3);
+  });
+
+  it("y-marker labelPosition places the label left / middle / right along the line", () => {
+    const yl = (marker: object) => {
+      const t = findLabel({ annotations: { yAxis: [{ y: 2, label: "YM", ...marker }] } }, "YM");
+      return transX(t) + transX(t.parentElement);
+    };
+    const left = yl({ labelPosition: "left" });
+    const right = yl({ labelPosition: "right" });
+    const mid = yl({ labelPosition: "middle" });
+    // Middle sits between the left- and right-anchored positions, near the horizontal center.
+    expect(mid).toBeGreaterThan(left);
+    expect(mid).toBeLessThan(right);
+    expect(mid).toBeGreaterThan(720 * 0.35);
+    expect(mid).toBeLessThan(720 * 0.65);
+    // Default (unset) matches "right".
+    expect(yl({})).toBeCloseTo(right, 3);
   });
 });

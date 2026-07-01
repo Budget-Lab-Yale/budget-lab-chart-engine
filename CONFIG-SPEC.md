@@ -93,10 +93,10 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 
 | field | type | notes |
 |---|---|---|
-| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelSide?, labelAnchor?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`. `labelSide` (`left`\|`right`) is the same "which side" field yAxis markers use; `labelAnchor` (`start`\|`middle`\|`end`) is the finer-grained option and wins when both are set. Labels auto-stagger to avoid collisions; `labelDx`/`labelDy` override placement. |
-| `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, style?, color?, strokeWidth?, labelSide?, labelDx?, labelDy?}`; `y` required. `labelSide` is `left`\|`right` (default right). |
+| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
+| `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?}`. |
-| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. |
+| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
 
 Marker/label `color` is a named color or `"#hex"`; the label color matches its line.
 
