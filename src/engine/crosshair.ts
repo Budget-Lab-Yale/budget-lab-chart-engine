@@ -1859,16 +1859,11 @@ export function attachSecondaryBandCursor(
     }
   }
   let accented: SVGTextElement | null = null;
-  let accentPill: SVGRectElement | null = null;
   const restoreAccent = (): void => {
     if (accented) {
       accented.setAttribute("font-weight", "500");
       accented.setAttribute("fill", TBL.color.axis);
       accented = null;
-    }
-    if (accentPill) {
-      accentPill.remove();
-      accentPill = null;
     }
   };
 
@@ -1913,41 +1908,11 @@ export function attachSecondaryBandCursor(
       addCoordRegion(g, doc, regX0, regX1 - regX0, regYmin, regYmax - regYmin);
       const weight = active ? 700 : 600;
       const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
-      // Accent the hovered category's Y label (bold/dark), matching the vertical x-axis highlight.
+      // Accent the hovered category's Y label by bolding + darkening the existing label element
+      // (no pill behind it — the shaded row already provides the emphasis in this layout).
       if (opts.accentLabel) {
         const el = labelEls.get(labelKey(category));
         if (el) {
-          // Pill behind the label (matches the vertical cursor's axis-label pill), inserted as the
-          // label's previous sibling so it paints behind the text; then bold+darken the label itself.
-          let bb: { x: number; y: number; width: number; height: number } | null = null;
-          try {
-            const r = el.getBBox();
-            if (r.width && r.height) bb = r;
-          } catch {
-            /* no layout (jsdom) → skip the pill */
-          }
-          if (bb) {
-            // getBBox excludes the element's OWN transform; the label text carries a translate
-            // (its gutter/band position), so add it back or the pill lands up-and-left of the label.
-            const tf = el.getAttribute("transform") ?? "";
-            const tm = /translate\(\s*([\d.+-]+)[ ,]\s*([\d.+-]+)/.exec(tf);
-            const tlx = tm ? parseFloat(tm[1]!) : 0;
-            const tly = tm ? parseFloat(tm[2]!) : 0;
-            const padX = 5;
-            const padY = 2;
-            const pill = doc.createElementNS(COORD_NS, "rect");
-            pill.setAttribute("x", String(bb.x - padX + tlx));
-            pill.setAttribute("y", String(bb.y - padY + tly));
-            pill.setAttribute("width", String(bb.width + padX * 2));
-            pill.setAttribute("height", String(bb.height + padY * 2));
-            pill.setAttribute("rx", "3");
-            pill.setAttribute("fill", "#ffffff");
-            pill.setAttribute("fill-opacity", "0.82");
-            pill.setAttribute("stroke", "#c8cdd7");
-            pill.setAttribute("stroke-opacity", "0.7");
-            el.parentNode?.insertBefore(pill, el);
-            accentPill = pill;
-          }
           el.setAttribute("font-weight", "700");
           el.setAttribute("fill", COORD_LABEL_DARK);
           accented = el;

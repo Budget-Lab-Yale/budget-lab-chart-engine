@@ -357,8 +357,9 @@ describe("golden SVG — bars", () => {
     expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-gridline").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-zero-baseline").length).toBe(1);
-    // Surviving gridlines span the full plot height (continuous vertical rules): the kept
-    // group's lines were stretched to top→bottom plot edges (marginTop..height-marginBottom).
+    // Surviving gridlines span the full plot height (continuous vertical rules): the kept group's
+    // lines were stretched top→bottom, with the top extended ~8px ABOVE the first bar (marginTop)
+    // for immediate context, down to the bottom plot edge (height-marginBottom).
     const mt = Number(svg.dataset.marginTop);
     const mb = Number(svg.dataset.marginBottom);
     const gridGroup = svg.querySelector("g.tbl-gridline");
@@ -367,7 +368,7 @@ describe("golden SVG — bars", () => {
       return m ? Number(m[1]) : 0;
     })();
     const firstLine = gridGroup?.querySelector("line");
-    expect(Number(firstLine?.getAttribute("y1")) + gridTy).toBeCloseTo(mt, 0);
+    expect(Number(firstLine?.getAttribute("y1")) + gridTy).toBeCloseTo(mt - 8, 0);
     expect(Number(firstLine?.getAttribute("y2")) + gridTy).toBeCloseTo(400 - mb, 0);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-grouped-horizontal.golden.svg");
   });

@@ -311,13 +311,17 @@ export function collapseFacetChromeY(
     }
   }
 
-  // 2 + 3. Gridlines and zero baseline: collapse to the first facet, then stretch its lines
-  //         to full plot height in the kept group's local frame.
+  // 2 + 3. Gridlines and zero baseline: collapse to the first facet, then stretch its lines to full
+  //         plot height. The top is extended a few px ABOVE the first bar (topAbs) so the scale has
+  //         immediate context above the topmost bar; the zero baseline is not extended (it reads as
+  //         a spine and shouldn't float above the data).
+  const GRIDLINE_TOP_EXTEND = 8;
   for (const cls of [GRIDLINE_CLASS, ZERO_BASELINE_CLASS]) {
     const kept = collapseDuplicateGroups(cls);
     const group = kept[0];
     if (!group) continue;
     const ty = readTranslateY(group);
-    stretchLinesToFullHeight(group, topAbs - ty, bottomAbs - ty);
+    const top = cls === GRIDLINE_CLASS ? topAbs - GRIDLINE_TOP_EXTEND : topAbs;
+    stretchLinesToFullHeight(group, top - ty, bottomAbs - ty);
   }
 }

@@ -547,22 +547,23 @@ export function isSectionSpacer(v: string): boolean {
 // Section headers for a sectioned HORIZONTAL bar axis: a bold label left-justified at svg x=0
 // (pushed left by `marginLeft` so its `textAnchor:"start"` origin lands at the canvas left edge,
 // flush with the title above). Each spacer-based header is faceted on its empty spacer band slot
-// (which sits ABOVE its section) and anchored near the slot's TOP, so the gap falls BELOW the header
-// (separating it from its first category and clearing that category's hover highlight), while only a
-// small gap sits above (the separation from the previous section).
+// (which sits ABOVE its section) and anchored to the slot's BOTTOM, then lifted `gap` px — so it
+// sits a FIXED distance above its section's first bar (uniform across sections; the empty space
+// above it separates this section from the previous one).
 export function tblSectionHeaderYAxis(
   spacers: { value: string; label: string }[],
   marginLeft: number = TBL_MARGIN_LEFT,
   fontSize: number = TBL.size.axis,
+  gap = 12,
 ): Mark[] {
   if (!spacers.length) return [];
   return [
     Plot.text(spacers, {
       fy: (d: { value: string }) => d.value,
       text: (d: { label: string }) => d.label,
-      frameAnchor: "top-left",
+      frameAnchor: "bottom-left",
       dx: -marginLeft,
-      dy: fontSize,
+      dy: -gap,
       textAnchor: "start",
       fill: TBL.color.heading,
       fontSize,

@@ -34,7 +34,7 @@ import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 // to fit the value-tick row (not the inherited categorical-label margin). The top margin fits the
 // optional top tick row + the first section header band.
 const HVALUE_TICK_PX = 18; // one value-tick row (top)
-const HSECTION_HEADER_BAND = 18; // room for the first section header (sits above the first bar)
+const SECTION_HEADER_GAP = 10; // spacer-header lift; yields ~15px header-to-bar gap after anchoring
 const HMARGIN_BOTTOM_TICKS = 26;
 const HMARGIN_BOTTOM_BARE = 8;
 // Outer padding fraction for the horizontal category band, with `align: 0` so the (small) outer
@@ -180,10 +180,15 @@ export function buildBarMarks(
   const xTicksMode = spec.x_axis_ticks ?? "bottom";
   const hTopTicks = xTicksMode === "top" || xTicksMode === "both";
   const hBottomTicks = xTicksMode !== "top";
-  const hMarginTop = (hTopTicks ? HVALUE_TICK_PX : 0) + (sectioned ? HSECTION_HEADER_BAND : 8);
+  // Every section header sits SECTION_HEADER_GAP px above its section's first bar (uniform). The top
+  // margin holds: the top ticks (if any) + the first header + that gap above the first bar.
+  const hMarginTop = (hTopTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8);
   const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
-  // First section header baseline sits just below the top ticks (if any). lift = marginTop − that.
-  const topHeaderLift = hMarginTop - ((hTopTicks ? HVALUE_TICK_PX : 0) + 13);
+  // First section header: faceted on its first category (facet top = first bar, align:0), lifted so
+  // its baseline lands the SAME ~15px above the bar as the spacer-based headers. The top-anchored
+  // baseline sits ~one font-size below the facet top, and the bottom-anchored spacers sit ~5px
+  // higher, so add that to match.
+  const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
 
   // Units suffix for value labels (matches the y-tick units inference upstream).
   const units = inferUnitsFromSubtitle(spec.subtitle);
@@ -277,7 +282,7 @@ export function buildBarMarks(
           ? []
           : [
               ...tblBandYAxis(categories, gutter, catFont),
-              ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont),
+              ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
               ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
             ],
         marginLeft: gutter,
@@ -346,7 +351,7 @@ export function buildBarMarks(
         ? []
         : [
             ...tblFacetGroupYAxis(categories, gutter, catFont),
-            ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont),
+            ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
             ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
           ],
       marginLeft: gutter,
