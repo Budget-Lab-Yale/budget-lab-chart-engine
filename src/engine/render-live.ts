@@ -1012,6 +1012,15 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 // --- Small-multiples figure mount ----------------------------------------------------------
 // Below this pane width the grid reflows to fewer columns (3→2→1). Used by both modes.
 const PANE_MIN_WIDTH = 240;
+// Minimum DATA width per pane for faceted horizontal bars (the shared category gutter is
+// reserved separately — see HBAR_GUTTER_RESERVE). Matches the vertical PANE_MIN_WIDTH: a
+// horizontal pane reads fine at this width, and the earlier 300px premium forced a natural
+// figure width (2×300 + gutter) that overflowed a normal content column, so faceted horizontal
+// charts scrolled horizontally even at wide viewports.
+const HBAR_PANE_MIN_WIDTH = 240;
+// Width reserved (once) for the shared category-label gutter on the leftmost horizontal pane
+// when computing the no-stack natural width.
+const HBAR_GUTTER_RESERVE = 200;
 // Per-pane mini-chart height (both modes — each pane is an independent mini-SVG).
 const PANE_HEIGHT = 240;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
@@ -1450,8 +1459,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     // No-stack: keep panes at a readable minimum and let the row overflow into the scroll wrapper.
     // (Horizontal panes reserve the left category gutter on top of the data, so allow extra.)
-    const minPerPane = isHorizontalBarFig ? 300 : paneMinWidth;
-    const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? 200 : 0);
+    const minPerPane = isHorizontalBarFig ? HBAR_PANE_MIN_WIDTH : paneMinWidth;
+    const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? HBAR_GUTTER_RESERVE : 0);
     const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
     // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
     // — SHARED mode (unequal labeled/label-less columns) OR variable pane_widths in either mode.
