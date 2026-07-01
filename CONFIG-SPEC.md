@@ -155,6 +155,7 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.pane_order` | array | Pane render order + inclusion filter. |
 | `small_multiples.pane_titles` | object | `{ <facetValue>: "Display title" }`. Falls back to the raw facet value. |
 | `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. |
+| `small_multiples.pane_widths` | enum \| array | How a row's width splits among its columns (vertical bar facets; applied to every row). `equal` (default) — same data width per column. `equal-bar` — each column sized to its bar count so bars render at the same width (exact for a single row; multi-row uses the max bar count per column). An array like `[2, 1]` sets explicit per-column proportions (length must equal the column count). When set and `columns` is unset, the panes lay out in a single row. |
 
 **Faceted horizontal bars.** `orientation: horizontal` combines with `small_multiples` to produce a
 faceted horizontal bar chart: each pane is one facet value, the panes share a single value (x) axis,

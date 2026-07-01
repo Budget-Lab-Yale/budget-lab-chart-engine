@@ -1,0 +1,25 @@
+<!-- pane: Durable goods (Durable goods) -->
+<svg class="tblchart-p0" fill="currentColor" font-family="system-ui, sans-serif" font-size="10" text-anchor="middle" width="608" height="320" viewBox="0 0 608 320" style="background: transparent; color: rgb(74, 74, 74); font-family: Figtree, &quot;Source Sans 3&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 10.5px; overflow: visible;" data-margin-left="44" data-margin-right="16" data-margin-top="18" data-margin-bottom="22"><style>:where(.tblchart-p0) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.tblchart-p0 text),
+:where(.tblchart-p0 tspan) {
+  white-space: pre;
+}</style><g aria-label="rule" stroke="#F0F0F0" transform="translate(0,0.5)"><line x1="0" x2="608" y1="242" y2="242"></line><line x1="0" x2="608" y1="185.99999999999997" y2="185.99999999999997"></line><line x1="0" x2="608" y1="130" y2="130"></line><line x1="0" x2="608" y1="73.99999999999999" y2="73.99999999999999"></line><line x1="0" x2="608" y1="18" y2="18"></line></g><g aria-label="text" class="tbl-y-tick-label" fill="#666666" text-anchor="start" font-size="10.5" font-weight="500" transform="translate(-43.5,-5.5)"><text y="0.32em" transform="translate(44,298)">0</text><text y="0.32em" transform="translate(44,242)">1</text><text y="0.32em" transform="translate(44,185.99999999999997)">2</text><text y="0.32em" transform="translate(44,130)">3</text><text y="0.32em" transform="translate(44,73.99999999999999)">4</text><text y="0.32em" transform="translate(44,18)">5</text></g><g aria-label="text" fill="#666666" font-size="10.5" font-weight="500" transform="translate(52.5,12.5)"><text transform="translate(71,298)">Motor vehicles</text><text transform="translate(201,298)">Furnishings</text><text transform="translate(331,298)">Recreation</text><text transform="translate(461,298)">Other durable</text></g><g aria-label="rule" stroke="#999999" transform="translate(0,0.5)"><line x1="0" x2="608" y1="298" y2="298"></line></g><g aria-label="bar" fill="#0072B2"><rect x="71" width="104" y="51.599999999999966" height="246.40000000000003" data-series=""></rect><rect x="201" width="104" y="180.39999999999998" height="117.60000000000002" data-series=""></rect><rect x="331" width="104" y="197.2" height="100.80000000000001" data-series=""></rect><rect x="461" width="104" y="225.20000000000002" height="72.79999999999998" data-series=""></rect></g></svg>
+
+<!-- pane: Services (Services) -->
+<svg class="tblchart-p1" fill="currentColor" font-family="system-ui, sans-serif" font-size="10" text-anchor="middle" width="292" height="320" viewBox="0 0 292 320" style="background: transparent; color: rgb(74, 74, 74); font-family: Figtree, &quot;Source Sans 3&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 10.5px; overflow: visible;" data-margin-left="2" data-margin-right="16" data-margin-top="18" data-margin-bottom="22"><style>:where(.tblchart-p1) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.tblchart-p1 text),
+:where(.tblchart-p1 tspan) {
+  white-space: pre;
+}</style><g aria-label="rule" stroke="#F0F0F0" transform="translate(0,0.5)"><line x1="0" x2="292" y1="242" y2="242"></line><line x1="0" x2="292" y1="185.99999999999997" y2="185.99999999999997"></line><line x1="0" x2="292" y1="130" y2="130"></line><line x1="0" x2="292" y1="73.99999999999999" y2="73.99999999999999"></line><line x1="0" x2="292" y1="18" y2="18"></line></g><g aria-label="text" fill="#666666" font-size="10.5" font-weight="500" transform="translate(50,12.5)"><text transform="translate(27,298)">Health care</text><text transform="translate(151,298)">Transportation</text></g><g aria-label="rule" stroke="#999999" transform="translate(0,0.5)"><line x1="0" x2="292" y1="298" y2="298"></line></g><g aria-label="bar" fill="#0072B2"><rect x="27" width="99" y="247.60000000000002" height="50.39999999999998" data-series=""></rect><rect x="151" width="99" y="258.79999999999995" height="39.200000000000045" data-series=""></rect></g></svg>

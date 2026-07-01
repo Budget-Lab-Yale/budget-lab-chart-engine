@@ -258,6 +258,22 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         );
       }
     }
+    // pane_widths proportion array: length must match the resolved grid column count. Columns =
+    // the explicit config, else a single row (all panes) when pane_widths is set, else the default.
+    const pw = spec.small_multiples.pane_widths;
+    if (Array.isArray(pw)) {
+      const paneCount = pane_order && pane_order.length
+        ? pane_order.filter((v) => facetValues.has(v)).length
+        : facetValues.size;
+      const cfgCols = spec.small_multiples.columns;
+      const resolvedCols =
+        cfgCols && cfgCols > 0 ? Math.min(cfgCols, paneCount) : paneCount; // pane_widths ⇒ single row default
+      if (pw.length !== resolvedCols) {
+        errors.push(
+          `small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`,
+        );
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };

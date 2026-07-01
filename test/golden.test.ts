@@ -18,7 +18,12 @@ import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { assemblePlot } from "../src/engine/assemble-plot";
 import { Plot, d3 } from "../src/engine/vendor";
-import { TBL, SHARED_LABELLESS_MARGIN_LEFT } from "../src/engine/theme";
+import {
+  TBL,
+  SHARED_LABELLESS_MARGIN_LEFT,
+  TBL_MARGIN_LEFT,
+  TBL_MARGIN_RIGHT,
+} from "../src/engine/theme";
 import { paneTitleMark, temporalXTicks, isSectionSpacer } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { computeYAxis } from "../src/engine/scales";
@@ -592,6 +597,57 @@ describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
     const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-sectioned.golden.svg");
+  });
+});
+
+// --- Variable pane widths (small_multiples.pane_widths) ---
+
+describe("figure — variable pane widths", () => {
+  const BASE: ChartSpec = {
+    chartType: "bar",
+    title: "Variable widths",
+    xAxisType: "categorical",
+    columns: { x: "category", value: "value", facet: "facet" },
+    data: "facet-varwidth.csv",
+    small_multiples: { mode: "shared", pane_order: ["Durable goods", "Services"] },
+  };
+  // Durable goods has 4 categories (bars); Services has 2. Single row of 2 panes.
+  // Inner data width from the outer column width + its left margin (col 0 = gutter, col 1 = small).
+  const dataW = (colW: number, col: number) =>
+    colW - (col === 0 ? TBL_MARGIN_LEFT : SHARED_LABELLESS_MARGIN_LEFT) - TBL_MARGIN_RIGHT;
+
+  it("equal (default): both panes get the same data width despite different bar counts", () => {
+    const rows = parseCsv("./fixtures/facet-varwidth.csv");
+    const fig = renderFigure(BASE, rows, { width: 900, document });
+    expect(fig.panes.length).toBe(2);
+    const w = fig.columnWidths!;
+    expect(dataW(w[0]!, 0)).toBeCloseTo(dataW(w[1]!, 1), 4);
+  });
+
+  it("equal-bar: a pane's data width is proportional to its bar count (4 vs 2 → 2:1)", () => {
+    const rows = parseCsv("./fixtures/facet-varwidth.csv");
+    const spec: ChartSpec = {
+      ...BASE,
+      small_multiples: { ...BASE.small_multiples!, pane_widths: "equal-bar" },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, document });
+    const w = fig.columnWidths!;
+    expect(dataW(w[0]!, 0)).toBeCloseTo(2 * dataW(w[1]!, 1), 3);
+    // Bars per pane unchanged (4 and 2).
+    expect(fig.panes[0]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
+    expect(fig.panes[1]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(2);
+  });
+
+  it("custom proportions [2,1]: column 0's data width is twice column 1's", async () => {
+    const rows = parseCsv("./fixtures/facet-varwidth.csv");
+    const spec: ChartSpec = {
+      ...BASE,
+      small_multiples: { ...BASE.small_multiples!, pane_widths: [2, 1] },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, document });
+    const w = fig.columnWidths!;
+    expect(dataW(w[0]!, 0)).toBeCloseTo(2 * dataW(w[1]!, 1), 3);
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/facet-varwidth.golden.svg");
   });
 });
 

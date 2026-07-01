@@ -218,6 +218,31 @@ describe("small_multiples config", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts pane_widths: equal-bar and a proportion array", () => {
+    expect(validateSpec({ ...VALID, small_multiples: { pane_widths: "equal-bar" } }).valid).toBe(true);
+    expect(validateSpec({ ...VALID, small_multiples: { pane_widths: [2, 1] } }).valid).toBe(true);
+  });
+
+  it("rejects a pane_widths array whose length ≠ the resolved column count", () => {
+    const rows: TidyRow[] = [
+      { facet: "A", cat: "a1", value: "1" },
+      { facet: "A", cat: "a2", value: "2" },
+      { facet: "B", cat: "b1", value: "3" },
+    ] as TidyRow[];
+    const spec: ChartSpec = {
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      columns: { x: "cat", value: "value", facet: "facet" },
+      data: "x",
+      // 2 panes → single row of 2 columns; a 3-length array is wrong.
+      small_multiples: { mode: "shared", pane_widths: [1, 2, 3] },
+    };
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/pane_widths has 3 proportions but the grid has 2 column/);
+  });
+
   it("accepts faceted horizontal BAR charts (now supported)", () => {
     const r = validateSpec({
       chartType: "bar",

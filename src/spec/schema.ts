@@ -176,6 +176,12 @@ const SMALL_MULTIPLES = {
     pane_order: { type: "array", items: { type: "string" } },
     pane_titles: { type: "object", additionalProperties: { type: "string" } },
     coordinated_cursor: { type: "boolean" },
+    pane_widths: {
+      anyOf: [
+        { type: "string", enum: ["equal", "equal-bar"] },
+        { type: "array", items: { type: "number", exclusiveMinimum: 0 }, minItems: 1 },
+      ],
+    },
   },
 } as const;
 

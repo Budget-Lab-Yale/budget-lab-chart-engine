@@ -132,6 +132,7 @@ export function sharedColumnWidths(
   columns: number,
   gap: number,
   leftMargin: number = TBL_MARGIN_LEFT,
+  weights?: number[],
 ): { dataW: number; colWidths: number[]; marginLeft: number[] } {
   // The leftmost (labeled) column's left margin. For vertical charts this is the y-label gutter
   // (TBL_MARGIN_LEFT); for faceted horizontal bars the caller passes the wider category gutter.
@@ -139,18 +140,26 @@ export function sharedColumnWidths(
   const lm = SHARED_LABELLESS_MARGIN_LEFT;
   const R = TBL_MARGIN_RIGHT;
   const C = Math.max(1, columns);
-  const dataW =
-    C === 1
-      ? availW - LM - R
-      : (availW - LM - (C - 1) * lm - C * R - (C - 1) * gap) / C;
+  // Total DATA width the row's columns share (after the left gutter, per-column right margins and
+  // inter-column gaps). Split it by `weights` (default all-ones ⇒ equal ⇒ byte-identical to before).
+  const totalDataW =
+    C === 1 ? availW - LM - R : availW - LM - (C - 1) * lm - C * R - (C - 1) * gap;
+  const w = weights && weights.length === C ? weights : Array.from({ length: C }, () => 1);
+  const sumW = w.reduce((a, b) => a + (b > 0 ? b : 0), 0) || C;
   const colWidths: number[] = [];
   const marginLeft: number[] = [];
+  let firstDataW = totalDataW;
   for (let c = 0; c < C; c++) {
     const isLeft = c === 0;
-    marginLeft.push(isLeft ? LM : lm);
-    colWidths.push(dataW + (isLeft ? LM : lm) + R);
+    const ml = isLeft ? LM : lm;
+    const dataW = (totalDataW * Math.max(0, w[c] as number)) / sumW;
+    if (c === 0) firstDataW = dataW;
+    marginLeft.push(ml);
+    colWidths.push(dataW + ml + R);
   }
-  return { dataW, colWidths, marginLeft };
+  // `dataW` retained for API compatibility (informational — col 0's data width; per-column widths
+  // now differ when weighted, so read colWidths/marginLeft for exact values).
+  return { dataW: firstDataW, colWidths, marginLeft };
 }
 
 /** A pane's identity + its standalone SVG and per-pane interaction metadata. BOTH modes
@@ -297,13 +306,17 @@ export function renderFigure(
 
   // 2. Grid layout. columns = config else default; rows = ceil(n / columns). col = i % columns,
   //    row = floor(i / columns).
-  // Column count: a live-layer override (responsive reflow) wins, else the spec config, else
-  // the ≈ceil(sqrt(n)) default. Clamp to [1, paneValues.length].
+  // Column count: a live-layer override (responsive reflow) wins, else the spec config, else the
+  // default — which is a SINGLE ROW when pane_widths is set (variable widths are per-column across
+  // one row of panes), and the ≈ceil(sqrt(n)) grid otherwise. Clamp to [1, paneValues.length].
+  const variableWidths = sm.pane_widths != null && sm.pane_widths !== "equal";
   const requestedColumns = opts.columns && opts.columns > 0
     ? opts.columns
     : sm.columns && sm.columns > 0
       ? sm.columns
-      : defaultColumns(paneValues.length);
+      : variableWidths
+        ? paneValues.length
+        : defaultColumns(paneValues.length);
   const columns = Math.max(1, Math.min(requestedColumns, paneValues.length));
   const gridRows = Math.ceil(paneValues.length / columns);
 
@@ -413,11 +426,39 @@ export function renderFigure(
   //    (e.g. golden tests pass a single width as the row total); the gap matches the live grid.
   const gridGap = opts.gridGap ?? 0;
   const availW = opts.gridWidth ?? opts.width ?? 720;
+  // Per-column width weights (pane_widths). "equal"/unset → undefined (uniform). A proportion array
+  // (length === columns) is used directly. "equal-bar" → each column's bar count; for a column with
+  // several panes (multi-row) take the MAX so the busiest pane's bars stay legible.
+  let colWeights: number[] | undefined;
+  const pw = sm.pane_widths;
+  if (Array.isArray(pw) && pw.length === columns) {
+    colWeights = pw;
+  } else if (pw === "equal-bar") {
+    const barCount = (value: string): number => {
+      const pr = rows.filter((r) => (r[facetField] as string) === value);
+      const catSet = new Set<string>();
+      const serSet = new Set<string>();
+      for (const r of pr) {
+        const c = r[cols.x] as string;
+        if (c) catSet.add(c);
+        const s = cols.series ? (r[cols.series] as string) : "";
+        if (s) serSet.add(s);
+      }
+      return Math.max(1, catSet.size) * Math.max(1, serSet.size);
+    };
+    const weights = Array.from({ length: columns }, () => 0);
+    paneValues.forEach((v, i) => {
+      const col = i % columns;
+      weights[col] = Math.max(weights[col] as number, barCount(v));
+    });
+    colWeights = weights;
+  }
   const { colWidths, marginLeft: colMarginLeft } = sharedColumnWidths(
     availW,
     columns,
     gridGap,
     hGutter,
+    colWeights,
   );
 
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing

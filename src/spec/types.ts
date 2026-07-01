@@ -141,6 +141,13 @@ export interface SmallMultiplesConfig {
   /** Coordinated cursor: hovering one pane echoes a secondary cursor (guide + compact value
    *  labels) on every other pane at the same x. Default true; set false to disable. */
   coordinated_cursor?: boolean;
+  /** How a row's width is split among its columns (shared across all rows; vertical bar facets).
+   *  - "equal" (default): every column the same data width.
+   *  - "equal-bar": each column's width ∝ its bar count, so bars render at the same width (exact for
+   *    a single row; multi-row sizes each column to the max bar count among its panes).
+   *  - number[]: explicit per-column proportions, length === the grid column count, applied to every
+   *    row (e.g. [2, 1] → column 0 twice as wide as column 1). */
+  pane_widths?: "equal" | "equal-bar" | number[];
 }
 
 /** Maps data-column names onto the roles the engine consumes. Any column name is allowed; the
