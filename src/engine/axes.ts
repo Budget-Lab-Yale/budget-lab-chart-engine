@@ -399,7 +399,10 @@ function rotatedLabelDy(categories: string[]): number {
 
 /** Bottom margin to fit each band-label layout (vs the ~22px single-line default). */
 export function bandLabelMarginBottom(categories: string[], mode: BandLabelMode): number {
-  if (mode === "rotate") return Math.round(Math.min(74, 18 + maxBandLabelWidth(categories) * 0.71));
+  // A 45° label drops by ~sin(45)·width below the axis; reserve that (plus a little padding) so it
+  // isn't clipped by the frame. Cap high enough for realistic long labels (~24 chars) — beyond that
+  // the author should shorten the category or rely on pane titles rather than have a giant margin.
+  if (mode === "rotate") return Math.round(Math.min(120, 18 + maxBandLabelWidth(categories) * 0.71));
   if (mode === "wrap") return 36; // room for a second line
   return 22;
 }
@@ -413,6 +416,39 @@ export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axi
   return text.length * fontSize * AVG_CHAR_EM;
 }
 
+/** Greedily word-wrap a label into as many lines as needed so each line's estimated width is
+ *  ≤ `maxPx` (a single over-long word still gets its own line). Returns the lines joined by "\n"
+ *  (Plot renders that as multi-line text). A label that already fits returns unchanged (no "\n"),
+ *  so callers that only sometimes wrap stay byte-identical for the labels that don't. */
+export function wrapToWidth(
+  label: string,
+  maxPx: number,
+  fontSize: number = TBL.size.axis,
+): string {
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return label;
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const trial = cur ? `${cur} ${w}` : w;
+    if (!cur || estimateLabelWidth(trial, fontSize) <= maxPx) cur = trial;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.join("\n");
+}
+
+/** Number of lines `label` wraps to at `maxPx` (≥ 1). */
+export function labelLineCount(label: string, maxPx: number, fontSize: number = TBL.size.axis): number {
+  return wrapToWidth(label, maxPx, fontSize).split("\n").length;
+}
+
+/** Padding (px) reserved between the wrapped category label and the bars in the left gutter. */
+export const GUTTER_TEXT_PAD = 8;
+
 // Responsive LEFT GUTTER for horizontal bars: the y-axis category labels live in the left
 // margin (left-justified at svg x=0), so the margin must be wide enough for the LONGEST
 // label or it clips into the plot. Derived from the longest category at the axis font size
@@ -420,11 +456,21 @@ export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axi
 // swallow the whole canvas. `pad` reserves a small gap between the label and the bars.
 export function horizontalLeftGutter(
   categories: string[],
-  { pad = 10, min = TBL_MARGIN_LEFT, max = 240 }: { pad?: number; min?: number; max?: number } = {},
+  {
+    pad = 10,
+    min = TBL_MARGIN_LEFT,
+    max = 240,
+    fontSize = TBL.size.axis,
+  }: { pad?: number; min?: number; max?: number; fontSize?: number } = {},
 ): number {
-  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c)), 0);
+  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c, fontSize)), 0);
   return Math.round(Math.max(min, Math.min(max, longest + pad)));
 }
+
+/** Category-label font size (px) for FACETED horizontal bars. Larger than the single-chart axis
+ *  size so the labels read at the same prominence they would in a standalone chart (the faceted
+ *  figure is much taller, which makes the default 10.5px look small). */
+export const FACETED_CAT_LABEL_PX = 13;
 
 // Band (categorical) y-axis for HORIZONTAL bars: one label per category at the band's
 // left edge in the label margin (svg x=0), vertically centered on its band. No ticks.
@@ -433,17 +479,24 @@ export function horizontalLeftGutter(
 export function tblBandYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
+  fontSize: number = TBL.size.axis,
 ): Mark[] {
+  // Wrap labels that would overflow the gutter onto multiple lines (prevents collision with the
+  // bars). Labels that fit return unchanged (no "\n"), so non-wrapping output stays byte-identical.
+  const maxPx = marginLeft - GUTTER_TEXT_PAD;
+  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx, fontSize).includes("\n"));
   return [
     Plot.text(categories, {
       y: (d: string) => d,
-      text: (d: string) => d,
+      text: (d: string) => wrapToWidth(d, maxPx, fontSize),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
-      fontSize: TBL.size.axis,
+      fontSize,
       fontWeight: 500,
+      // Center the wrapped block on the band only when multi-line (keeps single-line byte-identical).
+      ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
     }),
   ];
 }
@@ -457,18 +510,91 @@ export function tblBandYAxis(
 export function tblFacetGroupYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
+  fontSize: number = TBL.size.axis,
 ): Mark[] {
   const rows = categories.map((c) => ({ c }));
+  const maxPx = marginLeft - GUTTER_TEXT_PAD;
+  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx, fontSize).includes("\n"));
   return [
     Plot.text(rows, {
       fy: (d: { c: string }) => d.c,
-      text: (d: { c: string }) => d.c,
+      text: (d: { c: string }) => wrapToWidth(d.c, maxPx, fontSize),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",
       fill: TBL.color.axis,
-      fontSize: TBL.size.axis,
+      fontSize,
       fontWeight: 500,
+      ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
+    }),
+  ];
+}
+
+// --- Sectioned horizontal category axis ---------------------------------------------------
+// A sectioned category axis (columns.section) groups categories into contiguous sections along the
+// `fy`/`y` band. An empty SPACER band slot is inserted before each section — it carries no data
+// rows (so no bars render in it) and holds the section's bold header. The sentinel prefix uses a
+// leading space so it never collides with a real category value (which the engine trims/ignores).
+
+/** Sentinel prefix marking a section's empty spacer band slot. */
+export const SECTION_SPACER_PREFIX = " section:";
+/** The spacer band value for a section. */
+export function sectionSpacer(section: string): string {
+  return SECTION_SPACER_PREFIX + section;
+}
+/** Whether a band value is a section spacer sentinel (not a real category). */
+export function isSectionSpacer(v: string): boolean {
+  return v.startsWith(SECTION_SPACER_PREFIX);
+}
+
+// Section headers for a sectioned HORIZONTAL bar axis: a bold label left-justified at svg x=0
+// (pushed left by `marginLeft` so its `textAnchor:"start"` origin lands at the canvas left edge,
+// flush with the title above). Each spacer-based header is faceted on its empty spacer band slot
+// (which sits ABOVE its section) and anchored to the slot's BOTTOM, then lifted `gap` px — so it
+// sits a FIXED distance above its section's first bar (uniform across sections; the empty space
+// above it separates this section from the previous one).
+export function tblSectionHeaderYAxis(
+  spacers: { value: string; label: string }[],
+  marginLeft: number = TBL_MARGIN_LEFT,
+  fontSize: number = TBL.size.axis,
+  gap = 12,
+): Mark[] {
+  if (!spacers.length) return [];
+  return [
+    Plot.text(spacers, {
+      fy: (d: { value: string }) => d.value,
+      text: (d: { label: string }) => d.label,
+      frameAnchor: "bottom-left",
+      dx: -marginLeft,
+      dy: -gap,
+      textAnchor: "start",
+      fill: TBL.color.heading,
+      fontSize,
+      fontWeight: 700,
+    }),
+  ];
+}
+
+// The FIRST section has no leading spacer slot (so the figure doesn't open with a big empty gap);
+// its header is faceted on that section's FIRST CATEGORY and lifted up into the (enlarged) top
+// margin via a negative dy, so it sits just above the section's first bar at the very top.
+export function tblSectionTopHeader(
+  header: { category: string; label: string },
+  marginLeft: number = TBL_MARGIN_LEFT,
+  lift = 14,
+  fontSize: number = TBL.size.axis,
+): Mark[] {
+  return [
+    Plot.text([header], {
+      fy: (d: { category: string }) => d.category,
+      text: (d: { label: string }) => d.label,
+      frameAnchor: "top-left",
+      dx: -marginLeft,
+      dy: -lift,
+      textAnchor: "start",
+      fill: TBL.color.heading,
+      fontSize,
+      fontWeight: 700,
     }),
   ];
 }

@@ -18,8 +18,13 @@ import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { assemblePlot } from "../src/engine/assemble-plot";
 import { Plot, d3 } from "../src/engine/vendor";
-import { TBL } from "../src/engine/theme";
-import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
+import {
+  TBL,
+  SHARED_LABELLESS_MARGIN_LEFT,
+  TBL_MARGIN_LEFT,
+  TBL_MARGIN_RIGHT,
+} from "../src/engine/theme";
+import { paneTitleMark, temporalXTicks, isSectionSpacer } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
@@ -173,7 +178,7 @@ const BAR_GROUPED_HORIZONTAL_SPEC: ChartSpec = {
 };
 
 describe("golden SVG — bars", () => {
-  it("renders a single-series bar chart (brand.blue, value labels)", async () => {
+  it("renders a single-series bar chart (brand.blue)", async () => {
     const rows = parseCsv("./fixtures/bar-single.csv");
     const { svg } = renderChart(BAR_SINGLE_SPEC, rows, { width: 720, height: 400, document });
     // 4 bars rendered.
@@ -296,15 +301,14 @@ describe("golden SVG — bars", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-negative.golden.svg");
   });
 
-  it("suppresses value labels when bars are too thin", async () => {
+  it("emits no in-bar value labels (the feature was removed)", async () => {
     const rows = parseCsv("./fixtures/bar-thin.csv");
     const { svg } = renderChart(BAR_THIN_SPEC, rows, { width: 720, height: 400, document });
     // Bars still render...
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(24);
-    // ...but the value-label text mark is omitted entirely. When suppressed, only the chrome
-    // text groups are present: the y-tick-label group and the band x-axis group (2 total).
-    // A value-label Plot.text call would add a third g[aria-label="text"]. This assertion is
-    // robust to label content — it counts groups, not specific text strings.
+    // ...with NO value-label text mark: only the chrome text groups are present — the y-tick-label
+    // group and the band x-axis group (2 total). A value-label Plot.text call would add a third
+    // g[aria-label="text"]. (Counts groups, not specific text strings, so it's content-robust.)
     const textGroups = svg.querySelectorAll('g[aria-label="text"]');
     expect(textGroups.length).toBe(2);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-thin.golden.svg");
@@ -357,8 +361,9 @@ describe("golden SVG — bars", () => {
     expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-gridline").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-zero-baseline").length).toBe(1);
-    // Surviving gridlines span the full plot height (continuous vertical rules): the kept
-    // group's lines were stretched to top→bottom plot edges (marginTop..height-marginBottom).
+    // Surviving gridlines span the full plot height (continuous vertical rules): the kept group's
+    // lines were stretched top→bottom, with the top extended ~8px ABOVE the first bar (marginTop)
+    // for immediate context, down to the bottom plot edge (height-marginBottom).
     const mt = Number(svg.dataset.marginTop);
     const mb = Number(svg.dataset.marginBottom);
     const gridGroup = svg.querySelector("g.tbl-gridline");
@@ -367,7 +372,7 @@ describe("golden SVG — bars", () => {
       return m ? Number(m[1]) : 0;
     })();
     const firstLine = gridGroup?.querySelector("line");
-    expect(Number(firstLine?.getAttribute("y1")) + gridTy).toBeCloseTo(mt, 0);
+    expect(Number(firstLine?.getAttribute("y1")) + gridTy).toBeCloseTo(mt - 8, 0);
     expect(Number(firstLine?.getAttribute("y2")) + gridTy).toBeCloseTo(400 - mb, 0);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-grouped-horizontal.golden.svg");
   });
@@ -377,6 +382,290 @@ describe("golden SVG — bars", () => {
     const a = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+// --- Faceted-horizontal label/gutter signals (hideCategoryLabels + categoryGutter) ---
+
+describe("bar builder — faceted-horizontal label signals", () => {
+  const HBASE: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    series_order: ["2019", "2022", "2025"],
+    data: "bar-multi.csv",
+  };
+
+  it("hideCategoryLabels omits the y-band labels for grouped horizontal", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const shown = renderChart(HBASE, rows, { width: 400, height: 400, document });
+    const hidden = renderChart(HBASE, rows, {
+      width: 400,
+      height: 400,
+      document,
+      hideCategoryLabels: true,
+    });
+    const labelCount = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll("text")).filter((t) =>
+        /Northeast|Midwest|South/.test(t.textContent ?? ""),
+      ).length;
+    expect(labelCount(shown.svg)).toBeGreaterThan(0);
+    expect(labelCount(hidden.svg)).toBe(0);
+    expect(Number(hidden.svg.dataset.marginLeft)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
+  });
+
+  it("categoryGutter overrides the computed gutter (plot margin follows it)", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const r = renderChart(HBASE, rows, { width: 400, height: 400, document, categoryGutter: 180 });
+    expect(Number(r.svg.dataset.marginLeft)).toBe(180);
+  });
+});
+
+// --- Faceted horizontal bars (Figure 7: scenario panes, grouped Pre/Post bars) ---
+
+const FIG7_FACETED_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Consumer Price Effects by PCE Spending Category",
+  subtitle: "Percent change in consumer prices",
+  xAxisType: "categorical",
+  orientation: "horizontal",
+  series_order: ["Pre-Substitution", "Post-Substitution"],
+  columns: { x: "category", value: "value", series: "series", facet: "facet" },
+  small_multiples: {
+    columns: 2,
+    mode: "shared",
+    pane_order: ["Section 122 Expires", "Section 122 Extended"],
+  },
+  data: "figure7-tariff.csv",
+};
+
+describe("figure — faceted horizontal bars (shared mode)", () => {
+  it("leftmost pane has a wide gutter; others suppress labels; value axis is shared", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    expect(fig.panes.length).toBe(2);
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    // Leftmost gutter wide enough for the longest label (well over the 44px default).
+    expect(Number(p0.dataset.marginLeft)).toBeGreaterThan(120);
+    // Non-leftmost pane: tiny margin, no category labels.
+    expect(Number(p1.dataset.marginLeft)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
+    const catLabels = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll("text")).filter((t) =>
+        /Motor vehicles/.test(t.textContent ?? ""),
+      ).length;
+    expect(catLabels(p0)).toBe(1);
+    expect(catLabels(p1)).toBe(0);
+    // Each pane: 20 categories × 2 series = 40 rects.
+    expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    // Shared value (x) axis: both panes show the same max value tick.
+    const maxTick = (svg: SVGSVGElement) =>
+      Math.max(
+        ...Array.from(svg.querySelectorAll("text"))
+          .map((t) => parseFloat((t.textContent ?? "").replace("%", "")))
+          .filter((v) => Number.isFinite(v)),
+      );
+    expect(maxTick(p0)).toBe(maxTick(p1));
+  });
+
+  it("auto-grows the figure height with the row count when no height is given", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const h0 = Number((fig.panes[0]!.svg as SVGSVGElement).getAttribute("height"));
+    const h1 = Number((fig.panes[1]!.svg as SVGSVGElement).getAttribute("height"));
+    // 20 categories × 2 series → far taller than the 320 fixed pane height, and shared across panes.
+    expect(h0).toBeGreaterThan(900);
+    expect(h1).toBe(h0);
+  });
+
+  it("wraps long category labels onto multiple lines (no overflow into the plot)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    // The longest label wraps: its <text> carries multiple <tspan> lines.
+    const wrapped = Array.from(p0.querySelectorAll("text")).find((t) =>
+      (t.textContent ?? "").startsWith("Food and beverages"),
+    );
+    expect(wrapped).toBeTruthy();
+    expect(wrapped!.querySelectorAll("tspan").length).toBeGreaterThan(1);
+  });
+
+  it("x_axis_ticks 'both' draws value-tick labels at the top AND bottom of each pane", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const bottomOnly = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const both = renderFigure({ ...FIG7_FACETED_SPEC, x_axis_ticks: "both" }, rows, { width: 900, document });
+    const bp = bottomOnly.panes[0]!.svg as SVGSVGElement;
+    const tp = both.panes[0]!.svg as SVGSVGElement;
+    // Default: one bottom tick-label group, no top group.
+    expect(bp.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
+    expect(bp.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(0);
+    // "both": one bottom group AND one top group (per pane, after the facet-chrome collapse).
+    expect(tp.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
+    expect(tp.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(1);
+  });
+
+  it("faceted horizontal figure is deterministic and matches the golden", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const a = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document }));
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff.golden.svg");
+  });
+});
+
+// --- Sectioned horizontal category axis (columns.section) ---
+
+describe("bar builder — sectioned horizontal category axis", () => {
+  const SECTIONED_SINGLE: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    subtitle: "Percent change in consumer prices",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    series_order: ["Pre-Substitution", "Post-Substitution"],
+    columns: { x: "category", value: "value", series: "series", section: "toplevel" },
+    section_order: ["Durable goods", "Nondurable goods", "Services"],
+    data: "figure7-tariff.csv",
+  };
+
+  it("orders categories by section and renders bold section headers", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const { svg } = renderChart(SECTIONED_SINGLE, rows, { width: 520, height: 760, document });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+    // Section headers present.
+    expect(texts).toContain("Durable goods");
+    expect(texts).toContain("Nondurable goods");
+    expect(texts).toContain("Services");
+    // Headers are bold (700).
+    const bold = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map(
+      (t) => t.textContent ?? "",
+    );
+    expect(bold).toContain("Durable goods");
+    // The spacer sentinel never leaks into rendered text.
+    expect(texts.some((t) => isSectionSpacer(t))).toBe(false);
+    // Still one rect per (category × series): 20 × 2 = 40.
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("section_labels overrides the header text", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const spec: ChartSpec = {
+      ...SECTIONED_SINGLE,
+      section_labels: { "Durable goods": "Durables" },
+    };
+    const { svg } = renderChart(spec, rows, { width: 520, height: 760, document });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+    expect(texts).toContain("Durables");
+    expect(texts).not.toContain("Durable goods");
+  });
+});
+
+// --- Figure 7: the full faceted + sectioned horizontal bar chart ---
+
+const FIG7_SECTIONED_SPEC: ChartSpec = {
+  ...FIG7_FACETED_SPEC,
+  columns: { x: "category", value: "value", series: "series", facet: "facet", section: "toplevel" },
+  section_order: ["Durable goods", "Nondurable goods", "Services"],
+};
+
+describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
+  it("section headers render once (leftmost pane only); categories are section-grouped", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document });
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    const headers = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
+    expect(headers(p0).sort()).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+    // Suppressed on the non-leftmost pane (only its bars + value ticks show).
+    expect(headers(p1)).not.toContain("Durable goods");
+    // Both panes keep all bars (20 categories × 2 series).
+    expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("faceted + sectioned figure is deterministic and matches the golden", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const a = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-sectioned.golden.svg");
+  });
+});
+
+// --- Variable pane widths (small_multiples.pane_widths) ---
+
+describe("figure — variable pane widths", () => {
+  const BASE: ChartSpec = {
+    chartType: "bar",
+    title: "Variable widths",
+    xAxisType: "categorical",
+    columns: { x: "category", value: "value", facet: "facet" },
+    data: "facet-varwidth.csv",
+    small_multiples: { mode: "shared", pane_order: ["Durable goods", "Services"] },
+  };
+  // Durable goods has 4 categories (bars); Services has 2. Single row of 2 panes.
+  // Inner data width from the outer column width + its left margin (col 0 = gutter, col 1 = small).
+  const dataW = (colW: number, col: number) =>
+    colW - (col === 0 ? TBL_MARGIN_LEFT : SHARED_LABELLESS_MARGIN_LEFT) - TBL_MARGIN_RIGHT;
+
+  it("equal (default): both panes get the same data width despite different bar counts", () => {
+    const rows = parseCsv("./fixtures/facet-varwidth.csv");
+    const fig = renderFigure(BASE, rows, { width: 900, document });
+    expect(fig.panes.length).toBe(2);
+    const w = fig.columnWidths!;
+    expect(dataW(w[0]!, 0)).toBeCloseTo(dataW(w[1]!, 1), 4);
+  });
+
+  it("equal-bar: a pane's data width is proportional to its bar count (4 vs 2 → 2:1)", () => {
+    const rows = parseCsv("./fixtures/facet-varwidth.csv");
+    const spec: ChartSpec = {
+      ...BASE,
+      small_multiples: { ...BASE.small_multiples!, pane_widths: "equal-bar" },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, document });
+    const w = fig.columnWidths!;
+    expect(dataW(w[0]!, 0)).toBeCloseTo(2 * dataW(w[1]!, 1), 3);
+    // Bars per pane unchanged (4 and 2).
+    expect(fig.panes[0]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
+    expect(fig.panes[1]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(2);
+  });
+
+  it("coordinates x-axis label mode so panes share one bottom margin (baselines align)", () => {
+    // Pane A has 5 long category labels (would rotate at this width); pane B has 2 short ones
+    // (would stay single). Without coordination their bottom margins — and baselines — would differ.
+    const rows: TidyRow[] = [] as TidyRow[];
+    const aCats = ["Motor vehicles and parts", "Furnishings and equipment", "Recreation goods",
+      "Financial services", "Health care services"];
+    for (const c of aCats) rows.push({ facet: "A", category: c, value: "2" } as TidyRow);
+    for (const c of ["X", "Y"]) rows.push({ facet: "B", category: c, value: "1" } as TidyRow);
+    const spec: ChartSpec = {
+      chartType: "bar", title: "t", xAxisType: "categorical",
+      columns: { x: "category", value: "value", facet: "facet" },
+      data: "x", small_multiples: { mode: "shared", pane_order: ["A", "B"] },
+    };
+    const fig = renderFigure(spec, rows, { width: 640, document });
+    const mbs = fig.panes.map((p) => (p.svg as SVGSVGElement).dataset.marginBottom);
+    expect(new Set(mbs).size).toBe(1); // every pane reserves the same bottom margin
+  });
+
+  it("custom proportions [2,1]: column 0's data width is twice column 1's", async () => {
+    const rows = parseCsv("./fixtures/facet-varwidth.csv");
+    const spec: ChartSpec = {
+      ...BASE,
+      small_multiples: { ...BASE.small_multiples!, pane_widths: [2, 1] },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, document });
+    const w = fig.columnWidths!;
+    expect(dataW(w[0]!, 0)).toBeCloseTo(2 * dataW(w[1]!, 1), 3);
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/facet-varwidth.golden.svg");
   });
 });
 
@@ -1226,5 +1515,81 @@ describe("axes primitives — pane titles + tick density (task B3)", () => {
     // Sentinel against an unused import.
     expect(typeof makeTickFormatter([0, 1], "")).toBe("function");
     expect(typeof d3.timeFormat).toBe("function");
+  });
+});
+
+describe("figure — per-pane mode with variable pane widths (independent y-axes)", () => {
+  // Two facets with deliberately different value ranges → different y-domains and different zero
+  // points (one all-positive, one spanning negatives). Per-pane mode gives each its own y-axis.
+  const ROWS: TidyRow[] = [
+    { facet: "All positive", category: "A", value: "20" },
+    { facet: "All positive", category: "B", value: "80" },
+    { facet: "Signed", category: "A", value: "-40" },
+    { facet: "Signed", category: "B", value: "35" },
+  ];
+  const SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "Per-pane widths",
+    xAxisType: "categorical",
+    columns: { x: "category", value: "value", facet: "facet" },
+    small_multiples: { mode: "per-pane", pane_order: ["All positive", "Signed"], pane_widths: [3, 1] },
+    data: "x",
+  };
+
+  // Category labels ("A"/"B") and the title are non-numeric → filtered out, leaving the y ticks.
+  const numericYTicks = (svg: SVGSVGElement): number[] =>
+    Array.from(svg.querySelectorAll("text"))
+      .map((t) => parseFloat(t.textContent ?? ""))
+      .filter((v) => Number.isFinite(v));
+
+  it("distributes column widths 3:1 while every pane keeps its own y-axis gutter", () => {
+    const fig = renderFigure(SPEC, ROWS, { gridWidth: 900, gridGap: 16, document });
+    expect(fig.mode).toBe("per-pane");
+    expect(fig.columnWidths?.length).toBe(2);
+    const R = TBL_MARGIN_RIGHT;
+    const LM = TBL_MARGIN_LEFT;
+    const d0 = fig.columnWidths![0]! - LM - R;
+    const d1 = fig.columnWidths![1]! - LM - R;
+    expect(d0).toBeCloseTo(3 * d1, 3);
+    // Both panes carry the full label gutter (independent axes → col 1 is NOT the shared-mode
+    // narrow label-less margin).
+    expect(Number((fig.panes[0]!.svg as SVGSVGElement).dataset.marginLeft)).toBe(LM);
+    expect(Number((fig.panes[1]!.svg as SVGSVGElement).dataset.marginLeft)).toBe(LM);
+  });
+
+  it("gives each pane an independent y-domain (different zero points)", () => {
+    const fig = renderFigure(SPEC, ROWS, { gridWidth: 900, gridGap: 16, document });
+    const pos = numericYTicks(fig.panes[0]!.svg as SVGSVGElement);
+    const signed = numericYTicks(fig.panes[1]!.svg as SVGSVGElement);
+    // All-positive pane: no negative ticks. Signed pane: has a negative tick (zero sits mid-axis).
+    expect(Math.min(...pos)).toBeGreaterThanOrEqual(0);
+    expect(Math.min(...signed)).toBeLessThan(0);
+    // The domains genuinely differ (per-pane, not one shared scale).
+    expect(Math.max(...pos)).toBeGreaterThan(Math.max(...signed));
+  });
+
+  it("coordinates x-label rotation across panes so their baselines align", () => {
+    // One pane has short labels, the other has long labels that would rotate on their own. Both
+    // panes must reserve the SAME bottom margin (worst-case mode) so the baselines line up.
+    const rows: TidyRow[] = [
+      { facet: "Short", category: "A", value: "10" },
+      { facet: "Short", category: "B", value: "20" },
+      { facet: "Long", category: "Administrative and support services", value: "12" },
+      { facet: "Long", category: "Professional and technical services", value: "18" },
+    ];
+    const spec: ChartSpec = {
+      chartType: "bar",
+      title: "Coordinated rotation",
+      xAxisType: "categorical",
+      columns: { x: "category", value: "value", facet: "facet" },
+      small_multiples: { mode: "per-pane", pane_order: ["Short", "Long"], pane_widths: [1, 1] },
+      data: "x",
+    };
+    const fig = renderFigure(spec, rows, { gridWidth: 700, gridGap: 16, document });
+    const mb0 = Number((fig.panes[0]!.svg as SVGSVGElement).dataset.marginBottom);
+    const mb1 = Number((fig.panes[1]!.svg as SVGSVGElement).dataset.marginBottom);
+    expect(mb0).toBe(mb1);
+    // The long-label pane forces a taller margin than a short-only single-line axis would need.
+    expect(mb0).toBeGreaterThan(28);
   });
 });

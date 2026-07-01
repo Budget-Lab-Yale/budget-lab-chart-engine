@@ -23,6 +23,9 @@ export const Y_TICK_LABEL_CLASS = "tbl-y-tick-label";
 /** ClassName stamped on the value-axis tick-label text mark in the HORIZONTAL (fy) layout
  *  (assemble-plot) so the fy collapse can find the per-facet copies. */
 export const X_TICK_LABEL_CLASS = "tbl-x-tick-label";
+/** Horizontal value-axis tick labels drawn at the TOP (x_axis_ticks "top"/"both"). Collapsed to a
+ *  single row at the plot top by collapseFacetChromeY (the first facet's row is already at the top). */
+export const X_TICK_LABEL_TOP_CLASS = "tbl-x-tick-label-top";
 /** ClassName PREFIX stamped on each yAxisPolicy reference-line ruleY (assemble-plot appends a
  *  per-marker index). The fx-facet collapse stretches each to the full plot width so the line
  *  runs edge-to-edge like a line chart instead of stopping at each facet's frame. */
@@ -285,13 +288,40 @@ export function collapseFacetChromeY(
     }
   }
 
-  // 2 + 3. Gridlines and zero baseline: collapse to the first facet, then stretch its lines
-  //         to full plot height in the kept group's local frame.
+  // 1b. Top value-axis tick labels (x_axis_ticks "top"/"both"): keep the first facet's row and move
+  //     it to near the SVG TOP (just under the pane title) — not the plot-area top, which would
+  //     leave a big empty band above the ticks. The first facet's local top comes from the gridline
+  //     y1; we re-translate so the ticks land at TOP_TICK_PLACE.
+  const topLabelGroups = Array.from(svg.querySelectorAll<SVGGElement>(`g.${X_TICK_LABEL_TOP_CLASS}`));
+  if (topLabelGroups.length) {
+    const TOP_TICK_PLACE = 12; // facet-top target; the ticks' own dy (−8) lands the text ~4px down
+    const kept = topLabelGroups[0] as SVGGElement;
+    for (let i = 1; i < topLabelGroups.length; i++) topLabelGroups[i]?.remove();
+    const ty = readTranslateY(kept);
+    const firstGrid = svg.querySelector<SVGGElement>(`g.${GRIDLINE_CLASS}`);
+    let facetTopLocal = topAbs - ty; // fallback
+    if (firstGrid) {
+      const gl = firstGrid.querySelector<SVGLineElement>("line");
+      if (gl) facetTopLocal = Number(gl.getAttribute("y1") ?? facetTopLocal);
+    }
+    const dy = TOP_TICK_PLACE - (ty + facetTopLocal);
+    if (dy !== 0) {
+      const tx = readTranslateX(kept);
+      kept.setAttribute("transform", `translate(${tx},${ty + dy})`);
+    }
+  }
+
+  // 2 + 3. Gridlines and zero baseline: collapse to the first facet, then stretch its lines to full
+  //         plot height. The top is extended a few px ABOVE the first bar (topAbs) so the scale has
+  //         immediate context above the topmost bar; the zero baseline is not extended (it reads as
+  //         a spine and shouldn't float above the data).
+  const GRIDLINE_TOP_EXTEND = 8;
   for (const cls of [GRIDLINE_CLASS, ZERO_BASELINE_CLASS]) {
     const kept = collapseDuplicateGroups(cls);
     const group = kept[0];
     if (!group) continue;
     const ty = readTranslateY(group);
-    stretchLinesToFullHeight(group, topAbs - ty, bottomAbs - ty);
+    const top = cls === GRIDLINE_CLASS ? topAbs - GRIDLINE_TOP_EXTEND : topAbs;
+    stretchLinesToFullHeight(group, top - ty, bottomAbs - ty);
   }
 }

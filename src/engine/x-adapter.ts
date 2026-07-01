@@ -47,7 +47,9 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       validate: (r) => Number.isFinite(r._xn),
       buildXOpts(data, faceted = false) {
         const xMax = d3.max(data, (d: any) => d._xn) as number;
-        const anchorAtZero = xAxisPolicy?.anchorAtZero !== false;
+        // Default OFF: a numeric axis fits its data range. Anchoring at zero is surprising for a
+        // year axis (it squishes all history to the right); opt in with anchorAtZero: true.
+        const anchorAtZero = xAxisPolicy?.anchorAtZero === true;
         const xMin = anchorAtZero
           ? Math.min(0, d3.min(data, (d: any) => d._xn) as number)
           : (d3.min(data, (d: any) => d._xn) as number);

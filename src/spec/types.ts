@@ -18,9 +18,14 @@ export interface XAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
-  /** Label horizontal alignment relative to the line ("start" = right of line, default). */
-  labelAnchor?: "start" | "middle" | "end";
-  /** Vertical nudge (px, signed: + = down) of the label from the top of the plot. Default 0. */
+  /** Which SIDE of the (vertical) line the label sits — its relation to the line: "right" (default)
+   *  = to the right of the line, "left" = to the left, "middle" = centered on the line. */
+  labelSide?: "left" | "middle" | "right";
+  /** WHERE along the (vertical) line the label sits, relative to the x-axis: "top" (default) = top
+   *  of the plot (auto-staggered to avoid collisions), "middle" = vertical center, "bottom" = just
+   *  above the x-axis. `labelDy` still nudges from there. */
+  labelPosition?: "top" | "middle" | "bottom";
+  /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default 0. */
   labelDy?: number;
   /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
   labelDx?: number;
@@ -37,7 +42,8 @@ export interface XAxisBand {
 }
 
 export interface XAxisPolicy {
-  /** Numeric axis only: extend the visible domain to include 0. */
+  /** Numeric axis only: extend the visible domain to include 0. Default FALSE (the axis fits its
+   *  data range) — anchoring at zero is surprising for a year axis. */
   anchorAtZero?: boolean;
   /** Vertical reference lines (e.g. a treatment date). */
   markers?: XAxisMarker[];
@@ -52,12 +58,15 @@ export interface YAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
-  /** Which side the label sits + anchors to ("right" default → right edge, right-aligned;
-   *  "left" → left edge, left-aligned). */
-  labelSide?: "left" | "right";
+  /** Which SIDE of the (horizontal) line the label sits — its relation to the line: "top" (default)
+   *  = above the line, "middle" = centered on the line, "bottom" = below the line. */
+  labelSide?: "top" | "middle" | "bottom";
+  /** WHERE along the (horizontal) line the label sits: "right" (default) = right edge, right-aligned;
+   *  "left" = left edge, left-aligned; "middle" = horizontally centered. */
+  labelPosition?: "left" | "middle" | "right";
   /** Horizontal nudge (px, signed: + = right) of the label from its anchored edge. */
   labelDx?: number;
-  /** Vertical nudge (px, signed: + = down) of the label from the line. Default -5 (above). */
+  /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default above. */
   labelDy?: number;
 }
 
@@ -81,7 +90,9 @@ export interface PointCallout {
   series?: string;
   label: string;
   color?: ColorRef;
+  /** Horizontal nudge (px, signed: + = right) of the label from the point. */
   dx?: number;
+  /** Vertical nudge (px, signed: + = UP) of the label from the point. */
   dy?: number;
   connector?: boolean;
 }
@@ -135,6 +146,13 @@ export interface SmallMultiplesConfig {
   /** Coordinated cursor: hovering one pane echoes a secondary cursor (guide + compact value
    *  labels) on every other pane at the same x. Default true; set false to disable. */
   coordinated_cursor?: boolean;
+  /** How a row's width is split among its columns (shared across all rows; vertical bar facets).
+   *  - "equal" (default): every column the same data width.
+   *  - "equal-bar": each column's width ∝ its bar count, so bars render at the same width (exact for
+   *    a single row; multi-row sizes each column to the max bar count among its panes).
+   *  - number[]: explicit per-column proportions, length === the grid column count, applied to every
+   *    row (e.g. [2, 1] → column 0 twice as wide as column 1). */
+  pane_widths?: "equal" | "equal-bar" | number[];
 }
 
 /** Maps data-column names onto the roles the engine consumes. Any column name is allowed; the
@@ -154,6 +172,10 @@ export interface ColumnMap {
    *  independent of `series` (which drives color). Point both at the same column for redundant
    *  color+shape encoding (the dot-plot default). Omit ⇒ a single shape (circle), no shape legend. */
   shape?: string;
+  /** Horizontal bar charts: column whose distinct values group the categories into labeled
+   *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
+   *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
+  section?: string;
 }
 
 export interface ChartSpec {
@@ -170,6 +192,10 @@ export interface ChartSpec {
   source?: string;
   note?: string;
   x_axis_title?: string;
+  /** Where to place the x-axis (value-axis, for horizontal bars) TICK LABELS: "bottom" (default),
+   *  "top", or "both". "both" repeats the scale at top and bottom — useful for very tall horizontal
+   *  charts so the scale is readable without scrolling. */
+  x_axis_ticks?: "bottom" | "top" | "both";
   /** Y-axis title — a short caption above the axis (left-aligned, horizontal). Coexists with the
    *  units subtitle; the author manages any redundancy. */
   y_axis_title?: string;
@@ -201,6 +227,12 @@ export interface ChartSpec {
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
   x_labels?: Record<string, string>;
+
+  // Section axis (horizontal bars; the section COLUMN is mapped via `columns.section`).
+  /** Section render order along the category axis; also an inclusion filter (like series_order). */
+  section_order?: string[];
+  /** Section value → display label for the section header. */
+  section_labels?: Record<string, string>;
 
   // Shape channel (point charts: scatter / dotplot). The shape COLUMN is mapped via
   // `columns.shape`; these mirror the series_* fields for the shape-encoding legend.

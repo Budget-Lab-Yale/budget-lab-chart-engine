@@ -223,9 +223,9 @@ describe("computeChartHeight", () => {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
       series_order: ["X", "Y", "Z"], data: "x",
     };
-    // 6 categories x 3 series = 18 rows → 18*34 + 80 = 692, above the floor.
+    // 6 categories, grouped → each category slot = 3 series × 22px = 66px → 6×66 + 80 = 476.
     const h = computeChartHeight(spec, catRows(["a", "b", "c", "d", "e", "f"], ["X", "Y", "Z"]));
-    expect(h).toBe(18 * 34 + 80);
+    expect(h).toBe(6 * 66 + 80);
     expect(h).toBeGreaterThan(400);
   });
 
@@ -234,12 +234,28 @@ describe("computeChartHeight", () => {
       chartType: "stacked", title: "h", xAxisType: "categorical", orientation: "horizontal",
       series_order: ["X", "Y", "Z"], data: "x",
     };
-    // 12 categories, stacked → 12 rows → 12*34 + 80 = 488.
-    const h = computeChartHeight(
-      spec,
-      catRows(["a","b","c","d","e","f","g","h","i","j","k","l"], ["X", "Y", "Z"]),
+    // 24 categories, stacked → one 22px slot per category → 24×22 + 80 = 608.
+    const cats = Array.from({ length: 24 }, (_, i) => `c${i}`);
+    expect(computeChartHeight(spec, catRows(cats, ["X", "Y", "Z"]))).toBe(24 * 22 + 80);
+  });
+
+  it("adds height for section spacer rows (first section has no spacer)", () => {
+    const base: ChartSpec = {
+      chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
+      series_order: ["X", "Y"], data: "x",
+    };
+    const cats = Array.from({ length: 10 }, (_, i) => `c${i}`);
+    const rows: TidyRow[] = [];
+    for (const s of ["X", "Y"]) for (let i = 0; i < 10; i++) {
+      rows.push({ time: cats[i], series: s, sec: i < 5 ? "P" : "Q", value: "1" } as TidyRow);
+    }
+    const unsectioned = computeChartHeight(base, rows);
+    const sectioned = computeChartHeight(
+      { ...base, columns: { x: "time", series: "series", section: "sec" } },
+      rows,
     );
-    expect(h).toBe(12 * 34 + 80);
+    // 2 sections → 1 spacer slot (44px) + 16px top header → sectioned is taller.
+    expect(sectioned).toBe(unsectioned + 44 + 16);
   });
 });
 

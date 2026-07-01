@@ -1,7 +1,37 @@
 // Unit tests for the categorical x-axis label layout decision (collision avoidance):
 // single line → wrap multi-word labels to two lines → rotate 45°.
 import { describe, it, expect } from "vitest";
-import { bandLabelMode, bandLabelMarginBottom, wrapBandLabel } from "../src/engine/axes";
+import {
+  bandLabelMode,
+  bandLabelMarginBottom,
+  wrapBandLabel,
+  wrapToWidth,
+  labelLineCount,
+} from "../src/engine/axes";
+
+describe("wrapToWidth (gutter label wrapping)", () => {
+  it("returns the label unchanged when it fits (no newline)", () => {
+    // "Health care" ≈ 11*5.775 ≈ 64px, well under 200.
+    expect(wrapToWidth("Health care", 200)).toBe("Health care");
+    expect(wrapToWidth("Health care", 200).includes("\n")).toBe(false);
+  });
+
+  it("wraps a long multi-word label onto multiple lines, each within the width", () => {
+    const wrapped = wrapToWidth("Furnishings and durable household equipment", 150);
+    expect(wrapped.includes("\n")).toBe(true);
+    // Every line fits the width (char estimate 5.775/char → 150px ≈ 26 chars).
+    for (const line of wrapped.split("\n")) expect(line.length).toBeLessThanOrEqual(27);
+  });
+
+  it("keeps a single over-long word on its own line rather than looping", () => {
+    expect(wrapToWidth("Supercalifragilistic", 10)).toBe("Supercalifragilistic");
+  });
+
+  it("labelLineCount counts the wrapped lines", () => {
+    expect(labelLineCount("Health care", 200)).toBe(1);
+    expect(labelLineCount("Food and beverages purchased for off-premises consumption", 150)).toBeGreaterThan(1);
+  });
+});
 
 describe("bandLabelMode", () => {
   it("stays single-line when labels comfortably fit (wide plot, few short labels)", () => {
@@ -47,6 +77,9 @@ describe("bandLabelMarginBottom", () => {
     const cats = ["Total", "Physical care", "Reading"];
     expect(bandLabelMarginBottom(cats, "single")).toBe(22);
     expect(bandLabelMarginBottom(cats, "wrap")).toBeGreaterThan(22);
-    expect(bandLabelMarginBottom(["A very very long single category label"], "rotate")).toBeLessThanOrEqual(74);
+    // A realistic ~20-char label reserves enough drop to clear the 45° footprint (was clipped at
+    // the old 74px cap); very long labels are still capped so the margin can't dominate the chart.
+    expect(bandLabelMarginBottom(["Manufacturing output"], "rotate")).toBeGreaterThan(74);
+    expect(bandLabelMarginBottom(["A very very long single category label"], "rotate")).toBeLessThanOrEqual(120);
   });
 });

@@ -16,9 +16,11 @@ import {
   resolveFacetCell,
   buildFacetTooltipHtml,
   attachFacetCrosshair,
+  attachSecondaryBandCursor,
   type FacetCell,
 } from "../src/engine/crosshair";
 import { mountChart } from "../src/engine/render-live";
+import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -279,5 +281,79 @@ describe("mountFigure shared crosshair wiring", () => {
     });
     teardown();
     container.remove();
+  });
+});
+
+describe("coordinated cursor — horizontal bars (row highlight + tip pills, no tooltip)", () => {
+  const spec: ChartSpec = {
+    chartType: "bar",
+    title: "h",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    series_order: ["2019", "2022", "2025"],
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
+  } as ChartSpec;
+
+  const rows: TidyRow[] = [];
+  for (const facet of ["A", "B"]) {
+    for (const cat of ["Northeast", "Midwest", "South"]) {
+      for (const s of ["2019", "2022", "2025"]) {
+        rows.push({ facet, time: cat, series: s, value: "2" } as TidyRow);
+      }
+    }
+  }
+
+  it("faceted horizontal panes wire a band crosshair (coordinated), not a line tooltip", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const teardown = mountChart(container, { spec, rows, width: 838, height: 600 });
+    const paneSvgs = container.querySelectorAll(".figure-pane svg");
+    expect(paneSvgs.length).toBe(2);
+    paneSvgs.forEach((svg) => {
+      // Band crosshair (categorical) hit overlay present; NOT the continuous-line crosshair.
+      expect(svg.querySelector(".tbl-band-crosshair-hit")).not.toBeNull();
+    });
+    teardown();
+    container.remove();
+  });
+
+  it("faceted horizontal bars never stack — one row inside a horizontal-scroll wrapper, even when narrow", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    // A narrow width would normally reflow 2 panes to 1 column (2 rows); horizontal bars must not.
+    const teardown = mountChart(container, { spec, rows, width: 300, height: 600 });
+    expect(container.querySelector(".figure-grid-scroll")).not.toBeNull();
+    const grid = container.querySelector(".figure-grid") as HTMLElement;
+    // Both panes stay in a single row (2 explicit column widths, 2 panes).
+    expect(container.querySelectorAll(".figure-pane").length).toBe(2);
+    expect(grid.style.gridTemplateColumns.trim().split(/\s+/).length).toBe(2);
+    teardown();
+    container.remove();
+  });
+
+  it("the horizontal secondary band cursor shades the category row and labels each bar tip", () => {
+    const { svg } = renderChart(spec, rows.filter((r) => r.facet === "A"), {
+      width: 420,
+      height: 600,
+      document,
+    });
+    const driver = attachSecondaryBandCursor(svg, {
+      rows: rows.filter((r) => r.facet === "A").map((r) => ({ _xc: r.time as string, series: r.series as string, _y: 2 })),
+      isFaceted: true,
+      categories: ["Northeast", "Midwest", "South"],
+      colors: new Map([["2019", "#1"], ["2022", "#2"], ["2025", "#3"]]),
+      seriesOrder: ["2019", "2022", "2025"],
+      horizontal: true,
+    });
+    driver("Midwest", true);
+    // One shaded row region (opacity 0.12) + one pill per series (3) labelling the bar tips.
+    const coordGroup = svg.querySelector('g[opacity="1"]');
+    expect(coordGroup).not.toBeNull();
+    expect(coordGroup!.querySelectorAll('rect[opacity="0.12"]').length).toBe(1);
+    expect(coordGroup!.querySelectorAll("text").length).toBe(3);
+    driver(null);
+    expect(svg.querySelector('g[opacity="1"]')).toBeNull();
   });
 });

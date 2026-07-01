@@ -12,6 +12,7 @@ import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
 import { bandLabelMode } from "./axes";
+import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -61,6 +62,20 @@ export interface RenderOptions {
    *  legend order + colors stay series_order). The live layer passes a reordered list when series
    *  are selected (selected-to-bottom in click order) so a user can read a series against zero. */
   stackOrder?: string[];
+  /** Shared-mode small multiples, horizontal bars, non-leftmost panes: omit the category labels
+   *  (the horizontal analog of hideYAxisLabels, which only affects the vertical value axis).
+   *  Threaded into MarkContext.hideCategoryLabels. Absent → labels emitted. */
+  hideCategoryLabels?: boolean;
+  /** Shared-mode small multiples, horizontal bars: the shared category-gutter width (px) every
+   *  pane should use. Threaded into MarkContext.categoryGutter. Absent → builder computes its own. */
+  categoryGutter?: number;
+  /** Shared-mode small multiples (vertical bars): force the categorical x-axis label layout
+   *  ("single"/"wrap"/"rotate") instead of deciding it per-pane. The figure computes the worst-case
+   *  mode across all panes so every pane's labels look consistent. */
+  xLabelMode?: BandLabelMode;
+  /** Shared-mode small multiples (vertical bars): force the bottom margin (px) — the figure passes
+   *  the MAX across panes so every pane reserves the same space and their baselines align. */
+  marginBottom?: number;
 }
 
 export interface LegendItem {
@@ -220,6 +235,7 @@ export function renderPane(
       // Point charts: the independent shape-encoding value (drives marker symbol). When the shape
       // column IS the series column (redundant encoding) this simply mirrors `series`.
       if (cols.shape) row._shape = r[cols.shape] ?? "";
+      if (cols.section) row._section = r[cols.section] ?? "";
       (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {
@@ -384,11 +400,16 @@ export function renderPane(
       : [];
   const dataWidthForX =
     (opts.width ?? 720) - (opts.marginLeft ?? TBL_MARGIN_LEFT) - (opts.marginRight ?? TBL_MARGIN_RIGHT);
-  const xLabelMode = bandLabelMode(catsForX, dataWidthForX);
+  // A figure-forced mode (worst case across panes) wins, so every pane reserves the same bottom
+  // margin and their baselines align; otherwise decide per-pane from this pane's width + categories.
+  const xLabelMode = opts.xLabelMode ?? bandLabelMode(catsForX, dataWidthForX);
 
   // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
   // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
   const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null, xLabelMode);
+  // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
+  // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
+  if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
   const units = inferUnitsFromSubtitle(spec.subtitle);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
@@ -433,6 +454,9 @@ export function renderPane(
     // Dynamic stack order (area): the live layer passes a reordered list when a series is selected
     // (selected-to-bottom); the mark stacks in this order while legend/colors stay series_order.
     ...(opts.stackOrder ? { stackOrder: opts.stackOrder } : {}),
+    // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
+    ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
+    ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.

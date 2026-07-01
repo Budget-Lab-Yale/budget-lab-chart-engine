@@ -46,6 +46,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. |
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
+| `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
 
 ### Text
 
@@ -62,7 +63,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 
 | field | type | notes |
 |---|---|---|
-| `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. |
+| `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. **Default `false`** (the axis fits its data range — anchoring at zero squishes a year axis to the right). |
 | `x_order` | array | Categorical x-axis only: render order for the x-axis categories. Listed categories come first in this order; any unlisted ones follow in data-encounter order. **Order-only** — unlike `series_order`, it does *not* filter. Ignored off a categorical x-axis. |
 | `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). |
 | `yAxisPolicy.min` | number | Hard floor for the y-axis. |
@@ -92,10 +93,10 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 
 | field | type | notes |
 |---|---|---|
-| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelAnchor?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`; `labelAnchor` is `start`\|`middle`\|`end`. Labels auto-stagger to avoid collisions; `labelDx`/`labelDy` override placement. |
-| `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, style?, color?, strokeWidth?, labelSide?, labelDx?, labelDy?}`; `y` required. `labelSide` is `left`\|`right` (default right). |
+| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
+| `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?}`. |
-| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. |
+| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
 
 Marker/label `color` is a named color or `"#hex"`; the label color matches its line.
 
@@ -133,9 +134,8 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | field | type | notes |
 |---|---|---|
 | `orientation` | enum | `vertical` (default; value axis is Y) \| `horizontal`. |
-| `valueLabels.show` | boolean | Show in-bar value labels. |
-| `valueLabels.signed` | boolean | Force a leading `+`/`−` on value labels. |
-| `valueLabels.decimals` | integer | Fixed decimal places for value labels (else the minimum the data needs, capped at 2). |
+| `valueLabels.show` | boolean | **Stacked bars only.** Show per-segment value labels (in-bar value labels for plain/grouped bars were removed). Default off. |
+| `valueLabels.decimals` | integer | Fixed decimal places for the labels that remain (stacked segment + net callouts); else the minimum the data needs, capped at 2. |
 | `barStack.netDisplay` | enum | Net (sum) callout on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. |
 | `barStack.mono.base` | color | Monochrome stack: render all segments as shades of one base hue (a categorical hue key or alias; see [Colors](#colors)). |
 | `barStack.netLabelColor` | enum | `white` \| `black`. |
@@ -155,6 +155,25 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.pane_order` | array | Pane render order + inclusion filter. |
 | `small_multiples.pane_titles` | object | `{ <facetValue>: "Display title" }`. Falls back to the raw facet value. |
 | `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. |
+| `small_multiples.pane_widths` | enum \| array | How a row's width splits among its columns (vertical bar facets; applied to every row). `equal` (default) — same data width per column. `equal-bar` — each column sized to its bar count so bars render at the same width (exact for a single row; multi-row uses the max bar count per column). An array like `[2, 1]` sets explicit per-column proportions (length must equal the column count). When set and `columns` is unset, the panes lay out in a single row. |
+
+**Faceted horizontal bars.** `orientation: horizontal` combines with `small_multiples` to produce a
+faceted horizontal bar chart: each pane is one facet value, the panes share a single value (x) axis,
+and the category labels form a shared left gutter sized to the longest label — shown on the leftmost
+pane only, so the rows line up across panes. Works with single-series and grouped (multi-series)
+bars. Use `shared` mode (the default) so the value axis is comparable across panes.
+
+### Section axis (horizontal bars)
+
+Set `columns.section` to group the category axis into labeled sections (horizontal bar charts only).
+Categories are ordered so each section is contiguous, with a bold section header in the left gutter
+and a gap between sections. Combines with `small_multiples` (the headers show on the leftmost pane).
+
+| field | type | notes |
+|---|---|---|
+| `columns.section` | string | Column whose distinct values define the sections. |
+| `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`). |
+| `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
 ### Data
 
@@ -333,7 +352,8 @@ the engine expects `time`, `series`, `value`.
 | value | Numeric y-value. May be empty for missing observations. |
 
 Optional chart columns: confidence-bound columns (if `confidence_bands` references them), the facet
-column (if `columns.facet` is set), and the shape column (if `columns.shape` is set).
+column (if `columns.facet` is set), the shape column (if `columns.shape` is set), and the section
+column (if `columns.section` is set).
 
 **Tables** also use tidy/long data: one row per cell, with the `stub`, `header`, and `value`
 columns (plus optional `pane`, `emphasis_column`, `footnote_column`). The `value` column may hold

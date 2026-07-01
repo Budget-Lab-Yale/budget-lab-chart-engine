@@ -22,7 +22,8 @@ const X_MARKER_ARRAY = {
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
-      labelAnchor: { type: "string", enum: ["start", "middle", "end"] },
+      labelSide: { type: "string", enum: ["left", "middle", "right"] },
+      labelPosition: { type: "string", enum: ["top", "middle", "bottom"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
     },
@@ -56,7 +57,8 @@ const Y_MARKER_ARRAY = {
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
-      labelSide: { type: "string", enum: ["left", "right"] },
+      labelSide: { type: "string", enum: ["top", "middle", "bottom"] },
+      labelPosition: { type: "string", enum: ["left", "middle", "right"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
     },
@@ -175,6 +177,12 @@ const SMALL_MULTIPLES = {
     pane_order: { type: "array", items: { type: "string" } },
     pane_titles: { type: "object", additionalProperties: { type: "string" } },
     coordinated_cursor: { type: "boolean" },
+    pane_widths: {
+      anyOf: [
+        { type: "string", enum: ["equal", "equal-bar"] },
+        { type: "array", items: { type: "number", exclusiveMinimum: 0 }, minItems: 1 },
+      ],
+    },
   },
 } as const;
 
@@ -196,6 +204,7 @@ export const CHART_SPEC_SCHEMA = {
         series: { type: "string" },
         facet: { type: "string" },
         shape: { type: "string" },
+        section: { type: "string" },
       },
     },
 
@@ -206,6 +215,7 @@ export const CHART_SPEC_SCHEMA = {
     source: { type: "string" },
     note: { type: "string" },
     x_axis_title: { type: "string" },
+    x_axis_ticks: { type: "string", enum: ["bottom", "top", "both"] },
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
 
@@ -227,6 +237,10 @@ export const CHART_SPEC_SCHEMA = {
       },
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
+
+    // Section axis (horizontal bars; the section COLUMN is mapped via columns.section).
+    section_order: { type: "array", items: { type: "string" } },
+    section_labels: { type: "object", additionalProperties: { type: "string" } },
     x_order: { type: "array", items: { type: "string" } },
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 

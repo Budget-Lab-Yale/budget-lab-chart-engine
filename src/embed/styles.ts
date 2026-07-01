@@ -148,6 +148,15 @@ body {
   gap: 18px 16px;
   width: 100%;
 }
+/* Horizontal-bar and variable-width figures never reflow their panes to extra rows; when they
+   don't fit, this wrapper scrolls horizontally instead (the grid takes its natural width). */
+.figure-grid-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.figure-grid-scroll > .figure-grid {
+  width: max-content;
+}
 .figure-pane {
   min-width: 0;
 }

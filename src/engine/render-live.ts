@@ -12,7 +12,8 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
-import { renderFigure } from "./figure.js";
+import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figure.js";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import {
@@ -53,39 +54,65 @@ export interface MountOptions {
 const MIN_CHART_WIDTH = 390;
 const FIXED_CHART_HEIGHT = 400;
 
-// Horizontal bars grow taller with the bar/row count (the stakeholder blessed taller
-// horizontals). Per-row pixel budget + chrome headroom, floored at the vertical default so
-// short horizontals don't shrink. Vertical charts keep the fixed height.
-const HORIZONTAL_PX_PER_ROW = 34; // per bar (single/stacked: 1 per category; grouped: per series-in-group)
-const HORIZONTAL_CHROME_PX = 80; // top/bottom margins + value-axis label row + a little slack
-
-/** Compute the live-mount height for a chart. Horizontal bars scale with the number of bars
- *  (rows): single-series / stacked → one row per category; grouped → categories x series.
- *  Vertical charts (and non-bar types) return the fixed default. Floored at
- *  FIXED_CHART_HEIGHT so short horizontals are not smaller than a vertical chart. */
+/** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
+ *  band slots (grouped → nSeries bars per category; stacked/single → one), plus section spacer
+ *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarHeight`,
+ *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
+ *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
     return FIXED_CHART_HEIGHT;
   }
   const cols = resolveColumns(spec, rows);
-  const cats = new Set<string>();
+  const catList: string[] = [];
+  const catSeen = new Set<string>();
   const series = new Set<string>();
+  const sectionOf = new Map<string, string>();
   for (const r of rows) {
     const cat = r[cols.x];
-    if (typeof cat === "string" && cat !== "") cats.add(cat);
+    if (typeof cat === "string" && cat !== "" && !catSeen.has(cat)) {
+      catSeen.add(cat);
+      catList.push(cat);
+    }
     const s = cols.series ? r[cols.series] : null;
     if (typeof s === "string" && s !== "") series.add(s);
+    if (cols.section && typeof cat === "string" && cat !== "" && !sectionOf.has(cat)) {
+      const sec = r[cols.section];
+      if (typeof sec === "string") sectionOf.set(cat, sec);
+    }
   }
-  const nCats = Math.max(1, cats.size);
+  const nCats = Math.max(1, catList.length);
   // series_order, when present, is the authoritative series count (it filters/orders).
   const nSeries =
     spec.series_order && spec.series_order.length
       ? spec.series_order.length
       : Math.max(1, series.size);
-  // Stacked stacks all series into one row per category; grouped clusters one row per series.
   const grouped = spec.chartType === "bar" && nSeries > 1;
-  const rowCount = grouped ? nCats * nSeries : nCats;
-  return Math.max(FIXED_CHART_HEIGHT, Math.round(rowCount * HORIZONTAL_PX_PER_ROW + HORIZONTAL_CHROME_PX));
+  // Section count (distinct sections present, filtered by section_order when set). The first
+  // section has no spacer slot (its header sits in the top margin), so spacers = sections − 1.
+  let nSections = 0;
+  if (cols.section) {
+    const present = new Set(catList.map((c) => sectionOf.get(c) ?? ""));
+    nSections =
+      spec.section_order && spec.section_order.length
+        ? spec.section_order.filter((s) => present.has(s)).length
+        : present.size;
+  }
+  const nSpacers = Math.max(0, nSections - 1);
+  // Tallest wrapped category label at the gutter width.
+  const gutter = horizontalLeftGutter(catList);
+  const maxLabelLines = catList.reduce(
+    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD)),
+    1,
+  );
+  return horizontalBarHeight({
+    nCategories: nCats,
+    nSeries,
+    grouped,
+    nSpacers,
+    maxLabelLines,
+    extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
+  });
 }
 
 // Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px
@@ -1059,6 +1086,12 @@ function wireFigureSvg(
      *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
      *  can suppress the hovered category's pills. */
     onPillDriver?: (handle: HighlightPillsHandle) => void;
+    /** Horizontal coordinated cursor: extend the shaded row this many px past the plot's right edge
+     *  to bridge the inter-pane gap (so the highlight reads as one continuous row). */
+    coordExtendRight?: number;
+    /** Horizontal coordinated cursor: this pane shows the category labels (leftmost), so accent the
+     *  hovered category's label on hover. */
+    coordAccentLabel?: boolean;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
@@ -1128,10 +1161,12 @@ function wireFigureSvg(
   }
 
   const categorical = ctx.spec.xAxisType === "categorical";
-  // Coordinated cursor is x-keyed; horizontal bars are category-on-Y, so they keep the per-pane
-  // tooltip instead. `useCoord` gates the no-tooltip emitOnly + coordinated-renderer path.
+  // Coordinated cursor: the band crosshair resolves a CATEGORY (works for both orientations —
+  // categories on X for vertical, on Y for horizontal), so horizontal bars get the coordinated
+  // row-highlight + value pills too (not a per-pane tooltip). `useCoord` gates the no-tooltip
+  // emitOnly + coordinated-renderer path.
   const horizontal = ctx.spec.orientation === "horizontal";
-  const useCoord = ctx.onResolve != null && !horizontal;
+  const useCoord = ctx.onResolve != null;
   // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
   // match the static marker. Keyed by series index, matching the chart's symbol scale.
   const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
@@ -1186,6 +1221,25 @@ function wireFigureSvg(
       const cat = r._xc;
       if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
     }
+    // Sectioned horizontal bars render categories grouped by section, so the bands' VISUAL order
+    // differs from data-encounter order. The crosshair maps facet rows → categories by index, so
+    // reorder `cats` to match the rendered (section) order. Stable sort keeps within-section order.
+    const sectionCol = ctx.spec.columns?.section;
+    if (sectionCol) {
+      const sectionOf = new Map<string, string>();
+      for (const r of ctx.dataInScope) {
+        if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
+      }
+      const secOrder =
+        ctx.spec.section_order && ctx.spec.section_order.length
+          ? ctx.spec.section_order
+          : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
+      const rankOf = (c: string): number => {
+        const i = secOrder.indexOf(sectionOf.get(c) ?? "");
+        return i < 0 ? secOrder.length : i;
+      };
+      cats.sort((a, b) => rankOf(a) - rankOf(b));
+    }
     attachBandCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
@@ -1233,6 +1287,14 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        horizontal,
+        ...(horizontal
+          ? {
+              regionFromLeftEdge: true,
+              regionExtendRight: ctx.coordExtendRight ?? 0,
+              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
+            }
+          : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -1311,9 +1373,22 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Body: BOTH modes use the responsive `.figure-grid` of independent per-pane mini-SVGs.
   // (Shared mode is no longer a single faceted SVG — it is the same per-pane composition with
   // one shared y-domain + y-labels only on the left column, all handled inside renderFigure.)
+  // Horizontal-bar and variable-width figures never reflow to extra rows — they keep their columns
+  // and scroll horizontally when narrow, so their grid lives inside a horizontal-scroll wrapper.
+  const smCfg = spec.small_multiples!;
+  const variableWidths = smCfg.pane_widths != null && smCfg.pane_widths !== "equal";
+  const noStack =
+    (spec.chartType === "bar" && spec.orientation === "horizontal") || variableWidths;
   const grid = doc.createElement("div");
   grid.className = "figure-grid";
-  card.appendChild(grid);
+  if (noStack) {
+    const scroll = doc.createElement("div");
+    scroll.className = "figure-grid-scroll";
+    scroll.appendChild(grid);
+    card.appendChild(scroll);
+  } else {
+    card.appendChild(grid);
+  }
 
   // Figure-level x-axis title: one centered caption below the whole grid.
   appendAxisTitleEl(card, doc, "figure-x-axis-title", spec.x_axis_title ?? null);
@@ -1358,37 +1433,51 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // line/scatter panes keep the default.
   const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
   const paneHeight = TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
+  // Horizontal bar figures grow their height with the row count — let renderFigure compute it
+  // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
+  const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+  const figHeight = isHorizontalBarFig ? undefined : paneHeight;
 
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
+    // NO-STACK figures (horizontal bars / variable widths) never reduce columns for width — they
+    // keep the configured columns (else a single row) and scroll horizontally instead.
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
-    const cols = Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
-    // SHARED mode: pass the TOTAL inner grid width + gap so renderFigure's width helper sizes the
-    // unequal columns (labeled col 0 wider, label-less cols narrower) sharing one inner data width.
-    // PER-PANE mode: equal panes, one shared pane width (1fr columns).
-    const paneW = Math.max(paneMinWidth, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
-    const sig = isShared ? `s:${cols}:${outerWidth}` : `p:${cols}:${paneW}`;
+    const cols = noStack
+      ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
+      : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
+    // No-stack: keep panes at a readable minimum and let the row overflow into the scroll wrapper.
+    // (Horizontal panes reserve the left category gutter on top of the data, so allow extra.)
+    const minPerPane = isHorizontalBarFig ? 300 : paneMinWidth;
+    const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? 200 : 0);
+    const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
+    // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
+    // — SHARED mode (unequal labeled/label-less columns) OR variable pane_widths in either mode.
+    // Otherwise (equal per-pane) pass one shared pane width for 1fr columns.
+    const useGridWidth = isShared || variableWidths;
+    const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
+    const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
     let fig: FigureRenderResult;
     try {
-      fig = isShared
+      fig = useGridWidth
         ? renderFigure(spec, rows, {
-            gridWidth: outerWidth,
+            gridWidth: gridW,
             gridGap: GRID_GAP,
-            height: paneHeight,
+            height: figHeight,
             columns: cols,
           })
-        : renderFigure(spec, rows, { width: paneW, height: paneHeight, columns: cols });
+        : renderFigure(spec, rows, { width: paneW, height: figHeight, columns: cols });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
     }
     lastSig = sig; // commit only after a successful render
-    // SHARED mode: explicit unequal column px widths (the panes are rendered at those widths, so
-    // the grid template must match). PER-PANE mode: equal 1fr columns via --figure-cols.
-    if (isShared && fig.columnWidths && fig.columnWidths.length) {
+    // Explicit per-column px widths (shared mode, or variable pane_widths in either mode): the
+    // panes were rendered at those widths, so the grid template must match. Else equal 1fr columns.
+    if (fig.columnWidths && fig.columnWidths.length) {
       grid.style.gridTemplateColumns = fig.columnWidths.map((w) => `${w}px`).join(" ");
     } else {
       grid.style.gridTemplateColumns = "";
@@ -1401,6 +1490,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       const title = doc.createElement("div");
       title.className = "figure-pane-title";
       title.textContent = pane.title;
+      // Faceted horizontal bars: the leftmost pane reserves a wide category gutter on its left, so
+      // align the pane title with the DATA area (offset by that pane's left margin) instead of
+      // letting it sit over the category labels. Other panes have a negligible margin (no shift).
+      if (isHorizontalBarFig && pane.svg) {
+        const ml = Number((pane.svg as SVGSVGElement).dataset.marginLeft) || 0;
+        if (ml > 0) title.style.paddingInlineStart = `${ml}px`;
+      }
       cell.appendChild(title);
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
@@ -1445,6 +1541,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
     fig.panes.forEach((pane, idx) => {
       if (!pane.svg) { drivers.push(() => {}); return; }
+      const col = idx % fig.columns;
       const driver = wireFigureSvg(pane.svg, handle, {
         spec,
         dataInScope: pane.dataInScope ?? [],
@@ -1457,6 +1554,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
         onPillDriver: (d) => pillDrivers.push(d),
+        // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
+        // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
+        ...(isHorizontalBarFig
+          ? {
+              coordExtendRight: col < fig.columns - 1 ? GRID_GAP : 0,
+              coordAccentLabel: col === 0,
+            }
+          : {}),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));

@@ -67,3 +67,8 @@ export const TBL_VALUE_LABEL = {
 export const TBL_MARGIN_LEFT = 44;
 export const TBL_MARGIN_RIGHT = 16;
 export const TBL_MARGIN_TOP = 18;
+/** Label-less (non-leftmost) small-multiples columns get this small left margin instead of the
+ *  full label gutter, so the series doesn't render with a big blank strip on its left. Lives here
+ *  (not figure.ts) so leaf modules like the bar mark builder can import it without a module cycle.
+ *  figure.ts re-exports it for back-compat. */
+export const SHARED_LABELLESS_MARGIN_LEFT = 2;

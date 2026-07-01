@@ -26,6 +26,9 @@ export interface PreparedRow {
   /** Point charts (scatter / dotplot): the raw shape-encoding value (from columns.shape).
    *  Drives the marker symbol independently of `series` (color). Absent ⇒ no shape channel. */
   _shape?: string;
+  /** Horizontal sectioned bars: the row's section value (from columns.section). Drives the
+   *  section-ordered category band + section headers. Absent ⇒ no sections. */
+  _section?: string;
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
    *  facet_field that splits this row's pane). */
   _facet?: string;
@@ -78,6 +81,15 @@ export interface MarkContext {
   /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
    *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */
   stackOrder?: string[];
+  /** Horizontal bars in shared-mode small multiples, non-leftmost panes: omit the category
+   *  (y-band) labels so they show only on the leftmost pane. The category band domain is shared,
+   *  so rows still align. Absent → labels emitted (single-chart + leftmost pane unchanged). */
+  hideCategoryLabels?: boolean;
+  /** Horizontal bars in shared-mode small multiples: the shared left-gutter width (px) to use for
+   *  the category labels + plot left margin, computed once by the figure orchestrator over the
+   *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
+   *  via horizontalLeftGutter (single-chart unchanged). */
+  categoryGutter?: number;
 }
 
 export interface MarkLayers {
@@ -123,6 +135,14 @@ export interface MarkLayers {
    *  axes.horizontalLeftGutter); assemblePlot passes it to the Plot marginLeft so the labels
    *  are not clipped. Left undefined by vertical charts (they keep the default margin). */
   marginLeft?: number;
+  /** Optional: a TOP margin (px) the layer wants applied. Sectioned horizontal bars set this to
+   *  make room for the first section's header (which sits in the top margin, above the first bar).
+   *  Left undefined otherwise → assemblePlot keeps the default marginTop. */
+  marginTop?: number;
+  /** Optional: a BOTTOM margin (px) the layer wants applied. Horizontal bars set this small (the
+   *  category axis is on the LEFT, so the inherited categorical-label bottom margin is wasted —
+   *  only the value-tick row needs room). Left undefined otherwise → default marginBottom. */
+  marginBottom?: number;
   /** Optional: x-axis label marks supplied by the layer (grouped bars label the `fx`
    *  group scale, not the adapter's `x` scale). When present, used INSTEAD of the
    *  adapter's `xOpts.axisMarks` in assemblePlot. */

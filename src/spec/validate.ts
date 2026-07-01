@@ -51,17 +51,17 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   return null;
 }
 
-/** Horizontal small-multiples bar/stacked charts are not supported yet (the faceted-horizontal
- *  layout — per-pane left gutters, category-on-Y resolution — isn't built). Reject the combo with
- *  a pointed message rather than rendering a broken figure. May be specced in future. */
+/** Faceted horizontal `bar` charts ARE supported (shared category gutter + value axis; see
+ *  figure.ts / CONFIG-SPEC). Horizontal `stacked` small-multiples are not built yet (the stacked
+ *  net-callout chrome isn't wired through the faceted-horizontal layout), so reject only that combo
+ *  with a pointed message rather than rendering a broken figure. */
 function facetedHorizontalError(spec: {
   chartType?: unknown;
   orientation?: unknown;
   small_multiples?: unknown;
 }): string | null {
-  const isBar = spec.chartType === "bar" || spec.chartType === "stacked";
-  if (isBar && spec.orientation === "horizontal" && spec.small_multiples != null) {
-    return `horizontal orientation is not supported with small_multiples for ${JSON.stringify(spec.chartType)} charts yet — use vertical, or drop small_multiples`;
+  if (spec.chartType === "stacked" && spec.orientation === "horizontal" && spec.small_multiples != null) {
+    return `horizontal orientation is not supported with small_multiples for "stacked" charts yet — use vertical, or drop small_multiples`;
   }
   return null;
 }
@@ -255,6 +255,22 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       if (unknown.length) {
         errors.push(
           `small_multiples.pane_titles names panes ${JSON.stringify(unknown)} not found in facet column "${facetField}" (data values: ${knownFacets})`,
+        );
+      }
+    }
+    // pane_widths proportion array: length must match the resolved grid column count. Columns =
+    // the explicit config, else a single row (all panes) when pane_widths is set, else the default.
+    const pw = spec.small_multiples.pane_widths;
+    if (Array.isArray(pw)) {
+      const paneCount = pane_order && pane_order.length
+        ? pane_order.filter((v) => facetValues.has(v)).length
+        : facetValues.size;
+      const cfgCols = spec.small_multiples.columns;
+      const resolvedCols =
+        cfgCols && cfgCols > 0 ? Math.min(cfgCols, paneCount) : paneCount; // pane_widths ⇒ single row default
+      if (pw.length !== resolvedCols) {
+        errors.push(
+          `small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`,
         );
       }
     }
