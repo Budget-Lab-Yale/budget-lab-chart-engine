@@ -15,7 +15,8 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom } from "./axes";
+import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
@@ -461,6 +462,29 @@ export function renderFigure(
     colWeights,
   );
 
+  // 3b. Vertical categorical facets: coordinate the x-axis label layout so panes' baselines align.
+  //     Each pane would otherwise pick single/wrap/rotate from ITS width + category count — a pane
+  //     that rotates (or has longer labels) reserves a taller bottom margin, dropping its baseline
+  //     below the others'. Force (a) the WORST-CASE mode across panes for a consistent look, and
+  //     (b) the MAX bottom margin so every pane reserves the same space and the baselines line up.
+  let forcedXLabelMode: BandLabelMode | undefined;
+  let forcedMarginBottom: number | undefined;
+  if (!isHorizontalBar && spec.xAxisType === "categorical") {
+    const rank: Record<BandLabelMode, number> = { single: 0, wrap: 1, rotate: 2 };
+    const paneCats = paneValues.map((value, i) => {
+      const col = i % columns;
+      const catList = Array.from(
+        new Set(rows.filter((r) => (r[facetField] as string) === value).map((r) => r[cols.x] as string).filter(Boolean)),
+      );
+      const dataW = (colWidths[col] as number) - (colMarginLeft[col] as number) - TBL_MARGIN_RIGHT;
+      return { cats: catList, mode: bandLabelMode(catList, dataW) };
+    });
+    let worst: BandLabelMode = "single";
+    for (const p of paneCats) if (rank[p.mode] > rank[worst]) worst = p.mode;
+    forcedXLabelMode = worst;
+    forcedMarginBottom = Math.max(...paneCats.map((p) => bandLabelMarginBottom(p.cats, worst)));
+  }
+
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
   //    the shared y-domain. Vertical panes hide the y-tick LABELS on non-leftmost columns; horizontal
   //    bars instead pass the shared category gutter + suppress the CATEGORY labels there (and let the
@@ -478,6 +502,8 @@ export function renderFigure(
         pane: true,
         yDomain: sharedYDomain,
         width: colWidths[col],
+        ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
+        ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),
         ...(isHorizontalBar
           ? {
               categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,

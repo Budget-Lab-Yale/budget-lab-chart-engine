@@ -12,6 +12,7 @@ import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
 import { bandLabelMode } from "./axes";
+import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -68,6 +69,13 @@ export interface RenderOptions {
   /** Shared-mode small multiples, horizontal bars: the shared category-gutter width (px) every
    *  pane should use. Threaded into MarkContext.categoryGutter. Absent → builder computes its own. */
   categoryGutter?: number;
+  /** Shared-mode small multiples (vertical bars): force the categorical x-axis label layout
+   *  ("single"/"wrap"/"rotate") instead of deciding it per-pane. The figure computes the worst-case
+   *  mode across all panes so every pane's labels look consistent. */
+  xLabelMode?: BandLabelMode;
+  /** Shared-mode small multiples (vertical bars): force the bottom margin (px) — the figure passes
+   *  the MAX across panes so every pane reserves the same space and their baselines align. */
+  marginBottom?: number;
 }
 
 export interface LegendItem {
@@ -392,11 +400,16 @@ export function renderPane(
       : [];
   const dataWidthForX =
     (opts.width ?? 720) - (opts.marginLeft ?? TBL_MARGIN_LEFT) - (opts.marginRight ?? TBL_MARGIN_RIGHT);
-  const xLabelMode = bandLabelMode(catsForX, dataWidthForX);
+  // A figure-forced mode (worst case across panes) wins, so every pane reserves the same bottom
+  // margin and their baselines align; otherwise decide per-pane from this pane's width + categories.
+  const xLabelMode = opts.xLabelMode ?? bandLabelMode(catsForX, dataWidthForX);
 
   // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
   // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
   const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null, xLabelMode);
+  // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
+  // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
+  if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
   const units = inferUnitsFromSubtitle(spec.subtitle);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.

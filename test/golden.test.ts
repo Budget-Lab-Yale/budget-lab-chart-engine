@@ -638,6 +638,24 @@ describe("figure — variable pane widths", () => {
     expect(fig.panes[1]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(2);
   });
 
+  it("coordinates x-axis label mode so panes share one bottom margin (baselines align)", () => {
+    // Pane A has 5 long category labels (would rotate at this width); pane B has 2 short ones
+    // (would stay single). Without coordination their bottom margins — and baselines — would differ.
+    const rows: TidyRow[] = [] as TidyRow[];
+    const aCats = ["Motor vehicles and parts", "Furnishings and equipment", "Recreation goods",
+      "Financial services", "Health care services"];
+    for (const c of aCats) rows.push({ facet: "A", category: c, value: "2" } as TidyRow);
+    for (const c of ["X", "Y"]) rows.push({ facet: "B", category: c, value: "1" } as TidyRow);
+    const spec: ChartSpec = {
+      chartType: "bar", title: "t", xAxisType: "categorical",
+      columns: { x: "category", value: "value", facet: "facet" },
+      data: "x", small_multiples: { mode: "shared", pane_order: ["A", "B"] },
+    };
+    const fig = renderFigure(spec, rows, { width: 640, document });
+    const mbs = fig.panes.map((p) => (p.svg as SVGSVGElement).dataset.marginBottom);
+    expect(new Set(mbs).size).toBe(1); // every pane reserves the same bottom margin
+  });
+
   it("custom proportions [2,1]: column 0's data width is twice column 1's", async () => {
     const rows = parseCsv("./fixtures/facet-varwidth.csv");
     const spec: ChartSpec = {

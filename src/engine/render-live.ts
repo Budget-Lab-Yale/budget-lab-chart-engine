@@ -1373,9 +1373,22 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Body: BOTH modes use the responsive `.figure-grid` of independent per-pane mini-SVGs.
   // (Shared mode is no longer a single faceted SVG — it is the same per-pane composition with
   // one shared y-domain + y-labels only on the left column, all handled inside renderFigure.)
+  // Horizontal-bar and variable-width figures never reflow to extra rows — they keep their columns
+  // and scroll horizontally when narrow, so their grid lives inside a horizontal-scroll wrapper.
+  const smCfg = spec.small_multiples!;
+  const variableWidths = smCfg.pane_widths != null && smCfg.pane_widths !== "equal";
+  const noStack =
+    (spec.chartType === "bar" && spec.orientation === "horizontal") || variableWidths;
   const grid = doc.createElement("div");
   grid.className = "figure-grid";
-  card.appendChild(grid);
+  if (noStack) {
+    const scroll = doc.createElement("div");
+    scroll.className = "figure-grid-scroll";
+    scroll.appendChild(grid);
+    card.appendChild(scroll);
+  } else {
+    card.appendChild(grid);
+  }
 
   // Figure-level x-axis title: one centered caption below the whole grid.
   appendAxisTitleEl(card, doc, "figure-x-axis-title", spec.x_axis_title ?? null);
@@ -1429,19 +1442,28 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
+    // NO-STACK figures (horizontal bars / variable widths) never reduce columns for width — they
+    // keep the configured columns (else a single row) and scroll horizontally instead.
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
-    const cols = Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
+    const cols = noStack
+      ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
+      : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
+    // No-stack: keep panes at a readable minimum and let the row overflow into the scroll wrapper.
+    // (Horizontal panes reserve the left category gutter on top of the data, so allow extra.)
+    const minPerPane = isHorizontalBarFig ? 300 : paneMinWidth;
+    const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? 200 : 0);
+    const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
     // SHARED mode: pass the TOTAL inner grid width + gap so renderFigure's width helper sizes the
     // unequal columns (labeled col 0 wider, label-less cols narrower) sharing one inner data width.
     // PER-PANE mode: equal panes, one shared pane width (1fr columns).
-    const paneW = Math.max(paneMinWidth, Math.floor((outerWidth - GRID_GAP * (cols - 1)) / cols));
-    const sig = isShared ? `s:${cols}:${outerWidth}` : `p:${cols}:${paneW}`;
+    const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
+    const sig = isShared ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
     let fig: FigureRenderResult;
     try {
       fig = isShared
         ? renderFigure(spec, rows, {
-            gridWidth: outerWidth,
+            gridWidth: gridW,
             gridGap: GRID_GAP,
             height: figHeight,
             columns: cols,

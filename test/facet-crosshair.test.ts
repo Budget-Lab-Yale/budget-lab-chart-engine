@@ -319,6 +319,20 @@ describe("coordinated cursor — horizontal bars (row highlight + tip pills, no 
     container.remove();
   });
 
+  it("faceted horizontal bars never stack — one row inside a horizontal-scroll wrapper, even when narrow", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    // A narrow width would normally reflow 2 panes to 1 column (2 rows); horizontal bars must not.
+    const teardown = mountChart(container, { spec, rows, width: 300, height: 600 });
+    expect(container.querySelector(".figure-grid-scroll")).not.toBeNull();
+    const grid = container.querySelector(".figure-grid") as HTMLElement;
+    // Both panes stay in a single row (2 explicit column widths, 2 panes).
+    expect(container.querySelectorAll(".figure-pane").length).toBe(2);
+    expect(grid.style.gridTemplateColumns.trim().split(/\s+/).length).toBe(2);
+    teardown();
+    container.remove();
+  });
+
   it("the horizontal secondary band cursor shades the category row and labels each bar tip", () => {
     const { svg } = renderChart(spec, rows.filter((r) => r.facet === "A"), {
       width: 420,
