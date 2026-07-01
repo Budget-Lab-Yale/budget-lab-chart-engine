@@ -85,6 +85,20 @@ describe("makeXAdapter('categorical')", () => {
   });
 });
 
+describe("makeXAdapter('numeric') anchorAtZero", () => {
+  const data = [{ _xn: 2020 }, { _xn: 2021 }, { _xn: 2022 }];
+
+  it("defaults to NOT anchoring at zero — the domain fits the data range", () => {
+    const opts = makeXAdapter("numeric").buildXOpts(data);
+    expect(opts.xPlotOpts?.["domain"]).toEqual([2020, 2022]);
+  });
+
+  it("extends the domain to include 0 only when anchorAtZero: true", () => {
+    const opts = makeXAdapter("numeric", { anchorAtZero: true }).buildXOpts(data);
+    expect(opts.xPlotOpts?.["domain"]).toEqual([0, 2022]);
+  });
+});
+
 describe("tblBandXAxis", () => {
   it("returns a non-empty Mark[] for a list of categories", () => {
     const marks = tblBandXAxis(["A", "B", "C"]);

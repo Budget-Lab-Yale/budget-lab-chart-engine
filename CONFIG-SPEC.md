@@ -63,7 +63,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 
 | field | type | notes |
 |---|---|---|
-| `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. |
+| `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. **Default `false`** (the axis fits its data range — anchoring at zero squishes a year axis to the right). |
 | `x_order` | array | Categorical x-axis only: render order for the x-axis categories. Listed categories come first in this order; any unlisted ones follow in data-encounter order. **Order-only** — unlike `series_order`, it does *not* filter. Ignored off a categorical x-axis. |
 | `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). |
 | `yAxisPolicy.min` | number | Hard floor for the y-axis. |
@@ -93,7 +93,7 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 
 | field | type | notes |
 |---|---|---|
-| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelAnchor?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`; `labelAnchor` is `start`\|`middle`\|`end`. Labels auto-stagger to avoid collisions; `labelDx`/`labelDy` override placement. |
+| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelSide?, labelAnchor?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`. `labelSide` (`left`\|`right`) is the same "which side" field yAxis markers use; `labelAnchor` (`start`\|`middle`\|`end`) is the finer-grained option and wins when both are set. Labels auto-stagger to avoid collisions; `labelDx`/`labelDy` override placement. |
 | `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, style?, color?, strokeWidth?, labelSide?, labelDx?, labelDy?}`; `y` required. `labelSide` is `left`\|`right` (default right). |
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?}`. |
 | `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. |
@@ -134,9 +134,8 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | field | type | notes |
 |---|---|---|
 | `orientation` | enum | `vertical` (default; value axis is Y) \| `horizontal`. |
-| `valueLabels.show` | boolean | Show in-bar value labels. |
-| `valueLabels.signed` | boolean | Force a leading `+`/`−` on value labels. |
-| `valueLabels.decimals` | integer | Fixed decimal places for value labels (else the minimum the data needs, capped at 2). |
+| `valueLabels.show` | boolean | **Stacked bars only.** Show per-segment value labels (in-bar value labels for plain/grouped bars were removed). Default off. |
+| `valueLabels.decimals` | integer | Fixed decimal places for the labels that remain (stacked segment + net callouts); else the minimum the data needs, capped at 2. |
 | `barStack.netDisplay` | enum | Net (sum) callout on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. |
 | `barStack.mono.base` | color | Monochrome stack: render all segments as shades of one base hue (a categorical hue key or alias; see [Colors](#colors)). |
 | `barStack.netLabelColor` | enum | `white` \| `black`. |

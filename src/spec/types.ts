@@ -18,7 +18,12 @@ export interface XAxisMarker {
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
-  /** Label horizontal alignment relative to the line ("start" = right of line, default). */
+  /** Which side of the line the label sits on — the same "which side" field yAxis markers use, so
+   *  the two marker types stay consistent. "right" = label to the right of the line, "left" = to
+   *  the left. `labelAnchor` (below) takes precedence when set, and adds a "middle" option. */
+  labelSide?: "left" | "right";
+  /** Fine-grained horizontal alignment relative to the line ("start" = right of line, default;
+   *  "middle" = centered; "end" = left of line). Wins over `labelSide` when both are set. */
   labelAnchor?: "start" | "middle" | "end";
   /** Vertical nudge (px, signed: + = down) of the label from the top of the plot. Default 0. */
   labelDy?: number;
@@ -37,7 +42,8 @@ export interface XAxisBand {
 }
 
 export interface XAxisPolicy {
-  /** Numeric axis only: extend the visible domain to include 0. */
+  /** Numeric axis only: extend the visible domain to include 0. Default FALSE (the axis fits its
+   *  data range) — anchoring at zero is surprising for a year axis. */
   anchorAtZero?: boolean;
   /** Vertical reference lines (e.g. a treatment date). */
   markers?: XAxisMarker[];

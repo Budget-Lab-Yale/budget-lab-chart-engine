@@ -357,7 +357,10 @@ export function assemblePlot({
       }),
     );
     if (m.label) {
-      const anchor = m.labelAnchor ?? "start";
+      // Accept the same "which side" field yAxis markers use: labelSide left/right maps to end/start
+      // (label left/right of the line). Explicit labelAnchor wins (and adds "middle").
+      const anchor =
+        m.labelAnchor ?? (m.labelSide === "left" ? "end" : m.labelSide === "right" ? "start" : "start");
       const autoDy = staggerDy.get(`m${markerIdx}`) ?? 4;
       labelMarks.push(
         Plot.text([{ x: mx, t: m.label }], {

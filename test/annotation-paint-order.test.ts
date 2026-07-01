@@ -57,4 +57,24 @@ describe("annotation paint order", () => {
     // Every annotation label comes after the last line/rect in the DOM (so nothing paints over it).
     expect(firstLabel).toBeGreaterThan(lastLineOrRect);
   });
+
+  it("xAxis markers accept labelSide (the same field yAxis uses) → maps to text-anchor", () => {
+    const anchorOf = (marker: object): string | null => {
+      const s: ChartSpec = {
+        chartType: "line",
+        title: "t",
+        xAxisType: "numeric",
+        data: "x",
+        annotations: { xAxis: [{ x: "2021", label: "LBL", ...marker }] },
+      };
+      const { svg } = renderChart(s, rows, { width: 720, height: 400, document });
+      const t = Array.from(svg.querySelectorAll("text")).find((e) => e.textContent === "LBL");
+      // Plot puts text-anchor on the wrapping <g>.
+      return t?.closest("g[text-anchor]")?.getAttribute("text-anchor") ?? t?.getAttribute("text-anchor") ?? null;
+    };
+    expect(anchorOf({ labelSide: "left" })).toBe("end"); // label to the LEFT of the line
+    expect(anchorOf({ labelSide: "right" })).toBe("start"); // to the RIGHT
+    // labelAnchor wins over labelSide: "right" (→ start) is overridden by an explicit "end".
+    expect(anchorOf({ labelSide: "right", labelAnchor: "end" })).toBe("end");
+  });
 });

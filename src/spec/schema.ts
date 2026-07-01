@@ -22,6 +22,7 @@ const X_MARKER_ARRAY = {
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
+      labelSide: { type: "string", enum: ["left", "right"] },
       labelAnchor: { type: "string", enum: ["start", "middle", "end"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
