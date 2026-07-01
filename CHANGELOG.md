@@ -4,6 +4,61 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-07-01
+
+Adds faceted horizontal bar charts with sectioned category axes, variable pane widths for
+small-multiples, and a reworked annotation-label placement system — plus a few behavior changes
+worth reading before upgrading. Existing chart specs render unchanged unless noted under
+**Significant changes**.
+
+### New features
+
+- **Faceted horizontal bar charts** — `orientation: horizontal` together with `small_multiples`
+  now renders side-by-side panes that share one category gutter (on the leftmost pane) and one
+  value axis. Hover is a coordinated crosshair — a continuous highlight row spanning every pane
+  and the label gutter — rather than per-pane tooltips. `x_axis_ticks: top | bottom | both`
+  controls where the value-tick labels sit. The figure grows in height with the row count and
+  long category labels wrap.
+- **Sectioned category axis** — `columns.section` groups categories under bold section headers,
+  ordered by `section_order` with display overrides via `section_labels`.
+- **Variable pane widths** for faceted small-multiples — `small_multiples.pane_widths` accepts
+  `"equal"` (default), `"equal-bar"` (columns sized so bars are equal width), or a proportion
+  array like `[3, 1]`. Works in both `shared` mode (one common y-domain) and `per-pane` mode
+  (each pane keeps its own y-axis and zero point, and its own y-label gutter).
+- **Annotation label placement** — x/y reference-line markers now take two orthogonal, name-based
+  controls instead of pixel guesswork:
+  - `labelSide` — which side of the line the label sits on (x-marks: `left | middle | right`;
+    y-marks: `top | middle | bottom`).
+  - `labelPosition` — where along the line the label sits (x-marks: `top | middle | bottom`;
+    y-marks: `left | middle | right`).
+
+### Significant changes
+
+- **`labelDy` / point-callout `dy` sign flipped** — a **positive** value now nudges the label
+  **up** and a negative value **down**, for x-markers, y-markers, and point callouts (previously
+  it followed SVG's positive-is-down convention). `labelDx` is unchanged (positive = right). Any
+  existing spec that sets `labelDy`/`dy` will now nudge in the opposite vertical direction.
+- **`labelAnchor` removed** from x-axis markers — its `start | middle | end` options are folded
+  into `labelSide` (`right | middle | left`). Specs using `labelAnchor` must switch to `labelSide`.
+- **`anchorAtZero` now defaults to `false`** on numeric x-axes — the axis fits its data range
+  unless `xAxisPolicy.anchorAtZero: true`, which is the less-surprising default for a year axis.
+- **In-bar value labels removed** — bars no longer print a value label inside or atop each bar
+  (the prior style no longer fit the chart look). Values remain available on hover and via the axis.
+- **Annotation labels always paint on top** of every reference line, band, and data mark; a later
+  line can no longer paint over an earlier label. Near-top y-axis reference labels now also join
+  the x-marker collision-avoidance pass, so a label and a right-edge marker no longer overlap.
+
+### Minor tweaks
+
+- Faceted-horizontal layout polish: graceful auto-height, wrapped y-labels, pane titles aligned
+  over the data (not the gutter), gridlines extended just above the topmost bar, uniform gaps
+  below section headers, and 13px category labels.
+- Faceted-horizontal and variable-width figures never reflow onto extra rows — they keep their
+  configured columns and scroll horizontally when the viewport is narrow.
+- x-axis label rotation and bottom margin are coordinated across panes so baselines line up when
+  one pane's labels rotate; rotated (45°) labels also reserve enough room so long labels aren't
+  clipped at narrow widths.
+
 ## [1.1.1] — 2026-06-29
 
 ### Added — inline math in tables
