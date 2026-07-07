@@ -4,8 +4,9 @@
 // RE-RENDERED at the container's width (the x-axis compresses; height stays fixed) down to a
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
-import type { ChartSpec } from "../spec/types.js";
+import type { ChartSpec, TitleSelector } from "../spec/types.js";
 import { resolveColumns } from "../spec/columns.js";
+import { parseTitleTokens, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
@@ -47,6 +48,14 @@ export interface MountOptions {
    *  folder); pass this when several charts share one page (e.g. a gallery) so each still gets its
    *  own name instead of all resolving to the shared page's slug. */
   downloadName?: string;
+  /** Fires when the user changes an inline title selector (see spec.title_selectors), with the
+   *  selector key and the newly-active option id. A bubbling `tbl-title-select` CustomEvent
+   *  (same detail shape) also dispatches from the card root, for standalone bundles with no
+   *  host callback wired up. No-op when the spec has no title_selectors. */
+  onSelect?: (change: { id: string; value: string }) => void;
+  /** Initial active option id per title-selector key (host re-mount state restore). Precedence:
+   *  `selections[key]` > `title_selectors[key].default` > that selector's first option. */
+  selections?: Record<string, string>;
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -438,12 +447,25 @@ function downloadSlug(spec: ChartSpec): string {
   } catch {
     /* no location (SSR/jsdom) — fall through */
   }
-  return titleToSlug(spec.title);
+  // Resolve any title-selector tokens (with the defaults) BEFORE slugifying, so the slug reads
+  // "…-by-sector" rather than "…-by-dimension". (Braces themselves could never leak — the
+  // slugifier strips all non-alphanumerics — but the resolved label is the better name.)
+  return titleToSlug(resolveTitleText(spec));
 }
 
 /** Data (CSV) + Image (PNG) download buttons for the source line. Filenames use the chart's folder
- *  slug (from the URL) rather than the title, which makes for unwieldy filenames. */
-function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], slugOverride?: string): HTMLElement {
+ *  slug (from the URL) rather than the title, which makes for unwieldy filenames.
+ *
+ *  `selections` is the mount's LIVE title-selector selections object (mutated in place by the
+ *  inline <select>'s change handler), so the PNG export always prints the currently-chosen
+ *  option labels in its title — not the defaults captured at mount time. */
+function buildDownloadActions(
+  doc: Document,
+  spec: ChartSpec,
+  rows: TidyRow[],
+  slugOverride?: string,
+  selections?: Record<string, string>,
+): HTMLElement {
   const base = slugOverride || downloadSlug(spec);
   const downloads = doc.createElement("div");
   downloads.className = "figure-downloads";
@@ -489,7 +511,7 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], s
     imgBtn.disabled = true;
     imgLabel.textContent = "…";
     try {
-      await exportChartPng(spec, rows, { filename: `${base}.png` });
+      await exportChartPng(spec, rows, { filename: `${base}.png`, selections });
     } catch (err) {
       console.error("Image export failed:", err);
       imgLabel.textContent = "Failed";
@@ -615,9 +637,20 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const card = doc.createElement("div");
   card.className = `figure-card chart-${spec.chartType}`;
 
+  // Inline title selectors: the mount owns ONE selections object for its whole life. The
+  // header's <select> change handler mutates it in place, so the PNG download (below) and any
+  // later reads see the live state; the header itself is built once and never rebuilt by the
+  // resize draw() loop, so the control + its state survive the engine's own re-renders.
+  const selections = resolveSelections(spec, opts.selections);
+
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
-  buildFigureHeader(card, doc, spec, opts.eyebrow);
+  buildFigureHeader(
+    card, doc, spec, opts.eyebrow,
+    spec.title_selectors
+      ? { selectors: spec.title_selectors, selections, onSelect: opts.onSelect }
+      : undefined,
+  );
 
   // Legend slot above the canvas (used for top-legend; hidden/empty for right-legend).
   const legendSlot = doc.createElement("div");
@@ -640,7 +673,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections),
   });
 
   container.appendChild(card);
@@ -1030,13 +1063,77 @@ const PANE_HEIGHT = 240;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
+/** Live wiring for the inline title selector(s): the spec's `title_selectors`, the mount's
+ *  SHARED mutable selections object (updated in place on change, so later reads — e.g. the PNG
+ *  download button — always see the live state), and the host's optional change callback. The
+ *  card root itself (buildFigureHeader's first argument) is the CustomEvent dispatch target. */
+export interface TitleSelectorWiring {
+  selectors: Record<string, TitleSelector>;
+  selections: Record<string, string>;
+  onSelect?: (change: { id: string; value: string }) => void;
+}
+
+/** Render a title with inline-selector tokens into `h`: text segments become text nodes; each
+ *  `{key}` token becomes an engine-owned native <select> (options from its TitleSelector,
+ *  selected = the active selection). On change: the shared selections object is updated in
+ *  place, the host callback fires, and a bubbling `tbl-title-select` CustomEvent dispatches
+ *  from the card root (for standalone bundles with no host callback). */
+function buildSelectorTitle(
+  h: HTMLElement,
+  doc: Document,
+  title: string,
+  card: HTMLElement,
+  wiring: TitleSelectorWiring,
+): void {
+  const { selectors, selections, onSelect } = wiring;
+  for (const seg of parseTitleTokens(title, selectors)) {
+    if (seg.kind === "text") {
+      h.appendChild(doc.createTextNode(seg.text));
+      continue;
+    }
+    const key = seg.key;
+    const selector = selectors[key]!;
+    const select = doc.createElement("select");
+    select.className = "figure-title-select";
+    // A11y: name the control by its selector key, humanized (dashes/underscores → spaces).
+    select.setAttribute("aria-label", key.replace(/[_-]+/g, " "));
+    for (const opt of selector.options) {
+      const o = doc.createElement("option");
+      o.value = opt.id;
+      o.textContent = opt.label ?? opt.id;
+      select.appendChild(o);
+    }
+    select.value = selections[key] ?? selector.options[0]?.id ?? "";
+    select.addEventListener("change", () => {
+      const value = select.value;
+      selections[key] = value;
+      onSelect?.({ id: key, value });
+      card.dispatchEvent(
+        new CustomEvent("tbl-title-select", { detail: { id: key, value }, bubbles: true }),
+      );
+    });
+    h.appendChild(select);
+  }
+}
+
 /** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
  *  header so single-chart and figure cards look identical. The eyebrow (figure number) is an
  *  embed-time value supplied by the caller, not read from the spec.
  *
  *  The spec parameter is typed as `{ title?: string; subtitle?: string }` (a structural subset)
- *  so both ChartSpec and TableSpec can be passed without casting. */
-export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { title?: string; subtitle?: string }, eyebrowText?: string): void {
+ *  so both ChartSpec and TableSpec can be passed without casting. `titleWiring` (chart mounts
+ *  only — tables have no title_selectors and omit it) turns each `{key}` token in the title
+ *  into an engine-owned inline <select>; absent, the title renders as plain textContent,
+ *  DOM-identical to before the selector feature existed. The header is built ONCE per mount
+ *  (the resize draw() loop never rebuilds it), so the control and its selection state survive
+ *  the engine's own re-renders naturally. */
+export function buildFigureHeader(
+  card: HTMLElement,
+  doc: Document,
+  spec: { title?: string; subtitle?: string },
+  eyebrowText?: string,
+  titleWiring?: TitleSelectorWiring,
+): void {
   const header = doc.createElement("div");
   header.className = "figure-header";
   if (eyebrowText) {
@@ -1050,7 +1147,11 @@ export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { titl
   if (spec.title) {
     const h = doc.createElement("h3");
     h.className = "figure-title";
-    h.textContent = spec.title;
+    if (titleWiring && Object.keys(titleWiring.selectors).length) {
+      buildSelectorTitle(h, doc, spec.title, card, titleWiring);
+    } else {
+      h.textContent = spec.title;
+    }
     titlebar.appendChild(h);
   }
   const logoWrapper = doc.createElement("div");
@@ -1374,7 +1475,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
   const card = doc.createElement("div");
   card.className = "figure-card";
-  buildFigureHeader(card, doc, spec, opts.eyebrow);
+  // Inline title selectors — same single shared selections object discipline as mountChart.
+  const selections = resolveSelections(spec, opts.selections);
+  buildFigureHeader(
+    card, doc, spec, opts.eyebrow,
+    spec.title_selectors
+      ? { selectors: spec.title_selectors, selections, onSelect: opts.onSelect }
+      : undefined,
+  );
 
   const legendSlot = doc.createElement("div");
   legendSlot.className = "figure-legend-slot";
@@ -1409,7 +1517,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections),
   });
   container.appendChild(card);
 
