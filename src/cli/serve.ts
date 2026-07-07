@@ -1,7 +1,7 @@
 /**
  * tbl-chart serve — local review gallery.
  *
- * Exported functions are testable: createServer / createRequestHandler / findCharts
+ * Exported functions are testable: createServer / createRequestHandler / findSpecs
  * accept injected liveBundleJs + css and do NOT call process.exit.
  *
  * main() wires them to real disk I/O.
@@ -12,21 +12,25 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validateChart } from "../spec/validate";
+import { validateTableSpec, validateTableData } from "../spec/table-validate";
 import { loadData } from "../data/load";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
+import { isTableSpec } from "./table-detect";
 import type { ChartSpec } from "../spec/types";
+import type { TableSpec } from "../spec/table-types";
 
 // ---------------------------------------------------------------------------
-// findCharts
+// findSpecs
 // ---------------------------------------------------------------------------
 
 const SKIP_DIRS = new Set(["node_modules", "dist", ".git"]);
+const SPEC_FILENAMES = new Set(["chart.yaml", "table.yaml"]);
 
 /**
- * Recursively find every `chart.yaml` under `dir`, skipping `node_modules`,
- * `dist`, and `.git`. Returns absolute paths.
+ * Recursively find every `chart.yaml` and `table.yaml` under `dir`, skipping
+ * `node_modules`, `dist`, and `.git`. Returns absolute paths.
  */
-export function findCharts(dir: string): string[] {
+export function findSpecs(dir: string): string[] {
   const results: string[] = [];
 
   function walk(current: string): void {
@@ -41,7 +45,7 @@ export function findCharts(dir: string): string[] {
         if (!SKIP_DIRS.has(entry.name)) {
           walk(path.join(current, entry.name));
         }
-      } else if (entry.isFile() && entry.name === "chart.yaml") {
+      } else if (entry.isFile() && SPEC_FILENAMES.has(entry.name)) {
         results.push(path.join(current, entry.name));
       }
     }
@@ -61,34 +65,36 @@ function escapeHtml(s: string): string {
   );
 }
 
-/** Read a chart.yaml and pull out the title for the index. Returns null on failure. (The
- *  figure-number eyebrow is no longer a spec field — it's supplied at embed time.) */
-function readChartMeta(absPath: string): { title: string } | null {
+/** Read a chart.yaml or table.yaml and pull out the title + kind for the index. Returns null
+ *  on failure. (The figure-number eyebrow is no longer a spec field — it's supplied at embed
+ *  time.) */
+function readSpecMeta(absPath: string): { title: string; kind: "chart" | "table" } | null {
   try {
     const text = fs.readFileSync(absPath, "utf8");
     const spec = parseYaml(text) as Record<string, unknown>;
     if (typeof spec !== "object" || spec === null) return null;
     const title = typeof spec["title"] === "string" ? spec["title"] : null;
     if (!title) return null;
-    return { title };
+    return { title, kind: isTableSpec(spec) ? "table" : "chart" };
   } catch {
     return null;
   }
 }
 
-function buildIndexPage(charts: string[], rootDir: string): string {
+function buildIndexPage(specs: string[], rootDir: string): string {
   const items =
-    charts.length === 0
-      ? `<p class="no-charts">No <code>chart.yaml</code> files found under <code>${escapeHtml(rootDir)}</code>.</p>`
-      : charts
+    specs.length === 0
+      ? `<p class="no-charts">No <code>chart.yaml</code> or <code>table.yaml</code> files found under <code>${escapeHtml(rootDir)}</code>.</p>`
+      : specs
           .map((abs) => {
             const rel = path.relative(rootDir, abs).replace(/\\/g, "/");
-            const meta = readChartMeta(abs);
+            const meta = readSpecMeta(abs);
             const displayTitle = meta?.title ?? rel;
+            const kindTag = meta?.kind === "table" ? `<span class="chart-kind">table</span>` : "";
             const href = `/chart/${encodeURIComponent(rel).replace(/%2F/g, "/")}`;
             return [
               `<li class="chart-item">`,
-              `<a class="chart-link" href="${escapeHtml(href)}">${escapeHtml(displayTitle)}</a>`,
+              `<a class="chart-link" href="${escapeHtml(href)}">${escapeHtml(displayTitle)}</a>${kindTag}`,
               `<span class="chart-path">${escapeHtml(rel)}</span>`,
               `</li>`,
             ]
@@ -163,6 +169,17 @@ body {
   text-decoration: none;
 }
 .chart-link:hover { text-decoration: underline; }
+.chart-kind {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+  background: #eef0f3;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
 .chart-path {
   font-size: 12px;
   color: #888;
@@ -177,7 +194,7 @@ body {
 <body>
 <div class="header">
   <h1>tbl-chart gallery</h1>
-  <p>Serving from <code>${escapeHtml(rootDir)}</code> &mdash; ${charts.length} chart${charts.length === 1 ? "" : "s"} found</p>
+  <p>Serving from <code>${escapeHtml(rootDir)}</code> &mdash; ${specs.length} spec${specs.length === 1 ? "" : "s"} found</p>
 </div>
 <div class="main">
   <ul class="chart-list">
@@ -245,8 +262,8 @@ export function createRequestHandler(
 
     // GET / — index gallery
     if (pathname === "/" || pathname === "") {
-      const charts = findCharts(rootDir);
-      const html = buildIndexPage(charts, rootDir);
+      const specs = findSpecs(rootDir);
+      const html = buildIndexPage(specs, rootDir);
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html);
       return;
@@ -309,8 +326,47 @@ function serveChart(
       return;
     }
 
-    // Load data (baseDir = chart file's directory)
     const baseDir = path.dirname(absPath);
+
+    // --- Table path: mirrors runRender's table branch in src/cli/index.ts. ---
+    if (isTableSpec(spec)) {
+      const structural = validateTableSpec(spec);
+      if (!structural.valid) {
+        res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(buildErrorPage(displayRel, structural.errors));
+        return;
+      }
+
+      let tableRows;
+      try {
+        tableRows = await loadData((spec as TableSpec).data, { baseDir });
+      } catch (err) {
+        res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(buildErrorPage(displayRel, [`data load failed: ${(err as Error).message}`]));
+        return;
+      }
+
+      const dataResult = validateTableData(spec, tableRows);
+      if (!dataResult.valid) {
+        res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(buildErrorPage(displayRel, dataResult.errors));
+        return;
+      }
+
+      const tableHtml = buildStandaloneHtml({
+        spec: spec as unknown as ChartSpec,
+        rows: tableRows,
+        liveBundleJs,
+        css,
+        mountFn: "mountTable",
+      });
+
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(tableHtml);
+      return;
+    }
+
+    // --- Chart path (unchanged) ---
     let rows;
     try {
       rows = await loadData((spec as ChartSpec).data, { baseDir });
