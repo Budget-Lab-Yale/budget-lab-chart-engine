@@ -2,6 +2,7 @@
 // Port of C:\dev\GitHub\budget-lab-interactives\tools\ai-labor-market-tracker\export-image.js
 
 import type { ChartSpec } from "../spec/types.js";
+import { resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
@@ -176,8 +177,16 @@ function drawLegend(
  * the AILMT export. The chart fills the height left after the title/subtitle/legend chrome.
  * NOTE: the eyebrow is intentionally NOT drawn in the export (matches AILMT — the figure
  * number belongs to the publication context, not the standalone image).
+ *
+ * `selections` (active title-selector option ids, from the live mount) resolves any `{token}`
+ * in the title to the ACTIVE option's label; omitted, tokens resolve with the spec defaults.
+ * Either way the exported title is plain text — a raw braced token never prints.
  */
-export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement {
+export function buildExportSvg(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  opts: { selections?: Record<string, string> } = {},
+): SVGSVGElement {
   const isFigure = spec.small_multiples != null;
 
   // Pre-render to read legend items + axis title (rendered for real again below at the
@@ -194,7 +203,8 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   const xAxisTitle = meta.xAxisTitle ?? "";
   const yAxisTitle = spec.y_axis_title ?? "";
 
-  const title = spec.title ?? "";
+  // Title-selector tokens → the active (or default) option labels, as plain SVG text.
+  const title = spec.title ? resolveTitleText(spec, opts.selections) : "";
   const subtitle = spec.subtitle ?? "";
   const note = spec.note ?? "";
   const source = spec.source ?? "";
@@ -385,16 +395,19 @@ export function triggerDownload(blob: Blob, filename: string): void {
 export async function exportChartPng(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { filename?: string } = {},
+  opts: { filename?: string; selections?: Record<string, string> } = {},
 ): Promise<void> {
-  const svgElement = buildExportSvg(spec, rows);
+  const svgElement = buildExportSvg(spec, rows, { selections: opts.selections });
   const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
   const height = parseInt(svgElement.getAttribute("height") ?? String(H), 10);
   const blob = await rasterize(svgElement, width, height);
+  // Fallback filename slug: resolve title-selector tokens (defaults) before slugifying, so the
+  // name reads "…-by-sector" rather than the token key. Braces themselves could never survive
+  // the non-alphanumeric strip either way.
   const filename =
     opts.filename ??
     (spec.title
-      ? spec.title
+      ? resolveTitleText(spec)
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, "") + ".png"

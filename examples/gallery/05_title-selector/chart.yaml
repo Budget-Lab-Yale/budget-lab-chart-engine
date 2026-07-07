@@ -1,0 +1,13 @@
+chartType: line
+title: "Long-Run Change in Real GDP by {dimension} (feature test)"
+subtitle: Percent change from baseline, by scenario
+xAxisType: temporal
+series_order: ["Baseline", "Alternative"]
+title_selectors:
+  dimension:
+    options:
+      - { id: sector, label: Sector }
+      - { id: country, label: Country }
+    default: sector
+data: data.csv
+note: "Confirm: the title contains a working dropdown; change it and resize the window — the choice persists; PNG download prints the chosen label as plain text. (The data is static — in a standalone page the selector only changes the title; a host app would swap data via the onSelect callback / tbl-title-select event.)"

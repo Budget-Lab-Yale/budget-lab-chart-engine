@@ -1,8 +1,9 @@
 // Pure HTML builder: assembles a self-contained standalone HTML file from a
 // pre-built browser bundle, CSS, and chart spec + data. No esbuild dependency
 // at runtime — the caller passes the already-bundled JS as a string.
-import type { ChartSpec } from "../spec/types";
+import type { ChartSpec, TitleSelector } from "../spec/types";
 import type { TidyRow } from "../data/index";
+import { resolveTitleText } from "../spec/title.js";
 import { FIGTREE_FONT_FACE } from "./assets.js";
 
 export interface StandaloneInput {
@@ -41,7 +42,16 @@ function safeJsonForScript(value: unknown): string {
  */
 export function buildStandaloneHtml(input: StandaloneInput): string {
   const { spec, rows, liveBundleJs, css, title, eyebrow, mountFn = "mountChart" } = input;
-  const pageTitle = title ?? (spec as { title?: string }).title ?? "Chart";
+  // Page <title>: resolve any title-selector `{token}`s with the spec defaults so the browser
+  // tab shows real text (e.g. "GDP by Sector"), never a raw braced token. Specs without
+  // title_selectors pass through resolveTitleText untouched (tables never have them).
+  const rawTitle = title ?? (spec as { title?: string }).title;
+  const pageTitle = rawTitle
+    ? resolveTitleText({
+        title: rawTitle,
+        title_selectors: (spec as { title_selectors?: Record<string, TitleSelector> }).title_selectors,
+      })
+    : "Chart";
 
   const specJson = safeJsonForScript(spec);
   const rowsJson = safeJsonForScript(rows);
