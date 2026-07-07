@@ -97,6 +97,19 @@ export interface TableSpec {
   header_tier_rules?: boolean;
   /** Draw the flanking horizontal rules on multi-column banners. Default true; false → plain centered text. */
   spanner_rules?: boolean;
+  /** Collapsible row groups: a caret on each group header toggles that group's rows (nested
+   *  groups collapse their whole subtree). `default` sets the baseline open/closed state for every
+   *  group; `expanded`/`collapsed` list group VALUES (raw CSV values, matching group_labels keying)
+   *  that override the default — `collapsed` wins over `expanded` when a value appears in both.
+   *  Omit entirely for the current plain (non-interactive) group headers. */
+  collapsible?: {
+    /** Baseline state for every group not named in expanded/collapsed. Default "expanded". */
+    default?: "collapsed" | "expanded";
+    /** Group values open despite a "collapsed" default. */
+    expanded?: string[];
+    /** Group values closed despite an "expanded" default. Wins over `expanded`. */
+    collapsed?: string[];
+  };
   /** Fixed px width for the stub column (overrides the computed width). */
   stub_width?: number;
   /** Minimum px width for the stub column. Without stub_wrap it is a floor on the auto-sized width;

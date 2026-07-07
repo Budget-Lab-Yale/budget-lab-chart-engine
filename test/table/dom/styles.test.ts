@@ -83,4 +83,23 @@ describe("CHART_CSS — table rules", () => {
   it("contains the stub_nowrap hook (5c)", () => {
     expect(CHART_CSS).toMatch(/\.tbl-table-stub\.is-nowrap[\s\S]*white-space:\s*nowrap/);
   });
+
+  it("contains the collapsible group-toggle button styling (Task 4)", () => {
+    expect(CHART_CSS).toContain(".tbl-table-group-toggle");
+    // No button chrome: inline-flex, inherited font, pointer cursor.
+    expect(CHART_CSS).toMatch(/\.tbl-table-group-toggle\s*\{[^}]*display:\s*inline-flex/);
+    expect(CHART_CSS).toMatch(/\.tbl-table-group-toggle\s*\{[^}]*font:\s*inherit/);
+    expect(CHART_CSS).toMatch(/\.tbl-table-group-toggle\s*\{[^}]*cursor:\s*pointer/);
+  });
+
+  it("contains the caret with rotation keyed on aria-expanded (Task 4)", () => {
+    expect(CHART_CSS).toContain(".tbl-table-caret");
+    expect(CHART_CSS).toMatch(
+      /\.tbl-table-group-toggle\[aria-expanded="true"\] \.tbl-table-caret\s*\{[^}]*rotate\(90deg\)/,
+    );
+  });
+
+  it("hides collapsed rows via the hidden attribute (Task 4)", () => {
+    expect(CHART_CSS).toMatch(/\.tbl-table tr\[hidden\]\s*\{\s*display:\s*none/);
+  });
 });

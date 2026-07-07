@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTableModel } from "../../src/table/model";
+import { buildTableModel, groupKeyToken, applyCollapse } from "../../src/table/model";
 import type { TableSpec } from "../../src/spec/table-types";
 
 const tariff: TableSpec = {
@@ -404,5 +404,175 @@ describe("whole-row emphasis (Task 3)", () => {
     const a = m.body.find((b) => b.kind === "row") as any;
     expect(a.row.cells[0].emphasis).toBe(true);
     expect(a.row.emphasis).toBeFalsy();
+  });
+});
+
+describe("groupKeyToken", () => {
+  it("joins encoded path segments with /", () => {
+    expect(groupKeyToken(["China"])).toBe("China");
+    expect(groupKeyToken(["China", "base"])).toBe("China/base");
+  });
+
+  it("round-trips values containing spaces and slashes without colliding across different paths", () => {
+    const a = groupKeyToken(["North America", "US/Canada"]);
+    const b = groupKeyToken(["North", "America/US", "Canada"]);
+    // Different logical paths must not collide even though naive joining could produce the
+    // same string ("North America/US/Canada" either way without encoding).
+    expect(a).not.toBe(b);
+    // Spaces are preserved (decodable), slashes inside a segment are escaped (encodeURIComponent).
+    expect(decodeURIComponent(a.split("/")[0]!)).toBe("North America");
+    expect(a).toContain("US%2FCanada");
+  });
+});
+
+describe("collapsible groups — default-state resolution (Task 4)", () => {
+  const spec2: TableSpec = {
+    title: "T", data: "d", value: "val",
+    stub: ["grp", { label: "lab" }],
+    header: ["per"],
+  };
+  const rows2 = [
+    { grp: "China", lab: "r1", per: "2026", val: "1" },
+    { grp: "Canada", lab: "r2", per: "2026", val: "2" },
+    { grp: "Total", lab: "r3", per: "2026", val: "3" },
+  ] as any;
+
+  function groupsOf(m: ReturnType<typeof buildTableModel>): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    for (const b of m.body) if (b.kind === "group") out[b.group.label] = b.group.collapsed;
+    return out;
+  }
+
+  it("no collapsible config: every group defaults to expanded (collapsed:false)", () => {
+    const m = buildTableModel(spec2, rows2);
+    expect(groupsOf(m)).toEqual({ China: false, Canada: false, Total: false });
+  });
+
+  it("default:'collapsed' collapses every group", () => {
+    const m = buildTableModel({ ...spec2, collapsible: { default: "collapsed" } }, rows2);
+    expect(groupsOf(m)).toEqual({ China: true, Canada: true, Total: true });
+  });
+
+  it("default:'collapsed' + expanded:[X] opens X, leaves the rest collapsed", () => {
+    const m = buildTableModel(
+      { ...spec2, collapsible: { default: "collapsed", expanded: ["Total"] } },
+      rows2,
+    );
+    expect(groupsOf(m)).toEqual({ China: true, Canada: true, Total: false });
+  });
+
+  it("collapsed-list wins over expanded-list when a value is in both", () => {
+    const m = buildTableModel(
+      {
+        ...spec2,
+        collapsible: { default: "expanded", expanded: ["Total"], collapsed: ["Total"] },
+      },
+      rows2,
+    );
+    expect(groupsOf(m).Total).toBe(true);
+  });
+
+  it("default:'expanded' (or omitted) + collapsed:[X] closes only X", () => {
+    const m = buildTableModel(
+      { ...spec2, collapsible: { collapsed: ["China"] } },
+      rows2,
+    );
+    expect(groupsOf(m)).toEqual({ China: true, Canada: false, Total: false });
+  });
+
+  it("matches on the RAW group value, not a group_labels override", () => {
+    const m = buildTableModel(
+      {
+        ...spec2,
+        collapsible: { collapsed: ["China"] },
+        group_labels: { China: "People's Republic of China" },
+      },
+      rows2,
+    );
+    const entry = m.body.find((b) => b.kind === "group" && b.group.label === "People's Republic of China") as any;
+    expect(entry.group.collapsed).toBe(true);
+  });
+});
+
+describe("collapsible groups — key/parents/groupTokens (Task 4)", () => {
+  // 3-level stub: region > country > row, so groups nest 2 deep (region, then country-within-region).
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "val",
+    stub: ["region", "country", { label: "row" }],
+    header: ["per"],
+  };
+  const rows = [
+    { region: "Americas", country: "US", row: "r1", per: "2026", val: "1" },
+    { region: "Americas", country: "US", row: "r2", per: "2026", val: "2" },
+  ] as any;
+  const m = buildTableModel(spec, rows);
+  const regionGroup = m.body.find((b) => b.kind === "group" && b.group.level === 0) as any;
+  const countryGroup = m.body.find((b) => b.kind === "group" && b.group.level === 1) as any;
+  const row = m.body.find((b) => b.kind === "row") as any;
+
+  it("a level-0 group's key is the token of its own single-segment path, with no parents", () => {
+    expect(regionGroup.group.key).toBe(groupKeyToken(["Americas"]));
+    expect(regionGroup.group.parents).toEqual([]);
+  });
+
+  it("a level-1 (nested) group's key is the token of its full 2-segment prefix, parented by level-0", () => {
+    expect(countryGroup.group.key).toBe(groupKeyToken(["Americas", "US"]));
+    expect(countryGroup.group.parents).toEqual([groupKeyToken(["Americas"])]);
+  });
+
+  it("a data row's groupTokens lists every ancestor group prefix, deepest last", () => {
+    expect(row.row.groupTokens).toEqual([groupKeyToken(["Americas"]), groupKeyToken(["Americas", "US"])]);
+  });
+});
+
+describe("applyCollapse (Task 4)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "val",
+    stub: ["grp", { label: "lab" }],
+    header: ["per"],
+  };
+  const rows = [
+    { grp: "China", lab: "r1", per: "2026", val: "1" },
+    { grp: "China", lab: "r2", per: "2026", val: "2" },
+    { grp: "Canada", lab: "r3", per: "2026", val: "3" },
+  ] as any;
+
+  it("drops a collapsed group's descendant rows but keeps its own header (marked collapsed:true)", () => {
+    const m = buildTableModel(spec, rows);
+    const chinaKey = (m.body.find((b) => b.kind === "group" && b.group.label === "China") as any).group.key;
+    const filtered = applyCollapse(m, new Set([chinaKey]));
+    expect(filtered.body.map((b) => (b.kind === "group" ? `g:${b.group.label}` : `r:${b.row.label}`))).toEqual([
+      "g:China",
+      "g:Canada",
+      "r:r3",
+    ]);
+    const chinaEntry = filtered.body.find((b) => b.kind === "group" && b.group.label === "China") as any;
+    expect(chinaEntry.group.collapsed).toBe(true);
+  });
+
+  it("leaves the model unchanged (structurally) when nothing is collapsed", () => {
+    const m = buildTableModel(spec, rows);
+    const filtered = applyCollapse(m, new Set());
+    expect(filtered.body.length).toBe(m.body.length);
+  });
+
+  it("collapsing a parent also drops a nested child group's own header (whole subtree)", () => {
+    const nestedSpec: TableSpec = {
+      title: "T", data: "d", value: "val",
+      stub: ["region", "country", { label: "row" }],
+      header: ["per"],
+    };
+    const nestedRows = [
+      { region: "Americas", country: "US", row: "r1", per: "2026", val: "1" },
+      { region: "Americas", country: "CA", row: "r2", per: "2026", val: "2" },
+      { region: "Asia", country: "JP", row: "r3", per: "2026", val: "3" },
+    ] as any;
+    const m = buildTableModel(nestedSpec, nestedRows);
+    const americasKey = (m.body.find((b) => b.kind === "group" && b.group.label === "Americas") as any).group.key;
+    const filtered = applyCollapse(m, new Set([americasKey]));
+    // Americas' header remains; its nested US/CA country headers + rows are dropped entirely.
+    // Asia's header + JP country group + row survive untouched.
+    const labels = filtered.body.map((b) => (b.kind === "group" ? `g:${b.group.label}` : `r:${b.row.label}`));
+    expect(labels).toEqual(["g:Americas", "g:Asia", "g:JP", "r:r3"]);
   });
 });

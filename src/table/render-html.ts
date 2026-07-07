@@ -142,6 +142,10 @@ export function renderTableHtml(
       const tr = doc.createElement("tr");
       tr.className = "tbl-table-group";
       tr.setAttribute("data-level", String(group.level));
+      // Always emitted (cheap, useful): the collapse-set identity for this group and its
+      // ancestors, consumed by mount.ts's collapse/expand wiring regardless of spec.collapsible.
+      tr.setAttribute("data-group-key", group.key);
+      tr.setAttribute("data-group-parents", group.parents.join(" "));
 
       const th = doc.createElement("th");
       th.colSpan = totalCols;
@@ -151,7 +155,27 @@ export function renderTableHtml(
       const inner = doc.createElement("div");
       inner.className = "tbl-table-group-inner";
       if (stubNowrap) inner.classList.add("is-nowrap");
-      appendRichHtml(inner, group.label, doc);
+
+      if (spec?.collapsible) {
+        // Collapsible: the label (+ caret) becomes a real toggle button, keyboard/aria operable.
+        // The note (if any) stays OUTSIDE the button — it's explanatory text, not part of the
+        // clickable label.
+        const btn = doc.createElement("button");
+        btn.type = "button";
+        btn.className = "tbl-table-group-toggle";
+        btn.setAttribute("aria-expanded", group.collapsed ? "false" : "true");
+        const caret = doc.createElement("span");
+        caret.className = "tbl-table-caret";
+        caret.setAttribute("aria-hidden", "true");
+        btn.appendChild(caret);
+        const labelSpan = doc.createElement("span");
+        labelSpan.className = "tbl-table-group-label";
+        appendRichHtml(labelSpan, group.label, doc);
+        btn.appendChild(labelSpan);
+        inner.appendChild(btn);
+      } else {
+        appendRichHtml(inner, group.label, doc);
+      }
 
       if (group.note != null) {
         const noteDiv = doc.createElement("div");
@@ -167,6 +191,9 @@ export function renderTableHtml(
       const row: BodyRow = entry.row;
       const tr = doc.createElement("tr");
       tr.setAttribute("data-row", row.label);
+      // Always emitted: ancestor group tokens, consumed by mount.ts's collapse/expand wiring
+      // regardless of spec.collapsible (cheap; matches the group <tr>'s data-group-parents).
+      tr.setAttribute("data-group-parents", row.groupTokens.join(" "));
 
       // Stub label cell
       const stubTh = doc.createElement("th");

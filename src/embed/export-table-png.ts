@@ -5,7 +5,7 @@
 
 import type { TableSpec } from "../spec/table-types.js";
 import type { TidyRow } from "../data/index.js";
-import { buildTableModel } from "../table/model.js";
+import { buildTableModel, applyCollapse } from "../table/model.js";
 import { layoutTable, layoutOptionsFromSpec } from "../table/layout.js";
 import { renderTableSvg } from "../table/render-svg.js";
 import { makeMeasureText } from "../table/measure.js";
@@ -48,13 +48,24 @@ function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/** Options threading live view state into the export build. */
+export interface TableExportOptions {
+  /** Collapsed group keys (groupKeyToken values) from the live table; the export drops the
+   *  collapsed groups' descendant rows (their headers remain, drawn with a collapsed caret). */
+  collapsed?: string[];
+}
+
 /**
  * Build a self-contained export SVG for a table: chrome (title/subtitle/logo/source/notes) plus
  * the table body redrawn as SVG. The frame width is the max of the standard content frame and
  * the natural table width; the height fits chrome + table + bottom chrome.
  */
-export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElement {
-  if (spec.pane != null) return buildMultiPaneExportSvg(spec, rows);
+export function buildTableExportSvg(
+  spec: TableSpec,
+  rows: TidyRow[],
+  exportOpts: TableExportOptions = {},
+): SVGSVGElement {
+  if (spec.pane != null) return buildMultiPaneExportSvg(spec, rows, exportOpts);
 
   const title = spec.title ?? "";
   const subtitle = spec.subtitle ?? "";
@@ -62,9 +73,14 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
   const note = Array.isArray(spec.notes) ? spec.notes.join("  ") : (spec.notes ?? "");
 
   // Build the model and lay it out at the standard inner content width. The table may be wider
-  // (wide tables scroll on screen); the export frame grows to fit it.
+  // (wide tables scroll on screen); the export frame grows to fit it. Collapsed groups (live view
+  // state) are filtered out of the model BEFORE layout, so the exported frame shrinks to fit and
+  // the drawn rows match what the user sees on screen.
   const measureText = makeMeasureText();
-  const model = buildTableModel(spec, rows);
+  let model = buildTableModel(spec, rows);
+  if (exportOpts.collapsed && exportOpts.collapsed.length > 0) {
+    model = applyCollapse(model, new Set(exportOpts.collapsed));
+  }
   const layout = layoutTable(model, { width: INNER_W, measureText, ...layoutOptionsFromSpec(spec) });
 
   // Frame width: standard frame, widened if the table itself is wider than the inner content box.
@@ -102,7 +118,11 @@ export function buildTableExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGEle
  * panes are stretched to a shared width so their left/right edges align. Footnotes are collected
  * across panes and listed once at the figure level (above the source line).
  */
-function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElement {
+function buildMultiPaneExportSvg(
+  spec: TableSpec,
+  rows: TidyRow[],
+  exportOpts: TableExportOptions = {},
+): SVGSVGElement {
   const title = spec.title ?? "";
   const subtitle = spec.subtitle ?? "";
   const source = spec.source ?? "";
@@ -111,8 +131,11 @@ function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElemen
   const measureText = makeMeasureText();
   // Panes laid out with a shared stub width and stretched to a shared total width so their left
   // edges, first columns, and right edges all align. Pane models have footnotes stripped (listed
-  // once at the figure level below).
-  const laid = layoutPanes(spec, rows, measureText, true);
+  // once at the figure level below). Collapsed group keys (union across panes, from the live
+  // view) are filtered out of each pane model before layout.
+  const collapsedKeys =
+    exportOpts.collapsed && exportOpts.collapsed.length > 0 ? new Set(exportOpts.collapsed) : undefined;
+  const laid = layoutPanes(spec, rows, measureText, true, collapsedKeys);
   const sharedTableW = Math.max(...laid.map((l) => l.layout.totalWidth));
 
   // Figure-level footnotes (spec defines them once; the same set applies to every pane).
@@ -169,9 +192,9 @@ function buildMultiPaneExportSvg(spec: TableSpec, rows: TidyRow[]): SVGSVGElemen
 export async function exportTablePng(
   spec: TableSpec,
   rows: TidyRow[],
-  opts: { filename?: string } = {},
+  opts: { filename?: string } & TableExportOptions = {},
 ): Promise<void> {
-  const svgElement = buildTableExportSvg(spec, rows);
+  const svgElement = buildTableExportSvg(spec, rows, { collapsed: opts.collapsed ?? [] });
   const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
   const height = parseInt(svgElement.getAttribute("height") ?? "0", 10);
   const blob = await rasterize(svgElement, width, height);

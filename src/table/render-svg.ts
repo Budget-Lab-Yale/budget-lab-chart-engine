@@ -269,8 +269,22 @@ export function renderTableSvg(
       if (!isFirst) g.appendChild(ruleGroup(0, rect.y, layout.totalWidth, rect.y));
       const x = PAD_X + group.level * INDENT_STEP;
       const labelBaseline = rect.y + topGap + BODY_FONT;
+      // Collapsible parity: a small caret glyph before the group label (right-pointing when the
+      // group exported collapsed, down-pointing when expanded), mirroring the live table's caret.
+      // Only for collapsible specs, so non-collapsible export output is byte-identical. The label
+      // shifts right by a fixed slot regardless of caret orientation; group rows span the full
+      // table width, so the shift can never clip the label.
+      let labelX = x;
+      if (spec?.collapsible) {
+        const cy = labelBaseline - BODY_FONT / 3; // optical midline of the label text
+        const d = group.collapsed
+          ? `M ${x} ${cy - 4} L ${x + 5} ${cy} L ${x} ${cy + 4} Z` // right-pointing (collapsed)
+          : `M ${x} ${cy - 2.5} L ${x + 8} ${cy - 2.5} L ${x + 4} ${cy + 2.5} Z`; // down-pointing (expanded)
+        g.appendChild(el("path", { class: "tbl-table-caret", d, fill: TBL.color.heading }));
+        labelX = x + 13;
+      }
       g.appendChild(
-        drawText(x, labelBaseline, group.label, {
+        drawText(labelX, labelBaseline, group.label, {
           anchor: "start",
           weight: 700,
           fill: TBL.color.heading,

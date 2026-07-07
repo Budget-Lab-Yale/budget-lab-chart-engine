@@ -804,6 +804,50 @@ tr.tbl-table-group td {
   display: inline-block;
 }
 
+/* ---- Collapsible row groups ---- */
+/* The group label becomes a real <button> (keyboard/aria operable) with a caret inline-left.
+   No button chrome: it inherits the group heading's font/color so a collapsible table's group
+   headers look identical to a plain one, plus the caret affordance. */
+.tbl-table-group-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tbl-table-group-toggle:focus-visible {
+  outline: 2px solid var(--tbl-navy);
+  outline-offset: 2px;
+}
+/* Caret: a small CSS triangle. Points RIGHT when collapsed; rotates to point DOWN when the
+   group is expanded (aria-expanded is the source of truth; mount.ts also mirrors it onto an
+   is-collapsed class). */
+.tbl-table-caret {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+.tbl-table-group-toggle[aria-expanded="true"] .tbl-table-caret {
+  transform: rotate(90deg);
+}
+/* Rows hidden by a collapsed group use the hidden attribute; enforce display:none in case a
+   display rule elsewhere would otherwise resurrect them. */
+.tbl-table tr[hidden] { display: none; }
+/* Expand/collapse-all: shares .figure-download-btn chrome (border, hover) via its class list;
+   only the marker class is needed for tests/tools to find it. */
+
 /* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */
 tr.tbl-table-group-note th,
 tr.tbl-table-group-note td,

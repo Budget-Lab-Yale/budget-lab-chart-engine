@@ -5,8 +5,20 @@ import { resolveFormat, formatCell } from "./format";
 export interface LeafColumn { key: string; path: string[]; lastValue: string; label: string; sublabel?: string; isText?: boolean; }
 export interface HeaderCell { text: string; colSpan: number; rowSpan: number; leafKey?: string; }
 export interface Cell { value: number | null; text: string; isText?: boolean; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
-export interface BodyRow { stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; emphasis?: boolean; }   // cells aligned to leaves
-export interface RowGroup { label: string; level: number; note?: string; }
+export interface BodyRow {
+  stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; emphasis?: boolean;
+  /** Tokens of every ancestor group prefix (deepest last); used to hide a row when collapsing. */
+  groupTokens: string[];
+}   // cells aligned to leaves
+export interface RowGroup {
+  label: string; level: number; note?: string;
+  /** Stable, attribute-safe token of this group's own full prefix path (see groupKeyToken). */
+  key: string;
+  /** Tokens of ancestor group prefixes (nearest-last), NOT including this group's own key. */
+  parents: string[];
+  /** Default collapsed/expanded state, resolved from spec.collapsible against the RAW group value. */
+  collapsed: boolean;
+}
 export interface TableModel {
   leaves: LeafColumn[];
   headerRows: HeaderCell[][];      // top tier first
@@ -38,6 +50,25 @@ function parseValue(v: string | undefined): number | null {
 
 // Collision-safe separator: use NUL byte so real labels (which may contain spaces) cannot collide.
 const SEP = "\x00";
+
+/** Stable, attribute-safe identity for a group's full prefix path — used as the DOM
+ *  data-group-key / collapse-set member and as RowGroup.key / BodyRow.groupTokens entries.
+ *  encodeURIComponent escapes "/" (and other reserved chars) within a segment, so joining with
+ *  "/" cannot collide two different logical paths (e.g. ["a/b"] vs ["a","b"]) the way a naive
+ *  join would. Stable across re-renders because it depends only on the raw stub values. */
+export function groupKeyToken(path: string[]): string {
+  return path.map(encodeURIComponent).join("/");
+}
+
+/** Resolve a group's default collapsed/expanded state from spec.collapsible, matching on the
+ *  group's RAW (pre-group_labels) value. Precedence: collapsed-list > expanded-list > default
+ *  (default itself defaults to "expanded" when collapsible is present but default is omitted). */
+function resolveCollapsedDefault(rawValue: string, collapsible: TableSpec["collapsible"]): boolean {
+  if (!collapsible) return false;
+  if (collapsible.collapsed?.includes(rawValue)) return true;
+  if (collapsible.expanded?.includes(rawValue)) return false;
+  return collapsible.default === "collapsed";
+}
 
 export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
   const stubCols = spec.stub.map(colOf);
@@ -255,8 +286,14 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       if (!emittedGroup.has(gKey)) {
         emittedGroup.add(gKey);
         // Display label may be overridden in the spec (so math/markup can live in YAML); the raw
-        // CSV value `gLabel` stays the key for group_notes and format.groups.
-        const group: RowGroup = { label: spec.group_labels?.[gLabel] ?? gLabel, level: lvl };
+        // CSV value `gLabel` stays the key for group_notes, format.groups, and collapsible matching.
+        const group: RowGroup = {
+          label: spec.group_labels?.[gLabel] ?? gLabel,
+          level: lvl,
+          key: groupKeyToken(groupPath.slice(0, lvl + 1)),
+          parents: groupPath.slice(0, lvl).map((_, i) => groupKeyToken(groupPath.slice(0, i + 1))),
+          collapsed: resolveCollapsedDefault(gLabel, spec.collapsible),
+        };
         const note = spec.group_notes?.[gLabel];
         if (note != null) group.note = note;
         body.push({ kind: "group", group });
@@ -309,6 +346,7 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
         label: spec.row_labels?.[label] ?? label,
         level: groupPath.length,
         groupKeys: groupPath,
+        groupTokens: groupPath.map((_, i) => groupKeyToken(groupPath.slice(0, i + 1))),
         cells,
         // Whole-row emphasis (stub included): set ONLY from emphasis_rows on the raw leaf label,
         // never from emphasis_column — that mechanism stays strictly per-cell (see cell.emphasis
@@ -345,4 +383,26 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
     stubHeader: typeof spec.stub_header === "string" ? spec.stub_header : "",
     footnotes,
   };
+}
+
+/**
+ * Filter a TableModel down to what remains visible when the groups in `collapsedKeys` are
+ * collapsed: every row or nested group-header entry with a collapsed ANCESTOR is dropped, but a
+ * collapsed group's OWN header entry remains (its `collapsed` flag is set to reflect the live
+ * state passed in). Pure — returns a new model with a new `body` array; used by PNG export to
+ * render a static snapshot that matches the live, collapsed-aware DOM.
+ */
+export function applyCollapse(model: TableModel, collapsedKeys: Set<string>): TableModel {
+  const body: TableModel["body"] = [];
+  for (const entry of model.body) {
+    if (entry.kind === "group") {
+      if (entry.group.parents.some((p) => collapsedKeys.has(p))) continue; // subtree of a collapsed ancestor
+      const collapsed = collapsedKeys.has(entry.group.key);
+      body.push(collapsed === entry.group.collapsed ? entry : { kind: "group", group: { ...entry.group, collapsed } });
+    } else {
+      if (entry.row.groupTokens.some((t) => collapsedKeys.has(t))) continue;
+      body.push(entry);
+    }
+  }
+  return { ...model, body };
 }

@@ -84,6 +84,15 @@ export const TABLE_SPEC_SCHEMA = {
     },
     header_tier_rules: { type: "boolean" },
     spanner_rules: { type: "boolean" },
+    collapsible: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        default: { type: "string", enum: ["collapsed", "expanded"] },
+        expanded: { type: "array", items: { type: "string" } },
+        collapsed: { type: "array", items: { type: "string" } },
+      },
+    },
     stub_width: { type: "number" },
     stub_min_width: { type: "number" },
     stub_wrap: { type: "boolean" },
