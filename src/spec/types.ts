@@ -285,6 +285,11 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
    */
   legendPosition?: "top" | "right";
+  /** Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping
+   *  multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently
+   *  unavailable, since it is driven through the legend. Default true (legend shown per the
+   *  usual ≥2-series / style-override rules). */
+  legend?: boolean;
 
   // Small multiples (multi-panel); per-pane base chart type stays `chartType`.
   small_multiples?: SmallMultiplesConfig;

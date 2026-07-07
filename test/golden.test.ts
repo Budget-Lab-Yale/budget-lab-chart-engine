@@ -123,6 +123,69 @@ describe("golden SVG", () => {
   });
 });
 
+// --- `legend: false` (hide the legend, keep coloring/tooltips) ---
+
+describe("legend: false", () => {
+  it("multi-series + legend:false -> legendItems is null", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const { legendItems } = renderChart({ ...AUGMENTED_SPEC, legend: false }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(legendItems).toBeNull();
+  });
+
+  it("multi-series + legend absent (default) -> legendItems unchanged (non-null)", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const { legendItems } = renderChart(AUGMENTED_SPEC, rows, { width: 720, height: 400, document });
+    expect(legendItems).not.toBeNull();
+    expect(legendItems?.length).toBe(4);
+  });
+
+  it("multi-series + legend:true (explicit) -> legendItems unchanged (non-null)", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const { legendItems } = renderChart({ ...AUGMENTED_SPEC, legend: true }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(legendItems).not.toBeNull();
+    expect(legendItems?.length).toBe(4);
+  });
+
+  it("legend:false also nulls the single-series dash-override legend (hasDashOverrides case)", () => {
+    const rows = parseCsv("./fixtures/grads-recent.csv");
+    const dashedSpec: ChartSpec = { ...GRADS_SPEC, series_styles: { Dissimilarity: { dashed: true } } };
+    // Sanity: a dash override on a single series normally DOES produce a legend.
+    const withLegend = renderChart(dashedSpec, rows, { width: 720, height: 400, document });
+    expect(withLegend.legendItems).not.toBeNull();
+    const { legendItems } = renderChart({ ...dashedSpec, legend: false }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(legendItems).toBeNull();
+  });
+
+  it("legend:false does not affect series colors (colors map unchanged)", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const shown = renderChart(AUGMENTED_SPEC, rows, { width: 720, height: 400, document });
+    const hidden = renderChart({ ...AUGMENTED_SPEC, legend: false }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(hidden.colors.get("<5 Weeks")).toBe(shown.colors.get("<5 Weeks"));
+    expect(hidden.colors.get("27+ Weeks")).toBe(shown.colors.get("27+ Weeks"));
+    // The rendered <path data-series> elements still carry distinct stroke colors.
+    const strokeFor = (svg: SVGSVGElement, series: string) =>
+      svg.querySelector(`g[aria-label="line"] path[data-series="${series}"]`)?.getAttribute("stroke");
+    expect(strokeFor(hidden.svg, "<5 Weeks")).toBe(strokeFor(shown.svg, "<5 Weeks"));
+    expect(strokeFor(hidden.svg, "<5 Weeks")).not.toBe(strokeFor(hidden.svg, "27+ Weeks"));
+  });
+});
+
 // --- Bar charts (task A6) ---
 
 const BAR_SINGLE_SPEC: ChartSpec = {

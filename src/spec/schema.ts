@@ -282,6 +282,7 @@ export const CHART_SPEC_SCHEMA = {
     },
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
+    legend: { type: "boolean" },
 
     // Small multiples (multi-panel)
     small_multiples: SMALL_MULTIPLES,

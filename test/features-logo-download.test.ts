@@ -72,6 +72,21 @@ describe("buildExportSvg — composition", () => {
     const svg = buildExportSvg({ ...SPEC, y_axis_title: "Percent of GDP" }, ROWS);
     expect(svg.textContent ?? "").toContain("Percent of GDP");
   });
+
+  it("legend:false suppresses the legend in the PNG export (multi-series)", () => {
+    const multiRows: TidyRow[] = [
+      { time: "2020-01-01", series: "AlphaSeries", value: "10" },
+      { time: "2020-01-01", series: "BetaSeries", value: "20" },
+      { time: "2021-01-01", series: "AlphaSeries", value: "15" },
+      { time: "2021-01-01", series: "BetaSeries", value: "25" },
+    ];
+    const shown = buildExportSvg(SPEC, multiRows);
+    expect(shown.textContent).toContain("AlphaSeries");
+    expect(shown.textContent).toContain("BetaSeries");
+    const hidden = buildExportSvg({ ...SPEC, legend: false }, multiRows);
+    expect(hidden.textContent).not.toContain("AlphaSeries");
+    expect(hidden.textContent).not.toContain("BetaSeries");
+  });
 });
 
 // ---------------------------------------------------------------------------

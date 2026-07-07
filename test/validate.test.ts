@@ -167,6 +167,22 @@ describe("validateSpec (structural)", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts `legend: false` (hides the legend, colors/tooltips unaffected)", () => {
+    const r = validateSpec({ ...VALID, series_order: ["a", "b"], legend: false });
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts `legend: true` (explicit default)", () => {
+    const r = validateSpec({ ...VALID, series_order: ["a", "b"], legend: true });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects a non-boolean `legend` value", () => {
+    const r = validateSpec({ ...VALID, legend: "no" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/legend/);
+  });
+
   it("accepts a stacked spec with a barStack block", () => {
     const r = validateSpec({
       chartType: "stacked",

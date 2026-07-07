@@ -526,6 +526,7 @@ export function buildLegendItems(
   colors: Map<string, string>,
   layers: MarkLayers,
 ): LegendItem[] | null {
+  if (spec.legend === false) return null;
   const chartType = spec.chartType;
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
@@ -611,6 +612,7 @@ export function buildShapeLegendItems(
   spec: ChartSpec,
   layers: MarkLayers,
 ): ShapeLegendItem[] | null {
+  if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
   const shapeLabels = spec.shape_labels ?? {};
   return layers.shapeNames.map((shape, i) => ({
