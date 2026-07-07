@@ -806,13 +806,15 @@ describe("bar builder — sectioned horizontal category axis", () => {
       "Furnishings and durable household equipment",
       "Motor vehicles and parts",
     ]);
-    // Sections stay contiguous and in section_order: all three bold headers still render
-    // ("Durable goods" is still the first section, per section_order — x_order only reordered
-    // its categories, it did not move the section itself or split it from its header).
-    const headers = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map(
-      (t) => t.textContent ?? "",
-    );
-    expect(headers.sort()).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+    // Sections stay contiguous and in section_order: the bold headers render top-to-bottom in
+    // section_order ("Durable goods" is still the FIRST section — x_order only reordered its
+    // categories, it did not move the section itself or split it from its header). DOM order of
+    // the header marks is not visual order (the top header is a separate mark), so sort by absY.
+    const headers = Array.from(svg.querySelectorAll('g[font-weight="700"] text'))
+      .map((t) => ({ text: t.textContent ?? "", y: absY(t) }))
+      .sort((a, b) => a.y - b.y)
+      .map((h) => h.text);
+    expect(headers).toEqual(["Durable goods", "Nondurable goods", "Services"]);
   });
 });
 
@@ -868,9 +870,13 @@ describe("figure — faceted + sectioned horizontal bars, PER-PANE mode", () => 
     expect(fig.mode).toBe("per-pane");
     const p0 = fig.panes[0]!.svg as SVGSVGElement;
     const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    // Headers in VISUAL top-to-bottom order (absY; DOM order puts the top header last).
     const headers = (svg: SVGSVGElement) =>
-      Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
-    expect(headers(p0).sort()).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+      Array.from(svg.querySelectorAll('g[font-weight="700"] text'))
+        .map((t) => ({ text: t.textContent ?? "", y: absY(t) }))
+        .sort((a, b) => a.y - b.y)
+        .map((h) => h.text);
+    expect(headers(p0)).toEqual(["Durable goods", "Nondurable goods", "Services"]);
     // Suppressed on the non-leftmost pane (only its bars + value ticks show).
     expect(headers(p1)).toEqual([]);
     // Category (y-axis) labels are likewise pane-0-only. (font-weight 500 also covers the
@@ -886,6 +892,36 @@ describe("figure — faceted + sectioned horizontal bars, PER-PANE mode", () => 
     // Both panes still keep all bars (20 categories × 2 series) — suppression is label-only.
     expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
     expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("compensates outer widths for the asymmetric gutter: identical inner DATA width per row", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document });
+    // Unequal OUTER column widths, mirroring shared mode: the labeled left column is WIDER (it
+    // carries the shared category gutter); the label-less column is narrower. Threaded to the
+    // live grid via columnWidths.
+    expect(fig.columnWidths).toBeDefined();
+    expect(fig.columnWidths!.length).toBe(2);
+    expect(fig.columnWidths![0]).toBeGreaterThan(fig.columnWidths![1]!);
+    const svgW = (p: FigurePane): number => Number((p.svg as SVGSVGElement).getAttribute("width"));
+    expect(svgW(fig.panes[0]!)).toBe(fig.columnWidths![0]);
+    expect(svgW(fig.panes[1]!)).toBe(fig.columnWidths![1]);
+    // Left margin: pane 0 keeps the wide category gutter; pane 1 the small label-less margin.
+    const marginLeft = (p: FigurePane): number =>
+      Number((p.svg as SVGSVGElement).dataset.marginLeft);
+    expect(marginLeft(fig.panes[0]!)).toBeGreaterThan(120);
+    expect(marginLeft(fig.panes[1]!)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
+    // IDENTICAL inner DATA width across the row (outer − marginLeft − marginRight), so the same
+    // value renders as the same bar length in both panes despite the asymmetric gutter.
+    const dataW = (p: FigurePane): number => {
+      const svg = p.svg as SVGSVGElement;
+      return (
+        Number(svg.getAttribute("width")) -
+        Number(svg.dataset.marginLeft) -
+        Number(svg.dataset.marginRight)
+      );
+    };
+    expect(dataW(fig.panes[1]!)).toBeCloseTo(dataW(fig.panes[0]!), 4);
   });
 
   it("is deterministic", async () => {

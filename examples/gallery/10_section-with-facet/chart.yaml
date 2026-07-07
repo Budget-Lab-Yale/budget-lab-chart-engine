@@ -15,6 +15,9 @@ section_order:
   - Durable goods
   - Nondurable goods
   - Services
+section_labels:
+  Durable goods: "Durables"
+  Nondurable goods: "Nondurables"
 source: "The Budget Lab"
-note: "Confirm: both panes show the same sectioned category rows; section headers appear once on the left; rows align across panes."
+note: "Confirm: both panes show the same sectioned category rows; section headers appear once on the left (labeled Durables / Nondurables / Services); rows align across panes."
 data: data.csv
