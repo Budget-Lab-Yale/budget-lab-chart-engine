@@ -143,6 +143,10 @@ function resolveLegendPosition(
   seriesCount: number,
   rows: TidyRow[],
 ): "top" | "right" {
+  // `legend: false` suppresses the legend entirely (buildLegendItems returns null), so no
+  // right column must ever be reserved — treat the layout as top (whose slot stays empty and
+  // takes no space) regardless of an explicit legendPosition or the stacked defaults below.
+  if (spec.legend === false) return "top";
   if (spec.legendPosition === "top" || spec.legendPosition === "right") {
     return spec.legendPosition;
   }

@@ -550,6 +550,40 @@ describe("right-side legend layout", () => {
     const buttons = rightSlot.querySelectorAll("button.tbl-legend-item[data-series]");
     expect(buttons.length).toBe(5); // 5 interactive series
   });
+
+  it("legend:false + explicit legendPosition:'right' reclaims the legend column (full-width chart)", () => {
+    const svgWidth = (c: HTMLElement) => Number(c.querySelector("svg.tblchart")?.getAttribute("width"));
+    // Baseline: the right legend reserves its 160+16px column, narrowing the chart.
+    const shown = document.createElement("div");
+    mountChart(shown, { spec: EXPLICIT_RIGHT_SPEC, rows: EXPLICIT_RIGHT_ROWS, width: 800 });
+    expect(svgWidth(shown)).toBe(800 - 160 - 16);
+    // With legend:false no legend will render, so no column may be reserved: full width.
+    const hidden = document.createElement("div");
+    mountChart(hidden, {
+      spec: { ...EXPLICIT_RIGHT_SPEC, legend: false },
+      rows: EXPLICIT_RIGHT_ROWS,
+      width: 800,
+    });
+    expect(hidden.querySelector(".tbl-legend")).toBeNull();
+    expect(hidden.querySelector(".figure-body--legend-right")).toBeNull();
+    expect(svgWidth(hidden)).toBe(800);
+  });
+
+  it("legend:false + default-right rule (stacked ≥5 series) also reclaims the legend column", () => {
+    const svgWidth = (c: HTMLElement) => Number(c.querySelector("svg.tblchart")?.getAttribute("width"));
+    const shown = document.createElement("div");
+    mountChart(shown, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    expect(svgWidth(shown)).toBe(800 - 160 - 16);
+    const hidden = document.createElement("div");
+    mountChart(hidden, {
+      spec: { ...FIVE_SERIES_SPEC, legend: false },
+      rows: FIVE_SERIES_ROWS,
+      width: 800,
+    });
+    expect(hidden.querySelector(".tbl-legend")).toBeNull();
+    expect(hidden.querySelector(".figure-body--legend-right")).toBeNull();
+    expect(svgWidth(hidden)).toBe(800);
+  });
 });
 
 // ---------------------------------------------------------------------------
