@@ -16,6 +16,7 @@
 // Horizontal single-series puts categories on a band `y` (the value axis moves to `x`).
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
+import { resolveColor } from "../palette";
 import {
   tblBandXAxis,
   tblBandYAxis,
@@ -194,11 +195,32 @@ export function buildBarMarks(
 
   if (!isMulti) {
     // --- Single-series: categories on a band scale, no faceting. ---
-    const fill = highlightSet
-      ? (d: PreparedRow) => fillFor(d.series)
-      : seriesNames.length === 1
-        ? fillFor(seriesNames[0] as string)
-        : TBL.color.blue;
+    // `bar_color` (task 7): the single-series bar fill, resolved through the palette. A
+    // first-class replacement for the `series_colors: {"": color}` idiom — that idiom is already
+    // folded into `colors`/`fillFor` above, so `bar_color` simply overrides it when set.
+    const barColorOverride = resolveColor(spec.bar_color);
+    // This branch's data is exactly one series (or none — series_order filtered everything out),
+    // so `d.series` is the SAME value for every row: the highlight-aware `fillFor` call below
+    // always resolves to one constant color here (unlike the multi-series branch further down,
+    // where `fillFor`/`fillChannel` really is per-datum).
+    const baseFill = barColorOverride ?? fillFor(seriesNames.length === 1 ? (seriesNames[0] as string) : "");
+
+    // `category_colors` (task 7): per-x-category fill override, resolved through the palette.
+    // Single-series scope only (see ChartSpec.category_colors TSDoc) — this whole branch is the
+    // single-series path, so no series-fill precedence question arises. Presence forces a
+    // per-datum fill accessor; unlisted categories keep `baseFill`.
+    const categoryColorMap: Record<string, string> | null = spec.category_colors
+      ? Object.fromEntries(
+          Object.entries(spec.category_colors).map(([k, v]) => [k, resolveColor(v) as string]),
+        )
+      : null;
+
+    const fill = categoryColorMap
+      ? (d: PreparedRow) => {
+          const cat = (d as unknown as Record<string, unknown>)[catField] as string | undefined;
+          return (cat != null ? categoryColorMap[cat] : undefined) ?? baseFill;
+        }
+      : baseFill;
 
     overlay.push(
       horizontal

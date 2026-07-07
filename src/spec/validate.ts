@@ -234,6 +234,21 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // Cross-reference: every category named by category_colors must appear in the categorical x
+  // column — mirrors the x_order unknown-value check above (a typo'd key would otherwise silently
+  // no-op). category_colors is single-series scope at render time, but its KEYS are x-category
+  // values regardless of series count, so the same check applies. Only checked on a categorical
+  // x-axis (a no-op for numeric/temporal x).
+  if (spec.xAxisType === "categorical" && spec.category_colors) {
+    const xValues = new Set(rows.map((r) => r[cols.x] as string));
+    const unknown = Object.keys(spec.category_colors).filter((v) => !xValues.has(v));
+    if (unknown.length) {
+      errors.push(
+        `category_colors names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+      );
+    }
+  }
+
   // Cross-reference: small_multiples pane_order / pane_titles keys must correspond to actual
   // distinct values in the facet column. (The facet column's existence is already enforced above
   // via the resolved-columns check, which bails before this point if it's missing.)

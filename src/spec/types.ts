@@ -217,6 +217,17 @@ export interface ChartSpec {
   /** Render order; also an inclusion filter when set. */
   series_order?: string[];
   series_colors?: Record<string, ColorRef>;
+  /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
+   *  palette (named token or raw "#hex"). A first-class replacement for the
+   *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are
+   *  set. Ignored on multi-series (grouped) bar charts, where each series keeps its own color. */
+  bar_color?: ColorRef;
+  /** Bar charts, SINGLE-SERIES only (both orientations): per-x-category fill override, e.g. render
+   *  a "Total" category in a distinct color while every other category keeps the base fill (the
+   *  series color, or `bar_color` when set). Values are resolved through the palette; unlisted
+   *  categories are unaffected. Ignored on multi-series (grouped) bar charts, where series fill
+   *  wins for every bar regardless of category. */
+  category_colors?: Record<string, ColorRef>;
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;

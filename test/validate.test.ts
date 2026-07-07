@@ -73,6 +73,29 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/section_order/);
   });
 
+  it("accepts bar_color and category_colors", () => {
+    const r = validateSpec({
+      ...VALID,
+      chartType: "bar",
+      xAxisType: "categorical",
+      bar_color: "amber",
+      category_colors: { Total: "navy" },
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects a bar_color of the wrong type", () => {
+    const r = validateSpec({ ...VALID, chartType: "bar", bar_color: 123 });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bar_color/);
+  });
+
+  it("rejects a category_colors value of the wrong type", () => {
+    const r = validateSpec({ ...VALID, chartType: "bar", category_colors: { Total: 5 } });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/category_colors/);
+  });
+
   it("accepts xAxisPolicy.bands, yAxisPolicy.markers, and valueLabels.decimals", () => {
     const r = validateSpec({
       chartType: "line",
@@ -436,6 +459,30 @@ describe("validateChartData (cross-reference + CSV format)", () => {
       { time: "South", series: "a", value: "2" },
     ];
     const spec: ChartSpec = { ...VALID, xAxisType: "categorical", x_order: ["South"] };
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("flags a category_colors key absent from the categorical x column", () => {
+    const rows: TidyRow[] = [
+      { time: "Northeast", series: "a", value: "1" },
+      { time: "South", series: "a", value: "2" },
+    ];
+    const spec: ChartSpec = {
+      ...VALID,
+      xAxisType: "categorical",
+      category_colors: { South: "navy", Total: "amber" },
+    };
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/category_colors names categories \["Total"\]/);
+  });
+
+  it("accepts category_colors whose keys all exist in the categorical x column", () => {
+    const rows: TidyRow[] = [
+      { time: "Northeast", series: "a", value: "1" },
+      { time: "South", series: "a", value: "2" },
+    ];
+    const spec: ChartSpec = { ...VALID, xAxisType: "categorical", category_colors: { South: "navy" } };
     expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
   });
 

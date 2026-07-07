@@ -26,6 +26,7 @@ import {
 } from "../src/engine/theme";
 import { paneTitleMark, temporalXTicks, isSectionSpacer } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
+import { resolveColor } from "../src/engine/palette";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
@@ -399,6 +400,102 @@ describe("golden SVG — bars", () => {
     const a = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+// --- category_colors + bar_color (task 7) ---
+
+const BAR_CATCOLOR_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Effect by quarter",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  data: "bar-category-colors.csv",
+};
+
+describe("golden SVG — bar category_colors / bar_color", () => {
+  it("category_colors recolors a named category; others keep the base fill (vertical)", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const spec: ChartSpec = { ...BAR_CATCOLOR_SPEC, category_colors: { Total: "navy" } };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(4);
+    const fills = Array.from(rects).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([TBL.color.blue, TBL.color.blue, TBL.color.blue, resolveColor("navy")]);
+  });
+
+  it("category_colors recolors a named category; others keep the base fill (horizontal)", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const spec: ChartSpec = {
+      ...BAR_CATCOLOR_SPEC,
+      orientation: "horizontal",
+      category_colors: { Total: "navy" },
+    };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(4);
+    const fills = Array.from(rects).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([TBL.color.blue, TBL.color.blue, TBL.color.blue, resolveColor("navy")]);
+  });
+
+  // No `columns.series` and no "series" column in the data ⇒ the implicit single-series key
+  // (SINGLE_SERIES_KEY = "") — the case the `series_colors: {"": color}` idiom targets.
+  const BAR_NOSERIES_SPEC: ChartSpec = { ...BAR_SINGLE_SPEC, data: "bar-single-noseries.csv" };
+
+  it('bar_color sets the single-series fill, identical to the series_colors: {"": color} idiom', () => {
+    const rows = parseCsv("./fixtures/bar-single-noseries.csv");
+    const viaBarColor = renderChart({ ...BAR_NOSERIES_SPEC, bar_color: "amber" }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    }).svg.outerHTML;
+    const viaIdiom = renderChart(
+      { ...BAR_NOSERIES_SPEC, series_colors: { "": "amber" } },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg.outerHTML;
+    expect(viaBarColor).toBe(viaIdiom);
+  });
+
+  it("bar_color wins over the series_colors {\"\": color} idiom when both are set", () => {
+    const rows = parseCsv("./fixtures/bar-single-noseries.csv");
+    const { svg } = renderChart(
+      { ...BAR_NOSERIES_SPEC, bar_color: "amber", series_colors: { "": "navy" } },
+      rows,
+      { width: 720, height: 400, document },
+    );
+    // A constant fill (no category_colors) is hoisted to the group, not repeated per-<rect>.
+    expect(svg.querySelector('g[aria-label="bar"]')?.getAttribute("fill")).toBe(resolveColor("amber"));
+  });
+
+  it("bar_color + category_colors together: the named category wins, others get bar_color", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const spec: ChartSpec = {
+      ...BAR_CATCOLOR_SPEC,
+      bar_color: "amber",
+      category_colors: { Total: "navy" },
+    };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    const fills = Array.from(rects).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([
+      resolveColor("amber"),
+      resolveColor("amber"),
+      resolveColor("amber"),
+      resolveColor("navy"),
+    ]);
+  });
+
+  it("category_colors is scoped to single-series bars: a multi-series chart's series colors are unchanged", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const withoutCatColors = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document })
+      .svg.outerHTML;
+    const withCatColors = renderChart(
+      { ...BAR_MULTI_SPEC, category_colors: { Northeast: "navy" } },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg.outerHTML;
+    expect(withCatColors).toBe(withoutCatColors);
   });
 });
 

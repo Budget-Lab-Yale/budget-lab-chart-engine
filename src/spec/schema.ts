@@ -228,6 +228,8 @@ export const CHART_SPEC_SCHEMA = {
     // Series (the series COLUMN is mapped via `columns.series`)
     series_order: { type: "array", items: { type: "string" } },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
+    bar_color: { type: "string" },
+    category_colors: { type: "object", additionalProperties: { type: "string" } },
     series_styles: {
       type: "object",
       additionalProperties: {
