@@ -446,6 +446,17 @@ export function renderFigure(
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
+          // Horizontal bars: mirror the shared-mode category-gutter/label suppression (see below)
+          // so a sectioned per-pane facet also reads as one figure — pane 0 carries the section
+          // headers + category labels, other panes in the row keep only their bars + value ticks.
+          // Independent y-domains are unaffected (that's what "per-pane" governs); this only
+          // assumes every pane shares one category axis, same as shared mode always has.
+          ...(isHorizontalBar
+            ? {
+                categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
+                hideCategoryLabels: col > 0,
+              }
+            : {}),
         },
         `p${i}`,
       );

@@ -763,6 +763,57 @@ describe("bar builder — sectioned horizontal category axis", () => {
     );
     expect(absY(header ?? null)).toBeGreaterThanOrEqual(0);
   });
+
+  it("x_order reorders categories WITHIN a section without disturbing cross-section order", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    // Default (data-encounter) order within "Durable goods" is: Motor vehicles and parts,
+    // Furnishings and durable household equipment, Recreational goods and vehicles, Other durable
+    // goods. Reverse just that section's categories via x_order; the other two sections' category
+    // sets are unlisted so they keep encounter order, and section_order still drives which section
+    // comes first/second/third.
+    const spec: ChartSpec = {
+      ...SECTIONED_SINGLE,
+      x_order: [
+        "Other durable goods",
+        "Recreational goods and vehicles",
+        "Furnishings and durable household equipment",
+        "Motor vehicles and parts",
+      ],
+    };
+    const { svg } = renderChart(spec, rows, { width: 520, height: 760, document });
+    // Pull every category-axis label (font-weight 500, not the bold 700 section headers), in
+    // top-to-bottom render order (band position ⇒ ascending absY). Labels that wrap onto two
+    // lines join their tspans with no space in textContent, so compare whitespace-stripped.
+    const norm = (s: string): string => s.replace(/\s+/g, "");
+    const durableGoods = new Map(
+      [
+        "Motor vehicles and parts",
+        "Furnishings and durable household equipment",
+        "Recreational goods and vehicles",
+        "Other durable goods",
+      ].map((c) => [norm(c), c] as const),
+    );
+    const labels = Array.from(svg.querySelectorAll('g[font-weight="500"] text'))
+      .filter((t) => durableGoods.has(norm(t.textContent ?? "")))
+      .map((t) => ({ text: durableGoods.get(norm(t.textContent ?? "")) as string, y: absY(t) }))
+      .sort((a, b) => a.y - b.y)
+      .map((l) => l.text);
+    expect(labels).toEqual([
+      "Other durable goods",
+      "Recreational goods and vehicles",
+      "Furnishings and durable household equipment",
+      "Motor vehicles and parts",
+    ]);
+    // Sections stay contiguous and in section_order: all three bold headers still render
+    // ("Durable goods" is still the first section, per section_order — x_order only reordered
+    // its categories, it did not move the section itself or split it from its header).
+    const headers = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map(
+      (t) => t.textContent ?? "",
+    );
+    expect(headers.sort()).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+  });
 });
 
 // --- Figure 7: the full faceted + sectioned horizontal bar chart ---
@@ -795,6 +846,53 @@ describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
     const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-sectioned.golden.svg");
+  });
+});
+
+// --- Figure 7 (per-pane mode): section headers still suppressed off the leftmost pane ---
+//
+// Per-pane mode gives every pane an independent y-domain, but a sectioned horizontal facet still
+// shares ONE category axis across panes (every facet carries the same categories/sections here),
+// so it reads as one figure exactly like shared mode: headers + category labels render once
+// (pane 0 only); other panes keep their bars + value ticks.
+
+const FIG7_SECTIONED_PERPANE_SPEC: ChartSpec = {
+  ...FIG7_SECTIONED_SPEC,
+  small_multiples: { ...FIG7_SECTIONED_SPEC.small_multiples, mode: "per-pane" },
+};
+
+describe("figure — faceted + sectioned horizontal bars, PER-PANE mode", () => {
+  it("section headers + category labels render once (leftmost pane only)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document });
+    expect(fig.mode).toBe("per-pane");
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    const headers = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
+    expect(headers(p0).sort()).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+    // Suppressed on the non-leftmost pane (only its bars + value ticks show).
+    expect(headers(p1)).toEqual([]);
+    // Category (y-axis) labels are likewise pane-0-only. (font-weight 500 also covers the
+    // value-axis tick labels, so match against a known category name instead of counting all
+    // weight-500 text.)
+    const norm = (s: string): string => s.replace(/\s+/g, "");
+    const catLabels = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll('g[font-weight="500"] text')).filter((t) =>
+        norm(t.textContent ?? "") === norm("Motor vehicles and parts"),
+      );
+    expect(catLabels(p0).length).toBeGreaterThan(0);
+    expect(catLabels(p1).length).toBe(0);
+    // Both panes still keep all bars (20 categories × 2 series) — suppression is label-only.
+    expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("is deterministic", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const a = serializePanes(renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document }));
+    expect(a).toBe(b);
   });
 });
 

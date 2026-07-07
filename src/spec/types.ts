@@ -235,7 +235,11 @@ export interface ChartSpec {
   series_labels?: Record<string, string>;
   /** Categorical x: render order for the x-axis categories. Listed categories come first in this
    *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
-   *  series_order, this does NOT filter. Ignored off the categorical x-axis. */
+   *  series_order, this does NOT filter. Ignored off the categorical x-axis.
+   *  With `columns.section` set (horizontal bars), section grouping is authoritative for
+   *  CROSS-section order (sections always render contiguously, in `section_order`/encounter
+   *  order) — x_order only reorders categories WITHIN each section; it can never split a
+   *  section's categories apart or reorder the sections themselves. */
   x_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */

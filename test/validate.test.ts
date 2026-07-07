@@ -561,6 +561,77 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     };
     expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
   });
+
+  // --- Ragged facets: faceted HORIZONTAL bars share one category axis across panes (see
+  // figure.ts renderFigure) — a facet missing a category (or a whole section) would silently
+  // misalign that pane's rows against the others. Catch it here instead of rendering it broken.
+  describe("faceted horizontal bar: ragged-facet guard", () => {
+    const raggedSpec = (extra?: Partial<ChartSpec>): ChartSpec => ({
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: { x: "category", value: "value", facet: "facet" },
+      small_multiples: { mode: "shared" },
+      data: "d.csv",
+      ...extra,
+    });
+
+    it("accepts facets that all carry the same categories", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" },
+        { facet: "B", category: "Food", value: "4" },
+      ];
+      expect(validateChartData(raggedSpec(), rows)).toEqual({ valid: true, errors: [] });
+    });
+
+    it("flags a facet missing a category present in another facet", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" }, // B has no "Food" row
+      ];
+      const r = validateChartData(raggedSpec(), rows);
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/facet "B".*missing.*"Food"/);
+    });
+
+    it("names the missing section alongside the category when columns.section is set", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1", toplevel: "Durable goods" },
+        { facet: "A", category: "Rent", value: "2", toplevel: "Services" },
+        { facet: "B", category: "Cars", value: "3", toplevel: "Durable goods" }, // B lacks "Services" entirely
+      ];
+      const spec = raggedSpec({ columns: { x: "category", value: "value", facet: "facet", section: "toplevel" } });
+      const r = validateChartData(spec, rows);
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/facet "B".*"Rent".*section "Services"/);
+    });
+
+    it("is per-pane-mode agnostic — the same guard fires in per-pane mode", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" },
+      ];
+      const spec = raggedSpec({ small_multiples: { mode: "per-pane" } });
+      const r = validateChartData(spec, rows);
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/facet "B".*missing.*"Food"/);
+    });
+
+    it("does not fire for vertical (non-horizontal) faceted bars", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" },
+      ];
+      const spec = raggedSpec({ orientation: "vertical" });
+      expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+    });
+  });
 });
 
 describe("validateChart (combined)", () => {
