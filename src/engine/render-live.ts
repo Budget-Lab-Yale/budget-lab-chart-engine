@@ -1463,9 +1463,12 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? HBAR_GUTTER_RESERVE : 0);
     const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
     // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
-    // — SHARED mode (unequal labeled/label-less columns) OR variable pane_widths in either mode.
-    // Otherwise (equal per-pane) pass one shared pane width for 1fr columns.
-    const useGridWidth = isShared || variableWidths;
+    // — SHARED mode (unequal labeled/label-less columns), variable pane_widths in either mode, OR
+    // per-pane HORIZONTAL bars (the category gutter is asymmetric — pane 0 wide, others narrow —
+    // so renderFigure compensates the outer widths for one shared inner data width and needs the
+    // total row width, exactly like shared mode). Otherwise (equal per-pane) pass one shared pane
+    // width for 1fr columns.
+    const useGridWidth = isShared || variableWidths || isHorizontalBarFig;
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;

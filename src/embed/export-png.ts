@@ -260,10 +260,21 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
-    // PER-PANE mode: equal columns (unchanged).
+    // PER-PANE mode: equal columns, EXCEPT horizontal bars — their category gutter is asymmetric
+    // (pane 0 wide, others narrow), so renderFigure sizes unequal outer widths and needs the
+    // TOTAL row width (gridWidth), exactly like shared mode; the cell layout then consumes the
+    // returned columnWidths.
     const shared = isShared ? sharedColumnWidths(INNER_W, cols, COL_GAP) : null;
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
-    const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
+    const useGridW = isShared || isHorizontalBarFig;
+    const fig = useGridW
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols })
+      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols });
+    // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
+    // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
+    const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
+    const colWidth = (col: number): number =>
+      shared?.colWidths[col] ?? figColWidths?.[col] ?? equalPaneW;
     // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
     const colX: number[] = [];
     let acc = MARGIN;
@@ -271,9 +282,6 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
       colX.push(acc);
       acc += colWidth(c) + COL_GAP;
     }
-    const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols })
-      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols });
     // Effective pane height: the renderFigure-computed height for horizontal bars (read from the
     // rendered SVG), else the fixed pane height.
     const effPaneH =
