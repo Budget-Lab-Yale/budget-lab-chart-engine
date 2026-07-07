@@ -208,6 +208,22 @@ export interface ColumnMap {
   section?: string;
 }
 
+/** One option in an inline title selector's dropdown. `label` defaults to `id` when absent. */
+export interface TitleSelectorOption {
+  id: string;
+  label?: string;
+}
+
+/** An engine-owned interactive single-select control bound to a `{key}` token in `title`. See
+ *  `src/spec/title.ts` for token parsing/resolution and `src/engine/render-live.ts` for the
+ *  live `<select>` wiring. */
+export interface TitleSelector {
+  options: TitleSelectorOption[];
+  /** Initial active option id. Must be one of `options[].id`. Falls back to the first option
+   *  when omitted. */
+  default?: string;
+}
+
 export interface ChartSpec {
   chartType: ChartType;
 
@@ -218,6 +234,11 @@ export interface ChartSpec {
   // (The eyebrow / figure number is NOT a spec field — it's a property of the article a chart
   //  is embedded in, supplied at embed time via MountOptions.eyebrow / `render --eyebrow`.)
   title: string;
+  /** Interactive dropdowns embedded inline in `title` via a `{key}` token — e.g.
+   *  `title: "GDP by {dimension}"` with `title_selectors: { dimension: {...} }`. Every key here
+   *  must appear as `{key}` in `title` (validated in spec/validate.ts). Absent/empty ⇒ the title
+   *  renders as plain text, byte-identical to before this field existed. */
+  title_selectors?: Record<string, TitleSelector>;
   subtitle?: string;
   source?: string;
   note?: string;

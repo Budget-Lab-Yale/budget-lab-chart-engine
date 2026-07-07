@@ -184,6 +184,31 @@ const DATA_SOURCE = {
   ],
 } as const;
 
+// Inline title selector: a `{key}` token in `title` bound to a dropdown of options. Cross-field
+// rules that ajv can't express (key must appear as `{key}` in title; default must be an option
+// id; option ids must be unique) live in validate.ts's titleSelectorsError.
+const TITLE_SELECTOR = {
+  type: "object",
+  additionalProperties: false,
+  required: ["options"],
+  properties: {
+    options: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          label: { type: "string" },
+        },
+      },
+    },
+    default: { type: "string" },
+  },
+} as const;
+
 const SMALL_MULTIPLES = {
   type: "object",
   additionalProperties: false,
@@ -228,6 +253,7 @@ export const CHART_SPEC_SCHEMA = {
     // Text
     // (No `eyebrow` — the figure number is an embed-time property of the article, not the spec.)
     title: { type: "string", minLength: 1 },
+    title_selectors: { type: "object", additionalProperties: TITLE_SELECTOR },
     subtitle: { type: "string" },
     source: { type: "string" },
     note: { type: "string" },

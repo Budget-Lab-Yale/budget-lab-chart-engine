@@ -252,6 +252,77 @@ describe("validateSpec (structural)", () => {
   });
 });
 
+describe("title_selectors", () => {
+  const withSelector = (overrides: Record<string, unknown> = {}) => ({
+    ...VALID,
+    title: "GDP by {dimension}",
+    title_selectors: {
+      dimension: {
+        options: [
+          { id: "sector", label: "Sector" },
+          { id: "country", label: "Country" },
+        ],
+        default: "sector",
+        ...overrides,
+      },
+    },
+  });
+
+  it("accepts a happy-path selector whose key appears as a token in the title", () => {
+    const r = validateSpec(withSelector());
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an additional unknown property on a selector (structural)", () => {
+    const r = validateSpec(withSelector({ bogus: true }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogus/);
+  });
+
+  it("rejects an option with an empty id (structural)", () => {
+    const r = validateSpec(withSelector({ options: [{ id: "" }] }));
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects empty options array (structural)", () => {
+    const r = validateSpec(withSelector({ options: [] }));
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects a title_selectors key that never appears as {key} in the title", () => {
+    const spec = {
+      ...VALID,
+      title: "GDP over time",
+      title_selectors: {
+        dimension: { options: [{ id: "sector" }], default: "sector" },
+      },
+    };
+    const r = validateSpec(spec);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/dimension/);
+    expect(r.errors.join("\n")).toMatch(/\{dimension\}/);
+  });
+
+  it("rejects a default that is not one of the option ids", () => {
+    const r = validateSpec(withSelector({ default: "region" }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/default/);
+  });
+
+  it("rejects duplicate option ids", () => {
+    const r = validateSpec(
+      withSelector({
+        options: [
+          { id: "sector", label: "Sector" },
+          { id: "sector", label: "Also Sector" },
+        ],
+      }),
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/duplicate/i);
+  });
+});
+
 describe("small_multiples config", () => {
   it("accepts a spec with a full small_multiples block", () => {
     const r = validateSpec({
