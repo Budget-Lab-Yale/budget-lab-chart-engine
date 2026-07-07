@@ -62,6 +62,23 @@ function absX(el: Element | null): number {
   return x;
 }
 
+// Mirror of absX: absolute y of an SVG element, accumulating every ancestor
+// `transform="translate(x,y)"` up to the root <svg>. Used to assert a section header's
+// vertical position lands within the reserved top margin (not clipped above y=0).
+function absY(el: Element | null): number {
+  let y = 0;
+  let n: Element | null = el;
+  while (n && n.tagName.toLowerCase() !== "svg") {
+    const tf = n.getAttribute("transform");
+    if (tf) {
+      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
+      if (m) y += Number(m[2]);
+    }
+    n = n.parentElement;
+  }
+  return y;
+}
+
 const GRADS_SPEC: ChartSpec = {
   chartType: "line",
   title:
@@ -564,6 +581,39 @@ describe("bar builder — sectioned horizontal category axis", () => {
     const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
     expect(texts).toContain("Durables");
     expect(texts).not.toContain("Durable goods");
+  });
+
+  it("first section header is fully visible (not clipped above the plot) with default bottom ticks", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const { svg } = renderChart(SECTIONED_SINGLE, rows, { width: 520, height: 760, document });
+    const header = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).find(
+      (t) => t.textContent === "Durable goods",
+    );
+    expect(header).toBeDefined();
+    // The header's absolute y (accumulated transforms, root-svg-relative) must land at or below
+    // the canvas top (>= 0, not lifted above it and clipped) and still sit inside the reserved
+    // top margin, above the first bar (< marginTop).
+    const marginTop = Number(svg.dataset.marginTop);
+    const y = absY(header ?? null);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(y).toBeLessThan(marginTop);
+  });
+
+  it("x_axis_ticks: both keeps the tick-driven top margin (no double gap from the header floor)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const spec: ChartSpec = { ...SECTIONED_SINGLE, x_axis_ticks: "both" };
+    const { svg } = renderChart(spec, rows, { width: 520, height: 760, document });
+    // Tick-driven margin (HVALUE_TICK_PX + SECTION_HEADER_GAP + 12 = 18+10+12 = 40) exceeds the
+    // header-lift floor, so Math.max picks the tick-driven value untouched (no extra gap stacked on).
+    expect(Number(svg.dataset.marginTop)).toBe(40);
+    const header = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).find(
+      (t) => t.textContent === "Durable goods",
+    );
+    expect(absY(header ?? null)).toBeGreaterThanOrEqual(0);
   });
 });
 

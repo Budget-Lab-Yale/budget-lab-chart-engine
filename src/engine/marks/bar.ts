@@ -145,15 +145,21 @@ export function buildBarMarks(
   const xTicksMode = spec.x_axis_ticks ?? "bottom";
   const hTopTicks = xTicksMode === "top" || xTicksMode === "both";
   const hBottomTicks = xTicksMode !== "top";
-  // Every section header sits SECTION_HEADER_GAP px above its section's first bar (uniform). The top
-  // margin holds: the top ticks (if any) + the first header + that gap above the first bar.
-  const hMarginTop = (hTopTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8);
-  const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
   // First section header: faceted on its first category (facet top = first bar, align:0), lifted so
   // its baseline lands the SAME ~15px above the bar as the spacer-based headers. The top-anchored
   // baseline sits ~one font-size below the facet top, and the bottom-anchored spacers sit ~5px
-  // higher, so add that to match.
+  // higher, so add that to match. Computed before hMarginTop so the margin can floor on it.
   const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
+  // Every section header sits SECTION_HEADER_GAP px above its section's first bar (uniform). The top
+  // margin holds: the top ticks (if any) + the first header + that gap above the first bar. When
+  // there IS a top section header, floor the margin to its lift (+ gap) so it's never clipped above
+  // the canvas — without this floor, the tick-driven term alone can be smaller than the lift when
+  // there are no top ticks (the common default), clipping the header into the legend above.
+  const hMarginTop = Math.max(
+    (hTopTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8),
+    topSectionHeader ? topHeaderLift + SECTION_HEADER_GAP : 0,
+  );
+  const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
 
   // Highlight/dim: literal fill accessor (not the color scale) so non-highlighted series
   // collapse to annotationDim regardless of their palette slot. Used sparingly per spec.
