@@ -2,7 +2,7 @@ import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
 import { resolveFormat, formatCell } from "./format";
 
-export interface LeafColumn { key: string; path: string[]; label: string; sublabel?: string; isText?: boolean; }
+export interface LeafColumn { key: string; path: string[]; lastValue: string; label: string; sublabel?: string; isText?: boolean; }
 export interface HeaderCell { text: string; colSpan: number; rowSpan: number; leafKey?: string; }
 export interface Cell { value: number | null; text: string; isText?: boolean; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
 export interface BodyRow { stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; }   // cells aligned to leaves
@@ -36,23 +36,44 @@ function parseValue(v: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Collision-safe separator: use NUL byte so real labels (which may contain spaces) cannot collide.
+const SEP = "\x00";
+
 export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
   const stubCols = spec.stub.map(colOf);
   const headerCols = spec.header;
 
-  // ---- Leaves: distinct header-paths in first-seen order, keyed by leaf value. ----
+  // ---- Leaves: distinct header-paths in first-seen order. ----
+  // Leaves are deduped by their FULL path (not just the last-tier value), so a leaf value that
+  // repeats under different banner groups (e.g. presub/postsub under both "Levels" and "Change vs.
+  // default") produces distinct columns instead of colliding and being dropped. `key` is the
+  // unique, attribute-safe identity used downstream (data-col, HeaderCell.leafKey, layout/mount
+  // index lookups): it is the leaf's last value, suffixed with `~1`, `~2`, ... (first-seen order)
+  // only when that value is already taken by an earlier leaf. `lastValue` is always the raw
+  // last-tier value and is what header_labels/column_labels/sublabels/column_order/format resolve
+  // against, so authoring stays simple. Tables whose leaf values are already globally unique never
+  // hit the suffix branch, so key === lastValue and output is byte-identical to before this change.
   const leafMap = new Map<string, LeafColumn>();
+  const usedKeys = new Set<string>();
   for (const r of rows) {
     const path = headerCols.map((c) => r[c] ?? "");
-    const key = path[path.length - 1] ?? "";
-    if (!leafMap.has(key)) {
-      leafMap.set(key, {
-        key,
-        path,
-        label: spec.header_labels?.[key] ?? spec.column_labels?.[key] ?? key,
-        ...(spec.sublabels?.[key] != null ? { sublabel: spec.sublabels[key] } : {}),
-      });
+    const pathKey = path.join(SEP);
+    if (leafMap.has(pathKey)) continue;
+    const lastValue = path[path.length - 1] ?? "";
+    let key = lastValue;
+    if (usedKeys.has(key)) {
+      let n = 1;
+      while (usedKeys.has(`${lastValue}~${n}`)) n++;
+      key = `${lastValue}~${n}`;
     }
+    usedKeys.add(key);
+    leafMap.set(pathKey, {
+      key,
+      path,
+      lastValue,
+      label: spec.header_labels?.[lastValue] ?? spec.column_labels?.[lastValue] ?? lastValue,
+      ...(spec.sublabels?.[lastValue] != null ? { sublabel: spec.sublabels[lastValue] } : {}),
+    });
   }
   let leaves = [...leafMap.values()];
   if (spec.column_order && spec.column_order.length) {
@@ -61,8 +82,8 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
     leaves = leaves
       .map((l, i) => ({ l, i }))
       .sort((a, b) => {
-        const ra = rank.has(a.l.key) ? rank.get(a.l.key)! : order.length + a.i;
-        const rb = rank.has(b.l.key) ? rank.get(b.l.key)! : order.length + b.i;
+        const ra = rank.has(a.l.lastValue) ? rank.get(a.l.lastValue)! : order.length + a.i;
+        const rb = rank.has(b.l.lastValue) ? rank.get(b.l.lastValue)! : order.length + b.i;
         return ra - rb;
       })
       .map((x) => x.l);
@@ -145,9 +166,6 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
   const rowOrder = spec.row_order;
   const rowRank = rowOrder ? new Map(rowOrder.map((k, i) => [k, i])) : null;
 
-  // Collision-safe separator: use NUL byte so real labels (which may contain spaces) cannot collide.
-  const SEP = "\x00";
-
   // Index cell values by stubPathKey -> leafPathKey -> row (last wins) for lookup + extras.
   const cellIndex = new Map<string, Map<string, TidyRow>>();
   for (const r of rows) {
@@ -213,7 +231,11 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       // A non-empty, non-numeric value is a text cell: kept verbatim, left-aligned, no number
       // formatting or sign coloring. Blank/missing stays a null numeric cell.
       const isText = value == null && rawTrim !== "";
-      const rule = resolveFormat({ leafKey: leaf.key, groupKeys: groupPath, rowLabel: label, spec });
+      // format.columns is author-facing (authors write the leaf VALUE, e.g. "% of GDP"), so it must
+      // resolve against lastValue, not the possibly-suffixed `key` — matching header_labels/
+      // column_labels/sublabels/column_order, all of which resolve against lastValue too. A format
+      // rule keyed by a repeated leaf value applies to every leaf sharing that value.
+      const rule = resolveFormat({ leafKey: leaf.lastValue, groupKeys: groupPath, rowLabel: label, spec });
       const text = isText ? rawTrim : formatCell(value, rule);
       const cell: Cell = isText ? { value: null, text, isText: true } : { value, text };
 

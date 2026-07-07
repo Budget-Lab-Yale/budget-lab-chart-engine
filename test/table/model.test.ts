@@ -136,6 +136,62 @@ it("applies column_labels and header_labels overrides to HeaderCell.text", () =>
 
   // Sanity: leaf keys are still the raw values.
   expect(m.leaves.map((l) => l.key)).toEqual(["Static", "Dynamic", "Other"]);
+  // Byte-identity guard: globally-unique leaf values → key === lastValue (no suffix branch hit).
+  expect(m.leaves.map((l) => l.lastValue)).toEqual(["Static", "Dynamic", "Other"]);
+  m.leaves.forEach((l) => expect(l.key).toBe(l.lastValue));
+});
+
+describe("repeated last-tier header value under distinct banners (full-path leaf keying)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["banner", "leaf"],
+    format: { default: { type: "number", decimals: 1 } },
+    header_labels: {
+      Levels: "Levels",
+      Change: "Change vs. default",
+      presub: "Pre-substitution",
+      postsub: "Post-substitution",
+    },
+  };
+  const rows = [
+    { row: "USA", banner: "Levels", leaf: "presub", value: "10" },
+    { row: "USA", banner: "Levels", leaf: "postsub", value: "20" },
+    { row: "USA", banner: "Change", leaf: "presub", value: "30" },
+    { row: "USA", banner: "Change", leaf: "postsub", value: "40" },
+  ] as any;
+
+  it("keeps all 4 leaves distinct (no collision/drop) and suffixes the duplicate keys deterministically", () => {
+    const m = buildTableModel(spec, rows);
+    expect(m.leaves).toHaveLength(4);
+    expect(m.leaves.map((l) => l.key)).toEqual(["presub", "postsub", "presub~1", "postsub~1"]);
+    expect(m.leaves.map((l) => l.lastValue)).toEqual(["presub", "postsub", "presub", "postsub"]);
+  });
+
+  it("renders both banner texts in the top header row", () => {
+    const m = buildTableModel(spec, rows);
+    const bannerTexts = m.headerRows[0]!.map((c) => c.text);
+    expect(bannerTexts).toEqual(["Levels", "Change vs. default"]);
+  });
+
+  it("applies header_labels keyed by the repeated value to BOTH leaves", () => {
+    const m = buildTableModel(spec, rows);
+    const leafTexts = m.headerRows[1]!.map((c) => c.text);
+    expect(leafTexts).toEqual(["Pre-substitution", "Post-substitution", "Pre-substitution", "Post-substitution"]);
+  });
+
+  it("resolves correct cell values under each banner", () => {
+    const m = buildTableModel(spec, rows);
+    const row = m.body.find((b) => b.kind === "row") as any;
+    expect(row.row.cells.map((c: any) => c.text)).toEqual(["10.0", "20.0", "30.0", "40.0"]);
+  });
+
+  it("column_order listing the repeated value orders both leaves (stable first-seen tie-break)", () => {
+    const orderedSpec: TableSpec = { ...spec, column_order: ["postsub", "presub"] };
+    const m = buildTableModel(orderedSpec, rows);
+    expect(m.leaves.map((l) => l.key)).toEqual(["postsub", "postsub~1", "presub", "presub~1"]);
+    expect(m.leaves.map((l) => l.lastValue)).toEqual(["postsub", "postsub", "presub", "presub"]);
+  });
 });
 
 it("keeps non-numeric values as text cells (verbatim, no numeric formatting)", () => {
