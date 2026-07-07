@@ -5,6 +5,7 @@
 
 import type { TableSpec } from "../spec/table-types.js";
 import type { TidyRow } from "../data/index.js";
+import type { TableModel } from "../table/model.js";
 import { buildTableModel, applyCollapse } from "../table/model.js";
 import { layoutTable, layoutOptionsFromSpec } from "../table/layout.js";
 import { renderTableSvg } from "../table/render-svg.js";
@@ -51,8 +52,21 @@ function slugify(title: string): string {
 /** Options threading live view state into the export build. */
 export interface TableExportOptions {
   /** Collapsed group keys (groupKeyToken values) from the live table; the export drops the
-   *  collapsed groups' descendant rows (their headers remain, drawn with a collapsed caret). */
+   *  collapsed groups' descendant rows (their headers remain, drawn with a collapsed caret).
+   *  OMIT (undefined) to fall back to the spec's own collapsible default states; an explicit
+   *  array — including [] (fully expanded) — wins verbatim. */
   collapsed?: string[];
+}
+
+/** Keys of every group whose spec-resolved default state is collapsed — the same resolution the
+ *  mount seeding uses (collapsed-list > expanded-list > default). Empty for non-collapsible
+ *  specs (every group.collapsed defaults false), so applying it is a no-op there. */
+function defaultCollapsedKeys(model: TableModel): Set<string> {
+  const keys = new Set<string>();
+  for (const b of model.body) {
+    if (b.kind === "group" && b.group.collapsed) keys.add(b.group.key);
+  }
+  return keys;
 }
 
 /**
@@ -73,13 +87,17 @@ export function buildTableExportSvg(
   const note = Array.isArray(spec.notes) ? spec.notes.join("  ") : (spec.notes ?? "");
 
   // Build the model and lay it out at the standard inner content width. The table may be wider
-  // (wide tables scroll on screen); the export frame grows to fit it. Collapsed groups (live view
-  // state) are filtered out of the model BEFORE layout, so the exported frame shrinks to fit and
-  // the drawn rows match what the user sees on screen.
+  // (wide tables scroll on screen); the export frame grows to fit it. Collapsed groups are
+  // filtered out of the model BEFORE layout, so the exported frame shrinks to fit and the drawn
+  // rows match the visible view. An explicit collapsed list (the mount's live state, including
+  // an explicit [] = fully expanded) wins verbatim; when OMITTED, the export honors the spec's
+  // own collapsible defaults so a direct (CLI/batch) export shows the declared default view.
   const measureText = makeMeasureText();
   let model = buildTableModel(spec, rows);
-  if (exportOpts.collapsed && exportOpts.collapsed.length > 0) {
-    model = applyCollapse(model, new Set(exportOpts.collapsed));
+  const collapsedKeys =
+    exportOpts.collapsed != null ? new Set(exportOpts.collapsed) : defaultCollapsedKeys(model);
+  if (collapsedKeys.size > 0) {
+    model = applyCollapse(model, collapsedKeys);
   }
   const layout = layoutTable(model, { width: INNER_W, measureText, ...layoutOptionsFromSpec(spec) });
 
@@ -132,9 +150,12 @@ function buildMultiPaneExportSvg(
   // Panes laid out with a shared stub width and stretched to a shared total width so their left
   // edges, first columns, and right edges all align. Pane models have footnotes stripped (listed
   // once at the figure level below). Collapsed group keys (union across panes, from the live
-  // view) are filtered out of each pane model before layout.
-  const collapsedKeys =
-    exportOpts.collapsed && exportOpts.collapsed.length > 0 ? new Set(exportOpts.collapsed) : undefined;
+  // view) are filtered out of each pane model before layout. When the caller passes NO collapsed
+  // option, seed from the spec's collapsible defaults — resolved over a model of ALL rows, whose
+  // groups superset each pane's (panes partition the rows), so every pane group gets its default.
+  const explicit = exportOpts.collapsed != null ? new Set(exportOpts.collapsed) : undefined;
+  const seeded = explicit ?? defaultCollapsedKeys(buildTableModel(spec, rows));
+  const collapsedKeys = seeded.size > 0 ? seeded : undefined;
   const laid = layoutPanes(spec, rows, measureText, true, collapsedKeys);
   const sharedTableW = Math.max(...laid.map((l) => l.layout.totalWidth));
 
@@ -194,7 +215,13 @@ export async function exportTablePng(
   rows: TidyRow[],
   opts: { filename?: string } & TableExportOptions = {},
 ): Promise<void> {
-  const svgElement = buildTableExportSvg(spec, rows, { collapsed: opts.collapsed ?? [] });
+  // Preserve the undefined/[] distinction: undefined lets buildTableExportSvg seed from the
+  // spec's collapsible defaults; an explicit array (the mount always passes one for collapsible
+  // specs, possibly empty) is applied verbatim.
+  const svgElement = buildTableExportSvg(
+    spec, rows,
+    opts.collapsed != null ? { collapsed: opts.collapsed } : {},
+  );
   const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
   const height = parseInt(svgElement.getAttribute("height") ?? "0", 10);
   const blob = await rasterize(svgElement, width, height);

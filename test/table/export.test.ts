@@ -109,4 +109,38 @@ describe("buildTableExportSvg — collapsed groups (Task 4)", () => {
     const svg = buildTableExportSvg(plain, GROUPED_ROWS);
     expect(svg.querySelectorAll("path.tbl-table-caret").length).toBe(0);
   });
+
+  // ---- Default-state seeding when the caller passes NO collapsed option ----
+  // Without an explicit collapsed list the export must honor the spec's own declared default
+  // view (collapsed-list > expanded-list > default), exactly like the mount seeding. An explicit
+  // array — including [] — wins verbatim.
+  const DEFAULT_COLLAPSED: TableSpec = {
+    ...GROUPED,
+    collapsible: { default: "collapsed", expanded: ["Canada"] },
+  };
+
+  it("seeds from spec.collapsible defaults when the collapsed option is omitted", () => {
+    const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS);
+    // China defaults collapsed: header remains, rows omitted.
+    expect(svg.textContent).toContain("China");
+    expect(svg.textContent).not.toContain("111");
+    expect(svg.textContent).not.toContain("222");
+    // Canada is in the expanded list: its row survives.
+    expect(svg.textContent).toContain("Canada");
+    expect(svg.textContent).toContain("333");
+  });
+
+  it("an explicit empty collapsed list overrides a 'collapsed' default (fully expanded)", () => {
+    const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS, { collapsed: [] });
+    expect(svg.textContent).toContain("111");
+    expect(svg.textContent).toContain("222");
+    expect(svg.textContent).toContain("333");
+  });
+
+  it("an explicit collapsed list wins verbatim over the spec defaults", () => {
+    // Defaults would collapse China and expand Canada; the explicit list flips both.
+    const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS, { collapsed: ["Canada"] });
+    expect(svg.textContent).toContain("111"); // China expanded
+    expect(svg.textContent).not.toContain("333"); // Canada collapsed
+  });
 });
