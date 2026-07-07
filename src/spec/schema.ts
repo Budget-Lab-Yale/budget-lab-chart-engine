@@ -16,7 +16,9 @@ const VALUE_FORMAT = {
   type: "object",
   additionalProperties: false,
   properties: {
-    decimals: { type: "number" },
+    // Integer 0–10, matching tooltip_decimals / valueLabels.decimals — an out-of-range value
+    // would otherwise throw inside Number.toFixed at render time instead of failing validation.
+    decimals: { type: "integer", minimum: 0, maximum: 10 },
     prefix: { type: "string" },
     suffix: { type: "string" },
   },

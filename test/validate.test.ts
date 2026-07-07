@@ -114,6 +114,19 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/bogusKey/);
   });
 
+  it("rejects out-of-range value_format.decimals (would throw in toFixed at render time)", () => {
+    const neg = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y ({value})", value_format: { decimals: -1 } }] },
+    });
+    expect(neg.valid).toBe(false);
+    const huge = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y ({value})", value_format: { decimals: 200 } }] },
+    });
+    expect(huge.valid).toBe(false);
+  });
+
   it("rejects a band missing start/end and a y-marker missing y", () => {
     const r1 = validateSpec({
       chartType: "line", title: "x", xAxisType: "numeric", data: "d",
