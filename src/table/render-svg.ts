@@ -296,8 +296,27 @@ export function renderTableSvg(
     const { row, rect, cellRects } = entry;
     const rg = el("g", { class: "tbl-table-row" });
     const baseY = rect.y + rect.h / 2 + BODY_FONT / 3;
-    const stubWeight = row.cells.some((c) => c.emphasis) ? 700 : 400;
+    // Whole-row emphasis (emphasis_rows) drives the stub weight — NOT emphasis_column, which stays
+    // per-cell and never reaches row.emphasis (see model.ts). This is a deliberate behavior change
+    // from the old `row.cells.some(c => c.emphasis)` heuristic, which also bolded the stub for a
+    // column-only emphasis with no row-level highlight to match.
+    const stubWeight = row.emphasis ? 700 : 400;
     const stubX = PAD_X + row.level * INDENT_STEP;
+
+    // Highlight rect behind the stub cell, matching the value-cell emph rects, drawn BEFORE the
+    // stub text so the text paints on top.
+    if (row.emphasis) {
+      rg.appendChild(
+        el("rect", {
+          class: "tbl-table-cell-emph",
+          x: 0,
+          y: rect.y,
+          width: rect.w,
+          height: rect.h,
+          fill: TBL.color.bgSubtle,
+        }),
+      );
+    }
 
     // Stub label, left-aligned, indented by level. Wrapped onto multiple lines when the layout
     // wrapped it (stub_wrap); otherwise a single line, clipped to the column when capped.

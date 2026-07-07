@@ -822,6 +822,12 @@ tr.tbl-table-group-note td,
   font-weight: var(--tw-bold);
   background: var(--tbl-bg-subtle) !important;
 }
+/* th.tbl-table-stub (0,1,1) otherwise outranks .is-emphasis (0,1,0) on font-weight (its background
+   already wins via !important), so a whole-row-emphasized stub needs its own higher-specificity
+   bold rule to match the row's value cells. */
+th.tbl-table-stub.is-emphasis {
+  font-weight: var(--tw-bold);
+}
 
 /* ---- Positive / negative coloring ---- */
 /* Use categorical green (cat4) and red (cat5) tokens — muted base tones. */

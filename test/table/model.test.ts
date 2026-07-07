@@ -356,3 +356,53 @@ it("sets the stub corner from stub_header (string form)", () => {
   const m = buildTableModel(spec, [{ row: "a", metric: "M", value: "1" }] as any);
   expect(m.stubHeader).toBe("Parameter");
 });
+
+describe("whole-row emphasis (Task 3)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 1 } },
+    emphasis_rows: ["Total"],
+  };
+  const rows = [
+    { row: "A", metric: "M", value: "1.0" },
+    { row: "Total", metric: "M", value: "2.0" },
+  ] as any;
+
+  it("marks the row named in emphasis_rows with row.emphasis === true", () => {
+    const m = buildTableModel(spec, rows);
+    const total = m.body.find((b) => b.kind === "row" && (b as any).row.label === "Total") as any;
+    expect(total.row.emphasis).toBe(true);
+  });
+
+  it("leaves an unlisted row's emphasis falsy", () => {
+    const m = buildTableModel(spec, rows);
+    const a = m.body.find((b) => b.kind === "row" && (b as any).row.label === "A") as any;
+    expect(a.row.emphasis).toBeFalsy();
+  });
+
+  it("uses the raw leaf label (pre row_labels override) to match emphasis_rows", () => {
+    const overriddenSpec: TableSpec = { ...spec, row_labels: { Total: "Grand Total" } };
+    const m = buildTableModel(overriddenSpec, rows);
+    const total = m.body.find((b) => b.kind === "row" && (b as any).row.label === "Grand Total") as any;
+    expect(total.row.emphasis).toBe(true);
+  });
+
+  it("emphasis_column marks cells but does not set row.emphasis", () => {
+    const colSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      format: { default: { type: "number", decimals: 1 } },
+      emphasis_column: "flag",
+    };
+    const colRows = [
+      { row: "A", metric: "M", value: "1.0", flag: "yes" },
+    ] as any;
+    const m = buildTableModel(colSpec, colRows);
+    const a = m.body.find((b) => b.kind === "row") as any;
+    expect(a.row.cells[0].emphasis).toBe(true);
+    expect(a.row.emphasis).toBeFalsy();
+  });
+});

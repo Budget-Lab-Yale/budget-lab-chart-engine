@@ -250,3 +250,70 @@ describe("renderTableSvg — golden bodies", () => {
     expect(a).toBe(b);
   });
 });
+
+describe("renderTableSvg — whole-row emphasis (Task 3)", () => {
+  const emphSpec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 1 } },
+    emphasis_rows: ["Total"],
+  };
+  const emphRows = [
+    { row: "A", metric: "M", value: "1.0" },
+    { row: "Total", metric: "M", value: "2.0" },
+  ] as unknown as TidyRow[];
+
+  it("emphasized row's stub text gets weight 700 and an emph rect at the stub position", () => {
+    const m = buildTableModel(emphSpec, emphRows);
+    const l = layoutTable(m, layoutOpts);
+    const svg = renderTableSvg(m, l, { document, spec: emphSpec });
+    const rowGroups = svg.querySelectorAll("g.tbl-table-row");
+    const totalRowG = rowGroups[1]!; // "A" then "Total", in body order
+    const stubText = totalRowG.querySelector("text")!;
+    expect(stubText.textContent).toBe("Total");
+    expect(stubText.getAttribute("font-weight")).toBe("700");
+    // An emph rect sits behind the stub: x=0, width = stubWidth.
+    const emphRect = totalRowG.querySelector("rect.tbl-table-cell-emph");
+    expect(emphRect).not.toBeNull();
+    expect(Number(emphRect!.getAttribute("x"))).toBe(0);
+    expect(Number(emphRect!.getAttribute("width"))).toBe(l.stubWidth);
+  });
+
+  it("non-emphasized row's stub stays weight 400 with no emph rect at the stub position", () => {
+    const m = buildTableModel(emphSpec, emphRows);
+    const l = layoutTable(m, layoutOpts);
+    const svg = renderTableSvg(m, l, { document, spec: emphSpec });
+    const rowGroups = svg.querySelectorAll("g.tbl-table-row");
+    const aRowG = rowGroups[0]!;
+    const stubText = aRowG.querySelector("text")!;
+    expect(stubText.textContent).toBe("A");
+    expect(stubText.getAttribute("font-weight")).toBe("400");
+    expect(aRowG.querySelector("rect.tbl-table-cell-emph")).toBeNull();
+  });
+
+  it("emphasis_column-only (no emphasis_rows) leaves stubWeight at 400 (behavior change from the old some(c=>c.emphasis) heuristic)", () => {
+    const colSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      format: { default: { type: "number", decimals: 1 } },
+      emphasis_column: "flag",
+    };
+    const colRows = [
+      { row: "A", metric: "M", value: "1.0", flag: "yes" },
+    ] as unknown as TidyRow[];
+    const m = buildTableModel(colSpec, colRows);
+    const l = layoutTable(m, layoutOpts);
+    const svg = renderTableSvg(m, l, { document, spec: colSpec });
+    const rowG = svg.querySelector("g.tbl-table-row")!;
+    const stubText = rowG.querySelector("text")!;
+    expect(stubText.textContent).toBe("A");
+    // The value cell IS emphasized (per-cell mechanism unaffected)...
+    const emphRects = Array.from(rowG.querySelectorAll("rect.tbl-table-cell-emph"));
+    expect(emphRects.length).toBe(1);
+    // ...but the stub is not bolded and has no emph rect at x=0 (the stub's position).
+    expect(stubText.getAttribute("font-weight")).toBe("400");
+    expect(emphRects.some((r) => Number(r.getAttribute("x")) === 0)).toBe(false);
+  });
+});

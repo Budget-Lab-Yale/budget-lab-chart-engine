@@ -173,6 +173,10 @@ export function renderTableHtml(
       stubTh.scope = "row";
       stubTh.className = "tbl-table-stub";
       stubTh.classList.add(stubWrap ? "is-wrap" : "is-nowrap");
+      // Whole-row emphasis (emphasis_rows): the stub gets the same bold + subtle-bg treatment as
+      // the row's value cells, so the row reads as one unit. emphasis_column stays per-cell (does
+      // not set row.emphasis — see model.ts), so it never reaches here.
+      if (row.emphasis) stubTh.classList.add("is-emphasis");
       // Keep the cell's base 8px left padding (matches the corner + group headers) and ADD the
       // nesting indent on top — setting paddingLeft to just the indent would drop the base padding
       // for level-0 rows, leaving them flush at the cell edge while the corner sits at 8px.

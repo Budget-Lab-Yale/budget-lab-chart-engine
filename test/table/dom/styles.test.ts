@@ -59,6 +59,12 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toContain("z-index: 3");
   });
 
+  it("bolds an emphasized stub cell (th.tbl-table-stub.is-emphasis beats the plain stub's font-weight)", () => {
+    // th.tbl-table-stub (0,1,1) otherwise outranks .is-emphasis (0,1,0) on font-weight, so an
+    // emphasized row's stub would stay at the plain weight despite the .is-emphasis class.
+    expect(CHART_CSS).toMatch(/th\.tbl-table-stub\.is-emphasis\s*\{[^}]*font-weight:\s*var\(--tw-bold\)/);
+  });
+
   it("puts the header→body bottom rule on the bottom-tier th AND the stub corner (bug #4)", () => {
     expect(CHART_CSS).toMatch(
       /thead tr:last-child th,\s*\.tbl-table thead th\.tbl-table-stub-header\s*\{[^}]*border-bottom/,

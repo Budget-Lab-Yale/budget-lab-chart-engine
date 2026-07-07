@@ -5,7 +5,7 @@ import { resolveFormat, formatCell } from "./format";
 export interface LeafColumn { key: string; path: string[]; lastValue: string; label: string; sublabel?: string; isText?: boolean; }
 export interface HeaderCell { text: string; colSpan: number; rowSpan: number; leafKey?: string; }
 export interface Cell { value: number | null; text: string; isText?: boolean; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
-export interface BodyRow { stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; }   // cells aligned to leaves
+export interface BodyRow { stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; emphasis?: boolean; }   // cells aligned to leaves
 export interface RowGroup { label: string; level: number; note?: string; }
 export interface TableModel {
   leaves: LeafColumn[];
@@ -310,6 +310,10 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
         level: groupPath.length,
         groupKeys: groupPath,
         cells,
+        // Whole-row emphasis (stub included): set ONLY from emphasis_rows on the raw leaf label,
+        // never from emphasis_column — that mechanism stays strictly per-cell (see cell.emphasis
+        // above), so a column flag never forces the stub bold/highlighted.
+        ...(emphasisRows.has(label) ? { emphasis: true } : {}),
       },
     });
   }
