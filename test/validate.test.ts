@@ -93,6 +93,27 @@ describe("validateSpec (structural)", () => {
     expect(b.valid).toBe(true);
   });
 
+  it("accepts value_format on xAxis/yAxis markers and points callouts", () => {
+    const r = validateSpec({
+      ...VALID,
+      annotations: {
+        xAxis: [{ x: "2021", label: "X ({value})", value_format: { decimals: 1 } }],
+        yAxis: [{ y: 1, label: "Y ({value})", value_format: { prefix: "$", suffix: "M" } }],
+        points: [{ x: "2021", label: "P ({value})", value_format: {} }],
+      },
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects an unknown key inside value_format", () => {
+    const r = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y", value_format: { bogusKey: true } }] },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogusKey/);
+  });
+
   it("rejects a band missing start/end and a y-marker missing y", () => {
     const r1 = validateSpec({
       chartType: "line", title: "x", xAxisType: "numeric", data: "d",

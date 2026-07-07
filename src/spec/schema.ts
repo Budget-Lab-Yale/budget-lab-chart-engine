@@ -10,6 +10,18 @@
 
 // Shared annotation fragments — reused by the legacy axis policies AND the unified `annotations`
 // block, so both accept the same shapes.
+// `{value}` token formatting, shared by the three annotation shapes whose `label` may
+// reference their own coordinate value (see spec/annotations.ts substituteValueToken).
+const VALUE_FORMAT = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    decimals: { type: "number" },
+    prefix: { type: "string" },
+    suffix: { type: "string" },
+  },
+} as const;
+
 const X_MARKER_ARRAY = {
   type: "array",
   items: {
@@ -19,6 +31,7 @@ const X_MARKER_ARRAY = {
     properties: {
       x: { type: "string" },
       label: { type: "string" },
+      value_format: VALUE_FORMAT,
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
@@ -54,6 +67,7 @@ const Y_MARKER_ARRAY = {
     properties: {
       y: { type: "number" },
       label: { type: "string" },
+      value_format: VALUE_FORMAT,
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
@@ -76,6 +90,7 @@ const POINT_CALLOUT_ARRAY = {
       y: { type: "number" },
       series: { type: "string" },
       label: { type: "string" },
+      value_format: VALUE_FORMAT,
       color: { type: "string" },
       dx: { type: "number" },
       dy: { type: "number" },

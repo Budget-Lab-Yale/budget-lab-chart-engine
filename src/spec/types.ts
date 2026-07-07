@@ -12,9 +12,27 @@ export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
 
+/** Per-annotation number formatting for a `{value}` token substituted into an annotation's
+ *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
+ *  chart's value-axis tick format (yAxis markers, points) or the raw x string (xAxis markers). */
+export interface ValueFormat {
+  /** Fixed decimal places. Default 2. */
+  decimals?: number;
+  /** Text prepended to the formatted number. */
+  prefix?: string;
+  /** Text appended to the formatted number. */
+  suffix?: string;
+}
+
 export interface XAxisMarker {
   x: string;
+  /** May contain a literal `{value}` token, replaced with this marker's own `x` — formatted
+   *  numerically via `value_format` when present AND `x` parses as a number, else the raw
+   *  string. */
   label?: string;
+  /** Formatting for the `{value}` token in `label`. Only applies when `x` parses as a number;
+   *  absent (or `x` non-numeric) → the raw `x` string is substituted. */
+  value_format?: ValueFormat;
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
@@ -54,7 +72,12 @@ export interface XAxisPolicy {
 /** A horizontal reference line at a fixed y value (e.g. a target or assumption line). */
 export interface YAxisMarker {
   y: number;
+  /** May contain a literal `{value}` token, replaced with this marker's own `y`, formatted via
+   *  `value_format` — or, when absent, the chart's value-axis tick format. */
   label?: string;
+  /** Formatting for the `{value}` token in `label`. Absent → falls back to the chart's
+   *  value-axis tick format. */
+  value_format?: ValueFormat;
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
@@ -88,7 +111,14 @@ export interface PointCallout {
   x: string;
   y?: number;
   series?: string;
+  /** May contain a literal `{value}` token, replaced with this callout's resolved `y` (the
+   *  explicit value, or — when `y` is omitted and `series` snaps to a series — the snapped
+   *  value), formatted via `value_format` — or, when absent, the chart's value-axis tick
+   *  format. */
   label: string;
+  /** Formatting for the `{value}` token in `label`. Absent → falls back to the chart's
+   *  value-axis tick format. */
+  value_format?: ValueFormat;
   color?: ColorRef;
   /** Horizontal nudge (px, signed: + = right) of the label from the point. */
   dx?: number;
