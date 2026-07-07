@@ -128,6 +128,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   ];
   if (cols.series) requiredRoles.push(["series", cols.series]);
   if (cols.shape) requiredRoles.push(["shape", cols.shape]);
+  if (spec.projected_field) requiredRoles.push(["projected_field", spec.projected_field]);
   if (spec.small_multiples) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);

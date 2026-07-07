@@ -269,6 +269,15 @@ export const CHART_SPEC_SCHEMA = {
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
     points: { type: "boolean" },
+    projected_field: { type: "string" },
+    projected_style: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        dashed: { type: "boolean" },
+        fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+      },
+    },
 
     // Bar / stacked bar
     orientation: { type: "string", enum: ["vertical", "horizontal"] },

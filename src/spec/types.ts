@@ -281,6 +281,23 @@ export interface ChartSpec {
   /** Line charts: draw a marker (dot) at each data point. Default false. */
   points?: boolean;
 
+  /** Data column whose truthy value (`1`/`true`/`yes`, case-insensitive, trimmed) flags a row as
+   *  "projected" (forecast/estimated) rather than actual/historical. LINE charts draw the
+   *  flagged run(s) of a series dashed (same color/width), connecting continuously to the
+   *  adjacent actual points; a series may have multiple disjoint projected runs. AREA (stacked)
+   *  charts fade the fill over x-ranges where EVERY in-scope series is flagged projected
+   *  (conservative — a stack can't express partial-series fading). Absent ⇒ no projected styling
+   *  (byte-identical output). A series ALSO listed in `series_styles[..].dashed` (whole-series
+   *  dashed) is NOT split by this field — the whole-series dashed override wins; see
+   *  marks/line.ts for the exact gating. */
+  projected_field?: string;
+  /** Overrides the default projected-run styling. Only consulted when `projected_field` is set.
+   *  `dashed` (line charts, default true): whether the projected run renders dashed at all —
+   *  `false` renders it solid (same as actual), i.e. opts out of the visual distinction while
+   *  keeping the field wired. `fillOpacity` (area charts, default 0.2): the effective fill
+   *  opacity of the projected x-range's white veil overlay. */
+  projected_style?: { dashed?: boolean; fillOpacity?: number };
+
   // Bar / stacked bar
   /** Chart orientation; defaults to "vertical" (value axis is Y). */
   orientation?: "vertical" | "horizontal";

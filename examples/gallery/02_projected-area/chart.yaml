@@ -1,0 +1,11 @@
+chartType: area
+title: "projected_field — faded area range (feature test)"
+subtitle: Thousands of dollars, by component
+xAxisType: temporal
+series_order: ["Wages", "Benefits", "Taxes"]
+projected_field: projected
+annotations:
+  yAxis:
+    - { y: 12, label: "Target" }
+data: data.csv
+note: "Confirm: projected x-ranges render faded (≈0.2 fill); annotations/labels stay crisp."
