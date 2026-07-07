@@ -139,11 +139,14 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     .map((b) => b.row);
 
   // Resolve a per-leaf width override from opts.columnWidth (single number or per-key map).
-  const colWidthOverride = (leafKey: string): number | undefined => {
+  // The map is author-facing: authors write the raw leaf VALUE (leaf.lastValue), never a
+  // collision-suffixed key like "presub~1" — a width keyed by a repeated leaf value applies to
+  // every leaf sharing that value (same convention as header_labels / format.columns).
+  const colWidthOverride = (leafValue: string): number | undefined => {
     const cw = opts.columnWidth;
     if (cw == null) return undefined;
     if (typeof cw === "number") return cw;
-    return cw[leafKey];
+    return cw[leafValue];
   };
 
   // ---- Per-leaf natural width = max(label, sublabel, every body cell text) + padding. ----
@@ -151,7 +154,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
   // the column wide enough for the full label (only the sublabel + body cells do). A per-leaf
   // columnWidth override always wins.
   const colW = leaves.map((leaf, i) => {
-    const override = colWidthOverride(leaf.key);
+    const override = colWidthOverride(leaf.lastValue);
     if (override != null) return override;
     let natural = headerMaxLines != null ? 0 : measureHeader(leaf.label);
     if (leaf.sublabel != null) {

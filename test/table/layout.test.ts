@@ -219,6 +219,32 @@ describe("layoutTable — width + wrap config (5c)", () => {
     expect(layout.colW[idx]).toBe(200);
   });
 
+  it("column_width map keyed by a repeated leaf value applies to BOTH leaves (suffixed keys never leak into authoring)", () => {
+    // presub/postsub repeat under two banners; the second presub leaf carries key "presub~1" but
+    // authors write the raw leaf VALUE in column_width, so both presub columns must get the width.
+    const dupSpec: TableSpec = {
+      title: "T",
+      data: "d",
+      value: "value",
+      stub: [{ label: "row" }],
+      header: ["banner", "leaf"],
+      format: { default: { type: "number", decimals: 1 } },
+    };
+    const dupRows = [
+      { row: "r", banner: "Levels", leaf: "presub", value: "1.0" },
+      { row: "r", banner: "Levels", leaf: "postsub", value: "2.0" },
+      { row: "r", banner: "Change", leaf: "presub", value: "3.0" },
+      { row: "r", banner: "Change", leaf: "postsub", value: "4.0" },
+    ] as any;
+    const model = buildTableModel(dupSpec, dupRows);
+    expect(model.leaves.map((l) => l.key)).toEqual(["presub", "postsub", "presub~1", "postsub~1"]);
+    const layout = layoutTable(model, { width: 800, measureText, columnWidth: { presub: 200 } });
+    model.leaves.forEach((leaf, i) => {
+      if (leaf.lastValue === "presub") expect(layout.colW[i]).toBe(200);
+      else expect(layout.colW[i]).not.toBe(200);
+    });
+  });
+
   it("header_max_lines lets a long leaf header wrap and increases header height", () => {
     const longSpec: TableSpec = {
       title: "T",
