@@ -79,10 +79,21 @@ describe("splitProjectedRuns", () => {
     const { actual, projected } = splitProjectedRuns(rows);
     // The projected run's left neighbor (x=2) is non-finite -> NOT duplicated; no left extension.
     expect(projected.map((r) => r._xn)).toEqual([3, 4]);
-    // The null row itself appears exactly once (in whichever bucket its own flag places it),
-    // never duplicated into the projected run.
-    const nullCount = [...actual, ...projected].filter((r) => r._xn === 2).length;
-    expect(nullCount).toBe(1);
+    // The null row is DROPPED entirely: its isolated run has zero drawable points, so Plot emits
+    // no <path> for it — emitting the run would desync the per-path data-series tagging (every
+    // emitted _seg must correspond to exactly one rendered path).
+    expect([...actual, ...projected].filter((r) => r._xn === 2).length).toBe(0);
+  });
+
+  it("a single-point projected run (start === end) is extended on both sides", () => {
+    const rows = [0, 1, 0].map((f, i) => row("A", i + 1, (i + 1) * 10, !!f));
+    const { actual, projected } = splitProjectedRuns(rows);
+    // The one flagged point at x=2 gains a copy of each neighbor -> a 3-point dashed path.
+    expect(projected.map((r) => r._xn)).toEqual([1, 2, 3]);
+    expect(new Set(projected.map((r) => r._seg)).size).toBe(1);
+    // The actual runs keep their own single points (x=1, x=3), unextended.
+    expect(actual.map((r) => r._xn)).toEqual([1, 3]);
+    expect(new Set(actual.map((r) => r._seg)).size).toBe(2);
   });
 
   it("never mutates the input rows", () => {

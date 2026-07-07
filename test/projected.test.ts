@@ -89,6 +89,47 @@ describe("projected_field — line (dashed runs)", () => {
     expect(paths.map((p) => p.getAttribute("data-series"))).toEqual(["A", "B", "B", "B", "B"]);
   });
 
+  it("a null gap in an UNFLAGGED series still tags every path correctly (no phantom-path shift)", () => {
+    // Series A has a null gap at x=2 and ZERO projected rows; B has one projected row at x=2.
+    // The null row's isolated run renders NO <path> (all its points are defined:false), so the
+    // splitter must not emit it — otherwise every subsequent data-series tag shifts by one and
+    // B's actual paths get tagged "A" (the original bug this test pins).
+    const gapRows: TidyRow[] = [
+      { time: "1", series: "A", value: "10", projected: "0" },
+      { time: "2", series: "A", value: "", projected: "0" }, // null gap, unflagged
+      { time: "3", series: "A", value: "12", projected: "0" },
+      { time: "1", series: "B", value: "5", projected: "0" },
+      { time: "2", series: "B", value: "6", projected: "1" },
+      { time: "3", series: "B", value: "7", projected: "0" },
+    ] as TidyRow[];
+    const spec: ChartSpec = {
+      chartType: "line",
+      title: "t",
+      xAxisType: "numeric",
+      projected_field: "projected",
+      data: "x",
+    };
+    const { svg } = renderChart(spec, gapRows, { width: 400, height: 300, document });
+    const paths = Array.from(svg.querySelectorAll('g[aria-label="line"] path'));
+    // Accepted DOM shape (pinned deliberately): an unflagged series with a null gap renders as
+    // MULTIPLE single-run <path>s (one per _seg), not the pre-projected_field single path with
+    // gap subpaths — visually identical, and legend hover-dim / fat hit-paths key on
+    // data-series, so the multi-path shape behaves identically for interaction. Paths:
+    // B-projected (x1..x3 dashed, 1) + A actual runs (2; the null-only run renders nothing and
+    // is dropped) + B actual runs (2, single boundary points at x=1 and x=3).
+    expect(paths.length).toBe(5);
+    expect(paths.map((p) => p.getAttribute("data-series"))).toEqual(["B", "A", "A", "B", "B"]);
+    // Geometry cross-check: B's x=1 point (value 5) starts the projected path; any other path
+    // sharing that exact start coordinate must also be tagged B (the bug tagged it "A").
+    const dOf = (p: Element) => p.getAttribute("d") ?? "";
+    const bStart = /^M([\d.]+,[\d.]+)/.exec(dOf(paths[0]!))![1];
+    for (const p of paths.slice(1)) {
+      if (dOf(p).startsWith(`M${bStart}`)) {
+        expect(p.getAttribute("data-series")).toBe("B");
+      }
+    }
+  });
+
   it("crosshair/tooltip data (dataInScope) is unaffected — same row count with or without the field", () => {
     const withField = renderChart(LINE_PROJECTED_SPEC, rows, { width: 720, height: 400, document });
     const withoutField = renderChart(

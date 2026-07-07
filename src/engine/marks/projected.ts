@@ -36,6 +36,13 @@ export interface ProjectedSplit {
  * groups each run into its own <path>, preventing a solid bridge across a projected gap (the
  * failure mode of leaving z:"series" untouched).
  *
+ * Runs with NO drawable point are dropped from the output entirely. (The boundary rule isolates
+ * every non-finite row into its own single-row run, so a run is either all-finite or one lone
+ * null point.) Plot emits no <path> for a z-group whose points are all `defined:false`, so
+ * emitting such a run would desync the line builder's per-path data-series tagging — every
+ * emitted `_seg` must correspond to exactly one rendered path. The null point renders nothing
+ * either way; crosshair/tooltip read the ORIGINAL rows, which keep it.
+ *
  * Rows are only ever shallow-copied, never mutated — callers (crosshair/tooltip) read the
  * original PreparedRow[] and must see it unchanged.
  */
@@ -71,6 +78,14 @@ export function splitProjectedRuns(rows: PreparedRow[]): ProjectedSplit {
     }
 
     runs.forEach((run, runIdx) => {
+      // A run with no drawable point (a lone null row) renders no <path> — drop it so the
+      // emitted _seg set matches the rendered path set 1:1 (tagging depends on this).
+      let drawable = false;
+      for (let i = run.start; i <= run.end && !drawable; i++) {
+        drawable = Number.isFinite(seriesRows[i]!._y);
+      }
+      if (!drawable) return;
+
       const seg = `${series}\0${runIdx}`;
       const out: SegmentedRow[] = [];
 
