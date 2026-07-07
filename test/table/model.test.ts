@@ -242,6 +242,112 @@ it("flags a pure-text column as isText (mixed/numeric columns are not)", () => {
   expect(buildTableModel(spec, mixed).leaves[0]!.isText).toBeUndefined();
 });
 
+describe("order-independent grouping + group_order (Task 2)", () => {
+  it("groups rows by stub path regardless of input order (scenario-major CSV)", () => {
+    const spec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: ["country", { label: "scenario" }],
+      header: ["metric"],
+    };
+    // Scenario-major input: base for both countries, then reform for both countries.
+    const rows = [
+      { country: "China", scenario: "base", metric: "m", value: "1" },
+      { country: "Canada", scenario: "base", metric: "m", value: "2" },
+      { country: "China", scenario: "reform", metric: "m", value: "3" },
+      { country: "Canada", scenario: "reform", metric: "m", value: "4" },
+    ] as any;
+    const m = buildTableModel(spec, rows);
+    expect(m.body.map((b) => b.kind)).toEqual(["group", "row", "row", "group", "row", "row"]);
+    expect(m.body.filter((b) => b.kind === "group").map((b: any) => b.group.label)).toEqual(["China", "Canada"]);
+    expect(m.body.filter((b) => b.kind === "row").map((b: any) => b.row.label)).toEqual([
+      "base", "reform", "base", "reform",
+    ]);
+  });
+
+  it("group_order reorders the first group tier; unlisted groups follow first-seen", () => {
+    const spec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: ["country", { label: "scenario" }],
+      header: ["metric"],
+      group_order: ["Total", "China", "Canada"],
+    };
+    const rows = [
+      { country: "China", scenario: "base", metric: "m", value: "1" },
+      { country: "Canada", scenario: "base", metric: "m", value: "2" },
+      { country: "Mexico", scenario: "base", metric: "m", value: "3" }, // unlisted
+      { country: "Total", scenario: "base", metric: "m", value: "4" },
+    ] as any;
+    const m = buildTableModel(spec, rows);
+    expect(m.body.filter((b) => b.kind === "group").map((b: any) => b.group.label)).toEqual([
+      "Total", "China", "Canada", "Mexico",
+    ]);
+  });
+
+  it("group_order as string[][] orders each group level independently", () => {
+    const spec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: ["region", "country", { label: "scenario" }],
+      header: ["metric"],
+      group_order: [["Americas", "Asia"], ["Canada", "Mexico", "China"]],
+    };
+    const rows = [
+      { region: "Asia", country: "China", scenario: "base", metric: "m", value: "1" },
+      { region: "Americas", country: "Mexico", scenario: "base", metric: "m", value: "2" },
+      { region: "Americas", country: "Canada", scenario: "base", metric: "m", value: "3" },
+    ] as any;
+    const m = buildTableModel(spec, rows);
+    expect(m.body.filter((b) => b.kind === "group").map((b: any) => [b.group.level, b.group.label])).toEqual([
+      [0, "Americas"], [1, "Canada"], [1, "Mexico"], [0, "Asia"], [1, "China"],
+    ]);
+  });
+
+  it("row_order orders leaves within each group only (a shared leaf value doesn't hoist across groups)", () => {
+    const spec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: ["country", { label: "scenario" }],
+      header: ["metric"],
+      row_order: ["reform", "base"],
+    };
+    const rows = [
+      { country: "China", scenario: "base", metric: "m", value: "1" },
+      { country: "China", scenario: "reform", metric: "m", value: "2" },
+      { country: "Canada", scenario: "base", metric: "m", value: "3" },
+      { country: "Canada", scenario: "reform", metric: "m", value: "4" },
+    ] as any;
+    const m = buildTableModel(spec, rows);
+    expect(m.body.filter((b) => b.kind === "group").map((b: any) => b.group.label)).toEqual(["China", "Canada"]);
+    expect(m.body.filter((b) => b.kind === "row").map((b: any) => b.row.label)).toEqual([
+      "reform", "base", "reform", "base",
+    ]);
+  });
+
+  it("absent group_order + already-contiguous grouped data produces unchanged body order (byte-identity guard)", () => {
+    const spec: TableSpec = { ...tariff, stub: ["grp", { label: "row" }], header: ["per"] };
+    const rows = [
+      { grp: "G1", row: "r1", per: "2026", value: "1.2" },
+      { grp: "G1", row: "r2", per: "2026", value: "3.4" },
+      { grp: "G2", row: "r3", per: "2026", value: "5.6" },
+    ] as any;
+    const m = buildTableModel(spec, rows);
+    expect(m.body.map((b) => b.kind)).toEqual(["group", "row", "row", "group", "row"]);
+    expect(m.body.filter((b) => b.kind === "row").map((b: any) => b.row.label)).toEqual(["r1", "r2", "r3"]);
+  });
+
+  it("flat stub (no groups) with no row_order stays in first-seen order (sort is skipped)", () => {
+    const spec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+    };
+    const rows = [
+      { row: "b", metric: "m", value: "1" },
+      { row: "a", metric: "m", value: "2" },
+    ] as any;
+    const m = buildTableModel(spec, rows);
+    expect(m.body.map((b: any) => b.row.label)).toEqual(["b", "a"]);
+  });
+});
+
 it("sets the stub corner from stub_header (string form)", () => {
   const spec: TableSpec = {
     title: "T", data: "d", value: "value", stub_header: "Parameter",

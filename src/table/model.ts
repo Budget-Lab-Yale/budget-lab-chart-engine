@@ -166,6 +166,18 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
   const rowOrder = spec.row_order;
   const rowRank = rowOrder ? new Map(rowOrder.map((k, i) => [k, i])) : null;
 
+  // group_order normalization: a flat string[] orders level 0 only; string[][] orders each group
+  // level independently. Levels beyond the given lists (or when group_order is absent) fall back
+  // to first-seen order for that level.
+  const groupOrderLevels: (string[] | undefined)[] = !spec.group_order || spec.group_order.length === 0
+    ? []
+    : Array.isArray(spec.group_order[0])
+      ? (spec.group_order as string[][])
+      : [spec.group_order as string[]];
+  const groupRankMaps: (Map<string, number> | undefined)[] = groupOrderLevels.map((list) =>
+    list ? new Map(list.map((v, i) => [v, i])) : undefined,
+  );
+
   // Index cell values by stubPathKey -> leafPathKey -> row (last wins) for lookup + extras.
   const cellIndex = new Map<string, Map<string, TidyRow>>();
   for (const r of rows) {
@@ -185,15 +197,45 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
     if (!seenStub.has(key)) { seenStub.add(key); stubPaths.push(path); }
   }
 
-  // Sort stub-paths by row_order on the leaf (row label), then first-seen. Keep group locality:
-  // sort primarily so that earlier-ranked labels come first while preserving first-seen for ties.
-  if (rowRank) {
+  // Order-independent grouping + group_order + row_order-within-groups: a single hierarchical
+  // comparator over stub-paths. For each group tier (levels 0..groupDepth-1) it ranks by
+  // group_order if the value is listed, else by that group's first-seen ordinal (the existing
+  // column_order idiom: `list.length + firstSeenOrdinal`, so unlisted values sort after all
+  // listed ones and preserve their relative first-seen order). This also fixes the underlying
+  // grouping bug: sorting by group tier makes every group's rows contiguous regardless of how
+  // the source data was ordered (e.g. scenario-major CSVs), so the group-emission loop below
+  // (unchanged) emits each header exactly once with all of that group's rows following. At the
+  // leaf level it falls back to the same idiom using row_order, scoped within the group since the
+  // group tiers already sorted first.
+  //
+  // Gated on groupDepth > 0 || row_order so a flat, unordered table skips sorting entirely and
+  // stays byte-identical; a stable sort + first-seen fallbacks make already-contiguous grouped
+  // data produce unchanged output too.
+  const groupDepth = stubCols.length - 1;
+  if (groupDepth > 0 || rowRank) {
     const firstSeen = new Map(stubPaths.map((p, i) => [p.join(SEP), i]));
+    const firstSeenPrefix: Map<string, number>[] = Array.from({ length: groupDepth }, () => new Map());
+    for (const path of stubPaths) {
+      for (let l = 0; l < groupDepth; l++) {
+        const key = path.slice(0, l + 1).join(SEP);
+        const m = firstSeenPrefix[l]!;
+        if (!m.has(key)) m.set(key, m.size);
+      }
+    }
     stubPaths.sort((a, b) => {
+      for (let l = 0; l < groupDepth; l++) {
+        const la = a[l] ?? "";
+        const lb = b[l] ?? "";
+        const rankMap = groupRankMaps[l];
+        const listLen = groupOrderLevels[l]?.length ?? 0;
+        const ka = rankMap?.has(la) ? rankMap.get(la)! : listLen + firstSeenPrefix[l]!.get(a.slice(0, l + 1).join(SEP))!;
+        const kb = rankMap?.has(lb) ? rankMap.get(lb)! : listLen + firstSeenPrefix[l]!.get(b.slice(0, l + 1).join(SEP))!;
+        if (ka !== kb) return ka - kb;
+      }
       const la = a[a.length - 1] ?? "";
       const lb = b[b.length - 1] ?? "";
-      const ra = rowRank.has(la) ? rowRank.get(la)! : rowOrder!.length + (firstSeen.get(a.join(SEP)) ?? 0);
-      const rb = rowRank.has(lb) ? rowRank.get(lb)! : rowOrder!.length + (firstSeen.get(b.join(SEP)) ?? 0);
+      const ra = rowRank?.has(la) ? rowRank.get(la)! : (rowOrder?.length ?? 0) + (firstSeen.get(a.join(SEP)) ?? 0);
+      const rb = rowRank?.has(lb) ? rowRank.get(lb)! : (rowOrder?.length ?? 0) + (firstSeen.get(b.join(SEP)) ?? 0);
       return ra - rb;
     });
   }

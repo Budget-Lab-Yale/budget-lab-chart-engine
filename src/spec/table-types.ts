@@ -45,8 +45,16 @@ export interface TableSpec {
   pane_order?: string[];
   /** Pane value → subheading shown above that pane. Defaults to the pane value itself. */
   pane_titles?: Record<string, string>;
-  /** Render order for rows (optional); omitted entries appear in first-seen order. */
+  /** Render order for rows (optional); omitted entries appear in first-seen order. Scoped WITHIN
+   *  each row group — it orders leaves inside a group, not across groups. */
   row_order?: string[];
+  /** Render order for row GROUPS (the non-last stub tiers), mirroring row_order/column_order.
+   *  A flat string[] orders the FIRST group tier only; a string[][] orders each group level
+   *  independently (index 0 = first tier, index 1 = second tier, ...). Unlisted group values at a
+   *  level follow first-seen order. Omit for first-seen order at every level. Groups are always
+   *  gathered by stub path regardless of input row order (each group's rows render contiguously
+   *  under one header, wherever they appear in the source data). */
+  group_order?: string[] | string[][];
   /** Render order for columns (optional); leaf keys not listed appear in first-seen order. */
   column_order?: string[];
   /** Leaf column key → display label (overrides the raw header value). */
