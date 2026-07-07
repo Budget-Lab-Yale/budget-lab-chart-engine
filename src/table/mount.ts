@@ -32,12 +32,15 @@ export interface MountTableOptions {
   downloadName?: string;
 }
 
-/** Data (CSV) download button for the table source line. */
+/** Data (CSV) + Image (PNG) download buttons for the table source line. `getCollapsed` (set for
+ *  collapsible specs) reads the LIVE collapsed group keys at click time, so the exported PNG
+ *  omits exactly the rows the user has collapsed on screen. */
 function buildTableDownloadActions(
   doc: Document,
   spec: TableSpec,
   rows: TidyRow[],
   slugOverride?: string,
+  getCollapsed?: () => string[],
 ): HTMLElement {
   // Derive a filename slug from the spec title or the override.
   const base = slugOverride ?? spec.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -86,7 +89,10 @@ function buildTableDownloadActions(
   imgBtn.addEventListener("click", () => {
     const original = imgLabel.textContent ?? "Image";
     imgBtn.disabled = true;
-    void exportTablePng(spec, rows, { filename: `${base}.png` })
+    void exportTablePng(spec, rows, {
+      filename: `${base}.png`,
+      ...(getCollapsed ? { collapsed: getCollapsed() } : {}),
+    })
       .then(() => {
         imgBtn.disabled = false;
       })
@@ -107,7 +113,12 @@ function buildTableDownloadActions(
  * mountTable replaces the table DOM, so this re-runs against the new elements each time. All
  * state is per-call and tied to the live elements, so no listeners leak across re-renders.
  */
-function attachTableInteractivity(table: HTMLTableElement, model: TableModel, spec: TableSpec): void {
+function attachTableInteractivity(
+  table: HTMLTableElement,
+  model: TableModel,
+  spec: TableSpec,
+  onReorder?: () => void,
+): void {
   // ---- Sticky classes ----
   // The first column (row labels) pins during horizontal scroll when opted in.
   if (spec.sticky?.firstColumn) {
@@ -195,6 +206,10 @@ function attachTableInteractivity(table: HTMLTableElement, model: TableModel, sp
     if (activeKey == null || activeDir == null) {
       // Restore original order.
       tbody.replaceChildren(...originalOrder);
+      // Collapsed rows are hidden via a DOM property on the row elements themselves, so it
+      // travels with them through the reorder — this re-apply is a belt-and-suspenders sync
+      // (e.g. re-stamping toggle aria-expanded) rather than a correctness requirement.
+      onReorder?.();
       return;
     }
     const leafIdx = leafIndex.get(activeKey);
@@ -231,6 +246,7 @@ function attachTableInteractivity(table: HTMLTableElement, model: TableModel, sp
     }
     flush();
     tbody.replaceChildren(...ordered);
+    onReorder?.();
   }
 
   for (const [key, th] of leafHeaderEls) {
@@ -277,6 +293,115 @@ function attachTableInteractivity(table: HTMLTableElement, model: TableModel, sp
 }
 
 /**
+ * Wire collapsible row groups onto a freshly rendered table. Called each draw (like
+ * attachTableInteractivity — the ResizeObserver re-render replaces the table DOM, so this
+ * re-runs against the fresh elements). The `collapsed` set is OWNED BY THE CALLER's mount
+ * closure and persists across re-renders; this function only reads/mutates its membership, so
+ * collapse state survives the DOM replacement.
+ *
+ * Returns `applyVisibility` so the caller can re-run it after external DOM reorders (sort) or
+ * bulk state changes (collapse-all).
+ */
+function attachCollapsible(
+  table: HTMLTableElement,
+  collapsed: Set<string>,
+  onStateChange?: () => void,
+): () => void {
+  const groupTrs = Array.from(
+    table.querySelectorAll("tbody tr.tbl-table-group[data-group-key]"),
+  ) as HTMLTableRowElement[];
+  const dataTrs = Array.from(
+    table.querySelectorAll("tbody tr:not(.tbl-table-group)"),
+  ) as HTMLTableRowElement[];
+
+  const parentsOf = (tr: HTMLElement): string[] => {
+    const raw = tr.getAttribute("data-group-parents") ?? "";
+    return raw === "" ? [] : raw.split(" ");
+  };
+
+  /** Sync the DOM to the collapse set: hide any row (or nested subgroup header) with a collapsed
+   *  ancestor via the `hidden` attribute (which also removes it from the a11y tree), and reflect
+   *  each toggle's own state on aria-expanded + an is-collapsed class (the caret-rotation hook). */
+  function applyVisibility(): void {
+    for (const tr of dataTrs) {
+      tr.hidden = parentsOf(tr).some((t) => collapsed.has(t));
+    }
+    for (const tr of groupTrs) {
+      // A group header hides only when an ANCESTOR is collapsed; its own collapsed state keeps
+      // the header visible (that is the affordance for expanding it again).
+      tr.hidden = parentsOf(tr).some((t) => collapsed.has(t));
+      const key = tr.getAttribute("data-group-key")!;
+      const btn = tr.querySelector("button.tbl-table-group-toggle");
+      if (btn) {
+        const isCollapsed = collapsed.has(key);
+        btn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        btn.classList.toggle("is-collapsed", isCollapsed);
+      }
+    }
+    onStateChange?.();
+  }
+
+  for (const tr of groupTrs) {
+    const key = tr.getAttribute("data-group-key")!;
+    const btn = tr.querySelector("button.tbl-table-group-toggle");
+    if (!btn) continue; // non-collapsible spec: plain label, nothing to wire
+    btn.addEventListener("click", () => {
+      if (collapsed.has(key)) collapsed.delete(key);
+      else collapsed.add(key);
+      applyVisibility();
+    });
+  }
+
+  applyVisibility();
+  return applyVisibility;
+}
+
+/**
+ * The "Collapse all"/"Expand all" chrome control (single button, whole figure — all panes).
+ * If ANY group is currently expanded it collapses all, else it expands all. `panes` pairs each
+ * pane's live collapsed set with a getter for its current group keys (read from the live DOM so
+ * a re-render is always reflected); `refresh` re-syncs every pane's row visibility.
+ */
+function buildCollapseAllButton(
+  doc: Document,
+  panes: Array<{ collapsed: Set<string>; keys: () => string[] }>,
+  refresh: () => void,
+): { el: HTMLButtonElement; sync: () => void } {
+  const btn = doc.createElement("button");
+  btn.type = "button";
+  btn.className = "figure-download-btn tbl-table-collapse-all";
+
+  const anyExpanded = (): boolean =>
+    panes.some((p) => p.keys().some((k) => !p.collapsed.has(k)));
+
+  const sync = (): void => {
+    const label = anyExpanded() ? "Collapse all" : "Expand all";
+    btn.textContent = label;
+    btn.setAttribute("aria-label", label);
+  };
+
+  btn.addEventListener("click", () => {
+    if (anyExpanded()) {
+      for (const p of panes) for (const k of p.keys()) p.collapsed.add(k);
+    } else {
+      for (const p of panes) p.collapsed.clear();
+    }
+    refresh();
+    sync();
+  });
+
+  sync();
+  return { el: btn, sync };
+}
+
+/** Current group keys in a rendered region (read live so a re-render is always reflected). */
+function liveGroupKeys(region: HTMLElement): string[] {
+  return Array.from(region.querySelectorAll("tr.tbl-table-group[data-group-key]")).map(
+    (tr) => tr.getAttribute("data-group-key")!,
+  );
+}
+
+/**
  * Mount a live, interactive-ready table card into `container`. Returns a teardown function
  * that disconnects observers and removes the card.
  *
@@ -312,12 +437,27 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
 
   const measureText = makeMeasureText();
 
+  // ---- Collapsible state (persistent across re-renders) ----
+  // The set lives in THIS closure — outside draw() — so the ResizeObserver re-render (which
+  // replaces the table DOM and re-attaches everything) reads the same membership back and the
+  // user's collapse state survives. Seeded ONCE from the model's resolved defaults on first draw.
+  const collapsed = new Set<string>();
+  let collapseSeeded = false;
+  let applyVis: (() => void) | undefined; // re-applies visibility on the CURRENT table DOM
+  let syncCollapseAll: (() => void) | undefined; // re-syncs the chrome button label
+
   /** Render (or re-render) the table at the given width, then re-wire interactivity. */
   function draw(width: number): void {
     const model = buildTableModel(spec, rows);
     const layout = layoutTable(model, { width, measureText, ...layoutOptionsFromSpec(spec) });
     const table = renderTableHtml(model, layout, doc, spec);
     canvasScroll.replaceChildren(table);
+    if (spec.collapsible && !collapseSeeded) {
+      collapseSeeded = true;
+      for (const b of model.body) {
+        if (b.kind === "group" && b.group.collapsed) collapsed.add(b.group.key);
+      }
+    }
     // Footnote definition list (spec §8) — rebuilt each draw into the card-level block, which is
     // attached only when there are footnotes (so an empty block never appears in the DOM). It is
     // inserted right after the scroll wrapper so it sits above the source line.
@@ -337,7 +477,11 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     }
     // The ResizeObserver re-render replaces the table DOM, so interactivity (which holds
     // references to the live elements) must be re-attached against the fresh table each time.
-    attachTableInteractivity(table, model, spec);
+    // The onReorder hook re-applies collapse visibility after the sort's DOM reorder.
+    attachTableInteractivity(table, model, spec, () => applyVis?.());
+    if (spec.collapsible) {
+      applyVis = attachCollapsible(table, collapsed, () => syncCollapseAll?.());
+    }
   }
 
   // Initial render — use the provided width, the container's current width, or a default.
@@ -346,10 +490,23 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
 
   // Source/notes footer with Data download.
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
+  const actions = buildTableDownloadActions(
+    doc, spec, rows, opts.downloadName,
+    spec.collapsible ? () => [...collapsed] : undefined,
+  );
+  if (spec.collapsible) {
+    const allBtn = buildCollapseAllButton(
+      doc,
+      [{ collapsed, keys: () => liveGroupKeys(canvasScroll) }],
+      () => applyVis?.(),
+    );
+    syncCollapseAll = allBtn.sync;
+    actions.insertBefore(allBtn.el, actions.firstChild);
+  }
   renderSourceLine(card, {
     note,
     source: spec.source,
-    actions: buildTableDownloadActions(doc, spec, rows, opts.downloadName),
+    actions,
   });
 
   container.appendChild(card);
@@ -408,6 +565,14 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
   const fnBlock = doc.createElement("div");
   fnBlock.className = "tbl-table-footnotes";
 
+  // ---- Collapsible state, per pane (persistent across re-renders; see single-pane draw()) ----
+  const paneCollapse = panes.map(() => ({
+    collapsed: new Set<string>(),
+    seeded: false,
+    applyVis: undefined as (() => void) | undefined,
+  }));
+  let syncCollapseAll: (() => void) | undefined;
+
   function drawAll(_width: number): void {
     const fnMap = new Map<string, string>();
     // Panes share a stub width (planned across panes) so their first columns align; data columns
@@ -416,7 +581,17 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
     laid.forEach((lp, i) => {
       const table = renderTableHtml(lp.model, lp.layout, doc, spec, { flexDataCols: true });
       paneScrolls[i]!.replaceChildren(table);
-      attachTableInteractivity(table, lp.model, spec);
+      const pc = paneCollapse[i]!;
+      attachTableInteractivity(table, lp.model, spec, () => pc.applyVis?.());
+      if (spec.collapsible) {
+        if (!pc.seeded) {
+          pc.seeded = true;
+          for (const b of lp.model.body) {
+            if (b.kind === "group" && b.group.collapsed) pc.collapsed.add(b.group.key);
+          }
+        }
+        pc.applyVis = attachCollapsible(table, pc.collapsed, () => syncCollapseAll?.());
+      }
       for (const fn of lp.model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
     });
     fnBlock.replaceChildren();
@@ -439,10 +614,28 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
   drawAll(initialWidth);
 
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
+  // PNG export threading: the union of every pane's collapsed keys. Keys are stub-path tokens, so
+  // a group value shared across panes maps to the same key in each — the export applies the union
+  // uniformly (a group collapsed in ANY pane exports collapsed in all panes that have it).
+  const actions = buildTableDownloadActions(
+    doc, spec, rows, opts.downloadName,
+    spec.collapsible
+      ? () => [...new Set(paneCollapse.flatMap((pc) => [...pc.collapsed]))]
+      : undefined,
+  );
+  if (spec.collapsible) {
+    const allBtn = buildCollapseAllButton(
+      doc,
+      paneCollapse.map((pc, i) => ({ collapsed: pc.collapsed, keys: () => liveGroupKeys(paneScrolls[i]!) })),
+      () => { for (const pc of paneCollapse) pc.applyVis?.(); },
+    );
+    syncCollapseAll = allBtn.sync;
+    actions.insertBefore(allBtn.el, actions.firstChild);
+  }
   renderSourceLine(card, {
     note,
     source: spec.source,
-    actions: buildTableDownloadActions(doc, spec, rows, opts.downloadName),
+    actions,
   });
 
   container.appendChild(card);

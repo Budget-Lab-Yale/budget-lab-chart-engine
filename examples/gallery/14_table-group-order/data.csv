@@ -1,0 +1,9 @@
+country,scenario,measure,value
+China,base,rate,0.184
+Canada,base,rate,0.062
+Mexico,base,rate,0.071
+Total,base,rate,0.093
+China,reform,rate,0.152
+Canada,reform,rate,0.051
+Mexico,reform,rate,0.058
+Total,reform,rate,0.077

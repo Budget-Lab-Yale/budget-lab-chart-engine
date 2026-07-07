@@ -11,6 +11,37 @@ describe("validateTableSpec", () => {
     expect(r.valid).toBe(false); expect(r.errors.join()).toMatch(/bogus/);
   });
   it("requires stub/header/value", () => { expect(validateTableSpec({ title: "T", data: "d" }).valid).toBe(false); });
+
+  it("accepts group_order as a flat string[] (first tier) or string[][] (per level)", () => {
+    expect(validateTableSpec({ ...ok, group_order: ["A", "B"] }).valid).toBe(true);
+    expect(validateTableSpec({ ...ok, group_order: [["A"], ["B", "C"]] }).valid).toBe(true);
+  });
+  it("rejects group_order with a non-string/non-array-of-strings shape", () => {
+    expect(validateTableSpec({ ...ok, group_order: [1, 2] }).valid).toBe(false);
+    expect(validateTableSpec({ ...ok, group_order: "nope" }).valid).toBe(false);
+  });
+
+  it("accepts collapsible with default/expanded/collapsed", () => {
+    const r = validateTableSpec({
+      ...ok,
+      collapsible: { default: "collapsed", expanded: ["China", "Total"], collapsed: ["Mexico"] },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts collapsible with no subkeys at all", () => {
+    expect(validateTableSpec({ ...ok, collapsible: {} }).valid).toBe(true);
+  });
+
+  it("rejects a bad collapsible.default enum value", () => {
+    const r = validateTableSpec({ ...ok, collapsible: { default: "closed" } });
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects an unknown collapsible subkey", () => {
+    const r = validateTableSpec({ ...ok, collapsible: { defualt: "collapsed" } } as any);
+    expect(r.valid).toBe(false);
+  });
 });
 
 describe("validateTableData", () => {

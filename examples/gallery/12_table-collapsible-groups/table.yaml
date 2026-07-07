@@ -1,0 +1,13 @@
+title: "Table collapsible row groups (feature test)"
+subtitle: "Effective tariff rate by country, base vs. reform scenario"
+data: data.csv
+stub: [country, { label: scenario }]
+header: [measure]
+value: value
+collapsible:
+  default: collapsed
+  expanded: [Total]
+format:
+  default: { type: percent, decimals: 1 }
+source: "The Budget Lab"
+notes: "Confirm: groups collapsed except Total; carets toggle; Expand all works; resize the window — state persists; PNG download omits collapsed rows."

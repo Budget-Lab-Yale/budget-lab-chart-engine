@@ -236,3 +236,57 @@ describe("renderTableHtml — config hooks", () => {
     expect(table.querySelector(".tbl-table-group-inner.is-nowrap")).not.toBeNull();
   });
 });
+
+describe("renderTableHtml — whole-row emphasis (Task 3)", () => {
+  const emphSpec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 1 } },
+    emphasis_rows: ["Total"],
+  };
+  const emphRows = [
+    { row: "A", metric: "M", value: "1.0" },
+    { row: "Total", metric: "M", value: "2.0" },
+  ] as unknown as import("../../../src/data/index").TidyRow[];
+
+  it("emphasized row's stub <th> gets is-emphasis", () => {
+    const m = buildTableModel(emphSpec, emphRows);
+    const l = layoutTable(m, { width: 400, measureText });
+    const table = renderTableHtml(m, l, document, emphSpec);
+    const totalTr = table.querySelector('tbody tr[data-row="Total"]')!;
+    const stubTh = totalTr.querySelector("th.tbl-table-stub")!;
+    expect(stubTh.classList.contains("is-emphasis")).toBe(true);
+  });
+
+  it("non-emphasized row's stub <th> does not get is-emphasis", () => {
+    const m = buildTableModel(emphSpec, emphRows);
+    const l = layoutTable(m, { width: 400, measureText });
+    const table = renderTableHtml(m, l, document, emphSpec);
+    const aTr = table.querySelector('tbody tr[data-row="A"]')!;
+    const stubTh = aTr.querySelector("th.tbl-table-stub")!;
+    expect(stubTh.classList.contains("is-emphasis")).toBe(false);
+  });
+
+  it("emphasis_column-only table has no stub emphasis", () => {
+    const colSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      format: { default: { type: "number", decimals: 1 } },
+      emphasis_column: "flag",
+    };
+    const colRows = [
+      { row: "A", metric: "M", value: "1.0", flag: "yes" },
+    ] as unknown as import("../../../src/data/index").TidyRow[];
+    const m = buildTableModel(colSpec, colRows);
+    const l = layoutTable(m, { width: 400, measureText });
+    const table = renderTableHtml(m, l, document, colSpec);
+    // Sanity: the value cell IS emphasized (per-cell mechanism unaffected).
+    const td = table.querySelector('tbody tr[data-row="A"] td')!;
+    expect(td.classList.contains("is-emphasis")).toBe(true);
+    // But the stub is not.
+    const stubTh = table.querySelector('tbody tr[data-row="A"] th.tbl-table-stub')!;
+    expect(stubTh.classList.contains("is-emphasis")).toBe(false);
+  });
+});
