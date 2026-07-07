@@ -220,7 +220,9 @@ export interface ChartSpec {
   /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
    *  palette (named token or raw "#hex"). A first-class replacement for the
    *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are
-   *  set. Ignored on multi-series (grouped) bar charts, where each series keeps its own color. */
+   *  set. Ignored on multi-series (grouped) bar charts, where each series keeps its own color.
+   *  With `highlightSeries`, bar_color replaces the BASE color only — highlight dimming still
+   *  applies (a non-highlighted series dims regardless of bar_color). */
   bar_color?: ColorRef;
   /** Bar charts, SINGLE-SERIES only (both orientations): per-x-category fill override, e.g. render
    *  a "Total" category in a distinct color while every other category keeps the base fill (the

@@ -196,19 +196,30 @@ export function buildBarMarks(
   if (!isMulti) {
     // --- Single-series: categories on a band scale, no faceting. ---
     // `bar_color` (task 7): the single-series bar fill, resolved through the palette. A
-    // first-class replacement for the `series_colors: {"": color}` idiom — that idiom is already
-    // folded into `colors`/`fillFor` above, so `bar_color` simply overrides it when set.
+    // first-class replacement for the `series_colors: {"": color}` idiom (already folded into
+    // `colors`/`fillFor` above), overriding it when set. It replaces the BASE color only —
+    // highlight/dim still applies on top: a non-highlighted series dims to annotationDim
+    // regardless of bar_color.
     const barColorOverride = resolveColor(spec.bar_color);
-    // This branch's data is exactly one series (or none — series_order filtered everything out),
-    // so `d.series` is the SAME value for every row: the highlight-aware `fillFor` call below
-    // always resolves to one constant color here (unlike the multi-series branch further down,
-    // where `fillFor`/`fillChannel` really is per-datum).
-    const baseFill = barColorOverride ?? fillFor(seriesNames.length === 1 ? (seriesNames[0] as string) : "");
+    const singleFillFor = (series: string): string => {
+      if (highlightSet && !highlightSet.has(series)) return TBL.color.annotationDim;
+      return barColorOverride ?? fillFor(series);
+    };
+    // Constant vs. accessor matters at the SVG level: Plot hoists a constant fill onto the parent
+    // <g aria-label="bar">, while a function channel emits a per-<rect> fill attribute. Preserve
+    // the ORIGINAL decision shape (accessor iff highlightSet, else constant) so any spec that
+    // doesn't use the new fields renders byte-identical SVG; bar_color slots into both arms.
+    const baseFill = highlightSet
+      ? (d: PreparedRow) => singleFillFor(d.series)
+      : seriesNames.length === 1
+        ? singleFillFor(seriesNames[0] as string)
+        : barColorOverride ?? TBL.color.blue;
 
     // `category_colors` (task 7): per-x-category fill override, resolved through the palette.
     // Single-series scope only (see ChartSpec.category_colors TSDoc) — this whole branch is the
     // single-series path, so no series-fill precedence question arises. Presence forces a
-    // per-datum fill accessor; unlisted categories keep `baseFill`.
+    // per-datum fill accessor; named categories get their color, all others fall through to the
+    // base/highlight logic above.
     const categoryColorMap: Record<string, string> | null = spec.category_colors
       ? Object.fromEntries(
           Object.entries(spec.category_colors).map(([k, v]) => [k, resolveColor(v) as string]),
@@ -218,7 +229,9 @@ export function buildBarMarks(
     const fill = categoryColorMap
       ? (d: PreparedRow) => {
           const cat = (d as unknown as Record<string, unknown>)[catField] as string | undefined;
-          return (cat != null ? categoryColorMap[cat] : undefined) ?? baseFill;
+          const override = cat != null ? categoryColorMap[cat] : undefined;
+          if (override != null) return override;
+          return typeof baseFill === "function" ? baseFill(d) : baseFill;
         }
       : baseFill;
 

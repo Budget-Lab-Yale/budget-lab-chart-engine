@@ -497,6 +497,57 @@ describe("golden SVG — bar category_colors / bar_color", () => {
     ).svg.outerHTML;
     expect(withCatColors).toBe(withoutCatColors);
   });
+
+  it("bar_color is ignored on multi-series bars: output byte-identical with/without it", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const without = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document })
+      .svg.outerHTML;
+    const withBarColor = renderChart(
+      { ...BAR_MULTI_SPEC, bar_color: "amber" },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg.outerHTML;
+    expect(withBarColor).toBe(without);
+  });
+
+  // Regression (task 7 review): a single-series bar with highlightSeries and NONE of the new
+  // fields must keep the ORIGINAL SVG structure — an accessor fill emits a per-<rect> fill
+  // attribute (no fill on the parent <g>), whereas a constant fill hoists onto the <g>. The
+  // first task-7 implementation collapsed the highlight accessor to a constant, silently moving
+  // the fill up to the group; this locks the per-rect structure (and the exact fill values).
+  it("single-series + highlightSeries (no new fields): per-rect fill attrs, none on the group", async () => {
+    const rows = parseCsv("./fixtures/bar-single.csv");
+    const spec: ChartSpec = { ...BAR_SINGLE_SPEC, highlightSeries: ["Effect"] };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const group = svg.querySelector('g[aria-label="bar"]');
+    expect(group?.getAttribute("fill")).toBeNull();
+    const rects = Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(rects.length).toBe(4);
+    rects.forEach((r) => expect(r.getAttribute("fill")).toBe(TBL.color.blue));
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-single-highlight.golden.svg");
+  });
+
+  it("bar_color replaces the BASE color under highlightSeries; dimming still applies", () => {
+    const rows = parseCsv("./fixtures/bar-single.csv");
+    // Highlighted: the sole series is in the set — bars take bar_color (per-rect, accessor path).
+    const highlighted = renderChart(
+      { ...BAR_SINGLE_SPEC, bar_color: "amber", highlightSeries: ["Effect"] },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg;
+    Array.from(highlighted.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
+      expect(r.getAttribute("fill")).toBe(resolveColor("amber")),
+    );
+    // Not highlighted: dimming wins over bar_color.
+    const dimmed = renderChart(
+      { ...BAR_SINGLE_SPEC, bar_color: "amber", highlightSeries: ["Other"] },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg;
+    Array.from(dimmed.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
+      expect(r.getAttribute("fill")).toBe(TBL.color.annotationDim),
+    );
+  });
 });
 
 // --- Faceted-horizontal label/gutter signals (hideCategoryLabels + categoryGutter) ---
