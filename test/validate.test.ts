@@ -321,6 +321,15 @@ describe("title_selectors", () => {
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/duplicate/i);
   });
+
+  it("rejects a selector key outside the token character set (could never match a {token})", () => {
+    const r = validateSpec({
+      ...VALID,
+      title: "GDP by {my key}",
+      title_selectors: { "my key": { options: [{ id: "a" }] } },
+    });
+    expect(r.valid).toBe(false);
+  });
 });
 
 describe("small_multiples config", () => {

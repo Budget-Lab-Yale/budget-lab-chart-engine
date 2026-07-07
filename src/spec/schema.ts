@@ -253,7 +253,14 @@ export const CHART_SPEC_SCHEMA = {
     // Text
     // (No `eyebrow` — the figure number is an embed-time property of the article, not the spec.)
     title: { type: "string", minLength: 1 },
-    title_selectors: { type: "object", additionalProperties: TITLE_SELECTOR },
+    // Keys are constrained to the {token} character set (spec/title.ts TOKEN_RE) so a key that
+    // could never match a title token (e.g. one containing a space) fails structurally instead
+    // of passing validation but silently rendering no control.
+    title_selectors: {
+      type: "object",
+      propertyNames: { pattern: "^[A-Za-z0-9_-]+$" },
+      additionalProperties: TITLE_SELECTOR,
+    },
     subtitle: { type: "string" },
     source: { type: "string" },
     note: { type: "string" },
