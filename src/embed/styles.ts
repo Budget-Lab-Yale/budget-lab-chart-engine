@@ -5,10 +5,12 @@
 //   tbl-legend / tbl-legend-item / tbl-legend-swatch (.is-dashed) / tbl-legend-reset /
 //   tbl-legend-reset-icon / .is-pinned, tbl-dimmed,
 //   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch (.is-dashed) /
-//   tbl-tooltip-label / tbl-tooltip-value.
+//   tbl-tooltip-label / tbl-tooltip-value,
+//   inline-select-wrap / inline-select / inline-select-caret / inline-select-popover (title
+//   selector widget).
 // Base font/color variables and body defaults are included so the standalone HTML
 // renders correctly without any external stylesheet.
-// Intentionally omitted: scroll wrapper, y-axis overlay, downloads, selectors,
+// Intentionally omitted: scroll wrapper, y-axis overlay, downloads,
 // tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
 
 import { TOKENS_CSS } from "../theme/tokens";
@@ -81,35 +83,85 @@ body {
   color: var(--tbl-text-muted);
 }
 
-/* Inline title selector (spec title_selectors): a native <select> embedded in the title text.
-   Inherits the title's type (font/size/weight/line-height) so it reads as part of the sentence;
-   the accent color + dotted underline + small caret mark it as interactive. appearance:none
-   drops the platform chrome (the caret is our own, drawn as an inline SVG background). */
-.figure-title-select {
-  appearance: none;
-  -webkit-appearance: none;
-  border: none;
-  padding: 0 14px 0 0;
-  margin: 0;
-  background-color: transparent;
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
-  color: var(--tbl-blue);
-  border-bottom: 2px dotted currentColor;
-  border-radius: 0;
-  cursor: pointer;
-  /* Small caret, right-aligned inside the reserved 14px right padding. The stroke is a
-     hardcoded #0072B2 that must track --tbl-blue — var() cannot appear inside a data-URI. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%230072B2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right center;
+/* Inline title selector (spec title_selectors): a button+popover widget embedded in the title
+   text. Ported verbatim (design + rules) from the AI Labor Market Tracker's
+   .inline-select-wrap/.inline-select/.inline-select-caret/.inline-select-popover (styles.css
+   L392-479) — the industry-picker control. Looks like the surrounding title text (same font,
+   weight, color, size); a thin outline + caret signal interactivity. */
+.inline-select-wrap {
+  position: relative;
+  display: inline-block;
 }
-.figure-title-select:focus-visible {
-  outline: 2px solid var(--tbl-blue);
-  outline-offset: 2px;
+.inline-select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--tbl-border);
+  border-radius: 4px;
+  /* Inherit type from the surrounding .figure-title so the only visible difference is the
+     outline (and, when the active option resolves a color, the label tint). */
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  padding: 0 6px 0 8px;
+  margin: 0 1px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1.15;
+  transition: border-color 0.12s, background 0.12s;
+}
+.inline-select:hover,
+.inline-select:focus-visible {
+  border-color: var(--tbl-navy);
+  background: var(--tbl-bg-subtle);
+  outline: none;
+}
+.inline-select[aria-expanded="true"] {
+  border-color: var(--tbl-navy);
+  background: var(--tbl-bg-subtle);
+}
+.inline-select-caret {
+  font-size: 0.7em;
+  color: var(--tbl-text-muted);
+  margin-left: 2px;
+}
+
+/* Popover listbox under the inline-select button. */
+.inline-select-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--tbl-bg);
+  border: 1px solid var(--tbl-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  min-width: 100%;
+  max-width: 360px;
+  font-family: var(--tbl-font-sans);
+  font-size: 14px;
+  font-weight: var(--tw-body);
+  letter-spacing: normal;
+  color: var(--tbl-text-body);
+  white-space: nowrap;
+}
+.inline-select-popover li {
+  padding: 6px 14px;
+  cursor: pointer;
+  outline: none;
+}
+.inline-select-popover li:hover,
+.inline-select-popover li:focus {
+  background: var(--tbl-bg-subtle);
+  color: var(--tbl-text-heading);
+}
+.inline-select-popover li.is-active {
+  color: var(--tbl-navy);
+  font-weight: var(--tw-semi);
 }
 
 /* =========================================================================

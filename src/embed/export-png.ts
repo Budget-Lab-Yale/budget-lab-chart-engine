@@ -2,11 +2,12 @@
 // Port of C:\dev\GitHub\budget-lab-interactives\tools\ai-labor-market-tracker\export-image.js
 
 import type { ChartSpec } from "../spec/types.js";
-import { resolveTitleText } from "../spec/title.js";
+import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
 import { sharedColumnWidths } from "../engine/figure.js";
+import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
 import {
   SVG_NS,
@@ -209,6 +210,16 @@ export function buildExportSvg(
   const note = spec.note ?? "";
   const source = spec.source ?? "";
 
+  // Color accent feed (AILMT parity): resolve the same accent color the live single-chart mount
+  // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
+  // `renderFigure` (small multiples) never receives this — see TitleSelectorWiring.afterChange in
+  // render-live.ts for why a figure grid has no single accent target.
+  const effectiveSelections = opts.selections ?? resolveSelections(spec);
+  const rawAccent = spec.title_selectors
+    ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
+    : undefined;
+  const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
+
   const { root, bgRect } = createExportRoot(document, W, H);
 
   // --- top chrome: title (+ logo), subtitle ---
@@ -249,7 +260,11 @@ export function buildExportSvg(
   if (!isFigure) {
     // Single chart — unchanged: fills the height left after the chrome inside the 750 frame.
     contentHeight = Math.max(160, H - chartTop - bottomH);
-    const { svg: chartSvg } = renderChart(spec, rows, { width: INNER_W, height: contentHeight });
+    const { svg: chartSvg } = renderChart(spec, rows, {
+      width: INNER_W,
+      height: contentHeight,
+      ...(accentColor ? { accentColor } : {}),
+    });
     chartSvg.setAttribute("x", String(MARGIN));
     chartSvg.setAttribute("y", String(chartTop));
     chartSvg.setAttribute("width", String(INNER_W));

@@ -6,7 +6,12 @@
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
 import type { ChartSpec, TitleSelector } from "../spec/types.js";
 import { resolveColumns } from "../spec/columns.js";
-import { parseTitleTokens, resolveSelections, resolveTitleText } from "../spec/title.js";
+import {
+  parseTitleTokens,
+  resolveActiveOptionColor,
+  resolveSelections,
+  resolveTitleText,
+} from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
@@ -17,6 +22,7 @@ import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figu
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
+import { resolveColor } from "./palette.js";
 import {
   attachCrosshair,
   attachBandCrosshair,
@@ -457,7 +463,7 @@ function downloadSlug(spec: ChartSpec): string {
  *  slug (from the URL) rather than the title, which makes for unwieldy filenames.
  *
  *  `selections` is the mount's LIVE title-selector selections object (mutated in place by the
- *  inline <select>'s change handler), so the PNG export always prints the currently-chosen
+ *  inline-select widget's change handler), so the PNG export always prints the currently-chosen
  *  option labels in its title — not the defaults captured at mount time. */
 function buildDownloadActions(
   doc: Document,
@@ -638,17 +644,31 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   card.className = `figure-card chart-${spec.chartType}`;
 
   // Inline title selectors: the mount owns ONE selections object for its whole life. The
-  // header's <select> change handler mutates it in place, so the PNG download (below) and any
+  // header's widget change handler mutates it in place, so the PNG download (below) and any
   // later reads see the live state; the header itself is built once and never rebuilt by the
   // resize draw() loop, so the control + its state survive the engine's own re-renders.
   const selections = resolveSelections(spec, opts.selections);
+
+  // Color accent feed (AILMT parity — charts.js L556-562): a single-series chart driven by a
+  // colored title selector adopts the active option's resolved color as its line color, so it
+  // matches the selector's tinted label. `requestAccentRedraw` is assigned once `draw` exists
+  // below (forward reference — only invoked later, from a user's selection, by which point the
+  // assignment has already run); `draw()` itself recomputes the accent color from the live
+  // `selections` on every call, so a selection change picks it up on the very next redraw.
+  let requestAccentRedraw: (() => void) | undefined;
 
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
   buildFigureHeader(
     card, doc, spec, opts.eyebrow,
     spec.title_selectors
-      ? { selectors: spec.title_selectors, selections, onSelect: opts.onSelect }
+      ? {
+          selectors: spec.title_selectors,
+          selections,
+          onSelect: opts.onSelect,
+          seriesColors: spec.series_colors,
+          afterChange: () => requestAccentRedraw?.(),
+        }
       : undefined,
   );
 
@@ -730,9 +750,23 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
 
+    // Color accent feed (AILMT parity): resolve the active title-selector option's color (raw
+    // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
+    // it up immediately. renderChart only applies it when the chart resolves to exactly one
+    // series (engine/index.ts) — a multi-series chart's palette/series_colors stay untouched.
+    const rawAccent = spec.title_selectors
+      ? resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors)
+      : undefined;
+    const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
+
     let built;
     try {
-      built = renderChart(spec, rows, { width: target, height, ...(restackOrder ? { stackOrder: restackOrder } : {}) });
+      built = renderChart(spec, rows, {
+        width: target,
+        height,
+        ...(restackOrder ? { stackOrder: restackOrder } : {}),
+        ...(accentColor ? { accentColor } : {}),
+      });
     } catch (e) {
       canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return;
@@ -1004,6 +1038,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   draw(initialCardWidth, resolvedPos());
 
+  // Wire the accent-redraw hook (see its declaration above): a title-selector change forces
+  // draw() past its same-width/same-legendPos early return, mirroring the area click-to-restack
+  // pattern (`lastWidth = -1` then a fresh draw() call at the current width/legendPos).
+  requestAccentRedraw = () => {
+    lastWidth = -1;
+    draw(card.clientWidth || initialCardWidth, currentLegendPos ?? resolvedPos());
+  };
+
   // Single persistent scrollLeft → translateX for the sticky y-axis overlay.
   let scrollRaf: number | null = null;
   const onScroll = (): void => {
@@ -1071,13 +1113,201 @@ export interface TitleSelectorWiring {
   selectors: Record<string, TitleSelector>;
   selections: Record<string, string>;
   onSelect?: (change: { id: string; value: string }) => void;
+  /** `spec.series_colors` — the fallback source for an option's trigger-label tint when the
+   *  option itself has no explicit `color` (see TitleSelectorOption.color and
+   *  spec/title.ts#resolveActiveOptionColor, which this mirrors at build time). */
+  seriesColors?: Record<string, string>;
+  /** Called after a selection's shared-state update + host callback + CustomEvent have all
+   *  fired — mountChart's hook to re-render the chart body so a single-series chart's line
+   *  adopts the newly-active option's color (AILMT parity; see engine/index.ts
+   *  RenderOptions.accentColor). mountFigure (small multiples) omits this: the label still
+   *  tints, but the per-pane grid isn't re-rendered — each pane is one facet's chart body, not a
+   *  single accent target, and this port does not touch figure.ts. */
+  afterChange?: () => void;
+}
+
+/** One option's DATA for the inline-select widget below: display label + the RAW (unresolved)
+ *  color, if any, that tints the trigger label while this option is active. */
+interface InlineSelectItem {
+  id: string;
+  label: string;
+  color?: string;
+}
+
+/**
+ * The AI Labor Market Tracker's inline title-selector widget (charts.js `buildInlineSelect`,
+ * ported near-verbatim — see also styles.css L392-479 for the paired CSS): a button styled like
+ * a boxed piece of title text (`.inline-select`) with a caret, opening a popover `<ul>`
+ * (`.inline-select-popover`) of options on click. Behavior: click toggles the popover; a
+ * click anywhere outside the button/popover closes it; Escape closes it and refocuses the
+ * button; Enter/Space on a focused option selects it; ArrowUp/ArrowDown move focus with
+ * wraparound; typing buffers into a 600ms type-ahead match against option labels. The button's
+ * label is tinted to the ACTIVE option's resolved color (`palette.resolveColor`) — the caret
+ * stays muted; the popover itself carries no per-option tint (the active row is marked navy +
+ * semibold only, via `.is-active`).
+ *
+ * One structural difference from the tracker: the tracker tears down and rebuilds this widget on
+ * every selection (as part of a full figure re-render driven by its own state store). The
+ * engine's title is built ONCE per mount and never rebuilt (see buildFigureHeader) so the resize
+ * draw() loop can't clobber the user's open popover / focus — so this instance updates its own
+ * label/aria state in place on selection, rather than relying on a future rebuild.
+ */
+function buildInlineSelect(
+  doc: Document,
+  items: InlineSelectItem[],
+  initialActiveId: string,
+  onSelect: (id: string) => void,
+): HTMLElement {
+  const btn = doc.createElement("button");
+  btn.type = "button";
+  btn.className = "inline-select";
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
+
+  const labelEl = doc.createElement("span");
+  labelEl.className = "inline-select-label";
+  const caret = doc.createElement("span");
+  caret.className = "inline-select-caret";
+  caret.textContent = "▾";
+  caret.setAttribute("aria-hidden", "true");
+  btn.appendChild(labelEl);
+  btn.appendChild(caret);
+
+  const popover = doc.createElement("ul");
+  popover.className = "inline-select-popover";
+  popover.setAttribute("role", "listbox");
+  popover.hidden = true;
+
+  let activeId = initialActiveId;
+  const itemById = new Map<string, HTMLLIElement>();
+
+  function refresh(): void {
+    const active = items.find((i) => i.id === activeId) ?? items[0];
+    labelEl.textContent = active?.label ?? "";
+    // Tint the label with the option's resolved color (matches the chart's series color when the
+    // accent feeds back to a single-series chart — see engine/index.ts RenderOptions.accentColor);
+    // the caret stays grey (CSS-only, var(--tbl-text-muted)).
+    labelEl.style.color = (active && resolveColor(active.color)) || "";
+    for (const [id, li] of itemById) {
+      li.setAttribute("aria-selected", String(id === active?.id));
+      li.classList.toggle("is-active", id === active?.id);
+    }
+  }
+
+  function selectItem(id: string): void {
+    activeId = id;
+    refresh();
+    onSelect(id);
+  }
+
+  for (const item of items) {
+    const li = doc.createElement("li");
+    li.setAttribute("role", "option");
+    li.dataset.id = item.id;
+    li.textContent = item.label;
+    li.tabIndex = 0;
+    li.addEventListener("click", () => {
+      selectItem(item.id);
+      closePopover();
+    });
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectItem(item.id);
+        closePopover();
+      }
+    });
+    popover.appendChild(li);
+    itemById.set(item.id, li);
+  }
+  refresh();
+
+  let typeAheadBuffer = "";
+  let typeAheadTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function focusItem(li: HTMLElement | null | undefined): void {
+    li?.focus();
+  }
+
+  function openPopover(): void {
+    popover.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    setTimeout(() => doc.addEventListener("click", clickAway), 0);
+    setTimeout(() => {
+      const activeLi = itemById.get(activeId) ?? (popover.firstElementChild as HTMLElement | null);
+      focusItem(activeLi);
+    }, 0);
+  }
+  function closePopover(): void {
+    popover.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    doc.removeEventListener("click", clickAway);
+    typeAheadBuffer = "";
+    clearTimeout(typeAheadTimer);
+    btn.focus();
+  }
+  function clickAway(e: Event): void {
+    const target = e.target as Node;
+    if (!btn.contains(target) && !popover.contains(target)) closePopover();
+  }
+
+  function keyHandler(e: KeyboardEvent): void {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePopover();
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      const focused = doc.activeElement;
+      if (focused && focused.parentElement === popover) {
+        e.preventDefault();
+        (focused as HTMLElement).click();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const lis = Array.from(popover.children) as HTMLElement[];
+      const idx = lis.indexOf(doc.activeElement as HTMLElement);
+      const next = e.key === "ArrowDown"
+        ? lis[(idx + 1) % lis.length]
+        : lis[(idx - 1 + lis.length) % lis.length];
+      focusItem(next);
+      return;
+    }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      typeAheadBuffer += e.key.toLowerCase();
+      clearTimeout(typeAheadTimer);
+      typeAheadTimer = setTimeout(() => {
+        typeAheadBuffer = "";
+      }, 600);
+      const match = items.find((i) => i.label.toLowerCase().startsWith(typeAheadBuffer));
+      if (match) {
+        e.preventDefault();
+        focusItem(itemById.get(match.id));
+      }
+    }
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    popover.hidden ? openPopover() : closePopover();
+  });
+
+  const wrap = doc.createElement("span");
+  wrap.className = "inline-select-wrap";
+  wrap.appendChild(btn);
+  wrap.appendChild(popover);
+  wrap.addEventListener("keydown", keyHandler);
+  return wrap;
 }
 
 /** Render a title with inline-selector tokens into `h`: text segments become text nodes; each
- *  `{key}` token becomes an engine-owned native <select> (options from its TitleSelector,
- *  selected = the active selection). On change: the shared selections object is updated in
- *  place, the host callback fires, and a bubbling `tbl-title-select` CustomEvent dispatches
- *  from the card root (for standalone bundles with no host callback). */
+ *  `{key}` token becomes an engine-owned button+popover widget (see buildInlineSelect — options
+ *  from its TitleSelector, active = the current selection). On change: the shared selections
+ *  object is updated in place, the host callback fires, a bubbling `tbl-title-select` CustomEvent
+ *  dispatches from the card root (for standalone bundles with no host callback), and — when
+ *  wired (mountChart only) — `afterChange` re-renders the chart body for the color accent. */
 function buildSelectorTitle(
   h: HTMLElement,
   doc: Document,
@@ -1085,7 +1315,7 @@ function buildSelectorTitle(
   card: HTMLElement,
   wiring: TitleSelectorWiring,
 ): void {
-  const { selectors, selections, onSelect } = wiring;
+  const { selectors, selections, onSelect, seriesColors, afterChange } = wiring;
   for (const seg of parseTitleTokens(title, selectors)) {
     if (seg.kind === "text") {
       h.appendChild(doc.createTextNode(seg.text));
@@ -1093,29 +1323,26 @@ function buildSelectorTitle(
     }
     const key = seg.key;
     const selector = selectors[key]!;
-    const select = doc.createElement("select");
-    select.className = "figure-title-select";
-    // A11y: name the control by its selector key, humanized (dashes/underscores → spaces).
-    select.setAttribute("aria-label", key.replace(/[_-]+/g, " "));
-    for (const opt of selector.options) {
-      const o = doc.createElement("option");
-      o.value = opt.id;
-      o.textContent = opt.label ?? opt.id;
-      select.appendChild(o);
-    }
-    // The mounts always pass a resolveSelections() map (every key populated), so the fallbacks
-    // are defensive only — buildFigureHeader is exported, and an external caller could hand-roll
-    // an incomplete wiring.selections.
-    select.value = selections[key] ?? selector.options[0]?.id ?? "";
-    select.addEventListener("change", () => {
-      const value = select.value;
+    const items: InlineSelectItem[] = selector.options.map((opt) => ({
+      id: opt.id,
+      label: opt.label ?? opt.id,
+      // Explicit option color wins; else the figure's series color for the option's label (the
+      // shared per-series map) — mirrors spec/title.ts#resolveActiveOptionColor.
+      color: opt.color ?? seriesColors?.[opt.label ?? opt.id],
+    }));
+    // The mounts always pass a resolveSelections() map (every key populated), so the fallback is
+    // defensive only — buildFigureHeader is exported, and an external caller could hand-roll an
+    // incomplete wiring.selections.
+    const initialActiveId = selections[key] ?? selector.options[0]?.id ?? "";
+    const widget = buildInlineSelect(doc, items, initialActiveId, (value) => {
       selections[key] = value;
       onSelect?.({ id: key, value });
       card.dispatchEvent(
         new CustomEvent("tbl-title-select", { detail: { id: key, value }, bubbles: true }),
       );
+      afterChange?.();
     });
-    h.appendChild(select);
+    h.appendChild(widget);
   }
 }
 
@@ -1126,8 +1353,9 @@ function buildSelectorTitle(
  *  The spec parameter is typed as `{ title?: string; subtitle?: string }` (a structural subset)
  *  so both ChartSpec and TableSpec can be passed without casting. `titleWiring` (chart mounts
  *  only — tables have no title_selectors and omit it) turns each `{key}` token in the title
- *  into an engine-owned inline <select>; absent, the title renders as plain textContent,
- *  DOM-identical to before the selector feature existed. The header is built ONCE per mount
+ *  into an engine-owned button+popover widget (see buildInlineSelect); absent, the title renders
+ *  as plain textContent, DOM-identical to before the selector feature existed. The header is
+ *  built ONCE per mount
  *  (the resize draw() loop never rebuilds it), so the control and its selection state survive
  *  the engine's own re-renders naturally. */
 export function buildFigureHeader(
@@ -1479,11 +1707,19 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const card = doc.createElement("div");
   card.className = "figure-card";
   // Inline title selectors — same single shared selections object discipline as mountChart.
+  // No `afterChange` here: a small-multiples figure has no single accent target (each pane is
+  // its own facet's chart body, not one line) — the label still tints, but the grid doesn't
+  // re-render on selection. See TitleSelectorWiring.afterChange.
   const selections = resolveSelections(spec, opts.selections);
   buildFigureHeader(
     card, doc, spec, opts.eyebrow,
     spec.title_selectors
-      ? { selectors: spec.title_selectors, selections, onSelect: opts.onSelect }
+      ? {
+          selectors: spec.title_selectors,
+          selections,
+          onSelect: opts.onSelect,
+          seriesColors: spec.series_colors,
+        }
       : undefined,
   );
 
