@@ -123,7 +123,7 @@ describe("inline title selector — live DOM", () => {
     container.remove();
   });
 
-  it("selection survives the engine's own resize re-render", () => {
+  it("selection survives the engine's own resize re-render", async () => {
     // jsdom has no ResizeObserver — install the stub before mounting.
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
     const container = document.createElement("div");
@@ -134,14 +134,26 @@ describe("inline title selector — live DOM", () => {
     select.dispatchEvent(new Event("change", { bubbles: true }));
     expect(select.value).toBe("country");
 
-    // Simulate a resize: invoke the captured ResizeObserver callback (mountChart's draw() loop
-    // rebuilds the SVG/legend but NOT the header — buildFigureHeader runs once per mount).
+    // Simulate a resize: invoke the captured ResizeObserver callback. mountChart's RO handler
+    // only SCHEDULES draw() via requestAnimationFrame, so await rAF ticks before asserting —
+    // otherwise the redraw never runs and the assertions pass vacuously. (Scope the chart-svg
+    // selector to .figure-canvas — a bare "svg" would match the header's logo SVG instead.)
+    const svgBefore = container.querySelector(".figure-canvas svg");
+    expect(svgBefore).not.toBeNull();
     expect(FakeResizeObserver.instances.length).toBeGreaterThan(0);
     for (const inst of FakeResizeObserver.instances) inst.cb([], inst as unknown as ResizeObserver);
+    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => requestAnimationFrame(r));
 
+    // The redraw genuinely executed: draw() rebuilt the chart SVG (card.clientWidth is 0 in
+    // jsdom, so the render width changed 720 → the 390 floor and replaceChildren swapped it)...
+    expect(container.querySelector(".figure-canvas svg")).not.toBe(svgBefore);
+
+    // ...but the header was NOT rebuilt (buildFigureHeader runs once per mount): same <select>
+    // element, still holding the changed value.
     const selectAfter = container.querySelector("select.figure-title-select") as HTMLSelectElement;
     expect(selectAfter).not.toBeNull();
-    expect(selectAfter).toBe(select); // same element — header wasn't rebuilt
+    expect(selectAfter).toBe(select);
     expect(selectAfter.value).toBe("country");
   });
 

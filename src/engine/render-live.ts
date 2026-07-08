@@ -1103,6 +1103,9 @@ function buildSelectorTitle(
       o.textContent = opt.label ?? opt.id;
       select.appendChild(o);
     }
+    // The mounts always pass a resolveSelections() map (every key populated), so the fallbacks
+    // are defensive only — buildFigureHeader is exported, and an external caller could hand-roll
+    // an incomplete wiring.selections.
     select.value = selections[key] ?? selector.options[0]?.id ?? "";
     select.addEventListener("change", () => {
       const value = select.value;
