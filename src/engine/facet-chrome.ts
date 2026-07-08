@@ -30,6 +30,12 @@ export const X_TICK_LABEL_TOP_CLASS = "tbl-x-tick-label-top";
  *  per-marker index). The fx-facet collapse stretches each to the full plot width so the line
  *  runs edge-to-edge like a line chart instead of stopping at each facet's frame. */
 export const ANNOTATION_LINE_CLASS = "tbl-annotation-line";
+/** ClassName PREFIX stamped on each HORIZONTAL value-axis marker ruleX (assemble-plot appends a
+ *  per-marker index) — grouped horizontal bars only (fy row facets repeat the rule per band). The
+ *  fy collapse keeps one copy and stretches it to the full plot height so the rule runs
+ *  top-to-bottom like the zero baseline. Single-band horizontal charts are untagged (no facets,
+ *  nothing to collapse → byte-identical output). */
+export const X_ANNOTATION_LINE_CLASS = "tbl-annotation-vline";
 
 export interface CollapseFacetChromeOptions {
   /** Outer SVG width in px. Gridlines are stretched to span 0..width (the full pane,
@@ -323,5 +329,25 @@ export function collapseFacetChromeY(
     const ty = readTranslateY(group);
     const top = cls === GRIDLINE_CLASS ? topAbs - GRIDLINE_TOP_EXTEND : topAbs;
     stretchLinesToFullHeight(group, top - ty, bottomAbs - ty);
+  }
+
+  // 4. Value-axis marker rules (annotations.xAxis on horizontal bars): each marker is its own
+  //    indexed class (tbl-annotation-vline-N), repeated per row facet. Collapse each to the first
+  //    facet and stretch to the full plot height (mirrors collapseFacetChrome's step 4 with the
+  //    axes swapped; no top extend — like the zero baseline, the rule shouldn't float above the
+  //    plot area).
+  const annoClasses = new Set<string>();
+  for (const g of Array.from(
+    svg.querySelectorAll<SVGGElement>(`g[class*="${X_ANNOTATION_LINE_CLASS}-"]`),
+  )) {
+    for (const c of Array.from(g.classList)) {
+      if (c.startsWith(`${X_ANNOTATION_LINE_CLASS}-`)) annoClasses.add(c);
+    }
+  }
+  for (const cls of annoClasses) {
+    const group = collapseDuplicateGroups(cls)[0];
+    if (!group) continue;
+    const ty = readTranslateY(group);
+    stretchLinesToFullHeight(group, topAbs - ty, bottomAbs - ty);
   }
 }

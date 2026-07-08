@@ -451,6 +451,7 @@ export function renderFigure(
           ...opts,
           height: effHeight,
           pane: true,
+          paneFacetValue: value,
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
@@ -540,7 +541,12 @@ export function renderFigure(
   let yHi = -Infinity;
   for (const value of paneValues) {
     const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-    const [lo, hi] = renderPane(spec, paneRows, { ...opts, height: effHeight, pane: true }, "probe").yDomain;
+    const [lo, hi] = renderPane(
+      spec,
+      paneRows,
+      { ...opts, height: effHeight, pane: true, paneFacetValue: value },
+      "probe",
+    ).yDomain;
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }
@@ -583,6 +589,7 @@ export function renderFigure(
         ...opts,
         height: effHeight,
         pane: true,
+        paneFacetValue: value,
         yDomain: sharedYDomain,
         width: colWidths[col],
         ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),

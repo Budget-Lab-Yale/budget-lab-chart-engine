@@ -29,6 +29,9 @@ export interface XAxisMarker {
   labelDy?: number;
   /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
   labelDx?: number;
+  /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
+   *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 /** A shaded vertical region of the x-axis (e.g. a recession band). `start`/`end` are x values
@@ -68,6 +71,9 @@ export interface YAxisMarker {
   labelDx?: number;
   /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default above. */
   labelDy?: number;
+  /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
+   *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 export interface YAxisPolicy {

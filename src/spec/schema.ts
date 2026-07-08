@@ -26,6 +26,7 @@ const X_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["top", "middle", "bottom"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      facet: { type: "string" },
     },
   },
 } as const;
@@ -61,6 +62,7 @@ const Y_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["left", "middle", "right"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      facet: { type: "string" },
     },
   },
 } as const;
