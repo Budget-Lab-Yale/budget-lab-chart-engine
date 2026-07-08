@@ -55,15 +55,17 @@ export function buildAreaMarks(
   // builder does — a per-series projected sub-range would need its OWN areaY z-group, which
   // would double-count / misalign Plot's stack transform. Instead, paint a translucent WHITE
   // rect over the x-range(s) where EVERY in-scope series is flagged projected, painted on top of
-  // the stacked fill (still part of `overlay`, so it paints before annotations — see
-  // assemble-plot.ts step ordering). This is conservative and documented as a known limitation:
-  // a stack has no way to visually express ONE series' projected flag without affecting the read
-  // of the other series sharing that x, so an x where only SOME series are flagged is NOT faded.
+  // the stacked fill. Returned in its own `veil` layer (NOT `overlay` — see fix-wave I1) so
+  // assemblePlot can paint xAxis marker rules above it while keeping the fill exactly where it
+  // paints today. This is conservative and documented as a known limitation: a stack has no way
+  // to visually express ONE series' projected flag without affecting the read of the other
+  // series sharing that x, so an x where only SOME series are flagged is NOT faded.
   //
   // Reuses the exact run-boundary/extension algorithm the line builder uses (splitProjectedRuns)
   // over a synthetic one-row-per-x "virtual series", so the veil's edges extend to the adjacent
   // ACTUAL x exactly like the line's dashed connector does (an edge run — no adjacent actual x on
   // that side, e.g. a trailing forecast — clamps to the run's own x extent).
+  const veil: unknown[] = [];
   if (spec.projected_field && ctx.yDomain) {
     const [y1, y2] = ctx.yDomain;
     const byX = new Map<string, { x: unknown; allProjected: boolean }>();
@@ -109,7 +111,7 @@ export function buildAreaMarks(
       y2,
     }));
     if (veilRects.length) {
-      overlay.push(
+      veil.push(
         Plot.rect(veilRects, {
           x1: "x1",
           x2: "x2",
@@ -138,6 +140,7 @@ export function buildAreaMarks(
     overlay,
     tagging,
     dashedNames: new Set<string>(),
+    ...(veil.length ? { veil } : {}),
     ...(xScaleOpts ? { xScaleOpts } : {}),
   };
 }

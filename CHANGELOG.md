@@ -35,6 +35,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **`category_colors`** — per-x-category fill override for single-series bars (both
   orientations), e.g. a distinct color for one category while the rest keep the base fill.
 
+### Fixed — bars
+
+- **Sectioned horizontal bars no longer clip the first section header.** The top margin is now
+  floored to the header's lift height (+ gap) whenever a top section header is present, so it's
+  never clipped under the default (bottom) `x_axis_ticks` — this changes rendered output (top
+  margin) for existing sectioned horizontal bar specs; unsectioned and vertical bars are
+  unaffected.
+
 ### Added — line & area
 
 - **`projected_field`** + **`projected_style`** — flags rows as projected (forecast/estimated).

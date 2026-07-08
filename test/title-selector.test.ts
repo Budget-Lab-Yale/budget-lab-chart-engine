@@ -48,6 +48,16 @@ describe("parseTitleTokens", () => {
       { kind: "text", text: " vs {region}" },
     ]);
   });
+
+  it("leaves a prototype-property brace expression (e.g. {constructor}) as literal text instead of throwing", () => {
+    // `key in selectors` is true for inherited Object.prototype properties like `constructor`
+    // and `toString` even though selectors has no OWN property by that name — a naive `in`
+    // check would treat it as a registered token, and resolveTitleText would then try to read
+    // `selectors.constructor.options`, throwing a TypeError. Object.hasOwn fixes this.
+    expect(() => parseTitleTokens("GDP by {constructor}", { dimension: DIMENSION })).not.toThrow();
+    const segs = parseTitleTokens("GDP by {constructor}", { dimension: DIMENSION });
+    expect(segs).toEqual([{ kind: "text", text: "GDP by {constructor}" }]);
+  });
 });
 
 describe("resolveSelections", () => {
@@ -113,5 +123,11 @@ describe("resolveTitleText", () => {
   it("leaves an unmatched brace expression untouched", () => {
     const spec = { title: "GDP by {region}", title_selectors: { dimension: DIMENSION } };
     expect(resolveTitleText(spec)).toBe("GDP by {region}");
+  });
+
+  it("a {constructor} brace expression stays literal instead of throwing (prototype-key guard)", () => {
+    const spec = { title: "GDP by {constructor}", title_selectors: { dimension: DIMENSION } };
+    expect(() => resolveTitleText(spec)).not.toThrow();
+    expect(resolveTitleText(spec)).toBe("GDP by {constructor}");
   });
 });

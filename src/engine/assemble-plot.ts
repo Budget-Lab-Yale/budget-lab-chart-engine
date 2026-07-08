@@ -480,16 +480,31 @@ export function assemblePlot({
   //    value — it isn't one of the bar categories) — so this loop always no-op'd there anyway.
   //    Made explicit here so the horizontal VALUE-axis path (6a, below) is the only one that
   //    fires for horizontal bars.
-  if (!horizontal) {
-    xAxisAnn.forEach((m, markerIdx) => {
-      const mx = xOpts.markerToX(m);
-      if (mx == null) return;
-      drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4);
-    });
-  }
+  const drawVerticalXAxisMarkers = (): void => {
+    if (!horizontal) {
+      xAxisAnn.forEach((m, markerIdx) => {
+        const mx = xOpts.markerToX(m);
+        if (mx == null) return;
+        drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4);
+      });
+    }
+  };
+  // Fix-wave I1: the area builder's projected-range veil (layers.veil) is a translucent white
+  // rect that must paint ABOVE the area fill (to fade it) but UNDER these marker rules (so a
+  // marker landing inside the veiled range paints at full strength, not washed by the veil).
+  // Since the fill lives in `layers.overlay` and paints at step 6 (below), the only way to get
+  // "rules above veil" without moving the fill is to defer this push until AFTER overlay+veil —
+  // but ONLY when a veil is present, so the overwhelming majority of charts (no veil) keep
+  // today's exact push order (byte-identical goldens).
+  const hasVeil = !!(layers.veil && layers.veil.length);
+  if (!hasVeil) drawVerticalXAxisMarkers();
 
-  // 6. Line overlay (on top).
+  // 6. Line/area overlay (on top).
   marks.push(...layers.overlay);
+  // Veil (area projected-range fade), painted immediately above the fill it fades.
+  if (layers.veil) marks.push(...layers.veil);
+
+  if (hasVeil) drawVerticalXAxisMarkers();
 
   // 6a. HORIZONTAL bars: value-axis reference line(s) — a vertical rule drawn at a raw numeric
   //     `x` against the VALUE scale (which runs along x here; see `plotOpts.x` below). This is

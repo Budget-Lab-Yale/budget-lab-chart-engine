@@ -37,7 +37,11 @@ export function parseTitleTokens(
   let m: RegExpExecArray | null;
   while ((m = TOKEN_RE.exec(title))) {
     const key = m[1]!;
-    if (!(key in selectors)) continue; // unregistered — leave as literal text (no split here)
+    // Object.hasOwn (not `key in selectors`): the `in` operator also matches inherited
+    // Object.prototype properties (`constructor`, `toString`, `hasOwnProperty`, …), so a title
+    // containing a literal `{constructor}` would be misparsed as a registered token and
+    // resolveTitleText would then crash reading `.options` off the constructor function.
+    if (!Object.hasOwn(selectors, key)) continue; // unregistered — leave as literal text (no split here)
     if (m.index > lastIndex) segments.push({ kind: "text", text: title.slice(lastIndex, m.index) });
     segments.push({ kind: "token", key });
     lastIndex = m.index + m[0].length;

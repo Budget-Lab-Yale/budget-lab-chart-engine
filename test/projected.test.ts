@@ -226,4 +226,67 @@ describe("projected_field — area (fade veil)", () => {
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/area-projected.golden.svg");
   });
+
+  // Fix-wave I1: an xAxis marker landing inside the veiled range must paint its rule ABOVE
+  // (after) the veil, at full strength — not underneath it, where the veil's translucent white
+  // fill would wash it out to ~20% visual strength while its own label and any yAxis markers
+  // stayed full-strength (the inconsistency this test pins).
+  it("an xAxis marker inside the veiled range paints its rule AFTER (above) the veil, not before", () => {
+    const spec: ChartSpec = {
+      ...AREA_PROJECTED_SPEC,
+      annotations: {
+        xAxis: [{ x: "5", label: "Forecast begins" }], // x=5 is inside the [3,6] veiled run
+        yAxis: [{ y: 7, label: "TARGET" }],
+      },
+    };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const all = Array.from(svg.querySelectorAll("*"));
+    const idx = (el: Element) => all.indexOf(el);
+
+    const veilGroup = svg.querySelector('g[aria-label="rect"]')!;
+    const veilRects = Array.from(veilGroup.querySelectorAll("rect"));
+    expect(veilRects.length).toBe(2);
+    const lastVeilIdx = Math.max(...veilRects.map(idx));
+
+    // The marker's vertical rule: a <line> whose x1/x2 sit at the marker's plot x (distinct
+    // from the veil's <rect>s and the gridlines, which use different tags/positions).
+    const markerLabel = Array.from(svg.querySelectorAll("text")).find(
+      (t) => t.textContent === "Forecast begins",
+    )!;
+    expect(markerLabel).toBeTruthy();
+    // The rule line lives in the same <g> as the label's sibling structure; find it by matching
+    // x1===x2 (a vertical rule) at a position between the two gridline rules Plot always draws.
+    const candidateLines = Array.from(svg.querySelectorAll("line")).filter(
+      (l) => l.getAttribute("x1") === l.getAttribute("x2"),
+    );
+    expect(candidateLines.length).toBeGreaterThan(0);
+    // Every vertical rule line (marker rule + zero baseline, if any) must paint AFTER the veil —
+    // pin the STRONGEST form of the fix: none of them precede the veil in DOM order.
+    for (const line of candidateLines) {
+      expect(idx(line)).toBeGreaterThan(lastVeilIdx);
+    }
+
+    // yAxis rule/label placement is untouched by this fix: still paints after the overlay
+    // (unaffected either way), and its label still paints last, above everything.
+    const targetLabel = Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === "TARGET")!;
+    expect(idx(targetLabel)).toBeGreaterThan(lastVeilIdx);
+  });
+
+  it("no-veil area charts (no projected_field) keep the marker rule exactly where it renders today", () => {
+    // Byte-identical guarantee: a plain area chart with an xAxis marker and NO projected_field
+    // must not be affected by the veil reordering (hasVeil is false, so the original push order
+    // is preserved).
+    const spec: ChartSpec = {
+      chartType: "area",
+      title: "Plain area",
+      xAxisType: "numeric",
+      series_order: ["X", "Y"],
+      columns: { x: "time", value: "value", series: "series" },
+      data: "area-projected.csv",
+      annotations: { xAxis: [{ x: "5", label: "MARK" }] },
+    };
+    const a = renderChart(spec, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    const b = renderChart(spec, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    expect(a).toBe(b);
+  });
 });

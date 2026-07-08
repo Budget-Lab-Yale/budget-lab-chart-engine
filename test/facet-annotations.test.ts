@@ -372,6 +372,75 @@ describe("horizontal faceted (shared mode) — xAxis markers scoped + folded per
 });
 
 // ---------------------------------------------------------------------------
+// Composition: ONE marker carrying BOTH `facet` and `value_format` + a `{value}` token, across
+// per-pane vertical yAxis, shared vertical, and per-pane horizontal xAxis. Each pane must render
+// ONLY its own facet-scoped marker, with its label formatted from ITS OWN coordinate value (not
+// a neighboring pane's) — proving the facet filter and the {value} substitution compose
+// correctly rather than one silently overriding or bypassing the other.
+// ---------------------------------------------------------------------------
+
+function horizontalFacetedSpec(mode: "shared" | "per-pane", markers: object[]): ChartSpec {
+  return {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    columns: { x: "category", value: "value", facet: "facet" },
+    data: "x",
+    small_multiples: { mode, pane_order: ["pct", "dollars"], columns: 2 },
+    annotations: { xAxis: markers },
+  } as unknown as ChartSpec;
+}
+
+const H_FACET_ROWS: TidyRow[] = [
+  { facet: "pct", category: "A", value: "0.2" },
+  { facet: "pct", category: "B", value: "0.4" },
+  { facet: "dollars", category: "A", value: "100" },
+  { facet: "dollars", category: "B", value: "200" },
+] as unknown as TidyRow[];
+
+describe("composition — one marker with BOTH facet + value_format/{value}, across facet modes/orientations", () => {
+  it("per-pane vertical yAxis: each pane renders only its own marker, formatted from its own value", () => {
+    const spec = verticalFacetedSpec("per-pane", [
+      { y: 1.5, label: "Val ({value})", value_format: { decimals: 2 }, facet: "pct" },
+      { y: 150, label: "Val ({value})", value_format: { decimals: 0, prefix: "$" }, facet: "dollars" },
+    ]);
+    const fig = renderFigure(spec, V_ROWS, { width: 720, height: 320, document });
+    const [pane0, pane1] = fig.panes.map((p) => labelTexts(p.svg as SVGSVGElement));
+    expect(pane0).toContain("Val (1.50)");
+    expect(pane0).not.toContain("Val ($150)");
+    expect(pane1).toContain("Val ($150)");
+    expect(pane1).not.toContain("Val (1.50)");
+  });
+
+  it("shared vertical: each pane's final render shows only its own facet-scoped, correctly-formatted marker", () => {
+    const spec = verticalFacetedSpec("shared", [
+      { y: 1.5, label: "Val ({value})", value_format: { decimals: 2 }, facet: "pct" },
+      { y: 150, label: "Val ({value})", value_format: { decimals: 0, prefix: "$" }, facet: "dollars" },
+    ]);
+    const fig = renderFigure(spec, V_ROWS, { width: 720, height: 320, document });
+    const [pane0, pane1] = fig.panes.map((p) => labelTexts(p.svg as SVGSVGElement));
+    expect(pane0).toContain("Val (1.50)");
+    expect(pane0).not.toContain("Val ($150)");
+    expect(pane1).toContain("Val ($150)");
+    expect(pane1).not.toContain("Val (1.50)");
+  });
+
+  it("per-pane horizontal xAxis: each pane renders only its own value-axis marker, formatted from its own value", () => {
+    const spec = horizontalFacetedSpec("per-pane", [
+      { x: "0.33", label: "Rate ({value})", value_format: { decimals: 2, suffix: "%" }, facet: "pct" },
+      { x: "150", label: "Amt ({value})", value_format: { decimals: 0, prefix: "$" }, facet: "dollars" },
+    ]);
+    const fig = renderFigure(spec, H_FACET_ROWS, { width: 720, height: 320, document });
+    const [pane0, pane1] = fig.panes.map((p) => labelTexts(p.svg as SVGSVGElement));
+    expect(pane0).toContain("Rate (0.33%)");
+    expect(pane0).not.toContain("Amt ($150)");
+    expect(pane1).toContain("Amt ($150)");
+    expect(pane1).not.toContain("Rate (0.33%)");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Non-faceted / no-facet-key charts stay byte-identical.
 // ---------------------------------------------------------------------------
 

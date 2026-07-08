@@ -106,6 +106,14 @@ export interface MarkLayers {
   underlay: unknown[];
   /** Marks painted on top of the chrome (the lines). */
   overlay: unknown[];
+  /** Optional: a "veil" layer painted immediately above `overlay` — currently only the area
+   *  builder's projected-range fade rect(s), which must paint over the area fill but UNDER the
+   *  xAxis marker rules (fix-wave I1: painting it as part of `overlay` washed a marker rule
+   *  drawn inside the veiled range out to the veil's fill-opacity). assemblePlot pushes this
+   *  right after `overlay` and, only when present, defers the vertical xAxis marker-rule push
+   *  until after both — absent veil (the overwhelming majority of charts) keeps today's exact
+   *  push order, so non-area / non-projected output stays byte-identical. */
+  veil?: unknown[];
   /** Post-render data-series tagging. For each entry, the elements matched by `selector`
    *  (in DOM order) are tagged data-series from `seriesOrder` by index. When `shapeOrder` is
    *  present (point charts), the same elements are ALSO tagged data-shape by index, so the shape
