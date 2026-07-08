@@ -191,6 +191,34 @@ export function buildBarMarks(
     );
   }
 
+  // --- Shared fy-topology layer pieces (horizontal charts whose CATEGORY band lives on `fy`
+  // row facets: multi-series grouped — sectioned or not — AND single-series sectioned). One
+  // composition point for the fy category-band scale and the left-gutter axis marks (fy-bound
+  // category labels + section headers), so the single- and multi-series paths can never drift
+  // apart again — a fix landing on one path while its sibling kept a hand-copied variant is
+  // exactly the shape that produced the original phantom-facet defect (D1). `gutter` is the
+  // caller's resolved left-gutter width (shared/figure-supplied or computed). For unsectioned
+  // multi-series charts `sectionHeaders` is empty and `topSectionHeader` null, so the header
+  // marks contribute nothing — identical to composing the group labels alone.
+  const fyCategoryBandLayer = (
+    gutter: number,
+  ): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom"> => ({
+    // Category band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-band
+    // padding, align:0 (outer pad to the bottom only), no axis (categories labeled via the
+    // fy-bound marks below).
+    fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
+    xAxisMarks: ctx.hideCategoryLabels
+      ? []
+      : [
+          ...tblFacetGroupYAxis(categories, gutter, catFont),
+          ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
+          ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
+        ],
+    marginLeft: gutter,
+    marginTop: hMarginTop,
+    marginBottom: hMarginBottom,
+  });
+
   const overlay: unknown[] = [];
 
   if (!isMulti) {
@@ -270,29 +298,18 @@ export function buildBarMarks(
         : ctx.categoryGutter ?? horizontalLeftGutter(categories);
 
       if (sectioned) {
-        // fy = the section-grouped category band (incl. spacer slots) — same shape as the
-        // multi-series fyGroupOpts below; inner y = a single-value series band (padding 0, so
-        // the bar fills the whole facet — geometrically equivalent to the old plain-y band's
-        // paddingInner:0.2, which now lives on fy INSTEAD, between facets). Category labels
-        // move from tblBandYAxis (plain-y) to tblFacetGroupYAxis (fy-bound), matching how the
-        // multi-series path labels its fy row facets.
+        // fy = the section-grouped category band (incl. spacer slots) via the SHARED
+        // fyCategoryBandLayer — the same composition the multi-series path uses below; inner
+        // y = a single-value series band (padding 0, so the bar fills the whole facet —
+        // geometrically equivalent to the old plain-y band's paddingInner:0.2, which now
+        // lives on fy INSTEAD, between facets).
         return {
           underlay: [],
           overlay,
           tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
           dashedNames: new Set<string>(),
           yScaleOpts: { type: "band", domain: [onlySeries], padding: 0, axis: null },
-          fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
-          xAxisMarks: ctx.hideCategoryLabels
-            ? []
-            : [
-                ...tblFacetGroupYAxis(categories, gutter, catFont),
-                ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
-                ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
-              ],
-          marginLeft: gutter,
-          marginTop: hMarginTop,
-          marginBottom: hMarginBottom,
+          ...fyCategoryBandLayer(gutter),
         };
       }
 
@@ -345,10 +362,9 @@ export function buildBarMarks(
     // legend→bar highlight mismatch.)
     const hRectSeriesOrder = rectTagOrder(data, catField, categories);
 
-    // Group band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-group
-    // padding, no axis (groups labeled via the fy group-label mark). Inner series band on
-    // `y`: domain in series order, padding 0 so bars touch within the group.
-    const fyGroupOpts = { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null };
+    // Group band on `fy` via the SHARED fyCategoryBandLayer (declaration order; never
+    // auto-sort — Style-Guide §9). Inner series band on `y`: domain in series order,
+    // padding 0 so bars touch within the group.
     const innerYBandOpts = { type: "band", domain: seriesNames, padding: 0, axis: null };
 
     // Faceted horizontal small multiples: use the shared gutter from the figure (so panes align)
@@ -364,17 +380,7 @@ export function buildBarMarks(
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
-      fyScaleOpts: fyGroupOpts,
-      xAxisMarks: ctx.hideCategoryLabels
-        ? []
-        : [
-            ...tblFacetGroupYAxis(categories, gutter, catFont),
-            ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
-            ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
-          ],
-      marginLeft: gutter,
-      marginTop: hMarginTop,
-      marginBottom: hMarginBottom,
+      ...fyCategoryBandLayer(gutter),
     };
   }
 
