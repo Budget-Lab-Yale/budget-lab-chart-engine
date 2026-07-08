@@ -8,7 +8,7 @@ import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
-import { wrapBandLabel, wrapToWidth, GUTTER_TEXT_PAD } from "./axes";
+import { wrapBandLabel } from "./axes";
 
 type Row = Record<string, unknown>;
 
@@ -1727,10 +1727,23 @@ export interface SecondaryBandOptions {
   /** Horizontal: extend the shaded row this many px past the plot's right edge — used to bridge
    *  the inter-pane grid gap so the row looks continuous across panes. Default 0. */
   regionExtendRight?: number;
+  /** Vertical: extend the shaded column down through the bottom margin (the x-label area), so the
+   *  hover region covers the category's own axis label the way the horizontal cursor's
+   *  `regionFromLeftEdge` covers the row label gutter. Default false (stops at the plot's bottom
+   *  edge). Standalone-only — faceted panes' bottom margin is shared chrome, not a per-pane label
+   *  gutter, so this is omitted there. */
+  regionToBottomEdge?: boolean;
   /** Horizontal: when set, re-draw the hovered category's Y-axis label in bold/dark (accent),
    *  matching the vertical cursor's x-axis category highlight. Only the label-bearing (leftmost)
    *  pane passes this; `font` is the label size (the gutter is the pane's own left margin). */
-  accentLabel?: { font: number };
+  accentLabel?: {
+    font: number;
+    /** Draw a rounded frosted chip behind the accented label (matches the tooltip/pill surface),
+     *  so the hovered category reads as pill-surrounded, not just bolded. Measured from the
+     *  label's actual rendered box (getBoundingClientRect), so it no-ops cleanly without layout
+     *  (jsdom). Default false. */
+    chip?: boolean;
+  };
   /** Gap (px) between a bar's tip and its value pill. Default 6. */
   pillGap?: number;
 }
@@ -1847,24 +1860,55 @@ export function attachSecondaryBandCursor(
   const axisRows = makeAxisRows(svgEl, mt + plotH);
 
   // Accent (bold/dark) the hovered category's Y-axis label by mutating the EXISTING label element
-  // (pixel-perfect alignment, vs drawing a duplicate). The label's textContent is the wrapped lines
-  // joined with no separator; map category → that form so we can find it. Track + restore on clear.
-  const accentFont = opts.accentLabel?.font;
-  const labelKey = (cat: string): string =>
-    accentFont ? wrapToWidth(cat, ml - GUTTER_TEXT_PAD, accentFont).replace(/\n/g, "") : cat;
+  // (pixel-perfect alignment, vs drawing a duplicate). Found via the `data-category` hook the
+  // axes/tagging layer stamps on every category label (axes.ts CAT_LABEL_CLASS + assemble-plot's
+  // tagging pass) — robust against a category string that happens to equal a tick label's text
+  // (the old textContent-matching approach's collision risk). Track + restore on clear.
   const labelEls = new Map<string, SVGTextElement>();
   if (opts.accentLabel) {
-    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
-      labelEls.set((t.textContent ?? "").trim(), t);
+    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text[data-category]"))) {
+      const cat = t.getAttribute("data-category");
+      if (cat) labelEls.set(cat, t);
     }
   }
   let accented: SVGTextElement | null = null;
+  let accentChip: SVGRectElement | null = null;
   const restoreAccent = (): void => {
     if (accented) {
       accented.setAttribute("font-weight", "500");
       accented.setAttribute("fill", TBL.color.axis);
       accented = null;
     }
+    if (accentChip) {
+      accentChip.remove();
+      accentChip = null;
+    }
+  };
+
+  /** Insert a rounded frosted chip behind `el`, sized to its actual rendered box (converted from
+   *  screen px to SVG user coords) — no-ops without layout (jsdom returns a zero rect). */
+  const addLabelChip = (el: SVGTextElement): void => {
+    const box = el.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const svgRect = svgEl.getBoundingClientRect();
+    if (!svgRect.width || !svgRect.height) return;
+    const sx = W / svgRect.width;
+    const sy = H / svgRect.height;
+    const padX = 4;
+    const padY = 2;
+    const chip = doc.createElementNS(COORD_NS, "rect");
+    chip.setAttribute("x", String((box.left - svgRect.left) * sx - padX));
+    chip.setAttribute("y", String((box.top - svgRect.top) * sy - padY));
+    chip.setAttribute("width", String(box.width * sx + padX * 2));
+    chip.setAttribute("height", String(box.height * sy + padY * 2));
+    chip.setAttribute("rx", "3");
+    chip.setAttribute("fill", "#ffffff");
+    chip.setAttribute("fill-opacity", "0.82");
+    chip.setAttribute("stroke", "#c8cdd7");
+    chip.setAttribute("stroke-opacity", "0.7");
+    chip.classList.add("tbl-coord-label-chip");
+    el.parentNode?.insertBefore(chip, el);
+    accentChip = chip;
   };
 
   return (category: string | null, active = false): void => {
@@ -1911,11 +1955,12 @@ export function attachSecondaryBandCursor(
       // Accent the hovered category's Y label by bolding + darkening the existing label element
       // (no pill behind it — the shaded row already provides the emphasis in this layout).
       if (opts.accentLabel) {
-        const el = labelEls.get(labelKey(category));
+        const el = labelEls.get(category);
         if (el) {
           el.setAttribute("font-weight", "700");
           el.setAttribute("fill", COORD_LABEL_DARK);
           accented = el;
+          if (opts.accentLabel.chip) addLabelChip(el);
         }
       }
       const pillGap = opts.pillGap ?? 6;
@@ -1923,18 +1968,25 @@ export function attachSecondaryBandCursor(
         .map((rect) => ({ rect, v: vals.get(rect.series) }))
         .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
       for (const x of valid) {
-        const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
         const cy = x.rect.y + x.rect.h / 2;
-        addCoordPill(
-          g,
-          doc,
-          tipX + (x.v >= 0 ? pillGap : -pillGap),
-          cy,
-          x.v >= 0 ? "start" : "end",
-          yFormat(x.v),
-          colorFor(x.rect.series),
-          weight,
-        );
+        if (opts.isStacked) {
+          // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
+          // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
+          // not a meaningful "value" position, for anything but the outermost segment.
+          addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
+        } else {
+          const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
+          addCoordPill(
+            g,
+            doc,
+            tipX + (x.v >= 0 ? pillGap : -pillGap),
+            cy,
+            x.v >= 0 ? "start" : "end",
+            yFormat(x.v),
+            colorFor(x.rect.series),
+            weight,
+          );
+        }
       }
       g.setAttribute("opacity", "1");
       return;
@@ -1953,7 +2005,11 @@ export function attachSecondaryBandCursor(
     // Region spans the full band STEP (widened to the midpoints between clusters), matching the
     // hovered pane's highlight, so the shaded column reads the same across panes.
     const wide = widenBandsToMidpoints(raw.map((b) => ({ min: b.xMin, max: b.xMax })), ml, W - mr)[idx]!;
-    addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, plotH);
+    // Standalone vertical: extend the shaded column down through the bottom margin so the hover
+    // region covers the category's own x-axis label (the label-gutter parity item), matching the
+    // horizontal cursor's regionFromLeftEdge. Faceted panes omit this (shared bottom chrome).
+    const regionH = opts.regionToBottomEdge ? H - mt : plotH;
+    addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, regionH);
     const weight = active ? 700 : 600;
     if (active) {
       // Highlight the current category on the x-axis row, matching the axis labels' layout

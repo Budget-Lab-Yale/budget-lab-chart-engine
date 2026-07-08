@@ -827,6 +827,148 @@ describe("attachSecondaryBandCursor (coordinated cursor)", () => {
     attachSecondaryBandCursor(svg, { rows: ROWS, categories: ["Cat1"] });
     expect(svg.querySelectorAll("g.tbl-coord").length).toBe(1);
   });
+
+  // task 17: regionToBottomEdge extends the vertical shaded column through the bottom margin
+  // (the x-label gutter), matching the horizontal cursor's regionFromLeftEdge parity item.
+  it("regionToBottomEdge extends the shaded column's height into the bottom margin", () => {
+    const svg = makeSvg(); // width 600 height 400, default margins ml=0/mr=8/mt=18/mb=28 → plotH=354
+    const svgDefault = makeSvg();
+    const driveDefault = attachSecondaryBandCursor(svgDefault, { rows: ROWS, categories: ["Cat1"] });
+    driveDefault("Cat1");
+    const regionDefault = svgDefault.querySelector('rect[opacity="0.12"]') as SVGRectElement;
+    expect(regionDefault).not.toBeNull();
+    expect(Number(regionDefault.getAttribute("height"))).toBeCloseTo(354, 5); // H - mt - mb
+
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: ROWS,
+      categories: ["Cat1"],
+      regionToBottomEdge: true,
+    });
+    drive("Cat1");
+    const region = svg.querySelector('rect[opacity="0.12"]') as SVGRectElement;
+    expect(region).not.toBeNull();
+    expect(Number(region.getAttribute("height"))).toBeCloseTo(382, 5); // H - mt (covers the label gutter)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachSecondaryBandCursor — horizontal stacked pills + hover-accent chip (task 17)
+// ---------------------------------------------------------------------------
+
+/** A single-row horizontal "stack": two segments (different series) sharing one category row. */
+function makeHorizontalStackedSvg(doc: Document = document): SVGSVGElement {
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
+  svg.setAttribute("width", "600");
+  svg.setAttribute("height", "400");
+  const g = doc.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("aria-label", "bar");
+  const seg1 = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+  seg1.setAttribute("x", "50");
+  seg1.setAttribute("width", "100");
+  seg1.setAttribute("y", "30");
+  seg1.setAttribute("height", "40");
+  seg1.setAttribute("data-series", "Alpha");
+  const seg2 = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+  seg2.setAttribute("x", "150");
+  seg2.setAttribute("width", "80");
+  seg2.setAttribute("y", "30");
+  seg2.setAttribute("height", "40");
+  seg2.setAttribute("data-series", "Beta");
+  g.appendChild(seg1);
+  g.appendChild(seg2);
+  svg.appendChild(g);
+  return svg;
+}
+
+describe("attachSecondaryBandCursor horizontal — isStacked segment-center pills (task 17)", () => {
+  const ROWS: BandRow[] = [
+    { _xc: "Northeast", series: "Alpha", _y: 5 },
+    { _xc: "Northeast", series: "Beta", _y: 3 },
+  ];
+
+  it("isStacked: false (default) anchors the pill at the segment's tip, not its center", () => {
+    const svg = makeHorizontalStackedSvg();
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: ROWS,
+      categories: ["Northeast"],
+      seriesOrder: ["Alpha", "Beta"],
+      horizontal: true,
+    });
+    drive("Northeast");
+    const xs = Array.from(svg.querySelectorAll("g.tbl-coord text")).map((t) => Number(t.getAttribute("x")));
+    // Tip-anchored: Alpha's rect ends at x=150 (+6px gap) = 156; Beta's ends at x=230 (+6) = 236.
+    expect(xs.sort((a, b) => a - b)).toEqual([156, 236]);
+  });
+
+  it("isStacked: true centers each pill on its OWN segment (mirrors attachHighlightPills)", () => {
+    const svg = makeHorizontalStackedSvg();
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: ROWS,
+      categories: ["Northeast"],
+      seriesOrder: ["Alpha", "Beta"],
+      horizontal: true,
+      isStacked: true,
+    });
+    drive("Northeast");
+    const xs = Array.from(svg.querySelectorAll("g.tbl-coord text")).map((t) => Number(t.getAttribute("x")));
+    // Segment centers: Alpha [50,150] → 100; Beta [150,230] → 190.
+    expect(xs.sort((a, b) => a - b)).toEqual([100, 190]);
+  });
+});
+
+describe("attachSecondaryBandCursor horizontal — accentLabel chip (task 17)", () => {
+  const ROWS: BandRow[] = [{ _xc: "Northeast", series: "Alpha", _y: 5 }];
+
+  function makeSvgWithLabel(): { svg: SVGSVGElement; label: SVGTextElement } {
+    const svg = makeHorizontalStackedSvg();
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text") as SVGTextElement;
+    label.setAttribute("data-category", "Northeast");
+    label.textContent = "Northeast";
+    svg.appendChild(label);
+    return { svg, label };
+  }
+
+  it("without chip: bolds the label but adds no chip rect (jsdom has no layout either way)", () => {
+    const { svg, label } = makeSvgWithLabel();
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: ROWS,
+      categories: ["Northeast"],
+      horizontal: true,
+      accentLabel: { font: 13 },
+    });
+    drive("Northeast");
+    expect(label.getAttribute("font-weight")).toBe("700");
+    expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
+  });
+
+  it("with chip + a stubbed layout: inserts a frosted chip rect behind the accented label", () => {
+    const { svg, label } = makeSvgWithLabel();
+    document.body.appendChild(svg);
+    // jsdom has no layout engine (getBoundingClientRect is always a zero rect); stub just the two
+    // elements the chip geometry reads so the additive, gated code path is actually exercised.
+    const svgRect = { left: 0, top: 0, right: 300, bottom: 200, width: 300, height: 200, x: 0, y: 0, toJSON() {} };
+    const labelRect = { left: 40, top: 96, right: 100, bottom: 110, width: 60, height: 14, x: 40, y: 96, toJSON() {} };
+    svg.getBoundingClientRect = () => svgRect as DOMRect;
+    label.getBoundingClientRect = () => labelRect as DOMRect;
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: ROWS,
+      categories: ["Northeast"],
+      horizontal: true,
+      accentLabel: { font: 13, chip: true },
+    });
+    drive("Northeast");
+    const chip = svg.querySelector(".tbl-coord-label-chip") as SVGRectElement;
+    expect(chip).not.toBeNull();
+    expect(Number(chip.getAttribute("width"))).toBeGreaterThan(0);
+    expect(Number(chip.getAttribute("height"))).toBeGreaterThan(0);
+    // Inserted immediately before the label so it paints behind it.
+    expect(chip.nextSibling).toBe(label);
+    // Clearing the hover removes the chip along with the accent.
+    drive(null);
+    expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
+    expect(label.getAttribute("font-weight")).toBe("500");
+    document.body.removeChild(svg);
+  });
 });
 
 describe("attachSecondaryLineCursor (coordinated cursor)", () => {
