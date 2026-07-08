@@ -179,6 +179,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | field | type | notes |
 |---|---|---|
 | `orientation` | enum | `vertical` (default; value axis is Y) \| `horizontal`. |
+| `x_axis_ticks` | enum | **Horizontal bars only** (standalone and faceted). Where the value-axis tick row(s) render: `bottom` (default) \| `top` \| `both`. Requires `orientation: horizontal` — validation rejects it on a vertical chart (there is no top value axis there). |
 | `valueLabels.show` | boolean | **Stacked bars only.** Show per-segment value labels (in-bar value labels for plain/grouped bars were removed). Default off. |
 | `valueLabels.decimals` | integer | Fixed decimal places for the labels that remain (stacked segment + net callouts); else the minimum the data needs, capped at 2. |
 | `barStack.netDisplay` | enum | Net (sum) callout on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. |

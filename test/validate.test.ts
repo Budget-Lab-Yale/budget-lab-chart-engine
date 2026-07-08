@@ -112,6 +112,57 @@ describe("validateSpec (structural)", () => {
     });
   });
 
+  // --- x_axis_ticks (top/both value-axis tick row) silently no-ops on a vertical chart ---
+
+  describe("x_axis_ticks requires orientation horizontal", () => {
+    it("rejects x_axis_ticks on a vertical bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks/);
+    });
+
+    it("rejects x_axis_ticks: top on a vertical bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        x_axis_ticks: "top",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks/);
+    });
+
+    it("accepts x_axis_ticks: both on a horizontal bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(true);
+    });
+
+    it("accepts a horizontal bar chart with no x_axis_ticks (default 'bottom', unaffected)", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+      });
+      expect(r.valid).toBe(true);
+    });
+  });
+
   it("accepts bar_color and category_colors", () => {
     const r = validateSpec({
       ...VALID,

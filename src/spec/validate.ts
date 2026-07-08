@@ -116,6 +116,24 @@ function sectionColumnError(spec: {
   return null;
 }
 
+/** `x_axis_ticks` (top/both value-axis tick row) only has an effect on a HORIZONTAL bar/stacked
+ *  chart — assemblePlot only reads it inside its `if (horizontal)` branch (see assemble-plot.ts).
+ *  A vertical chart has no meaningful "top value axis" there, so the field silently no-ops; reject
+ *  it early with a pointed message instead of leaving it looking like dead configuration. */
+function xAxisTicksOrientationError(spec: {
+  x_axis_ticks?: unknown;
+  orientation?: unknown;
+}): string | null {
+  if (spec.x_axis_ticks == null) return null;
+  if (spec.orientation !== "horizontal") {
+    return (
+      `x_axis_ticks requires orientation "horizontal" (a vertical chart has no top value axis) ` +
+      `(got orientation ${JSON.stringify(spec.orientation)})`
+    );
+  }
+  return null;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -136,6 +154,10 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
   );
   if (secErr) return { valid: false, errors: [secErr] };
+  const ticksErr = xAxisTicksOrientationError(
+    spec as { x_axis_ticks?: unknown; orientation?: unknown },
+  );
+  if (ticksErr) return { valid: false, errors: [ticksErr] };
   return { valid: true, errors: [] };
 }
 

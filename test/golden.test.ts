@@ -416,6 +416,23 @@ describe("golden SVG — bars", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal.golden.svg");
   });
 
+  it("x_axis_ticks: both renders a top value-tick row on a STANDALONE (unfaceted) horizontal bar chart", async () => {
+    // Item 6: top/both value-axis ticks already worked for horizontal bars before task 17 — this
+    // locks the plain-y (unsectioned, non-faceted) emission with a golden, not just a margin
+    // assertion (the sectioned/faceted cases already have golden coverage above/below).
+    const rows = parseCsv("./fixtures/bar-horizontal.csv");
+    const { svg } = renderChart({ ...BAR_HORIZONTAL_SPEC, x_axis_ticks: "both" }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    // A top tick-label row (frameAnchor:"top" text marks) in addition to the default bottom row —
+    // 6 tick values (0%..5%) rendered twice (top + bottom).
+    const tickTexts = Array.from(svg.querySelectorAll("text")).filter((t) => /^\d%$/.test(t.textContent ?? ""));
+    expect(tickTexts.length).toBe(12);
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal-both-ticks.golden.svg");
+  });
+
   it("renders a multi-series grouped HORIZONTAL bar chart via fy", async () => {
     const rows = parseCsv("./fixtures/bar-multi.csv");
     const { svg } = renderChart(BAR_GROUPED_HORIZONTAL_SPEC, rows, {

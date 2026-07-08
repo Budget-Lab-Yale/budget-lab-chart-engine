@@ -42,6 +42,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   never clipped under the default (bottom) `x_axis_ticks` — this changes rendered output (top
   margin) for existing sectioned horizontal bar specs; unsectioned and vertical bars are
   unaffected.
+- **`x_axis_ticks` now validates orientation.** It only has an effect on horizontal bars/stacked
+  charts; setting it on a vertical chart previously silently no-op'ed and now fails validation.
+
+### Changed — bars
+
+- **Standalone bar/stacked hover now matches the faceted "best practice" look.** Hovering a
+  standalone (non-small-multiples) bar or stacked chart shades the FULL band — including the
+  category-label gutter — at a uniform height across section spacers, bolds the hovered
+  category's axis label (with a background chip on horizontal charts), and shows a value pill at
+  the bar's end — replacing the previous floating tooltip. Faceted panes are unchanged (they
+  already worked this way); standalone horizontal category labels + section headers also now
+  render at the larger faceted font size, previously standalone-only-smaller.
 
 ### Added — line & area
 
@@ -83,7 +95,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### CLI / gallery
 
 - **`tbl-chart serve` now discovers `table.yaml`** alongside `chart.yaml` under the served
-  directory, tagging tables in the index; `npm run gallery` serves `examples/gallery` — 15
+  directory, tagging tables in the index; `npm run gallery` serves `examples/gallery` — 16
   example figures pressure-testing each feature above.
 
 ## [1.2.1] — 2026-07-01
