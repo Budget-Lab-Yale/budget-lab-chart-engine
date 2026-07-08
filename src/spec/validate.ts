@@ -97,6 +97,25 @@ function facetedHorizontalError(spec: {
   return null;
 }
 
+/** `columns.section` (section-header horizontal-bar grouping) only has an effect on a horizontal
+ *  `bar` chart (see bar.ts's `sectioned` gate) — it silently no-ops on every other chartType/
+ *  orientation combination, which looks like a config bug (the field appears to do nothing) but
+ *  is actually just dead configuration. Reject it early with a pointed message instead. */
+function sectionColumnError(spec: {
+  chartType?: unknown;
+  orientation?: unknown;
+  columns?: { section?: unknown };
+}): string | null {
+  if (spec.columns?.section == null) return null;
+  if (spec.chartType !== "bar" || spec.orientation !== "horizontal") {
+    return (
+      `columns.section requires chartType "bar" with orientation "horizontal" ` +
+      `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
+    );
+  }
+  return null;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -113,6 +132,10 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (fhErr) return { valid: false, errors: [fhErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
   if (tsErr) return { valid: false, errors: [tsErr] };
+  const secErr = sectionColumnError(
+    spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
+  );
+  if (secErr) return { valid: false, errors: [secErr] };
   return { valid: true, errors: [] };
 }
 

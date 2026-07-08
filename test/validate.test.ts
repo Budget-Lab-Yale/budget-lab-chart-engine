@@ -57,9 +57,15 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/step/);
   });
 
-  it("accepts columns.section + section_order + section_labels", () => {
+  it("accepts columns.section + section_order + section_labels (on a horizontal bar chart)", () => {
+    // D7: columns.section only has an effect on horizontal bar charts (see validate.ts
+    // sectionColumnError) — this is the combination it should accept.
     const r = validateSpec({
-      ...VALID,
+      chartType: "bar",
+      title: "Demo",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      data: "data.csv",
       columns: { section: "toplevel" },
       section_order: ["Durable goods", "Services"],
       section_labels: { "Durable goods": "Durables" },
@@ -71,6 +77,39 @@ describe("validateSpec (structural)", () => {
     const r = validateSpec({ ...VALID, section_order: "Durable goods" });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/section_order/);
+  });
+
+  // --- D7: columns.section silently no-ops on anything but a horizontal bar chart ---
+
+  describe("columns.section requires chartType bar + orientation horizontal", () => {
+    it("rejects columns.section on a (non-bar) line chart", () => {
+      const r = validateSpec({ ...VALID, columns: { section: "toplevel" } });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/columns\.section/);
+    });
+
+    it("rejects columns.section on a VERTICAL bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        columns: { section: "toplevel" },
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/columns\.section/);
+    });
+
+    it("accepts a horizontal bar chart with no columns.section (unaffected)", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+      });
+      expect(r.valid).toBe(true);
+    });
   });
 
   it("accepts bar_color and category_colors", () => {
