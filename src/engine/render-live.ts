@@ -695,7 +695,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
-  buildFigureHeader(
+  const closeTitleSelectors = buildFigureHeader(
     card, doc, spec, opts.eyebrow,
     spec.title_selectors
       ? {
@@ -1123,6 +1123,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
     canvasScroll.removeEventListener("scroll", onScroll);
     currentOverlay?._ro?.disconnect();
+    closeTitleSelectors();
   };
 }
 
@@ -1195,7 +1196,7 @@ function buildInlineSelect(
   items: InlineSelectItem[],
   initialActiveId: string,
   onSelect: (id: string) => void,
-): HTMLElement {
+): { el: HTMLElement; destroy: () => void } {
   const btn = doc.createElement("button");
   btn.type = "button";
   btn.className = "inline-select";
@@ -1267,10 +1268,19 @@ function buildInlineSelect(
     li?.focus();
   }
 
+  // Guards the deferred `addEventListener` below: if closePopover runs in the SAME synchronous
+  // tick as openPopover (e.g. click-then-Escape with no await), the pending setTimeout hasn't
+  // fired yet, so removeEventListener would no-op and the listener would attach anyway a tick
+  // later — permanently, since nothing is listening for it at that point. Capturing the timer id
+  // lets closePopover cancel it before it ever registers.
+  let clickAwayTimer: ReturnType<typeof setTimeout> | undefined;
   function openPopover(): void {
     popover.hidden = false;
     btn.setAttribute("aria-expanded", "true");
-    setTimeout(() => doc.addEventListener("click", clickAway), 0);
+    clickAwayTimer = setTimeout(() => {
+      clickAwayTimer = undefined;
+      doc.addEventListener("click", clickAway);
+    }, 0);
     setTimeout(() => {
       const activeLi = itemById.get(activeId) ?? (popover.firstElementChild as HTMLElement | null);
       focusItem(activeLi);
@@ -1279,6 +1289,10 @@ function buildInlineSelect(
   function closePopover(): void {
     popover.hidden = true;
     btn.setAttribute("aria-expanded", "false");
+    if (clickAwayTimer !== undefined) {
+      clearTimeout(clickAwayTimer);
+      clickAwayTimer = undefined;
+    }
     doc.removeEventListener("click", clickAway);
     typeAheadBuffer = "";
     clearTimeout(typeAheadTimer);
@@ -1287,6 +1301,18 @@ function buildInlineSelect(
   function clickAway(e: Event): void {
     const target = e.target as Node;
     if (!btn.contains(target) && !popover.contains(target)) closePopover();
+  }
+  // Unmount-time teardown: same listener/timer cleanup as closePopover, but without the
+  // onSelect-adjacent focus side effect (the button may be about to leave the DOM).
+  function destroy(): void {
+    if (clickAwayTimer !== undefined) {
+      clearTimeout(clickAwayTimer);
+      clickAwayTimer = undefined;
+    }
+    doc.removeEventListener("click", clickAway);
+    clearTimeout(typeAheadTimer);
+    popover.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
   }
 
   function keyHandler(e: KeyboardEvent): void {
@@ -1337,7 +1363,7 @@ function buildInlineSelect(
   wrap.appendChild(btn);
   wrap.appendChild(popover);
   wrap.addEventListener("keydown", keyHandler);
-  return wrap;
+  return { el: wrap, destroy };
 }
 
 /** Render a title with inline-selector tokens into `h`: text segments become text nodes; each
@@ -1352,7 +1378,8 @@ function buildSelectorTitle(
   title: string,
   card: HTMLElement,
   wiring: TitleSelectorWiring,
-): void {
+): Array<() => void> {
+  const cleanups: Array<() => void> = [];
   const { selectors, selections, onSelect, seriesColors, afterChange } = wiring;
   for (const seg of parseTitleTokens(title, selectors)) {
     if (seg.kind === "text") {
@@ -1372,7 +1399,7 @@ function buildSelectorTitle(
     // defensive only — buildFigureHeader is exported, and an external caller could hand-roll an
     // incomplete wiring.selections.
     const initialActiveId = selections[key] ?? selector.options[0]?.id ?? "";
-    const widget = buildInlineSelect(doc, items, initialActiveId, (value) => {
+    const { el, destroy } = buildInlineSelect(doc, items, initialActiveId, (value) => {
       selections[key] = value;
       onSelect?.({ id: key, value });
       card.dispatchEvent(
@@ -1380,8 +1407,10 @@ function buildSelectorTitle(
       );
       afterChange?.();
     });
-    h.appendChild(widget);
+    h.appendChild(el);
+    cleanups.push(destroy);
   }
+  return cleanups;
 }
 
 /** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
@@ -1395,14 +1424,20 @@ function buildSelectorTitle(
  *  as plain textContent, DOM-identical to before the selector feature existed. The header is
  *  built ONCE per mount
  *  (the resize draw() loop never rebuilds it), so the control and its selection state survive
- *  the engine's own re-renders naturally. */
+ *  the engine's own re-renders naturally.
+ *
+ *  Returns a cleanup callback: closes any open title-selector popover(s), clears their pending
+ *  click-away timers, and removes the document click listener. A no-op when there's no
+ *  titleWiring (tables, or a chart with no title_selectors). Callers (mountChart, mountFigure)
+ *  MUST invoke this from their own unmount closures — otherwise unmounting with a popover open
+ *  leaves its document-level click listener attached forever. */
 export function buildFigureHeader(
   card: HTMLElement,
   doc: Document,
   spec: { title?: string; subtitle?: string },
   eyebrowText?: string,
   titleWiring?: TitleSelectorWiring,
-): void {
+): () => void {
   const header = doc.createElement("div");
   header.className = "figure-header";
   if (eyebrowText) {
@@ -1413,11 +1448,12 @@ export function buildFigureHeader(
   }
   const titlebar = doc.createElement("div");
   titlebar.className = "figure-titlebar";
+  let cleanups: Array<() => void> = [];
   if (spec.title) {
     const h = doc.createElement("h3");
     h.className = "figure-title";
     if (titleWiring && Object.keys(titleWiring.selectors).length) {
-      buildSelectorTitle(h, doc, spec.title, card, titleWiring);
+      cleanups = buildSelectorTitle(h, doc, spec.title, card, titleWiring);
     } else {
       h.textContent = spec.title;
     }
@@ -1435,6 +1471,9 @@ export function buildFigureHeader(
     header.appendChild(s);
   }
   card.appendChild(header);
+  return () => {
+    for (const cleanup of cleanups) cleanup();
+  };
 }
 
 /** Wire the crosshair + two-way selection onto one figure SVG (shared combined SVG or a
@@ -1735,7 +1774,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // its own facet's chart body, not one line) — the label still tints, but the grid doesn't
   // re-render on selection. See TitleSelectorWiring.afterChange.
   const selections = resolveSelections(spec, opts.selections);
-  buildFigureHeader(
+  const closeTitleSelectors = buildFigureHeader(
     card, doc, spec, opts.eyebrow,
     spec.title_selectors
       ? {
@@ -1976,5 +2015,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   return () => {
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+    closeTitleSelectors();
   };
 }

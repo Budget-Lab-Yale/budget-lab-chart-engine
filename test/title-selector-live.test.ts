@@ -305,6 +305,75 @@ describe("inline title selector — live DOM", () => {
     expect(container.querySelector("h3")?.textContent).toBe("GDP by {region}");
     expect(container.querySelector(".inline-select-wrap")).toBeNull();
   });
+
+  it("open then close in the SAME synchronous tick (click, then Escape, no await) does not leak the deferred click-away listener", async () => {
+    // openPopover schedules `document.addEventListener("click", clickAway)` via setTimeout(...,0).
+    // If closePopover (via Escape here) runs before that timer fires, removeEventListener no-ops
+    // and — without the fix — the deferred addEventListener still attaches a tick later, wiring a
+    // permanent document click listener that never gets cleaned up. Spy on addEventListener to
+    // prove clickAway never actually gets attached once the timer is allowed to run.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: SPEC_WITH_SELECTOR, rows: ROWS });
+    const btn = container.querySelector("button.inline-select") as HTMLButtonElement;
+    const popover = container.querySelector("ul.inline-select-popover") as HTMLUListElement;
+    const wrap = container.querySelector(".inline-select-wrap") as HTMLElement;
+
+    const addSpy = vi.spyOn(document, "addEventListener");
+
+    // Open and close synchronously — no await between them, so the click-away setTimeout has not
+    // yet fired.
+    btn.click();
+    expect(popover.hidden).toBe(false);
+    wrap.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(popover.hidden).toBe(true);
+
+    // Let the deferred setTimeout(...,0) callback(s) run.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The fix cancels the pending timer in closePopover, so clickAway is never registered —
+    // without the fix, the deferred setTimeout still fires and calls addEventListener("click", ...).
+    const clickCallsAfterClose = addSpy.mock.calls.filter(([type]) => type === "click").length;
+    expect(clickCallsAfterClose).toBe(0);
+    addSpy.mockRestore();
+
+    // Behavioral confirmation: a document click does not reopen the popover or throw — if a
+    // stray clickAway were attached, this would be a no-op too (popover already closed), so the
+    // real proof is the listener count above; this just confirms no crash/reopen either.
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(popover.hidden).toBe(true);
+
+    container.remove();
+  });
+
+  it("unmounting with the popover open removes the click-away listener (no leak past unmount)", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const unmount = mountChart(container, { spec: SPEC_WITH_SELECTOR, rows: ROWS });
+    const btn = container.querySelector("button.inline-select") as HTMLButtonElement;
+    const popover = container.querySelector("ul.inline-select-popover") as HTMLUListElement;
+
+    btn.click();
+    expect(popover.hidden).toBe(false);
+    // Let the deferred click-away registration actually attach before unmounting, so this test
+    // exercises the "listener is live, then torn down" path rather than the same-tick race above.
+    await new Promise((r) => setTimeout(r, 0));
+
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+    unmount();
+
+    expect(popover.hidden).toBe(true);
+    expect(removeSpy.mock.calls.some(([type]) => type === "click")).toBe(true);
+    removeSpy.mockRestore();
+
+    // A document click after unmount must not throw and must have no effect — if clickAway were
+    // still attached, popover.hidden would already be true so this wouldn't distinguish the bug,
+    // so the load-bearing assertion is the removeEventListener spy above; this just confirms no
+    // crash from a dangling handler referencing a torn-down widget.
+    expect(() => document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }))).not.toThrow();
+
+    container.remove();
+  });
 });
 
 describe("inline title selector — color matching", () => {
