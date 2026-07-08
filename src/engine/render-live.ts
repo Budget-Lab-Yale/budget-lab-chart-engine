@@ -629,6 +629,42 @@ function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
   raf(step);
 }
 
+// Bar charts facet their category band whenever bar.ts puts it on fx (vertical grouped) or fy
+// (horizontal grouped, OR horizontal sectioned — any series count, since Task 16 unified single-
+// and multi-series sectioned bars onto one fy topology; see bar.ts). The category-band crosshair
+// (attachBandCrosshair) reads rect geometry differently in each case: faceted charts wrap each
+// category in its own translated `<g>` (readCategoryBands/H's `isFaceted` branch); unfaceted charts
+// read raw rect x/y directly. Passing the wrong branch reads a facet-LOCAL coordinate as if it were
+// absolute, misresolving every hover past the first facet.
+function isBarCategoryFaceted(spec: ChartSpec, rows: PreparedRow[], seriesCount: number): boolean {
+  if (spec.chartType !== "bar") return false;
+  if (seriesCount > 1) return true;
+  return spec.orientation === "horizontal" && rows.some((r) => r._section != null);
+}
+
+// Sectioned horizontal bars render categories grouped by section (bar.ts's `bandDomain`), so the
+// bands' rendered VISUAL (fy facet) order can differ from data-encounter order. The category-band
+// crosshair maps facet rows -> categories BY INDEX, so callers must reorder their category list to
+// match before passing it in. Stable sort keeps within-section order. No-op (returns `cats`
+// unchanged, same array reference) when the chart has no section column.
+function sectionOrderedCategories(spec: ChartSpec, rows: PreparedRow[], cats: string[]): string[] {
+  const sectionCol = spec.columns?.section;
+  if (!sectionCol) return cats;
+  const sectionOf = new Map<string, string>();
+  for (const r of rows) {
+    if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
+  }
+  const secOrder =
+    spec.section_order && spec.section_order.length
+      ? spec.section_order
+      : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
+  const rankOf = (c: string): number => {
+    const i = secOrder.indexOf(sectionOf.get(c) ?? "");
+    return i < 0 ? secOrder.length : i;
+  };
+  return [...cats].sort((a, b) => rankOf(a) - rankOf(b));
+}
+
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
@@ -927,10 +963,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
       });
     } else if (spec.xAxisType === "categorical") {
-      // Determine if this is a stacked chart (needs Total row) and if it uses
-      // fx-faceted grouped bar layout (xScaleField === "fx" in bar.ts).
+      // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
+      // band (xScaleField === "fx" for vertical grouped, or `fy` for horizontal grouped/sectioned
+      // — see bar.ts / isBarCategoryFaceted above).
       const isStacked = spec.chartType === "stacked";
-      const isFaceted = spec.chartType === "bar" && (seriesOrder.length > 1);
+      const isFaceted = isBarCategoryFaceted(spec, dataInScope, seriesOrder.length);
       // Derive the ordered category list from the data rows (declaration order).
       const catsSeen = new Set<string>();
       const cats: string[] = [];
@@ -938,12 +975,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         const cat = r._xc;
         if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
       }
+      const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
       attachBandCrosshair(svg, {
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isStacked,
         showTotalDot,
         isFaceted,
-        categories: cats,
+        categories: orderedCats,
         colors,
         seriesLabels,
         seriesOrder,
@@ -957,7 +995,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         chartType: isStacked ? "stacked" : "bar",
         isStacked,
         isFaceted,
-        categories: cats,
+        categories: orderedCats,
         colors,
         seriesOrder,
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
@@ -1558,33 +1596,19 @@ function wireFigureSvg(
     // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
     const isStacked = ctx.spec.chartType === "stacked";
     // A grouped per-pane bar IS fx-faceted within its own frame (xScaleField === "fx" in
-    // bar.ts), so isFaceted = bar && >1 series.
-    const isFaceted = ctx.spec.chartType === "bar" && ctx.seriesOrder.length > 1;
+    // bar.ts); a sectioned horizontal per-pane bar (any series count) is fy-faceted — see
+    // isBarCategoryFaceted above.
+    const isFaceted = isBarCategoryFaceted(ctx.spec, ctx.dataInScope, ctx.seriesOrder.length);
     const catsSeen = new Set<string>();
-    const cats: string[] = [];
+    const catsRaw: string[] = [];
     for (const r of ctx.dataInScope) {
       const cat = r._xc;
-      if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
+      if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); catsRaw.push(cat); }
     }
     // Sectioned horizontal bars render categories grouped by section, so the bands' VISUAL order
     // differs from data-encounter order. The crosshair maps facet rows → categories by index, so
-    // reorder `cats` to match the rendered (section) order. Stable sort keeps within-section order.
-    const sectionCol = ctx.spec.columns?.section;
-    if (sectionCol) {
-      const sectionOf = new Map<string, string>();
-      for (const r of ctx.dataInScope) {
-        if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
-      }
-      const secOrder =
-        ctx.spec.section_order && ctx.spec.section_order.length
-          ? ctx.spec.section_order
-          : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
-      const rankOf = (c: string): number => {
-        const i = secOrder.indexOf(sectionOf.get(c) ?? "");
-        return i < 0 ? secOrder.length : i;
-      };
-      cats.sort((a, b) => rankOf(a) - rankOf(b));
-    }
+    // reorder to match the rendered (section) order.
+    const cats = sectionOrderedCategories(ctx.spec, ctx.dataInScope, catsRaw);
     attachBandCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,

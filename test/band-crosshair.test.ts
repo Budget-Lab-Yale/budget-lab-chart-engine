@@ -593,6 +593,71 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     expect(chartSvg.querySelector(".tbl-crosshair")).toBeNull();
   });
 
+  it("SINGLE-SERIES SECTIONED horizontal bar mounts fy-faceted with a correctly-ordered band crosshair (Task 16 crosshair regression)", () => {
+    // Before the fy-topology fix (bar.ts) + the render-live `isFaceted` update, a sectioned
+    // single-series horizontal chart rendered on a plain (unfaceted) y band, so `isFaceted` stayed
+    // false and the hover resolver read raw <rect> y-coordinates directly. After the fix the bars
+    // live inside per-category fy facet <g translate(0,ty)> groups (mirroring the multi-series
+    // grouped case above) — isFaceted must follow, or the resolver misreads each rect's LOCAL y as
+    // if it were absolute, breaking category resolution across facets.
+    const sectionedSpec: ChartSpec = {
+      chartType: "bar",
+      title: "Sectioned single-series",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: { x: "cat", value: "value", section: "sec" },
+      section_order: ["P", "Q"],
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { cat: "Cars", sec: "P", value: "3.2" },
+      { cat: "Food", sec: "P", value: "2.1" },
+      { cat: "Rent", sec: "Q", value: "4.1" },
+      { cat: "Care", sec: "Q", value: "2.5" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec: sectionedSpec, rows, width: 720 });
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    expect(svg).not.toBeNull();
+
+    // fy-faceted: one row-facet <g translate(0,ty)> per category (the section-2 spacer slot
+    // carries no rect and is excluded).
+    const facetGroups = Array.from(svg.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g')).filter(
+      (g) => g.querySelector("rect"),
+    );
+    expect(facetGroups.length).toBe(4);
+
+    // The LAST facet by y-translate is "Care" (bandDomain render order: Cars, Food, <Q spacer>,
+    // Rent, Care). Compute its absolute rect vertical midpoint.
+    const withTy = facetGroups.map((g) => {
+      const m = /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(g.getAttribute("transform") ?? "");
+      const ty = m ? parseFloat(m[1]!) : 0;
+      const rect = g.querySelector("rect")!;
+      const ry = parseFloat(rect.getAttribute("y") ?? "0") + ty;
+      const rh = parseFloat(rect.getAttribute("height") ?? "0");
+      return { ty, yMid: ry + rh / 2 };
+    });
+    withTy.sort((a, b) => a.ty - b.ty);
+    const careY = withTy[withTy.length - 1]!.yMid;
+
+    // jsdom has no real layout: mock getBoundingClientRect to a 1:1 mapping of the SVG's viewBox
+    // (top-left at 0,0) so a pointer's clientY maps directly to SVG user-space y.
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+    document.body.appendChild(container);
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: careY, bubbles: true }));
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    expect(tip.querySelector(".tbl-tooltip-head")?.textContent).toBe("Care");
+    document.body.removeChild(container);
+  });
+
   it("categorical chart gets a .tbl-band-crosshair-hit element (not the line crosshair)", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: BAR_SPEC, rows: BAR_ROWS });

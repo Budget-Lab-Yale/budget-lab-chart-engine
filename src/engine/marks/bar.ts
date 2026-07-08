@@ -235,10 +235,21 @@ export function buildBarMarks(
         }
       : baseFill;
 
+    // Sectioned horizontal (any series count): route onto the SAME fy topology the multi-series
+    // sectioned path uses (below, ~L310): fy = category band (incl. spacer slots), inner y = a
+    // single-value series band, x = value. An UNfaceted single-series mark that still carries
+    // fy-bound header marks (tblSectionHeaderYAxis/tblSectionTopHeader, pushed below) makes Plot
+    // auto-facet the WHOLE plot from those header marks alone — a spurious fy domain derived from
+    // the spacer sentinels + first category (2-3 phantom facets), which starves every real bar's
+    // height and prints the raw " section:" sentinel as Plot's default fy-axis text (the
+    // fig09/fig10 defect, D1). Keeping every sectioned horizontal chart on fy, regardless of
+    // series count, means the header marks are always correct for the topology Plot actually uses.
     overlay.push(
-      horizontal
-        ? Plot.barX(data, { y: xField, x: "_y", fill, ...clipOpt })
-        : Plot.barY(data, { x: xField, y: "_y", fill, ...clipOpt }),
+      horizontal && sectioned
+        ? Plot.barX(data, { fy: xField, y: "series", x: "_y", fill, ...clipOpt })
+        : horizontal
+          ? Plot.barX(data, { y: xField, x: "_y", fill, ...clipOpt })
+          : Plot.barY(data, { x: xField, y: "_y", fill, ...clipOpt }),
     );
 
     // Rect tagging: Plot emits one <rect> per category in band-domain order (it does not
@@ -257,6 +268,34 @@ export function buildBarMarks(
       const gutter = ctx.hideCategoryLabels
         ? SHARED_LABELLESS_MARGIN_LEFT
         : ctx.categoryGutter ?? horizontalLeftGutter(categories);
+
+      if (sectioned) {
+        // fy = the section-grouped category band (incl. spacer slots) — same shape as the
+        // multi-series fyGroupOpts below; inner y = a single-value series band (padding 0, so
+        // the bar fills the whole facet — geometrically equivalent to the old plain-y band's
+        // paddingInner:0.2, which now lives on fy INSTEAD, between facets). Category labels
+        // move from tblBandYAxis (plain-y) to tblFacetGroupYAxis (fy-bound), matching how the
+        // multi-series path labels its fy row facets.
+        return {
+          underlay: [],
+          overlay,
+          tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
+          dashedNames: new Set<string>(),
+          yScaleOpts: { type: "band", domain: [onlySeries], padding: 0, axis: null },
+          fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
+          xAxisMarks: ctx.hideCategoryLabels
+            ? []
+            : [
+                ...tblFacetGroupYAxis(categories, gutter, catFont),
+                ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
+                ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
+              ],
+          marginLeft: gutter,
+          marginTop: hMarginTop,
+          marginBottom: hMarginBottom,
+        };
+      }
+
       return {
         underlay: [],
         overlay,
