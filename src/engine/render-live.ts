@@ -978,8 +978,20 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
       }
       const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
+      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+      const horizontalBar = spec.orientation === "horizontal";
+      const bandYFormat = (v: number): string => formatValue(v, units, spec.tooltip_decimals);
+
+      // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
+      // faceted panes use (attachSecondaryBandCursor) — full-band hover incl. the label gutter,
+      // a uniform highlight height across section spacers, a bolded/chip-accented hovered label,
+      // and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
+      // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
+      // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →
+      // highlightPills → secondaryBandCursor) so `.tbl-coord` paints above the bars.
+      let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
       attachBandCrosshair(svg, {
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        rows: bandRows,
         isStacked,
         showTotalDot,
         isFaceted,
@@ -987,22 +999,41 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: bandYFormat,
         categoryLabels: spec.x_labels,
         swatchShape: "rect",
-        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+        orientation: horizontalBar ? "horizontal" : "vertical",
+        emitOnly: true,
+        onResolve: (cat: string | null) => {
+          pillDriver?.setSuppressedCategory(cat);
+          secondaryDriver?.(cat, true);
+        },
       });
       pillDriver = attachHighlightPills(svg, {
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        rows: bandRows,
         chartType: isStacked ? "stacked" : "bar",
         isStacked,
         isFaceted,
         categories: orderedCats,
         colors,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
-        horizontal: spec.orientation === "horizontal",
+        yFormat: bandYFormat,
+        horizontal: horizontalBar,
       });
+      secondaryDriver = attachSecondaryBandCursor(svg, {
+        rows: bandRows,
+        isStacked,
+        isFaceted,
+        categories: orderedCats,
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: bandYFormat,
+        horizontal: horizontalBar,
+        ...(horizontalBar
+          ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX, chip: true } }
+          : { regionToBottomEdge: true }),
+      }) as (key: unknown, active?: boolean) => void;
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),

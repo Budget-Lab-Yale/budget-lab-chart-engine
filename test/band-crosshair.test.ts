@@ -593,13 +593,17 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     expect(chartSvg.querySelector(".tbl-crosshair")).toBeNull();
   });
 
-  it("SINGLE-SERIES SECTIONED horizontal bar mounts fy-faceted with a correctly-ordered band crosshair (Task 16 crosshair regression)", () => {
+  it("SINGLE-SERIES SECTIONED horizontal bar mounts fy-faceted with a correctly-ordered coordinated cursor (Task 16 crosshair regression; task 17 coord-cursor rewrite)", () => {
     // Before the fy-topology fix (bar.ts) + the render-live `isFaceted` update, a sectioned
     // single-series horizontal chart rendered on a plain (unfaceted) y band, so `isFaceted` stayed
     // false and the hover resolver read raw <rect> y-coordinates directly. After the fix the bars
     // live inside per-category fy facet <g translate(0,ty)> groups (mirroring the multi-series
     // grouped case above) — isFaceted must follow, or the resolver misreads each rect's LOCAL y as
     // if it were absolute, breaking category resolution across facets.
+    //
+    // Task 17: standalone bars now drive the SAME coordinated-cursor primitive faceted panes use
+    // (attachSecondaryBandCursor), not a floating tooltip — this test was rewritten from asserting
+    // a tooltip header ("Care") to asserting the coord group's region/pill/label-accent contract.
     const sectionedSpec: ChartSpec = {
       chartType: "bar",
       title: "Sectioned single-series",
@@ -650,11 +654,138 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
       }),
       configurable: true,
     });
+    // The hover-accent hook (data-category, from the fonts/tagging commit) — stub its geometry so
+    // the chip's additive, layout-gated code path actually runs (not just no-ops on a zero rect).
+    const careLabel = svg.querySelector<SVGTextElement>('text[data-category="Care"]');
+    expect(careLabel).not.toBeNull();
+    Object.defineProperty(careLabel!, "getBoundingClientRect", {
+      value: () => ({ width: 36, height: 14, top: careY - 7, left: 4, right: 40, bottom: careY + 7, x: 4, y: careY - 7 }),
+      configurable: true,
+    });
     document.body.appendChild(container);
+    const tooltipHeadsBefore = document.body.querySelectorAll(".tbl-tooltip-head").length;
     const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
     hit.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: careY, bubbles: true }));
-    const tip = document.body.querySelector(".tbl-tooltip")!;
-    expect(tip.querySelector(".tbl-tooltip-head")?.textContent).toBe("Care");
+
+    // No tooltip: emitOnly mode never builds/shows the floating tooltip.
+    expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(tooltipHeadsBefore);
+
+    // Coordinated cursor: a shaded row spanning the FULL width from x=0 (covers the label gutter,
+    // regionFromLeftEdge), plus a value pill at the bar's tip.
+    const coord = svg.querySelector("g.tbl-coord")!;
+    expect(coord.getAttribute("opacity")).toBe("1");
+    const region = coord.querySelector('rect[opacity="0.12"]') as SVGRectElement;
+    expect(region).not.toBeNull();
+    expect(Number(region.getAttribute("x"))).toBe(0);
+    expect(coord.querySelectorAll("text").length).toBeGreaterThan(0);
+
+    // Hovered category's own axis label: bold + a frosted chip behind it.
+    expect(careLabel!.getAttribute("font-weight")).toBe("700");
+    expect(svg.querySelector(".tbl-coord-label-chip")).not.toBeNull();
+
+    hit.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+    expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
+    expect(careLabel!.getAttribute("font-weight")).toBe("500");
+    document.body.removeChild(container);
+  });
+
+  it("uniform hover-row height across a section spacer (task 17, item 4): 'Food' (last of P) and 'Rent' (first of Q, across the spacer) get the SAME shaded-row height", () => {
+    const sectionedSpec: ChartSpec = {
+      chartType: "bar",
+      title: "Sectioned single-series",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: { x: "cat", value: "value", section: "sec" },
+      section_order: ["P", "Q"],
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { cat: "Cars", sec: "P", value: "3.2" },
+      { cat: "Food", sec: "P", value: "2.1" },
+      { cat: "Rent", sec: "Q", value: "4.1" },
+      { cat: "Care", sec: "Q", value: "2.5" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec: sectionedSpec, rows, width: 720 });
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+    document.body.appendChild(container);
+    const facetGroups = Array.from(svg.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g')).filter(
+      (g) => g.querySelector("rect"),
+    );
+    const yMidFor = (cat: string): number => {
+      const idx = ["Cars", "Food", "Rent", "Care"].indexOf(cat); // bandDomain render order (Q spacer excluded)
+      const g = facetGroups[idx]!;
+      const m = /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(g.getAttribute("transform") ?? "");
+      const ty = m ? parseFloat(m[1]!) : 0;
+      const rect = g.querySelector("rect")!;
+      return ty + parseFloat(rect.getAttribute("y") ?? "0") + parseFloat(rect.getAttribute("height") ?? "0") / 2;
+    };
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    const regionHeightAt = (clientY: number): number => {
+      hit.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY, bubbles: true }));
+      const region = svg.querySelector('g.tbl-coord rect[opacity="0.12"]') as SVGRectElement;
+      return Number(region.getAttribute("height"));
+    };
+    const foodHeight = regionHeightAt(yMidFor("Food"));
+    const rentHeight = regionHeightAt(yMidFor("Rent"));
+    expect(foodHeight).toBeCloseTo(rentHeight, 5);
+    document.body.removeChild(container);
+  });
+
+  it("standalone VERTICAL single-series bar drives a coordinated cursor: full-height column incl. the label gutter, top-of-bar pill, no tooltip", () => {
+    const vertSpec: ChartSpec = {
+      chartType: "bar",
+      title: "Vertical smoke",
+      xAxisType: "categorical",
+      columns: { x: "cat", value: "value" },
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      { cat: "Alpha", value: "3.2" },
+      { cat: "Beta", value: "2.1" },
+      { cat: "Gamma", value: "4.1" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec: vertSpec, rows, width: 600 });
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    expect(svg).not.toBeNull();
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+    document.body.appendChild(container);
+    const rect = svg.querySelector<SVGRectElement>('g[aria-label="bar"] rect')!;
+    const cx = parseFloat(rect.getAttribute("x")!) + parseFloat(rect.getAttribute("width")!) / 2;
+    const tooltipHeadsBefore = document.body.querySelectorAll(".tbl-tooltip-head").length;
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 50, bubbles: true }));
+
+    expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(tooltipHeadsBefore);
+
+    const coord = svg.querySelector("g.tbl-coord")!;
+    expect(coord.getAttribute("opacity")).toBe("1");
+    const region = coord.querySelector('rect[opacity="0.12"]') as SVGRectElement;
+    expect(region).not.toBeNull();
+    // regionToBottomEdge: the shaded column reaches the SVG's bottom edge (covers the x-axis
+    // label), not just the plot's bottom margin.
+    const regionBottom = Number(region.getAttribute("y")) + Number(region.getAttribute("height"));
+    expect(regionBottom).toBeCloseTo(vb.height, 1);
+    expect(coord.querySelectorAll("text").length).toBeGreaterThan(0); // the bar-top value pill
+
+    hit.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+    expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
     document.body.removeChild(container);
   });
 
