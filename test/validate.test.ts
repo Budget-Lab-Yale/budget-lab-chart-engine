@@ -161,6 +161,31 @@ describe("validateSpec (structural)", () => {
       });
       expect(r.valid).toBe(true);
     });
+
+    it("rejects x_axis_ticks on a horizontal LINE chart (bar/stacked-only, not just orientation)", () => {
+      const r = validateSpec({
+        chartType: "line",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks/);
+    });
+
+    it("accepts x_axis_ticks: both on a horizontal STACKED chart", () => {
+      const r = validateSpec({
+        chartType: "stacked",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(true);
+    });
   });
 
   it("accepts bar_color and category_colors", () => {

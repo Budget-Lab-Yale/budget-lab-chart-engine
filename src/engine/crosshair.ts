@@ -1757,6 +1757,43 @@ interface CatRect {
   /** Left edge (x) and width — used by horizontal highlight pills to find the bar tip. */
   x: number;
   w: number;
+  /** The rect's ACTUAL rendered fill color, or null. Value pills color-match this so a
+   *  differently-colored bar (category_colors / bar_color / mono / highlight-dim) gets a pill in
+   *  its OWN color, not the series' base color. */
+  fill: string | null;
+}
+
+/** The rect's rendered fill: its own `fill` attribute if present, else the nearest ancestor's
+ *  (Plot hoists a CONSTANT fill onto the parent `<g aria-label="bar">`, but emits a per-`<rect>`
+ *  fill when the mark's fill is a function channel — e.g. category_colors, mono stacks, highlight
+ *  dimming). Walks up to (not past) the SVG root; `none`/empty resolve to null. */
+function renderedRectFill(rect: SVGRectElement, svgEl: SVGSVGElement): string | null {
+  let el: Element | null = rect;
+  while (el && el !== svgEl) {
+    const f = el.getAttribute("fill");
+    if (f && f !== "none") return f;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/** Sum the `translate(x,y)` of every element from `from` UP TO (not including) `svgEl`. Used to
+ *  convert an absolute svg-user coordinate into the LOCAL frame of a child inserted under `from`:
+ *  a point drawn at (abs − sum) inside `from` renders back at `abs`. Axis-label groups only ever
+ *  use translate (no scale/rotate), so summing translates is exact. */
+function sumAncestorTranslate(from: Element | null, svgEl: SVGSVGElement): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  let el: Element | null = from;
+  while (el && el !== svgEl) {
+    const m = /translate\(\s*(-?[\d.]+)(?:[ ,]+(-?[\d.]+))?/.exec(el.getAttribute("transform") ?? "");
+    if (m) {
+      x += parseFloat(m[1]!);
+      y += m[2] != null ? parseFloat(m[2]) : 0;
+    }
+    el = el.parentElement;
+  }
+  return { x, y };
 }
 
 /** Bucket the rendered bar rects by category. Vertical (default): fx-faceted → one group per
@@ -1780,6 +1817,7 @@ function buildRectsByCategory(
       h: parseFloat(rect.getAttribute("height") ?? "0"),
       x: dx + x,
       w,
+      fill: renderedRectFill(rect, svgEl),
     };
   };
 
@@ -1885,29 +1923,45 @@ export function attachSecondaryBandCursor(
     }
   };
 
-  /** Insert a rounded frosted chip behind `el`, sized to its actual rendered box (converted from
-   *  screen px to SVG user coords) — no-ops without layout (jsdom returns a zero rect). */
+  /** Insert a rounded frosted chip BEHIND the label `el` (as its previous sibling, so the label
+   *  text paints on top and isn't washed out). Sized to the label's actual rendered box. The chip
+   *  is a child of the label's transformed ancestor `<g transform="translate(...)">`, so its x/y
+   *  must be in that ancestor's LOCAL frame: we compute the label's ABSOLUTE svg-user box, then
+   *  subtract the summed ancestor translate — otherwise the ancestor transform is applied a second
+   *  time and the chip lands tens of px away (the bug the first cut shipped). No-ops without layout
+   *  (jsdom returns a zero rect). */
   const addLabelChip = (el: SVGTextElement): void => {
     const box = el.getBoundingClientRect();
     if (!box.width || !box.height) return;
     const svgRect = svgEl.getBoundingClientRect();
     if (!svgRect.width || !svgRect.height) return;
+    const parent = el.parentNode as SVGElement | null;
+    if (!parent) return;
     const sx = W / svgRect.width;
     const sy = H / svgRect.height;
+    // Absolute (svg-user) box of the rendered label.
+    const absX = (box.left - svgRect.left) * sx;
+    const absY = (box.top - svgRect.top) * sy;
+    const w = box.width * sx;
+    const h = box.height * sy;
+    // Transforms the chip will inherit (parent chain up to the svg root). The label's OWN transform
+    // is NOT included — the chip is the label's sibling, not its child — and is already baked into
+    // absX/absY via getBoundingClientRect.
+    const { x: gx, y: gy } = sumAncestorTranslate(parent, svgEl);
     const padX = 4;
     const padY = 2;
     const chip = doc.createElementNS(COORD_NS, "rect");
-    chip.setAttribute("x", String((box.left - svgRect.left) * sx - padX));
-    chip.setAttribute("y", String((box.top - svgRect.top) * sy - padY));
-    chip.setAttribute("width", String(box.width * sx + padX * 2));
-    chip.setAttribute("height", String(box.height * sy + padY * 2));
+    chip.setAttribute("x", String(absX - gx - padX));
+    chip.setAttribute("y", String(absY - gy - padY));
+    chip.setAttribute("width", String(w + padX * 2));
+    chip.setAttribute("height", String(h + padY * 2));
     chip.setAttribute("rx", "3");
     chip.setAttribute("fill", "#ffffff");
     chip.setAttribute("fill-opacity", "0.82");
     chip.setAttribute("stroke", "#c8cdd7");
     chip.setAttribute("stroke-opacity", "0.7");
     chip.classList.add("tbl-coord-label-chip");
-    el.parentNode?.insertBefore(chip, el);
+    parent.insertBefore(chip, el);
     accentChip = chip;
   };
 
@@ -1951,7 +2005,10 @@ export function attachSecondaryBandCursor(
       const regX1 = W + (opts.regionExtendRight ?? 0);
       addCoordRegion(g, doc, regX0, regX1 - regX0, regYmin, regYmax - regYmin);
       const weight = active ? 700 : 600;
+      // Pill color: prefer the bar's ACTUAL rendered fill (so a category_colors/bar_color/mono/
+      // highlight-dimmed bar gets a matching pill), falling back to the series' legend color.
       const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
+      const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
       // Accent the hovered category's Y label by bolding + darkening the existing label element
       // (no pill behind it — the shaded row already provides the emphasis in this layout).
       if (opts.accentLabel) {
@@ -1973,7 +2030,7 @@ export function attachSecondaryBandCursor(
           // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
           // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
           // not a meaningful "value" position, for anything but the outermost segment.
-          addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
+          addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), pillColor(x.rect), weight);
         } else {
           const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
           addCoordPill(
@@ -1983,7 +2040,7 @@ export function attachSecondaryBandCursor(
             cy,
             x.v >= 0 ? "start" : "end",
             yFormat(x.v),
-            colorFor(x.rect.series),
+            pillColor(x.rect),
             weight,
           );
         }
@@ -2023,11 +2080,14 @@ export function attachSecondaryBandCursor(
     const valid = (rectsByCat.get(category) ?? [])
       .map((rect) => ({ rect, v: vals.get(rect.series) }))
       .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
-    const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK; // color-matched
+    // Pill color: prefer the bar's ACTUAL rendered fill (category_colors/bar_color/mono/dim),
+    // falling back to the series' legend color.
+    const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
+    const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
     if (opts.isStacked) {
       // Segments share one x (single band), so de-collide the within-segment labels vertically.
       const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
     } else {
       // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
       // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
@@ -2040,7 +2100,7 @@ export function attachSecondaryBandCursor(
         })),
         COORD_PILL_H,
       );
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
     }
     g.setAttribute("opacity", "1");
   };
@@ -2442,6 +2502,9 @@ export function attachHighlightPills(
     valByCat.get(r._xc)!.set(r.series, r._y);
   }
   const colorFor = (s: string): string => opts.colors?.get(s) || COORD_LABEL_DARK;
+  // Value pills color-match the bar's ACTUAL rendered fill (category_colors/bar_color/mono/dim),
+  // falling back to the series' legend color; dot-plot pills have no rect and stay series-keyed.
+  const pillColor = (r: CatRect): string => r.fill ?? colorFor(r.series);
   const orderFor = (cat: string, active: Set<string>): string[] => {
     const vals = valByCat.get(cat);
     if (!vals) return [];
@@ -2536,16 +2599,16 @@ export function attachHighlightPills(
         for (const x of valid) {
           const yc = x.rect.y + x.rect.h / 2;
           if (opts.isStacked) {
-            addCoordPill(g, doc, x.rect.cx, yc, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
+            addCoordPill(g, doc, x.rect.cx, yc, "middle", yFormat(x.v), pillColor(x.rect), weight);
           } else {
             const tip = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
             const [anchor, ax] = x.v >= 0 ? (["start", tip + 6] as const) : (["end", tip - 6] as const);
-            addCoordPill(g, doc, ax, yc, anchor, yFormat(x.v), colorFor(x.rect.series), weight);
+            addCoordPill(g, doc, ax, yc, anchor, yFormat(x.v), pillColor(x.rect), weight);
           }
         }
       } else if (opts.isStacked) {
         const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
-        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       } else {
         const ys = staggerBarLabels(
           valid.map((x) => ({
@@ -2556,7 +2619,7 @@ export function attachHighlightPills(
           })),
           COORD_PILL_H,
         );
-        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       }
     }
     g.setAttribute("opacity", "1");

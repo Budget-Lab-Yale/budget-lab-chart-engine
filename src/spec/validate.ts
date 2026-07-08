@@ -117,18 +117,21 @@ function sectionColumnError(spec: {
 }
 
 /** `x_axis_ticks` (top/both value-axis tick row) only has an effect on a HORIZONTAL bar/stacked
- *  chart — assemblePlot only reads it inside its `if (horizontal)` branch (see assemble-plot.ts).
- *  A vertical chart has no meaningful "top value axis" there, so the field silently no-ops; reject
- *  it early with a pointed message instead of leaving it looking like dead configuration. */
+ *  chart — assemblePlot reads it inside its `if (horizontal)` branch, which only bar/stacked marks
+ *  reach (see assemble-plot.ts). On any other chartType/orientation it silently no-ops; reject it
+ *  early with a pointed message (mirrors the columns.section D7 gate) instead of leaving it looking
+ *  like dead configuration. */
 function xAxisTicksOrientationError(spec: {
   x_axis_ticks?: unknown;
+  chartType?: unknown;
   orientation?: unknown;
 }): string | null {
   if (spec.x_axis_ticks == null) return null;
-  if (spec.orientation !== "horizontal") {
+  const isBarLike = spec.chartType === "bar" || spec.chartType === "stacked";
+  if (!isBarLike || spec.orientation !== "horizontal") {
     return (
-      `x_axis_ticks requires orientation "horizontal" (a vertical chart has no top value axis) ` +
-      `(got orientation ${JSON.stringify(spec.orientation)})`
+      `x_axis_ticks requires a horizontal bar/stacked chart (a top value axis exists only there) ` +
+      `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
     );
   }
   return null;
@@ -155,7 +158,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   );
   if (secErr) return { valid: false, errors: [secErr] };
   const ticksErr = xAxisTicksOrientationError(
-    spec as { x_axis_ticks?: unknown; orientation?: unknown },
+    spec as { x_axis_ticks?: unknown; chartType?: unknown; orientation?: unknown },
   );
   if (ticksErr) return { valid: false, errors: [ticksErr] };
   return { valid: true, errors: [] };

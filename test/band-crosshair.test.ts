@@ -1045,18 +1045,80 @@ describe("attachSecondaryBandCursor horizontal — isStacked segment-center pill
     // Segment centers: Alpha [50,150] → 100; Beta [150,230] → 190.
     expect(xs.sort((a, b) => a - b)).toEqual([100, 190]);
   });
+
+  it("pill text color-matches the bar's ACTUAL rendered fill, not the series' base color", () => {
+    // A category_colors-style override: the rendered rect carries its own fill that differs from
+    // the series' legend color. The pill must read the rect's fill (#aa0000), not colors.get.
+    const svg = makeHorizontalStackedSvg();
+    // Give Alpha's rect a distinct per-rect fill (overriding any series color).
+    const alphaRect = svg.querySelector<SVGRectElement>('rect[data-series="Alpha"]')!;
+    alphaRect.setAttribute("fill", "#aa0000");
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: [{ _xc: "Northeast", series: "Alpha", _y: 5 }],
+      categories: ["Northeast"],
+      seriesOrder: ["Alpha"],
+      colors: new Map([["Alpha", "#0072B2"]]), // series base color — must be OVERRIDDEN by the fill
+      horizontal: true,
+    });
+    drive("Northeast");
+    const text = svg.querySelector<SVGTextElement>("g.tbl-coord text")!;
+    expect(text.getAttribute("fill")).toBe("#aa0000");
+  });
+
+  it("pill falls back to the series color when the bar has no rendered fill", () => {
+    const svg = makeHorizontalStackedSvg(); // rects carry no fill attr, no ancestor fill
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: [{ _xc: "Northeast", series: "Alpha", _y: 5 }],
+      categories: ["Northeast"],
+      seriesOrder: ["Alpha"],
+      colors: new Map([["Alpha", "#0072B2"]]),
+      horizontal: true,
+    });
+    drive("Northeast");
+    const text = svg.querySelector<SVGTextElement>("g.tbl-coord text")!;
+    expect(text.getAttribute("fill")).toBe("#0072B2");
+  });
+
+  it("reads a fill hoisted onto the parent bar group (Plot's constant-fill case)", () => {
+    // Plot hoists a CONSTANT fill onto <g aria-label="bar" fill="..."> rather than each rect;
+    // the pill must walk up to find it.
+    const svg = makeHorizontalStackedSvg();
+    svg.querySelector('g[aria-label="bar"]')!.setAttribute("fill", "#123456");
+    const drive = attachSecondaryBandCursor(svg, {
+      rows: [{ _xc: "Northeast", series: "Alpha", _y: 5 }],
+      categories: ["Northeast"],
+      seriesOrder: ["Alpha"],
+      colors: new Map([["Alpha", "#0072B2"]]),
+      horizontal: true,
+    });
+    drive("Northeast");
+    const text = svg.querySelector<SVGTextElement>("g.tbl-coord text")!;
+    expect(text.getAttribute("fill")).toBe("#123456");
+  });
 });
 
 describe("attachSecondaryBandCursor horizontal — accentLabel chip (task 17)", () => {
   const ROWS: BandRow[] = [{ _xc: "Northeast", series: "Alpha", _y: 5 }];
 
-  function makeSvgWithLabel(): { svg: SVGSVGElement; label: SVGTextElement } {
-    const svg = makeHorizontalStackedSvg();
+  // REAL DOM shape: the category label <text> lives inside a TRANSLATED ancestor <g> (both
+  // tblBandYAxis and tblFacetGroupYAxis wrap the labels that way). The chip is inserted as the
+  // label's sibling — a child of that same transformed <g> — so its x/y attributes are in the g's
+  // LOCAL frame. A naive "absolute svg-user coords" chip would have the g translate applied twice
+  // and land far from the label; these fixtures reproduce that so the coordinate math is tested.
+  const G_TX = 100;
+  const G_TY = 50;
+  function makeSvgWithLabel(): { svg: SVGSVGElement; label: SVGTextElement; g: SVGGElement } {
+    const svg = makeHorizontalStackedSvg(); // width 600, height 400
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g") as SVGGElement;
+    g.setAttribute("class", "tbl-cat-label");
+    g.setAttribute("transform", `translate(${G_TX},${G_TY})`);
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text") as SVGTextElement;
     label.setAttribute("data-category", "Northeast");
+    label.setAttribute("transform", "translate(146,18)"); // the label's OWN transform (like the golden)
     label.textContent = "Northeast";
-    svg.appendChild(label);
-    return { svg, label };
+    g.appendChild(label);
+    svg.appendChild(g);
+    return { svg, label, g };
   }
 
   it("without chip: bolds the label but adds no chip rect (jsdom has no layout either way)", () => {
@@ -1072,13 +1134,14 @@ describe("attachSecondaryBandCursor horizontal — accentLabel chip (task 17)", 
     expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
   });
 
-  it("with chip + a stubbed layout: inserts a frosted chip rect behind the accented label", () => {
-    const { svg, label } = makeSvgWithLabel();
+  it("with chip: the chip rect OVERLAPS the label's rendered box in absolute coords (catches the double-transform bug)", () => {
+    const { svg, label, g } = makeSvgWithLabel();
     document.body.appendChild(svg);
-    // jsdom has no layout engine (getBoundingClientRect is always a zero rect); stub just the two
-    // elements the chip geometry reads so the additive, gated code path is actually exercised.
-    const svgRect = { left: 0, top: 0, right: 300, bottom: 200, width: 300, height: 200, x: 0, y: 0, toJSON() {} };
-    const labelRect = { left: 40, top: 96, right: 100, bottom: 110, width: 60, height: 14, x: 40, y: 96, toJSON() {} };
+    // jsdom has no layout; stub the two rects the chip geometry reads. svgRect width == the SVG's
+    // own width (600) so the sx/sy scale is 1 and the stubbed screen box IS the svg-user box. The
+    // label's ABSOLUTE box is [140..200] x [96..110] (it already reflects the g + own transforms).
+    const svgRect = { left: 0, top: 0, right: 600, bottom: 400, width: 600, height: 400, x: 0, y: 0, toJSON() {} };
+    const labelRect = { left: 140, top: 96, right: 200, bottom: 110, width: 60, height: 14, x: 140, y: 96, toJSON() {} };
     svg.getBoundingClientRect = () => svgRect as DOMRect;
     label.getBoundingClientRect = () => labelRect as DOMRect;
     const drive = attachSecondaryBandCursor(svg, {
@@ -1090,11 +1153,20 @@ describe("attachSecondaryBandCursor horizontal — accentLabel chip (task 17)", 
     drive("Northeast");
     const chip = svg.querySelector(".tbl-coord-label-chip") as SVGRectElement;
     expect(chip).not.toBeNull();
-    expect(Number(chip.getAttribute("width"))).toBeGreaterThan(0);
-    expect(Number(chip.getAttribute("height"))).toBeGreaterThan(0);
-    // Inserted immediately before the label so it paints behind it.
+    // Chip x/y are in the g's LOCAL frame; the g's transform is applied when rendered, so the
+    // chip's ABSOLUTE box = attribute + g translate. It must fully surround the label's abs box.
+    const chipAbsX = Number(chip.getAttribute("x")) + G_TX;
+    const chipAbsY = Number(chip.getAttribute("y")) + G_TY;
+    const chipAbsRight = chipAbsX + Number(chip.getAttribute("width"));
+    const chipAbsBottom = chipAbsY + Number(chip.getAttribute("height"));
+    expect(chipAbsX).toBeLessThanOrEqual(labelRect.left);
+    expect(chipAbsRight).toBeGreaterThanOrEqual(labelRect.right);
+    expect(chipAbsY).toBeLessThanOrEqual(labelRect.top);
+    expect(chipAbsBottom).toBeGreaterThanOrEqual(labelRect.bottom);
+    // Behind the label (previous sibling), inside the same transformed <g>.
+    expect(chip.parentNode).toBe(g);
     expect(chip.nextSibling).toBe(label);
-    // Clearing the hover removes the chip along with the accent.
+    // Clearing removes the chip + restores the label weight.
     drive(null);
     expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
     expect(label.getAttribute("font-weight")).toBe("500");

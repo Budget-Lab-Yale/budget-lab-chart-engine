@@ -1733,7 +1733,7 @@ function wireFigureSvg(
           ? {
               regionFromLeftEdge: true,
               regionExtendRight: ctx.coordExtendRight ?? 0,
-              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
+              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX, chip: true } } : {}),
             }
           : {}),
       }) as (key: unknown, active?: boolean) => void;
