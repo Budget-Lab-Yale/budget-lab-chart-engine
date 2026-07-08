@@ -442,7 +442,14 @@ export function renderPane(
 
   // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
   // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
-  const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null, xLabelMode);
+  // tagCategoryLabels: the hover-accent hook (task 17) is bar/stacked-only — categorical-x line
+  // and dot-plot charts share this same adapter path and stay byte-identical.
+  const xOpts = adapter.buildXOpts(
+    dataInScope,
+    facetInfo != null,
+    xLabelMode,
+    chartType === "bar" || chartType === "stacked",
+  );
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;

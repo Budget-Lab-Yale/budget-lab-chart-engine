@@ -114,10 +114,12 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
         : present.size;
   }
   const nSpacers = Math.max(0, nSections - 1);
-  // Tallest wrapped category label at the gutter width.
-  const gutter = horizontalLeftGutter(catList);
+  // Tallest wrapped category label at the gutter width. Standalone horizontal bars now render
+  // their category labels at the (larger) faceted size (task 17), so size the gutter + wrap
+  // estimate at that font — mirrors figure.ts's shared-gutter computation for faceted panes.
+  const gutter = horizontalLeftGutter(catList, { fontSize: FACETED_CAT_LABEL_PX });
   const maxLabelLines = catList.reduce(
-    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD)),
+    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
     1,
   );
   return horizontalBarHeight({

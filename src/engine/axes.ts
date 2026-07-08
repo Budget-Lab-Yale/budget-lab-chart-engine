@@ -291,8 +291,15 @@ export function tblBandXAxis(
   scaleField: "x" | "fx" = "x",
   className?: string,
   mode: BandLabelMode = "single",
+  /** Stamp the hover-accent hook class (CAT_LABEL_CLASS). Explicit opt-in because this function
+   *  is shared infrastructure across every categorical chart type (bar, stacked, categorical-x
+   *  line, dot plot) via x-adapter.ts's single-band "x" path — only bar/stacked callers pass true,
+   *  so line/dotplot output (out of this task's scope) stays byte-identical. Ignored when
+   *  `className` is already set (shared-mode grid faceting: Plot's `className` mark option accepts
+   *  exactly ONE CSS-ident token, so the two can't combine — the grid-collapse class wins). */
+  tagCategoryLabels = false,
 ): Mark[] {
-  const cls = className ? { className } : {};
+  const cls = { className: className ?? (tagCategoryLabels ? CAT_LABEL_CLASS : undefined) };
   const textOf = (s: string): string => (mode === "wrap" ? wrapBandLabel(s) : s);
   // Per-mode layout props. Rotated labels are CENTER-anchored and turned 45° (counter-clockwise,
   // reading bottom-left → top-right): center-anchoring keeps each label's bounding-box center on
@@ -472,6 +479,12 @@ export function horizontalLeftGutter(
  *  figure is much taller, which makes the default 10.5px look small). */
 export const FACETED_CAT_LABEL_PX = 13;
 
+/** Class stamped on every category-axis label mark (bar/stacked, both orientations, faceted and
+ *  standalone alike) — a hook the live layer uses to find + accent the hovered category's label
+ *  (bold + optional chip) without matching on textContent (which can collide with a tick string).
+ *  Combined with a mark's OWN faceted-grid class (e.g. X_AXIS_LABEL_CLASS) when both apply. */
+export const CAT_LABEL_CLASS = "tbl-cat-label";
+
 // Band (categorical) y-axis for HORIZONTAL bars: one label per category at the band's
 // left edge in the label margin (svg x=0), vertically centered on its band. No ticks.
 // `marginLeft` is the (responsive) left gutter width; the label is pushed left by that
@@ -495,6 +508,7 @@ export function tblBandYAxis(
       fill: TBL.color.axis,
       fontSize,
       fontWeight: 500,
+      className: CAT_LABEL_CLASS,
       // Center the wrapped block on the band only when multi-line (keeps single-line byte-identical).
       ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
     }),
@@ -525,6 +539,7 @@ export function tblFacetGroupYAxis(
       fill: TBL.color.axis,
       fontSize,
       fontWeight: 500,
+      className: CAT_LABEL_CLASS,
       ...(anyMultiline ? { lineAnchor: "middle" as const } : {}),
     }),
   ];

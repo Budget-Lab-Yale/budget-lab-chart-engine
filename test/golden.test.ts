@@ -407,7 +407,9 @@ describe("golden SVG — bars", () => {
     const marginLeft = Number(svg.dataset.marginLeft);
     expect(marginLeft).toBeGreaterThan(44);
     const longestLabel = rows.reduce((w, r) => Math.max(w, (r.time as string).length), 0);
-    const estWidth = longestLabel * 10.5 * 0.55; // matches axes.estimateLabelWidth heuristic
+    // Standalone horizontal bars now render category labels at the faceted-matching 13px size
+    // (task 17), not the 10.5px axis default — matches axes.estimateLabelWidth heuristic.
+    const estWidth = longestLabel * 13 * 0.55;
     expect(estWidth).toBeLessThanOrEqual(marginLeft);
     // Bars begin at the gutter edge (value-axis origin = marginLeft), past the labels.
     rects.forEach((r) => expect(Number(r.getAttribute("x"))).toBeGreaterThanOrEqual(marginLeft - 1));

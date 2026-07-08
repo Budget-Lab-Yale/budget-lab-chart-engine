@@ -24,8 +24,10 @@ import {
   tblSectionHeaderYAxis,
   tblSectionTopHeader,
   sectionSpacer,
+  isSectionSpacer,
   horizontalLeftGutter,
   FACETED_CAT_LABEL_PX,
+  CAT_LABEL_CLASS,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import type { ChartSpec } from "../../spec/types";
@@ -72,9 +74,10 @@ export function buildBarMarks(
   const catField = xField;
   const seriesNames = ctx.seriesNames ?? [];
   const horizontal = spec.orientation === "horizontal";
-  // Faceted horizontal panes use a larger category-label font (the figure is tall, so the default
-  // axis size looks small); single charts keep the axis size so their goldens stay byte-identical.
-  const catFont = ctx.pane && horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
+  // HORIZONTAL bars (faceted AND standalone) use the larger "faceted best practice" category-label
+  // font — task 17 brings standalone up to the faceted look, so this is no longer gated on
+  // ctx.pane. Vertical is unchanged (no faceted/standalone gap there — both are TBL.size.axis).
+  const catFont = horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
   // Truncated (non-zero baseline) bars are drawn from 0 and would overflow below the plot; clip
   // them to the frame. No-op (and byte-identical) for normal zero-baseline bars.
   const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
@@ -140,6 +143,20 @@ export function buildBarMarks(
     }
     bandDomain = domain;
   }
+
+  // Render-order category list for the hover-accent label hook (data-category tagging, below):
+  // for the fy topology (sectioned and/or multi-series horizontal), Plot iterates the fy facet
+  // DOMAIN — bandDomain, section-grouped — when placing this mark's <text> children in the DOM,
+  // NOT the (encounter-order) `categories` array passed to Plot.text; the tagging pass reads DOM
+  // order, so it must match. Equals `categories` when unsectioned (bandDomain has no spacers then).
+  const catLabelOrder = bandDomain.filter((c) => !isSectionSpacer(c));
+  // Tagging entry for the hover-accent hook: stamps data-category on each rendered category label
+  // (in render order, see catLabelOrder above) so the live layer can find + accent the hovered
+  // one without matching on textContent. Empty when labels are suppressed (hideCategoryLabels —
+  // non-leftmost faceted panes): no label marks are emitted there, so nothing to tag.
+  const catLabelTagging = ctx.hideCategoryLabels
+    ? []
+    : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: catLabelOrder }];
 
   // Horizontal value-axis margins, driven by where the value-tick labels go (bottom/top/both) and
   // whether the chart is sectioned (the first section header sits in the top margin).
@@ -295,7 +312,7 @@ export function buildBarMarks(
       // (the band domain is shared, so rows still line up).
       const gutter = ctx.hideCategoryLabels
         ? SHARED_LABELLESS_MARGIN_LEFT
-        : ctx.categoryGutter ?? horizontalLeftGutter(categories);
+        : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
 
       if (sectioned) {
         // fy = the section-grouped category band (incl. spacer slots) via the SHARED
@@ -306,7 +323,7 @@ export function buildBarMarks(
         return {
           underlay: [],
           overlay,
-          tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
+          tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...catLabelTagging],
           dashedNames: new Set<string>(),
           yScaleOpts: { type: "band", domain: [onlySeries], padding: 0, axis: null },
           ...fyCategoryBandLayer(gutter),
@@ -316,7 +333,7 @@ export function buildBarMarks(
       return {
         underlay: [],
         overlay,
-        tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
+        tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...catLabelTagging],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
         xAxisMarks: ctx.hideCategoryLabels
@@ -335,7 +352,13 @@ export function buildBarMarks(
     return {
       underlay: [],
       overlay,
-      tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }],
+      tagging: [
+        { selector: 'g[aria-label="bar"] rect', seriesOrder },
+        // Vertical single-series: the adapter (x-adapter.ts) supplies the category label marks
+        // (xAxisMarks left undefined below), tagged with CAT_LABEL_CLASS there — encounter order
+        // (non-faceted single band), matching `categories`.
+        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
+      ],
       dashedNames: new Set<string>(),
       // Refine the adapter's band x with a slightly larger outer pad so bars do not kiss
       // the frame. (Adapter set type:band/domain/axis already.)
@@ -371,12 +394,13 @@ export function buildBarMarks(
     // and suppress category labels on non-leftmost panes.
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
-      : ctx.categoryGutter ?? horizontalLeftGutter(categories);
+      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
     return {
       underlay: [],
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder },
+        ...catLabelTagging,
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
@@ -408,12 +432,16 @@ export function buildBarMarks(
     overlay,
     tagging: [
       { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+      // Vertical grouped: this builder supplies its own fx-faceted category labels below (always
+      // tagged with CAT_LABEL_CLASS, the "fx" call never conflicts with a grid-collapse class —
+      // see tblBandXAxis) — fx-domain order, matching `categories`.
+      { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
     ],
     dashedNames: new Set<string>(),
     fxScaleOpts: groupBandOpts,
     xScaleOpts: innerBandOpts,
     xScaleField: "fx",
-    xAxisMarks: tblBandXAxis(categories, "fx", undefined, ctx.xLabelMode ?? "single"),
+    xAxisMarks: tblBandXAxis(categories, "fx", undefined, ctx.xLabelMode ?? "single", true),
   };
 }
 
