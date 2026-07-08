@@ -59,6 +59,23 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
 | `tooltip_decimals` | integer | Decimal places for values in hover tooltips (independent of axis ticks). Default 2. |
 
+### Inline title selector
+
+An interactive `<select>` dropdown embedded inline in the title, bound to a `{key}` token — e.g.
+`title: "GDP by {dimension}"` with a `dimension` entry in `title_selectors`. Every key in
+`title_selectors` must appear as `{key}` in `title` (validated). Absent/empty `title_selectors` ⇒
+the title renders as plain text, byte-identical to before this field existed.
+
+| field | type | notes |
+|---|---|---|
+| `title_selectors` | object | `{ <key>: { options: [{id, label?}, ...], default? } }`. `label` defaults to `id`. `default` must be one of `options[].id`; falls back to the first option when omitted. |
+
+Changing the selection swaps the token's text in place (no re-render of the chart) and fires a
+bubbling `tbl-title-select` CustomEvent (`detail: { id, value }`). `MountOptions.selections` sets
+the initial selections (per-key: a valid id wins, else the selector's `default`, else its first
+option); `MountOptions.onSelect` is called on every change. PNG export renders the title with
+whichever option is currently active (or the initial `selections`, for a scripted export).
+
 ### Axes
 
 | field | type | notes |
@@ -83,6 +100,8 @@ The series **column** is set via `columns.series`. These options reference the s
 | `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). |
 | `series_styles` | object | `{ <seriesKey>: { dashed: true } }`. `dashed` is currently the only flag. |
 | `series_labels` | object | `{ <seriesKey>: "Display name" }`. Lets the CSV use short keys while the legend/tooltip show full names. |
+| `bar_color` | color | **Single-series bar charts only.** The one series' bar fill, resolved through the palette. A first-class replacement for the `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are set. Ignored on multi-series (grouped) bar charts. With `highlightSeries`, `bar_color` replaces the base color only — a non-highlighted series still dims. |
+| `category_colors` | object | **Single-series bar charts only** (both orientations). `{ <xCategory>: color }` — per-category fill override, e.g. a distinct color for one "Total" category while the rest keep the base fill (`bar_color` or series color). Unlisted categories are unaffected. Ignored on multi-series (grouped) bar charts. Validation flags any key not found in the x column. |
 
 ### Annotations
 
@@ -93,12 +112,23 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 
 | field | type | notes |
 |---|---|---|
-| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
-| `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
+| `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. On **horizontal bar** charts with a numeric `x`, an `xAxis` marker now renders as a vertical rule on the value axis (previously silently ignored). |
+| `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?}`. |
-| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
+| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, value_format?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
 
 Marker/label `color` is a named color or `"#hex"`; the label color matches its line.
+
+**`{value}` token.** Any `xAxis`/`yAxis`/`points` `label` may contain a literal `{value}` token,
+substituted with the marker's own numeric value (`x` when it parses as a number, `y`, or the
+callout's resolved value). `value_format` controls the substitution: `{decimals?, prefix?, suffix?}`
+(decimals default 2). Without `value_format`, the substitution falls back to the chart's
+value-axis tick format (`yAxis`/`points`) or the raw `x` string (`xAxis`, or any `x` that doesn't
+parse as a number). A `label` without the token is unaffected.
+
+**`facet` (small multiples only).** Scope an `xAxis`/`yAxis` marker to the pane whose facet value
+equals `facet`; omit to render in every pane (unchanged default). Ignored on a non-faceted chart.
+`bands`/`points` are not facet-scoped.
 
 ### Confidence bands
 
@@ -111,11 +141,14 @@ Marker/label `color` is a named color or `"#hex"`; the label color matches its l
 | field | type | notes |
 |---|---|---|
 | `points` | boolean | Line charts: draw a marker dot at each data point. Default false. |
+| `projected_field` | string | Data column whose truthy value (`1`/`true`/`yes`, case-insensitive, trimmed) flags a row as projected (forecast/estimated) rather than actual. **Line:** the flagged run(s) of a series draw dashed, connecting continuously to adjacent actual points — a series may have multiple disjoint projected runs. **Area (stacked):** the fill fades over x-ranges where *every* in-scope series is flagged projected (conservative — a stack can't express partial-series fading). Absent ⇒ no projected styling (byte-identical output). A series also listed in `series_styles[..].dashed` (whole-series dashed) is not split by this field — the whole-series override wins. |
+| `projected_style.dashed` | boolean | Line charts, only consulted when `projected_field` is set. Default true; `false` renders the projected run solid (opts out of the visual distinction while keeping the field wired). |
+| `projected_style.fillOpacity` | number | Area charts, only consulted when `projected_field` is set. Effective fill opacity of the projected x-range's white veil overlay. Default 0.2. |
 
 Area charts (`chartType: area`) stack their series (a single series fills to the zero baseline);
 stack order follows `series_order`. The hover tooltip adds a cumulative **Total** row, and
 selecting series in the legend animates them to the bottom of the stack so they can be read against
-zero. No area-specific config fields.
+zero.
 
 ### Point charts (scatter / dot plot)
 
@@ -143,6 +176,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
+| `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
 
 ### Small multiples
 
@@ -174,6 +208,12 @@ and a gap between sections. Combines with `small_multiples` (the headers show on
 | `columns.section` | string | Column whose distinct values define the sections. |
 | `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`). |
 | `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
+
+`columns.section` and `columns.facet` are supported together on faceted horizontal bars (both
+`shared` and `per-pane` `small_multiples.mode`). Faceted horizontal bars share one category axis
+across panes, so every facet must carry the same categories (and sections) — a facet missing a
+category or a whole section (a **ragged facet**) fails validation with an error naming the facet
+and the missing categories/sections, rather than silently misaligning rows across panes.
 
 ### Data
 
@@ -230,11 +270,19 @@ text string.
 | `header_labels` | object | `{ <headerValue>: "Display label" }` — applied to banner tiers above the leaves. |
 | `sublabels` | object | `{ <leafKey>: "secondary" }` — a small second line under a column label (e.g. units). |
 
+Leaf columns are keyed by their **full header path**, not just the last-tier value, so a leaf value
+that repeats under different banners (e.g. the same metric under two different scenario headers)
+renders as distinct columns instead of one column silently swallowing the other. `header_labels`,
+`column_labels`, `sublabels`, `column_order`, and the `column_width` map still key off the leaf's
+raw last-tier value (the display label an author writes), so authoring is unaffected — a rule keyed
+by a repeated leaf value applies to every leaf sharing that value.
+
 ### Order
 
 | field | type | notes |
 |---|---|---|
-| `row_order` | array | Row render order; unlisted rows follow in first-seen order. |
+| `row_order` | array | Row render order; unlisted rows follow in first-seen order. **Scoped within each row group** — it orders leaves inside a group, not across groups. |
+| `group_order` | array | Render order for row **groups** (the non-last stub tiers). A flat `string[]` orders the first group tier only; a `string[][]` orders each tier independently (index 0 = first tier, index 1 = second, ...). Unlisted values at a level follow first-seen order. Groups are always gathered by stub path regardless of input row order, so a group's rows render contiguously wherever they appear in the source data (e.g. a scenario-major CSV regroups correctly). |
 | `column_order` | array | Leaf-column render order; unlisted leaves follow in first-seen order. |
 
 ### Number formats
@@ -266,7 +314,7 @@ formatting).
 
 | field | type | notes |
 |---|---|---|
-| `emphasis_rows` | array | Row labels to render bold/highlighted. |
+| `emphasis_rows` | array | Row labels to render bold/highlighted — styles the **whole row, including the stub** (row label cell), identically in HTML and PNG export. |
 | `emphasis_column` | string | CSV column holding a per-cell emphasis flag (`yes`/`1`/`true`). |
 | `footnotes` | object | `{ <key>: "text" }` (e.g. `{ a: "revised" }`); rendered as a list below the table. |
 | `footnote_column` | string | CSV column holding per-cell footnote keys (space- or comma-separated). |
@@ -286,6 +334,12 @@ formatting).
 | `header_tier_rules` | boolean | Draw horizontal rules between header tiers. Default false. |
 | `sticky.firstColumn` | boolean | Pin the row-label column during horizontal scroll. |
 | `sort` | boolean | Allow interactive column sorting (within row groups). |
+| `collapsible.default` | enum | Makes row groups collapsible: a caret on each group header toggles that group's rows (a nested group collapses its whole subtree), plus expand-all/collapse-all controls. Baseline state for every group not named in `expanded`/`collapsed`. Default `"expanded"`. Omit `collapsible` entirely for the current plain (non-interactive) group headers. |
+| `collapsible.expanded` | array | Group **values** (raw CSV values, matching `group_labels` keying) open despite a `"collapsed"` default. |
+| `collapsible.collapsed` | array | Group values closed despite an `"expanded"` default. Wins over `expanded` when a value appears in both. |
+
+Collapse state survives a resize, and PNG export renders a static snapshot honoring the live
+collapse state (or the spec's defaults, when exported without interaction).
 
 ### Text
 
