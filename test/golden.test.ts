@@ -651,6 +651,52 @@ describe("bar builder — faceted-horizontal label signals", () => {
   });
 });
 
+// --- D6: horizontal xAxis marker label placement (top margin, not on the flush-top first bar) ---
+//
+// The horizontal category band uses `align: 0` so the (small) outer pad goes to the BOTTOM only —
+// the first bar sits flush at marginTop, with no gap above it. A "top"-position xAxis marker label
+// used a fixed positive dy (frameAnchor "top"), which sits INSIDE the frame a few px below its top
+// edge — exactly where the first bar starts, so the label painted over the bar (gallery 07b). The
+// fix places the label in the TOP MARGIN instead (negative dy, above the frame's top edge).
+
+describe("D6: horizontal xAxis marker label sits in the top margin (fig07b regression)", () => {
+  const rows = parseCsv("./fixtures/bar-horizontal.csv");
+  const SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    columns: { x: "time", value: "value" },
+    annotations: { xAxis: [{ x: "1", label: "All items" }] },
+    data: "bar-horizontal.csv",
+  };
+
+  it("labelPosition 'top' (default) renders ABOVE the frame's top edge, clear of the flush first bar", () => {
+    const { svg } = renderChart(SPEC, rows, { width: 520, height: 400, document });
+    const label = Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === "All items");
+    expect(label).toBeDefined();
+    const marginTop = Number(svg.dataset.marginTop);
+    // Above the frame top edge (smaller absY = higher on the canvas) — i.e. IN the margin, not
+    // inside the plot area where the first bar (flush at marginTop) would sit under it.
+    expect(absY(label ?? null)).toBeLessThan(marginTop);
+    // Still on-canvas (not clipped above y=0).
+    expect(absY(label ?? null)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("an explicit labelDy still nudges the label from its (now top-margin) base position", () => {
+    const base = renderChart(SPEC, rows, { width: 520, height: 400, document });
+    const nudged = renderChart(
+      { ...SPEC, annotations: { xAxis: [{ x: "1", label: "All items", labelDy: 5 }] } },
+      rows,
+      { width: 520, height: 400, document },
+    );
+    const y = (svg: SVGSVGElement) =>
+      absY(Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === "All items") ?? null);
+    // labelDy is + = UP, so the nudged label sits strictly higher (smaller absY) than the base.
+    expect(y(nudged.svg)).toBeLessThan(y(base.svg));
+  });
+});
+
 // --- Faceted horizontal bars (Figure 7: scenario panes, grouped Pre/Post bars) ---
 
 const FIG7_FACETED_SPEC: ChartSpec = {
@@ -878,6 +924,200 @@ describe("bar builder — sectioned horizontal category axis", () => {
       .sort((a, b) => a.y - b.y)
       .map((h) => h.text);
     expect(headers).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+  });
+});
+
+// --- SINGLE-SERIES sectioned horizontal category axis (Task 16 / D1-D4 regression) ---
+//
+// Before the fy-topology fix, a single-series sectioned chart pushed fy-bound section-header
+// marks (tblSectionHeaderYAxis/tblSectionTopHeader) onto an UNfaceted plain-`y` band mark. Any
+// mark carrying fy/fx facets the WHOLE plot in Observable Plot, so the header marks alone made
+// Plot auto-derive a phantom 3-value fy domain (2 spacer sentinels + the first category) —
+// producing 27 rects instead of 9, the raw " section:" sentinel as Plot's default fy-axis text,
+// starved bar height, and header/category collisions (gallery figures 09/10). These assertions
+// fail on the pre-fix plain-y path and pass once single-series sectioned routes onto the same fy
+// topology the multi-series sectioned path already uses correctly (Figure 7, above).
+
+describe("bar builder — SINGLE-SERIES sectioned horizontal category axis (fig09 regression)", () => {
+  const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+    (r) => r.facet === "Section 122 Expires" && r.series === "Pre-Substitution",
+  );
+  const catCount = new Set(rows.map((r) => r.category)).size;
+
+  const SINGLE_SERIES_SECTIONED: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    columns: { x: "category", value: "value", section: "toplevel" },
+    section_order: ["Durable goods", "Nondurable goods", "Services"],
+    data: "figure7-tariff.csv",
+  };
+
+  it("renders exactly one rect per category (not per category × phantom-facet)", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    expect(catCount).toBe(20);
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(catCount);
+  });
+
+  it("never prints the raw section-spacer sentinel as rendered axis text", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+    expect(texts.some((t) => isSectionSpacer(t))).toBe(false);
+  });
+
+  it("renders each section header exactly once, in bold", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    const bold = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
+    for (const label of ["Durable goods", "Nondurable goods", "Services"]) {
+      expect(bold.filter((t) => t === label).length).toBe(1);
+    }
+  });
+
+  it("uses the fy facet topology (one facet group per category, matching the multi-series path)", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    // Non-empty facet groups (spacer-slot facets carry no bars and are excluded) == category count.
+    const groups = Array.from(svg.querySelectorAll('g[aria-label="bar"] > g')).filter((g) =>
+      g.querySelector("rect"),
+    );
+    expect(groups.length).toBe(catCount);
+  });
+
+  it("is deterministic and matches the golden", async () => {
+    const a = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document }).svg.outerHTML;
+    const b = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document }).svg.outerHTML;
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/bar-sectioned-single.golden.svg");
+  });
+});
+
+// --- Faceted + sectioned, SINGLE series per pane (fig10 shape: shared small multiples) ---
+
+const FIG10_SHAPE_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Faceted + sectioned, single series per pane",
+  xAxisType: "categorical",
+  orientation: "horizontal",
+  columns: { x: "category", value: "value", facet: "facet", section: "toplevel" },
+  section_order: ["Durable goods", "Nondurable goods", "Services"],
+  small_multiples: {
+    columns: 2,
+    mode: "shared",
+    pane_order: ["Section 122 Expires", "Section 122 Extended"],
+  },
+  data: "figure7-tariff.csv",
+};
+
+describe("figure — faceted + sectioned horizontal bars, SINGLE series per pane (fig10 regression)", () => {
+  it("both panes render one rect per category and stay aligned (same rect count + y-geometry)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter((r) => r.series === "Pre-Substitution");
+    const fig = renderFigure(FIG10_SHAPE_SPEC, rows, { width: 900, document });
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    const catCount = new Set(rows.map((r) => r.category)).size;
+    const rects = (svg: SVGSVGElement) => Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(rects(p0).length).toBe(catCount);
+    expect(rects(p1).length).toBe(catCount);
+    // No pane-0-explodes-while-others-are-fine regression (the diagnosed cross-pane misalignment):
+    // every rect's absolute y (top edge) in pane 0 matches its counterpart in pane 1, in DOM order.
+    const ys = (svg: SVGSVGElement) => rects(svg).map((r) => absY(r) + Number(r.getAttribute("y") ?? 0));
+    const y0 = ys(p0);
+    const y1 = ys(p1);
+    expect(y0.length).toBe(y1.length);
+    y0.forEach((y, i) => expect(y).toBeCloseTo(y1[i] as number, 4));
+    // No sentinel leakage in either pane.
+    for (const svg of [p0, p1]) {
+      const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+      expect(texts.some((t) => isSectionSpacer(t))).toBe(false);
+    }
+  });
+
+  it("is deterministic and matches the golden", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter((r) => r.series === "Pre-Substitution");
+    const a = serializePanes(renderFigure(FIG10_SHAPE_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG10_SHAPE_SPEC, rows, { width: 900, document }));
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/figure10-shape-sectioned-single.golden.svg");
+  });
+});
+
+// --- assemblePlot invariant guard: a mark with a facet channel MUST declare its facet scale ---
+//
+// D1's root cause: a mark builder pushed fy-BOUND marks (the section-header text) without ever
+// declaring `layers.fyScaleOpts`. In Observable Plot, ANY mark carrying an fx/fy channel facets
+// the WHOLE plot — including marks that never asked for it — so Plot silently derived its own
+// phantom facet domain and rendered its OWN default facet-axis chrome (raw domain values as
+// text) instead of the engine's collapsed chrome. This guard makes that failure mode loud instead
+// of silent: assemblePlot checks its OWN rendered output for Plot's default fy/fx-axis chrome and
+// throws if the layer never declared the matching scale.
+
+describe("assemblePlot — fy/fx facet invariant guard", () => {
+  const baseXOpts = makeXAdapter("categorical").buildXOpts([{ _xc: "a" }, { _xc: "b" }], false);
+  const baseArgs = {
+    yDomain: [0, 1] as [number, number],
+    yTicks: [0, 1],
+    units: "",
+    xOpts: baseXOpts,
+    seriesNames: ["Series"],
+    colors: new Map([["Series", TBL.color.blue]]),
+    spec: { chartType: "bar", title: "t", xAxisType: "categorical", data: "d" } as ChartSpec,
+    document,
+  };
+
+  it("throws when a mark carries an fy channel but the layer declares no fyScaleOpts", () => {
+    // Hand-built BAD layer: an fy-bound mark (mirrors the real defect — a section-header text
+    // mark bound to fy) with no fyScaleOpts declared anywhere in the layer.
+    const badLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.text([{ cat: "a", label: "Header" }], { fy: "cat", text: "label" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+    };
+    expect(() => assemblePlot({ layers: badLayer, ...baseArgs })).toThrow(/fyScaleOpts/);
+  });
+
+  it("throws when a mark carries an fx channel but the layer declares neither fxScaleOpts nor xScaleField:\"fx\"", () => {
+    const badLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.text([{ cat: "a", label: "Header" }], { fx: "cat", text: "label" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+    };
+    expect(() => assemblePlot({ layers: badLayer, ...baseArgs })).toThrow(/fxScaleOpts/);
+  });
+
+  it("does NOT throw for a healthy fy-faceted layer (fyScaleOpts declared)", () => {
+    const goodLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.barX([{ cat: "a", v: 1 }], { fy: "cat", x: "v" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+      yScaleOpts: { type: "band", domain: ["Series"], padding: 0, axis: null },
+      fyScaleOpts: { domain: ["a", "b"], axis: null },
+    };
+    expect(() => assemblePlot({ layers: goodLayer, ...baseArgs })).not.toThrow();
+  });
+
+  it("does NOT throw for a healthy fx-faceted (xScaleField:\"fx\") layer", () => {
+    const goodLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.barY([{ cat: "a", v: 1 }], { fx: "cat", y: "v" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+      fxScaleOpts: { domain: ["a", "b"], axis: null },
+      xScaleField: "fx",
+    };
+    expect(() => assemblePlot({ layers: goodLayer, ...baseArgs })).not.toThrow();
+  });
+
+  it("does NOT throw for an ordinary unfaceted layer", () => {
+    const goodLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.barY([{ cat: "a", v: 1 }], { x: "cat", y: "v" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+    };
+    expect(() => assemblePlot({ layers: goodLayer, ...baseArgs })).not.toThrow();
   });
 });
 
