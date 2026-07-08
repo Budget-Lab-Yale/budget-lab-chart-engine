@@ -204,6 +204,9 @@ const TITLE_SELECTOR = {
         properties: {
           id: { type: "string", minLength: 1 },
           label: { type: "string" },
+          // Explicit trigger-label tint for this option; falls back to
+          // series_colors[label ?? id] when absent (see spec/title.ts).
+          color: { type: "string" },
         },
       },
     },

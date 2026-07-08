@@ -97,3 +97,29 @@ export function resolveTitleText(spec: TitleSpec, selections?: Record<string, st
     })
     .join("");
 }
+
+/** Resolve the RAW color (a `ColorRef` — a token name or hex string, not yet run through
+ *  `engine/palette`'s `resolveColor`) of the currently-ACTIVE option across a spec's
+ *  `title_selectors`, or `undefined` if none resolves a color. Mirrors the AI Labor Market
+ *  Tracker's `activeSelectorColor` (charts.js): per selector, in declaration order, the active
+ *  option's explicit `color` wins; else the spec's `series_colors[label ?? id]` (the shared
+ *  per-series color map); the first selector that resolves a color wins. Callers (render-live's
+ *  live mount + export-png's static export) apply `resolveColor` to the result before using it —
+ *  this function stays palette-agnostic, matching title.ts's "no DOM / no engine imports"
+ *  convention. `effectiveSelections` must already be fully resolved (see `resolveSelections`) —
+ *  every selector key populated with a valid option id. */
+export function resolveActiveOptionColor(
+  selectors: Record<string, TitleSelector> | undefined,
+  effectiveSelections: Record<string, string>,
+  seriesColors: Record<string, string> | undefined,
+): string | undefined {
+  if (!selectors) return undefined;
+  for (const [key, selector] of Object.entries(selectors)) {
+    const activeId = effectiveSelections[key];
+    const opt = selector.options.find((o) => o.id === activeId);
+    if (!opt) continue;
+    const color = opt.color ?? seriesColors?.[opt.label ?? opt.id];
+    if (color) return color;
+  }
+  return undefined;
+}

@@ -214,15 +214,21 @@ export interface ColumnMap {
   section?: string;
 }
 
-/** One option in an inline title selector's dropdown. `label` defaults to `id` when absent. */
+/** One option in an inline title selector's dropdown. `label` defaults to `id` when absent.
+ *  `color` tints the selector's trigger label when this option is active (ported from the AI
+ *  Labor Market Tracker's inline industry picker): explicit `color` wins; else falls back to
+ *  `spec.series_colors[label ?? id]` (the shared per-series color map) — see
+ *  `title.ts#resolveActiveOptionColor`. Absent ⇒ the label inherits the surrounding title color,
+ *  unchanged from before this field existed. */
 export interface TitleSelectorOption {
   id: string;
   label?: string;
+  color?: ColorRef;
 }
 
 /** An engine-owned interactive single-select control bound to a `{key}` token in `title`. See
  *  `src/spec/title.ts` for token parsing/resolution and `src/engine/render-live.ts` for the
- *  live `<select>` wiring. */
+ *  live button+popover widget (ported from the AI Labor Market Tracker's inline title picker). */
 export interface TitleSelector {
   options: TitleSelectorOption[];
   /** Initial active option id. Must be one of `options[].id`. Falls back to the first option
