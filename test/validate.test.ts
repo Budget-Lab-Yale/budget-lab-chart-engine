@@ -345,6 +345,18 @@ describe("title_selectors", () => {
     expect(r.errors.join("\n")).toMatch(/duplicate/i);
   });
 
+  it("accepts an option-level color field", () => {
+    const r = validateSpec(
+      withSelector({
+        options: [
+          { id: "sector", label: "Sector", color: "blue" },
+          { id: "country", label: "Country" },
+        ],
+      }),
+    );
+    expect(r.valid).toBe(true);
+  });
+
   it("rejects a selector key outside the token character set (could never match a {token})", () => {
     const r = validateSpec({
       ...VALID,

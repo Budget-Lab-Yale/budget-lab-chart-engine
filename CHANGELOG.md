@@ -66,10 +66,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **`legend: false`** — hides all legend chrome (top/right/figure/PNG export alike) while keeping
   multi-series coloring, tooltips, and the crosshair. Click-to-pin/dim is unavailable since it's
   driven through the legend.
-- **`title_selectors`** + a `{token}` in `title` — an inline `<select>` dropdown embedded in the
-  figure title. Selecting an option swaps the title text in place and fires a bubbling
-  `tbl-title-select` CustomEvent; `MountOptions.selections`/`onSelect` read and drive the
-  selection programmatically. PNG export prints whichever option is active.
+- **`title_selectors`** + a `{token}` in `title` — an inline button+popover dropdown (ported from
+  the AI Labor Market Tracker's inline industry picker) embedded in the figure title. Selecting an
+  option swaps the title text in place and fires a bubbling `tbl-title-select` CustomEvent;
+  `MountOptions.selections`/`onSelect` read and drive the selection programmatically. PNG export
+  prints whichever option is active. Options may carry a `color` (or fall back to
+  `series_colors[label]`): the active option tints the trigger label, and on a single-series chart
+  is also fed back as that line's color (multi-series charts keep their own palette).
 
 ### Fixed — small multiples
 

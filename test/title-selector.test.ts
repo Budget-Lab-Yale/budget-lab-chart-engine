@@ -2,7 +2,12 @@
 // See src/spec/title.ts. jsdom-mounted / export / validate coverage lives in their own test
 // files; this file is the pure-function unit layer.
 import { describe, it, expect } from "vitest";
-import { parseTitleTokens, resolveTitleText, resolveSelections } from "../src/spec/title";
+import {
+  parseTitleTokens,
+  resolveActiveOptionColor,
+  resolveTitleText,
+  resolveSelections,
+} from "../src/spec/title";
 import type { TitleSelector } from "../src/spec/types";
 
 const DIMENSION: TitleSelector = {
@@ -129,5 +134,69 @@ describe("resolveTitleText", () => {
     const spec = { title: "GDP by {constructor}", title_selectors: { dimension: DIMENSION } };
     expect(() => resolveTitleText(spec)).not.toThrow();
     expect(resolveTitleText(spec)).toBe("GDP by {constructor}");
+  });
+});
+
+describe("resolveActiveOptionColor", () => {
+  it("returns undefined when there are no selectors", () => {
+    expect(resolveActiveOptionColor(undefined, {}, undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when neither the option nor series_colors resolves a color", () => {
+    expect(
+      resolveActiveOptionColor({ dimension: DIMENSION }, { dimension: "sector" }, undefined),
+    ).toBeUndefined();
+  });
+
+  it("an option's explicit color wins", () => {
+    const withColor: TitleSelector = {
+      options: [
+        { id: "sector", label: "Sector", color: "blue" },
+        { id: "country", label: "Country", color: "amber" },
+      ],
+      default: "sector",
+    };
+    expect(
+      resolveActiveOptionColor({ dimension: withColor }, { dimension: "country" }, undefined),
+    ).toBe("amber");
+  });
+
+  it("falls back to series_colors[label] when the active option has no explicit color", () => {
+    expect(
+      resolveActiveOptionColor(
+        { dimension: DIMENSION },
+        { dimension: "country" },
+        { Sector: "blue", Country: "green" },
+      ),
+    ).toBe("green");
+  });
+
+  it("an option's explicit color beats a series_colors fallback for the same option", () => {
+    const withColor: TitleSelector = {
+      options: [{ id: "sector", label: "Sector", color: "blue" }],
+      default: "sector",
+    };
+    expect(
+      resolveActiveOptionColor({ dimension: withColor }, { dimension: "sector" }, { Sector: "red" }),
+    ).toBe("blue");
+  });
+
+  it("falls back to series_colors[id] when the option has no label", () => {
+    const noLabel: TitleSelector = { options: [{ id: "sector" }], default: "sector" };
+    expect(
+      resolveActiveOptionColor({ dimension: noLabel }, { dimension: "sector" }, { sector: "violet" }),
+    ).toBe("violet");
+  });
+
+  it("checks selectors in declaration order and returns the first that resolves a color", () => {
+    const noColor: TitleSelector = { options: [{ id: "a" }], default: "a" };
+    const withColor: TitleSelector = { options: [{ id: "b", color: "red" }], default: "b" };
+    expect(
+      resolveActiveOptionColor(
+        { first: noColor, second: withColor },
+        { first: "a", second: "b" },
+        undefined,
+      ),
+    ).toBe("red");
   });
 });

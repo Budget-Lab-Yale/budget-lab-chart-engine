@@ -61,20 +61,32 @@ it defaults to `x: time`, `value: value`, `series: series`.
 
 ### Inline title selector
 
-An interactive `<select>` dropdown embedded inline in the title, bound to a `{key}` token — e.g.
-`title: "GDP by {dimension}"` with a `dimension` entry in `title_selectors`. Every key in
+An interactive button+popover widget embedded inline in the title, bound to a `{key}` token —
+e.g. `title: "GDP by {dimension}"` with a `dimension` entry in `title_selectors`. Every key in
 `title_selectors` must appear as `{key}` in `title` (validated). Absent/empty `title_selectors` ⇒
-the title renders as plain text, byte-identical to before this field existed.
+the title renders as plain text, byte-identical to before this field existed. The widget (a boxed
+piece of title text with a caret, opening a listbox popover on click) is ported verbatim from the
+AI Labor Market Tracker's inline industry picker — click/click-away/Escape/Enter/arrow-keys/type-
+ahead all behave the same.
 
 | field | type | notes |
 |---|---|---|
-| `title_selectors` | object | `{ <key>: { options: [{id, label?}, ...], default? } }`. `label` defaults to `id`. `default` must be one of `options[].id`; falls back to the first option when omitted. |
+| `title_selectors` | object | `{ <key>: { options: [{id, label?, color?}, ...], default? } }`. `label` defaults to `id`. `default` must be one of `options[].id`; falls back to the first option when omitted. |
 
-Changing the selection swaps the token's text in place (no re-render of the chart) and fires a
+Changing the selection updates the trigger label in place (no rebuild of the header) and fires a
 bubbling `tbl-title-select` CustomEvent (`detail: { id, value }`). `MountOptions.selections` sets
 the initial selections (per-key: a valid id wins, else the selector's `default`, else its first
 option); `MountOptions.onSelect` is called on every change. PNG export renders the title with
 whichever option is currently active (or the initial `selections`, for a scripted export).
+
+**Color matching.** An option's trigger label is tinted to its resolved color: an explicit
+`option.color` wins; else `series_colors[option.label ?? option.id]` (the chart's own per-series
+color map); else the label inherits the surrounding title color, unchanged. On a **single-series**
+chart, the active option's resolved color is also fed back as an accent onto the rendered line
+itself — selecting a different option re-colors the chart to match, and a PNG export downloaded
+with that selection matches what was on screen (AILMT parity: the by-industry picker recoloring
+its own line). On a **multi-series** chart this accent is not applied — only the trigger label
+tints; each series keeps its own distinct color from the palette/`series_colors`.
 
 ### Axes
 
