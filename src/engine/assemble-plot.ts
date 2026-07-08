@@ -36,6 +36,15 @@ const PLOT_CLASS = "tblchart";
 // behind the fill) so labels stay legible over annotation lines, bands, and dense data.
 const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
 
+// D6: horizontal bars' category band uses `align: 0` (the outer pad goes to the BOTTOM only), so
+// the first bar sits flush at the plot frame's top edge with no gap above it. A "top"-position
+// xAxis marker label's `topDy` is applied to a `frameAnchor: "top"` text mark — a POSITIVE dy
+// there sits INSIDE the frame, a few px below its top edge, i.e. right where the flush first bar
+// starts (the fig07b overlap). A NEGATIVE dy instead lifts the label into the TOP MARGIN, above
+// the frame's top edge and clear of every bar. `labelDy` (which the caller applies on top of this
+// base) still nudges from there.
+const HORIZONTAL_MARKER_TOP_DY = -6;
+
 export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
@@ -539,7 +548,7 @@ export function assemblePlot({
             : undefined;
         fyOpts = { ruleClassName: `${X_ANNOTATION_LINE_CLASS}-${i}`, labelFy };
       }
-      drawXAxisMarker(vx, m, 4, fyOpts);
+      drawXAxisMarker(vx, m, HORIZONTAL_MARKER_TOP_DY, fyOpts);
     });
   }
 
@@ -748,6 +757,37 @@ export function assemblePlot({
   if (document) plotOpts.document = document;
 
   const svg = Plot.plot(plotOpts) as SVGSVGElement;
+
+  // Invariant guard (Task 16 / D1): in Observable Plot, ANY mark carrying an fx/fy channel
+  // facets the WHOLE plot — unfaceted marks silently replicate into every facet, and an
+  // undeclared facet scale falls back to Plot's own default facet-axis chrome (raw domain
+  // values rendered as text) instead of the engine's collapsed chrome. This is exactly how the
+  // fig09/fig10 defect happened: a mark builder pushed fy-bound header marks without ever
+  // declaring `fyScaleOpts`. Every scale THIS module declares always sets `axis: null` (see
+  // `plotOpts.fx`/`plotOpts.fy` above), so Plot's default facet-axis groups appearing in the
+  // rendered SVG are a reliable, deterministic tell that a mark carries a facet channel the
+  // layer never accounted for. Fail loudly here — at the one chokepoint every chart renders
+  // through — instead of shipping a silently-broken chart.
+  if (svg.querySelector('g[aria-label^="fy-axis"]') && layers.fyScaleOpts == null) {
+    throw new Error(
+      "assemblePlot: the rendered SVG carries Plot's default fy-axis chrome, but the mark " +
+        "layer declared no `fyScaleOpts`. A mark carries a facet channel (fy) the builder " +
+        "didn't account for — ANY fy-bound mark facets the whole plot, so every category- " +
+        "band mark must route through `layers.fyScaleOpts` (see bar.ts's horizontal grouped/" +
+        "sectioned path) or the facet chrome renders as Plot's raw, uncollapsed defaults.",
+    );
+  }
+  if (svg.querySelector('g[aria-label^="fx-axis"]') && layers.fxScaleOpts == null && layers.xScaleField !== "fx") {
+    throw new Error(
+      "assemblePlot: the rendered SVG carries Plot's default fx-axis chrome, but the mark " +
+        "layer declared neither `fxScaleOpts` nor `xScaleField: \"fx\"`. A mark carries a " +
+        "facet channel (fx) the builder didn't account for — ANY fx-bound mark facets the " +
+        "whole plot, so every category-band mark must route through `layers.fxScaleOpts` " +
+        "(see bar.ts's vertical grouped path) or the facet chrome renders as Plot's raw, " +
+        "uncollapsed defaults.",
+    );
+  }
+
   svg.dataset.marginLeft = String((plotOpts.marginLeft as number) ?? 0);
   svg.dataset.marginRight = String((plotOpts.marginRight as number) ?? 8);
   svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
