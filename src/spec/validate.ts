@@ -234,6 +234,21 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // Cross-reference: every category named by category_colors must appear in the categorical x
+  // column — mirrors the x_order unknown-value check above (a typo'd key would otherwise silently
+  // no-op). category_colors is single-series scope at render time, but its KEYS are x-category
+  // values regardless of series count, so the same check applies. Only checked on a categorical
+  // x-axis (a no-op for numeric/temporal x).
+  if (spec.xAxisType === "categorical" && spec.category_colors) {
+    const xValues = new Set(rows.map((r) => r[cols.x] as string));
+    const unknown = Object.keys(spec.category_colors).filter((v) => !xValues.has(v));
+    if (unknown.length) {
+      errors.push(
+        `category_colors names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+      );
+    }
+  }
+
   // Cross-reference: small_multiples pane_order / pane_titles keys must correspond to actual
   // distinct values in the facet column. (The facet column's existence is already enforced above
   // via the resolved-columns check, which bails before this point if it's missing.)
@@ -272,6 +287,50 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         errors.push(
           `small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`,
         );
+      }
+    }
+
+    // Ragged-facet guard (both shared and per-pane mode): faceted HORIZONTAL bars lay every
+    // facet out as its own pane but assume ONE shared category axis (renderFigure suppresses the
+    // category labels/section headers on every pane but the first — see figure.ts). Each pane's
+    // band domain is otherwise computed independently from ITS OWN rows (buildBarMarks), so a
+    // facet missing a category (or a whole section) would silently shrink that pane's domain and
+    // misalign its rows against the others with no visual cue. Fail loudly instead — pointed at
+    // the facet + category (+ section, when sectioned) that's missing.
+    if (spec.chartType === "bar" && spec.orientation === "horizontal" && spec.xAxisType === "categorical" && cols.x) {
+      const xField = cols.x;
+      const catsByFacet = new Map<string, Set<string>>();
+      const allCats = new Set<string>();
+      for (const r of rows) {
+        const facet = r[facetField] as string;
+        const cat = r[xField] as string;
+        if (!facet || !cat) continue;
+        allCats.add(cat);
+        if (!catsByFacet.has(facet)) catsByFacet.set(facet, new Set());
+        (catsByFacet.get(facet) as Set<string>).add(cat);
+      }
+      const sectionOf = cols.section
+        ? (() => {
+            const secField = cols.section as string;
+            const m = new Map<string, string>();
+            for (const r of rows) {
+              const cat = r[xField] as string;
+              const sec = r[secField] as string;
+              if (cat && sec != null && sec !== "" && !m.has(cat)) m.set(cat, sec);
+            }
+            return m;
+          })()
+        : null;
+      for (const [facet, cats] of catsByFacet) {
+        const missing = [...allCats].filter((c) => !cats.has(c));
+        if (missing.length) {
+          const named = sectionOf
+            ? missing.map((c) => `${JSON.stringify(c)} (section ${JSON.stringify(sectionOf.get(c) ?? "?")})`)
+            : missing.map((c) => JSON.stringify(c));
+          errors.push(
+            `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
+          );
+        }
       }
     }
   }

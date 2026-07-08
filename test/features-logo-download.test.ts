@@ -162,6 +162,43 @@ describe("buildExportSvg — small multiples", () => {
     expect(Number(svg.getAttribute("height"))).toBeGreaterThan(750);
   });
 
+  it("per-pane HORIZONTAL sectioned figure: cells consume the figure's unequal column widths", () => {
+    // Per-pane horizontal bars carry an asymmetric category gutter (pane 0 wide, others narrow),
+    // so renderFigure sizes explicit unequal outer widths sharing ONE inner data width. The
+    // export layout must consume those columnWidths (not the old equal-pane split), like shared
+    // mode — otherwise each pane renders far narrower than its cell.
+    const spec: ChartSpec = {
+      chartType: "bar",
+      title: "Sectioned per-pane horizontal",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      data: "inline",
+      columns: { x: "cat", value: "value", facet: "facet", section: "sec" },
+      section_order: ["P", "Q"],
+      small_multiples: { columns: 2, mode: "per-pane" },
+    };
+    const rows: TidyRow[] = [];
+    for (const [f, base] of [["A", 1], ["B", 2]] as const) {
+      rows.push({ facet: f, cat: "Cars", sec: "P", value: String(base) } as TidyRow);
+      rows.push({ facet: f, cat: "Food", sec: "P", value: String(base + 1) } as TidyRow);
+      rows.push({ facet: f, cat: "Rent", sec: "Q", value: String(base + 2) } as TidyRow);
+      rows.push({ facet: f, cat: "Care", sec: "Q", value: String(base + 3) } as TidyRow);
+    }
+    const svg = buildExportSvg(spec, rows);
+    const inner = Array.from(svg.querySelectorAll("svg"));
+    expect(inner.length).toBe(2);
+    const w0 = Number(inner[0]!.getAttribute("width"));
+    const w1 = Number(inner[1]!.getAttribute("width"));
+    // Labeled col 0 is wider (carries the category gutter); the row tiles the full inner width
+    // (1000 − 2×40 margins − 20 col gap).
+    expect(w0).toBeGreaterThan(w1);
+    expect(w0 + w1).toBeCloseTo(1000 - 2 * 40 - 20, 0);
+    // Column x positions tile against the ACTUAL cell widths (pane 1 starts after pane 0 + gap).
+    const x0 = Number(inner[0]!.getAttribute("x"));
+    const x1 = Number(inner[1]!.getAttribute("x"));
+    expect(x1).toBeCloseTo(x0 + w0 + 20, 0);
+  });
+
   it("short figure (single row of panes) sizes to content — no 750 whitespace floor", () => {
     // 2 facets at 2 cols → a single row, so the export should be much shorter than 750.
     const twoFacets: TidyRow[] = [];

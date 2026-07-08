@@ -16,6 +16,7 @@
 // Horizontal single-series puts categories on a band `y` (the value axis moves to `x`).
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
+import { resolveColor } from "../palette";
 import {
   tblBandXAxis,
   tblBandYAxis,
@@ -145,15 +146,21 @@ export function buildBarMarks(
   const xTicksMode = spec.x_axis_ticks ?? "bottom";
   const hTopTicks = xTicksMode === "top" || xTicksMode === "both";
   const hBottomTicks = xTicksMode !== "top";
-  // Every section header sits SECTION_HEADER_GAP px above its section's first bar (uniform). The top
-  // margin holds: the top ticks (if any) + the first header + that gap above the first bar.
-  const hMarginTop = (hTopTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8);
-  const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
   // First section header: faceted on its first category (facet top = first bar, align:0), lifted so
   // its baseline lands the SAME ~15px above the bar as the spacer-based headers. The top-anchored
   // baseline sits ~one font-size below the facet top, and the bottom-anchored spacers sit ~5px
-  // higher, so add that to match.
+  // higher, so add that to match. Computed before hMarginTop so the margin can floor on it.
   const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
+  // Every section header sits SECTION_HEADER_GAP px above its section's first bar (uniform). The top
+  // margin holds: the top ticks (if any) + the first header + that gap above the first bar. When
+  // there IS a top section header, floor the margin to its lift (+ gap) so it's never clipped above
+  // the canvas — without this floor, the tick-driven term alone can be smaller than the lift when
+  // there are no top ticks (the common default), clipping the header into the legend above.
+  const hMarginTop = Math.max(
+    (hTopTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8),
+    topSectionHeader ? topHeaderLift + SECTION_HEADER_GAP : 0,
+  );
+  const hMarginBottom = hBottomTicks ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE;
 
   // Highlight/dim: literal fill accessor (not the color scale) so non-highlighted series
   // collapse to annotationDim regardless of their palette slot. Used sparingly per spec.
@@ -188,11 +195,45 @@ export function buildBarMarks(
 
   if (!isMulti) {
     // --- Single-series: categories on a band scale, no faceting. ---
-    const fill = highlightSet
-      ? (d: PreparedRow) => fillFor(d.series)
+    // `bar_color` (task 7): the single-series bar fill, resolved through the palette. A
+    // first-class replacement for the `series_colors: {"": color}` idiom (already folded into
+    // `colors`/`fillFor` above), overriding it when set. It replaces the BASE color only —
+    // highlight/dim still applies on top: a non-highlighted series dims to annotationDim
+    // regardless of bar_color.
+    const barColorOverride = resolveColor(spec.bar_color);
+    const singleFillFor = (series: string): string => {
+      if (highlightSet && !highlightSet.has(series)) return TBL.color.annotationDim;
+      return barColorOverride ?? fillFor(series);
+    };
+    // Constant vs. accessor matters at the SVG level: Plot hoists a constant fill onto the parent
+    // <g aria-label="bar">, while a function channel emits a per-<rect> fill attribute. Preserve
+    // the ORIGINAL decision shape (accessor iff highlightSet, else constant) so any spec that
+    // doesn't use the new fields renders byte-identical SVG; bar_color slots into both arms.
+    const baseFill = highlightSet
+      ? (d: PreparedRow) => singleFillFor(d.series)
       : seriesNames.length === 1
-        ? fillFor(seriesNames[0] as string)
-        : TBL.color.blue;
+        ? singleFillFor(seriesNames[0] as string)
+        : barColorOverride ?? TBL.color.blue;
+
+    // `category_colors` (task 7): per-x-category fill override, resolved through the palette.
+    // Single-series scope only (see ChartSpec.category_colors TSDoc) — this whole branch is the
+    // single-series path, so no series-fill precedence question arises. Presence forces a
+    // per-datum fill accessor; named categories get their color, all others fall through to the
+    // base/highlight logic above.
+    const categoryColorMap: Record<string, string> | null = spec.category_colors
+      ? Object.fromEntries(
+          Object.entries(spec.category_colors).map(([k, v]) => [k, resolveColor(v) as string]),
+        )
+      : null;
+
+    const fill = categoryColorMap
+      ? (d: PreparedRow) => {
+          const cat = (d as unknown as Record<string, unknown>)[catField] as string | undefined;
+          const override = cat != null ? categoryColorMap[cat] : undefined;
+          if (override != null) return override;
+          return typeof baseFill === "function" ? baseFill(d) : baseFill;
+        }
+      : baseFill;
 
     overlay.push(
       horizontal

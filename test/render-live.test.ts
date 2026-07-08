@@ -1377,6 +1377,50 @@ describe("mountChart small multiples", () => {
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
   });
+
+  // --- Per-pane HORIZONTAL bars (sectioned): the figure sizes explicit per-column widths
+  //     (asymmetric category gutter → unequal outer widths, one shared inner data width), so the
+  //     live caller must pass the TOTAL grid width and consume the returned columnWidths —
+  //     exactly like shared mode. Guards the caller contract, not just the engine math.
+  const HBAR_SECTIONED_PERPANE_SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "Sectioned per-pane horizontal",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    data: "inline",
+    columns: { x: "cat", value: "value", facet: "facet", section: "sec" },
+    section_order: ["P", "Q"],
+    small_multiples: { columns: 2, mode: "per-pane" },
+  };
+  const HBAR_SECTIONED_ROWS: TidyRow[] = [];
+  for (const [f, base] of [["A", 1], ["B", 2]] as const) {
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Cars", sec: "P", value: String(base) } as TidyRow);
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Food", sec: "P", value: String(base + 1) } as TidyRow);
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Rent", sec: "Q", value: String(base + 2) } as TidyRow);
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Care", sec: "Q", value: String(base + 3) } as TidyRow);
+  }
+
+  it("per-pane sectioned horizontal figure fills the container width with equal data widths", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: HBAR_SECTIONED_PERPANE_SPEC, rows: HBAR_SECTIONED_ROWS, width: 900 });
+    const grid = container.querySelector<HTMLElement>(".figure-grid")!;
+    expect(grid).not.toBeNull();
+    // Explicit px grid template consuming the figure's per-column widths (labeled col 0 wider).
+    const tpl = grid.style.gridTemplateColumns.split(" ").map((s) => Number.parseFloat(s));
+    expect(tpl.length).toBe(2);
+    expect(tpl[0]!).toBeGreaterThan(tpl[1]!);
+    // The row of panes tiles the FULL container width (minus the 16px grid gap) — the old
+    // single-pane-width contract rendered the whole figure at ~half the container.
+    expect(tpl[0]! + tpl[1]!).toBeCloseTo(900 - 16, 0);
+    // Pane SVGs are rendered at those widths, and the inner DATA width is identical across the
+    // row despite the asymmetric gutter (same value → same bar length in both panes).
+    const svgs = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    expect(svgs.length).toBe(2);
+    svgs.forEach((s, i) => expect(Number(s.getAttribute("width"))).toBeCloseTo(tpl[i]!, 0));
+    const dataW = (s: SVGSVGElement): number =>
+      Number(s.getAttribute("width")) - Number(s.dataset.marginLeft) - Number(s.dataset.marginRight);
+    expect(dataW(svgs[1]!)).toBeCloseTo(dataW(svgs[0]!), 3);
+  });
 });
 
 // ---------------------------------------------------------------------------

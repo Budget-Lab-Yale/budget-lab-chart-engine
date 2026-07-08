@@ -7,7 +7,7 @@
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
 import { resolveColumns, SINGLE_SERIES_KEY } from "../spec/columns";
-import { resolveAnnotations } from "../spec/annotations";
+import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
@@ -76,6 +76,12 @@ export interface RenderOptions {
   /** Shared-mode small multiples (vertical bars): force the bottom margin (px) — the figure passes
    *  the MAX across panes so every pane reserves the same space and their baselines align. */
   marginBottom?: number;
+  /** Small multiples: this pane's facet value, used to scope `annotations.xAxis`/`yAxis` markers
+   *  that carry a `facet` key (see `filterAnnotationsByFacet`) — both the y-extent/x-extent
+   *  folding below AND the drawn rule/label in assemblePlot read the filtered set. Absent (single
+   *  chart, or a faceted chart's figure orchestrator omitting it) → every marker renders,
+   *  unchanged from today. */
+  paneFacetValue?: string;
 }
 
 export interface LegendItem {
@@ -288,7 +294,11 @@ export function renderPane(
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
   // little headroom instead of sitting flush against the axis edge.
-  const ann = resolveAnnotations(spec);
+  // Small multiples: scope markers with a `facet` key to THIS pane before anything below reads
+  // `ann` — the extent folding a few lines down (markerYs / yForAxis) must see the FILTERED set
+  // so a marker beyond one pane's own range doesn't widen every pane's domain. Undefined
+  // paneFacetValue (single chart) returns `ann` unchanged (byte-identical).
+  const ann = filterAnnotationsByFacet(resolveAnnotations(spec), opts.paneFacetValue);
 
   // Point callouts: resolve a y for any callout that gives a `series` but omits `y` — snap to that
   // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
@@ -341,7 +351,15 @@ export function renderPane(
     // headroom). An explicit yAxisPolicy.min OPTS OUT of the forced zero — a truncated bar axis
     // (use sparingly; e.g. a level series whose variation is small relative to its magnitude).
     // Reference-line (markers) values are folded into the extent so a marker stays visible.
-    const markerYs = ann.yAxis.map((m) => m.y).filter(Number.isFinite);
+    // Horizontal bars: the VALUE axis is x, not y — annotations.xAxis markers there play the same
+    // role annotations.yAxis markers play for vertical bars (see assemblePlot's horizontal xAxis
+    // marker path), so their numeric `x` folds into this same value extent (mirrors the vertical
+    // yAxis fold below; the `chartType` gate already means this hardDomain IS the value axis
+    // regardless of orientation).
+    const markerYs = [
+      ...ann.yAxis.map((m) => m.y),
+      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
+    ].filter(Number.isFinite);
     includeZero = policy.min == null;
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
@@ -502,6 +520,7 @@ export function renderPane(
     ...(facetOpt ? { facet: facetOpt } : {}),
     ...(opts.hideYAxisLabels ? { hideYAxisLabels: true } : {}),
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),
+    ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
   });
 
   return {

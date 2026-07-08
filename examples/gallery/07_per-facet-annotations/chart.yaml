@@ -1,0 +1,25 @@
+chartType: bar
+title: "Per-facet annotations, vertical (feature test)"
+subtitle: "Change in household resources, by income decile"
+xAxisType: categorical
+columns:
+  x: decile
+  value: value
+  facet: basis
+small_multiples:
+  mode: per-pane
+  columns: 2
+  pane_order:
+    - "% of after-tax income"
+    - "2025 dollars"
+annotations:
+  yAxis:
+    - facet: "% of after-tax income"
+      y: -0.28
+      label: "All households"
+    - facet: "2025 dollars"
+      y: -357
+      label: "All households"
+source: "The Budget Lab"
+note: "Confirm: each pane shows its own labeled reference line at a pane-appropriate height (both read 'All households', at -0.28 in the % pane and -357 in the dollars pane against each pane's OWN scale)."
+data: data.csv

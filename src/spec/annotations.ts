@@ -20,3 +20,24 @@ export function resolveAnnotations(spec: ChartSpec): ResolvedAnnotations {
     points: a?.points ?? [],
   };
 }
+
+/** Small multiples: scope `xAxis`/`yAxis` markers to the pane whose facet value is `facetValue`.
+ *  A marker with no `facet` key always passes through (today's all-panes behavior); a marker
+ *  WITH a `facet` key is kept only when it equals `facetValue`. `bands`/`points` are unaffected
+ *  (out of scope — unchanged, all-panes). `facetValue === undefined` (non-faceted chart, or a
+ *  faceted chart's shared-mode probe called without a pane) returns `resolved` UNCHANGED (same
+ *  reference) so non-faceted rendering stays byte-identical. */
+export function filterAnnotationsByFacet(
+  resolved: ResolvedAnnotations,
+  facetValue: string | undefined,
+): ResolvedAnnotations {
+  if (facetValue === undefined) return resolved;
+  const keep = <T extends { facet?: string }>(list: T[]): T[] =>
+    list.filter((m) => m.facet == null || m.facet === facetValue);
+  return {
+    xAxis: keep(resolved.xAxis),
+    yAxis: keep(resolved.yAxis),
+    bands: resolved.bands,
+    points: resolved.points,
+  };
+}

@@ -26,6 +26,7 @@ const X_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["top", "middle", "bottom"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      facet: { type: "string" },
     },
   },
 } as const;
@@ -61,6 +62,7 @@ const Y_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["left", "middle", "right"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      facet: { type: "string" },
     },
   },
 } as const;
@@ -228,6 +230,8 @@ export const CHART_SPEC_SCHEMA = {
     // Series (the series COLUMN is mapped via `columns.series`)
     series_order: { type: "array", items: { type: "string" } },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
+    bar_color: { type: "string" },
+    category_colors: { type: "object", additionalProperties: { type: "string" } },
     series_styles: {
       type: "object",
       additionalProperties: {

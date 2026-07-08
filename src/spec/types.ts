@@ -29,6 +29,9 @@ export interface XAxisMarker {
   labelDy?: number;
   /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
   labelDx?: number;
+  /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
+   *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 /** A shaded vertical region of the x-axis (e.g. a recession band). `start`/`end` are x values
@@ -68,6 +71,9 @@ export interface YAxisMarker {
   labelDx?: number;
   /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default above. */
   labelDy?: number;
+  /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
+   *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 export interface YAxisPolicy {
@@ -217,12 +223,29 @@ export interface ChartSpec {
   /** Render order; also an inclusion filter when set. */
   series_order?: string[];
   series_colors?: Record<string, ColorRef>;
+  /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
+   *  palette (named token or raw "#hex"). A first-class replacement for the
+   *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are
+   *  set. Ignored on multi-series (grouped) bar charts, where each series keeps its own color.
+   *  With `highlightSeries`, bar_color replaces the BASE color only — highlight dimming still
+   *  applies (a non-highlighted series dims regardless of bar_color). */
+  bar_color?: ColorRef;
+  /** Bar charts, SINGLE-SERIES only (both orientations): per-x-category fill override, e.g. render
+   *  a "Total" category in a distinct color while every other category keeps the base fill (the
+   *  series color, or `bar_color` when set). Values are resolved through the palette; unlisted
+   *  categories are unaffected. Ignored on multi-series (grouped) bar charts, where series fill
+   *  wins for every bar regardless of category. */
+  category_colors?: Record<string, ColorRef>;
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;
   /** Categorical x: render order for the x-axis categories. Listed categories come first in this
    *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
-   *  series_order, this does NOT filter. Ignored off the categorical x-axis. */
+   *  series_order, this does NOT filter. Ignored off the categorical x-axis.
+   *  With `columns.section` set (horizontal bars), section grouping is authoritative for
+   *  CROSS-section order (sections always render contiguously, in `section_order`/encounter
+   *  order) — x_order only reorders categories WITHIN each section; it can never split a
+   *  section's categories apart or reorder the sections themselves. */
   x_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */

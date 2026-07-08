@@ -420,9 +420,17 @@ export function renderFigure(
     // Variable pane widths in per-pane mode: distribute the inner data width by the resolved
     // weights, but EVERY column keeps its own full y-label gutter (independent axes). Absent
     // (equal) ⇒ leave widths undefined so the live grid uses equal `1fr` columns as before.
-    const perPaneWidths = variableWidths
-      ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
-      : undefined;
+    // EXCEPT horizontal bars: the category gutter is asymmetric (pane 0 carries the shared
+    // gutter, col>0 panes only the small label-less margin — see the categoryGutter threading
+    // below), so equal OUTER widths would give col>0 panes a much wider inner DATA width and the
+    // same value would render as visibly different bar lengths across panes. Use the shared-mode
+    // width math (sharedColumnWidths with the category gutter as col 0's left margin) so the
+    // inner data width is IDENTICAL across a row, exactly like the shared branch.
+    const perPaneWidths = isHorizontalBar
+      ? sharedColumnWidths(availW, columns, gridGap, hGutter, colWeights).colWidths
+      : variableWidths
+        ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
+        : undefined;
     // Coordinate x-label rotation/wrap + bottom margin across panes so their baselines align — each
     // pane draws its own x-axis, so a pane with longer/rotated labels would otherwise sit lower.
     // Data width per column: the variable per-pane widths, else the single equal pane width.
@@ -443,9 +451,21 @@ export function renderFigure(
           ...opts,
           height: effHeight,
           pane: true,
+          paneFacetValue: value,
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
+          // Horizontal bars: mirror the shared-mode category-gutter/label suppression (see below)
+          // so a sectioned per-pane facet also reads as one figure — pane 0 carries the section
+          // headers + category labels, other panes in the row keep only their bars + value ticks.
+          // Independent y-domains are unaffected (that's what "per-pane" governs); this only
+          // assumes every pane shares one category axis, same as shared mode always has.
+          ...(isHorizontalBar
+            ? {
+                categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
+                hideCategoryLabels: col > 0,
+              }
+            : {}),
         },
         `p${i}`,
       );
@@ -521,7 +541,12 @@ export function renderFigure(
   let yHi = -Infinity;
   for (const value of paneValues) {
     const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-    const [lo, hi] = renderPane(spec, paneRows, { ...opts, height: effHeight, pane: true }, "probe").yDomain;
+    const [lo, hi] = renderPane(
+      spec,
+      paneRows,
+      { ...opts, height: effHeight, pane: true, paneFacetValue: value },
+      "probe",
+    ).yDomain;
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }
@@ -564,6 +589,7 @@ export function renderFigure(
         ...opts,
         height: effHeight,
         pane: true,
+        paneFacetValue: value,
         yDomain: sharedYDomain,
         width: colWidths[col],
         ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),

@@ -17,11 +17,12 @@ import {
   X_TICK_LABEL_TOP_CLASS,
   X_AXIS_LABEL_CLASS,
   ANNOTATION_LINE_CLASS,
+  X_ANNOTATION_LINE_CLASS,
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
 import { tblColorScale, resolveColor } from "./palette";
-import { resolveAnnotations } from "../spec/annotations";
-import type { ChartSpec, PointCallout } from "../spec/types";
+import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
+import type { ChartSpec, PointCallout, XAxisMarker } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
 
@@ -85,6 +86,10 @@ export interface AssembleOptions {
    *  (byte-identical single-chart + leftmost-pane output). Ignored for horizontal bars (their
    *  value axis runs along x). */
   hideYAxisLabels?: boolean;
+  /** Small multiples: this pane's facet value — scopes `annotations.xAxis`/`yAxis` markers that
+   *  carry a `facet` key to this pane only (see `filterAnnotationsByFacet`). Absent (single
+   *  chart, or a faceted call that omits it) → every marker renders, unchanged from today. */
+  paneFacetValue?: string;
 }
 
 export interface FacetOptions {
@@ -116,6 +121,7 @@ export function assemblePlot({
   marginLeft,
   facet,
   hideYAxisLabels,
+  paneFacetValue,
 }: AssembleOptions): SVGSVGElement {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
   // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
@@ -162,7 +168,10 @@ export function assemblePlot({
   // 0. Shaded x-bands (e.g. recession indicators): vertical regions painted at the very back,
   //    behind gridlines + data. Spans the full y-domain; x edges parsed via the adapter (numeric
   //    / temporal only — markerToX returns null for a categorical band scale).
-  const ann = resolveAnnotations(spec);
+  // Small multiples: scope xAxis/yAxis markers with a `facet` key to THIS pane (bands/points pass
+  // through unaffected). Undefined paneFacetValue (single chart) returns the resolved set
+  // unchanged, so non-faceted output stays byte-identical.
+  const ann = filterAnnotationsByFacet(resolveAnnotations(spec), paneFacetValue);
 
   // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
   // label's px position/width and greedily push overlapping labels onto stacked rows so they don't
@@ -380,20 +389,35 @@ export function assemblePlot({
     }
   }
 
-  // 5. Reference markers (vertical rules, e.g. a treatment date) + optional labels at the top.
-  //    Labels auto-stagger to avoid collisions (an explicit labelDy opts out).
-  ann.xAxis.forEach((m, markerIdx) => {
-    const mx = xOpts.markerToX(m);
-    if (mx == null) return;
+  // Shared xAxis-marker renderer: a vertical rule at `mx` (a plot x-coordinate: number, Date, or
+  // — for the horizontal value-axis path below — a plain value number) + its optional label.
+  // `topDy` is the SVG dy used for a "top" labelPosition (the vertical-chart caller passes the
+  // auto-staggered row; the horizontal-value caller — which has no x-DATA extent to stagger
+  // against — passes the fixed base offset). Used by BOTH: (a) vertical charts' treatment-line
+  // markers (5, below) and (b) horizontal bars' value-axis markers (6a, below) — same color/dash
+  // resolution and labelSide/labelPosition/labelDx/labelDy conventions either way.
+  // `fyOpts` (grouped horizontal bars only — categories live on fy row facets, so an unfaceted
+  // mark repeats per band): `ruleClassName` tags the rule so collapseFacetChromeY can keep one
+  // copy + stretch it to the full plot height (same discipline as the gridlines/zero baseline),
+  // and the label binds to an END fy category (chosen by labelPosition, mirroring the fx-bound
+  // yAxis marker label in 6b) so it renders exactly once.
+  const drawXAxisMarker = (
+    mx: number | Date,
+    m: XAxisMarker,
+    topDy: number,
+    fyOpts?: { ruleClassName: string; labelFy: string | undefined },
+  ): void => {
     const mColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
     marks.push(
       Plot.ruleX([mx], {
         stroke: mColor,
         strokeDasharray: (m.style || "dashed") === "dashed" ? "3 2" : null,
         strokeWidth: m.strokeWidth || 1,
+        ...(fyOpts ? { className: fyOpts.ruleClassName } : {}),
       }),
     );
     if (m.label) {
+      const labelFy = fyOpts?.labelFy;
       // labelSide = which SIDE of the vertical line the label sits (its relation to the line):
       // left → left of the line, middle → centered on it, right → right of it (default).
       const side = m.labelSide ?? "right";
@@ -403,13 +427,14 @@ export function assemblePlot({
       // supplies the vertical dimension (x channel keeps the horizontal). labelDy (+ = UP) nudges it.
       const pos = m.labelPosition ?? "top";
       const vAnchor = pos === "middle" ? "middle" : pos === "bottom" ? "bottom" : "top";
-      // Base SVG dy (+ = down): top uses the auto-stagger row; bottom lifts up off the bottom edge.
-      const baseDy = pos === "top" ? (staggerDy.get(`m${markerIdx}`) ?? 4) : pos === "bottom" ? -6 : 0;
+      // Base SVG dy (+ = down): top uses the caller's row/offset; bottom lifts up off the bottom edge.
+      const baseDy = pos === "top" ? topDy : pos === "bottom" ? -6 : 0;
       const nudge = m.labelDy != null ? -m.labelDy : 0;
       labelMarks.push(
-        Plot.text([{ x: mx, t: m.label }], {
+        Plot.text([{ x: mx, t: m.label, ...(labelFy != null ? { fy: labelFy } : {}) }], {
           x: "x",
           text: "t",
+          ...(labelFy != null ? { fy: "fy" } : {}),
           frameAnchor: vAnchor,
           textAnchor: anchor,
           dx: m.labelDx != null ? m.labelDx : anchor === "end" ? -4 : anchor === "middle" ? 0 : 4,
@@ -421,10 +446,62 @@ export function assemblePlot({
         }),
       );
     }
-  });
+  };
+
+  // 5. Reference markers (vertical rules, e.g. a treatment date) + optional labels at the top.
+  //    Labels auto-stagger to avoid collisions (an explicit labelDy opts out). VERTICAL charts
+  //    only: `xOpts.markerToX` runs the marker's `x` through the x-axis adapter, which for
+  //    horizontal bars is the CATEGORICAL y-band adapter (always returns null for a marker's raw
+  //    value — it isn't one of the bar categories) — so this loop always no-op'd there anyway.
+  //    Made explicit here so the horizontal VALUE-axis path (6a, below) is the only one that
+  //    fires for horizontal bars.
+  if (!horizontal) {
+    ann.xAxis.forEach((m, markerIdx) => {
+      const mx = xOpts.markerToX(m);
+      if (mx == null) return;
+      drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4);
+    });
+  }
 
   // 6. Line overlay (on top).
   marks.push(...layers.overlay);
+
+  // 6a. HORIZONTAL bars: value-axis reference line(s) — a vertical rule drawn at a raw numeric
+  //     `x` against the VALUE scale (which runs along x here; see `plotOpts.x` below). This is
+  //     the horizontal analog of the vertical-chart marker above (reuses the same drawXAxisMarker
+  //     — same color/dash resolution and label placement conventions), drawn AFTER the bars (like
+  //     the yAxis "Total" reference line below does for vertical bars) so it stays visible over
+  //     them. NEW capability: until now `annotations.xAxis` silently no-op'd on horizontal bars
+  //     (the loop above, via the categorical y-band adapter's markerToX). Does NOT participate in
+  //     the auto-stagger system above (that estimates label px from the x-DATA extent, which is
+  //     meaningless on the value-axis coordinate space) — pass an explicit `labelDy` per marker to
+  //     separate labels that would otherwise collide.
+  if (horizontal) {
+    // Grouped horizontal bars (categories on fy row facets): tag the rule per marker so the fy
+    // chrome collapse keeps ONE copy stretched to the full plot height, and bind the label to the
+    // fy category matching its labelPosition (top → first band, middle → middle band, bottom →
+    // last band) so it renders once. Single-band horizontal charts pass no fyOpts (untagged,
+    // unfaceted — byte-identical to a plain mark).
+    const fyDomain = fyFaceted ? (layers.fyScaleOpts?.domain as string[] | undefined) : undefined;
+    ann.xAxis.forEach((m, i) => {
+      const vx = Number(m.x);
+      if (!Number.isFinite(vx)) return;
+      let fyOpts: { ruleClassName: string; labelFy: string | undefined } | undefined;
+      if (fyFaceted) {
+        const pos = m.labelPosition ?? "top";
+        const labelFy =
+          fyDomain && fyDomain.length
+            ? pos === "bottom"
+              ? fyDomain[fyDomain.length - 1]
+              : pos === "middle"
+                ? fyDomain[Math.floor(fyDomain.length / 2)]
+                : fyDomain[0]
+            : undefined;
+        fyOpts = { ruleClassName: `${X_ANNOTATION_LINE_CLASS}-${i}`, labelFy };
+      }
+      drawXAxisMarker(vx, m, 4, fyOpts);
+    });
+  }
 
   // 6b. Horizontal reference lines (yAxisPolicy.markers): drawn over the data, each with an
   //     optional label. By DEFAULT lines + matched labels take categorical colors starting at
