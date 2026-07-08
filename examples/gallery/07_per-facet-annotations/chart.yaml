@@ -20,6 +20,7 @@ annotations:
     - facet: "2025 dollars"
       y: -357
       label: "All households"
+      labelPosition: left
 source: "The Budget Lab"
 note: "Confirm: each pane shows its own labeled reference line at a pane-appropriate height (both read 'All households', at -0.28 in the % pane and -357 in the dollars pane against each pane's OWN scale)."
 data: data.csv

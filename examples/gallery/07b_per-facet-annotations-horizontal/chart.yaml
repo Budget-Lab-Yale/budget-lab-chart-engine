@@ -18,9 +18,11 @@ annotations:
     - facet: Pre-substitution
       x: "0.33"
       label: "All items"
+      labelPosition: bottom
     - facet: Post-substitution
       x: "0.26"
       label: "All items"
+      labelPosition: bottom
 source: "The Budget Lab"
 note: "Confirm: each pane shows its own labeled vertical value line ('All items' at 0.33 in the Pre pane, 0.26 in the Post pane); the line is dashed and spans the pane's full height."
 data: data.csv
