@@ -18,7 +18,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
-import { inferUnitsFromSubtitle } from "./util";
+import { inferUnitsFromSubtitle, isTruthyFlag } from "./util";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -242,6 +242,9 @@ export function renderPane(
       // column IS the series column (redundant encoding) this simply mirrors `series`.
       if (cols.shape) row._shape = r[cols.shape] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
+      if (spec.projected_field) {
+        row._projected = isTruthyFlag(r[spec.projected_field]);
+      }
       (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {
@@ -458,6 +461,9 @@ export function renderPane(
     seriesNames,
     plotWidth,
     plotHeight,
+    // Final resolved y-domain (post auto/hard/bar-extent/shared-mode override) — the area
+    // builder's projected-range veil needs it to span the full plot height.
+    yDomain,
     // Truncated bar axis (y-domain excludes 0): clip bars so they don't overflow below the plot.
     ...((chartType === "bar" || chartType === "stacked") && yDomain[0] > 0 ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
@@ -545,6 +551,7 @@ export function buildLegendItems(
   colors: Map<string, string>,
   layers: MarkLayers,
 ): LegendItem[] | null {
+  if (spec.legend === false) return null;
   const chartType = spec.chartType;
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
@@ -630,6 +637,7 @@ export function buildShapeLegendItems(
   spec: ChartSpec,
   layers: MarkLayers,
 ): ShapeLegendItem[] | null {
+  if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
   const shapeLabels = spec.shape_labels ?? {};
   return layers.shapeNames.map((shape, i) => ({

@@ -51,6 +51,37 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   return null;
 }
 
+/** `title_selectors` cross-field rules the JSON schema can't express: every selector key must
+ *  appear as a literal `{key}` token in the title (else the control has nowhere to render), and
+ *  `default` (when set) must name one of that selector's own option ids. Duplicate option ids
+ *  are also rejected here (ajv has no cross-item uniqueness keyword short of a custom one).
+ *  Non-empty option id / options array are enforced structurally (schema.ts TITLE_SELECTOR). */
+function titleSelectorsError(spec: {
+  title?: unknown;
+  title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }>;
+}): string | null {
+  const selectors = spec.title_selectors;
+  if (!selectors) return null;
+  const title = typeof spec.title === "string" ? spec.title : "";
+  for (const [key, selector] of Object.entries(selectors)) {
+    if (!title.includes(`{${key}}`)) {
+      return `title_selectors.${key}: title must contain the token "{${key}}" (got ${JSON.stringify(title)})`;
+    }
+    const ids = new Set<string>();
+    for (const opt of selector.options ?? []) {
+      const id = opt.id ?? "";
+      if (ids.has(id)) {
+        return `title_selectors.${key}: duplicate option id ${JSON.stringify(id)}`;
+      }
+      ids.add(id);
+    }
+    if (selector.default != null && !ids.has(selector.default)) {
+      return `title_selectors.${key}: default ${JSON.stringify(selector.default)} is not one of the option ids (${JSON.stringify([...ids])})`;
+    }
+  }
+  return null;
+}
+
 /** Faceted horizontal `bar` charts ARE supported (shared category gutter + value axis; see
  *  figure.ts / CONFIG-SPEC). Horizontal `stacked` small-multiples are not built yet (the stacked
  *  net-callout chrome isn't wired through the faceted-horizontal layout), so reject only that combo
@@ -80,6 +111,8 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; small_multiples?: unknown },
   );
   if (fhErr) return { valid: false, errors: [fhErr] };
+  const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
+  if (tsErr) return { valid: false, errors: [tsErr] };
   return { valid: true, errors: [] };
 }
 
@@ -128,6 +161,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   ];
   if (cols.series) requiredRoles.push(["series", cols.series]);
   if (cols.shape) requiredRoles.push(["shape", cols.shape]);
+  if (spec.projected_field) requiredRoles.push(["projected_field", spec.projected_field]);
   if (spec.small_multiples) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);

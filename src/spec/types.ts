@@ -12,9 +12,27 @@ export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
 
+/** Per-annotation number formatting for a `{value}` token substituted into an annotation's
+ *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
+ *  chart's value-axis tick format (yAxis markers, points) or the raw x string (xAxis markers). */
+export interface ValueFormat {
+  /** Fixed decimal places. Default 2. */
+  decimals?: number;
+  /** Text prepended to the formatted number. */
+  prefix?: string;
+  /** Text appended to the formatted number. */
+  suffix?: string;
+}
+
 export interface XAxisMarker {
   x: string;
+  /** May contain a literal `{value}` token, replaced with this marker's own `x` — formatted
+   *  numerically via `value_format` when present AND `x` parses as a number, else the raw
+   *  string. */
   label?: string;
+  /** Formatting for the `{value}` token in `label`. Only applies when `x` parses as a number;
+   *  absent (or `x` non-numeric) → the raw `x` string is substituted. */
+  value_format?: ValueFormat;
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
@@ -57,7 +75,12 @@ export interface XAxisPolicy {
 /** A horizontal reference line at a fixed y value (e.g. a target or assumption line). */
 export interface YAxisMarker {
   y: number;
+  /** May contain a literal `{value}` token, replaced with this marker's own `y`, formatted via
+   *  `value_format` — or, when absent, the chart's value-axis tick format. */
   label?: string;
+  /** Formatting for the `{value}` token in `label`. Absent → falls back to the chart's
+   *  value-axis tick format. */
+  value_format?: ValueFormat;
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
@@ -94,7 +117,14 @@ export interface PointCallout {
   x: string;
   y?: number;
   series?: string;
+  /** May contain a literal `{value}` token, replaced with this callout's resolved `y` (the
+   *  explicit value, or — when `y` is omitted and `series` snaps to a series — the snapped
+   *  value), formatted via `value_format` — or, when absent, the chart's value-axis tick
+   *  format. */
   label: string;
+  /** Formatting for the `{value}` token in `label`. Absent → falls back to the chart's
+   *  value-axis tick format. */
+  value_format?: ValueFormat;
   color?: ColorRef;
   /** Horizontal nudge (px, signed: + = right) of the label from the point. */
   dx?: number;
@@ -184,6 +214,22 @@ export interface ColumnMap {
   section?: string;
 }
 
+/** One option in an inline title selector's dropdown. `label` defaults to `id` when absent. */
+export interface TitleSelectorOption {
+  id: string;
+  label?: string;
+}
+
+/** An engine-owned interactive single-select control bound to a `{key}` token in `title`. See
+ *  `src/spec/title.ts` for token parsing/resolution and `src/engine/render-live.ts` for the
+ *  live `<select>` wiring. */
+export interface TitleSelector {
+  options: TitleSelectorOption[];
+  /** Initial active option id. Must be one of `options[].id`. Falls back to the first option
+   *  when omitted. */
+  default?: string;
+}
+
 export interface ChartSpec {
   chartType: ChartType;
 
@@ -194,6 +240,11 @@ export interface ChartSpec {
   // (The eyebrow / figure number is NOT a spec field — it's a property of the article a chart
   //  is embedded in, supplied at embed time via MountOptions.eyebrow / `render --eyebrow`.)
   title: string;
+  /** Interactive dropdowns embedded inline in `title` via a `{key}` token — e.g.
+   *  `title: "GDP by {dimension}"` with `title_selectors: { dimension: {...} }`. Every key here
+   *  must appear as `{key}` in `title` (validated in spec/validate.ts). Absent/empty ⇒ the title
+   *  renders as plain text, byte-identical to before this field existed. */
+  title_selectors?: Record<string, TitleSelector>;
   subtitle?: string;
   source?: string;
   note?: string;
@@ -274,6 +325,23 @@ export interface ChartSpec {
   /** Line charts: draw a marker (dot) at each data point. Default false. */
   points?: boolean;
 
+  /** Data column whose truthy value (`1`/`true`/`yes`, case-insensitive, trimmed) flags a row as
+   *  "projected" (forecast/estimated) rather than actual/historical. LINE charts draw the
+   *  flagged run(s) of a series dashed (same color/width), connecting continuously to the
+   *  adjacent actual points; a series may have multiple disjoint projected runs. AREA (stacked)
+   *  charts fade the fill over x-ranges where EVERY in-scope series is flagged projected
+   *  (conservative — a stack can't express partial-series fading). Absent ⇒ no projected styling
+   *  (byte-identical output). A series ALSO listed in `series_styles[..].dashed` (whole-series
+   *  dashed) is NOT split by this field — the whole-series dashed override wins; see
+   *  marks/line.ts for the exact gating. */
+  projected_field?: string;
+  /** Overrides the default projected-run styling. Only consulted when `projected_field` is set.
+   *  `dashed` (line charts, default true): whether the projected run renders dashed at all —
+   *  `false` renders it solid (same as actual), i.e. opts out of the visual distinction while
+   *  keeping the field wired. `fillOpacity` (area charts, default 0.2): the effective fill
+   *  opacity of the projected x-range's white veil overlay. */
+  projected_style?: { dashed?: boolean; fillOpacity?: number };
+
   // Bar / stacked bar
   /** Chart orientation; defaults to "vertical" (value axis is Y). */
   orientation?: "vertical" | "horizontal";
@@ -308,6 +376,11 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
    */
   legendPosition?: "top" | "right";
+  /** Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping
+   *  multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently
+   *  unavailable, since it is driven through the legend. Default true (legend shown per the
+   *  usual ≥2-series / style-override rules). */
+  legend?: boolean;
 
   // Small multiples (multi-panel); per-pane base chart type stays `chartType`.
   small_multiples?: SmallMultiplesConfig;

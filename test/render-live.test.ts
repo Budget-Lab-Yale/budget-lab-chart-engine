@@ -76,6 +76,21 @@ describe("mountChart", () => {
     expect(container.querySelector(".tbl-legend")).not.toBeNull();
   });
 
+  it("legend:false hides the legend for a multi-series chart while keeping distinct series colors", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: { ...MULTI_SERIES_SPEC, legend: false }, rows: MULTI_SERIES_ROWS });
+    // No legend chrome at all.
+    expect(container.querySelector(".tbl-legend")).toBeNull();
+    // Colors/interactivity otherwise unchanged: each series' <path> still carries its own stroke.
+    const paths = container.querySelectorAll<SVGPathElement>('svg g[aria-label="line"] path[data-series]');
+    expect(paths.length).toBe(2);
+    const strokeA = [...paths].find((p) => p.getAttribute("data-series") === "A")?.getAttribute("stroke");
+    const strokeB = [...paths].find((p) => p.getAttribute("data-series") === "B")?.getAttribute("stroke");
+    expect(strokeA).toBeTruthy();
+    expect(strokeB).toBeTruthy();
+    expect(strokeA).not.toBe(strokeB);
+  });
+
   it("renders the y-axis title caption when y_axis_title is set", () => {
     const container = document.createElement("div");
     mountChart(container, {
@@ -534,6 +549,40 @@ describe("right-side legend layout", () => {
     const rightSlot = container.querySelector(".figure-legend-slot--right")!;
     const buttons = rightSlot.querySelectorAll("button.tbl-legend-item[data-series]");
     expect(buttons.length).toBe(5); // 5 interactive series
+  });
+
+  it("legend:false + explicit legendPosition:'right' reclaims the legend column (full-width chart)", () => {
+    const svgWidth = (c: HTMLElement) => Number(c.querySelector("svg.tblchart")?.getAttribute("width"));
+    // Baseline: the right legend reserves its 160+16px column, narrowing the chart.
+    const shown = document.createElement("div");
+    mountChart(shown, { spec: EXPLICIT_RIGHT_SPEC, rows: EXPLICIT_RIGHT_ROWS, width: 800 });
+    expect(svgWidth(shown)).toBe(800 - 160 - 16);
+    // With legend:false no legend will render, so no column may be reserved: full width.
+    const hidden = document.createElement("div");
+    mountChart(hidden, {
+      spec: { ...EXPLICIT_RIGHT_SPEC, legend: false },
+      rows: EXPLICIT_RIGHT_ROWS,
+      width: 800,
+    });
+    expect(hidden.querySelector(".tbl-legend")).toBeNull();
+    expect(hidden.querySelector(".figure-body--legend-right")).toBeNull();
+    expect(svgWidth(hidden)).toBe(800);
+  });
+
+  it("legend:false + default-right rule (stacked ≥5 series) also reclaims the legend column", () => {
+    const svgWidth = (c: HTMLElement) => Number(c.querySelector("svg.tblchart")?.getAttribute("width"));
+    const shown = document.createElement("div");
+    mountChart(shown, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    expect(svgWidth(shown)).toBe(800 - 160 - 16);
+    const hidden = document.createElement("div");
+    mountChart(hidden, {
+      spec: { ...FIVE_SERIES_SPEC, legend: false },
+      rows: FIVE_SERIES_ROWS,
+      width: 800,
+    });
+    expect(hidden.querySelector(".tbl-legend")).toBeNull();
+    expect(hidden.querySelector(".figure-body--legend-right")).toBeNull();
+    expect(svgWidth(hidden)).toBe(800);
   });
 });
 
@@ -1513,6 +1562,17 @@ describe("mountChart point charts", () => {
     expect(container.querySelectorAll(".tbl-legend-item[data-shape]").length).toBe(2);
     // Color group rows carry data-series.
     expect(container.querySelectorAll(".tbl-legend-item[data-series]").length).toBe(2);
+  });
+
+  it("legend:false suppresses the shape legend too (one flag kills all legend chrome)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: { ...SCATTER_SPEC, legend: false }, rows: SCATTER_ROWS, width: 720 });
+    expect(container.querySelector(".tbl-legend")).toBeNull();
+    expect(container.querySelector(".tbl-legend-group")).toBeNull();
+    // Markers still render and are still tagged (coloring/shape unaffected).
+    const markers = container.querySelectorAll('g[aria-label="dot"] path[data-series]');
+    expect(markers.length).toBe(4);
+    expect(container.querySelectorAll('g[aria-label="dot"] path[data-shape]').length).toBe(4);
   });
 
   it("scatter markers carry data-shape so the shape legend can dim them", () => {

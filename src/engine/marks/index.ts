@@ -38,6 +38,10 @@ export interface PreparedRow {
   /** Small-multiples (shared mode): the pane's grid ROW index as a String, bound to Plot's
    *  `fy` facet channel. */
   _fyRow?: string;
+  /** Set when `spec.projected_field` is configured: true when this row's flag column parsed
+   *  truthy (`1`/`true`/`yes`, case-insensitive, trimmed). Absent when the field isn't
+   *  configured. Drives the line dashed-run split (marks/projected.ts) and the area fade veil. */
+  _projected?: boolean;
 }
 
 export interface MarkContext {
@@ -90,6 +94,11 @@ export interface MarkContext {
    *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
    *  via horizontalLeftGutter (single-chart unchanged). */
   categoryGutter?: number;
+  /** The pane's final computed y-domain (post auto/hard/bar-extent resolution, or the forced
+   *  shared-mode override) — the SAME value assemblePlot uses for the value axis. The area
+   *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =
+   *  yDomain) without recomputing the axis. Other builders may ignore it. */
+  yDomain?: [number, number];
 }
 
 export interface MarkLayers {

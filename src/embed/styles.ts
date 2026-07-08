@@ -81,6 +81,37 @@ body {
   color: var(--tbl-text-muted);
 }
 
+/* Inline title selector (spec title_selectors): a native <select> embedded in the title text.
+   Inherits the title's type (font/size/weight/line-height) so it reads as part of the sentence;
+   the accent color + dotted underline + small caret mark it as interactive. appearance:none
+   drops the platform chrome (the caret is our own, drawn as an inline SVG background). */
+.figure-title-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  padding: 0 14px 0 0;
+  margin: 0;
+  background-color: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  color: var(--tbl-blue);
+  border-bottom: 2px dotted currentColor;
+  border-radius: 0;
+  cursor: pointer;
+  /* Small caret, right-aligned inside the reserved 14px right padding. The stroke is a
+     hardcoded #0072B2 that must track --tbl-blue — var() cannot appear inside a data-URI. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%230072B2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right center;
+}
+.figure-title-select:focus-visible {
+  outline: 2px solid var(--tbl-blue);
+  outline-offset: 2px;
+}
+
 /* =========================================================================
  * Legend slot + canvas
  * ========================================================================= */

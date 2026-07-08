@@ -116,6 +116,40 @@ describe("validateSpec (structural)", () => {
     expect(b.valid).toBe(true);
   });
 
+  it("accepts value_format on xAxis/yAxis markers and points callouts", () => {
+    const r = validateSpec({
+      ...VALID,
+      annotations: {
+        xAxis: [{ x: "2021", label: "X ({value})", value_format: { decimals: 1 } }],
+        yAxis: [{ y: 1, label: "Y ({value})", value_format: { prefix: "$", suffix: "M" } }],
+        points: [{ x: "2021", label: "P ({value})", value_format: {} }],
+      },
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects an unknown key inside value_format", () => {
+    const r = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y", value_format: { bogusKey: true } }] },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogusKey/);
+  });
+
+  it("rejects out-of-range value_format.decimals (would throw in toFixed at render time)", () => {
+    const neg = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y ({value})", value_format: { decimals: -1 } }] },
+    });
+    expect(neg.valid).toBe(false);
+    const huge = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y ({value})", value_format: { decimals: 200 } }] },
+    });
+    expect(huge.valid).toBe(false);
+  });
+
   it("rejects a band missing start/end and a y-marker missing y", () => {
     const r1 = validateSpec({
       chartType: "line", title: "x", xAxisType: "numeric", data: "d",
@@ -190,6 +224,22 @@ describe("validateSpec (structural)", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts `legend: false` (hides the legend, colors/tooltips unaffected)", () => {
+    const r = validateSpec({ ...VALID, series_order: ["a", "b"], legend: false });
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts `legend: true` (explicit default)", () => {
+    const r = validateSpec({ ...VALID, series_order: ["a", "b"], legend: true });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects a non-boolean `legend` value", () => {
+    const r = validateSpec({ ...VALID, legend: "no" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/legend/);
+  });
+
   it("accepts a stacked spec with a barStack block", () => {
     const r = validateSpec({
       chartType: "stacked",
@@ -222,6 +272,86 @@ describe("validateSpec (structural)", () => {
     const r = validateSpec({ ...VALID, orientation: "diagonal" });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/vertical, horizontal/);
+  });
+});
+
+describe("title_selectors", () => {
+  const withSelector = (overrides: Record<string, unknown> = {}) => ({
+    ...VALID,
+    title: "GDP by {dimension}",
+    title_selectors: {
+      dimension: {
+        options: [
+          { id: "sector", label: "Sector" },
+          { id: "country", label: "Country" },
+        ],
+        default: "sector",
+        ...overrides,
+      },
+    },
+  });
+
+  it("accepts a happy-path selector whose key appears as a token in the title", () => {
+    const r = validateSpec(withSelector());
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an additional unknown property on a selector (structural)", () => {
+    const r = validateSpec(withSelector({ bogus: true }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogus/);
+  });
+
+  it("rejects an option with an empty id (structural)", () => {
+    const r = validateSpec(withSelector({ options: [{ id: "" }] }));
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects empty options array (structural)", () => {
+    const r = validateSpec(withSelector({ options: [] }));
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects a title_selectors key that never appears as {key} in the title", () => {
+    const spec = {
+      ...VALID,
+      title: "GDP over time",
+      title_selectors: {
+        dimension: { options: [{ id: "sector" }], default: "sector" },
+      },
+    };
+    const r = validateSpec(spec);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/dimension/);
+    expect(r.errors.join("\n")).toMatch(/\{dimension\}/);
+  });
+
+  it("rejects a default that is not one of the option ids", () => {
+    const r = validateSpec(withSelector({ default: "region" }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/default/);
+  });
+
+  it("rejects duplicate option ids", () => {
+    const r = validateSpec(
+      withSelector({
+        options: [
+          { id: "sector", label: "Sector" },
+          { id: "sector", label: "Also Sector" },
+        ],
+      }),
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/duplicate/i);
+  });
+
+  it("rejects a selector key outside the token character set (could never match a {token})", () => {
+    const r = validateSpec({
+      ...VALID,
+      title: "GDP by {my key}",
+      title_selectors: { "my key": { options: [{ id: "a" }] } },
+    });
+    expect(r.valid).toBe(false);
   });
 });
 

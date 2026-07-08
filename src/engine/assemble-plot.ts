@@ -21,7 +21,7 @@ import {
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
 import { tblColorScale, resolveColor } from "./palette";
-import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
+import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
 import type { ChartSpec, PointCallout, XAxisMarker } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
@@ -173,6 +173,31 @@ export function assemblePlot({
   // unchanged, so non-faceted output stays byte-identical.
   const ann = filterAnnotationsByFacet(resolveAnnotations(spec), paneFacetValue);
 
+  // Substitute a `{value}` token in yAxis/xAxis/points labels with the annotation's own
+  // coordinate value (per-annotation `value_format`, else the chart's y-tick format) BEFORE
+  // anything below reads `.label` — both the auto-stagger geometry (which estimates label px
+  // width from `label.length`) and the drawn text must see the SAME (substituted) string, or
+  // the stagger would size its collision boxes from the short literal token instead of the
+  // (usually longer) rendered number. Labels without the token are returned unchanged, so
+  // charts that don't use it get byte-identical output.
+  const yTickFallbackFmt = makeTickFormatter(yTicks, units);
+  const yAxisAnn = ann.yAxis.map((m) =>
+    m.label ? { ...m, label: substituteValueToken(m.label, m.y, m.value_format, yTickFallbackFmt) } : m,
+  );
+  const xAxisAnn = ann.xAxis.map((m) => {
+    if (!m.label) return m;
+    const xNum = Number(m.x);
+    // Numerically formatted only when value_format is given AND x parses as a number;
+    // otherwise the raw x string is substituted (dates/quarters/categories, or no format).
+    const fmt = m.value_format != null && Number.isFinite(xNum) ? m.value_format : undefined;
+    return { ...m, label: substituteValueToken(m.label, xNum, fmt, () => m.x) };
+  });
+  const pointsAnn = (points ?? ann.points).map((p) =>
+    Number.isFinite(p.y as number)
+      ? { ...p, label: substituteValueToken(p.label, p.y as number, p.value_format, yTickFallbackFmt) }
+      : p,
+  );
+
   // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
   // label's px position/width and greedily push overlapping labels onto stacked rows so they don't
   // collide. Deterministic (no layout/getBBox), so it applies uniformly to live HTML, PNG, and SSR.
@@ -204,7 +229,7 @@ export function assemblePlot({
     // Vertical scale (needs height) → the stagger row each fixed y-marker label lands in.
     const innerHForRows = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
     if (innerHForRows != null && innerHForRows > 0 && yDomain[1] > yDomain[0]) {
-      for (const m of ann.yAxis) {
+      for (const m of yAxisAnn) {
         if (!m.label) continue;
         const py = TBL_MARGIN_TOP + ((yDomain[1] - m.y) / (yDomain[1] - yDomain[0])) * innerHForRows;
         // Applied SVG dy = labelSide base (top -7 / middle 0 / bottom +6) minus labelDy (+ = UP).
@@ -234,7 +259,7 @@ export function assemblePlot({
       const w = b.label.length * LABEL_CHAR_PX;
       labels.push({ id: `b${i}`, iv: [px + 6, px + 6 + w] });
     });
-    ann.xAxis.forEach((m, i) => {
+    xAxisAnn.forEach((m, i) => {
       // Only "top" labels live in the top band and auto-stagger; middle/bottom sit elsewhere.
       if (!m.label || (m.labelPosition ?? "top") !== "top") return;
       const px = toPx(xOpts.markerToX(m));
@@ -456,7 +481,7 @@ export function assemblePlot({
   //    Made explicit here so the horizontal VALUE-axis path (6a, below) is the only one that
   //    fires for horizontal bars.
   if (!horizontal) {
-    ann.xAxis.forEach((m, markerIdx) => {
+    xAxisAnn.forEach((m, markerIdx) => {
       const mx = xOpts.markerToX(m);
       if (mx == null) return;
       drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4);
@@ -483,7 +508,7 @@ export function assemblePlot({
     // last band) so it renders once. Single-band horizontal charts pass no fyOpts (untagged,
     // unfaceted — byte-identical to a plain mark).
     const fyDomain = fyFaceted ? (layers.fyScaleOpts?.domain as string[] | undefined) : undefined;
-    ann.xAxis.forEach((m, i) => {
+    xAxisAnn.forEach((m, i) => {
       const vx = Number(m.x);
       if (!Number.isFinite(vx)) return;
       let fyOpts: { ruleClassName: string; labelFy: string | undefined } | undefined;
@@ -507,7 +532,7 @@ export function assemblePlot({
   //     optional label. By DEFAULT lines + matched labels take categorical colors starting at
   //     amber (skipping the blue cat-1 slot, which data series usually use); an explicit
   //     marker.color overrides. The label color always matches its line.
-  const markerList = ann.yAxis;
+  const markerList = yAxisAnn;
   // +1 so index 0 (blue) is skipped → markers start at amber, then violet, green, …
   const markerPalette = tblColorScale(markerList.length + 1);
   markerList.forEach((m, i) => {
@@ -576,7 +601,7 @@ export function assemblePlot({
   //     lands exactly on the point. The arrowhead marks the point (no separate dot).
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  for (const p of points ?? ann.points) {
+  for (const p of pointsAnn) {
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
