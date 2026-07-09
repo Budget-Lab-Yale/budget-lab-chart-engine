@@ -25,11 +25,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Fixed — bars
 
-- **Inline-selector color accent now recolors no-series bar charts.** When a colored
-  `title_selectors` option is active, a bar chart with no `columns.series` (colored via
-  `bar_color`/default) now tints its bars to the option's color — matching the tinted selector
-  label — the bar analogue of the single-series line recolor. The accent wins over `bar_color`;
-  `category_colors` still overrides per-category. Multi-series bars are unchanged.
+- **Inline-selector color accent now recolors no-series bar charts — standalone and faceted.**
+  When a colored `title_selectors` option is active, a bar chart with no `columns.series` (colored
+  via `bar_color`/default) now tints its bars to the option's color — matching the tinted selector
+  label — the bar analogue of the single-series line recolor. This applies to standalone charts
+  and to every pane of a `small_multiples` figure (recoloring live on selection change, and in PNG
+  export). The accent wins over `bar_color`; `category_colors` still overrides per-category.
+  Multi-series bars are unchanged.
 - **Single-facet small multiples use the bar-end pill, not the legacy tooltip.** A
   `small_multiples` bar/stacked chart whose facet resolves to one value now hovers with the shade
   band + bar-end value pill (like a standalone chart) instead of falling back to the floating

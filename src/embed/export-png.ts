@@ -212,8 +212,8 @@ export function buildExportSvg(
 
   // Color accent feed (AILMT parity): resolve the same accent color the live single-chart mount
   // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
-  // `renderFigure` (small multiples) never receives this — see TitleSelectorWiring.afterChange in
-  // render-live.ts for why a figure grid has no single accent target.
+  // `renderFigure` (small multiples) also receives it, so a faceted chart's per-pane bars adopt the
+  // active option's accent in the export just as they do live (see mountFigure in render-live.ts).
   const effectiveSelections = opts.selections ?? resolveSelections(spec);
   const rawAccent = spec.title_selectors
     ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
@@ -293,8 +293,8 @@ export function buildExportSvg(
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
     const useGridW = isShared || isHorizontalBarFig;
     const fig = useGridW
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols })
-      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) })
+      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
     // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
     const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
