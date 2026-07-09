@@ -153,6 +153,60 @@ describe("collapsible groups — mount interactivity", () => {
     mountTable(container, { spec: { ...SPEC, collapsible: undefined }, rows: ROWS });
     expect(container.querySelector(".tbl-table-collapse-all")).toBeNull();
   });
+
+  it("renders the collapse-all control in the stub-header corner cell by default (not the footer)", () => {
+    const container = document.createElement("div");
+    mountTable(container, { spec: SPEC, rows: ROWS });
+    const allBtn = container.querySelector(".tbl-table-collapse-all") as HTMLButtonElement;
+    expect(allBtn).not.toBeNull();
+    // Lives inside the top-left corner cell, above the stub.
+    expect(allBtn.closest("th.tbl-table-stub-header")).not.toBeNull();
+    // Not in the download action row, and not carrying the download-button chrome class.
+    expect(allBtn.closest(".figure-downloads")).toBeNull();
+    expect(allBtn.classList.contains("figure-download-btn")).toBe(false);
+    // Data/Image downloads stay in the footer.
+    const downloads = container.querySelector(".figure-downloads")!;
+    expect(downloads.querySelector(".tbl-table-collapse-all")).toBeNull();
+    expect(downloads.querySelectorAll(".figure-download-btn").length).toBeGreaterThan(0);
+  });
+
+  it("renders the collapse-all control in the footer when control: 'footer'", () => {
+    const container = document.createElement("div");
+    mountTable(container, { spec: { ...SPEC, collapsible: { default: "expanded", control: "footer" } }, rows: ROWS });
+    const allBtn = container.querySelector(".tbl-table-collapse-all") as HTMLButtonElement;
+    expect(allBtn).not.toBeNull();
+    expect(allBtn.closest(".figure-downloads")).not.toBeNull();
+    expect(allBtn.closest("th.tbl-table-stub-header")).toBeNull();
+  });
+
+  it("keeps the corner control working after a simulated resize re-render (re-parented into the fresh corner)", () => {
+    let roCallback: (() => void) | undefined;
+    class FakeResizeObserver {
+      constructor(cb: () => void) { roCallback = cb; }
+      observe(): void {}
+      disconnect(): void {}
+    }
+    (globalThis as any).ResizeObserver = FakeResizeObserver;
+    try {
+      const container = document.createElement("div");
+      mountTable(container, { spec: SPEC, rows: ROWS });
+      const card = container.querySelector(".figure-card") as HTMLElement;
+      Object.defineProperty(card, "clientWidth", { value: 500, configurable: true });
+      roCallback!();
+
+      // Exactly one control, still in the fresh corner, still functional.
+      const all = container.querySelectorAll(".tbl-table-collapse-all");
+      expect(all.length).toBe(1);
+      const allBtn = all[0] as HTMLButtonElement;
+      expect(allBtn.closest("th.tbl-table-stub-header")).not.toBeNull();
+      allBtn.click();
+      const table = container.querySelector("table.tbl-table") as HTMLTableElement;
+      const dataRows = Array.from(table.querySelectorAll("tbody tr:not(.tbl-table-group)")) as HTMLTableRowElement[];
+      expect(dataRows.every((tr) => tr.hidden)).toBe(true);
+    } finally {
+      delete (globalThis as any).ResizeObserver;
+    }
+  });
 });
 
 describe("collapsible groups — persists across the ResizeObserver re-render", () => {

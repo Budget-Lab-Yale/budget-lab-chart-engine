@@ -928,8 +928,32 @@ tr.tbl-table-group td {
 /* Rows hidden by a collapsed group use the hidden attribute; enforce display:none in case a
    display rule elsewhere would otherwise resurrect them. */
 .tbl-table tr[hidden] { display: none; }
-/* Expand/collapse-all: shares .figure-download-btn chrome (border, hover) via its class list;
-   only the marker class is needed for tests/tools to find it. */
+/* Expand/collapse-all control. Marker class .tbl-table-collapse-all is always present (tests/tools
+   find the control by it). Placement chrome is added by the caller: in the footer action row it
+   takes .figure-download-btn; in the stub-header corner (default) it takes the compact corner
+   chrome below — a small muted text button seated at the bottom-left of the corner cell (the
+   corner <th>'s vertical-align:bottom + text-align:left do the seating, so on a multi-tier header
+   it aligns to the leaf header row), beside the carets it toggles. */
+.tbl-table-collapse-all-corner {
+  appearance: none;
+  display: inline-block;
+  font: var(--tw-medium) 11px/1 var(--tbl-font-sans);
+  color: var(--tbl-text-muted);
+  background: transparent;
+  border: 1px solid var(--tbl-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-top: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tbl-table-collapse-all-corner:hover,
+.tbl-table-collapse-all-corner:focus-visible {
+  border-color: var(--tbl-navy);
+  color: #fff;
+  background: var(--tbl-navy);
+  outline: none;
+}
 
 /* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */
 tr.tbl-table-group-note th,

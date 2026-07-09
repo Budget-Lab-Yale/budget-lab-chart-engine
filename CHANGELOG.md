@@ -4,6 +4,25 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] - 2026-07-09
+
+### Fixed — tables
+
+- **Multi-tier header super-groups stay contiguous under `column_order`.** `column_order` now
+  orders the leaf tier **within** each header super-group instead of sorting all leaves globally
+  (which interleaved the super-groups into repeated `colspan=1` cells). Super-groups are gathered
+  by header path regardless of input row order — the column analogue of the 1.3.0 row grouping.
+
+### Added — tables
+
+- **`column_group_order`** — orders header **super-groups** (the non-last header tiers), the
+  column analogue of `group_order` (a flat `string[]` for the first super tier, or a `string[][]`
+  for each tier independently). Unlisted values follow first-seen order.
+- **`collapsible.control`** — `"stub-header"` (new default) renders the expand/collapse-all
+  control in the table's top-left corner cell, above the stub and beside the carets it toggles;
+  `"footer"` keeps the pre-1.3.1 placement in the download action row. PNG export omits the
+  control either way.
+
 ## [1.3.0] - 2026-07-09
 
 ### Added — tables

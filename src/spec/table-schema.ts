@@ -97,6 +97,7 @@ export const TABLE_SPEC_SCHEMA = {
         default: { type: "string", enum: ["collapsed", "expanded"] },
         expanded: { type: "array", items: { type: "string" } },
         collapsed: { type: "array", items: { type: "string" } },
+        control: { type: "string", enum: ["stub-header", "footer"] },
       },
     },
     stub_width: { type: "number" },

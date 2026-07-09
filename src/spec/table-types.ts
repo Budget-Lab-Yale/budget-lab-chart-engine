@@ -117,6 +117,10 @@ export interface TableSpec {
     expanded?: string[];
     /** Group values closed despite an "expanded" default. Wins over `expanded`. */
     collapsed?: string[];
+    /** Where the expand/collapse-all control renders. "stub-header" (default) = the table's
+     *  top-left corner cell, above the stub and beside the carets it controls; "footer" = the
+     *  download action row (the pre-1.3.1 placement). PNG export omits the control either way. */
+    control?: "stub-header" | "footer";
   };
   /** Fixed px width for the stub column (overrides the computed width). */
   stub_width?: number;
