@@ -250,6 +250,19 @@ describe("buildBandTooltipHtml", () => {
     expect(betaIdx).toBeLessThan(alphaIdx);
   });
 
+  it("prefers renderedFills over colors for the swatch (bar tooltip color-matches the drawn bar)", () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, {
+      swatchShape: "rect",
+      colors: COLORS, // series base colors #f00 / #00f
+      renderedFills: new Map([["Alpha", "#123456"]]), // Alpha's ACTUAL bar fill
+    });
+    // Alpha's swatch uses the rendered fill, not its base color.
+    expect(html).toContain("background: #123456");
+    expect(html).not.toContain("background: #f00");
+    // Beta has no rendered fill → falls back to its base color.
+    expect(html).toContain("background: #00f");
+  });
+
   it("uses seriesLabels for display names", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
       colors: COLORS,

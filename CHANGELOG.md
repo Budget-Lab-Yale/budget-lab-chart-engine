@@ -23,6 +23,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `"footer"` keeps the pre-1.3.1 placement in the download action row. PNG export omits the
   control either way.
 
+### Fixed — bars
+
+- **Inline-selector color accent now recolors no-series bar charts.** When a colored
+  `title_selectors` option is active, a bar chart with no `columns.series` (colored via
+  `bar_color`/default) now tints its bars to the option's color — matching the tinted selector
+  label — the bar analogue of the single-series line recolor. The accent wins over `bar_color`;
+  `category_colors` still overrides per-category. Multi-series bars are unchanged.
+- **Single-facet small multiples use the bar-end pill, not the legacy tooltip.** A
+  `small_multiples` bar/stacked chart whose facet resolves to one value now hovers with the shade
+  band + bar-end value pill (like a standalone chart) instead of falling back to the floating
+  tooltip. Any tooltip swatch still shown (e.g. `coordinated_cursor: false`) now color-matches the
+  bar's rendered fill rather than the series' base color.
+
 ## [1.3.0] - 2026-07-09
 
 ### Added — tables

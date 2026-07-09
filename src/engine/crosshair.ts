@@ -797,9 +797,13 @@ export function buildBandTooltipHtml(
     categoryLabels?: Record<string, string>;
     /** Series swatch shape — "rect" (filled square, matching a bar legend) or the default line. */
     swatchShape?: "line" | "rect";
+    /** Series → the bar's ACTUAL rendered fill (bar_color / accent / category_colors), preferred
+     *  over the series' base `colors` for the swatch so the tooltip marker matches the drawn bar
+     *  — the same fill-first rule the 1.3.x value pill uses. Absent → fall back to `colors`. */
+    renderedFills?: Map<string, string>;
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, renderedFills } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -819,7 +823,7 @@ export function buildBandTooltipHtml(
     const v = valBySeries.get(series);
     if (v == null) continue;
     total += v;
-    const dot = colors?.get(series) || "currentColor";
+    const dot = renderedFills?.get(series) || colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
     // Swatch matches the chart's legend marker: a filled square for bars (default here is the
     // small line swatch, used by line charts).
@@ -1067,6 +1071,24 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
   const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
 
+  // Bar tooltips: color each series' swatch from the bar's ACTUAL rendered fill (bar_color /
+  // accent / category_colors), not the series' base color — matching the 1.3.x value pill. Built
+  // once from the rendered rects (fill is uniform per series; category_colors is single-series).
+  // Only for bar swatches (swatchShape "rect"); line tooltips keep their series-color swatch,
+  // which already equals the rendered stroke.
+  const renderedFills = !emitOnly && opts.swatchShape === "rect"
+    ? (() => {
+        const m = new Map<string, string>();
+        svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect').forEach((r) => {
+          const s = r.getAttribute("data-series") ?? "";
+          if (m.has(s)) return;
+          const f = renderedRectFill(r, svgEl);
+          if (f) m.set(s, f);
+        });
+        return m;
+      })()
+    : undefined;
+
   /** Show the highlight over the given band geometry, spanning the full plot axis. */
   function showHighlight(bandMin: number, bandMax: number): void {
     if (!hl) return;
@@ -1154,6 +1176,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       yFormat,
       categoryLabels: opts.categoryLabels,
       swatchShape: opts.swatchShape,
+      renderedFills,
     });
     tip!.innerHTML = html;
 

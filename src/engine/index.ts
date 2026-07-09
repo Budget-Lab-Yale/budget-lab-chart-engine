@@ -500,6 +500,10 @@ export function renderPane(
     // Dynamic stack order (area): the live layer passes a reordered list when a series is selected
     // (selected-to-bottom); the mark stacks in this order while legend/colors stay series_order.
     ...(opts.stackOrder ? { stackOrder: opts.stackOrder } : {}),
+    // Inline-selector accent: let a no-series/single-series bar chart recolor its bars to the
+    // active option's color (the bar analogue of the single-series line recolor above). The bar
+    // mark makes it win over bar_color/default; multi-series charts keep their palette.
+    ...(opts.accentColor ? { accentColor: opts.accentColor } : {}),
     // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
     ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
     ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),

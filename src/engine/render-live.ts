@@ -1896,6 +1896,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Horizontal bar figures grow their height with the row count — let renderFigure compute it
   // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
   const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+  // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
+  // chart), not the floating tooltip. Used to give a lone pane that treatment (see `coordinated`).
+  const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
   const figHeight = isHorizontalBarFig ? undefined : paneHeight;
 
   const drawGrid = (outerWidth: number): void => {
@@ -1989,7 +1992,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // same x. Default on for multi-pane figures; `coordinated_cursor: false` disables. The bus
     // collects each pane's secondary-cursor driver; a pane's primary crosshair emits its resolved
     // x-key, which drives the others (and clears the source's own secondary).
-    const coordinated = sm.coordinated_cursor !== false && fig.panes.length > 1;
+    // Multi-pane figures coordinate cursors across panes. A SINGLE-pane bar/stacked figure (a
+    // small_multiples chart whose facet resolves to one value) has nothing to coordinate, but it
+    // should still get the in-place shade + bar-end value pill instead of falling back to the
+    // legacy floating tooltip — i.e. behave like the standalone bar chart. So enable the same
+    // path for a lone bar/stacked pane. Line/area figures keep the tooltip when standalone-like.
+    const coordinated =
+      sm.coordinated_cursor !== false && (fig.panes.length > 1 || isCategoricalBarFig);
     const drivers: Array<(key: unknown, active?: boolean) => void> = [];
     // Render EVERY pane at the hovered x: the source (hovered) pane gets active styling (heavier
     // labels + the x-axis value above); the rest get passive styling. null clears all.

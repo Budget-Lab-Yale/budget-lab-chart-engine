@@ -85,6 +85,11 @@ export interface MarkContext {
   /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
    *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */
   stackOrder?: string[];
+  /** Inline-title-selector color accent (already palette-resolved). When present on a single-
+   *  series OR no-series bar chart, it becomes the bar fill — winning over `bar_color`/default so
+   *  the bars match the selector's tinted label (`category_colors` still overrides per-category).
+   *  Absent → bars keep bar_color/palette. Set from RenderOptions.accentColor. */
+  accentColor?: string;
   /** Horizontal bars in shared-mode small multiples, non-leftmost panes: omit the category
    *  (y-band) labels so they show only on the leftmost pane. The category band domain is shared,
    *  so rows still align. Absent → labels emitted (single-chart + leftmost pane unchanged). */
