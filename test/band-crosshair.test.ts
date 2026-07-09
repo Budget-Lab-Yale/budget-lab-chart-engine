@@ -654,14 +654,10 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
       }),
       configurable: true,
     });
-    // The hover-accent hook (data-category, from the fonts/tagging commit) — stub its geometry so
-    // the chip's additive, layout-gated code path actually runs (not just no-ops on a zero rect).
+    // The hover-accent hook (data-category, from the fonts/tagging commit) locates the hovered
+    // row label so it can be bolded.
     const careLabel = svg.querySelector<SVGTextElement>('text[data-category="Care"]');
     expect(careLabel).not.toBeNull();
-    Object.defineProperty(careLabel!, "getBoundingClientRect", {
-      value: () => ({ width: 36, height: 14, top: careY - 7, left: 4, right: 40, bottom: careY + 7, x: 4, y: careY - 7 }),
-      configurable: true,
-    });
     document.body.appendChild(container);
     const tooltipHeadsBefore = document.body.querySelectorAll(".tbl-tooltip-head").length;
     const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
@@ -679,9 +675,9 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     expect(Number(region.getAttribute("x"))).toBe(0);
     expect(coord.querySelectorAll("text").length).toBeGreaterThan(0);
 
-    // Hovered category's own axis label: bold + a frosted chip behind it.
+    // Hovered category's own axis label: bold ONLY, no background pill/chip (horizontal design).
     expect(careLabel!.getAttribute("font-weight")).toBe("700");
-    expect(svg.querySelector(".tbl-coord-label-chip")).not.toBeNull();
+    expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
 
     hit.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
     expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("0");
@@ -740,7 +736,7 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
-  it("standalone VERTICAL single-series bar drives a coordinated cursor: full-height column incl. the label gutter, top-of-bar pill, no tooltip", () => {
+  it("standalone VERTICAL single-series bar drives a coordinated cursor: column shade stops at the baseline (matching faceted vertical), top-of-bar pill, no tooltip", () => {
     const vertSpec: ChartSpec = {
       chartType: "bar",
       title: "Vertical smoke",
@@ -778,10 +774,16 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     expect(coord.getAttribute("opacity")).toBe("1");
     const region = coord.querySelector('rect[opacity="0.12"]') as SVGRectElement;
     expect(region).not.toBeNull();
-    // regionToBottomEdge: the shaded column reaches the SVG's bottom edge (covers the x-axis
-    // label), not just the plot's bottom margin.
+    // The shaded column STOPS AT THE BASELINE (plot bottom = mt + plotH), NOT down through the
+    // x-axis label — standalone vertical matches faceted vertical. Assert it stops well short of
+    // the SVG's full height (the bottom margin holds the x-axis label + ticks).
+    const mt = Number(svg.dataset.marginTop);
+    const mb = Number(svg.dataset.marginBottom);
+    const plotBottom = vb.height - mb;
     const regionBottom = Number(region.getAttribute("y")) + Number(region.getAttribute("height"));
-    expect(regionBottom).toBeCloseTo(vb.height, 1);
+    expect(regionBottom).toBeCloseTo(plotBottom, 1);
+    expect(regionBottom).toBeLessThan(vb.height - 1); // does NOT reach the SVG bottom edge
+    expect(Number(region.getAttribute("y"))).toBeCloseTo(mt, 1); // starts at the plot top
     expect(coord.querySelectorAll("text").length).toBeGreaterThan(0); // the bar-top value pill
 
     hit.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
@@ -959,31 +961,22 @@ describe("attachSecondaryBandCursor (coordinated cursor)", () => {
     expect(svg.querySelectorAll("g.tbl-coord").length).toBe(1);
   });
 
-  // task 17: regionToBottomEdge extends the vertical shaded column through the bottom margin
-  // (the x-label gutter), matching the horizontal cursor's regionFromLeftEdge parity item.
-  it("regionToBottomEdge extends the shaded column's height into the bottom margin", () => {
+  // task 17: the vertical shaded column stops at the BASELINE (plot height), NOT down through the
+  // bottom margin / x-axis label — standalone vertical matches faceted vertical.
+  it("the vertical shaded column stops at the baseline (height = plot height, not the full SVG)", () => {
     const svg = makeSvg(); // width 600 height 400, default margins ml=0/mr=8/mt=18/mb=28 → plotH=354
-    const svgDefault = makeSvg();
-    const driveDefault = attachSecondaryBandCursor(svgDefault, { rows: ROWS, categories: ["Cat1"] });
-    driveDefault("Cat1");
-    const regionDefault = svgDefault.querySelector('rect[opacity="0.12"]') as SVGRectElement;
-    expect(regionDefault).not.toBeNull();
-    expect(Number(regionDefault.getAttribute("height"))).toBeCloseTo(354, 5); // H - mt - mb
-
-    const drive = attachSecondaryBandCursor(svg, {
-      rows: ROWS,
-      categories: ["Cat1"],
-      regionToBottomEdge: true,
-    });
+    const drive = attachSecondaryBandCursor(svg, { rows: ROWS, categories: ["Cat1"] });
     drive("Cat1");
     const region = svg.querySelector('rect[opacity="0.12"]') as SVGRectElement;
     expect(region).not.toBeNull();
-    expect(Number(region.getAttribute("height"))).toBeCloseTo(382, 5); // H - mt (covers the label gutter)
+    // plotH = H - mt - mb = 400 - 18 - 28 = 354 (does NOT extend into the 28px bottom margin).
+    expect(Number(region.getAttribute("y"))).toBeCloseTo(18, 5); // mt
+    expect(Number(region.getAttribute("height"))).toBeCloseTo(354, 5);
   });
 });
 
 // ---------------------------------------------------------------------------
-// attachSecondaryBandCursor — horizontal stacked pills + hover-accent chip (task 17)
+// attachSecondaryBandCursor — horizontal stacked pills + hover-accent label (task 17)
 // ---------------------------------------------------------------------------
 
 /** A single-row horizontal "stack": two segments (different series) sharing one category row. */
@@ -1097,31 +1090,26 @@ describe("attachSecondaryBandCursor horizontal — isStacked segment-center pill
   });
 });
 
-describe("attachSecondaryBandCursor horizontal — accentLabel chip (task 17)", () => {
+describe("attachSecondaryBandCursor horizontal — accentLabel bolds the row label, no pill (task 17)", () => {
   const ROWS: BandRow[] = [{ _xc: "Northeast", series: "Alpha", _y: 5 }];
 
-  // REAL DOM shape: the category label <text> lives inside a TRANSLATED ancestor <g> (both
-  // tblBandYAxis and tblFacetGroupYAxis wrap the labels that way). The chip is inserted as the
-  // label's sibling — a child of that same transformed <g> — so its x/y attributes are in the g's
-  // LOCAL frame. A naive "absolute svg-user coords" chip would have the g translate applied twice
-  // and land far from the label; these fixtures reproduce that so the coordinate math is tested.
-  const G_TX = 100;
-  const G_TY = 50;
-  function makeSvgWithLabel(): { svg: SVGSVGElement; label: SVGTextElement; g: SVGGElement } {
+  // The category label <text> lives inside a translated ancestor <g> (tblBandYAxis /
+  // tblFacetGroupYAxis wrap the labels that way); it carries the data-category hook.
+  function makeSvgWithLabel(): { svg: SVGSVGElement; label: SVGTextElement } {
     const svg = makeHorizontalStackedSvg(); // width 600, height 400
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g") as SVGGElement;
     g.setAttribute("class", "tbl-cat-label");
-    g.setAttribute("transform", `translate(${G_TX},${G_TY})`);
+    g.setAttribute("transform", "translate(100,50)");
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text") as SVGTextElement;
     label.setAttribute("data-category", "Northeast");
-    label.setAttribute("transform", "translate(146,18)"); // the label's OWN transform (like the golden)
+    label.setAttribute("transform", "translate(146,18)");
     label.textContent = "Northeast";
     g.appendChild(label);
     svg.appendChild(g);
-    return { svg, label, g };
+    return { svg, label };
   }
 
-  it("without chip: bolds the label but adds no chip rect (jsdom has no layout either way)", () => {
+  it("bolds + darkens the hovered row label and adds NO background pill/chip", () => {
     const { svg, label } = makeSvgWithLabel();
     const drive = attachSecondaryBandCursor(svg, {
       rows: ROWS,
@@ -1131,46 +1119,12 @@ describe("attachSecondaryBandCursor horizontal — accentLabel chip (task 17)", 
     });
     drive("Northeast");
     expect(label.getAttribute("font-weight")).toBe("700");
+    expect(label.getAttribute("fill")).toBe("#1A1A2E"); // COORD_LABEL_DARK
+    // No pill/chip is ever drawn for horizontal (unlike vertical's x-axis category-name pill).
     expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
-  });
-
-  it("with chip: the chip rect OVERLAPS the label's rendered box in absolute coords (catches the double-transform bug)", () => {
-    const { svg, label, g } = makeSvgWithLabel();
-    document.body.appendChild(svg);
-    // jsdom has no layout; stub the two rects the chip geometry reads. svgRect width == the SVG's
-    // own width (600) so the sx/sy scale is 1 and the stubbed screen box IS the svg-user box. The
-    // label's ABSOLUTE box is [140..200] x [96..110] (it already reflects the g + own transforms).
-    const svgRect = { left: 0, top: 0, right: 600, bottom: 400, width: 600, height: 400, x: 0, y: 0, toJSON() {} };
-    const labelRect = { left: 140, top: 96, right: 200, bottom: 110, width: 60, height: 14, x: 140, y: 96, toJSON() {} };
-    svg.getBoundingClientRect = () => svgRect as DOMRect;
-    label.getBoundingClientRect = () => labelRect as DOMRect;
-    const drive = attachSecondaryBandCursor(svg, {
-      rows: ROWS,
-      categories: ["Northeast"],
-      horizontal: true,
-      accentLabel: { font: 13, chip: true },
-    });
-    drive("Northeast");
-    const chip = svg.querySelector(".tbl-coord-label-chip") as SVGRectElement;
-    expect(chip).not.toBeNull();
-    // Chip x/y are in the g's LOCAL frame; the g's transform is applied when rendered, so the
-    // chip's ABSOLUTE box = attribute + g translate. It must fully surround the label's abs box.
-    const chipAbsX = Number(chip.getAttribute("x")) + G_TX;
-    const chipAbsY = Number(chip.getAttribute("y")) + G_TY;
-    const chipAbsRight = chipAbsX + Number(chip.getAttribute("width"));
-    const chipAbsBottom = chipAbsY + Number(chip.getAttribute("height"));
-    expect(chipAbsX).toBeLessThanOrEqual(labelRect.left);
-    expect(chipAbsRight).toBeGreaterThanOrEqual(labelRect.right);
-    expect(chipAbsY).toBeLessThanOrEqual(labelRect.top);
-    expect(chipAbsBottom).toBeGreaterThanOrEqual(labelRect.bottom);
-    // Behind the label (previous sibling), inside the same transformed <g>.
-    expect(chip.parentNode).toBe(g);
-    expect(chip.nextSibling).toBe(label);
-    // Clearing removes the chip + restores the label weight.
+    // Clearing restores the label weight/color.
     drive(null);
-    expect(svg.querySelector(".tbl-coord-label-chip")).toBeNull();
     expect(label.getAttribute("font-weight")).toBe("500");
-    document.body.removeChild(svg);
   });
 });
 

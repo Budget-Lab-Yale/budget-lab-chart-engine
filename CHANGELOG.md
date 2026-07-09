@@ -48,12 +48,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Changed — bars
 
 - **Standalone bar/stacked hover now matches the faceted "best practice" look.** Hovering a
-  standalone (non-small-multiples) bar or stacked chart shades the FULL band — including the
-  category-label gutter — at a uniform height across section spacers, bolds the hovered
-  category's axis label (with a background chip on horizontal charts), and shows a value pill at
-  the bar's end — replacing the previous floating tooltip. Faceted panes are unchanged (they
-  already worked this way); standalone horizontal category labels + section headers also now
-  render at the larger faceted font size, previously standalone-only-smaller.
+  standalone (non-small-multiples) bar or stacked chart shades the hovered band at a uniform height
+  across section spacers and shows a value pill at the bar's end, replacing the previous floating
+  tooltip. Horizontal: the shade extends into the left category-label gutter and the hovered row
+  label is bolded (no pill). Vertical: the shade stops at the baseline and the hovered x-axis
+  category name is shown on a frosted pill — both matching faceted panes, which are unchanged.
+  Standalone horizontal category labels + section headers also now render at the larger faceted
+  font size (previously standalone-only-smaller).
 
 ### Added — line & area
 

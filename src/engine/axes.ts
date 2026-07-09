@@ -481,7 +481,7 @@ export const FACETED_CAT_LABEL_PX = 13;
 
 /** Class stamped on every category-axis label mark (bar/stacked, both orientations, faceted and
  *  standalone alike) — a hook the live layer uses to find + accent the hovered category's label
- *  (bold + optional chip) without matching on textContent (which can collide with a tick string).
+ *  (bolding it) without matching on textContent (which can collide with a tick string).
  *  Combined with a mark's OWN faceted-grid class (e.g. X_AXIS_LABEL_CLASS) when both apply. */
 export const CAT_LABEL_CLASS = "tbl-cat-label";
 

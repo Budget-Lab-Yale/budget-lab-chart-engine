@@ -983,9 +983,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const bandYFormat = (v: number): string => formatValue(v, units, spec.tooltip_decimals);
 
       // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
-      // faceted panes use (attachSecondaryBandCursor) — full-band hover incl. the label gutter,
-      // a uniform highlight height across section spacers, a bolded/chip-accented hovered label,
-      // and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
+      // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
+      // label gutter; vertical: stopping at the baseline, matching faceted), a uniform highlight
+      // height across section spacers, a bolded hovered label (horizontal) / frosted category pill
+      // (vertical), and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
       // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
       // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →
       // highlightPills → secondaryBandCursor) so `.tbl-coord` paints above the bars.
@@ -1030,9 +1031,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: bandYFormat,
         horizontal: horizontalBar,
+        // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
+        // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
+        // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.
         ...(horizontalBar
-          ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX, chip: true } }
-          : { regionToBottomEdge: true }),
+          ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX } }
+          : {}),
       }) as (key: unknown, active?: boolean) => void;
     } else {
       attachCrosshair(svg, {
@@ -1733,7 +1737,7 @@ function wireFigureSvg(
           ? {
               regionFromLeftEdge: true,
               regionExtendRight: ctx.coordExtendRight ?? 0,
-              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX, chip: true } } : {}),
+              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
             }
           : {}),
       }) as (key: unknown, active?: boolean) => void;
