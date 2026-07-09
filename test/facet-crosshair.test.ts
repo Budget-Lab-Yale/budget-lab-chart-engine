@@ -357,3 +357,52 @@ describe("coordinated cursor — horizontal bars (row highlight + tip pills, no 
     expect(svg.querySelector('g[opacity="1"]')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Single-facet small multiples: a small_multiples chart whose facet resolves to ONE value gets
+// the standalone bar treatment (shade + bar-end pill) instead of the legacy floating tooltip.
+// Discriminator: the coordinated path attaches the band crosshair with emitOnly:true, which does
+// NOT create the tooltip highlight rect (.tbl-band-crosshair-hl); the tooltip path does.
+// ---------------------------------------------------------------------------
+
+describe("single-facet small multiples — bar panes get the pill hover, not the tooltip", () => {
+  const barSpec: ChartSpec = {
+    chartType: "bar",
+    title: "One facet",
+    subtitle: "Percentage points",
+    xAxisType: "categorical",
+    columns: { facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
+  } as ChartSpec;
+  const barRows: TidyRow[] = ["Northeast", "Midwest", "South"].map(
+    (cat) => ({ facet: "Countries", time: cat, value: "2" } as TidyRow),
+  );
+
+  it("a lone bar pane wires the crosshair in emitOnly/coordinated mode (no tooltip highlight rect)", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const teardown = mountChart(container, { spec: barSpec, rows: barRows, width: 838, height: 420 });
+    const paneSvgs = container.querySelectorAll(".figure-pane svg");
+    expect(paneSvgs.length).toBe(1); // single facet → one pane
+    const svg = paneSvgs[0]!;
+    expect(svg.querySelector(".tbl-band-crosshair-hit")).not.toBeNull(); // hover wired
+    expect(svg.querySelector(".tbl-band-crosshair-hl")).toBeNull(); // emitOnly → no tooltip highlight
+    teardown();
+    container.remove();
+  });
+
+  it("a lone LINE pane is unchanged (continuous crosshair, still the tooltip path)", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const lineSpec = { ...barSpec, chartType: "line", xAxisType: "temporal" } as ChartSpec;
+    const lineRows: TidyRow[] = ["2020-01-01", "2020-02-01", "2020-03-01"].map(
+      (t) => ({ facet: "Countries", time: t, value: "2" } as TidyRow),
+    );
+    const teardown = mountChart(container, { spec: lineSpec, rows: lineRows, width: 838, height: 420 });
+    const paneSvgs = container.querySelectorAll(".figure-pane svg");
+    expect(paneSvgs.length).toBe(1);
+    expect(paneSvgs[0]!.querySelector(".tbl-crosshair-hit")).not.toBeNull();
+    teardown();
+    container.remove();
+  });
+});

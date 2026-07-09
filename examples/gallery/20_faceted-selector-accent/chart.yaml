@@ -1,0 +1,21 @@
+chartType: bar
+title: "GDP by {dimension} (faceted selector accent)"
+subtitle: "Percentage points, by region"
+xAxisType: categorical
+columns:
+  x: category
+  value: value
+  facet: region
+small_multiples:
+  columns: 2
+title_selectors:
+  dimension:
+    options:
+      - { id: sector, label: Sector, color: navy }
+      - { id: country, label: Country, color: amber }
+    default: sector
+category_colors:
+  Total: gray
+source: "The Budget Lab"
+note: "Confirm: at load EVERY pane's bars are NAVY (active 'Sector' color), matching the tinted selector label. Switch to 'Country' → all panes recolor to AMBER live. Total stays GRAY per pane (category_colors overrides). This is a faceted (small_multiples) no-series bar chart; before 1.3.1 the label tinted but the per-pane bars did not."
+data: data.csv

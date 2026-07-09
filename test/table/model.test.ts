@@ -186,11 +186,41 @@ describe("repeated last-tier header value under distinct banners (full-path leaf
     expect(row.row.cells.map((c: any) => c.text)).toEqual(["10.0", "20.0", "30.0", "40.0"]);
   });
 
-  it("column_order listing the repeated value orders both leaves (stable first-seen tie-break)", () => {
+  it("column_order orders the leaf tier WITHIN each super-group (supers stay contiguous)", () => {
     const orderedSpec: TableSpec = { ...spec, column_order: ["postsub", "presub"] };
     const m = buildTableModel(orderedSpec, rows);
-    expect(m.leaves.map((l) => l.key)).toEqual(["postsub", "postsub~1", "presub", "presub~1"]);
-    expect(m.leaves.map((l) => l.lastValue)).toEqual(["postsub", "postsub", "presub", "presub"]);
+    // Leaves reorder to postsub-before-presub INSIDE each banner; banners stay first-seen.
+    expect(m.leaves.map((l) => l.key)).toEqual(["postsub", "presub", "postsub~1", "presub~1"]);
+    expect(m.leaves.map((l) => l.lastValue)).toEqual(["postsub", "presub", "postsub", "presub"]);
+    // Each banner still spans its two contiguous leaves (colSpan 2, not interleaved colSpan 1).
+    expect(m.headerRows[0]!.map((c) => [c.text, c.colSpan])).toEqual([
+      ["Levels", 2], ["Change vs. default", 2],
+    ]);
+  });
+
+  it("gathers super-groups contiguously regardless of input row order (interleaved CSV)", () => {
+    // Banner-interleaved input: Levels/Change alternate. Supers must still each span colSpan 2.
+    const interleaved = [
+      { row: "USA", banner: "Levels", leaf: "presub", value: "10" },
+      { row: "USA", banner: "Change", leaf: "presub", value: "30" },
+      { row: "USA", banner: "Levels", leaf: "postsub", value: "20" },
+      { row: "USA", banner: "Change", leaf: "postsub", value: "40" },
+    ] as any;
+    const m = buildTableModel(spec, interleaved);
+    expect(m.headerRows[0]!.map((c) => [c.text, c.colSpan])).toEqual([
+      ["Levels", 2], ["Change vs. default", 2],
+    ]);
+    expect(m.leaves.map((l) => l.lastValue)).toEqual(["presub", "postsub", "presub", "postsub"]);
+  });
+
+  it("column_group_order flips the super tier without touching the data", () => {
+    const orderedSpec: TableSpec = { ...spec, column_group_order: ["Change", "Levels"] };
+    const m = buildTableModel(orderedSpec, rows);
+    expect(m.headerRows[0]!.map((c) => [c.text, c.colSpan])).toEqual([
+      ["Change vs. default", 2], ["Levels", 2],
+    ]);
+    // Leaves within each super keep first-seen (presub, postsub); Change group comes first.
+    expect(m.leaves.map((l) => l.lastValue)).toEqual(["presub", "postsub", "presub", "postsub"]);
   });
 });
 

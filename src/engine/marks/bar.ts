@@ -246,9 +246,14 @@ export function buildBarMarks(
     // highlight/dim still applies on top: a non-highlighted series dims to annotationDim
     // regardless of bar_color.
     const barColorOverride = resolveColor(spec.bar_color);
+    // Inline-selector accent (ctx.accentColor): when a colored title selector is in force, the
+    // active option's color becomes the bar fill, winning over bar_color/default so the bars match
+    // the tinted selector label. `category_colors` still overrides per-category (applied below,
+    // outside baseFill). Absent → byte-identical to before. Highlight-dim still wins on top.
+    const accentFill = ctx.accentColor;
     const singleFillFor = (series: string): string => {
       if (highlightSet && !highlightSet.has(series)) return TBL.color.annotationDim;
-      return barColorOverride ?? fillFor(series);
+      return accentFill ?? barColorOverride ?? fillFor(series);
     };
     // Constant vs. accessor matters at the SVG level: Plot hoists a constant fill onto the parent
     // <g aria-label="bar">, while a function channel emits a per-<rect> fill attribute. Preserve
@@ -258,7 +263,7 @@ export function buildBarMarks(
       ? (d: PreparedRow) => singleFillFor(d.series)
       : seriesNames.length === 1
         ? singleFillFor(seriesNames[0] as string)
-        : barColorOverride ?? TBL.color.blue;
+        : accentFill ?? barColorOverride ?? TBL.color.blue;
 
     // `category_colors` (task 7): per-x-category fill override, resolved through the palette.
     // Single-series scope only (see ChartSpec.category_colors TSDoc) — this whole branch is the

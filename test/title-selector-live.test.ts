@@ -26,6 +26,14 @@ const MULTI_SERIES_ROWS: TidyRow[] = [
   { time: "2024-02-01", series: "Country", value: "4.0" },
 ];
 
+// Faceted no-series bars across two panes (no `series` column).
+const FACET_BAR_ROWS: TidyRow[] = [
+  { facet: "P1", time: "A", value: "1" },
+  { facet: "P1", time: "B", value: "2" },
+  { facet: "P2", time: "A", value: "3" },
+  { facet: "P2", time: "B", value: "4" },
+];
+
 const SPEC_WITH_SELECTOR: ChartSpec = {
   chartType: "line",
   title: "Long-Run Change in Real GDP by {dimension}",
@@ -504,5 +512,43 @@ describe("inline title selector — color matching", () => {
     // The label itself DID tint to the newly-active option's color.
     const label = container.querySelector(".inline-select-label") as HTMLElement;
     expect(label.style.color.toLowerCase()).toBe("rgb(230, 159, 0)"); // #E69F00 (amber)
+  });
+
+  it("faceted (small multiples) no-series bars: every pane adopts the accent, live on selection change", () => {
+    const spec: ChartSpec = {
+      chartType: "bar",
+      title: "GDP by {dimension}",
+      xAxisType: "categorical",
+      data: "inline",
+      columns: { x: "time", value: "value", facet: "facet" },
+      small_multiples: { columns: 2 },
+      title_selectors: {
+        dimension: {
+          options: [
+            { id: "sector", label: "Sector", color: "blue" },
+            { id: "country", label: "Country", color: "amber" },
+          ],
+          default: "sector",
+        },
+      },
+    };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: FACET_BAR_ROWS });
+    // Effective bar fill per pane — hoisted constant on the group, else the first rect's fill.
+    const paneFill = (g: Element): string | null => {
+      const own = g.getAttribute("fill");
+      if (own && own !== "none") return own.toLowerCase();
+      return g.querySelector("rect")?.getAttribute("fill")?.toLowerCase() ?? null;
+    };
+    const groups = () => Array.from(container.querySelectorAll('.figure-pane svg g[aria-label="bar"]'));
+    const before = groups();
+    expect(before.length).toBe(2); // two panes
+    before.forEach((g) => expect(paneFill(g)).toBe("#0072b2")); // blue accent at load
+
+    const btn = container.querySelector("button.inline-select") as HTMLButtonElement;
+    btn.click();
+    (container.querySelector('li[data-id="country"]') as HTMLLIElement).click();
+
+    groups().forEach((g) => expect(paneFill(g)).toBe("#e69f00")); // recolored to amber, live
   });
 });

@@ -296,7 +296,8 @@ by a repeated leaf value applies to every leaf sharing that value.
 |---|---|---|
 | `row_order` | array | Row render order; unlisted rows follow in first-seen order. **Scoped within each row group** — it orders leaves inside a group, not across groups. |
 | `group_order` | array | Render order for row **groups** (the non-last stub tiers). A flat `string[]` orders the first group tier only; a `string[][]` orders each tier independently (index 0 = first tier, index 1 = second, ...). Unlisted values at a level follow first-seen order. Groups are always gathered by stub path regardless of input row order, so a group's rows render contiguously wherever they appear in the source data (e.g. a scenario-major CSV regroups correctly). |
-| `column_order` | array | Leaf-column render order; unlisted leaves follow in first-seen order. |
+| `column_order` | array | Leaf-column render order; unlisted leaves follow in first-seen order. On a multi-tier header it is **scoped within each header super-group** — it orders the leaf tier inside a super, not across supers. |
+| `column_group_order` | array | The column analogue of `group_order`: render order for header **super-groups** (the non-last header tiers). A flat `string[]` orders the first super tier only; a `string[][]` orders each tier independently. Unlisted values follow first-seen order. Super-groups are always gathered by header path regardless of input row order, so each super `<th>` spans its leaves contiguously (`colspan`). |
 
 ### Number formats
 

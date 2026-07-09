@@ -1,0 +1,18 @@
+chartType: bar
+title: "GDP by {dimension} (selector accent → no-series bars)"
+subtitle: "Percentage points"
+xAxisType: categorical
+columns:
+  x: category
+  value: value
+title_selectors:
+  dimension:
+    options:
+      - { id: sector, label: Sector, color: navy }
+      - { id: country, label: Country, color: amber }
+    default: sector
+category_colors:
+  Total: gray
+source: "The Budget Lab"
+note: "Confirm: at load the bars are NAVY (the active 'Sector' option's color), matching the tinted selector label — not the default blue. Switch to 'Country' → bars turn AMBER with the label. The Total bar stays GRAY (category_colors overrides the accent). This is a no-series bar chart (no columns.series); before 1.3.1 only the label recolored."
+data: data.csv

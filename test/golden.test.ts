@@ -592,6 +592,44 @@ describe("golden SVG — bar category_colors / bar_color", () => {
     expect(withBarColor).toBe(without);
   });
 
+  // --- inline-selector accentColor on no-series / single-series bars (post-1.3.0) ---
+  const ACCENT = resolveColor("amber") as string;
+
+  it("accentColor recolors a no-series bar chart's fill (matches the tinted selector label)", () => {
+    const rows = parseCsv("./fixtures/bar-single-noseries.csv");
+    const { svg } = renderChart(BAR_NOSERIES_SPEC, rows, { width: 720, height: 400, document, accentColor: ACCENT });
+    // Constant fill (no category_colors) hoists to the group.
+    expect(svg.querySelector('g[aria-label="bar"]')?.getAttribute("fill")).toBe(ACCENT);
+  });
+
+  it("accentColor wins over bar_color on a no-series bar", () => {
+    const rows = parseCsv("./fixtures/bar-single-noseries.csv");
+    const { svg } = renderChart(
+      { ...BAR_NOSERIES_SPEC, bar_color: "navy" },
+      rows,
+      { width: 720, height: 400, document, accentColor: ACCENT },
+    );
+    expect(svg.querySelector('g[aria-label="bar"]')?.getAttribute("fill")).toBe(ACCENT);
+  });
+
+  it("accentColor is applied, but category_colors still overrides the named category", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const { svg } = renderChart(
+      { ...BAR_CATCOLOR_SPEC, category_colors: { Total: "navy" } },
+      rows,
+      { width: 720, height: 400, document, accentColor: ACCENT },
+    );
+    const fills = Array.from(svg.querySelectorAll('g[aria-label="bar"] rect')).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([ACCENT, ACCENT, ACCENT, resolveColor("navy")]);
+  });
+
+  it("accentColor does NOT touch multi-series bars (palette kept, byte-identical)", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const without = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
+    const withAccent = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document, accentColor: ACCENT }).svg.outerHTML;
+    expect(withAccent).toBe(without);
+  });
+
   // Regression (task 7 review): a single-series bar with highlightSeries and NONE of the new
   // fields must keep the ORIGINAL SVG structure — an accessor fill emits a per-<rect> fill
   // attribute (no fill on the parent <g>), whereas a constant fill hoists onto the <g>. The

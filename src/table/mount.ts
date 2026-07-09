@@ -369,7 +369,9 @@ function buildCollapseAllButton(
 ): { el: HTMLButtonElement; sync: () => void } {
   const btn = doc.createElement("button");
   btn.type = "button";
-  btn.className = "figure-download-btn tbl-table-collapse-all";
+  // Base marker class only; the caller adds the placement chrome ("figure-download-btn" in the
+  // footer, "tbl-table-collapse-all-corner" in the stub-header corner).
+  btn.className = "tbl-table-collapse-all";
 
   const anyExpanded = (): boolean =>
     panes.some((p) => p.keys().some((k) => !p.collapsed.has(k)));
@@ -481,7 +483,30 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     attachTableInteractivity(table, model, spec, () => applyVis?.());
     if (spec.collapsible) {
       applyVis = attachCollapsible(table, collapsed, () => syncCollapseAll?.());
+      // Stub-header placement: the corner cell is rebuilt each draw, so re-parent the (stable)
+      // control element into the fresh corner. Footer placement is handled once, below.
+      if (collapsibleControl === "stub-header" && collapseAllEl) {
+        table.querySelector("thead th.tbl-table-stub-header")?.appendChild(collapseAllEl);
+      }
     }
+  }
+
+  // Collapse-all control: built once (the element is stable across re-renders); placement depends
+  // on spec.collapsible.control (default "stub-header" = the top-left corner cell; "footer" = the
+  // download action row). Declared before the initial draw so draw() can seat it in the corner.
+  const collapsibleControl = spec.collapsible?.control ?? "stub-header";
+  let collapseAllEl: HTMLElement | undefined;
+  if (spec.collapsible) {
+    const allBtn = buildCollapseAllButton(
+      doc,
+      [{ collapsed, keys: () => liveGroupKeys(canvasScroll) }],
+      () => applyVis?.(),
+    );
+    syncCollapseAll = allBtn.sync;
+    collapseAllEl = allBtn.el;
+    allBtn.el.classList.add(
+      collapsibleControl === "footer" ? "figure-download-btn" : "tbl-table-collapse-all-corner",
+    );
   }
 
   // Initial render — use the provided width, the container's current width, or a default.
@@ -494,14 +519,8 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     doc, spec, rows, opts.downloadName,
     spec.collapsible ? () => [...collapsed] : undefined,
   );
-  if (spec.collapsible) {
-    const allBtn = buildCollapseAllButton(
-      doc,
-      [{ collapsed, keys: () => liveGroupKeys(canvasScroll) }],
-      () => applyVis?.(),
-    );
-    syncCollapseAll = allBtn.sync;
-    actions.insertBefore(allBtn.el, actions.firstChild);
+  if (collapseAllEl && collapsibleControl === "footer") {
+    actions.insertBefore(collapseAllEl, actions.firstChild);
   }
   renderSourceLine(card, {
     note,
@@ -594,6 +613,11 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
       }
       for (const fn of lp.model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
     });
+    // Stub-header placement: seat the (stable) whole-figure control in the FIRST pane's corner
+    // cell, rebuilt each draw. Footer placement is handled once, below.
+    if (spec.collapsible && collapsibleControl === "stub-header" && collapseAllEl) {
+      paneScrolls[0]!.querySelector("thead th.tbl-table-stub-header")?.appendChild(collapseAllEl);
+    }
     fnBlock.replaceChildren();
     if (fnMap.size > 0) {
       for (const [marker, text] of fnMap) {
@@ -610,6 +634,23 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
     }
   }
 
+  // Collapse-all control: built once, seated in the first pane's corner (default) or the footer
+  // action row (control: "footer"); declared before the initial draw so drawAll() can seat it.
+  const collapsibleControl = spec.collapsible?.control ?? "stub-header";
+  let collapseAllEl: HTMLElement | undefined;
+  if (spec.collapsible) {
+    const allBtn = buildCollapseAllButton(
+      doc,
+      paneCollapse.map((pc, i) => ({ collapsed: pc.collapsed, keys: () => liveGroupKeys(paneScrolls[i]!) })),
+      () => { for (const pc of paneCollapse) pc.applyVis?.(); },
+    );
+    syncCollapseAll = allBtn.sync;
+    collapseAllEl = allBtn.el;
+    allBtn.el.classList.add(
+      collapsibleControl === "footer" ? "figure-download-btn" : "tbl-table-collapse-all-corner",
+    );
+  }
+
   const initialWidth = opts.width ?? (container.clientWidth || 720);
   drawAll(initialWidth);
 
@@ -623,14 +664,8 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
       ? () => [...new Set(paneCollapse.flatMap((pc) => [...pc.collapsed]))]
       : undefined,
   );
-  if (spec.collapsible) {
-    const allBtn = buildCollapseAllButton(
-      doc,
-      paneCollapse.map((pc, i) => ({ collapsed: pc.collapsed, keys: () => liveGroupKeys(paneScrolls[i]!) })),
-      () => { for (const pc of paneCollapse) pc.applyVis?.(); },
-    );
-    syncCollapseAll = allBtn.sync;
-    actions.insertBefore(allBtn.el, actions.firstChild);
+  if (collapseAllEl && collapsibleControl === "footer") {
+    actions.insertBefore(collapseAllEl, actions.firstChild);
   }
   renderSourceLine(card, {
     note,

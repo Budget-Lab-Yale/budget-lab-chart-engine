@@ -1807,10 +1807,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const card = doc.createElement("div");
   card.className = "figure-card";
   // Inline title selectors — same single shared selections object discipline as mountChart.
-  // No `afterChange` here: a small-multiples figure has no single accent target (each pane is
-  // its own facet's chart body, not one line) — the label still tints, but the grid doesn't
-  // re-render on selection. See TitleSelectorWiring.afterChange.
+  // `afterChange` re-renders the pane grid so a colored option's accent recolors every pane's bars
+  // live (parity with mountChart's requestAccentRedraw). Forward-declared: assigned once draw()
+  // exists below. See TitleSelectorWiring.afterChange.
   const selections = resolveSelections(spec, opts.selections);
+  let requestFigureRedraw: (() => void) | undefined;
   const closeTitleSelectors = buildFigureHeader(
     card, doc, spec, opts.eyebrow,
     spec.title_selectors
@@ -1819,6 +1820,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           selections,
           onSelect: opts.onSelect,
           seriesColors: spec.series_colors,
+          afterChange: () => requestFigureRedraw?.(),
         }
       : undefined,
   );
@@ -1896,6 +1898,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Horizontal bar figures grow their height with the row count — let renderFigure compute it
   // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
   const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+  // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
+  // chart), not the floating tooltip. Used to give a lone pane that treatment (see `coordinated`).
+  const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
   const figHeight = isHorizontalBarFig ? undefined : paneHeight;
 
   const drawGrid = (outerWidth: number): void => {
@@ -1923,6 +1928,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
+    // Inline-selector accent (parity with mountChart's draw()): recolor every pane's bars to the
+    // active option's color. renderFigure forwards accentColor to each pane's renderChart, which
+    // applies it to single/no-series bars (category_colors still overrides; multi-series unchanged).
+    // Gated on a resolvable colored option → figures without one pass nothing and stay byte-identical.
+    const rawAccent = spec.title_selectors
+      ? resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors)
+      : undefined;
+    const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
     let fig: FigureRenderResult;
     try {
       fig = useGridWidth
@@ -1931,8 +1944,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
             gridGap: GRID_GAP,
             height: figHeight,
             columns: cols,
+            ...(accentColor ? { accentColor } : {}),
           })
-        : renderFigure(spec, rows, { width: paneW, height: figHeight, columns: cols });
+        : renderFigure(spec, rows, {
+            width: paneW,
+            height: figHeight,
+            columns: cols,
+            ...(accentColor ? { accentColor } : {}),
+          });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
@@ -1989,7 +2008,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // same x. Default on for multi-pane figures; `coordinated_cursor: false` disables. The bus
     // collects each pane's secondary-cursor driver; a pane's primary crosshair emits its resolved
     // x-key, which drives the others (and clears the source's own secondary).
-    const coordinated = sm.coordinated_cursor !== false && fig.panes.length > 1;
+    // Multi-pane figures coordinate cursors across panes. A SINGLE-pane bar/stacked figure (a
+    // small_multiples chart whose facet resolves to one value) has nothing to coordinate, but it
+    // should still get the in-place shade + bar-end value pill instead of falling back to the
+    // legacy floating tooltip — i.e. behave like the standalone bar chart. So enable the same
+    // path for a lone bar/stacked pane. Line/area figures keep the tooltip when standalone-like.
+    const coordinated =
+      sm.coordinated_cursor !== false && (fig.panes.length > 1 || isCategoricalBarFig);
     const drivers: Array<(key: unknown, active?: boolean) => void> = [];
     // Render EVERY pane at the hovered x: the source (hovered) pane gets active styling (heavier
     // labels + the x-axis value above); the rest get passive styling. null clears all.
@@ -2034,6 +2059,12 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const draw = (w: number): void => { drawGrid(w); };
 
   const initialWidth = card.clientWidth || opts.width || 720;
+  // On a selection change, re-render the grid so the accent tracks the active option. Reset the
+  // width-keyed guard (sig is width-only) so the same-width re-render isn't skipped.
+  requestFigureRedraw = () => {
+    lastSig = "";
+    draw(card.clientWidth || initialWidth);
+  };
   draw(initialWidth);
 
   let resizeRaf: number | null = null;

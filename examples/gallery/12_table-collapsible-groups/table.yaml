@@ -10,4 +10,4 @@ collapsible:
 format:
   default: { type: percent, decimals: 1 }
 source: "The Budget Lab"
-notes: "Confirm: groups collapsed except Total; carets toggle; Expand all works; resize the window — state persists; PNG download omits collapsed rows."
+notes: "Confirm: the Expand/Collapse-all control sits in the top-left corner cell above the stub (not the footer); groups collapsed except Total; carets toggle; Expand all works; resize the window — state persists; PNG download omits collapsed rows."
