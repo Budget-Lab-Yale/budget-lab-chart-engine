@@ -21,6 +21,15 @@ describe("validateTableSpec", () => {
     expect(validateTableSpec({ ...ok, group_order: "nope" }).valid).toBe(false);
   });
 
+  it("accepts column_group_order as a flat string[] (first super tier) or string[][] (per level)", () => {
+    expect(validateTableSpec({ ...ok, column_group_order: ["A", "B"] }).valid).toBe(true);
+    expect(validateTableSpec({ ...ok, column_group_order: [["A"], ["B", "C"]] }).valid).toBe(true);
+  });
+  it("rejects column_group_order with a non-string/non-array-of-strings shape", () => {
+    expect(validateTableSpec({ ...ok, column_group_order: [1, 2] } as any).valid).toBe(false);
+    expect(validateTableSpec({ ...ok, column_group_order: "nope" } as any).valid).toBe(false);
+  });
+
   it("accepts collapsible with default/expanded/collapsed", () => {
     const r = validateTableSpec({
       ...ok,

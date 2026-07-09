@@ -55,8 +55,16 @@ export interface TableSpec {
    *  gathered by stub path regardless of input row order (each group's rows render contiguously
    *  under one header, wherever they appear in the source data). */
   group_order?: string[] | string[][];
-  /** Render order for columns (optional); leaf keys not listed appear in first-seen order. */
+  /** Render order for columns (optional); last-tier values not listed appear in first-seen order.
+   *  On a multi-tier header it orders the LEAF tier WITHIN each super-group — it never reorders
+   *  across super-groups (which stay contiguous). Use column_group_order for the super tiers. */
   column_order?: string[];
+  /** Render order for header super-groups (the non-last header tiers), the column analogue of
+   *  group_order. A flat string[] orders the FIRST super tier only; a string[][] orders each super
+   *  tier independently (index 0 = first tier, ...). Unlisted values at a level follow first-seen
+   *  order. Omit for first-seen order at every level. Super-groups are always gathered by header
+   *  path regardless of input row order, so each super `<th>` spans its leaves contiguously. */
+  column_group_order?: string[] | string[][];
   /** Leaf column key → display label (overrides the raw header value). */
   column_labels?: Record<string, string>;
   /** Row label (last stub value) → display label (overrides the raw CSV value). Lets math/markup

@@ -107,14 +107,54 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
     });
   }
   let leaves = [...leafMap.values()];
-  if (spec.column_order && spec.column_order.length) {
-    const order = spec.column_order;
-    const rank = new Map(order.map((k, i) => [k, i]));
+
+  // ---- Leaf ordering: super-group-contiguous, column_order within super. ----
+  // Column analogue of the row-side hierarchical sort below (see the group_order comment). Rank
+  // each SUPER tier (header path positions 0..T-2) first — by column_group_order if listed, else
+  // that super's first-seen ordinal — so every super-group's leaves stay contiguous (each super
+  // <th> merges into one colspan) regardless of input row order. The leaf tier (lastValue) is then
+  // ordered WITHIN each super by column_order. On a single-tier header there is no super tier, so
+  // this collapses to the prior behaviour: sort by column_order on lastValue when given, else keep
+  // first-seen. Gated like the row side (superDepth > 0 || column_order) so a flat, unordered
+  // header skips sorting entirely; the stable sort + first-seen fallbacks keep already-contiguous
+  // multi-tier data byte-identical.
+  const columnGroupOrderLevels: (string[] | undefined)[] =
+    !spec.column_group_order || spec.column_group_order.length === 0
+      ? []
+      : Array.isArray(spec.column_group_order[0])
+        ? (spec.column_group_order as string[][])
+        : [spec.column_group_order as string[]];
+  const columnGroupRankMaps: (Map<string, number> | undefined)[] = columnGroupOrderLevels.map((list) =>
+    list ? new Map(list.map((v, i) => [v, i])) : undefined,
+  );
+  const colRank = spec.column_order && spec.column_order.length
+    ? new Map(spec.column_order.map((k, i) => [k, i]))
+    : null;
+  const colOrderLen = spec.column_order?.length ?? 0;
+  const superDepth = headerCols.length - 1;
+  if (superDepth > 0 || colRank) {
+    const superFirstSeen: Map<string, number>[] = Array.from({ length: superDepth }, () => new Map());
+    for (const l of leaves) {
+      for (let s = 0; s < superDepth; s++) {
+        const key = l.path.slice(0, s + 1).join(SEP);
+        const m = superFirstSeen[s]!;
+        if (!m.has(key)) m.set(key, m.size);
+      }
+    }
     leaves = leaves
       .map((l, i) => ({ l, i }))
       .sort((a, b) => {
-        const ra = rank.has(a.l.lastValue) ? rank.get(a.l.lastValue)! : order.length + a.i;
-        const rb = rank.has(b.l.lastValue) ? rank.get(b.l.lastValue)! : order.length + b.i;
+        for (let s = 0; s < superDepth; s++) {
+          const va = a.l.path[s] ?? "";
+          const vb = b.l.path[s] ?? "";
+          const rankMap = columnGroupRankMaps[s];
+          const listLen = columnGroupOrderLevels[s]?.length ?? 0;
+          const ka = rankMap?.has(va) ? rankMap.get(va)! : listLen + superFirstSeen[s]!.get(a.l.path.slice(0, s + 1).join(SEP))!;
+          const kb = rankMap?.has(vb) ? rankMap.get(vb)! : listLen + superFirstSeen[s]!.get(b.l.path.slice(0, s + 1).join(SEP))!;
+          if (ka !== kb) return ka - kb;
+        }
+        const ra = colRank?.has(a.l.lastValue) ? colRank.get(a.l.lastValue)! : colOrderLen + a.i;
+        const rb = colRank?.has(b.l.lastValue) ? colRank.get(b.l.lastValue)! : colOrderLen + b.i;
         return ra - rb;
       })
       .map((x) => x.l);
