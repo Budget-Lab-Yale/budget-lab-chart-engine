@@ -95,7 +95,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### CLI / gallery
 
 - **`tbl-chart serve` now discovers `table.yaml`** alongside `chart.yaml` under the served
-  directory, tagging tables in the index; `npm run gallery` serves `examples/gallery` — 16
+  directory, tagging tables in the index; `npm run gallery` serves `examples/gallery` — 17
   example figures pressure-testing each feature above.
 
 ## [1.2.1] — 2026-07-01
