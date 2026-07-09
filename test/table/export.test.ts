@@ -63,3 +63,84 @@ describe("buildTableExportSvg", () => {
     expect(svg.querySelectorAll("svg").length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("buildTableExportSvg — collapsed groups (Task 4)", () => {
+  const GROUPED: TableSpec = {
+    title: "Grouped",
+    data: "d.csv",
+    stub: ["country", { label: "scenario" }],
+    header: ["per"],
+    value: "value",
+    collapsible: { default: "expanded" },
+    format: { default: { type: "number", decimals: 0 } },
+  };
+  const GROUPED_ROWS: TidyRow[] = [
+    { country: "China", scenario: "base", per: "2026", value: "111" },
+    { country: "China", scenario: "reform", per: "2026", value: "222" },
+    { country: "Canada", scenario: "base", per: "2026", value: "333" },
+  ] as TidyRow[];
+
+  it("omits a collapsed group's rows but keeps its header", () => {
+    const svg = buildTableExportSvg(GROUPED, GROUPED_ROWS, { collapsed: ["China"] });
+    // China's header remains…
+    expect(svg.textContent).toContain("China");
+    // …but its row values are gone.
+    expect(svg.textContent).not.toContain("111");
+    expect(svg.textContent).not.toContain("222");
+    // Canada's subtree is intact.
+    expect(svg.textContent).toContain("Canada");
+    expect(svg.textContent).toContain("333");
+  });
+
+  it("renders all rows when nothing is collapsed", () => {
+    const svg = buildTableExportSvg(GROUPED, GROUPED_ROWS, { collapsed: [] });
+    expect(svg.textContent).toContain("111");
+    expect(svg.textContent).toContain("333");
+  });
+
+  it("draws a caret glyph before group labels when spec.collapsible (SVG parity)", () => {
+    const svg = buildTableExportSvg(GROUPED, GROUPED_ROWS, { collapsed: ["China"] });
+    const carets = svg.querySelectorAll("path.tbl-table-caret");
+    expect(carets.length).toBe(2); // one per visible group header (China + Canada)
+  });
+
+  it("draws no caret glyphs for a non-collapsible spec", () => {
+    const plain: TableSpec = { ...GROUPED, collapsible: undefined };
+    const svg = buildTableExportSvg(plain, GROUPED_ROWS);
+    expect(svg.querySelectorAll("path.tbl-table-caret").length).toBe(0);
+  });
+
+  // ---- Default-state seeding when the caller passes NO collapsed option ----
+  // Without an explicit collapsed list the export must honor the spec's own declared default
+  // view (collapsed-list > expanded-list > default), exactly like the mount seeding. An explicit
+  // array — including [] — wins verbatim.
+  const DEFAULT_COLLAPSED: TableSpec = {
+    ...GROUPED,
+    collapsible: { default: "collapsed", expanded: ["Canada"] },
+  };
+
+  it("seeds from spec.collapsible defaults when the collapsed option is omitted", () => {
+    const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS);
+    // China defaults collapsed: header remains, rows omitted.
+    expect(svg.textContent).toContain("China");
+    expect(svg.textContent).not.toContain("111");
+    expect(svg.textContent).not.toContain("222");
+    // Canada is in the expanded list: its row survives.
+    expect(svg.textContent).toContain("Canada");
+    expect(svg.textContent).toContain("333");
+  });
+
+  it("an explicit empty collapsed list overrides a 'collapsed' default (fully expanded)", () => {
+    const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS, { collapsed: [] });
+    expect(svg.textContent).toContain("111");
+    expect(svg.textContent).toContain("222");
+    expect(svg.textContent).toContain("333");
+  });
+
+  it("an explicit collapsed list wins verbatim over the spec defaults", () => {
+    // Defaults would collapse China and expand Canada; the explicit list flips both.
+    const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS, { collapsed: ["Canada"] });
+    expect(svg.textContent).toContain("111"); // China expanded
+    expect(svg.textContent).not.toContain("333"); // Canada collapsed
+  });
+});

@@ -1,0 +1,12 @@
+chartType: line
+title: "Long-Run Change in Real GDP by {dimension} (feature test)"
+subtitle: Percent change from baseline
+xAxisType: temporal
+title_selectors:
+  dimension:
+    options:
+      - { id: sector, label: Sector, color: blue }
+      - { id: country, label: Country, color: amber }
+    default: sector
+data: data.csv
+note: "Confirm: selector looks like the AILMT design (boxed, caret, popover); label is tinted to the active option's color; the line adopts the color; keyboard + type-ahead work."

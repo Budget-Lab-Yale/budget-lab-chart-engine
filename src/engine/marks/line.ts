@@ -6,6 +6,7 @@ import { Plot } from "../vendor";
 import { TBL, markerSymbolForIndex } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
+import { splitProjectedRuns } from "./projected";
 
 export function buildLineMarks(
   data: PreparedRow[],
@@ -61,7 +62,59 @@ export function buildLineMarks(
       }),
     );
   }
-  if (solidData.length) {
+  // Projected-run split (task 12): a per-row `_projected` flag (spec.projected_field) splits
+  // ONLY the solid group into maximal actual/projected runs per series, so the projected date
+  // range(s) render dashed while the rest of the series stays solid — connecting continuously to
+  // the adjacent actual points (splitProjectedRuns extends each projected run with a shallow copy
+  // of its neighboring actual boundary point, so the connector segment renders once, dashed, with
+  // no gap). A series ALSO listed in series_styles[..].dashed lives in dashedData (above), never
+  // solidData, so it is NEVER split here — whole-series dashed wins outright over per-row
+  // projected styling for that series.
+  const hasProjected = !!spec.projected_field;
+  let projRows: PreparedRow[] = [];
+  let actualRows: PreparedRow[] = solidData;
+  if (hasProjected) {
+    const split = splitProjectedRuns(solidData);
+    projRows = split.projected;
+    actualRows = split.actual;
+  }
+  // Default true (projected runs render dashed); an explicit `false` opts a chart out of the
+  // visual distinction while keeping projected_field wired (e.g. for tooling that only needs the
+  // area fade, or a future non-dash treatment).
+  const projDashed = spec.projected_style?.dashed !== false;
+
+  if (hasProjected) {
+    // Paint order: dashed-series (above) → projected-runs → actual-runs. z:"_seg" (not "series")
+    // is essential in both calls: grouping by series would let Plot bridge the projected gap (or
+    // bridge two disjoint projected runs) with an unwanted solid/dashed segment.
+    if (projRows.length) {
+      overlay.push(
+        Plot.line(projRows, {
+          x: xField,
+          y: "_y",
+          z: "_seg",
+          stroke: "series",
+          strokeWidth: solidStroke,
+          ...(projDashed ? { strokeDasharray: TBL.dashArray } : {}),
+          defined: (r: PreparedRow) => Number.isFinite(r._y),
+          ...facetChannels,
+        }),
+      );
+    }
+    if (actualRows.length) {
+      overlay.push(
+        Plot.line(actualRows, {
+          x: xField,
+          y: "_y",
+          z: "_seg",
+          stroke: "series",
+          strokeWidth: solidStroke,
+          defined: (r: PreparedRow) => Number.isFinite(r._y),
+          ...facetChannels,
+        }),
+      );
+    }
+  } else if (solidData.length) {
     overlay.push(
       Plot.line(solidData, {
         x: xField,
@@ -99,20 +152,34 @@ export function buildLineMarks(
     );
   }
 
-  // Series encounter order within each line group, so post-render path tagging maps
-  // each <path data-series> correctly even when dashed+solid groups share a color.
-  // `g[aria-label="line"] path` returns all line paths in document order — dashed-group
-  // paths first (they paint first), then solid-group paths — which matches concatenating
-  // each group's encounter order in the same dashed-then-solid sequence.
-  const encounterOrder = (rs: PreparedRow[]): string[] => {
+  // Path encounter order within each line group, so post-render path tagging maps each
+  // <path data-series> correctly even when several groups share a color. `g[aria-label="line"]
+  // path` returns all line paths in document order, matching the overlay's paint order above.
+  // Plot emits one <path> per unique z-group value (in the z-group's first-appearance order in
+  // its call's data), so the tagging key must be the z FIELD actually used by that call: plain
+  // "series" for the unsplit dashed/solid groups, "_seg" (falling back to "series") once
+  // projected_field splits solidData into multiple per-run paths per series — each unique _seg
+  // is its own path and must get its own (repeated) series tag.
+  const encounterOrder = (rs: PreparedRow[], keyField: "series" | "_seg" = "series"): string[] => {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const r of rs) if (!seen.has(r.series)) { seen.add(r.series); out.push(r.series); }
+    for (const r of rs) {
+      const key = keyField === "_seg" ? ((r as PreparedRow & { _seg?: string })._seg ?? r.series) : r.series;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(r.series);
+      }
+    }
     return out;
   };
   const seriesOrder: string[] = [];
   if (dashedData.length) seriesOrder.push(...encounterOrder(dashedData));
-  if (solidData.length) seriesOrder.push(...encounterOrder(solidData));
+  if (hasProjected) {
+    if (projRows.length) seriesOrder.push(...encounterOrder(projRows, "_seg"));
+    if (actualRows.length) seriesOrder.push(...encounterOrder(actualRows, "_seg"));
+  } else if (solidData.length) {
+    seriesOrder.push(...encounterOrder(solidData));
+  }
 
   // Categorical x (xField "_xc"): a line connects category points, so use a POINT scale (points
   // span the axis with only a small edge inset) instead of the bar BAND scale (whose outer

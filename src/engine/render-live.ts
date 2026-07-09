@@ -4,8 +4,14 @@
 // RE-RENDERED at the container's width (the x-axis compresses; height stays fixed) down to a
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
-import type { ChartSpec } from "../spec/types.js";
+import type { ChartSpec, TitleSelector } from "../spec/types.js";
 import { resolveColumns } from "../spec/columns.js";
+import {
+  parseTitleTokens,
+  resolveActiveOptionColor,
+  resolveSelections,
+  resolveTitleText,
+} from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
@@ -16,6 +22,7 @@ import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figu
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
+import { resolveColor } from "./palette.js";
 import {
   attachCrosshair,
   attachBandCrosshair,
@@ -47,6 +54,14 @@ export interface MountOptions {
    *  folder); pass this when several charts share one page (e.g. a gallery) so each still gets its
    *  own name instead of all resolving to the shared page's slug. */
   downloadName?: string;
+  /** Fires when the user changes an inline title selector (see spec.title_selectors), with the
+   *  selector key and the newly-active option id. A bubbling `tbl-title-select` CustomEvent
+   *  (same detail shape) also dispatches from the card root, for standalone bundles with no
+   *  host callback wired up. No-op when the spec has no title_selectors. */
+  onSelect?: (change: { id: string; value: string }) => void;
+  /** Initial active option id per title-selector key (host re-mount state restore). Precedence:
+   *  `selections[key]` > `title_selectors[key].default` > that selector's first option. */
+  selections?: Record<string, string>;
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -99,10 +114,12 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
         : present.size;
   }
   const nSpacers = Math.max(0, nSections - 1);
-  // Tallest wrapped category label at the gutter width.
-  const gutter = horizontalLeftGutter(catList);
+  // Tallest wrapped category label at the gutter width. Standalone horizontal bars now render
+  // their category labels at the (larger) faceted size (task 17), so size the gutter + wrap
+  // estimate at that font — mirrors figure.ts's shared-gutter computation for faceted panes.
+  const gutter = horizontalLeftGutter(catList, { fontSize: FACETED_CAT_LABEL_PX });
   const maxLabelLines = catList.reduce(
-    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD)),
+    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
     1,
   );
   return horizontalBarHeight({
@@ -143,6 +160,10 @@ function resolveLegendPosition(
   seriesCount: number,
   rows: TidyRow[],
 ): "top" | "right" {
+  // `legend: false` suppresses the legend entirely (buildLegendItems returns null), so no
+  // right column must ever be reserved — treat the layout as top (whose slot stays empty and
+  // takes no space) regardless of an explicit legendPosition or the stacked defaults below.
+  if (spec.legend === false) return "top";
   if (spec.legendPosition === "top" || spec.legendPosition === "right") {
     return spec.legendPosition;
   }
@@ -434,12 +455,25 @@ function downloadSlug(spec: ChartSpec): string {
   } catch {
     /* no location (SSR/jsdom) — fall through */
   }
-  return titleToSlug(spec.title);
+  // Resolve any title-selector tokens (with the defaults) BEFORE slugifying, so the slug reads
+  // "…-by-sector" rather than "…-by-dimension". (Braces themselves could never leak — the
+  // slugifier strips all non-alphanumerics — but the resolved label is the better name.)
+  return titleToSlug(resolveTitleText(spec));
 }
 
 /** Data (CSV) + Image (PNG) download buttons for the source line. Filenames use the chart's folder
- *  slug (from the URL) rather than the title, which makes for unwieldy filenames. */
-function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], slugOverride?: string): HTMLElement {
+ *  slug (from the URL) rather than the title, which makes for unwieldy filenames.
+ *
+ *  `selections` is the mount's LIVE title-selector selections object (mutated in place by the
+ *  inline-select widget's change handler), so the PNG export always prints the currently-chosen
+ *  option labels in its title — not the defaults captured at mount time. */
+function buildDownloadActions(
+  doc: Document,
+  spec: ChartSpec,
+  rows: TidyRow[],
+  slugOverride?: string,
+  selections?: Record<string, string>,
+): HTMLElement {
   const base = slugOverride || downloadSlug(spec);
   const downloads = doc.createElement("div");
   downloads.className = "figure-downloads";
@@ -485,7 +519,7 @@ function buildDownloadActions(doc: Document, spec: ChartSpec, rows: TidyRow[], s
     imgBtn.disabled = true;
     imgLabel.textContent = "…";
     try {
-      await exportChartPng(spec, rows, { filename: `${base}.png` });
+      await exportChartPng(spec, rows, { filename: `${base}.png`, selections });
     } catch (err) {
       console.error("Image export failed:", err);
       imgLabel.textContent = "Failed";
@@ -597,6 +631,42 @@ function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
   raf(step);
 }
 
+// Bar charts facet their category band whenever bar.ts puts it on fx (vertical grouped) or fy
+// (horizontal grouped, OR horizontal sectioned — any series count, since Task 16 unified single-
+// and multi-series sectioned bars onto one fy topology; see bar.ts). The category-band crosshair
+// (attachBandCrosshair) reads rect geometry differently in each case: faceted charts wrap each
+// category in its own translated `<g>` (readCategoryBands/H's `isFaceted` branch); unfaceted charts
+// read raw rect x/y directly. Passing the wrong branch reads a facet-LOCAL coordinate as if it were
+// absolute, misresolving every hover past the first facet.
+function isBarCategoryFaceted(spec: ChartSpec, rows: PreparedRow[], seriesCount: number): boolean {
+  if (spec.chartType !== "bar") return false;
+  if (seriesCount > 1) return true;
+  return spec.orientation === "horizontal" && rows.some((r) => r._section != null);
+}
+
+// Sectioned horizontal bars render categories grouped by section (bar.ts's `bandDomain`), so the
+// bands' rendered VISUAL (fy facet) order can differ from data-encounter order. The category-band
+// crosshair maps facet rows -> categories BY INDEX, so callers must reorder their category list to
+// match before passing it in. Stable sort keeps within-section order. No-op (returns `cats`
+// unchanged, same array reference) when the chart has no section column.
+function sectionOrderedCategories(spec: ChartSpec, rows: PreparedRow[], cats: string[]): string[] {
+  const sectionCol = spec.columns?.section;
+  if (!sectionCol) return cats;
+  const sectionOf = new Map<string, string>();
+  for (const r of rows) {
+    if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
+  }
+  const secOrder =
+    spec.section_order && spec.section_order.length
+      ? spec.section_order
+      : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
+  const rankOf = (c: string): number => {
+    const i = secOrder.indexOf(sectionOf.get(c) ?? "");
+    return i < 0 ? secOrder.length : i;
+  };
+  return [...cats].sort((a, b) => rankOf(a) - rankOf(b));
+}
+
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
@@ -611,9 +681,34 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const card = doc.createElement("div");
   card.className = `figure-card chart-${spec.chartType}`;
 
+  // Inline title selectors: the mount owns ONE selections object for its whole life. The
+  // header's widget change handler mutates it in place, so the PNG download (below) and any
+  // later reads see the live state; the header itself is built once and never rebuilt by the
+  // resize draw() loop, so the control + its state survive the engine's own re-renders.
+  const selections = resolveSelections(spec, opts.selections);
+
+  // Color accent feed (AILMT parity — charts.js L556-562): a single-series chart driven by a
+  // colored title selector adopts the active option's resolved color as its line color, so it
+  // matches the selector's tinted label. `requestAccentRedraw` is assigned once `draw` exists
+  // below (forward reference — only invoked later, from a user's selection, by which point the
+  // assignment has already run); `draw()` itself recomputes the accent color from the live
+  // `selections` on every call, so a selection change picks it up on the very next redraw.
+  let requestAccentRedraw: (() => void) | undefined;
+
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
-  buildFigureHeader(card, doc, spec, opts.eyebrow);
+  const closeTitleSelectors = buildFigureHeader(
+    card, doc, spec, opts.eyebrow,
+    spec.title_selectors
+      ? {
+          selectors: spec.title_selectors,
+          selections,
+          onSelect: opts.onSelect,
+          seriesColors: spec.series_colors,
+          afterChange: () => requestAccentRedraw?.(),
+        }
+      : undefined,
+  );
 
   // Legend slot above the canvas (used for top-legend; hidden/empty for right-legend).
   const legendSlot = doc.createElement("div");
@@ -636,7 +731,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections),
   });
 
   container.appendChild(card);
@@ -693,9 +788,23 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
 
+    // Color accent feed (AILMT parity): resolve the active title-selector option's color (raw
+    // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
+    // it up immediately. renderChart only applies it when the chart resolves to exactly one
+    // series (engine/index.ts) — a multi-series chart's palette/series_colors stay untouched.
+    const rawAccent = spec.title_selectors
+      ? resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors)
+      : undefined;
+    const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
+
     let built;
     try {
-      built = renderChart(spec, rows, { width: target, height, ...(restackOrder ? { stackOrder: restackOrder } : {}) });
+      built = renderChart(spec, rows, {
+        width: target,
+        height,
+        ...(restackOrder ? { stackOrder: restackOrder } : {}),
+        ...(accentColor ? { accentColor } : {}),
+      });
     } catch (e) {
       canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
       return;
@@ -856,10 +965,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
       });
     } else if (spec.xAxisType === "categorical") {
-      // Determine if this is a stacked chart (needs Total row) and if it uses
-      // fx-faceted grouped bar layout (xScaleField === "fx" in bar.ts).
+      // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
+      // band (xScaleField === "fx" for vertical grouped, or `fy` for horizontal grouped/sectioned
+      // — see bar.ts / isBarCategoryFaceted above).
       const isStacked = spec.chartType === "stacked";
-      const isFaceted = spec.chartType === "bar" && (seriesOrder.length > 1);
+      const isFaceted = isBarCategoryFaceted(spec, dataInScope, seriesOrder.length);
       // Derive the ordered category list from the data rows (declaration order).
       const catsSeen = new Set<string>();
       const cats: string[] = [];
@@ -867,31 +977,67 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         const cat = r._xc;
         if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
       }
+      const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
+      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+      const horizontalBar = spec.orientation === "horizontal";
+      const bandYFormat = (v: number): string => formatValue(v, units, spec.tooltip_decimals);
+
+      // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
+      // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
+      // label gutter; vertical: stopping at the baseline, matching faceted), a uniform highlight
+      // height across section spacers, a bolded hovered label (horizontal) / frosted category pill
+      // (vertical), and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
+      // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
+      // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →
+      // highlightPills → secondaryBandCursor) so `.tbl-coord` paints above the bars.
+      let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
       attachBandCrosshair(svg, {
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        rows: bandRows,
         isStacked,
         showTotalDot,
         isFaceted,
-        categories: cats,
+        categories: orderedCats,
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: bandYFormat,
         categoryLabels: spec.x_labels,
         swatchShape: "rect",
-        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+        orientation: horizontalBar ? "horizontal" : "vertical",
+        emitOnly: true,
+        onResolve: (cat: string | null) => {
+          pillDriver?.setSuppressedCategory(cat);
+          secondaryDriver?.(cat, true);
+        },
       });
       pillDriver = attachHighlightPills(svg, {
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        rows: bandRows,
         chartType: isStacked ? "stacked" : "bar",
         isStacked,
         isFaceted,
-        categories: cats,
+        categories: orderedCats,
         colors,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
-        horizontal: spec.orientation === "horizontal",
+        yFormat: bandYFormat,
+        horizontal: horizontalBar,
       });
+      secondaryDriver = attachSecondaryBandCursor(svg, {
+        rows: bandRows,
+        isStacked,
+        isFaceted,
+        categories: orderedCats,
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: bandYFormat,
+        horizontal: horizontalBar,
+        // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
+        // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
+        // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.
+        ...(horizontalBar
+          ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX } }
+          : {}),
+      }) as (key: unknown, active?: boolean) => void;
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -967,6 +1113,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   draw(initialCardWidth, resolvedPos());
 
+  // Wire the accent-redraw hook (see its declaration above): a title-selector change forces
+  // draw() past its same-width/same-legendPos early return, mirroring the area click-to-restack
+  // pattern (`lastWidth = -1` then a fresh draw() call at the current width/legendPos).
+  requestAccentRedraw = () => {
+    lastWidth = -1;
+    draw(card.clientWidth || initialCardWidth, currentLegendPos ?? resolvedPos());
+  };
+
   // Single persistent scrollLeft → translateX for the sticky y-axis overlay.
   let scrollRaf: number | null = null;
   const onScroll = (): void => {
@@ -1006,6 +1160,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
     canvasScroll.removeEventListener("scroll", onScroll);
     currentOverlay?._ro?.disconnect();
+    closeTitleSelectors();
   };
 }
 
@@ -1026,13 +1181,300 @@ const PANE_HEIGHT = 240;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
+/** Live wiring for the inline title selector(s): the spec's `title_selectors`, the mount's
+ *  SHARED mutable selections object (updated in place on change, so later reads — e.g. the PNG
+ *  download button — always see the live state), and the host's optional change callback. The
+ *  card root itself (buildFigureHeader's first argument) is the CustomEvent dispatch target. */
+export interface TitleSelectorWiring {
+  selectors: Record<string, TitleSelector>;
+  selections: Record<string, string>;
+  onSelect?: (change: { id: string; value: string }) => void;
+  /** `spec.series_colors` — the fallback source for an option's trigger-label tint when the
+   *  option itself has no explicit `color` (see TitleSelectorOption.color and
+   *  spec/title.ts#resolveActiveOptionColor, which this mirrors at build time). */
+  seriesColors?: Record<string, string>;
+  /** Called after a selection's shared-state update + host callback + CustomEvent have all
+   *  fired — mountChart's hook to re-render the chart body so a single-series chart's line
+   *  adopts the newly-active option's color (AILMT parity; see engine/index.ts
+   *  RenderOptions.accentColor). mountFigure (small multiples) omits this: the label still
+   *  tints, but the per-pane grid isn't re-rendered — each pane is one facet's chart body, not a
+   *  single accent target, and this port does not touch figure.ts. */
+  afterChange?: () => void;
+}
+
+/** One option's DATA for the inline-select widget below: display label + the RAW (unresolved)
+ *  color, if any, that tints the trigger label while this option is active. */
+interface InlineSelectItem {
+  id: string;
+  label: string;
+  color?: string;
+}
+
+/**
+ * The AI Labor Market Tracker's inline title-selector widget (charts.js `buildInlineSelect`,
+ * ported near-verbatim — see also styles.css L392-479 for the paired CSS): a button styled like
+ * a boxed piece of title text (`.inline-select`) with a caret, opening a popover `<ul>`
+ * (`.inline-select-popover`) of options on click. Behavior: click toggles the popover; a
+ * click anywhere outside the button/popover closes it; Escape closes it and refocuses the
+ * button; Enter/Space on a focused option selects it; ArrowUp/ArrowDown move focus with
+ * wraparound; typing buffers into a 600ms type-ahead match against option labels. The button's
+ * label is tinted to the ACTIVE option's resolved color (`palette.resolveColor`) — the caret
+ * stays muted; the popover itself carries no per-option tint (the active row is marked navy +
+ * semibold only, via `.is-active`).
+ *
+ * One structural difference from the tracker: the tracker tears down and rebuilds this widget on
+ * every selection (as part of a full figure re-render driven by its own state store). The
+ * engine's title is built ONCE per mount and never rebuilt (see buildFigureHeader) so the resize
+ * draw() loop can't clobber the user's open popover / focus — so this instance updates its own
+ * label/aria state in place on selection, rather than relying on a future rebuild.
+ */
+function buildInlineSelect(
+  doc: Document,
+  items: InlineSelectItem[],
+  initialActiveId: string,
+  onSelect: (id: string) => void,
+): { el: HTMLElement; destroy: () => void } {
+  const btn = doc.createElement("button");
+  btn.type = "button";
+  btn.className = "inline-select";
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
+
+  const labelEl = doc.createElement("span");
+  labelEl.className = "inline-select-label";
+  const caret = doc.createElement("span");
+  caret.className = "inline-select-caret";
+  caret.textContent = "▾";
+  caret.setAttribute("aria-hidden", "true");
+  btn.appendChild(labelEl);
+  btn.appendChild(caret);
+
+  const popover = doc.createElement("ul");
+  popover.className = "inline-select-popover";
+  popover.setAttribute("role", "listbox");
+  popover.hidden = true;
+
+  let activeId = initialActiveId;
+  const itemById = new Map<string, HTMLLIElement>();
+
+  function refresh(): void {
+    const active = items.find((i) => i.id === activeId) ?? items[0];
+    labelEl.textContent = active?.label ?? "";
+    // Tint the label with the option's resolved color (matches the chart's series color when the
+    // accent feeds back to a single-series chart — see engine/index.ts RenderOptions.accentColor);
+    // the caret stays grey (CSS-only, var(--tbl-text-muted)).
+    labelEl.style.color = (active && resolveColor(active.color)) || "";
+    for (const [id, li] of itemById) {
+      li.setAttribute("aria-selected", String(id === active?.id));
+      li.classList.toggle("is-active", id === active?.id);
+    }
+  }
+
+  function selectItem(id: string): void {
+    activeId = id;
+    refresh();
+    onSelect(id);
+  }
+
+  for (const item of items) {
+    const li = doc.createElement("li");
+    li.setAttribute("role", "option");
+    li.dataset.id = item.id;
+    li.textContent = item.label;
+    li.tabIndex = 0;
+    li.addEventListener("click", () => {
+      selectItem(item.id);
+      closePopover();
+    });
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectItem(item.id);
+        closePopover();
+      }
+    });
+    popover.appendChild(li);
+    itemById.set(item.id, li);
+  }
+  refresh();
+
+  let typeAheadBuffer = "";
+  let typeAheadTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function focusItem(li: HTMLElement | null | undefined): void {
+    li?.focus();
+  }
+
+  // Guards the deferred `addEventListener` below: if closePopover runs in the SAME synchronous
+  // tick as openPopover (e.g. click-then-Escape with no await), the pending setTimeout hasn't
+  // fired yet, so removeEventListener would no-op and the listener would attach anyway a tick
+  // later — permanently, since nothing is listening for it at that point. Capturing the timer id
+  // lets closePopover cancel it before it ever registers.
+  let clickAwayTimer: ReturnType<typeof setTimeout> | undefined;
+  function openPopover(): void {
+    popover.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    clickAwayTimer = setTimeout(() => {
+      clickAwayTimer = undefined;
+      doc.addEventListener("click", clickAway);
+    }, 0);
+    setTimeout(() => {
+      const activeLi = itemById.get(activeId) ?? (popover.firstElementChild as HTMLElement | null);
+      focusItem(activeLi);
+    }, 0);
+  }
+  function closePopover(): void {
+    popover.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    if (clickAwayTimer !== undefined) {
+      clearTimeout(clickAwayTimer);
+      clickAwayTimer = undefined;
+    }
+    doc.removeEventListener("click", clickAway);
+    typeAheadBuffer = "";
+    clearTimeout(typeAheadTimer);
+    btn.focus();
+  }
+  function clickAway(e: Event): void {
+    const target = e.target as Node;
+    if (!btn.contains(target) && !popover.contains(target)) closePopover();
+  }
+  // Unmount-time teardown: same listener/timer cleanup as closePopover, but without the
+  // onSelect-adjacent focus side effect (the button may be about to leave the DOM).
+  function destroy(): void {
+    if (clickAwayTimer !== undefined) {
+      clearTimeout(clickAwayTimer);
+      clickAwayTimer = undefined;
+    }
+    doc.removeEventListener("click", clickAway);
+    clearTimeout(typeAheadTimer);
+    popover.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  }
+
+  function keyHandler(e: KeyboardEvent): void {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePopover();
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      const focused = doc.activeElement;
+      if (focused && focused.parentElement === popover) {
+        e.preventDefault();
+        (focused as HTMLElement).click();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const lis = Array.from(popover.children) as HTMLElement[];
+      const idx = lis.indexOf(doc.activeElement as HTMLElement);
+      const next = e.key === "ArrowDown"
+        ? lis[(idx + 1) % lis.length]
+        : lis[(idx - 1 + lis.length) % lis.length];
+      focusItem(next);
+      return;
+    }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      typeAheadBuffer += e.key.toLowerCase();
+      clearTimeout(typeAheadTimer);
+      typeAheadTimer = setTimeout(() => {
+        typeAheadBuffer = "";
+      }, 600);
+      const match = items.find((i) => i.label.toLowerCase().startsWith(typeAheadBuffer));
+      if (match) {
+        e.preventDefault();
+        focusItem(itemById.get(match.id));
+      }
+    }
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    popover.hidden ? openPopover() : closePopover();
+  });
+
+  const wrap = doc.createElement("span");
+  wrap.className = "inline-select-wrap";
+  wrap.appendChild(btn);
+  wrap.appendChild(popover);
+  wrap.addEventListener("keydown", keyHandler);
+  return { el: wrap, destroy };
+}
+
+/** Render a title with inline-selector tokens into `h`: text segments become text nodes; each
+ *  `{key}` token becomes an engine-owned button+popover widget (see buildInlineSelect — options
+ *  from its TitleSelector, active = the current selection). On change: the shared selections
+ *  object is updated in place, the host callback fires, a bubbling `tbl-title-select` CustomEvent
+ *  dispatches from the card root (for standalone bundles with no host callback), and — when
+ *  wired (mountChart only) — `afterChange` re-renders the chart body for the color accent. */
+function buildSelectorTitle(
+  h: HTMLElement,
+  doc: Document,
+  title: string,
+  card: HTMLElement,
+  wiring: TitleSelectorWiring,
+): Array<() => void> {
+  const cleanups: Array<() => void> = [];
+  const { selectors, selections, onSelect, seriesColors, afterChange } = wiring;
+  for (const seg of parseTitleTokens(title, selectors)) {
+    if (seg.kind === "text") {
+      h.appendChild(doc.createTextNode(seg.text));
+      continue;
+    }
+    const key = seg.key;
+    const selector = selectors[key]!;
+    const items: InlineSelectItem[] = selector.options.map((opt) => ({
+      id: opt.id,
+      label: opt.label ?? opt.id,
+      // Explicit option color wins; else the figure's series color for the option's label (the
+      // shared per-series map) — mirrors spec/title.ts#resolveActiveOptionColor.
+      color: opt.color ?? seriesColors?.[opt.label ?? opt.id],
+    }));
+    // The mounts always pass a resolveSelections() map (every key populated), so the fallback is
+    // defensive only — buildFigureHeader is exported, and an external caller could hand-roll an
+    // incomplete wiring.selections.
+    const initialActiveId = selections[key] ?? selector.options[0]?.id ?? "";
+    const { el, destroy } = buildInlineSelect(doc, items, initialActiveId, (value) => {
+      selections[key] = value;
+      onSelect?.({ id: key, value });
+      card.dispatchEvent(
+        new CustomEvent("tbl-title-select", { detail: { id: key, value }, bubbles: true }),
+      );
+      afterChange?.();
+    });
+    h.appendChild(el);
+    cleanups.push(destroy);
+  }
+  return cleanups;
+}
+
 /** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
  *  header so single-chart and figure cards look identical. The eyebrow (figure number) is an
  *  embed-time value supplied by the caller, not read from the spec.
  *
  *  The spec parameter is typed as `{ title?: string; subtitle?: string }` (a structural subset)
- *  so both ChartSpec and TableSpec can be passed without casting. */
-export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { title?: string; subtitle?: string }, eyebrowText?: string): void {
+ *  so both ChartSpec and TableSpec can be passed without casting. `titleWiring` (chart mounts
+ *  only — tables have no title_selectors and omit it) turns each `{key}` token in the title
+ *  into an engine-owned button+popover widget (see buildInlineSelect); absent, the title renders
+ *  as plain textContent, DOM-identical to before the selector feature existed. The header is
+ *  built ONCE per mount
+ *  (the resize draw() loop never rebuilds it), so the control and its selection state survive
+ *  the engine's own re-renders naturally.
+ *
+ *  Returns a cleanup callback: closes any open title-selector popover(s), clears their pending
+ *  click-away timers, and removes the document click listener. A no-op when there's no
+ *  titleWiring (tables, or a chart with no title_selectors). Callers (mountChart, mountFigure)
+ *  MUST invoke this from their own unmount closures — otherwise unmounting with a popover open
+ *  leaves its document-level click listener attached forever. */
+export function buildFigureHeader(
+  card: HTMLElement,
+  doc: Document,
+  spec: { title?: string; subtitle?: string },
+  eyebrowText?: string,
+  titleWiring?: TitleSelectorWiring,
+): () => void {
   const header = doc.createElement("div");
   header.className = "figure-header";
   if (eyebrowText) {
@@ -1043,10 +1485,15 @@ export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { titl
   }
   const titlebar = doc.createElement("div");
   titlebar.className = "figure-titlebar";
+  let cleanups: Array<() => void> = [];
   if (spec.title) {
     const h = doc.createElement("h3");
     h.className = "figure-title";
-    h.textContent = spec.title;
+    if (titleWiring && Object.keys(titleWiring.selectors).length) {
+      cleanups = buildSelectorTitle(h, doc, spec.title, card, titleWiring);
+    } else {
+      h.textContent = spec.title;
+    }
     titlebar.appendChild(h);
   }
   const logoWrapper = doc.createElement("div");
@@ -1061,6 +1508,9 @@ export function buildFigureHeader(card: HTMLElement, doc: Document, spec: { titl
     header.appendChild(s);
   }
   card.appendChild(header);
+  return () => {
+    for (const cleanup of cleanups) cleanup();
+  };
 }
 
 /** Wire the crosshair + two-way selection onto one figure SVG (shared combined SVG or a
@@ -1222,33 +1672,19 @@ function wireFigureSvg(
     // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
     const isStacked = ctx.spec.chartType === "stacked";
     // A grouped per-pane bar IS fx-faceted within its own frame (xScaleField === "fx" in
-    // bar.ts), so isFaceted = bar && >1 series.
-    const isFaceted = ctx.spec.chartType === "bar" && ctx.seriesOrder.length > 1;
+    // bar.ts); a sectioned horizontal per-pane bar (any series count) is fy-faceted — see
+    // isBarCategoryFaceted above.
+    const isFaceted = isBarCategoryFaceted(ctx.spec, ctx.dataInScope, ctx.seriesOrder.length);
     const catsSeen = new Set<string>();
-    const cats: string[] = [];
+    const catsRaw: string[] = [];
     for (const r of ctx.dataInScope) {
       const cat = r._xc;
-      if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
+      if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); catsRaw.push(cat); }
     }
     // Sectioned horizontal bars render categories grouped by section, so the bands' VISUAL order
     // differs from data-encounter order. The crosshair maps facet rows → categories by index, so
-    // reorder `cats` to match the rendered (section) order. Stable sort keeps within-section order.
-    const sectionCol = ctx.spec.columns?.section;
-    if (sectionCol) {
-      const sectionOf = new Map<string, string>();
-      for (const r of ctx.dataInScope) {
-        if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
-      }
-      const secOrder =
-        ctx.spec.section_order && ctx.spec.section_order.length
-          ? ctx.spec.section_order
-          : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
-      const rankOf = (c: string): number => {
-        const i = secOrder.indexOf(sectionOf.get(c) ?? "");
-        return i < 0 ? secOrder.length : i;
-      };
-      cats.sort((a, b) => rankOf(a) - rankOf(b));
-    }
+    // reorder to match the rendered (section) order.
+    const cats = sectionOrderedCategories(ctx.spec, ctx.dataInScope, catsRaw);
     attachBandCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
@@ -1370,7 +1806,22 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
   const card = doc.createElement("div");
   card.className = "figure-card";
-  buildFigureHeader(card, doc, spec, opts.eyebrow);
+  // Inline title selectors — same single shared selections object discipline as mountChart.
+  // No `afterChange` here: a small-multiples figure has no single accent target (each pane is
+  // its own facet's chart body, not one line) — the label still tints, but the grid doesn't
+  // re-render on selection. See TitleSelectorWiring.afterChange.
+  const selections = resolveSelections(spec, opts.selections);
+  const closeTitleSelectors = buildFigureHeader(
+    card, doc, spec, opts.eyebrow,
+    spec.title_selectors
+      ? {
+          selectors: spec.title_selectors,
+          selections,
+          onSelect: opts.onSelect,
+          seriesColors: spec.series_colors,
+        }
+      : undefined,
+  );
 
   const legendSlot = doc.createElement("div");
   legendSlot.className = "figure-legend-slot";
@@ -1405,7 +1856,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows, opts.downloadName),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections),
   });
   container.appendChild(card);
 
@@ -1463,9 +1914,12 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? HBAR_GUTTER_RESERVE : 0);
     const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
     // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
-    // — SHARED mode (unequal labeled/label-less columns) OR variable pane_widths in either mode.
-    // Otherwise (equal per-pane) pass one shared pane width for 1fr columns.
-    const useGridWidth = isShared || variableWidths;
+    // — SHARED mode (unequal labeled/label-less columns), variable pane_widths in either mode, OR
+    // per-pane HORIZONTAL bars (the category gutter is asymmetric — pane 0 wide, others narrow —
+    // so renderFigure compensates the outer widths for one shared inner data width and needs the
+    // total row width, exactly like shared mode). Otherwise (equal per-pane) pass one shared pane
+    // width for 1fr columns.
+    const useGridWidth = isShared || variableWidths || isHorizontalBarFig;
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
@@ -1598,5 +2052,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   return () => {
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+    closeTitleSelectors();
   };
 }

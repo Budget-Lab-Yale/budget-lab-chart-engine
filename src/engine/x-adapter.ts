@@ -28,8 +28,16 @@ export interface XAdapter {
   validate: (r: Record<string, unknown>) => boolean;
   /** Build the per-chart x options. `faceted` (shared-mode small multiples) tags the x-axis
    *  label marks with `X_AXIS_LABEL_CLASS` so the grid chrome collapse can keep the bottom-row
-   *  copies and drop the duplicate rows. Default (false) → no class → output byte-identical. */
-  buildXOpts: (data: Array<Record<string, any>>, faceted?: boolean, labelMode?: BandLabelMode) => XOpts;
+   *  copies and drop the duplicate rows. Default (false) → no class → output byte-identical.
+   *  `tagCategoryLabels` (categorical axis only): stamp the hover-accent hook class on the
+   *  category labels — passed true for bar/stacked charts only (see index.ts), so other
+   *  categorical chart types (categorical-x line, dot plot) stay byte-identical. */
+  buildXOpts: (
+    data: Array<Record<string, any>>,
+    faceted?: boolean,
+    labelMode?: BandLabelMode,
+    tagCategoryLabels?: boolean,
+  ) => XOpts;
 }
 
 // Margin for the two-line month/year axis vs the collapsed year-only axis.
@@ -117,7 +125,7 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       parseX: (v) => v,
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
-      buildXOpts(data, faceted = false, labelMode: BandLabelMode = "single") {
+      buildXOpts(data, faceted = false, labelMode: BandLabelMode = "single", tagCategoryLabels = false) {
         // Category domain in data-encounter order (Style-Guide: declaration order is
         // authoritative; never auto-sort by magnitude).
         const seen = new Set<string>();
@@ -139,7 +147,13 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
             axis: null,
             padding: 0.2,
           },
-          axisMarks: tblBandXAxis(categories, "x", faceted ? X_AXIS_LABEL_CLASS : undefined, labelMode),
+          axisMarks: tblBandXAxis(
+            categories,
+            "x",
+            faceted ? X_AXIS_LABEL_CLASS : undefined,
+            labelMode,
+            tagCategoryLabels,
+          ),
           // Vertical reference markers are meaningless on a band scale.
           markerToX: () => null,
           tooltipXParse: undefined,

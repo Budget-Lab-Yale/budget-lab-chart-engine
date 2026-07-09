@@ -7,7 +7,7 @@
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
 import { resolveColumns, SINGLE_SERIES_KEY } from "../spec/columns";
-import { resolveAnnotations } from "../spec/annotations";
+import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import { computeYAxis, computeBarYExtent } from "./scales";
@@ -18,7 +18,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
-import { inferUnitsFromSubtitle } from "./util";
+import { inferUnitsFromSubtitle, isTruthyFlag } from "./util";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -76,6 +76,21 @@ export interface RenderOptions {
   /** Shared-mode small multiples (vertical bars): force the bottom margin (px) — the figure passes
    *  the MAX across panes so every pane reserves the same space and their baselines align. */
   marginBottom?: number;
+  /** Small multiples: this pane's facet value, used to scope `annotations.xAxis`/`yAxis` markers
+   *  that carry a `facet` key (see `filterAnnotationsByFacet`) — both the y-extent/x-extent
+   *  folding below AND the drawn rule/label in assemblePlot read the filtered set. Absent (single
+   *  chart, or a faceted chart's figure orchestrator omitting it) → every marker renders,
+   *  unchanged from today. */
+  paneFacetValue?: string;
+  /** Inline title-selector color accent (AILMT parity — charts.js L556-562): an already-resolved
+   *  CSS color (run through `palette.resolveColor` by the caller) applied as the sole series'
+   *  color WHEN the chart resolves to exactly one series (after `series_order` filtering). A
+   *  multi-series chart ignores this — its distinct palette/`series_colors` stay untouched, matching
+   *  the tracker's single-line-only accent-feed. render-live.ts recomputes this from the active
+   *  title-selector option on every selection change and re-renders; export-png.ts resolves it
+   *  once from `selections` for a static export. Absent (the common case — no title_selectors, or
+   *  a multi-series chart) ⇒ byte-identical to before this field existed. */
+  accentColor?: string;
 }
 
 export interface LegendItem {
@@ -236,6 +251,9 @@ export function renderPane(
       // column IS the series column (redundant encoding) this simply mirrors `series`.
       if (cols.shape) row._shape = r[cols.shape] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
+      if (spec.projected_field) {
+        row._projected = isTruthyFlag(r[spec.projected_field]);
+      }
       (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {
@@ -272,6 +290,12 @@ export function renderPane(
   const seriesSet = new Set(seriesNames);
   const dataInScope = data.filter((r) => seriesSet.has(r.series));
   const colors = buildColorMap(seriesNames, spec.series_colors);
+  // Single-series charts driven by a colored inline title selector (e.g. a by-industry picker)
+  // adopt the selector's color, so the line matches the selector's tinted label. Multi-series
+  // charts keep their distinct palette/series_colors untouched — see RenderOptions.accentColor.
+  if (opts.accentColor && seriesNames.length === 1) {
+    colors.set(seriesNames[0]!, opts.accentColor);
+  }
 
   // Categorical x render order. Every downstream consumer (the band scale via adapter.buildXOpts,
   // the mark builders, the x-label collision check) reads the category order from dataInScope's
@@ -288,7 +312,11 @@ export function renderPane(
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
   // little headroom instead of sitting flush against the axis edge.
-  const ann = resolveAnnotations(spec);
+  // Small multiples: scope markers with a `facet` key to THIS pane before anything below reads
+  // `ann` — the extent folding a few lines down (markerYs / yForAxis) must see the FILTERED set
+  // so a marker beyond one pane's own range doesn't widen every pane's domain. Undefined
+  // paneFacetValue (single chart) returns `ann` unchanged (byte-identical).
+  const ann = filterAnnotationsByFacet(resolveAnnotations(spec), opts.paneFacetValue);
 
   // Point callouts: resolve a y for any callout that gives a `series` but omits `y` — snap to that
   // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
@@ -341,7 +369,15 @@ export function renderPane(
     // headroom). An explicit yAxisPolicy.min OPTS OUT of the forced zero — a truncated bar axis
     // (use sparingly; e.g. a level series whose variation is small relative to its magnitude).
     // Reference-line (markers) values are folded into the extent so a marker stays visible.
-    const markerYs = ann.yAxis.map((m) => m.y).filter(Number.isFinite);
+    // Horizontal bars: the VALUE axis is x, not y — annotations.xAxis markers there play the same
+    // role annotations.yAxis markers play for vertical bars (see assemblePlot's horizontal xAxis
+    // marker path), so their numeric `x` folds into this same value extent (mirrors the vertical
+    // yAxis fold below; the `chartType` gate already means this hardDomain IS the value axis
+    // regardless of orientation).
+    const markerYs = [
+      ...ann.yAxis.map((m) => m.y),
+      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
+    ].filter(Number.isFinite);
     includeZero = policy.min == null;
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
@@ -406,7 +442,14 @@ export function renderPane(
 
   // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
   // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
-  const xOpts = adapter.buildXOpts(dataInScope, facetInfo != null, xLabelMode);
+  // tagCategoryLabels: the hover-accent hook (task 17) is bar/stacked-only — categorical-x line
+  // and dot-plot charts share this same adapter path and stay byte-identical.
+  const xOpts = adapter.buildXOpts(
+    dataInScope,
+    facetInfo != null,
+    xLabelMode,
+    chartType === "bar" || chartType === "stacked",
+  );
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
@@ -440,6 +483,9 @@ export function renderPane(
     seriesNames,
     plotWidth,
     plotHeight,
+    // Final resolved y-domain (post auto/hard/bar-extent/shared-mode override) — the area
+    // builder's projected-range veil needs it to span the full plot height.
+    yDomain,
     // Truncated bar axis (y-domain excludes 0): clip bars so they don't overflow below the plot.
     ...((chartType === "bar" || chartType === "stacked") && yDomain[0] > 0 ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
@@ -502,6 +548,7 @@ export function renderPane(
     ...(facetOpt ? { facet: facetOpt } : {}),
     ...(opts.hideYAxisLabels ? { hideYAxisLabels: true } : {}),
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),
+    ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
   });
 
   return {
@@ -526,6 +573,7 @@ export function buildLegendItems(
   colors: Map<string, string>,
   layers: MarkLayers,
 ): LegendItem[] | null {
+  if (spec.legend === false) return null;
   const chartType = spec.chartType;
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
@@ -611,6 +659,7 @@ export function buildShapeLegendItems(
   spec: ChartSpec,
   layers: MarkLayers,
 ): ShapeLegendItem[] | null {
+  if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
   const shapeLabels = spec.shape_labels ?? {};
   return layers.shapeNames.map((shape, i) => ({

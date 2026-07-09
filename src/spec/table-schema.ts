@@ -46,6 +46,12 @@ export const TABLE_SPEC_SCHEMA = {
     pane_order: { type: "array", items: { type: "string" } },
     pane_titles: { type: "object", additionalProperties: { type: "string" } },
     row_order: { type: "array", items: { type: "string" } },
+    group_order: {
+      anyOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "array", items: { type: "array", items: { type: "string" } } },
+      ],
+    },
     column_order: { type: "array", items: { type: "string" } },
     column_labels: { type: "object", additionalProperties: { type: "string" } },
     row_labels: { type: "object", additionalProperties: { type: "string" } },
@@ -78,6 +84,15 @@ export const TABLE_SPEC_SCHEMA = {
     },
     header_tier_rules: { type: "boolean" },
     spanner_rules: { type: "boolean" },
+    collapsible: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        default: { type: "string", enum: ["collapsed", "expanded"] },
+        expanded: { type: "array", items: { type: "string" } },
+        collapsed: { type: "array", items: { type: "string" } },
+      },
+    },
     stub_width: { type: "number" },
     stub_min_width: { type: "number" },
     stub_wrap: { type: "boolean" },

@@ -10,6 +10,20 @@
 
 // Shared annotation fragments — reused by the legacy axis policies AND the unified `annotations`
 // block, so both accept the same shapes.
+// `{value}` token formatting, shared by the three annotation shapes whose `label` may
+// reference their own coordinate value (see spec/annotations.ts substituteValueToken).
+const VALUE_FORMAT = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    // Integer 0–10, matching tooltip_decimals / valueLabels.decimals — an out-of-range value
+    // would otherwise throw inside Number.toFixed at render time instead of failing validation.
+    decimals: { type: "integer", minimum: 0, maximum: 10 },
+    prefix: { type: "string" },
+    suffix: { type: "string" },
+  },
+} as const;
+
 const X_MARKER_ARRAY = {
   type: "array",
   items: {
@@ -19,6 +33,7 @@ const X_MARKER_ARRAY = {
     properties: {
       x: { type: "string" },
       label: { type: "string" },
+      value_format: VALUE_FORMAT,
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
@@ -26,6 +41,7 @@ const X_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["top", "middle", "bottom"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      facet: { type: "string" },
     },
   },
 } as const;
@@ -54,6 +70,7 @@ const Y_MARKER_ARRAY = {
     properties: {
       y: { type: "number" },
       label: { type: "string" },
+      value_format: VALUE_FORMAT,
       style: { type: "string", enum: ["dashed", "solid"] },
       color: { type: "string" },
       strokeWidth: { type: "number" },
@@ -61,6 +78,7 @@ const Y_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["left", "middle", "right"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      facet: { type: "string" },
     },
   },
 } as const;
@@ -76,6 +94,7 @@ const POINT_CALLOUT_ARRAY = {
       y: { type: "number" },
       series: { type: "string" },
       label: { type: "string" },
+      value_format: VALUE_FORMAT,
       color: { type: "string" },
       dx: { type: "number" },
       dy: { type: "number" },
@@ -167,6 +186,34 @@ const DATA_SOURCE = {
   ],
 } as const;
 
+// Inline title selector: a `{key}` token in `title` bound to a dropdown of options. Cross-field
+// rules that ajv can't express (key must appear as `{key}` in title; default must be an option
+// id; option ids must be unique) live in validate.ts's titleSelectorsError.
+const TITLE_SELECTOR = {
+  type: "object",
+  additionalProperties: false,
+  required: ["options"],
+  properties: {
+    options: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          label: { type: "string" },
+          // Explicit trigger-label tint for this option; falls back to
+          // series_colors[label ?? id] when absent (see spec/title.ts).
+          color: { type: "string" },
+        },
+      },
+    },
+    default: { type: "string" },
+  },
+} as const;
+
 const SMALL_MULTIPLES = {
   type: "object",
   additionalProperties: false,
@@ -211,6 +258,14 @@ export const CHART_SPEC_SCHEMA = {
     // Text
     // (No `eyebrow` — the figure number is an embed-time property of the article, not the spec.)
     title: { type: "string", minLength: 1 },
+    // Keys are constrained to the {token} character set (spec/title.ts TOKEN_RE) so a key that
+    // could never match a title token (e.g. one containing a space) fails structurally instead
+    // of passing validation but silently rendering no control.
+    title_selectors: {
+      type: "object",
+      propertyNames: { pattern: "^[A-Za-z0-9_-]+$" },
+      additionalProperties: TITLE_SELECTOR,
+    },
     subtitle: { type: "string" },
     source: { type: "string" },
     note: { type: "string" },
@@ -228,6 +283,8 @@ export const CHART_SPEC_SCHEMA = {
     // Series (the series COLUMN is mapped via `columns.series`)
     series_order: { type: "array", items: { type: "string" } },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
+    bar_color: { type: "string" },
+    category_colors: { type: "object", additionalProperties: { type: "string" } },
     series_styles: {
       type: "object",
       additionalProperties: {
@@ -252,6 +309,15 @@ export const CHART_SPEC_SCHEMA = {
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
     points: { type: "boolean" },
+    projected_field: { type: "string" },
+    projected_style: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        dashed: { type: "boolean" },
+        fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+      },
+    },
 
     // Bar / stacked bar
     orientation: { type: "string", enum: ["vertical", "horizontal"] },
@@ -282,6 +348,7 @@ export const CHART_SPEC_SCHEMA = {
     },
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
+    legend: { type: "boolean" },
 
     // Small multiples (multi-panel)
     small_multiples: SMALL_MULTIPLES,

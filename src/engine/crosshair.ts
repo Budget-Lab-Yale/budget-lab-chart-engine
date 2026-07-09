@@ -8,7 +8,7 @@ import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
-import { wrapBandLabel, wrapToWidth, GUTTER_TEXT_PAD } from "./axes";
+import { wrapBandLabel } from "./axes";
 
 type Row = Record<string, unknown>;
 
@@ -1727,9 +1727,10 @@ export interface SecondaryBandOptions {
   /** Horizontal: extend the shaded row this many px past the plot's right edge — used to bridge
    *  the inter-pane grid gap so the row looks continuous across panes. Default 0. */
   regionExtendRight?: number;
-  /** Horizontal: when set, re-draw the hovered category's Y-axis label in bold/dark (accent),
-   *  matching the vertical cursor's x-axis category highlight. Only the label-bearing (leftmost)
-   *  pane passes this; `font` is the label size (the gutter is the pane's own left margin). */
+  /** Horizontal: when set, re-draw the hovered category's Y-axis label in bold/dark (accent) — by
+   *  weight/color ONLY, no background pill. (Vertical's x-axis category name IS shown on a frosted
+   *  pill via addCoordCategoryHighlight; horizontal's row label is not.) Only the label-bearing
+   *  (leftmost) pane passes this; `font` is the label size. */
   accentLabel?: { font: number };
   /** Gap (px) between a bar's tip and its value pill. Default 6. */
   pillGap?: number;
@@ -1744,6 +1745,24 @@ interface CatRect {
   /** Left edge (x) and width — used by horizontal highlight pills to find the bar tip. */
   x: number;
   w: number;
+  /** The rect's ACTUAL rendered fill color, or null. Value pills color-match this so a
+   *  differently-colored bar (category_colors / bar_color / mono / highlight-dim) gets a pill in
+   *  its OWN color, not the series' base color. */
+  fill: string | null;
+}
+
+/** The rect's rendered fill: its own `fill` attribute if present, else the nearest ancestor's
+ *  (Plot hoists a CONSTANT fill onto the parent `<g aria-label="bar">`, but emits a per-`<rect>`
+ *  fill when the mark's fill is a function channel — e.g. category_colors, mono stacks, highlight
+ *  dimming). Walks up to (not past) the SVG root; `none`/empty resolve to null. */
+function renderedRectFill(rect: SVGRectElement, svgEl: SVGSVGElement): string | null {
+  let el: Element | null = rect;
+  while (el && el !== svgEl) {
+    const f = el.getAttribute("fill");
+    if (f && f !== "none") return f;
+    el = el.parentElement;
+  }
+  return null;
 }
 
 /** Bucket the rendered bar rects by category. Vertical (default): fx-faceted → one group per
@@ -1767,6 +1786,7 @@ function buildRectsByCategory(
       h: parseFloat(rect.getAttribute("height") ?? "0"),
       x: dx + x,
       w,
+      fill: renderedRectFill(rect, svgEl),
     };
   };
 
@@ -1847,15 +1867,15 @@ export function attachSecondaryBandCursor(
   const axisRows = makeAxisRows(svgEl, mt + plotH);
 
   // Accent (bold/dark) the hovered category's Y-axis label by mutating the EXISTING label element
-  // (pixel-perfect alignment, vs drawing a duplicate). The label's textContent is the wrapped lines
-  // joined with no separator; map category → that form so we can find it. Track + restore on clear.
-  const accentFont = opts.accentLabel?.font;
-  const labelKey = (cat: string): string =>
-    accentFont ? wrapToWidth(cat, ml - GUTTER_TEXT_PAD, accentFont).replace(/\n/g, "") : cat;
+  // (pixel-perfect alignment, vs drawing a duplicate). Found via the `data-category` hook the
+  // axes/tagging layer stamps on every category label (axes.ts CAT_LABEL_CLASS + assemble-plot's
+  // tagging pass) — robust against a category string that happens to equal a tick label's text
+  // (the old textContent-matching approach's collision risk). Track + restore on clear.
   const labelEls = new Map<string, SVGTextElement>();
   if (opts.accentLabel) {
-    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
-      labelEls.set((t.textContent ?? "").trim(), t);
+    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text[data-category]"))) {
+      const cat = t.getAttribute("data-category");
+      if (cat) labelEls.set(cat, t);
     }
   }
   let accented: SVGTextElement | null = null;
@@ -1907,11 +1927,14 @@ export function attachSecondaryBandCursor(
       const regX1 = W + (opts.regionExtendRight ?? 0);
       addCoordRegion(g, doc, regX0, regX1 - regX0, regYmin, regYmax - regYmin);
       const weight = active ? 700 : 600;
+      // Pill color: prefer the bar's ACTUAL rendered fill (so a category_colors/bar_color/mono/
+      // highlight-dimmed bar gets a matching pill), falling back to the series' legend color.
       const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
+      const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
       // Accent the hovered category's Y label by bolding + darkening the existing label element
-      // (no pill behind it — the shaded row already provides the emphasis in this layout).
+      // (weight/color only, no background pill — the shaded row already provides the emphasis).
       if (opts.accentLabel) {
-        const el = labelEls.get(labelKey(category));
+        const el = labelEls.get(category);
         if (el) {
           el.setAttribute("font-weight", "700");
           el.setAttribute("fill", COORD_LABEL_DARK);
@@ -1923,18 +1946,25 @@ export function attachSecondaryBandCursor(
         .map((rect) => ({ rect, v: vals.get(rect.series) }))
         .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
       for (const x of valid) {
-        const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
         const cy = x.rect.y + x.rect.h / 2;
-        addCoordPill(
-          g,
-          doc,
-          tipX + (x.v >= 0 ? pillGap : -pillGap),
-          cy,
-          x.v >= 0 ? "start" : "end",
-          yFormat(x.v),
-          colorFor(x.rect.series),
-          weight,
-        );
+        if (opts.isStacked) {
+          // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
+          // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
+          // not a meaningful "value" position, for anything but the outermost segment.
+          addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), pillColor(x.rect), weight);
+        } else {
+          const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
+          addCoordPill(
+            g,
+            doc,
+            tipX + (x.v >= 0 ? pillGap : -pillGap),
+            cy,
+            x.v >= 0 ? "start" : "end",
+            yFormat(x.v),
+            pillColor(x.rect),
+            weight,
+          );
+        }
       }
       g.setAttribute("opacity", "1");
       return;
@@ -1951,7 +1981,8 @@ export function attachSecondaryBandCursor(
       return;
     }
     // Region spans the full band STEP (widened to the midpoints between clusters), matching the
-    // hovered pane's highlight, so the shaded column reads the same across panes.
+    // hovered pane's highlight, so the shaded column reads the same across panes. It stops at the
+    // baseline (plotH), NOT down through the x-axis label — standalone and faceted vertical match.
     const wide = widenBandsToMidpoints(raw.map((b) => ({ min: b.xMin, max: b.xMax })), ml, W - mr)[idx]!;
     addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, plotH);
     const weight = active ? 700 : 600;
@@ -1967,11 +1998,14 @@ export function attachSecondaryBandCursor(
     const valid = (rectsByCat.get(category) ?? [])
       .map((rect) => ({ rect, v: vals.get(rect.series) }))
       .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
-    const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK; // color-matched
+    // Pill color: prefer the bar's ACTUAL rendered fill (category_colors/bar_color/mono/dim),
+    // falling back to the series' legend color.
+    const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
+    const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
     if (opts.isStacked) {
       // Segments share one x (single band), so de-collide the within-segment labels vertically.
       const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
     } else {
       // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
       // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
@@ -1984,7 +2018,7 @@ export function attachSecondaryBandCursor(
         })),
         COORD_PILL_H,
       );
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
     }
     g.setAttribute("opacity", "1");
   };
@@ -2386,6 +2420,9 @@ export function attachHighlightPills(
     valByCat.get(r._xc)!.set(r.series, r._y);
   }
   const colorFor = (s: string): string => opts.colors?.get(s) || COORD_LABEL_DARK;
+  // Value pills color-match the bar's ACTUAL rendered fill (category_colors/bar_color/mono/dim),
+  // falling back to the series' legend color; dot-plot pills have no rect and stay series-keyed.
+  const pillColor = (r: CatRect): string => r.fill ?? colorFor(r.series);
   const orderFor = (cat: string, active: Set<string>): string[] => {
     const vals = valByCat.get(cat);
     if (!vals) return [];
@@ -2480,16 +2517,16 @@ export function attachHighlightPills(
         for (const x of valid) {
           const yc = x.rect.y + x.rect.h / 2;
           if (opts.isStacked) {
-            addCoordPill(g, doc, x.rect.cx, yc, "middle", yFormat(x.v), colorFor(x.rect.series), weight);
+            addCoordPill(g, doc, x.rect.cx, yc, "middle", yFormat(x.v), pillColor(x.rect), weight);
           } else {
             const tip = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
             const [anchor, ax] = x.v >= 0 ? (["start", tip + 6] as const) : (["end", tip - 6] as const);
-            addCoordPill(g, doc, ax, yc, anchor, yFormat(x.v), colorFor(x.rect.series), weight);
+            addCoordPill(g, doc, ax, yc, anchor, yFormat(x.v), pillColor(x.rect), weight);
           }
         }
       } else if (opts.isStacked) {
         const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
-        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       } else {
         const ys = staggerBarLabels(
           valid.map((x) => ({
@@ -2500,7 +2537,7 @@ export function attachHighlightPills(
           })),
           COORD_PILL_H,
         );
-        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), colorFor(x.rect.series), weight));
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       }
     }
     g.setAttribute("opacity", "1");

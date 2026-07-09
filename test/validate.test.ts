@@ -57,9 +57,15 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/step/);
   });
 
-  it("accepts columns.section + section_order + section_labels", () => {
+  it("accepts columns.section + section_order + section_labels (on a horizontal bar chart)", () => {
+    // D7: columns.section only has an effect on horizontal bar charts (see validate.ts
+    // sectionColumnError) — this is the combination it should accept.
     const r = validateSpec({
-      ...VALID,
+      chartType: "bar",
+      title: "Demo",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      data: "data.csv",
       columns: { section: "toplevel" },
       section_order: ["Durable goods", "Services"],
       section_labels: { "Durable goods": "Durables" },
@@ -71,6 +77,138 @@ describe("validateSpec (structural)", () => {
     const r = validateSpec({ ...VALID, section_order: "Durable goods" });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/section_order/);
+  });
+
+  // --- D7: columns.section silently no-ops on anything but a horizontal bar chart ---
+
+  describe("columns.section requires chartType bar + orientation horizontal", () => {
+    it("rejects columns.section on a (non-bar) line chart", () => {
+      const r = validateSpec({ ...VALID, columns: { section: "toplevel" } });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/columns\.section/);
+    });
+
+    it("rejects columns.section on a VERTICAL bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        columns: { section: "toplevel" },
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/columns\.section/);
+    });
+
+    it("accepts a horizontal bar chart with no columns.section (unaffected)", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+      });
+      expect(r.valid).toBe(true);
+    });
+  });
+
+  // --- x_axis_ticks (top/both value-axis tick row) silently no-ops on a vertical chart ---
+
+  describe("x_axis_ticks requires orientation horizontal", () => {
+    it("rejects x_axis_ticks on a vertical bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks/);
+    });
+
+    it("rejects x_axis_ticks: top on a vertical bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        x_axis_ticks: "top",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks/);
+    });
+
+    it("accepts x_axis_ticks: both on a horizontal bar chart", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(true);
+    });
+
+    it("accepts a horizontal bar chart with no x_axis_ticks (default 'bottom', unaffected)", () => {
+      const r = validateSpec({
+        chartType: "bar",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+      });
+      expect(r.valid).toBe(true);
+    });
+
+    it("rejects x_axis_ticks on a horizontal LINE chart (bar/stacked-only, not just orientation)", () => {
+      const r = validateSpec({
+        chartType: "line",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks/);
+    });
+
+    it("accepts x_axis_ticks: both on a horizontal STACKED chart", () => {
+      const r = validateSpec({
+        chartType: "stacked",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(true);
+    });
+  });
+
+  it("accepts bar_color and category_colors", () => {
+    const r = validateSpec({
+      ...VALID,
+      chartType: "bar",
+      xAxisType: "categorical",
+      bar_color: "amber",
+      category_colors: { Total: "navy" },
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects a bar_color of the wrong type", () => {
+    const r = validateSpec({ ...VALID, chartType: "bar", bar_color: 123 });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bar_color/);
+  });
+
+  it("rejects a category_colors value of the wrong type", () => {
+    const r = validateSpec({ ...VALID, chartType: "bar", category_colors: { Total: 5 } });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/category_colors/);
   });
 
   it("accepts xAxisPolicy.bands, yAxisPolicy.markers, and valueLabels.decimals", () => {
@@ -91,6 +229,40 @@ describe("validateSpec (structural)", () => {
       valueLabels: { show: true, decimals: 1 },
     });
     expect(b.valid).toBe(true);
+  });
+
+  it("accepts value_format on xAxis/yAxis markers and points callouts", () => {
+    const r = validateSpec({
+      ...VALID,
+      annotations: {
+        xAxis: [{ x: "2021", label: "X ({value})", value_format: { decimals: 1 } }],
+        yAxis: [{ y: 1, label: "Y ({value})", value_format: { prefix: "$", suffix: "M" } }],
+        points: [{ x: "2021", label: "P ({value})", value_format: {} }],
+      },
+    });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects an unknown key inside value_format", () => {
+    const r = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y", value_format: { bogusKey: true } }] },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogusKey/);
+  });
+
+  it("rejects out-of-range value_format.decimals (would throw in toFixed at render time)", () => {
+    const neg = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y ({value})", value_format: { decimals: -1 } }] },
+    });
+    expect(neg.valid).toBe(false);
+    const huge = validateSpec({
+      ...VALID,
+      annotations: { yAxis: [{ y: 1, label: "Y ({value})", value_format: { decimals: 200 } }] },
+    });
+    expect(huge.valid).toBe(false);
   });
 
   it("rejects a band missing start/end and a y-marker missing y", () => {
@@ -167,6 +339,22 @@ describe("validateSpec (structural)", () => {
     expect(r.valid).toBe(true);
   });
 
+  it("accepts `legend: false` (hides the legend, colors/tooltips unaffected)", () => {
+    const r = validateSpec({ ...VALID, series_order: ["a", "b"], legend: false });
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts `legend: true` (explicit default)", () => {
+    const r = validateSpec({ ...VALID, series_order: ["a", "b"], legend: true });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects a non-boolean `legend` value", () => {
+    const r = validateSpec({ ...VALID, legend: "no" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/legend/);
+  });
+
   it("accepts a stacked spec with a barStack block", () => {
     const r = validateSpec({
       chartType: "stacked",
@@ -199,6 +387,98 @@ describe("validateSpec (structural)", () => {
     const r = validateSpec({ ...VALID, orientation: "diagonal" });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/vertical, horizontal/);
+  });
+});
+
+describe("title_selectors", () => {
+  const withSelector = (overrides: Record<string, unknown> = {}) => ({
+    ...VALID,
+    title: "GDP by {dimension}",
+    title_selectors: {
+      dimension: {
+        options: [
+          { id: "sector", label: "Sector" },
+          { id: "country", label: "Country" },
+        ],
+        default: "sector",
+        ...overrides,
+      },
+    },
+  });
+
+  it("accepts a happy-path selector whose key appears as a token in the title", () => {
+    const r = validateSpec(withSelector());
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an additional unknown property on a selector (structural)", () => {
+    const r = validateSpec(withSelector({ bogus: true }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/bogus/);
+  });
+
+  it("rejects an option with an empty id (structural)", () => {
+    const r = validateSpec(withSelector({ options: [{ id: "" }] }));
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects empty options array (structural)", () => {
+    const r = validateSpec(withSelector({ options: [] }));
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects a title_selectors key that never appears as {key} in the title", () => {
+    const spec = {
+      ...VALID,
+      title: "GDP over time",
+      title_selectors: {
+        dimension: { options: [{ id: "sector" }], default: "sector" },
+      },
+    };
+    const r = validateSpec(spec);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/dimension/);
+    expect(r.errors.join("\n")).toMatch(/\{dimension\}/);
+  });
+
+  it("rejects a default that is not one of the option ids", () => {
+    const r = validateSpec(withSelector({ default: "region" }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/default/);
+  });
+
+  it("rejects duplicate option ids", () => {
+    const r = validateSpec(
+      withSelector({
+        options: [
+          { id: "sector", label: "Sector" },
+          { id: "sector", label: "Also Sector" },
+        ],
+      }),
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/duplicate/i);
+  });
+
+  it("accepts an option-level color field", () => {
+    const r = validateSpec(
+      withSelector({
+        options: [
+          { id: "sector", label: "Sector", color: "blue" },
+          { id: "country", label: "Country" },
+        ],
+      }),
+    );
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects a selector key outside the token character set (could never match a {token})", () => {
+    const r = validateSpec({
+      ...VALID,
+      title: "GDP by {my key}",
+      title_selectors: { "my key": { options: [{ id: "a" }] } },
+    });
+    expect(r.valid).toBe(false);
   });
 });
 
@@ -439,6 +719,30 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
   });
 
+  it("flags a category_colors key absent from the categorical x column", () => {
+    const rows: TidyRow[] = [
+      { time: "Northeast", series: "a", value: "1" },
+      { time: "South", series: "a", value: "2" },
+    ];
+    const spec: ChartSpec = {
+      ...VALID,
+      xAxisType: "categorical",
+      category_colors: { South: "navy", Total: "amber" },
+    };
+    const r = validateChartData(spec, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/category_colors names categories \["Total"\]/);
+  });
+
+  it("accepts category_colors whose keys all exist in the categorical x column", () => {
+    const rows: TidyRow[] = [
+      { time: "Northeast", series: "a", value: "1" },
+      { time: "South", series: "a", value: "2" },
+    ];
+    const spec: ChartSpec = { ...VALID, xAxisType: "categorical", category_colors: { South: "navy" } };
+    expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
   it("flags a time value that doesn't parse under xAxisType", () => {
     const r = validateChartData(VALID, [{ time: "2021/01/01", series: "a", value: "1" }]);
     expect(r.valid).toBe(false);
@@ -513,6 +817,77 @@ describe("validateChartData (cross-reference + CSV format)", () => {
       },
     };
     expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+  });
+
+  // --- Ragged facets: faceted HORIZONTAL bars share one category axis across panes (see
+  // figure.ts renderFigure) — a facet missing a category (or a whole section) would silently
+  // misalign that pane's rows against the others. Catch it here instead of rendering it broken.
+  describe("faceted horizontal bar: ragged-facet guard", () => {
+    const raggedSpec = (extra?: Partial<ChartSpec>): ChartSpec => ({
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: { x: "category", value: "value", facet: "facet" },
+      small_multiples: { mode: "shared" },
+      data: "d.csv",
+      ...extra,
+    });
+
+    it("accepts facets that all carry the same categories", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" },
+        { facet: "B", category: "Food", value: "4" },
+      ];
+      expect(validateChartData(raggedSpec(), rows)).toEqual({ valid: true, errors: [] });
+    });
+
+    it("flags a facet missing a category present in another facet", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" }, // B has no "Food" row
+      ];
+      const r = validateChartData(raggedSpec(), rows);
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/facet "B".*missing.*"Food"/);
+    });
+
+    it("names the missing section alongside the category when columns.section is set", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1", toplevel: "Durable goods" },
+        { facet: "A", category: "Rent", value: "2", toplevel: "Services" },
+        { facet: "B", category: "Cars", value: "3", toplevel: "Durable goods" }, // B lacks "Services" entirely
+      ];
+      const spec = raggedSpec({ columns: { x: "category", value: "value", facet: "facet", section: "toplevel" } });
+      const r = validateChartData(spec, rows);
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/facet "B".*"Rent".*section "Services"/);
+    });
+
+    it("is per-pane-mode agnostic — the same guard fires in per-pane mode", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" },
+      ];
+      const spec = raggedSpec({ small_multiples: { mode: "per-pane" } });
+      const r = validateChartData(spec, rows);
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/facet "B".*missing.*"Food"/);
+    });
+
+    it("does not fire for vertical (non-horizontal) faceted bars", () => {
+      const rows: TidyRow[] = [
+        { facet: "A", category: "Cars", value: "1" },
+        { facet: "A", category: "Food", value: "2" },
+        { facet: "B", category: "Cars", value: "3" },
+      ];
+      const spec = raggedSpec({ orientation: "vertical" });
+      expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
+    });
   });
 });
 

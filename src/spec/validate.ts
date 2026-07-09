@@ -51,6 +51,37 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   return null;
 }
 
+/** `title_selectors` cross-field rules the JSON schema can't express: every selector key must
+ *  appear as a literal `{key}` token in the title (else the control has nowhere to render), and
+ *  `default` (when set) must name one of that selector's own option ids. Duplicate option ids
+ *  are also rejected here (ajv has no cross-item uniqueness keyword short of a custom one).
+ *  Non-empty option id / options array are enforced structurally (schema.ts TITLE_SELECTOR). */
+function titleSelectorsError(spec: {
+  title?: unknown;
+  title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }>;
+}): string | null {
+  const selectors = spec.title_selectors;
+  if (!selectors) return null;
+  const title = typeof spec.title === "string" ? spec.title : "";
+  for (const [key, selector] of Object.entries(selectors)) {
+    if (!title.includes(`{${key}}`)) {
+      return `title_selectors.${key}: title must contain the token "{${key}}" (got ${JSON.stringify(title)})`;
+    }
+    const ids = new Set<string>();
+    for (const opt of selector.options ?? []) {
+      const id = opt.id ?? "";
+      if (ids.has(id)) {
+        return `title_selectors.${key}: duplicate option id ${JSON.stringify(id)}`;
+      }
+      ids.add(id);
+    }
+    if (selector.default != null && !ids.has(selector.default)) {
+      return `title_selectors.${key}: default ${JSON.stringify(selector.default)} is not one of the option ids (${JSON.stringify([...ids])})`;
+    }
+  }
+  return null;
+}
+
 /** Faceted horizontal `bar` charts ARE supported (shared category gutter + value axis; see
  *  figure.ts / CONFIG-SPEC). Horizontal `stacked` small-multiples are not built yet (the stacked
  *  net-callout chrome isn't wired through the faceted-horizontal layout), so reject only that combo
@@ -62,6 +93,46 @@ function facetedHorizontalError(spec: {
 }): string | null {
   if (spec.chartType === "stacked" && spec.orientation === "horizontal" && spec.small_multiples != null) {
     return `horizontal orientation is not supported with small_multiples for "stacked" charts yet — use vertical, or drop small_multiples`;
+  }
+  return null;
+}
+
+/** `columns.section` (section-header horizontal-bar grouping) only has an effect on a horizontal
+ *  `bar` chart (see bar.ts's `sectioned` gate) — it silently no-ops on every other chartType/
+ *  orientation combination, which looks like a config bug (the field appears to do nothing) but
+ *  is actually just dead configuration. Reject it early with a pointed message instead. */
+function sectionColumnError(spec: {
+  chartType?: unknown;
+  orientation?: unknown;
+  columns?: { section?: unknown };
+}): string | null {
+  if (spec.columns?.section == null) return null;
+  if (spec.chartType !== "bar" || spec.orientation !== "horizontal") {
+    return (
+      `columns.section requires chartType "bar" with orientation "horizontal" ` +
+      `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
+    );
+  }
+  return null;
+}
+
+/** `x_axis_ticks` (top/both value-axis tick row) only has an effect on a HORIZONTAL bar/stacked
+ *  chart — assemblePlot reads it inside its `if (horizontal)` branch, which only bar/stacked marks
+ *  reach (see assemble-plot.ts). On any other chartType/orientation it silently no-ops; reject it
+ *  early with a pointed message (mirrors the columns.section D7 gate) instead of leaving it looking
+ *  like dead configuration. */
+function xAxisTicksOrientationError(spec: {
+  x_axis_ticks?: unknown;
+  chartType?: unknown;
+  orientation?: unknown;
+}): string | null {
+  if (spec.x_axis_ticks == null) return null;
+  const isBarLike = spec.chartType === "bar" || spec.chartType === "stacked";
+  if (!isBarLike || spec.orientation !== "horizontal") {
+    return (
+      `x_axis_ticks requires a horizontal bar/stacked chart (a top value axis exists only there) ` +
+      `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
+    );
   }
   return null;
 }
@@ -80,6 +151,16 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; small_multiples?: unknown },
   );
   if (fhErr) return { valid: false, errors: [fhErr] };
+  const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
+  if (tsErr) return { valid: false, errors: [tsErr] };
+  const secErr = sectionColumnError(
+    spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
+  );
+  if (secErr) return { valid: false, errors: [secErr] };
+  const ticksErr = xAxisTicksOrientationError(
+    spec as { x_axis_ticks?: unknown; chartType?: unknown; orientation?: unknown },
+  );
+  if (ticksErr) return { valid: false, errors: [ticksErr] };
   return { valid: true, errors: [] };
 }
 
@@ -128,6 +209,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   ];
   if (cols.series) requiredRoles.push(["series", cols.series]);
   if (cols.shape) requiredRoles.push(["shape", cols.shape]);
+  if (spec.projected_field) requiredRoles.push(["projected_field", spec.projected_field]);
   if (spec.small_multiples) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);
@@ -234,6 +316,21 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // Cross-reference: every category named by category_colors must appear in the categorical x
+  // column — mirrors the x_order unknown-value check above (a typo'd key would otherwise silently
+  // no-op). category_colors is single-series scope at render time, but its KEYS are x-category
+  // values regardless of series count, so the same check applies. Only checked on a categorical
+  // x-axis (a no-op for numeric/temporal x).
+  if (spec.xAxisType === "categorical" && spec.category_colors) {
+    const xValues = new Set(rows.map((r) => r[cols.x] as string));
+    const unknown = Object.keys(spec.category_colors).filter((v) => !xValues.has(v));
+    if (unknown.length) {
+      errors.push(
+        `category_colors names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+      );
+    }
+  }
+
   // Cross-reference: small_multiples pane_order / pane_titles keys must correspond to actual
   // distinct values in the facet column. (The facet column's existence is already enforced above
   // via the resolved-columns check, which bails before this point if it's missing.)
@@ -272,6 +369,50 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         errors.push(
           `small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`,
         );
+      }
+    }
+
+    // Ragged-facet guard (both shared and per-pane mode): faceted HORIZONTAL bars lay every
+    // facet out as its own pane but assume ONE shared category axis (renderFigure suppresses the
+    // category labels/section headers on every pane but the first — see figure.ts). Each pane's
+    // band domain is otherwise computed independently from ITS OWN rows (buildBarMarks), so a
+    // facet missing a category (or a whole section) would silently shrink that pane's domain and
+    // misalign its rows against the others with no visual cue. Fail loudly instead — pointed at
+    // the facet + category (+ section, when sectioned) that's missing.
+    if (spec.chartType === "bar" && spec.orientation === "horizontal" && spec.xAxisType === "categorical" && cols.x) {
+      const xField = cols.x;
+      const catsByFacet = new Map<string, Set<string>>();
+      const allCats = new Set<string>();
+      for (const r of rows) {
+        const facet = r[facetField] as string;
+        const cat = r[xField] as string;
+        if (!facet || !cat) continue;
+        allCats.add(cat);
+        if (!catsByFacet.has(facet)) catsByFacet.set(facet, new Set());
+        (catsByFacet.get(facet) as Set<string>).add(cat);
+      }
+      const sectionOf = cols.section
+        ? (() => {
+            const secField = cols.section as string;
+            const m = new Map<string, string>();
+            for (const r of rows) {
+              const cat = r[xField] as string;
+              const sec = r[secField] as string;
+              if (cat && sec != null && sec !== "" && !m.has(cat)) m.set(cat, sec);
+            }
+            return m;
+          })()
+        : null;
+      for (const [facet, cats] of catsByFacet) {
+        const missing = [...allCats].filter((c) => !cats.has(c));
+        if (missing.length) {
+          const named = sectionOf
+            ? missing.map((c) => `${JSON.stringify(c)} (section ${JSON.stringify(sectionOf.get(c) ?? "?")})`)
+            : missing.map((c) => JSON.stringify(c));
+          errors.push(
+            `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
+          );
+        }
       }
     }
   }

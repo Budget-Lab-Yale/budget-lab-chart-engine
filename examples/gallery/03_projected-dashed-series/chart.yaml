@@ -1,0 +1,10 @@
+chartType: line
+title: "projected_field + whole-series dashed override (feature test)"
+subtitle: Index value, by series
+xAxisType: temporal
+series_order: ["Series A", "Series B"]
+projected_field: projected
+series_styles:
+  Series A: { dashed: true }
+data: data.csv
+note: "Confirm: the dashed-styled series (Series A) stays uniformly dashed (whole-series dashed wins); the other series (Series B) shows projected dashing over its windows/tail only."

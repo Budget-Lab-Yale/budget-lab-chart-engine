@@ -5,10 +5,12 @@
 //   tbl-legend / tbl-legend-item / tbl-legend-swatch (.is-dashed) / tbl-legend-reset /
 //   tbl-legend-reset-icon / .is-pinned, tbl-dimmed,
 //   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch (.is-dashed) /
-//   tbl-tooltip-label / tbl-tooltip-value.
+//   tbl-tooltip-label / tbl-tooltip-value,
+//   inline-select-wrap / inline-select / inline-select-caret / inline-select-popover (title
+//   selector widget).
 // Base font/color variables and body defaults are included so the standalone HTML
 // renders correctly without any external stylesheet.
-// Intentionally omitted: scroll wrapper, y-axis overlay, downloads, selectors,
+// Intentionally omitted: scroll wrapper, y-axis overlay, downloads,
 // tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
 
 import { TOKENS_CSS } from "../theme/tokens";
@@ -79,6 +81,87 @@ body {
   font-size: 13px;
   font-weight: var(--tw-semi);
   color: var(--tbl-text-muted);
+}
+
+/* Inline title selector (spec title_selectors): a button+popover widget embedded in the title
+   text. Ported verbatim (design + rules) from the AI Labor Market Tracker's
+   .inline-select-wrap/.inline-select/.inline-select-caret/.inline-select-popover (styles.css
+   L392-479) — the industry-picker control. Looks like the surrounding title text (same font,
+   weight, color, size); a thin outline + caret signal interactivity. */
+.inline-select-wrap {
+  position: relative;
+  display: inline-block;
+}
+.inline-select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--tbl-border);
+  border-radius: 4px;
+  /* Inherit type from the surrounding .figure-title so the only visible difference is the
+     outline (and, when the active option resolves a color, the label tint). */
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  padding: 0 6px 0 8px;
+  margin: 0 1px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1.15;
+  transition: border-color 0.12s, background 0.12s;
+}
+.inline-select:hover,
+.inline-select:focus-visible {
+  border-color: var(--tbl-navy);
+  background: var(--tbl-bg-subtle);
+  outline: none;
+}
+.inline-select[aria-expanded="true"] {
+  border-color: var(--tbl-navy);
+  background: var(--tbl-bg-subtle);
+}
+.inline-select-caret {
+  font-size: 0.7em;
+  color: var(--tbl-text-muted);
+  margin-left: 2px;
+}
+
+/* Popover listbox under the inline-select button. */
+.inline-select-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--tbl-bg);
+  border: 1px solid var(--tbl-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  min-width: 100%;
+  max-width: 360px;
+  font-family: var(--tbl-font-sans);
+  font-size: 14px;
+  font-weight: var(--tw-body);
+  letter-spacing: normal;
+  color: var(--tbl-text-body);
+  white-space: nowrap;
+}
+.inline-select-popover li {
+  padding: 6px 14px;
+  cursor: pointer;
+  outline: none;
+}
+.inline-select-popover li:hover,
+.inline-select-popover li:focus {
+  background: var(--tbl-bg-subtle);
+  color: var(--tbl-text-heading);
+}
+.inline-select-popover li.is-active {
+  color: var(--tbl-navy);
+  font-weight: var(--tw-semi);
 }
 
 /* =========================================================================
@@ -804,6 +887,50 @@ tr.tbl-table-group td {
   display: inline-block;
 }
 
+/* ---- Collapsible row groups ---- */
+/* The group label becomes a real <button> (keyboard/aria operable) with a caret inline-left.
+   No button chrome: it inherits the group heading's font/color so a collapsible table's group
+   headers look identical to a plain one, plus the caret affordance. */
+.tbl-table-group-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tbl-table-group-toggle:focus-visible {
+  outline: 2px solid var(--tbl-navy);
+  outline-offset: 2px;
+}
+/* Caret: a small CSS triangle. Points RIGHT when collapsed; rotates to point DOWN when the
+   group is expanded (aria-expanded is the source of truth; mount.ts also mirrors it onto an
+   is-collapsed class). */
+.tbl-table-caret {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+.tbl-table-group-toggle[aria-expanded="true"] .tbl-table-caret {
+  transform: rotate(90deg);
+}
+/* Rows hidden by a collapsed group use the hidden attribute; enforce display:none in case a
+   display rule elsewhere would otherwise resurrect them. */
+.tbl-table tr[hidden] { display: none; }
+/* Expand/collapse-all: shares .figure-download-btn chrome (border, hover) via its class list;
+   only the marker class is needed for tests/tools to find it. */
+
 /* Group note: italic, muted, smaller — sits directly under the heading, no rule, no fill. */
 tr.tbl-table-group-note th,
 tr.tbl-table-group-note td,
@@ -821,6 +948,12 @@ tr.tbl-table-group-note td,
 .is-emphasis {
   font-weight: var(--tw-bold);
   background: var(--tbl-bg-subtle) !important;
+}
+/* th.tbl-table-stub (0,1,1) otherwise outranks .is-emphasis (0,1,0) on font-weight (its background
+   already wins via !important), so a whole-row-emphasized stub needs its own higher-specificity
+   bold rule to match the row's value cells. */
+th.tbl-table-stub.is-emphasis {
+  font-weight: var(--tw-bold);
 }
 
 /* ---- Positive / negative coloring ---- */

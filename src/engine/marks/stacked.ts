@@ -19,7 +19,7 @@
 // we pass NO order/reverse option and rely on data being supplied in declaration order.
 import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
-import { tblBandYAxis, horizontalLeftGutter } from "../axes";
+import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
 import { monoScale } from "../palette";
 import { inferUnitsFromSubtitle } from "../util";
 import { tokens } from "../../theme/tokens";
@@ -79,6 +79,9 @@ export function buildStackedMarks(
   const catField = xField;
   const seriesNames = ctx.seriesNames ?? [];
   const horizontal = spec.orientation === "horizontal";
+  // HORIZONTAL stacked bars use the same larger "faceted best practice" category-label font as
+  // grouped/single bar.ts bars (task 17); vertical is unchanged (no faceted/standalone gap there).
+  const catFont = horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
   const normalize = spec.barStack?.normalize === true;
 
   // Category domain in data-encounter order (declaration order is authoritative).
@@ -405,18 +408,22 @@ export function buildStackedMarks(
     netMode === "dot" ? true : netMode === "text" ? false : undefined;
 
   if (horizontal) {
-    // Responsive left gutter so the longest category label is not clipped (see bar.ts).
-    const gutter = horizontalLeftGutter(categories);
+    // Responsive left gutter so the longest category label is not clipped (see bar.ts); sized to
+    // the (now larger, faceted-matching) catFont so the wider glyphs still fit.
+    const gutter = horizontalLeftGutter(categories, { fontSize: catFont });
     return {
       underlay: [],
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
         ...netTagging,
+        // Hover-accent hook (task 17): no sections/faceting for stacked bars, so render order is
+        // always plain encounter order.
+        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-      xAxisMarks: tblBandYAxis(categories, gutter),
+      xAxisMarks: tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
       seriesColors,
       legendVisualOrder,
@@ -431,6 +438,9 @@ export function buildStackedMarks(
     tagging: [
       { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
       ...netTagging,
+      // Vertical: the adapter (x-adapter.ts) supplies the category label marks (xAxisMarks left
+      // undefined below), tagged with CAT_LABEL_CLASS there — encounter order, matching `categories`.
+      { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
     ],
     dashedNames: new Set<string>(),
     // Single category band on `x`; refine outer pad like single-series bars. xScaleField

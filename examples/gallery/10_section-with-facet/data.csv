@@ -1,0 +1,19 @@
+category,value,toplevel,facet
+Motor vehicles,3.4,Durable goods,Scenario A
+Furnishings,2.1,Durable goods,Scenario A
+Recreation goods,1.6,Durable goods,Scenario A
+Food at home,0.9,Nondurable goods,Scenario A
+Clothing,1.2,Nondurable goods,Scenario A
+Gasoline,2.8,Nondurable goods,Scenario A
+Housing services,0.5,Services,Scenario A
+Health care,0.7,Services,Scenario A
+Recreation services,0.6,Services,Scenario A
+Motor vehicles,2.9,Durable goods,Scenario B
+Furnishings,1.8,Durable goods,Scenario B
+Recreation goods,1.4,Durable goods,Scenario B
+Food at home,1.1,Nondurable goods,Scenario B
+Clothing,1.0,Nondurable goods,Scenario B
+Gasoline,2.3,Nondurable goods,Scenario B
+Housing services,0.6,Services,Scenario B
+Health care,0.9,Services,Scenario B
+Recreation services,0.4,Services,Scenario B

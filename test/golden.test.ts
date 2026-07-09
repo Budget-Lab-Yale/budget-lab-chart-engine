@@ -26,6 +26,7 @@ import {
 } from "../src/engine/theme";
 import { paneTitleMark, temporalXTicks, isSectionSpacer } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
+import { resolveColor } from "../src/engine/palette";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
@@ -60,6 +61,23 @@ function absX(el: Element | null): number {
     n = n.parentElement;
   }
   return x;
+}
+
+// Mirror of absX: absolute y of an SVG element, accumulating every ancestor
+// `transform="translate(x,y)"` up to the root <svg>. Used to assert a section header's
+// vertical position lands within the reserved top margin (not clipped above y=0).
+function absY(el: Element | null): number {
+  let y = 0;
+  let n: Element | null = el;
+  while (n && n.tagName.toLowerCase() !== "svg") {
+    const tf = n.getAttribute("transform");
+    if (tf) {
+      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
+      if (m) y += Number(m[2]);
+    }
+    n = n.parentElement;
+  }
+  return y;
 }
 
 const GRADS_SPEC: ChartSpec = {
@@ -120,6 +138,69 @@ describe("golden SVG", () => {
     const a = renderChart(GRADS_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(GRADS_SPEC, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+// --- `legend: false` (hide the legend, keep coloring/tooltips) ---
+
+describe("legend: false", () => {
+  it("multi-series + legend:false -> legendItems is null", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const { legendItems } = renderChart({ ...AUGMENTED_SPEC, legend: false }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(legendItems).toBeNull();
+  });
+
+  it("multi-series + legend absent (default) -> legendItems unchanged (non-null)", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const { legendItems } = renderChart(AUGMENTED_SPEC, rows, { width: 720, height: 400, document });
+    expect(legendItems).not.toBeNull();
+    expect(legendItems?.length).toBe(4);
+  });
+
+  it("multi-series + legend:true (explicit) -> legendItems unchanged (non-null)", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const { legendItems } = renderChart({ ...AUGMENTED_SPEC, legend: true }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(legendItems).not.toBeNull();
+    expect(legendItems?.length).toBe(4);
+  });
+
+  it("legend:false also nulls the single-series dash-override legend (hasDashOverrides case)", () => {
+    const rows = parseCsv("./fixtures/grads-recent.csv");
+    const dashedSpec: ChartSpec = { ...GRADS_SPEC, series_styles: { Dissimilarity: { dashed: true } } };
+    // Sanity: a dash override on a single series normally DOES produce a legend.
+    const withLegend = renderChart(dashedSpec, rows, { width: 720, height: 400, document });
+    expect(withLegend.legendItems).not.toBeNull();
+    const { legendItems } = renderChart({ ...dashedSpec, legend: false }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(legendItems).toBeNull();
+  });
+
+  it("legend:false does not affect series colors (colors map unchanged)", () => {
+    const rows = parseCsv("./fixtures/augmented-occ-observed.csv");
+    const shown = renderChart(AUGMENTED_SPEC, rows, { width: 720, height: 400, document });
+    const hidden = renderChart({ ...AUGMENTED_SPEC, legend: false }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    expect(hidden.colors.get("<5 Weeks")).toBe(shown.colors.get("<5 Weeks"));
+    expect(hidden.colors.get("27+ Weeks")).toBe(shown.colors.get("27+ Weeks"));
+    // The rendered <path data-series> elements still carry distinct stroke colors.
+    const strokeFor = (svg: SVGSVGElement, series: string) =>
+      svg.querySelector(`g[aria-label="line"] path[data-series="${series}"]`)?.getAttribute("stroke");
+    expect(strokeFor(hidden.svg, "<5 Weeks")).toBe(strokeFor(shown.svg, "<5 Weeks"));
+    expect(strokeFor(hidden.svg, "<5 Weeks")).not.toBe(strokeFor(hidden.svg, "27+ Weeks"));
   });
 });
 
@@ -326,11 +407,30 @@ describe("golden SVG — bars", () => {
     const marginLeft = Number(svg.dataset.marginLeft);
     expect(marginLeft).toBeGreaterThan(44);
     const longestLabel = rows.reduce((w, r) => Math.max(w, (r.time as string).length), 0);
-    const estWidth = longestLabel * 10.5 * 0.55; // matches axes.estimateLabelWidth heuristic
+    // Standalone horizontal bars now render category labels at the faceted-matching 13px size
+    // (task 17), not the 10.5px axis default — matches axes.estimateLabelWidth heuristic.
+    const estWidth = longestLabel * 13 * 0.55;
     expect(estWidth).toBeLessThanOrEqual(marginLeft);
     // Bars begin at the gutter edge (value-axis origin = marginLeft), past the labels.
     rects.forEach((r) => expect(Number(r.getAttribute("x"))).toBeGreaterThanOrEqual(marginLeft - 1));
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal.golden.svg");
+  });
+
+  it("x_axis_ticks: both renders a top value-tick row on a STANDALONE (unfaceted) horizontal bar chart", async () => {
+    // Item 6: top/both value-axis ticks already worked for horizontal bars before task 17 — this
+    // locks the plain-y (unsectioned, non-faceted) emission with a golden, not just a margin
+    // assertion (the sectioned/faceted cases already have golden coverage above/below).
+    const rows = parseCsv("./fixtures/bar-horizontal.csv");
+    const { svg } = renderChart({ ...BAR_HORIZONTAL_SPEC, x_axis_ticks: "both" }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    });
+    // A top tick-label row (frameAnchor:"top" text marks) in addition to the default bottom row —
+    // 6 tick values (0%..5%) rendered twice (top + bottom).
+    const tickTexts = Array.from(svg.querySelectorAll("text")).filter((t) => /^\d%$/.test(t.textContent ?? ""));
+    expect(tickTexts.length).toBe(12);
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal-both-ticks.golden.svg");
   });
 
   it("renders a multi-series grouped HORIZONTAL bar chart via fy", async () => {
@@ -385,6 +485,153 @@ describe("golden SVG — bars", () => {
   });
 });
 
+// --- category_colors + bar_color (task 7) ---
+
+const BAR_CATCOLOR_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Effect by quarter",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  data: "bar-category-colors.csv",
+};
+
+describe("golden SVG — bar category_colors / bar_color", () => {
+  it("category_colors recolors a named category; others keep the base fill (vertical)", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const spec: ChartSpec = { ...BAR_CATCOLOR_SPEC, category_colors: { Total: "navy" } };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(4);
+    const fills = Array.from(rects).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([TBL.color.blue, TBL.color.blue, TBL.color.blue, resolveColor("navy")]);
+  });
+
+  it("category_colors recolors a named category; others keep the base fill (horizontal)", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const spec: ChartSpec = {
+      ...BAR_CATCOLOR_SPEC,
+      orientation: "horizontal",
+      category_colors: { Total: "navy" },
+    };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(4);
+    const fills = Array.from(rects).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([TBL.color.blue, TBL.color.blue, TBL.color.blue, resolveColor("navy")]);
+  });
+
+  // No `columns.series` and no "series" column in the data ⇒ the implicit single-series key
+  // (SINGLE_SERIES_KEY = "") — the case the `series_colors: {"": color}` idiom targets.
+  const BAR_NOSERIES_SPEC: ChartSpec = { ...BAR_SINGLE_SPEC, data: "bar-single-noseries.csv" };
+
+  it('bar_color sets the single-series fill, identical to the series_colors: {"": color} idiom', () => {
+    const rows = parseCsv("./fixtures/bar-single-noseries.csv");
+    const viaBarColor = renderChart({ ...BAR_NOSERIES_SPEC, bar_color: "amber" }, rows, {
+      width: 720,
+      height: 400,
+      document,
+    }).svg.outerHTML;
+    const viaIdiom = renderChart(
+      { ...BAR_NOSERIES_SPEC, series_colors: { "": "amber" } },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg.outerHTML;
+    expect(viaBarColor).toBe(viaIdiom);
+  });
+
+  it("bar_color wins over the series_colors {\"\": color} idiom when both are set", () => {
+    const rows = parseCsv("./fixtures/bar-single-noseries.csv");
+    const { svg } = renderChart(
+      { ...BAR_NOSERIES_SPEC, bar_color: "amber", series_colors: { "": "navy" } },
+      rows,
+      { width: 720, height: 400, document },
+    );
+    // A constant fill (no category_colors) is hoisted to the group, not repeated per-<rect>.
+    expect(svg.querySelector('g[aria-label="bar"]')?.getAttribute("fill")).toBe(resolveColor("amber"));
+  });
+
+  it("bar_color + category_colors together: the named category wins, others get bar_color", () => {
+    const rows = parseCsv("./fixtures/bar-category-colors.csv");
+    const spec: ChartSpec = {
+      ...BAR_CATCOLOR_SPEC,
+      bar_color: "amber",
+      category_colors: { Total: "navy" },
+    };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    const fills = Array.from(rects).map((r) => r.getAttribute("fill"));
+    expect(fills).toEqual([
+      resolveColor("amber"),
+      resolveColor("amber"),
+      resolveColor("amber"),
+      resolveColor("navy"),
+    ]);
+  });
+
+  it("category_colors is scoped to single-series bars: a multi-series chart's series colors are unchanged", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const withoutCatColors = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document })
+      .svg.outerHTML;
+    const withCatColors = renderChart(
+      { ...BAR_MULTI_SPEC, category_colors: { Northeast: "navy" } },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg.outerHTML;
+    expect(withCatColors).toBe(withoutCatColors);
+  });
+
+  it("bar_color is ignored on multi-series bars: output byte-identical with/without it", () => {
+    const rows = parseCsv("./fixtures/bar-multi.csv");
+    const without = renderChart(BAR_MULTI_SPEC, rows, { width: 720, height: 400, document })
+      .svg.outerHTML;
+    const withBarColor = renderChart(
+      { ...BAR_MULTI_SPEC, bar_color: "amber" },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg.outerHTML;
+    expect(withBarColor).toBe(without);
+  });
+
+  // Regression (task 7 review): a single-series bar with highlightSeries and NONE of the new
+  // fields must keep the ORIGINAL SVG structure — an accessor fill emits a per-<rect> fill
+  // attribute (no fill on the parent <g>), whereas a constant fill hoists onto the <g>. The
+  // first task-7 implementation collapsed the highlight accessor to a constant, silently moving
+  // the fill up to the group; this locks the per-rect structure (and the exact fill values).
+  it("single-series + highlightSeries (no new fields): per-rect fill attrs, none on the group", async () => {
+    const rows = parseCsv("./fixtures/bar-single.csv");
+    const spec: ChartSpec = { ...BAR_SINGLE_SPEC, highlightSeries: ["Effect"] };
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const group = svg.querySelector('g[aria-label="bar"]');
+    expect(group?.getAttribute("fill")).toBeNull();
+    const rects = Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(rects.length).toBe(4);
+    rects.forEach((r) => expect(r.getAttribute("fill")).toBe(TBL.color.blue));
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-single-highlight.golden.svg");
+  });
+
+  it("bar_color replaces the BASE color under highlightSeries; dimming still applies", () => {
+    const rows = parseCsv("./fixtures/bar-single.csv");
+    // Highlighted: the sole series is in the set — bars take bar_color (per-rect, accessor path).
+    const highlighted = renderChart(
+      { ...BAR_SINGLE_SPEC, bar_color: "amber", highlightSeries: ["Effect"] },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg;
+    Array.from(highlighted.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
+      expect(r.getAttribute("fill")).toBe(resolveColor("amber")),
+    );
+    // Not highlighted: dimming wins over bar_color.
+    const dimmed = renderChart(
+      { ...BAR_SINGLE_SPEC, bar_color: "amber", highlightSeries: ["Other"] },
+      rows,
+      { width: 720, height: 400, document },
+    ).svg;
+    Array.from(dimmed.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
+      expect(r.getAttribute("fill")).toBe(TBL.color.annotationDim),
+    );
+  });
+});
+
 // --- Faceted-horizontal label/gutter signals (hideCategoryLabels + categoryGutter) ---
 
 describe("bar builder — faceted-horizontal label signals", () => {
@@ -420,6 +667,52 @@ describe("bar builder — faceted-horizontal label signals", () => {
     const rows = parseCsv("./fixtures/bar-multi.csv");
     const r = renderChart(HBASE, rows, { width: 400, height: 400, document, categoryGutter: 180 });
     expect(Number(r.svg.dataset.marginLeft)).toBe(180);
+  });
+});
+
+// --- D6: horizontal xAxis marker label placement (top margin, not on the flush-top first bar) ---
+//
+// The horizontal category band uses `align: 0` so the (small) outer pad goes to the BOTTOM only —
+// the first bar sits flush at marginTop, with no gap above it. A "top"-position xAxis marker label
+// used a fixed positive dy (frameAnchor "top"), which sits INSIDE the frame a few px below its top
+// edge — exactly where the first bar starts, so the label painted over the bar (gallery 07b). The
+// fix places the label in the TOP MARGIN instead (negative dy, above the frame's top edge).
+
+describe("D6: horizontal xAxis marker label sits in the top margin (fig07b regression)", () => {
+  const rows = parseCsv("./fixtures/bar-horizontal.csv");
+  const SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    columns: { x: "time", value: "value" },
+    annotations: { xAxis: [{ x: "1", label: "All items" }] },
+    data: "bar-horizontal.csv",
+  };
+
+  it("labelPosition 'top' (default) renders ABOVE the frame's top edge, clear of the flush first bar", () => {
+    const { svg } = renderChart(SPEC, rows, { width: 520, height: 400, document });
+    const label = Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === "All items");
+    expect(label).toBeDefined();
+    const marginTop = Number(svg.dataset.marginTop);
+    // Above the frame top edge (smaller absY = higher on the canvas) — i.e. IN the margin, not
+    // inside the plot area where the first bar (flush at marginTop) would sit under it.
+    expect(absY(label ?? null)).toBeLessThan(marginTop);
+    // Still on-canvas (not clipped above y=0).
+    expect(absY(label ?? null)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("an explicit labelDy still nudges the label from its (now top-margin) base position", () => {
+    const base = renderChart(SPEC, rows, { width: 520, height: 400, document });
+    const nudged = renderChart(
+      { ...SPEC, annotations: { xAxis: [{ x: "1", label: "All items", labelDy: 5 }] } },
+      rows,
+      { width: 520, height: 400, document },
+    );
+    const y = (svg: SVGSVGElement) =>
+      absY(Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === "All items") ?? null);
+    // labelDy is + = UP, so the nudged label sits strictly higher (smaller absY) than the base.
+    expect(y(nudged.svg)).toBeLessThan(y(base.svg));
   });
 });
 
@@ -565,6 +858,286 @@ describe("bar builder — sectioned horizontal category axis", () => {
     expect(texts).toContain("Durables");
     expect(texts).not.toContain("Durable goods");
   });
+
+  it("first section header is fully visible (not clipped above the plot) with default bottom ticks", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const { svg } = renderChart(SECTIONED_SINGLE, rows, { width: 520, height: 760, document });
+    const header = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).find(
+      (t) => t.textContent === "Durable goods",
+    );
+    expect(header).toBeDefined();
+    // The header's absolute y (accumulated transforms, root-svg-relative) must land at or below
+    // the canvas top (>= 0, not lifted above it and clipped) and still sit inside the reserved
+    // top margin, above the first bar (< marginTop).
+    const marginTop = Number(svg.dataset.marginTop);
+    const y = absY(header ?? null);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(y).toBeLessThan(marginTop);
+  });
+
+  it("x_axis_ticks: both keeps the tick-driven top margin (no double gap from the header floor)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    const spec: ChartSpec = { ...SECTIONED_SINGLE, x_axis_ticks: "both" };
+    const { svg } = renderChart(spec, rows, { width: 520, height: 760, document });
+    // Tick-driven margin (HVALUE_TICK_PX + SECTION_HEADER_GAP + 12 = 18+10+12 = 40) exceeds the
+    // header-lift floor, so Math.max picks the tick-driven value untouched (no extra gap stacked on).
+    expect(Number(svg.dataset.marginTop)).toBe(40);
+    const header = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).find(
+      (t) => t.textContent === "Durable goods",
+    );
+    expect(absY(header ?? null)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("x_order reorders categories WITHIN a section without disturbing cross-section order", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+      (r) => r.facet === "Section 122 Expires",
+    );
+    // Default (data-encounter) order within "Durable goods" is: Motor vehicles and parts,
+    // Furnishings and durable household equipment, Recreational goods and vehicles, Other durable
+    // goods. Reverse just that section's categories via x_order; the other two sections' category
+    // sets are unlisted so they keep encounter order, and section_order still drives which section
+    // comes first/second/third.
+    const spec: ChartSpec = {
+      ...SECTIONED_SINGLE,
+      x_order: [
+        "Other durable goods",
+        "Recreational goods and vehicles",
+        "Furnishings and durable household equipment",
+        "Motor vehicles and parts",
+      ],
+    };
+    const { svg } = renderChart(spec, rows, { width: 520, height: 760, document });
+    // Pull every category-axis label (font-weight 500, not the bold 700 section headers), in
+    // top-to-bottom render order (band position ⇒ ascending absY). Labels that wrap onto two
+    // lines join their tspans with no space in textContent, so compare whitespace-stripped.
+    const norm = (s: string): string => s.replace(/\s+/g, "");
+    const durableGoods = new Map(
+      [
+        "Motor vehicles and parts",
+        "Furnishings and durable household equipment",
+        "Recreational goods and vehicles",
+        "Other durable goods",
+      ].map((c) => [norm(c), c] as const),
+    );
+    const labels = Array.from(svg.querySelectorAll('g[font-weight="500"] text'))
+      .filter((t) => durableGoods.has(norm(t.textContent ?? "")))
+      .map((t) => ({ text: durableGoods.get(norm(t.textContent ?? "")) as string, y: absY(t) }))
+      .sort((a, b) => a.y - b.y)
+      .map((l) => l.text);
+    expect(labels).toEqual([
+      "Other durable goods",
+      "Recreational goods and vehicles",
+      "Furnishings and durable household equipment",
+      "Motor vehicles and parts",
+    ]);
+    // Sections stay contiguous and in section_order: the bold headers render top-to-bottom in
+    // section_order ("Durable goods" is still the FIRST section — x_order only reordered its
+    // categories, it did not move the section itself or split it from its header). DOM order of
+    // the header marks is not visual order (the top header is a separate mark), so sort by absY.
+    const headers = Array.from(svg.querySelectorAll('g[font-weight="700"] text'))
+      .map((t) => ({ text: t.textContent ?? "", y: absY(t) }))
+      .sort((a, b) => a.y - b.y)
+      .map((h) => h.text);
+    expect(headers).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+  });
+});
+
+// --- SINGLE-SERIES sectioned horizontal category axis (Task 16 / D1-D4 regression) ---
+//
+// Before the fy-topology fix, a single-series sectioned chart pushed fy-bound section-header
+// marks (tblSectionHeaderYAxis/tblSectionTopHeader) onto an UNfaceted plain-`y` band mark. Any
+// mark carrying fy/fx facets the WHOLE plot in Observable Plot, so the header marks alone made
+// Plot auto-derive a phantom 3-value fy domain (2 spacer sentinels + the first category) —
+// producing 27 rects instead of 9, the raw " section:" sentinel as Plot's default fy-axis text,
+// starved bar height, and header/category collisions (gallery figures 09/10). These assertions
+// fail on the pre-fix plain-y path and pass once single-series sectioned routes onto the same fy
+// topology the multi-series sectioned path already uses correctly (Figure 7, above).
+
+describe("bar builder — SINGLE-SERIES sectioned horizontal category axis (fig09 regression)", () => {
+  const rows = parseCsv("./fixtures/figure7-tariff.csv").filter(
+    (r) => r.facet === "Section 122 Expires" && r.series === "Pre-Substitution",
+  );
+  const catCount = new Set(rows.map((r) => r.category)).size;
+
+  const SINGLE_SERIES_SECTIONED: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    columns: { x: "category", value: "value", section: "toplevel" },
+    section_order: ["Durable goods", "Nondurable goods", "Services"],
+    data: "figure7-tariff.csv",
+  };
+
+  it("renders exactly one rect per category (not per category × phantom-facet)", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    expect(catCount).toBe(20);
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(catCount);
+  });
+
+  it("never prints the raw section-spacer sentinel as rendered axis text", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+    expect(texts.some((t) => isSectionSpacer(t))).toBe(false);
+  });
+
+  it("renders each section header exactly once, in bold", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    const bold = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent ?? "");
+    for (const label of ["Durable goods", "Nondurable goods", "Services"]) {
+      expect(bold.filter((t) => t === label).length).toBe(1);
+    }
+  });
+
+  it("uses the fy facet topology (one facet group per category, matching the multi-series path)", () => {
+    const { svg } = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document });
+    // Non-empty facet groups (spacer-slot facets carry no bars and are excluded) == category count.
+    const groups = Array.from(svg.querySelectorAll('g[aria-label="bar"] > g')).filter((g) =>
+      g.querySelector("rect"),
+    );
+    expect(groups.length).toBe(catCount);
+  });
+
+  it("is deterministic and matches the golden", async () => {
+    const a = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document }).svg.outerHTML;
+    const b = renderChart(SINGLE_SERIES_SECTIONED, rows, { width: 520, height: 760, document }).svg.outerHTML;
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/bar-sectioned-single.golden.svg");
+  });
+});
+
+// --- Faceted + sectioned, SINGLE series per pane (fig10 shape: shared small multiples) ---
+
+const FIG10_SHAPE_SPEC: ChartSpec = {
+  chartType: "bar",
+  title: "Faceted + sectioned, single series per pane",
+  xAxisType: "categorical",
+  orientation: "horizontal",
+  columns: { x: "category", value: "value", facet: "facet", section: "toplevel" },
+  section_order: ["Durable goods", "Nondurable goods", "Services"],
+  small_multiples: {
+    columns: 2,
+    mode: "shared",
+    pane_order: ["Section 122 Expires", "Section 122 Extended"],
+  },
+  data: "figure7-tariff.csv",
+};
+
+describe("figure — faceted + sectioned horizontal bars, SINGLE series per pane (fig10 regression)", () => {
+  it("both panes render one rect per category and stay aligned (same rect count + y-geometry)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter((r) => r.series === "Pre-Substitution");
+    const fig = renderFigure(FIG10_SHAPE_SPEC, rows, { width: 900, document });
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    const catCount = new Set(rows.map((r) => r.category)).size;
+    const rects = (svg: SVGSVGElement) => Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(rects(p0).length).toBe(catCount);
+    expect(rects(p1).length).toBe(catCount);
+    // No pane-0-explodes-while-others-are-fine regression (the diagnosed cross-pane misalignment):
+    // every rect's absolute y (top edge) in pane 0 matches its counterpart in pane 1, in DOM order.
+    const ys = (svg: SVGSVGElement) => rects(svg).map((r) => absY(r) + Number(r.getAttribute("y") ?? 0));
+    const y0 = ys(p0);
+    const y1 = ys(p1);
+    expect(y0.length).toBe(y1.length);
+    y0.forEach((y, i) => expect(y).toBeCloseTo(y1[i] as number, 4));
+    // No sentinel leakage in either pane.
+    for (const svg of [p0, p1]) {
+      const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
+      expect(texts.some((t) => isSectionSpacer(t))).toBe(false);
+    }
+  });
+
+  it("is deterministic and matches the golden", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv").filter((r) => r.series === "Pre-Substitution");
+    const a = serializePanes(renderFigure(FIG10_SHAPE_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG10_SHAPE_SPEC, rows, { width: 900, document }));
+    expect(a).toBe(b);
+    await expect(a).toMatchFileSnapshot("./fixtures/figure10-shape-sectioned-single.golden.svg");
+  });
+});
+
+// --- assemblePlot invariant guard: a mark with a facet channel MUST declare its facet scale ---
+//
+// D1's root cause: a mark builder pushed fy-BOUND marks (the section-header text) without ever
+// declaring `layers.fyScaleOpts`. In Observable Plot, ANY mark carrying an fx/fy channel facets
+// the WHOLE plot — including marks that never asked for it — so Plot silently derived its own
+// phantom facet domain and rendered its OWN default facet-axis chrome (raw domain values as
+// text) instead of the engine's collapsed chrome. This guard makes that failure mode loud instead
+// of silent: assemblePlot checks its OWN rendered output for Plot's default fy/fx-axis chrome and
+// throws if the layer never declared the matching scale.
+
+describe("assemblePlot — fy/fx facet invariant guard", () => {
+  const baseXOpts = makeXAdapter("categorical").buildXOpts([{ _xc: "a" }, { _xc: "b" }], false);
+  const baseArgs = {
+    yDomain: [0, 1] as [number, number],
+    yTicks: [0, 1],
+    units: "",
+    xOpts: baseXOpts,
+    seriesNames: ["Series"],
+    colors: new Map([["Series", TBL.color.blue]]),
+    spec: { chartType: "bar", title: "t", xAxisType: "categorical", data: "d" } as ChartSpec,
+    document,
+  };
+
+  it("throws when a mark carries an fy channel but the layer declares no fyScaleOpts", () => {
+    // Hand-built BAD layer: an fy-bound mark (mirrors the real defect — a section-header text
+    // mark bound to fy) with no fyScaleOpts declared anywhere in the layer.
+    const badLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.text([{ cat: "a", label: "Header" }], { fy: "cat", text: "label" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+    };
+    expect(() => assemblePlot({ layers: badLayer, ...baseArgs })).toThrow(/fyScaleOpts/);
+  });
+
+  it("throws when a mark carries an fx channel but the layer declares neither fxScaleOpts nor xScaleField:\"fx\"", () => {
+    const badLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.text([{ cat: "a", label: "Header" }], { fx: "cat", text: "label" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+    };
+    expect(() => assemblePlot({ layers: badLayer, ...baseArgs })).toThrow(/fxScaleOpts/);
+  });
+
+  it("does NOT throw for a healthy fy-faceted layer (fyScaleOpts declared)", () => {
+    const goodLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.barX([{ cat: "a", v: 1 }], { fy: "cat", x: "v" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+      yScaleOpts: { type: "band", domain: ["Series"], padding: 0, axis: null },
+      fyScaleOpts: { domain: ["a", "b"], axis: null },
+    };
+    expect(() => assemblePlot({ layers: goodLayer, ...baseArgs })).not.toThrow();
+  });
+
+  it("does NOT throw for a healthy fx-faceted (xScaleField:\"fx\") layer", () => {
+    const goodLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.barY([{ cat: "a", v: 1 }], { fx: "cat", y: "v" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+      fxScaleOpts: { domain: ["a", "b"], axis: null },
+      xScaleField: "fx",
+    };
+    expect(() => assemblePlot({ layers: goodLayer, ...baseArgs })).not.toThrow();
+  });
+
+  it("does NOT throw for an ordinary unfaceted layer", () => {
+    const goodLayer: MarkLayers = {
+      underlay: [],
+      overlay: [Plot.barY([{ cat: "a", v: 1 }], { x: "cat", y: "v" })],
+      tagging: [],
+      dashedNames: new Set<string>(),
+    };
+    expect(() => assemblePlot({ layers: goodLayer, ...baseArgs })).not.toThrow();
+  });
 });
 
 // --- Figure 7: the full faceted + sectioned horizontal bar chart ---
@@ -597,6 +1170,87 @@ describe("figure — faceted + sectioned horizontal bars (Figure 7)", () => {
     const b = serializePanes(renderFigure(FIG7_SECTIONED_SPEC, rows, { width: 900, document }));
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-sectioned.golden.svg");
+  });
+});
+
+// --- Figure 7 (per-pane mode): section headers still suppressed off the leftmost pane ---
+//
+// Per-pane mode gives every pane an independent y-domain, but a sectioned horizontal facet still
+// shares ONE category axis across panes (every facet carries the same categories/sections here),
+// so it reads as one figure exactly like shared mode: headers + category labels render once
+// (pane 0 only); other panes keep their bars + value ticks.
+
+const FIG7_SECTIONED_PERPANE_SPEC: ChartSpec = {
+  ...FIG7_SECTIONED_SPEC,
+  small_multiples: { ...FIG7_SECTIONED_SPEC.small_multiples, mode: "per-pane" },
+};
+
+describe("figure — faceted + sectioned horizontal bars, PER-PANE mode", () => {
+  it("section headers + category labels render once (leftmost pane only)", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document });
+    expect(fig.mode).toBe("per-pane");
+    const p0 = fig.panes[0]!.svg as SVGSVGElement;
+    const p1 = fig.panes[1]!.svg as SVGSVGElement;
+    // Headers in VISUAL top-to-bottom order (absY; DOM order puts the top header last).
+    const headers = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll('g[font-weight="700"] text'))
+        .map((t) => ({ text: t.textContent ?? "", y: absY(t) }))
+        .sort((a, b) => a.y - b.y)
+        .map((h) => h.text);
+    expect(headers(p0)).toEqual(["Durable goods", "Nondurable goods", "Services"]);
+    // Suppressed on the non-leftmost pane (only its bars + value ticks show).
+    expect(headers(p1)).toEqual([]);
+    // Category (y-axis) labels are likewise pane-0-only. (font-weight 500 also covers the
+    // value-axis tick labels, so match against a known category name instead of counting all
+    // weight-500 text.)
+    const norm = (s: string): string => s.replace(/\s+/g, "");
+    const catLabels = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll('g[font-weight="500"] text')).filter((t) =>
+        norm(t.textContent ?? "") === norm("Motor vehicles and parts"),
+      );
+    expect(catLabels(p0).length).toBeGreaterThan(0);
+    expect(catLabels(p1).length).toBe(0);
+    // Both panes still keep all bars (20 categories × 2 series) — suppression is label-only.
+    expect(p0.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+    expect(p1.querySelectorAll('g[aria-label="bar"] rect').length).toBe(40);
+  });
+
+  it("compensates outer widths for the asymmetric gutter: identical inner DATA width per row", () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const fig = renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document });
+    // Unequal OUTER column widths, mirroring shared mode: the labeled left column is WIDER (it
+    // carries the shared category gutter); the label-less column is narrower. Threaded to the
+    // live grid via columnWidths.
+    expect(fig.columnWidths).toBeDefined();
+    expect(fig.columnWidths!.length).toBe(2);
+    expect(fig.columnWidths![0]).toBeGreaterThan(fig.columnWidths![1]!);
+    const svgW = (p: FigurePane): number => Number((p.svg as SVGSVGElement).getAttribute("width"));
+    expect(svgW(fig.panes[0]!)).toBe(fig.columnWidths![0]);
+    expect(svgW(fig.panes[1]!)).toBe(fig.columnWidths![1]);
+    // Left margin: pane 0 keeps the wide category gutter; pane 1 the small label-less margin.
+    const marginLeft = (p: FigurePane): number =>
+      Number((p.svg as SVGSVGElement).dataset.marginLeft);
+    expect(marginLeft(fig.panes[0]!)).toBeGreaterThan(120);
+    expect(marginLeft(fig.panes[1]!)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
+    // IDENTICAL inner DATA width across the row (outer − marginLeft − marginRight), so the same
+    // value renders as the same bar length in both panes despite the asymmetric gutter.
+    const dataW = (p: FigurePane): number => {
+      const svg = p.svg as SVGSVGElement;
+      return (
+        Number(svg.getAttribute("width")) -
+        Number(svg.dataset.marginLeft) -
+        Number(svg.dataset.marginRight)
+      );
+    };
+    expect(dataW(fig.panes[1]!)).toBeCloseTo(dataW(fig.panes[0]!), 4);
+  });
+
+  it("is deterministic", async () => {
+    const rows = parseCsv("./fixtures/figure7-tariff.csv");
+    const a = serializePanes(renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document }));
+    const b = serializePanes(renderFigure(FIG7_SECTIONED_PERPANE_SPEC, rows, { width: 900, document }));
+    expect(a).toBe(b);
   });
 });
 

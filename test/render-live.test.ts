@@ -76,6 +76,21 @@ describe("mountChart", () => {
     expect(container.querySelector(".tbl-legend")).not.toBeNull();
   });
 
+  it("legend:false hides the legend for a multi-series chart while keeping distinct series colors", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: { ...MULTI_SERIES_SPEC, legend: false }, rows: MULTI_SERIES_ROWS });
+    // No legend chrome at all.
+    expect(container.querySelector(".tbl-legend")).toBeNull();
+    // Colors/interactivity otherwise unchanged: each series' <path> still carries its own stroke.
+    const paths = container.querySelectorAll<SVGPathElement>('svg g[aria-label="line"] path[data-series]');
+    expect(paths.length).toBe(2);
+    const strokeA = [...paths].find((p) => p.getAttribute("data-series") === "A")?.getAttribute("stroke");
+    const strokeB = [...paths].find((p) => p.getAttribute("data-series") === "B")?.getAttribute("stroke");
+    expect(strokeA).toBeTruthy();
+    expect(strokeB).toBeTruthy();
+    expect(strokeA).not.toBe(strokeB);
+  });
+
   it("renders the y-axis title caption when y_axis_title is set", () => {
     const container = document.createElement("div");
     mountChart(container, {
@@ -534,6 +549,40 @@ describe("right-side legend layout", () => {
     const rightSlot = container.querySelector(".figure-legend-slot--right")!;
     const buttons = rightSlot.querySelectorAll("button.tbl-legend-item[data-series]");
     expect(buttons.length).toBe(5); // 5 interactive series
+  });
+
+  it("legend:false + explicit legendPosition:'right' reclaims the legend column (full-width chart)", () => {
+    const svgWidth = (c: HTMLElement) => Number(c.querySelector("svg.tblchart")?.getAttribute("width"));
+    // Baseline: the right legend reserves its 160+16px column, narrowing the chart.
+    const shown = document.createElement("div");
+    mountChart(shown, { spec: EXPLICIT_RIGHT_SPEC, rows: EXPLICIT_RIGHT_ROWS, width: 800 });
+    expect(svgWidth(shown)).toBe(800 - 160 - 16);
+    // With legend:false no legend will render, so no column may be reserved: full width.
+    const hidden = document.createElement("div");
+    mountChart(hidden, {
+      spec: { ...EXPLICIT_RIGHT_SPEC, legend: false },
+      rows: EXPLICIT_RIGHT_ROWS,
+      width: 800,
+    });
+    expect(hidden.querySelector(".tbl-legend")).toBeNull();
+    expect(hidden.querySelector(".figure-body--legend-right")).toBeNull();
+    expect(svgWidth(hidden)).toBe(800);
+  });
+
+  it("legend:false + default-right rule (stacked ≥5 series) also reclaims the legend column", () => {
+    const svgWidth = (c: HTMLElement) => Number(c.querySelector("svg.tblchart")?.getAttribute("width"));
+    const shown = document.createElement("div");
+    mountChart(shown, { spec: FIVE_SERIES_SPEC, rows: FIVE_SERIES_ROWS, width: 800 });
+    expect(svgWidth(shown)).toBe(800 - 160 - 16);
+    const hidden = document.createElement("div");
+    mountChart(hidden, {
+      spec: { ...FIVE_SERIES_SPEC, legend: false },
+      rows: FIVE_SERIES_ROWS,
+      width: 800,
+    });
+    expect(hidden.querySelector(".tbl-legend")).toBeNull();
+    expect(hidden.querySelector(".figure-body--legend-right")).toBeNull();
+    expect(svgWidth(hidden)).toBe(800);
   });
 });
 
@@ -1377,6 +1426,50 @@ describe("mountChart small multiples", () => {
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
   });
+
+  // --- Per-pane HORIZONTAL bars (sectioned): the figure sizes explicit per-column widths
+  //     (asymmetric category gutter → unequal outer widths, one shared inner data width), so the
+  //     live caller must pass the TOTAL grid width and consume the returned columnWidths —
+  //     exactly like shared mode. Guards the caller contract, not just the engine math.
+  const HBAR_SECTIONED_PERPANE_SPEC: ChartSpec = {
+    chartType: "bar",
+    title: "Sectioned per-pane horizontal",
+    xAxisType: "categorical",
+    orientation: "horizontal",
+    data: "inline",
+    columns: { x: "cat", value: "value", facet: "facet", section: "sec" },
+    section_order: ["P", "Q"],
+    small_multiples: { columns: 2, mode: "per-pane" },
+  };
+  const HBAR_SECTIONED_ROWS: TidyRow[] = [];
+  for (const [f, base] of [["A", 1], ["B", 2]] as const) {
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Cars", sec: "P", value: String(base) } as TidyRow);
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Food", sec: "P", value: String(base + 1) } as TidyRow);
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Rent", sec: "Q", value: String(base + 2) } as TidyRow);
+    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Care", sec: "Q", value: String(base + 3) } as TidyRow);
+  }
+
+  it("per-pane sectioned horizontal figure fills the container width with equal data widths", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: HBAR_SECTIONED_PERPANE_SPEC, rows: HBAR_SECTIONED_ROWS, width: 900 });
+    const grid = container.querySelector<HTMLElement>(".figure-grid")!;
+    expect(grid).not.toBeNull();
+    // Explicit px grid template consuming the figure's per-column widths (labeled col 0 wider).
+    const tpl = grid.style.gridTemplateColumns.split(" ").map((s) => Number.parseFloat(s));
+    expect(tpl.length).toBe(2);
+    expect(tpl[0]!).toBeGreaterThan(tpl[1]!);
+    // The row of panes tiles the FULL container width (minus the 16px grid gap) — the old
+    // single-pane-width contract rendered the whole figure at ~half the container.
+    expect(tpl[0]! + tpl[1]!).toBeCloseTo(900 - 16, 0);
+    // Pane SVGs are rendered at those widths, and the inner DATA width is identical across the
+    // row despite the asymmetric gutter (same value → same bar length in both panes).
+    const svgs = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    expect(svgs.length).toBe(2);
+    svgs.forEach((s, i) => expect(Number(s.getAttribute("width"))).toBeCloseTo(tpl[i]!, 0));
+    const dataW = (s: SVGSVGElement): number =>
+      Number(s.getAttribute("width")) - Number(s.dataset.marginLeft) - Number(s.dataset.marginRight);
+    expect(dataW(svgs[1]!)).toBeCloseTo(dataW(svgs[0]!), 3);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1469,6 +1562,17 @@ describe("mountChart point charts", () => {
     expect(container.querySelectorAll(".tbl-legend-item[data-shape]").length).toBe(2);
     // Color group rows carry data-series.
     expect(container.querySelectorAll(".tbl-legend-item[data-series]").length).toBe(2);
+  });
+
+  it("legend:false suppresses the shape legend too (one flag kills all legend chrome)", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: { ...SCATTER_SPEC, legend: false }, rows: SCATTER_ROWS, width: 720 });
+    expect(container.querySelector(".tbl-legend")).toBeNull();
+    expect(container.querySelector(".tbl-legend-group")).toBeNull();
+    // Markers still render and are still tagged (coloring/shape unaffected).
+    const markers = container.querySelectorAll('g[aria-label="dot"] path[data-series]');
+    expect(markers.length).toBe(4);
+    expect(container.querySelectorAll('g[aria-label="dot"] path[data-shape]').length).toBe(4);
   });
 
   it("scatter markers carry data-shape so the shape legend can dim them", () => {

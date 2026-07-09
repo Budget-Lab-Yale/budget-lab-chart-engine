@@ -14,31 +14,13 @@ import { validateTableSpec, validateTableData } from "../spec/table-validate";
 import { loadData } from "../data/load";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
 import { CHART_CSS } from "../embed/styles";
-import { createServer, findCharts } from "./serve";
+import { createServer, findSpecs } from "./serve";
 import { renderChartPng } from "../snapshot/render-png";
 import { comparePng } from "../snapshot/compare";
+import { isTableSpec } from "./table-detect";
 import type { ChartSpec } from "../spec/types";
-import type { TableSpec } from "../spec/table-types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
-
-// ---------------------------------------------------------------------------
-// Table detection
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true when the parsed YAML looks like a table spec.
- * Detection is content-based (not filename-based) and intentionally generous:
- * any spec that has a `stub` field is treated as a table — chart specs never use that key.
- * This means partially-invalid table specs (e.g. missing `value`) are still routed to the
- * table validator, which produces the correct error rather than falling through to the chart
- * validator and emitting confusing "chartType required" messages.
- */
-function isTableSpec(parsed: unknown): parsed is TableSpec {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const p = parsed as Record<string, unknown>;
-  return p["stub"] !== undefined;
-}
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -594,7 +576,7 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     }
 
-    const charts = findCharts(rootDir);
+    const specs = findSpecs(rootDir);
     const server = createServer({ rootDir, liveBundleJs, css: CHART_CSS });
 
     await new Promise<void>((resolvePromise, reject) => {
@@ -612,7 +594,7 @@ export async function main(argv: string[]): Promise<number> {
 
       server.listen(port, () => {
         console.log(
-          `Serving ${charts.length} chart${charts.length === 1 ? "" : "s"} from ${rootDir} at http://localhost:${port}`,
+          `Serving ${specs.length} spec${specs.length === 1 ? "" : "s"} from ${rootDir} at http://localhost:${port}`,
         );
         resolvePromise();
       });

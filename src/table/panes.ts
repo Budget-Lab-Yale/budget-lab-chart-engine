@@ -4,7 +4,7 @@ import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
 import type { TableModel } from "./model";
 import type { TableLayout } from "./layout";
-import { buildTableModel } from "./model";
+import { buildTableModel, applyCollapse } from "./model";
 import { layoutTable, layoutOptionsFromSpec } from "./layout";
 
 export interface Pane {
@@ -65,20 +65,24 @@ export interface LaidPane { value: string; title: string; model: TableModel; lay
  * lines up across panes. When `fill` is set, also stretch each pane's data columns to a shared total
  * width so the right edges align too (for the PNG); the HTML instead fills the card and only needs
  * the shared stub. Pane corner labels (stub_header) are resolved per pane. Footnotes are stripped
- * from pane models when `fill` (the PNG lists them once at figure level).
+ * from pane models when `fill` (the PNG lists them once at figure level). `collapsedKeys`
+ * (PNG export of a collapsible table) filters each pane model through applyCollapse BEFORE
+ * layout, so the laid-out geometry matches the visible (collapsed-aware) rows.
  */
 export function layoutPanes(
   spec: TableSpec,
   rows: TidyRow[],
   measureText: (s: string, fontPx: number, weight: number) => number,
   fill: boolean,
+  collapsedKeys?: Set<string>,
 ): LaidPane[] {
   const opts = layoutOptionsFromSpec(spec);
   const panes = splitPanes(spec, rows);
 
   // Pass 1: natural layouts to discover the shared stub width and (for fill) the shared total.
   const natural = panes.map((p) => {
-    const model = buildTableModel(spec, p.rows);
+    let model = buildTableModel(spec, p.rows);
+    if (collapsedKeys) model = applyCollapse(model, collapsedKeys);
     model.stubHeader = resolveStubHeader(spec, p.value);
     return { p, model, layout: layoutTable(model, { width: 720, measureText, ...opts }) };
   });

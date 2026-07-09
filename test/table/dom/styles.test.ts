@@ -59,6 +59,12 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toContain("z-index: 3");
   });
 
+  it("bolds an emphasized stub cell (th.tbl-table-stub.is-emphasis beats the plain stub's font-weight)", () => {
+    // th.tbl-table-stub (0,1,1) otherwise outranks .is-emphasis (0,1,0) on font-weight, so an
+    // emphasized row's stub would stay at the plain weight despite the .is-emphasis class.
+    expect(CHART_CSS).toMatch(/th\.tbl-table-stub\.is-emphasis\s*\{[^}]*font-weight:\s*var\(--tw-bold\)/);
+  });
+
   it("puts the header→body bottom rule on the bottom-tier th AND the stub corner (bug #4)", () => {
     expect(CHART_CSS).toMatch(
       /thead tr:last-child th,\s*\.tbl-table thead th\.tbl-table-stub-header\s*\{[^}]*border-bottom/,
@@ -76,5 +82,24 @@ describe("CHART_CSS — table rules", () => {
 
   it("contains the stub_nowrap hook (5c)", () => {
     expect(CHART_CSS).toMatch(/\.tbl-table-stub\.is-nowrap[\s\S]*white-space:\s*nowrap/);
+  });
+
+  it("contains the collapsible group-toggle button styling (Task 4)", () => {
+    expect(CHART_CSS).toContain(".tbl-table-group-toggle");
+    // No button chrome: inline-flex, inherited font, pointer cursor.
+    expect(CHART_CSS).toMatch(/\.tbl-table-group-toggle\s*\{[^}]*display:\s*inline-flex/);
+    expect(CHART_CSS).toMatch(/\.tbl-table-group-toggle\s*\{[^}]*font:\s*inherit/);
+    expect(CHART_CSS).toMatch(/\.tbl-table-group-toggle\s*\{[^}]*cursor:\s*pointer/);
+  });
+
+  it("contains the caret with rotation keyed on aria-expanded (Task 4)", () => {
+    expect(CHART_CSS).toContain(".tbl-table-caret");
+    expect(CHART_CSS).toMatch(
+      /\.tbl-table-group-toggle\[aria-expanded="true"\] \.tbl-table-caret\s*\{[^}]*rotate\(90deg\)/,
+    );
+  });
+
+  it("hides collapsed rows via the hidden attribute (Task 4)", () => {
+    expect(CHART_CSS).toMatch(/\.tbl-table tr\[hidden\]\s*\{\s*display:\s*none/);
   });
 });

@@ -1,0 +1,11 @@
+decile,value,scenario
+1st,0.7,Scenario A
+2nd,1.0,Scenario A
+3rd,1.3,Scenario A
+4th,1.6,Scenario A
+5th,2.1,Scenario A
+1st,0.5,Scenario B
+2nd,0.9,Scenario B
+3rd,1.5,Scenario B
+4th,1.8,Scenario B
+5th,2.4,Scenario B

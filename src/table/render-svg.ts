@@ -269,8 +269,22 @@ export function renderTableSvg(
       if (!isFirst) g.appendChild(ruleGroup(0, rect.y, layout.totalWidth, rect.y));
       const x = PAD_X + group.level * INDENT_STEP;
       const labelBaseline = rect.y + topGap + BODY_FONT;
+      // Collapsible parity: a small caret glyph before the group label (right-pointing when the
+      // group exported collapsed, down-pointing when expanded), mirroring the live table's caret.
+      // Only for collapsible specs, so non-collapsible export output is byte-identical. The label
+      // shifts right by a fixed slot regardless of caret orientation; group rows span the full
+      // table width, so the shift can never clip the label.
+      let labelX = x;
+      if (spec?.collapsible) {
+        const cy = labelBaseline - BODY_FONT / 3; // optical midline of the label text
+        const d = group.collapsed
+          ? `M ${x} ${cy - 4} L ${x + 5} ${cy} L ${x} ${cy + 4} Z` // right-pointing (collapsed)
+          : `M ${x} ${cy - 2.5} L ${x + 8} ${cy - 2.5} L ${x + 4} ${cy + 2.5} Z`; // down-pointing (expanded)
+        g.appendChild(el("path", { class: "tbl-table-caret", d, fill: TBL.color.heading }));
+        labelX = x + 13;
+      }
       g.appendChild(
-        drawText(x, labelBaseline, group.label, {
+        drawText(labelX, labelBaseline, group.label, {
           anchor: "start",
           weight: 700,
           fill: TBL.color.heading,
@@ -296,8 +310,27 @@ export function renderTableSvg(
     const { row, rect, cellRects } = entry;
     const rg = el("g", { class: "tbl-table-row" });
     const baseY = rect.y + rect.h / 2 + BODY_FONT / 3;
-    const stubWeight = row.cells.some((c) => c.emphasis) ? 700 : 400;
+    // Whole-row emphasis (emphasis_rows) drives the stub weight — NOT emphasis_column, which stays
+    // per-cell and never reaches row.emphasis (see model.ts). This is a deliberate behavior change
+    // from the old `row.cells.some(c => c.emphasis)` heuristic, which also bolded the stub for a
+    // column-only emphasis with no row-level highlight to match.
+    const stubWeight = row.emphasis ? 700 : 400;
     const stubX = PAD_X + row.level * INDENT_STEP;
+
+    // Highlight rect behind the stub cell, matching the value-cell emph rects, drawn BEFORE the
+    // stub text so the text paints on top.
+    if (row.emphasis) {
+      rg.appendChild(
+        el("rect", {
+          class: "tbl-table-cell-emph",
+          x: 0,
+          y: rect.y,
+          width: rect.w,
+          height: rect.h,
+          fill: TBL.color.bgSubtle,
+        }),
+      );
+    }
 
     // Stub label, left-aligned, indented by level. Wrapped onto multiple lines when the layout
     // wrapped it (stub_wrap); otherwise a single line, clipped to the column when capped.

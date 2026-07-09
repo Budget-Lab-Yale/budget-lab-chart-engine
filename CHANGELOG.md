@@ -4,6 +4,101 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-07-09
+
+### Added — tables
+
+- **`group_order`** — orders row-group tiers (a flat `string[]` for the first tier, or a
+  `string[][]` for each tier independently). `row_order` is now scoped **within** each group
+  rather than across all groups. Grouping is order-independent: groups are always gathered by
+  stub path, so a scenario-major CSV (rows not already grouped contiguously) regroups correctly.
+- **Collapsible row groups** — `collapsible: { default?, expanded?, collapsed? }` adds a caret to
+  each group header that toggles its rows (nested groups collapse their whole subtree), plus
+  expand/collapse-all controls. Collapse state survives a resize; PNG export renders a static
+  snapshot honoring the live collapse state, or the spec's defaults when exported without
+  interaction.
+
+### Fixed — tables
+
+- **`emphasis_rows` now styles the whole row**, including the stub (row label) cell, identically
+  in HTML and PNG export — previously the stub cell was left unstyled.
+- **Multi-tier header leaves are now keyed by their full header path**, not just the last-tier
+  value, so a leaf value repeated under different banner groups renders as distinct columns
+  instead of one silently swallowing the other. `header_labels`, `column_labels`, `sublabels`,
+  `column_order`, and the `column_width` map still resolve against the leaf's raw last-tier value.
+
+### Added — bars
+
+- **`bar_color`** — single-series bar fill resolved through the palette; a first-class
+  replacement for the `series_colors: {"": color}` idiom (which still works). Highlight dimming
+  still applies on top.
+- **`category_colors`** — per-x-category fill override for single-series bars (both
+  orientations), e.g. a distinct color for one category while the rest keep the base fill.
+
+### Fixed — bars
+
+- **Sectioned horizontal bars no longer clip the first section header.** The top margin is now
+  floored to the header's lift height (+ gap) whenever a top section header is present, so it's
+  never clipped under the default (bottom) `x_axis_ticks` — this changes rendered output (top
+  margin) for existing sectioned horizontal bar specs; unsectioned and vertical bars are
+  unaffected.
+- **`x_axis_ticks` now validates orientation.** It only has an effect on horizontal bars/stacked
+  charts; setting it on a vertical chart previously silently no-op'ed and now fails validation.
+
+### Changed — bars
+
+- **Standalone bar/stacked hover now matches the faceted "best practice" look.** Hovering a
+  standalone (non-small-multiples) bar or stacked chart shades the hovered band at a uniform height
+  across section spacers and shows a value pill at the bar's end, replacing the previous floating
+  tooltip. Horizontal: the shade extends into the left category-label gutter and the hovered row
+  label is bolded (no pill). Vertical: the shade stops at the baseline and the hovered x-axis
+  category name is shown on a frosted pill — both matching faceted panes, which are unchanged.
+  Standalone horizontal category labels + section headers also now render at the larger faceted
+  font size (previously standalone-only-smaller).
+
+### Added — line & area
+
+- **`projected_field`** + **`projected_style`** — flags rows as projected (forecast/estimated).
+  Line charts draw the flagged run(s) of a series dashed, connecting continuously to adjacent
+  actual points, with support for multiple disjoint projected runs per series. Area charts fade
+  the fill over x-ranges where every in-scope series is flagged projected. A whole-series
+  `series_styles[..].dashed` override still wins over per-run projected styling.
+
+### Added — annotations
+
+- **`facet` on `xAxis`/`yAxis` markers** — scopes a reference line to one small-multiples pane;
+  omitted, it still renders in every pane.
+- **`value_format`** + a `{value}` token in `xAxis`/`yAxis`/`points` labels — substitutes the
+  marker's own numeric value into the label, formatted with `{decimals, prefix, suffix}` (falling
+  back to the chart's value-axis tick format when `value_format` is omitted).
+- **Horizontal bars now honor numeric `annotations.xAxis` markers**, rendering them as vertical
+  rules on the value axis — previously silently ignored on that orientation.
+
+### Added — chrome
+
+- **`legend: false`** — hides all legend chrome (top/right/figure/PNG export alike) while keeping
+  multi-series coloring, tooltips, and the crosshair. Click-to-pin/dim is unavailable since it's
+  driven through the legend.
+- **`title_selectors`** + a `{token}` in `title` — an inline button+popover dropdown (ported from
+  the AI Labor Market Tracker's inline industry picker) embedded in the figure title. Selecting an
+  option swaps the title text in place and fires a bubbling `tbl-title-select` CustomEvent;
+  `MountOptions.selections`/`onSelect` read and drive the selection programmatically. PNG export
+  prints whichever option is active. Options may carry a `color` (or fall back to
+  `series_colors[label]`): the active option tints the trigger label, and on a single-series chart
+  is also fed back as that line's color (multi-series charts keep their own palette).
+
+### Fixed — small multiples
+
+- **`columns.section` and `columns.facet` now compose** on faceted horizontal bars (shared and
+  per-pane modes). A facet missing a category or a whole section (a ragged facet) now fails
+  validation with a pointed error instead of silently misaligning rows across panes.
+
+### CLI / gallery
+
+- **`tbl-chart serve` now discovers `table.yaml`** alongside `chart.yaml` under the served
+  directory, tagging tables in the index; `npm run gallery` serves `examples/gallery` — 17
+  example figures pressure-testing each feature above.
+
 ## [1.2.1] — 2026-07-01
 
 ### Fixed

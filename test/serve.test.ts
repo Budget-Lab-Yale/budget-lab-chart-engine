@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as http from "node:http";
-import { findCharts, createRequestHandler } from "../src/cli/serve";
+import { findSpecs, createRequestHandler } from "../src/cli/serve";
 
 // ---------------------------------------------------------------------------
 // Repo root — used to prove findCharts discovers chart.yaml files in the tree
@@ -23,8 +23,30 @@ const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Stub injection
 // ---------------------------------------------------------------------------
 
-const STUB_BUNDLE = `var BudgetLabChart={mountChart:function(el,opts){el.innerHTML='<p>chart</p>';}};`;
+const STUB_BUNDLE = `var BudgetLabChart={mountChart:function(el,opts){el.innerHTML='<p>chart</p>';},mountTable:function(el,opts){el.innerHTML='<p>table</p>';}};`;
 const STUB_CSS = "body{}";
+
+/** Write a minimal valid table.yaml + data.csv into `dir` (mirrors test/table/cli.test.ts). */
+function makeTableFixture(dir: string): void {
+  writeFileSync(
+    join(dir, "data.csv"),
+    "row,metric,value\nGDP,2024,1.2\nGDP,2025,1.8\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(dir, "table.yaml"),
+    [
+      "title: Test Table",
+      "data: data.csv",
+      "stub:",
+      "  - label: row",
+      "header:",
+      "  - metric",
+      "value: value",
+    ].join("\n") + "\n",
+    "utf8",
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Temp directory helpers
@@ -92,18 +114,18 @@ function fakeRequest(
 }
 
 // ---------------------------------------------------------------------------
-// findCharts
+// findSpecs
 // ---------------------------------------------------------------------------
 
-describe("findCharts", () => {
+describe("findSpecs", () => {
   it("discovers chart.yaml files under the repo root", () => {
-    const found = findCharts(REPO_ROOT);
+    const found = findSpecs(REPO_ROOT);
     const normalized = found.map((p) => p.replace(/\\/g, "/"));
     expect(normalized.some((p) => p.endsWith("test/fixtures/sample-chart/chart.yaml"))).toBe(true);
   });
 
   it("skips node_modules, dist, and .git directories", () => {
-    const found = findCharts(REPO_ROOT);
+    const found = findSpecs(REPO_ROOT);
     for (const p of found) {
       const normalized = p.replace(/\\/g, "/");
       expect(normalized).not.toContain("/node_modules/");
@@ -112,9 +134,9 @@ describe("findCharts", () => {
     }
   });
 
-  it("returns an empty array for a dir with no chart.yaml files", () => {
+  it("returns an empty array for a dir with no chart.yaml or table.yaml files", () => {
     const dir = makeTempDir();
-    expect(findCharts(dir)).toHaveLength(0);
+    expect(findSpecs(dir)).toHaveLength(0);
   });
 
   it("finds chart.yaml files in nested subdirectories", () => {
@@ -122,9 +144,22 @@ describe("findCharts", () => {
     const sub = join(dir, "a", "b");
     mkdirSync(sub, { recursive: true });
     writeFileSync(join(sub, "chart.yaml"), "chartType: line\ntitle: Nested\nxAxisType: temporal\ndata: d.csv\n");
-    const found = findCharts(dir);
+    const found = findSpecs(dir);
     expect(found).toHaveLength(1);
     expect(found[0]).toContain(join("a", "b", "chart.yaml"));
+  });
+
+  it("finds table.yaml files alongside chart.yaml files", () => {
+    const dir = makeTempDir();
+    makeTableFixture(dir);
+    const sub = join(dir, "chart-sub");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "chart.yaml"), "chartType: line\ntitle: X\nxAxisType: temporal\ndata: d.csv\n");
+
+    const found = findSpecs(dir).map((p) => p.replace(/\\/g, "/"));
+    expect(found.some((p) => p.endsWith("table.yaml"))).toBe(true);
+    expect(found.some((p) => p.endsWith("chart-sub/chart.yaml"))).toBe(true);
+    expect(found).toHaveLength(2);
   });
 
   it("skips a dir named node_modules even when nested", () => {
@@ -132,7 +167,7 @@ describe("findCharts", () => {
     const nm = join(dir, "node_modules", "some-pkg");
     mkdirSync(nm, { recursive: true });
     writeFileSync(join(nm, "chart.yaml"), "chartType: line\ntitle: X\nxAxisType: temporal\ndata: d.csv\n");
-    expect(findCharts(dir)).toHaveLength(0);
+    expect(findSpecs(dir)).toHaveLength(0);
   });
 });
 
@@ -162,6 +197,23 @@ describe("GET / — index page", () => {
     expect(status).toBe(200);
     expect(body).toContain("No");
     expect(body).toContain("chart.yaml");
+  });
+
+  it("does not crash and returns valid HTML for an empty gallery dir", async () => {
+    const dir = makeTempDir();
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/");
+    expect(status).toBe(200);
+    expect(body).toContain("<!doctype html");
+  });
+
+  it("lists a table.yaml spec by its title", async () => {
+    const dir = makeTempDir();
+    makeTableFixture(dir);
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/");
+    expect(status).toBe(200);
+    expect(body).toContain("Test Table");
   });
 });
 
@@ -196,6 +248,52 @@ describe("GET /chart/<relpath> — valid chart", () => {
     const { status, body } = await fakeRequest(handler, `/chart/${rel}`);
     expect(status).toBe(200);
     expect(body).toContain("BudgetLabChart");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /chart/<relpath> — valid table
+// ---------------------------------------------------------------------------
+
+describe("GET /chart/<relpath> — valid table", () => {
+  it("routes table.yaml through the table validator/mount and returns 200", async () => {
+    const dir = makeTempDir();
+    makeTableFixture(dir);
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+
+    const { status, body } = await fakeRequest(handler, "/chart/table.yaml");
+    expect(status).toBe(200);
+    expect(body).toContain("<!doctype html");
+    expect(body).toContain("BudgetLabChart.mountTable");
+    expect(body).not.toContain("BudgetLabChart.mountChart");
+    expect(body).toContain("Test Table");
+  });
+
+  it("returns 422 with table validator errors for an invalid table.yaml", async () => {
+    const dir = makeTempDir();
+    writeFileSync(
+      join(dir, "data.csv"),
+      "row,metric,value\nGDP,2024,1.2\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(dir, "table.yaml"),
+      [
+        "title: Bad Table",
+        "data: data.csv",
+        "stub:",
+        "  - label: row",
+        "header:",
+        "  - metric",
+        // deliberately omitting 'value:' to trigger the table validator error
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/chart/table.yaml");
+    expect(status).toBe(422);
+    expect(body).toContain("Validation error");
   });
 });
 

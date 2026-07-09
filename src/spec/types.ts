@@ -12,9 +12,27 @@ export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
 
+/** Per-annotation number formatting for a `{value}` token substituted into an annotation's
+ *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
+ *  chart's value-axis tick format (yAxis markers, points) or the raw x string (xAxis markers). */
+export interface ValueFormat {
+  /** Fixed decimal places. Default 2. */
+  decimals?: number;
+  /** Text prepended to the formatted number. */
+  prefix?: string;
+  /** Text appended to the formatted number. */
+  suffix?: string;
+}
+
 export interface XAxisMarker {
   x: string;
+  /** May contain a literal `{value}` token, replaced with this marker's own `x` — formatted
+   *  numerically via `value_format` when present AND `x` parses as a number, else the raw
+   *  string. */
   label?: string;
+  /** Formatting for the `{value}` token in `label`. Only applies when `x` parses as a number;
+   *  absent (or `x` non-numeric) → the raw `x` string is substituted. */
+  value_format?: ValueFormat;
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
@@ -29,6 +47,9 @@ export interface XAxisMarker {
   labelDy?: number;
   /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
   labelDx?: number;
+  /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
+   *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 /** A shaded vertical region of the x-axis (e.g. a recession band). `start`/`end` are x values
@@ -54,7 +75,12 @@ export interface XAxisPolicy {
 /** A horizontal reference line at a fixed y value (e.g. a target or assumption line). */
 export interface YAxisMarker {
   y: number;
+  /** May contain a literal `{value}` token, replaced with this marker's own `y`, formatted via
+   *  `value_format` — or, when absent, the chart's value-axis tick format. */
   label?: string;
+  /** Formatting for the `{value}` token in `label`. Absent → falls back to the chart's
+   *  value-axis tick format. */
+  value_format?: ValueFormat;
   style?: "dashed" | "solid";
   color?: ColorRef;
   strokeWidth?: number;
@@ -68,6 +94,9 @@ export interface YAxisMarker {
   labelDx?: number;
   /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default above. */
   labelDy?: number;
+  /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
+   *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 export interface YAxisPolicy {
@@ -88,7 +117,14 @@ export interface PointCallout {
   x: string;
   y?: number;
   series?: string;
+  /** May contain a literal `{value}` token, replaced with this callout's resolved `y` (the
+   *  explicit value, or — when `y` is omitted and `series` snaps to a series — the snapped
+   *  value), formatted via `value_format` — or, when absent, the chart's value-axis tick
+   *  format. */
   label: string;
+  /** Formatting for the `{value}` token in `label`. Absent → falls back to the chart's
+   *  value-axis tick format. */
+  value_format?: ValueFormat;
   color?: ColorRef;
   /** Horizontal nudge (px, signed: + = right) of the label from the point. */
   dx?: number;
@@ -178,6 +214,28 @@ export interface ColumnMap {
   section?: string;
 }
 
+/** One option in an inline title selector's dropdown. `label` defaults to `id` when absent.
+ *  `color` tints the selector's trigger label when this option is active (ported from the AI
+ *  Labor Market Tracker's inline industry picker): explicit `color` wins; else falls back to
+ *  `spec.series_colors[label ?? id]` (the shared per-series color map) — see
+ *  `title.ts#resolveActiveOptionColor`. Absent ⇒ the label inherits the surrounding title color,
+ *  unchanged from before this field existed. */
+export interface TitleSelectorOption {
+  id: string;
+  label?: string;
+  color?: ColorRef;
+}
+
+/** An engine-owned interactive single-select control bound to a `{key}` token in `title`. See
+ *  `src/spec/title.ts` for token parsing/resolution and `src/engine/render-live.ts` for the
+ *  live button+popover widget (ported from the AI Labor Market Tracker's inline title picker). */
+export interface TitleSelector {
+  options: TitleSelectorOption[];
+  /** Initial active option id. Must be one of `options[].id`. Falls back to the first option
+   *  when omitted. */
+  default?: string;
+}
+
 export interface ChartSpec {
   chartType: ChartType;
 
@@ -188,6 +246,11 @@ export interface ChartSpec {
   // (The eyebrow / figure number is NOT a spec field — it's a property of the article a chart
   //  is embedded in, supplied at embed time via MountOptions.eyebrow / `render --eyebrow`.)
   title: string;
+  /** Interactive dropdowns embedded inline in `title` via a `{key}` token — e.g.
+   *  `title: "GDP by {dimension}"` with `title_selectors: { dimension: {...} }`. Every key here
+   *  must appear as `{key}` in `title` (validated in spec/validate.ts). Absent/empty ⇒ the title
+   *  renders as plain text, byte-identical to before this field existed. */
+  title_selectors?: Record<string, TitleSelector>;
   subtitle?: string;
   source?: string;
   note?: string;
@@ -217,12 +280,29 @@ export interface ChartSpec {
   /** Render order; also an inclusion filter when set. */
   series_order?: string[];
   series_colors?: Record<string, ColorRef>;
+  /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
+   *  palette (named token or raw "#hex"). A first-class replacement for the
+   *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are
+   *  set. Ignored on multi-series (grouped) bar charts, where each series keeps its own color.
+   *  With `highlightSeries`, bar_color replaces the BASE color only — highlight dimming still
+   *  applies (a non-highlighted series dims regardless of bar_color). */
+  bar_color?: ColorRef;
+  /** Bar charts, SINGLE-SERIES only (both orientations): per-x-category fill override, e.g. render
+   *  a "Total" category in a distinct color while every other category keeps the base fill (the
+   *  series color, or `bar_color` when set). Values are resolved through the palette; unlisted
+   *  categories are unaffected. Ignored on multi-series (grouped) bar charts, where series fill
+   *  wins for every bar regardless of category. */
+  category_colors?: Record<string, ColorRef>;
   series_styles?: Record<string, SeriesStyle>;
   /** Short data key → display label for legend/tooltip. */
   series_labels?: Record<string, string>;
   /** Categorical x: render order for the x-axis categories. Listed categories come first in this
    *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
-   *  series_order, this does NOT filter. Ignored off the categorical x-axis. */
+   *  series_order, this does NOT filter. Ignored off the categorical x-axis.
+   *  With `columns.section` set (horizontal bars), section grouping is authoritative for
+   *  CROSS-section order (sections always render contiguously, in `section_order`/encounter
+   *  order) — x_order only reorders categories WITHIN each section; it can never split a
+   *  section's categories apart or reorder the sections themselves. */
   x_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
@@ -250,6 +330,23 @@ export interface ChartSpec {
 
   /** Line charts: draw a marker (dot) at each data point. Default false. */
   points?: boolean;
+
+  /** Data column whose truthy value (`1`/`true`/`yes`, case-insensitive, trimmed) flags a row as
+   *  "projected" (forecast/estimated) rather than actual/historical. LINE charts draw the
+   *  flagged run(s) of a series dashed (same color/width), connecting continuously to the
+   *  adjacent actual points; a series may have multiple disjoint projected runs. AREA (stacked)
+   *  charts fade the fill over x-ranges where EVERY in-scope series is flagged projected
+   *  (conservative — a stack can't express partial-series fading). Absent ⇒ no projected styling
+   *  (byte-identical output). A series ALSO listed in `series_styles[..].dashed` (whole-series
+   *  dashed) is NOT split by this field — the whole-series dashed override wins; see
+   *  marks/line.ts for the exact gating. */
+  projected_field?: string;
+  /** Overrides the default projected-run styling. Only consulted when `projected_field` is set.
+   *  `dashed` (line charts, default true): whether the projected run renders dashed at all —
+   *  `false` renders it solid (same as actual), i.e. opts out of the visual distinction while
+   *  keeping the field wired. `fillOpacity` (area charts, default 0.2): the effective fill
+   *  opacity of the projected x-range's white veil overlay. */
+  projected_style?: { dashed?: boolean; fillOpacity?: number };
 
   // Bar / stacked bar
   /** Chart orientation; defaults to "vertical" (value axis is Y). */
@@ -285,6 +382,11 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
    */
   legendPosition?: "top" | "right";
+  /** Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping
+   *  multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently
+   *  unavailable, since it is driven through the legend. Default true (legend shown per the
+   *  usual ≥2-series / style-override rules). */
+  legend?: boolean;
 
   // Small multiples (multi-panel); per-pane base chart type stays `chartType`.
   small_multiples?: SmallMultiplesConfig;

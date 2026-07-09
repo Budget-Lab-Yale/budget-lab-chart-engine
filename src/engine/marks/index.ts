@@ -38,6 +38,10 @@ export interface PreparedRow {
   /** Small-multiples (shared mode): the pane's grid ROW index as a String, bound to Plot's
    *  `fy` facet channel. */
   _fyRow?: string;
+  /** Set when `spec.projected_field` is configured: true when this row's flag column parsed
+   *  truthy (`1`/`true`/`yes`, case-insensitive, trimmed). Absent when the field isn't
+   *  configured. Drives the line dashed-run split (marks/projected.ts) and the area fade veil. */
+  _projected?: boolean;
 }
 
 export interface MarkContext {
@@ -90,6 +94,11 @@ export interface MarkContext {
    *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
    *  via horizontalLeftGutter (single-chart unchanged). */
   categoryGutter?: number;
+  /** The pane's final computed y-domain (post auto/hard/bar-extent resolution, or the forced
+   *  shared-mode override) — the SAME value assemblePlot uses for the value axis. The area
+   *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =
+   *  yDomain) without recomputing the axis. Other builders may ignore it. */
+  yDomain?: [number, number];
 }
 
 export interface MarkLayers {
@@ -97,6 +106,14 @@ export interface MarkLayers {
   underlay: unknown[];
   /** Marks painted on top of the chrome (the lines). */
   overlay: unknown[];
+  /** Optional: a "veil" layer painted immediately above `overlay` — currently only the area
+   *  builder's projected-range fade rect(s), which must paint over the area fill but UNDER the
+   *  xAxis marker rules (fix-wave I1: painting it as part of `overlay` washed a marker rule
+   *  drawn inside the veiled range out to the veil's fill-opacity). assemblePlot pushes this
+   *  right after `overlay` and, only when present, defers the vertical xAxis marker-rule push
+   *  until after both — absent veil (the overwhelming majority of charts) keeps today's exact
+   *  push order, so non-area / non-projected output stays byte-identical. */
+  veil?: unknown[];
   /** Post-render data-series tagging. For each entry, the elements matched by `selector`
    *  (in DOM order) are tagged data-series from `seriesOrder` by index. When `shapeOrder` is
    *  present (point charts), the same elements are ALSO tagged data-shape by index, so the shape

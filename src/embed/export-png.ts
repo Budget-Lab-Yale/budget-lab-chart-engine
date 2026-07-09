@@ -2,10 +2,12 @@
 // Port of C:\dev\GitHub\budget-lab-interactives\tools\ai-labor-market-tracker\export-image.js
 
 import type { ChartSpec } from "../spec/types.js";
+import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
 import { sharedColumnWidths } from "../engine/figure.js";
+import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
 import {
   SVG_NS,
@@ -176,8 +178,16 @@ function drawLegend(
  * the AILMT export. The chart fills the height left after the title/subtitle/legend chrome.
  * NOTE: the eyebrow is intentionally NOT drawn in the export (matches AILMT — the figure
  * number belongs to the publication context, not the standalone image).
+ *
+ * `selections` (active title-selector option ids, from the live mount) resolves any `{token}`
+ * in the title to the ACTIVE option's label; omitted, tokens resolve with the spec defaults.
+ * Either way the exported title is plain text — a raw braced token never prints.
  */
-export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement {
+export function buildExportSvg(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  opts: { selections?: Record<string, string> } = {},
+): SVGSVGElement {
   const isFigure = spec.small_multiples != null;
 
   // Pre-render to read legend items + axis title (rendered for real again below at the
@@ -194,10 +204,21 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   const xAxisTitle = meta.xAxisTitle ?? "";
   const yAxisTitle = spec.y_axis_title ?? "";
 
-  const title = spec.title ?? "";
+  // Title-selector tokens → the active (or default) option labels, as plain SVG text.
+  const title = spec.title ? resolveTitleText(spec, opts.selections) : "";
   const subtitle = spec.subtitle ?? "";
   const note = spec.note ?? "";
   const source = spec.source ?? "";
+
+  // Color accent feed (AILMT parity): resolve the same accent color the live single-chart mount
+  // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
+  // `renderFigure` (small multiples) never receives this — see TitleSelectorWiring.afterChange in
+  // render-live.ts for why a figure grid has no single accent target.
+  const effectiveSelections = opts.selections ?? resolveSelections(spec);
+  const rawAccent = spec.title_selectors
+    ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
+    : undefined;
+  const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
 
   const { root, bgRect } = createExportRoot(document, W, H);
 
@@ -239,7 +260,11 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
   if (!isFigure) {
     // Single chart — unchanged: fills the height left after the chrome inside the 750 frame.
     contentHeight = Math.max(160, H - chartTop - bottomH);
-    const { svg: chartSvg } = renderChart(spec, rows, { width: INNER_W, height: contentHeight });
+    const { svg: chartSvg } = renderChart(spec, rows, {
+      width: INNER_W,
+      height: contentHeight,
+      ...(accentColor ? { accentColor } : {}),
+    });
     chartSvg.setAttribute("x", String(MARGIN));
     chartSvg.setAttribute("y", String(chartTop));
     chartSvg.setAttribute("width", String(INNER_W));
@@ -260,10 +285,21 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
-    // PER-PANE mode: equal columns (unchanged).
+    // PER-PANE mode: equal columns, EXCEPT horizontal bars — their category gutter is asymmetric
+    // (pane 0 wide, others narrow), so renderFigure sizes unequal outer widths and needs the
+    // TOTAL row width (gridWidth), exactly like shared mode; the cell layout then consumes the
+    // returned columnWidths.
     const shared = isShared ? sharedColumnWidths(INNER_W, cols, COL_GAP) : null;
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
-    const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
+    const useGridW = isShared || isHorizontalBarFig;
+    const fig = useGridW
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols })
+      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols });
+    // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
+    // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
+    const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
+    const colWidth = (col: number): number =>
+      shared?.colWidths[col] ?? figColWidths?.[col] ?? equalPaneW;
     // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
     const colX: number[] = [];
     let acc = MARGIN;
@@ -271,9 +307,6 @@ export function buildExportSvg(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement 
       colX.push(acc);
       acc += colWidth(c) + COL_GAP;
     }
-    const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols })
-      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols });
     // Effective pane height: the renderFigure-computed height for horizontal bars (read from the
     // rendered SVG), else the fixed pane height.
     const effPaneH =
@@ -385,16 +418,19 @@ export function triggerDownload(blob: Blob, filename: string): void {
 export async function exportChartPng(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { filename?: string } = {},
+  opts: { filename?: string; selections?: Record<string, string> } = {},
 ): Promise<void> {
-  const svgElement = buildExportSvg(spec, rows);
+  const svgElement = buildExportSvg(spec, rows, { selections: opts.selections });
   const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
   const height = parseInt(svgElement.getAttribute("height") ?? String(H), 10);
   const blob = await rasterize(svgElement, width, height);
+  // Fallback filename slug: resolve title-selector tokens (defaults) before slugifying, so the
+  // name reads "…-by-sector" rather than the token key. Braces themselves could never survive
+  // the non-alphanumeric strip either way.
   const filename =
     opts.filename ??
     (spec.title
-      ? spec.title
+      ? resolveTitleText(spec)
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, "") + ".png"
