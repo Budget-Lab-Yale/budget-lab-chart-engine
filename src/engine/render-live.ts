@@ -990,6 +990,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
       // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →
       // highlightPills → secondaryBandCursor) so `.tbl-coord` paints above the bars.
+      // Total-dot stacks hover with the floating band tooltip (with its dot-swatch Total row),
+      // NOT the per-segment value pills — the net is what matters and pills can't show it. Every
+      // other bar/stacked chart keeps the coordinated-cursor pills (task 17). Legend-highlight
+      // pills stay in BOTH modes (a legend gesture, independent of band hover).
+      const useTooltip = showTotalDot === true;
       let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
       attachBandCrosshair(svg, {
         rows: bandRows,
@@ -1004,11 +1009,15 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         categoryLabels: spec.x_labels,
         swatchShape: "rect",
         orientation: horizontalBar ? "horizontal" : "vertical",
-        emitOnly: true,
-        onResolve: (cat: string | null) => {
-          pillDriver?.setSuppressedCategory(cat);
-          secondaryDriver?.(cat, true);
-        },
+        ...(useTooltip
+          ? {}
+          : {
+              emitOnly: true,
+              onResolve: (cat: string | null) => {
+                pillDriver?.setSuppressedCategory(cat);
+                secondaryDriver?.(cat, true);
+              },
+            }),
       });
       pillDriver = attachHighlightPills(svg, {
         rows: bandRows,
@@ -1021,23 +1030,25 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: bandYFormat,
         horizontal: horizontalBar,
       });
-      secondaryDriver = attachSecondaryBandCursor(svg, {
-        rows: bandRows,
-        isStacked,
-        isFaceted,
-        categories: orderedCats,
-        colors,
-        seriesLabels,
-        seriesOrder,
-        yFormat: bandYFormat,
-        horizontal: horizontalBar,
-        // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
-        // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
-        // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.
-        ...(horizontalBar
-          ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX } }
-          : {}),
-      }) as (key: unknown, active?: boolean) => void;
+      if (!useTooltip) {
+        secondaryDriver = attachSecondaryBandCursor(svg, {
+          rows: bandRows,
+          isStacked,
+          isFaceted,
+          categories: orderedCats,
+          colors,
+          seriesLabels,
+          seriesOrder,
+          yFormat: bandYFormat,
+          horizontal: horizontalBar,
+          // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
+          // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
+          // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.
+          ...(horizontalBar
+            ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX } }
+            : {}),
+        }) as (key: unknown, active?: boolean) => void;
+      }
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -1685,6 +1696,11 @@ function wireFigureSvg(
     // differs from data-encounter order. The crosshair maps facet rows → categories by index, so
     // reorder to match the rendered (section) order.
     const cats = sectionOrderedCategories(ctx.spec, ctx.dataInScope, catsRaw);
+    // Total-dot stacks hover with the tooltip (dot-swatch Total row), never per-segment pills —
+    // matching the standalone rule. Coordination is dropped for these panes (they tooltip
+    // independently), so pills never appear anywhere in a total-dot figure.
+    const useTooltip = ctx.showTotalDot === true;
+    const coord = useCoord && !useTooltip;
     attachBandCrosshair(svg, {
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
@@ -1699,7 +1715,7 @@ function wireFigureSvg(
       swatchShape: "rect",
       orientation: horizontal ? "horizontal" : "vertical",
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
-      ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+      ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
       // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
@@ -1722,7 +1738,7 @@ function wireFigureSvg(
         horizontal,
       }),
     );
-    if (useCoord) {
+    if (coord) {
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isStacked,

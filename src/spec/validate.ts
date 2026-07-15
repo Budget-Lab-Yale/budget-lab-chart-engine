@@ -82,20 +82,6 @@ function titleSelectorsError(spec: {
   return null;
 }
 
-/** Faceted horizontal `bar` charts ARE supported (shared category gutter + value axis; see
- *  figure.ts / CONFIG-SPEC). Horizontal `stacked` small-multiples are not built yet (the stacked
- *  net-callout chrome isn't wired through the faceted-horizontal layout), so reject only that combo
- *  with a pointed message rather than rendering a broken figure. */
-function facetedHorizontalError(spec: {
-  chartType?: unknown;
-  orientation?: unknown;
-  small_multiples?: unknown;
-}): string | null {
-  if (spec.chartType === "stacked" && spec.orientation === "horizontal" && spec.small_multiples != null) {
-    return `horizontal orientation is not supported with small_multiples for "stacked" charts yet — use vertical, or drop small_multiples`;
-  }
-  return null;
-}
 
 /** `columns.section` (section-header horizontal-bar grouping) only has an effect on a horizontal
  *  `bar` chart (see bar.ts's `sectioned` gate) — it silently no-ops on every other chartType/
@@ -147,10 +133,6 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
-  const fhErr = facetedHorizontalError(
-    spec as { chartType?: unknown; orientation?: unknown; small_multiples?: unknown },
-  );
-  if (fhErr) return { valid: false, errors: [fhErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
   if (tsErr) return { valid: false, errors: [tsErr] };
   const secErr = sectionColumnError(
@@ -379,7 +361,10 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     // facet missing a category (or a whole section) would silently shrink that pane's domain and
     // misalign its rows against the others with no visual cue. Fail loudly instead — pointed at
     // the facet + category (+ section, when sectioned) that's missing.
-    if (spec.chartType === "bar" && spec.orientation === "horizontal" && spec.xAxisType === "categorical" && cols.x) {
+    // Exception: columns:1 puts each pane on its OWN row with its own full-width gutter + labels,
+    // so panes never share a category axis and disjoint categories per facet are legitimate.
+    const oneFacetPerRow = spec.small_multiples.columns === 1;
+    if (!oneFacetPerRow && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal" && spec.xAxisType === "categorical" && cols.x) {
       const xField = cols.x;
       const catsByFacet = new Map<string, Set<string>>();
       const allCats = new Set<string>();
@@ -410,7 +395,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
             ? missing.map((c) => `${JSON.stringify(c)} (section ${JSON.stringify(sectionOf.get(c) ?? "?")})`)
             : missing.map((c) => JSON.stringify(c));
           errors.push(
-            `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
+            `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars/stacks share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
           );
         }
       }

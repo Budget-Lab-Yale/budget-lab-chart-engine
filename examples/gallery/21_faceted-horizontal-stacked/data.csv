@@ -1,0 +1,37 @@
+section,group,cut_size,share
+By quintile,Quintile 1,No cut,86
+By quintile,Quintile 1,< $500,11
+By quintile,Quintile 1,"$500 - $5,000",3
+By quintile,Quintile 1,"> $5,000",0
+By quintile,Quintile 2,No cut,47
+By quintile,Quintile 2,< $500,34
+By quintile,Quintile 2,"$500 - $5,000",18
+By quintile,Quintile 2,"> $5,000",1
+By quintile,Quintile 3,No cut,10
+By quintile,Quintile 3,< $500,31
+By quintile,Quintile 3,"$500 - $5,000",57
+By quintile,Quintile 3,"> $5,000",2
+By quintile,Quintile 4,No cut,2
+By quintile,Quintile 4,< $500,3
+By quintile,Quintile 4,"$500 - $5,000",90
+By quintile,Quintile 4,"> $5,000",5
+By quintile,Quintile 5,No cut,6
+By quintile,Quintile 5,< $500,1
+By quintile,Quintile 5,"$500 - $5,000",78
+By quintile,Quintile 5,"> $5,000",15
+Within top quintile,Top 10%,No cut,10
+Within top quintile,Top 10%,< $500,26
+Within top quintile,Top 10%,"$500 - $5,000",51
+Within top quintile,Top 10%,"> $5,000",13
+Within top quintile,Top 5%,No cut,18
+Within top quintile,Top 5%,< $500,25
+Within top quintile,Top 5%,"$500 - $5,000",39
+Within top quintile,Top 5%,"> $5,000",18
+Within top quintile,Top 1%,No cut,55
+Within top quintile,Top 1%,< $500,30
+Within top quintile,Top 1%,"$500 - $5,000",12
+Within top quintile,Top 1%,"> $5,000",3
+Within top quintile,Top 0.1%,No cut,79
+Within top quintile,Top 0.1%,< $500,17
+Within top quintile,Top 0.1%,"$500 - $5,000",3
+Within top quintile,Top 0.1%,"> $5,000",1

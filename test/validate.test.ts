@@ -536,7 +536,7 @@ describe("small_multiples config", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("still rejects faceted horizontal STACKED charts (not built)", () => {
+  it("accepts faceted horizontal STACKED charts (now supported)", () => {
     const r = validateSpec({
       chartType: "stacked",
       title: "t",
@@ -546,8 +546,7 @@ describe("small_multiples config", () => {
       small_multiples: { mode: "shared" },
       data: "d.csv",
     });
-    expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/stacked/);
+    expect(r.valid).toBe(true);
   });
 
   it("accepts a boolean points flag", () => {

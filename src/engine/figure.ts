@@ -282,7 +282,12 @@ export function renderFigure(
   // shared category set, gutter, section-spacer count and tallest wrapped label ONCE here, so the
   // gutter sizing, category-label suppression and the auto-grown figure HEIGHT all agree across
   // panes. (Vertical / non-bar figures keep the default chrome + caller height.)
-  const isHorizontalBar = spec.chartType === "bar" && spec.orientation === "horizontal";
+  // Horizontal bar AND horizontal stacked share the left-gutter / category-label / auto-height
+  // chrome. A stack is one bar slot per category (never grouped-by-series), so isHorizontalStacked
+  // gates the two places that differ: the auto-height `grouped` flag and the equal-bar weight.
+  const isHorizontalStacked = spec.chartType === "stacked" && spec.orientation === "horizontal";
+  const isHorizontalBar =
+    (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   const sharedCategories = isHorizontalBar ? orderedCategories(rows, cols.x, spec) : [];
   // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
   const hGutter = isHorizontalBar
@@ -303,10 +308,22 @@ export function renderFigure(
       (m, c) => Math.max(m, labelLineCount(c, maxPx, FACETED_CAT_LABEL_PX)),
       1,
     );
+    // Height sizes to the BUSIEST pane's category count, not the union: with one-facet-per-row
+    // (disjoint categories) each pane should be sized to its own rows, not the total. When facets
+    // share categories (the common case), the busiest pane == the union, so this is unchanged.
+    const catsByFacet = new Map<string, Set<string>>();
+    for (const r of rows) {
+      const f = facetField ? (r[facetField] as string) : "";
+      const c = r[cols.x] as string;
+      if (!c) continue;
+      if (!catsByFacet.has(f)) catsByFacet.set(f, new Set());
+      catsByFacet.get(f)!.add(c);
+    }
+    const maxPaneCats = Math.max(1, ...[...catsByFacet.values()].map((s) => s.size));
     autoHeight = horizontalBarHeight({
-      nCategories: sharedCategories.length,
+      nCategories: maxPaneCats,
       nSeries: Math.max(1, nSeries),
-      grouped: nSeries > 1,
+      grouped: nSeries > 1 && !isHorizontalStacked,
       nSpacers,
       maxLabelLines,
       extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
@@ -374,7 +391,10 @@ export function renderFigure(
           const s = cols.series ? (r[cols.series] as string) : "";
           if (s) serSet.add(s);
         }
-        return Math.max(1, catSet.size) * Math.max(1, serSet.size);
+        // A stack is one bar per category; a grouped bar is category × series bars.
+        return isHorizontalStacked
+          ? Math.max(1, catSet.size)
+          : Math.max(1, catSet.size) * Math.max(1, serSet.size);
       };
       const weights = Array.from({ length: columns }, () => 0);
       paneValues.forEach((v, i) => {

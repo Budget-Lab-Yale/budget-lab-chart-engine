@@ -4,6 +4,25 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-07-15
+
+### Added — bars
+
+- **Faceted horizontal stacked bars.** `orientation: horizontal` + `small_multiples` now works for
+  `stacked` charts, not just single-series/grouped bars. Panes share the value axis and the left
+  category gutter (labels on the leftmost pane); diverging stacks keep the net dot in each pane at a
+  reduced radius, with the net text callout and segment labels suppressed. With `columns: 1` each
+  facet gets its own row and may carry different categories; the ragged-facet guard (shared category
+  axis) now covers stacked and applies only when panes share a row (`columns > 1`).
+
+### Changed — bars
+
+- **Total-dot stacks hover with the band tooltip, not per-segment value pills.** When a stacked
+  chart shows the net **dot** (`barStack.netDisplay: dot`, or `auto` with negatives), hovering a
+  category now shows the floating tooltip — including the dot-swatch Total row — instead of the
+  per-segment pills introduced in 1.3.0. Plain and grouped bars, and cumulative (text-callout)
+  stacks, keep the pills. Legend-highlight pills are unaffected in both modes.
+
 ## [1.3.1] - 2026-07-09
 
 ### Fixed — tables

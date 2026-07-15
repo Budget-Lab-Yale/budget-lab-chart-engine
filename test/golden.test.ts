@@ -2181,6 +2181,62 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
   });
 });
 
+// Faceted HORIZONTAL stacked (shared mode): the category axis runs down a shared left gutter, so
+// col>0 panes suppress their category labels, and the diverging net dot renders at the reduced
+// pane radius. Reuses the diverging fixture with a horizontal shared spec.
+const HSTACK_SHARED_SPEC: ChartSpec = {
+  chartType: "stacked",
+  orientation: "horizontal",
+  title: "Contributions to the net effect, by plan",
+  subtitle: "Percentage points",
+  xAxisType: "categorical",
+  series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
+  data: "figure-stacked-perpane.csv",
+  columns: { x: "time", facet: "facet" },
+  small_multiples: {
+    columns: 2,
+    mode: "shared",
+    pane_order: ["Plan A", "Plan B"],
+    pane_titles: { "Plan A": "Plan A", "Plan B": "Plan B" },
+  },
+};
+
+describe("golden figure — faceted horizontal stacked (renderFigure)", () => {
+  it("shared mode: category labels only on the left pane; net dot at pane radius", async () => {
+    const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
+    const fig = renderFigure(HSTACK_SHARED_SPEC, rows, { width: 720, document });
+
+    expect(fig.mode).toBe("shared");
+    expect(fig.panes.length).toBe(2);
+
+    // Leftmost pane carries category labels; the right pane suppresses them (shared gutter).
+    const leftLabels = (fig.panes[0]!.svg as SVGSVGElement).querySelectorAll("g.tbl-cat-label text").length;
+    const rightLabels = (fig.panes[1]!.svg as SVGSVGElement).querySelectorAll("g.tbl-cat-label text").length;
+    expect(leftLabels).toBeGreaterThan(0);
+    expect(rightLabels).toBe(0);
+
+    // Diverging → net dot kept in every pane, at the reduced pane radius (7), tagged Total.
+    fig.panes.forEach((p) => {
+      const dots = (p.svg as SVGSVGElement).querySelectorAll('g[aria-label="dot"] circle');
+      expect(dots.length).toBe(2);
+      dots.forEach((d) => {
+        expect(d.getAttribute("r")).toBe("7");
+        expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY);
+      });
+    });
+
+    expect(fig.showTotalDot).toBe(true);
+    await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-hstacked-shared.golden.svg");
+  });
+
+  it("render is deterministic (byte-identical)", () => {
+    const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
+    const a = serializePanes(renderFigure(HSTACK_SHARED_SPEC, rows, { width: 720, document }));
+    const b = serializePanes(renderFigure(HSTACK_SHARED_SPEC, rows, { width: 720, document }));
+    expect(a).toBe(b);
+  });
+});
+
 describe("axes primitives — pane titles + tick density (task B3)", () => {
   it("paneTitleMark returns one non-empty text mark per grid", () => {
     const marks = paneTitleMark([
