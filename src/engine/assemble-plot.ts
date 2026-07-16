@@ -5,7 +5,7 @@
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
-import { tblPlotDefaults, gridAndYLabels, paneTitleMark } from "./axes";
+import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
   collapseFacetChrome,
@@ -218,8 +218,8 @@ export function assemblePlot({
   const staggerDy = new Map<string, number>();
   if (xExtent && xExtent[1] > xExtent[0] && width != null) {
     const innerW = width - effMarginLeft - effMarginRight;
-    const toPx = (v: number | Date | null): number | null => {
-      if (v == null) return null;
+    const toPx = (v: number | Date | string | null): number | null => {
+      if (v == null || typeof v === "string") return null;
       const n = typeof v === "number" ? v : v.getTime();
       return effMarginLeft + ((n - xExtent[0]) / (xExtent[1] - xExtent[0])) * innerW;
     };
@@ -493,7 +493,9 @@ export function assemblePlot({
     if (!horizontal) {
       xAxisAnn.forEach((m, markerIdx) => {
         const mx = xOpts.markerToX(m);
-        if (mx == null) return;
+        // Vertical reference LINES stay a no-op on a categorical band scale (mx is the category
+        // string there). Point callouts DO resolve a category to the band center — see 6c below.
+        if (mx == null || typeof mx === "string") return;
         drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4);
       });
     }
@@ -624,6 +626,8 @@ export function assemblePlot({
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
   for (const p of pointsAnn) {
+    // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
+    // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
@@ -633,12 +637,12 @@ export function assemblePlot({
     const dx = p.dx != null ? p.dx : 0;
     const dy = p.dy != null ? -p.dy : p.connector ? -28 : -6;
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
-    const canLeader =
-      p.connector && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null;
-    if (canLeader) {
+    // A pixel-offset leader needs a numeric x extent; the band (categorical) scale has none, so a
+    // category-anchored callout falls back to the simple dot (or no marker).
+    if (p.connector && typeof px !== "string" && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null) {
       // Label position in DATA space: shift the point by the px offset using the per-px data deltas.
-      const dppx = (xExtent![1] - xExtent![0]) / innerWForPx!;
-      const dppy = (yDomain[1] - yDomain[0]) / innerHForPx!;
+      const dppx = (xExtent[1] - xExtent[0]) / innerWForPx;
+      const dppy = (yDomain[1] - yDomain[0]) / innerHForPx;
       const baseN = typeof px === "number" ? px : px.getTime();
       const labelN = baseN + dx * dppx;
       const labelX = typeof px === "number" ? labelN : new Date(labelN);
@@ -658,8 +662,10 @@ export function assemblePlot({
     } else if (p.connector) {
       marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
     }
+    // Optional word-wrap to a max px width (Plot renders the "\n"s as multiple lines).
+    const labelText = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
     marks.push(
-      Plot.text([{ x: px, y: py, t: p.label }], {
+      Plot.text([{ x: px, y: py, t: labelText }], {
         x: "x",
         y: "y",
         text: "t",

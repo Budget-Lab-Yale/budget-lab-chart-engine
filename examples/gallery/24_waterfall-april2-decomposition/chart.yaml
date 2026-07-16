@@ -1,0 +1,27 @@
+chartType: waterfall
+title: "Re-estimating the April 2 price decomposition with new model"
+subtitle: "Short-run price effect, percent"
+y_axis_title: "Short-Run Price Effect (%)"
+xAxisType: categorical
+columns:
+  x: step
+  value: value
+  kind: kind
+  facet: model
+small_multiples:
+  columns: 2
+  pane_order: ["Original", "New model"]
+category_colors:
+  "50% passthrough": rose
+valueLabels:
+  show: true
+annotations:
+  yAxis:
+    - { y: 1.0, label: "Cavallo et al. upper (1%)", style: dashed, labelPosition: left }
+    - { y: 0.8, label: "Minton et al. (Fed) core PCE (0.8%)", style: dashed, labelPosition: left }
+    - { y: 0.5, label: "Dvorkin et al. lower (0.5%)", style: dashed, labelPosition: left }
+  points:
+    - { x: "Apply ns elasticity", y: 1.35, label: "(no step in original)", facet: "Original", color: gray, maxWidth: 80 }
+source: "The Budget Lab at Yale Tariff Model"
+note: "Two-facet April 2 waterfall: opening total bar, running-total labels, a dashed reference-line band, shared category + value axes, and a 'skip' step in the Original facet. The '(no step in original)' text is a POINT ANNOTATION scoped to the Original facet (x = the skipped step's bar center, configurable y, maxWidth word-wrap) — no bespoke skip-label config."
+data: data.csv

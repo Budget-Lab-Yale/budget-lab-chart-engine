@@ -64,8 +64,11 @@ describe("makeXAdapter('categorical')", () => {
       expect(opts.marginBottom).toBe(22);
     });
 
-    it("markerToX always returns null", () => {
-      expect(opts.markerToX({ x: "anything" })).toBeNull();
+    it("markerToX resolves a real category to itself (band center), else null", () => {
+      // A known category → the string itself (Plot's band scale places it at the bar center),
+      // so point callouts land on categorical charts; an unknown category → null (dropped).
+      expect(opts.markerToX({ x: "Services" })).toBe("Services");
+      expect(opts.markerToX({ x: "not-a-category" })).toBeNull();
     });
 
     it("tooltipXParse and tooltipXFormat are undefined", () => {

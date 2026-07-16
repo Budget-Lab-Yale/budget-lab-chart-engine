@@ -13,8 +13,10 @@ type Mark = unknown;
 export interface XOpts {
   marginBottom: number;
   axisMarks: Mark[];
-  /** Maps a marker spec's `x` string onto the adapter's x value (for reference lines). */
-  markerToX: (m: { x: string }) => number | Date | null;
+  /** Maps a marker spec's `x` string onto the adapter's x value (for reference lines / point
+   *  callouts). Categorical: returns the category string itself (Plot's band scale places it at the
+   *  band center) when it's a real category, else null. */
+  markerToX: (m: { x: string }) => number | Date | string | null;
   /** Plot `x` scale options (numeric supplies an explicit domain). */
   xPlotOpts?: Record<string, unknown>;
   /** Crosshair x parse/format overrides; undefined = crosshair auto-detects. */
@@ -154,8 +156,9 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
             labelMode,
             tagCategoryLabels,
           ),
-          // Vertical reference markers are meaningless on a band scale.
-          markerToX: () => null,
+          // Categorical: a marker/point `x` resolves to the category string itself, which Plot's
+          // band scale positions at the band (bar) center; unknown categories → null (dropped).
+          markerToX: (m) => (seen.has(m.x) ? m.x : null),
           tooltipXParse: undefined,
           tooltipXFormat: undefined,
         };

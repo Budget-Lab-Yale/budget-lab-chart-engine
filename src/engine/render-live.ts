@@ -18,6 +18,7 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
+import { waterfallValueDecimals } from "./scales.js";
 import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figure.js";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
@@ -76,7 +77,8 @@ const FIXED_CHART_HEIGHT = 400;
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
-    return FIXED_CHART_HEIGHT;
+    // Waterfall carries long (often rotated) step labels under the plot — give it more room.
+    return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }
   const cols = resolveColumns(spec, rows);
   const catList: string[] = [];
@@ -970,6 +972,23 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // — see bar.ts / isBarCategoryFaceted above).
       const isStacked = spec.chartType === "stacked";
       const isFaceted = isBarCategoryFaceted(spec, dataInScope, seriesOrder.length);
+      // Waterfall: `delta` steps get a signed value pill CENTERED in the bar on hover; `total`/`skip`
+      // steps shade only (their value is the always-on running-total label). deltaCats drives that
+      // (empty for non-waterfall charts). `skip` steps render a zero-height rect in the builder, so
+      // every category still has a rect and the rect-index→category mapping stays 1:1.
+      const waterfallCursor =
+        spec.chartType === "waterfall"
+          ? {
+              deltaCats: new Set(
+                dataInScope
+                  .filter((r) => {
+                    const k = ((r._kind as string | undefined) ?? "").trim();
+                    return k !== "total" && k !== "skip";
+                  })
+                  .map((r) => r._xc as string),
+              ),
+            }
+          : undefined;
       // Derive the ordered category list from the data rows (declaration order).
       const catsSeen = new Set<string>();
       const cats: string[] = [];
@@ -980,7 +999,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
       const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
       const horizontalBar = spec.orientation === "horizontal";
-      const bandYFormat = (v: number): string => formatValue(v, units, spec.tooltip_decimals);
+      // Waterfall: the hover delta uses the SAME precision as the always-on running-total labels
+      // (valueLabels.decimals, else the min the data needs) so the two never disagree.
+      const wfDecimals =
+        spec.chartType === "waterfall"
+          ? waterfallValueDecimals(dataInScope, spec.valueLabels?.decimals)
+          : undefined;
+      const bandYFormat = (v: number): string =>
+        formatValue(v, units, wfDecimals ?? spec.tooltip_decimals);
 
       // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
       // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
@@ -1029,6 +1055,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: bandYFormat,
         horizontal: horizontalBar,
+        showTotalDot,
       });
       if (!useTooltip) {
         secondaryDriver = attachSecondaryBandCursor(svg, {
@@ -1047,6 +1074,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           ...(horizontalBar
             ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX } }
             : {}),
+          ...(waterfallCursor ? { waterfall: waterfallCursor } : {}),
         }) as (key: unknown, active?: boolean) => void;
       }
     } else {
@@ -1736,9 +1764,29 @@ function wireFigureSvg(
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
         horizontal,
+        showTotalDot: ctx.showTotalDot,
       }),
     );
     if (coord) {
+      // Waterfall (per pane): delta steps get a centered signed value pill on hover; total/skip
+      // shade only. Computed from this pane's rows so a step that is a delta in one facet and a
+      // skip in another is handled correctly (e.g. the April 2 decomposition's "Apply ηs").
+      const wfCursor =
+        ctx.spec.chartType === "waterfall"
+          ? {
+              deltaCats: new Set(
+                ctx.dataInScope
+                  .filter((r) => {
+                    const k = ((r._kind as string | undefined) ?? "").trim();
+                    return k !== "total" && k !== "skip";
+                  })
+                  .map((r) => r._xc as string),
+              ),
+            }
+          : undefined;
+      const wfDecimals = wfCursor
+        ? waterfallValueDecimals(ctx.dataInScope, ctx.spec.valueLabels?.decimals)
+        : undefined;
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isStacked,
@@ -1747,7 +1795,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.units, wfDecimals ?? ctx.spec.tooltip_decimals),
         horizontal,
         ...(horizontal
           ? {
@@ -1756,6 +1804,7 @@ function wireFigureSvg(
               ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
             }
           : {}),
+        ...(wfCursor ? { waterfall: wfCursor } : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -1906,11 +1955,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // than line/bar panes — use a smaller reflow floor so a configured column count (e.g. 3) still
   // fits at common widths instead of collapsing to 2.
   const isPointFigure = spec.chartType === "dotplot" || spec.chartType === "scatter";
-  const paneMinWidth = isPointFigure ? 160 : PANE_MIN_WIDTH;
+  // Waterfall panes carry long step labels (often rotated) under the plot, so give them a wider
+  // reflow floor (fewer, roomier columns) than a plain bar pane.
+  const isWaterfallFig = spec.chartType === "waterfall";
+  const paneMinWidth = isPointFigure ? 160 : isWaterfallFig ? 320 : PANE_MIN_WIDTH;
   // Dot-plot AND bar/stacked panes render ~33% taller (320) so the marks have room to read;
-  // line/scatter panes keep the default.
+  // waterfall panes taller still (420) to clear rotated step labels; line/scatter keep the default.
   const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
-  const paneHeight = TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
+  const paneHeight = isWaterfallFig ? 420 : TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
   // Horizontal bar figures grow their height with the row count — let renderFigure compute it
   // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
   const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";

@@ -9,6 +9,7 @@ import { TBL } from "./theme";
 import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
+import { TOTAL_SERIES_KEY } from "./series-keys";
 
 type Row = Record<string, unknown>;
 
@@ -1240,6 +1241,8 @@ function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null 
 const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
 const COORD_LABEL_DARK = "#1A1A2E";
+/** Net-total pill text: true black, matching the net dot's black stroke (Style-Guide mark-black). */
+const TOTAL_PILL_COLOR = "#000000";
 
 /**
  * Append a hollow highlight marker (white fill, series-color ring) to the coord group. When a
@@ -1757,6 +1760,11 @@ export interface SecondaryBandOptions {
   accentLabel?: { font: number };
   /** Gap (px) between a bar's tip and its value pill. Default 6. */
   pillGap?: number;
+  /** Waterfall mode (vertical only). When set: EVERY category shades on hover (even total/skip
+   *  steps that carry no `_y`), and only `deltaCats` categories get a value pill — drawn CENTERED
+   *  in the bar and SIGNED (explicit + on gains). Total/skip steps shade without a pill (their
+   *  value is the always-on running-total label). */
+  waterfall?: { deltaCats: Set<string> };
 }
 
 /** A rendered bar rect's geometry + series, for one category. */
@@ -1847,6 +1855,36 @@ function buildRectsByCategory(
   Array.from(byKey.keys())
     .sort((a, b) => a - b)
     .forEach((k, i) => out.set(categories[i] ?? String(i), byKey.get(k)!));
+  return out;
+}
+
+/** The rendered net-dot markers of a diverging stack, in USER (viewBox) coordinates — the same
+ *  space `buildRectsByCategory` reads rects in, so a dot can be matched to a category by its
+ *  band-axis center. Reads each `<circle cx cy r>` and accumulates ancestor `translate()`
+ *  transforms (facet panes translate their marks). Attribute-based, so it works in jsdom. */
+function readNetDotMarkers(svgEl: SVGSVGElement): Array<{ cx: number; cy: number; r: number }> {
+  const circles = svgEl.querySelectorAll<SVGCircleElement>(
+    `g.tbl-net-marker circle, circle[data-series="${TOTAL_SERIES_KEY}"]`,
+  );
+  const seen = new Set<Element>();
+  const out: Array<{ cx: number; cy: number; r: number }> = [];
+  for (const c of circles) {
+    if (seen.has(c)) continue;
+    seen.add(c);
+    let cx = parseFloat(c.getAttribute("cx") ?? "0");
+    let cy = parseFloat(c.getAttribute("cy") ?? "0");
+    const r = parseFloat(c.getAttribute("r") ?? "8");
+    let el: Element | null = c.parentElement;
+    while (el && el !== svgEl) {
+      const m = /translate\(\s*(-?[\d.]+)(?:\s*[ ,]\s*(-?[\d.]+))?/.exec(el.getAttribute("transform") ?? "");
+      if (m) {
+        cx += parseFloat(m[1]!);
+        cy += parseFloat(m[2] ?? "0");
+      }
+      el = el.parentElement;
+    }
+    out.push({ cx, cy, r });
+  }
   return out;
 }
 
@@ -1999,7 +2037,9 @@ export function attachSecondaryBandCursor(
     } as BandCrosshairOptions);
     const idx = raw.findIndex((b) => b.category === category);
     const vals = valByCat.get(category);
-    if (idx < 0 || !vals) {
+    // Waterfall shades EVERY step (incl. total/skip, which carry no `_y`); every other chart keeps
+    // the "no values → no hover" behavior.
+    if (idx < 0 || (!vals && !opts.waterfall)) {
       g.setAttribute("opacity", "0");
       return;
     }
@@ -2019,13 +2059,22 @@ export function attachSecondaryBandCursor(
       }
     }
     const valid = (rectsByCat.get(category) ?? [])
-      .map((rect) => ({ rect, v: vals.get(rect.series) }))
+      .map((rect) => ({ rect, v: vals?.get(rect.series) }))
       .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
     // Pill color: prefer the bar's ACTUAL rendered fill (category_colors/bar_color/mono/dim),
     // falling back to the series' legend color.
     const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
     const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
-    if (opts.isStacked) {
+    if (opts.waterfall) {
+      // Delta steps: a signed value pill CENTERED in the bar. Total/skip steps shade only.
+      if (opts.waterfall.deltaCats.has(category)) {
+        for (const x of valid) {
+          const cy = x.rect.y + x.rect.h / 2;
+          const text = `${x.v >= 0 ? "+" : ""}${yFormat(x.v)}`;
+          addCoordPill(g, doc, x.rect.cx, cy, "middle", text, pillColor(x.rect), weight);
+        }
+      }
+    } else if (opts.isStacked) {
       // Segments share one x (single band), so de-collide the within-segment labels vertically.
       const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
       valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
@@ -2394,6 +2443,10 @@ export interface HighlightPillsOptions {
   dodge?: Map<string, number>;
   /** Horizontal bars (categories on Y): pills sit beside the bar tip / at the segment center. */
   horizontal?: boolean;
+  /** Diverging / net-dot stack: when true, selecting the Total pseudo-series (TOTAL_SERIES_KEY)
+   *  draws a black net-value pill at each category's net dot (below the dot, flipping above when
+   *  space is tight). Absent/false → the Total selection draws nothing (it has no rect). */
+  showTotalDot?: boolean;
 }
 
 export interface HighlightPillsHandle {
@@ -2526,6 +2579,9 @@ export function attachHighlightPills(
       isFaceted: opts.isFaceted,
       categories: opts.categories,
     } as SecondaryBandOptions, opts.horizontal);
+    // Vertical stacked: the y-centers of the segment pills already drawn per category, so the Total
+    // pill below can flip above to avoid landing on one (e.g. Total + a segment both selected).
+    const segPillYByCat = new Map<string, number[]>();
     for (const [category, rects] of rectsByCat) {
       if (category === suppressedCat) continue;
       const vals = valByCat.get(category);
@@ -2549,6 +2605,7 @@ export function attachHighlightPills(
         }
       } else if (opts.isStacked) {
         const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
+        segPillYByCat.set(category, cys);
         valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       } else {
         const ys = staggerBarLabels(
@@ -2561,6 +2618,51 @@ export function attachHighlightPills(
           COORD_PILL_H,
         );
         valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
+      }
+    }
+
+    // Total pseudo-series (diverging / net-dot stack): selecting "Total" has no rect to pill, so
+    // draw a black net-value pill at each category's net dot. Vertical: centered under the dot,
+    // flipping above when it would fall out of the plot; horizontal: just past the dot on the side
+    // with room. Additive — composes with any segment series also selected.
+    if (opts.showTotalDot && active.has(TOTAL_SERIES_KEY)) {
+      const dots = readNetDotMarkers(svgEl);
+      if (dots.length) {
+        const loY = mt + COORD_PILL_H / 2;
+        const hiY = mt + plotH - COORD_PILL_H / 2;
+        const midX = ml + (W - ml - mr) / 2;
+        for (const [category, rects] of rectsByCat) {
+          if (category === suppressedCat || !rects.length) continue;
+          const vals = valByCat.get(category);
+          if (!vals) continue;
+          let net = 0;
+          let any = false;
+          for (const v of vals.values()) {
+            if (v != null && Number.isFinite(v)) { net += v; any = true; }
+          }
+          if (!any) continue;
+          if (opts.horizontal) {
+            const yc = rects[0]!.y + rects[0]!.h / 2;
+            const dot = dots.reduce((a, b) => (Math.abs(b.cy - yc) < Math.abs(a.cy - yc) ? b : a));
+            const toRight = dot.cx <= midX;
+            const ax = toRight ? dot.cx + dot.r + 4 : dot.cx - dot.r - 4;
+            addCoordPill(g, doc, ax, dot.cy, toRight ? "start" : "end", yFormat(net), TOTAL_PILL_COLOR, weight);
+          } else {
+            const cx = rects[0]!.cx;
+            const dot = dots.reduce((a, b) => (Math.abs(b.cx - cx) < Math.abs(a.cx - cx) ? b : a));
+            const below = dot.cy + dot.r + COORD_PILL_H / 2 + 2;
+            const above = dot.cy - dot.r - COORD_PILL_H / 2 - 2;
+            // Avoid landing on a segment pill drawn at the same x (Total + a segment both selected):
+            // prefer below the dot, else above, each only if it fits the plot and clears the pills.
+            const segYs = segPillYByCat.get(category) ?? [];
+            const clear = (y: number): boolean => segYs.every((sy) => Math.abs(sy - y) >= COORD_PILL_H);
+            const py =
+              below <= hiY && clear(below) ? below
+              : above >= loY && clear(above) ? above
+              : Math.min(Math.max(below <= hiY ? below : above, loY), hiY);
+            addCoordPill(g, doc, dot.cx, py, "middle", yFormat(net), TOTAL_PILL_COLOR, weight);
+          }
+        }
       }
     }
     g.setAttribute("opacity", "1");

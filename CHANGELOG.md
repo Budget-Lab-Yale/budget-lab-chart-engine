@@ -4,6 +4,37 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-07-16
+
+### Added — waterfall
+
+- **New `chartType: "waterfall"`** — a vertical, single-series categorical chart whose bars float
+  on a running cumulative. `columns.kind` flags each step: `total` (an absolute bar anchored at
+  zero — an explicit value rebases the running total, a blank value draws the auto running sum),
+  `skip` (no bar; the category slot is kept so faceted panes stay aligned — label the gap with a
+  point annotation), else `delta` (a signed step). Colors are semantic by default (increase blue,
+  decrease red, total navy), overridable globally via `waterfall.colors` and per bar via
+  `category_colors`. Dotted connectors link consecutive bars (`waterfall.connectors`,
+  `waterfall.connectorColor`). Always-on running-total labels (`valueLabels.show`) are
+  color-matched to the bar; on hover a **signed** delta pill shows centered in the bar
+  (delta bars only — totals/skips shade without a pill). The delta and running total share one
+  precision (`valueLabels.decimals`, else the minimum the data needs). Single-frame and faceted
+  (small-multiples) figures are both supported.
+
+### Added — annotations
+
+- **Point callouts now render on categorical (bar-type) charts.** A point annotation's `x`
+  resolves to the category's bar center (previously a silent no-op on a band scale). Point callouts
+  also gained `facet` scoping (like axis markers) and a `maxWidth` word-wrap. Available to every
+  bar-type chart, not just waterfalls.
+
+### Added — bars
+
+- **Selecting the `Total` legend row pins a net-value pill at each net dot** on a diverging /
+  net-dot stack (`barStack.netDisplay: dot`). The pill is black, sits below the dot by default and
+  flips above when space is tight (horizontal: just past the dot on its value side), and avoids
+  colliding with any segment pill also selected. Composes with per-segment selection pills.
+
 ## [1.3.3] - 2026-07-16
 
 ### Changed — annotations

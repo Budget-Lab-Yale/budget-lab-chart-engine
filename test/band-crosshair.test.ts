@@ -17,12 +17,14 @@ import {
   attachBandCrosshair,
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
+  attachHighlightPills,
   spreadLabelYs,
   staggerBarLabels,
   type CategoryBand,
   type CategoryBandH,
 } from "../src/engine/crosshair";
 import { mountChart } from "../src/engine/render-live";
+import { TOTAL_SERIES_KEY } from "../src/engine/series-keys";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -1236,5 +1238,89 @@ describe("attachSecondaryLineCursor (coordinated cursor)", () => {
     const svg = makeSvg();
     const drive = attachSecondaryLineCursor(svg, { rows: [] });
     expect(() => drive(123)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachHighlightPills — selecting the Total pseudo-series draws a net pill at the dot
+// ---------------------------------------------------------------------------
+
+/** A single vertical diverging stack (one category "A": a +3 and a −1 segment ⇒ net 2), with a
+ *  net-dot circle at `dotCy` tagged TOTAL_SERIES_KEY — the shape attachHighlightPills reads. */
+function makeVerticalStackWithNetDot(dotCy: number, doc: Document = document): SVGSVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = doc.createElementNS(NS, "svg") as SVGSVGElement;
+  svg.setAttribute("viewBox", "0 0 600 400");
+  svg.dataset.marginLeft = "50";
+  svg.dataset.marginRight = "20";
+  svg.dataset.marginTop = "20";
+  svg.dataset.marginBottom = "40"; // plotH = 340 → [loY 28, hiY 352]
+  const bar = doc.createElementNS(NS, "g");
+  bar.setAttribute("aria-label", "bar");
+  for (const [series, y, h] of [["pos", "100", "80"], ["neg", "180", "30"]] as const) {
+    const r = doc.createElementNS(NS, "rect");
+    r.setAttribute("x", "100");
+    r.setAttribute("width", "60");
+    r.setAttribute("y", y);
+    r.setAttribute("height", h);
+    r.setAttribute("data-series", series);
+    bar.appendChild(r);
+  }
+  svg.appendChild(bar);
+  const marker = doc.createElementNS(NS, "g");
+  marker.setAttribute("class", "tbl-net-marker");
+  const dot = doc.createElementNS(NS, "circle");
+  dot.setAttribute("cx", "130"); // x-center of the 100..160 band
+  dot.setAttribute("cy", String(dotCy));
+  dot.setAttribute("r", "8");
+  dot.setAttribute("data-series", TOTAL_SERIES_KEY);
+  marker.appendChild(dot);
+  svg.appendChild(marker);
+  document.body.appendChild(svg);
+  return svg;
+}
+
+describe("attachHighlightPills — Total selection net pill", () => {
+  const OPTS = {
+    rows: [
+      { _xc: "A", series: "pos", _y: 3 },
+      { _xc: "A", series: "neg", _y: -1 },
+    ],
+    chartType: "stacked" as const,
+    isStacked: true,
+    categories: ["A"],
+    seriesOrder: ["pos", "neg"],
+    showTotalDot: true,
+  };
+
+  it("draws a black net-value pill at the dot when Total is selected", () => {
+    const svg = makeVerticalStackWithNetDot(150);
+    const handle = attachHighlightPills(svg, OPTS);
+    handle.setActive(new Set([TOTAL_SERIES_KEY]));
+    const pills = svg.querySelectorAll("g.tbl-hl-pills text");
+    expect(pills.length).toBe(1);
+    const pill = pills[0]!;
+    expect(pill.textContent).toBe("2"); // net = 3 + (−1)
+    expect(pill.getAttribute("fill")).toBe("#000000");
+    // Dot at cy=150 has room below → pill sits below the dot.
+    expect(Number(pill.getAttribute("y"))).toBeGreaterThan(150);
+    document.body.removeChild(svg);
+  });
+
+  it("flips the pill above the dot when there is no room below", () => {
+    const svg = makeVerticalStackWithNetDot(348); // near the plot bottom (hiY 352)
+    const handle = attachHighlightPills(svg, OPTS);
+    handle.setActive(new Set([TOTAL_SERIES_KEY]));
+    const pill = svg.querySelector("g.tbl-hl-pills text")!;
+    expect(Number(pill.getAttribute("y"))).toBeLessThan(348);
+    document.body.removeChild(svg);
+  });
+
+  it("draws no Total pill when showTotalDot is not set (regression guard)", () => {
+    const svg = makeVerticalStackWithNetDot(150);
+    const handle = attachHighlightPills(svg, { ...OPTS, showTotalDot: false });
+    handle.setActive(new Set([TOTAL_SERIES_KEY]));
+    expect(svg.querySelectorAll("g.tbl-hl-pills text").length).toBe(0);
+    document.body.removeChild(svg);
   });
 });

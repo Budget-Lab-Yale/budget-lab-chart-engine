@@ -123,6 +123,24 @@ function xAxisTicksOrientationError(spec: {
   return null;
 }
 
+/** Waterfall cross-field constraints the JSON schema can't express: a waterfall is a vertical,
+ *  categorical chart (the running cumulative reads top-to-bottom on the value axis). Horizontal
+ *  is rejected, and xAxisType must be categorical. */
+function waterfallSpecError(spec: {
+  chartType?: unknown;
+  orientation?: unknown;
+  xAxisType?: unknown;
+}): string | null {
+  if (spec.chartType !== "waterfall") return null;
+  if (spec.orientation === "horizontal") {
+    return `chartType "waterfall" is vertical only (got orientation "horizontal")`;
+  }
+  if (spec.xAxisType !== "categorical") {
+    return `chartType "waterfall" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
+  }
+  return null;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -143,6 +161,10 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { x_axis_ticks?: unknown; chartType?: unknown; orientation?: unknown },
   );
   if (ticksErr) return { valid: false, errors: [ticksErr] };
+  const wfErr = waterfallSpecError(
+    spec as { chartType?: unknown; orientation?: unknown; xAxisType?: unknown },
+  );
+  if (wfErr) return { valid: false, errors: [wfErr] };
   return { valid: true, errors: [] };
 }
 
@@ -396,6 +418,53 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
             : missing.map((c) => JSON.stringify(c));
           errors.push(
             `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars/stacks share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
+          );
+        }
+      }
+    }
+  }
+
+  // Waterfall: the kind column (columns.kind) may only hold delta / total / skip (empty ⇒ delta),
+  // and a waterfall is single-series (one bar per step — no series channel). The value-axis reads
+  // a running cumulative, so faceted waterfalls share ONE category axis: every facet must carry the
+  // same steps (use a `skip` row to hold a category slot a facet lacks), mirroring the horizontal
+  // bar ragged-facet guard.
+  if (spec.chartType === "waterfall") {
+    if (cols.kind && columns.has(cols.kind)) {
+      const ALLOWED = new Set(["", "delta", "total", "skip"]);
+      const bad = new Set<string>();
+      for (const r of rows) {
+        const k = ((r[cols.kind] as string) ?? "").trim();
+        if (!ALLOWED.has(k)) bad.add(k);
+      }
+      if (bad.size) {
+        errors.push(
+          `columns.kind "${cols.kind}" has unknown value(s) ${JSON.stringify([...bad])} — waterfall kinds are "delta", "total", or "skip" (empty ⇒ delta)`,
+        );
+      }
+    }
+    if (cols.series && seriesSeen.size > 1) {
+      errors.push(
+        `chartType "waterfall" is single-series (one bar per step) but the data has ${seriesSeen.size} series (${knownSeries}) — remove columns.series`,
+      );
+    }
+    if (spec.small_multiples && cols.facet && columns.has(cols.facet)) {
+      const facetField = cols.facet;
+      const catsByFacet = new Map<string, Set<string>>();
+      const allCats = new Set<string>();
+      for (const r of rows) {
+        const facet = r[facetField] as string;
+        const cat = r[cols.x] as string;
+        if (!facet || !cat) continue;
+        allCats.add(cat);
+        if (!catsByFacet.has(facet)) catsByFacet.set(facet, new Set());
+        (catsByFacet.get(facet) as Set<string>).add(cat);
+      }
+      for (const [facet, cats] of catsByFacet) {
+        const missing = [...allCats].filter((c) => !cats.has(c));
+        if (missing.length) {
+          errors.push(
+            `facet "${facet}" is missing step(s) ${missing.map((c) => JSON.stringify(c)).join(", ")} present in other facets — faceted waterfalls share one category axis, so every facet must carry the same steps (use a "skip" row to hold a missing step's slot)`,
           );
         }
       }

@@ -905,3 +905,50 @@ describe("validateChart (combined)", () => {
     expect(validateChart(VALID)).toEqual({ valid: true, errors: [] });
   });
 });
+
+describe("waterfall validation", () => {
+  const WF: ChartSpec = {
+    chartType: "waterfall",
+    title: "WF",
+    xAxisType: "categorical",
+    columns: { x: "step", value: "amount", kind: "kind" },
+    data: "data.csv",
+  } as ChartSpec;
+  const WF_ROWS: TidyRow[] = [
+    { step: "Start", amount: "100", kind: "total" },
+    { step: "A", amount: "20", kind: "" },
+    { step: "B", amount: "-10", kind: "" },
+  ];
+
+  it("accepts a categorical vertical waterfall", () => {
+    expect(validateSpec(WF)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects horizontal orientation", () => {
+    const r = validateSpec({ ...WF, orientation: "horizontal" });
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toMatch(/vertical only/);
+  });
+
+  it("rejects a non-categorical x axis", () => {
+    const r = validateSpec({ ...WF, xAxisType: "numeric" });
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toMatch(/requires xAxisType "categorical"/);
+  });
+
+  it("rejects an unknown kind value in the data", () => {
+    const rows: TidyRow[] = [...WF_ROWS, { step: "C", amount: "5", kind: "bogus" }];
+    const r = validateChartData(WF, rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /unknown value/.test(e) && /bogus/.test(e))).toBe(true);
+  });
+
+  it("accepts delta/total/skip kinds", () => {
+    const rows: TidyRow[] = [
+      { step: "Start", amount: "100", kind: "total" },
+      { step: "Gap", amount: "", kind: "skip" },
+      { step: "A", amount: "20", kind: "delta" },
+    ];
+    expect(validateChartData(WF, rows).valid).toBe(true);
+  });
+});

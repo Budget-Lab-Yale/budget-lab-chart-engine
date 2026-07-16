@@ -99,6 +99,8 @@ const POINT_CALLOUT_ARRAY = {
       dx: { type: "number" },
       dy: { type: "number" },
       connector: { type: "boolean" },
+      maxWidth: { type: "number", exclusiveMinimum: 0 },
+      facet: { type: "string" },
     },
   },
 } as const;
@@ -239,7 +241,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -252,6 +254,7 @@ export const CHART_SPEC_SCHEMA = {
         facet: { type: "string" },
         shape: { type: "string" },
         section: { type: "string" },
+        kind: { type: "string" },
       },
     },
 
@@ -344,6 +347,23 @@ export const CHART_SPEC_SCHEMA = {
         netLabelColor: { type: "string", enum: ["white", "black"] },
         normalize: { type: "boolean" },
         stackOrder: { type: "array", items: { type: "string" } },
+      },
+    },
+    waterfall: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        colors: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            increase: { type: "string" },
+            decrease: { type: "string" },
+            total: { type: "string" },
+          },
+        },
+        connectors: { type: "boolean" },
+        connectorColor: { type: "string" },
       },
     },
     highlightSeries: { type: "array", items: { type: "string" } },

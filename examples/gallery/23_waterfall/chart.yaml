@@ -1,0 +1,13 @@
+chartType: waterfall
+title: "Illustrative cash-flow bridge"
+subtitle: "Billions of dollars"
+xAxisType: categorical
+columns:
+  x: step
+  value: amount
+  kind: kind
+valueLabels:
+  show: true
+source: "The Budget Lab"
+note: "Single-frame waterfall, default semantic colors: navy total bars anchored at zero, blue increases, red decreases; dotted connectors; running-total labels above rising bars and below falling ones. Ending balance is a blank-value total (auto running sum)."
+data: data.csv
