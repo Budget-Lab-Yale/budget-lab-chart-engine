@@ -22,6 +22,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   category now shows the floating tooltip — including the dot-swatch Total row — instead of the
   per-segment pills introduced in 1.3.0. Plain and grouped bars, and cumulative (text-callout)
   stacks, keep the pills. Legend-highlight pills are unaffected in both modes.
+- **Net dot: no static value label, smaller marker.** The net dot no longer draws a static signed
+  value label (the value now reads from the hover tooltip's Total row), and the dot marker is 20%
+  smaller (radius 10→8 standalone, ~7→5.6 in small-multiples panes). `barStack.netLabelColor` is
+  accepted for compatibility but no longer has an effect.
 
 ## [1.3.1] - 2026-07-09
 

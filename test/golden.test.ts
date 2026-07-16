@@ -1487,7 +1487,7 @@ describe("golden SVG — stacked bars", () => {
     expect(legendItems?.map((i) => i.series)).toEqual(baseLegend?.map((i) => i.series));
   });
 
-  it("renders a diverging stack with a net dot + signed label and Total legend extra", async () => {
+  it("renders a diverging stack with a net dot (no static label) and Total legend extra", async () => {
     const rows = parseCsv("./fixtures/stacked-diverging.csv");
     const { svg } = renderChart(STACKED_DIVERGING_SPEC, rows, { width: 720, height: 400, document });
     // 3 categories x 4 series = 12 rects.
@@ -1495,11 +1495,9 @@ describe("golden SVG — stacked bars", () => {
     // A net dot exists (Plot.dot → g[aria-label="dot"] with circles).
     const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
     expect(dots.length).toBe(3); // one per category
-    // Net dots + net labels carry the shared Total key as data-series (TT6 #2/#3).
     dots.forEach((d) => expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
-    const netLabels = svg.querySelectorAll("g.tbl-net-label text");
-    expect(netLabels.length).toBe(3);
-    netLabels.forEach((t) => expect(t.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
+    // The net value shows on hover (tooltip Total row), so no static net label is drawn.
+    expect(svg.querySelectorAll("g.tbl-net-label text").length).toBe(0);
     // Diverging stack-order pin: within category A, declaration order from 0 is
     // Lower rates (bottom positive), Wider brackets, then the negatives. The first rect
     // (visual bottom of the positive sub-stack) is the first-declared positive series.
@@ -2220,7 +2218,7 @@ describe("golden figure — faceted horizontal stacked (renderFigure)", () => {
       const dots = (p.svg as SVGSVGElement).querySelectorAll('g[aria-label="dot"] circle');
       expect(dots.length).toBe(2);
       dots.forEach((d) => {
-        expect(d.getAttribute("r")).toBe("7");
+        expect(d.getAttribute("r")).toBe("5.6");
         expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY);
       });
     });
