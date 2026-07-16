@@ -1,0 +1,21 @@
+chartType: stacked
+orientation: horizontal
+title: "Faceted horizontal 100% stacks, one facet per row"
+subtitle: "Share of tax units by size of tax cut, percent"
+xAxisType: categorical
+columns:
+  x: group
+  value: share
+  series: cut_size
+  facet: section
+series_order: ["No cut", "< $500", "$500 - $5,000", "> $5,000"]
+small_multiples:
+  columns: 1
+  pane_order: ["By quintile", "Within top quintile"]
+barStack:
+  netDisplay: none
+yAxisPolicy:
+  max: 100
+source: "The Budget Lab"
+note: "columns:1 puts each facet on its OWN row with its own full-width category gutter + labels, so the two facets carry DIFFERENT categories (quintiles vs top-quintile breakout) — the ragged-facet guard does not apply to one-per-row. Confirm each pane shows its own category labels, both share a 0-100 value axis, and there is a single figure-level legend in stack order."
+data: data.csv

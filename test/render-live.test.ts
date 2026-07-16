@@ -692,16 +692,15 @@ describe("legend swatch shapes", () => {
     }
   });
 
-  it("net dots + net labels carry TOTAL_SERIES_KEY as data-series", () => {
+  it("net dots carry TOTAL_SERIES_KEY as data-series; no static net labels", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS });
     const svg = container.querySelector(".figure-canvas svg")!;
     const dots = svg.querySelectorAll('g[aria-label="dot"] circle');
     expect(dots.length).toBeGreaterThan(0);
     dots.forEach((d) => expect(d.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
-    const labels = svg.querySelectorAll("g.tbl-net-label text");
-    expect(labels.length).toBe(dots.length);
-    labels.forEach((t) => expect(t.getAttribute("data-series")).toBe(TOTAL_SERIES_KEY));
+    // Net value shows on hover (tooltip Total row), so no static net-label text is drawn.
+    expect(svg.querySelectorAll("g.tbl-net-label text").length).toBe(0);
   });
 
   it("pinning a real series dims the net dots; unpin clears", () => {

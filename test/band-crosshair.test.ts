@@ -698,6 +698,69 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
+  // Total-dot rule: a diverging stacked chart (netDisplay dot → showTotalDot) hovers with the
+  // floating band tooltip (its dot-swatch Total row), NOT the per-segment value pills.
+  const DIVERGING_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Diverging stacked",
+    xAxisType: "categorical",
+    series_order: ["Up", "Down"],
+    barStack: { netDisplay: "dot" },
+    data: "inline",
+  };
+  const DIVERGING_ROWS: TidyRow[] = [
+    { time: "A", series: "Up", value: "6" },
+    { time: "A", series: "Down", value: "-4" },
+    { time: "B", series: "Up", value: "5" },
+    { time: "B", series: "Down", value: "-2" },
+  ];
+
+  const hoverFirstBar = (container: HTMLElement): SVGSVGElement => {
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({ width: vb.width, height: vb.height, top: 0, left: 0, right: vb.width, bottom: vb.height, x: 0, y: 0 }),
+      configurable: true,
+    });
+    const rect = svg.querySelector<SVGRectElement>('g[aria-label="bar"] rect')!;
+    const cx = parseFloat(rect.getAttribute("x") ?? "0") + parseFloat(rect.getAttribute("width") ?? "0") / 2;
+    document.body.appendChild(container);
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 20, bubbles: true }));
+    return svg;
+  };
+
+  it("diverging stacked (total dot) hovers with the tooltip, not per-segment pills", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    const before = document.body.querySelectorAll(".tbl-tooltip-head").length;
+    const svg = hoverFirstBar(container);
+    // Tooltip shown (visible band crosshair), with the dot-swatch Total row.
+    expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(before + 1);
+    expect(document.body.querySelector(".tbl-tooltip-swatch.is-dot")).not.toBeNull();
+    // No coordinated pill cursor was attached at all.
+    expect(svg.querySelector("g.tbl-coord")).toBeNull();
+    document.body.removeChild(container);
+  });
+
+  it("cumulative stacked (no total dot) keeps the coordinated pills, no tooltip", () => {
+    const cumulative: ChartSpec = { ...DIVERGING_SPEC, barStack: { netDisplay: "text" } };
+    const rows: TidyRow[] = [
+      { time: "A", series: "Up", value: "6" },
+      { time: "A", series: "Down", value: "4" },
+      { time: "B", series: "Up", value: "5" },
+      { time: "B", series: "Down", value: "2" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec: cumulative, rows, width: 600, height: 360 });
+    const before = document.body.querySelectorAll(".tbl-tooltip-head").length;
+    const svg = hoverFirstBar(container);
+    // No tooltip; the coordinated cursor is active instead.
+    expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(before);
+    expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("1");
+    document.body.removeChild(container);
+  });
+
   it("uniform hover-row height across a section spacer (task 17, item 4): 'Food' (last of P) and 'Rent' (first of Q, across the spacer) get the SAME shaded-row height", () => {
     const sectionedSpec: ChartSpec = {
       chartType: "bar",

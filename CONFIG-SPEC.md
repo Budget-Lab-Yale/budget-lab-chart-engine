@@ -182,7 +182,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `x_axis_ticks` | enum | **Horizontal bars only** (standalone and faceted). Where the value-axis tick row(s) render: `bottom` (default) \| `top` \| `both`. Requires `orientation: horizontal` — validation rejects it on a vertical chart (there is no top value axis there). |
 | `valueLabels.show` | boolean | **Stacked bars only.** Show per-segment value labels (in-bar value labels for plain/grouped bars were removed). Default off. |
 | `valueLabels.decimals` | integer | Fixed decimal places for the labels that remain (stacked segment + net callouts); else the minimum the data needs, capped at 2. |
-| `barStack.netDisplay` | enum | Net (sum) callout on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. |
+| `barStack.netDisplay` | enum | Net (sum) callout on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. When the net **dot** is shown, hovering a category shows the floating tooltip (with a dot-swatch Total row), not the per-segment value pills. |
 | `barStack.mono.base` | color | Monochrome stack: render all segments as shades of one base hue (a categorical hue key or alias; see [Colors](#colors)). |
 | `barStack.netLabelColor` | enum | `white` \| `black`. |
 | `barStack.normalize` | boolean | Normalize each bar to 100%. |
@@ -204,11 +204,15 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. |
 | `small_multiples.pane_widths` | enum \| array | How a row's width splits among its columns (vertical bar facets; applied to every row). `equal` (default) — same data width per column. `equal-bar` — each column sized to its bar count so bars render at the same width (exact for a single row; multi-row uses the max bar count per column). An array like `[2, 1]` sets explicit per-column proportions (length must equal the column count). When set and `columns` is unset, the panes lay out in a single row. |
 
-**Faceted horizontal bars.** `orientation: horizontal` combines with `small_multiples` to produce a
-faceted horizontal bar chart: each pane is one facet value, the panes share a single value (x) axis,
-and the category labels form a shared left gutter sized to the longest label — shown on the leftmost
-pane only, so the rows line up across panes. Works with single-series and grouped (multi-series)
-bars. Use `shared` mode (the default) so the value axis is comparable across panes.
+**Faceted horizontal bars/stacks.** `orientation: horizontal` combines with `small_multiples` to
+produce a faceted horizontal chart: each pane is one facet value, the panes share a single value (x)
+axis, and the category labels form a shared left gutter sized to the longest label — shown on the
+leftmost pane only, so the rows line up across panes. Works with single-series, grouped (multi-series),
+and **stacked** bars. Use `shared` mode (the default) so the value axis is comparable across panes.
+On a diverging stack, `barStack.netDisplay: dot` keeps the net dot in each pane (at a reduced radius);
+the net text callout and per-segment value labels are suppressed in panes. With `columns: 1` each
+facet occupies its own row with its own full-width category axis, so facets may carry **different**
+categories (the shared-category requirement — see below — applies only when panes share a row).
 
 ### Section axis (horizontal bars)
 
@@ -223,10 +227,12 @@ and a gap between sections. Combines with `small_multiples` (the headers show on
 | `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
 `columns.section` and `columns.facet` are supported together on faceted horizontal bars (both
-`shared` and `per-pane` `small_multiples.mode`). Faceted horizontal bars share one category axis
-across panes, so every facet must carry the same categories (and sections) — a facet missing a
-category or a whole section (a **ragged facet**) fails validation with an error naming the facet
-and the missing categories/sections, rather than silently misaligning rows across panes.
+`shared` and `per-pane` `small_multiples.mode`). When panes share a row (`columns > 1`), faceted
+horizontal bars/stacks share one category axis across those panes, so every facet must carry the
+same categories (and sections) — a facet missing a category or a whole section (a **ragged facet**)
+fails validation with an error naming the facet and the missing categories/sections, rather than
+silently misaligning rows across panes. This does not apply with `columns: 1` (each facet is on its
+own row with its own category axis, so different categories per facet are allowed).
 
 ### Data
 

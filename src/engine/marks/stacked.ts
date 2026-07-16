@@ -20,6 +20,7 @@
 import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
+import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
 import { inferUnitsFromSubtitle } from "../util";
 import { tokens } from "../../theme/tokens";
@@ -30,7 +31,10 @@ import { TOTAL_SERIES_KEY } from "../series-keys";
 // Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
 // pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
 const NET_DOT_CLASS = "tbl-net-marker";
-const NET_LABEL_CLASS = "tbl-net-label";
+
+// Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.
+const NET_DOT_R = 8;
+const NET_DOT_PANE_R = 5.6;
 
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
@@ -266,64 +270,14 @@ export function buildStackedMarks(
         : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -TBL_VALUE_LABEL.gap }),
     );
   } else if (netMode === "dot") {
-    // Black-stroked white dot at the true net y (KEPT in panes), plus a signed value label
-    // below (suppressed in panes — §6). The dot still carries the net for small multiples.
-    const netLabelFill = spec.barStack?.netLabelColor === "black" ? MARK_BLACK : WHITE;
-    if (horizontal) {
-      overlay.push(
-        Plot.dot(netRows, {
-          y: "_xc",
-          x: "net",
-          r: 10,
-          fill: WHITE,
-          stroke: MARK_BLACK,
-          strokeWidth: 2,
-          className: NET_DOT_CLASS,
-        }),
-      );
-      if (!pane) {
-        overlay.push(
-          Plot.text(netRows, {
-            y: "_xc",
-            x: "net",
-            text: (d: { net: number }) => netFmt(d.net),
-            fill: netLabelFill,
-            fontSize: TBL_VALUE_LABEL.fontSize,
-            fontWeight: TBL_VALUE_LABEL.fontWeight,
-            textAnchor: "middle",
-            dy: 20,
-            className: NET_LABEL_CLASS,
-          }),
-        );
-      }
-    } else {
-      overlay.push(
-        Plot.dot(netRows, {
-          x: "_xc",
-          y: "net",
-          r: 10,
-          fill: WHITE,
-          stroke: MARK_BLACK,
-          strokeWidth: 2,
-          className: NET_DOT_CLASS,
-        }),
-      );
-      if (!pane) {
-        overlay.push(
-          Plot.text(netRows, {
-            x: "_xc",
-            y: "net",
-            text: (d: { net: number }) => netFmt(d.net),
-            fill: netLabelFill,
-            fontSize: TBL_VALUE_LABEL.fontSize,
-            fontWeight: TBL_VALUE_LABEL.fontWeight,
-            textAnchor: "middle",
-            dy: 20,
-            className: NET_LABEL_CLASS,
-          }),
-        );
-      }
-    }
+    // Black-stroked white dot at the true net y (KEPT in panes). The net value is shown on hover
+    // (the band tooltip's Total row), so no static value label is drawn. The dot shrinks in narrow
+    // panes; the net always sits between the +/− sums, so it never reaches the frame edge.
+    const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
+    const netDot = horizontal
+      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: WHITE, stroke: MARK_BLACK, strokeWidth: 2, className: NET_DOT_CLASS })
+      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: WHITE, stroke: MARK_BLACK, strokeWidth: 2, className: NET_DOT_CLASS });
+    overlay.push(netDot);
   }
 
   // --- Segment labels ---
@@ -371,17 +325,17 @@ export function buildStackedMarks(
     .map((r) => r.series);
 
   // --- Legend extras: diverging stacks add a "Total" dot row (A8 renders it) ---
-  // The row carries TOTAL_SERIES_KEY, shared with the net dot/label data-series below, so
-  // legend row + chart markers pin/hover/dim as one pseudo-series.
+  // The row carries TOTAL_SERIES_KEY, shared with the net dot's data-series below, so the
+  // legend row + net dots pin/hover/dim as one pseudo-series.
   const legendExtras =
     netMode === "dot"
       ? [{ series: TOTAL_SERIES_KEY, label: "Total", markerShape: "dot" as const }]
       : undefined;
 
   // --- Net-marker tagging (dot mode only) ---
-  // One net dot + one net label per category, so each selector matches `categories.length`
-  // elements in DOM order; tag every one with TOTAL_SERIES_KEY so the existing pin/dim
-  // system treats them as the Total pseudo-series.
+  // One net dot per category, so the selector matches `categories.length` elements in DOM order;
+  // tag every one with TOTAL_SERIES_KEY so the existing pin/dim system treats them as the Total
+  // pseudo-series.
   const netTagging =
     netMode === "dot"
       ? [
@@ -389,15 +343,6 @@ export function buildStackedMarks(
             selector: `g.${NET_DOT_CLASS} circle`,
             seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
           },
-          // The net LABEL text is suppressed in panes, so only tag it for the single chart.
-          ...(pane
-            ? []
-            : [
-                {
-                  selector: `g.${NET_LABEL_CLASS} text`,
-                  seriesOrder: Array(categories.length).fill(TOTAL_SERIES_KEY) as string[],
-                },
-              ]),
         ]
       : [];
 
@@ -409,8 +354,12 @@ export function buildStackedMarks(
 
   if (horizontal) {
     // Responsive left gutter so the longest category label is not clipped (see bar.ts); sized to
-    // the (now larger, faceted-matching) catFont so the wider glyphs still fit.
-    const gutter = horizontalLeftGutter(categories, { fontSize: catFont });
+    // the (now larger, faceted-matching) catFont so the wider glyphs still fit. Faceted small
+    // multiples: the figure passes the shared gutter (categoryGutter) so panes align, and
+    // hideCategoryLabels suppresses labels on non-leftmost panes (band domain is shared).
+    const gutter = ctx.hideCategoryLabels
+      ? SHARED_LABELLESS_MARGIN_LEFT
+      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
     return {
       underlay: [],
       overlay,
@@ -423,7 +372,7 @@ export function buildStackedMarks(
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-      xAxisMarks: tblBandYAxis(categories, gutter, catFont),
+      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
       seriesColors,
       legendVisualOrder,
