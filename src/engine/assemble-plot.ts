@@ -20,7 +20,7 @@ import {
   X_ANNOTATION_LINE_CLASS,
 } from "./facet-chrome";
 import { makeTickFormatter } from "./scales";
-import { tblColorScale, resolveColor } from "./palette";
+import { resolveColor } from "./palette";
 import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
 import type { ChartSpec, PointCallout, XAxisMarker } from "../spec/types";
 import type { XOpts } from "./x-adapter";
@@ -553,14 +553,12 @@ export function assemblePlot({
   }
 
   // 6b. Horizontal reference lines (yAxisPolicy.markers): drawn over the data, each with an
-  //     optional label. By DEFAULT lines + matched labels take categorical colors starting at
-  //     amber (skipping the blue cat-1 slot, which data series usually use); an explicit
-  //     marker.color overrides. The label color always matches its line.
+  //     optional label. By DEFAULT lines + matched labels take the dim annotation neutral —
+  //     same as vertical (xAxis) markers (see drawXAxisMarker) so the two axes are consistent;
+  //     an explicit marker.color overrides. The label color always matches its line.
   const markerList = yAxisAnn;
-  // +1 so index 0 (blue) is skipped → markers start at amber, then violet, green, …
-  const markerPalette = tblColorScale(markerList.length + 1);
   markerList.forEach((m, i) => {
-    const markerColor = (m.color && (resolveColor(m.color) || m.color)) || markerPalette[i + 1] || TBL.color.annotationDim;
+    const markerColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
     marks.push(
       Plot.ruleY([m.y], {
         stroke: markerColor,

@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderChart, renderFigure } from "../src/engine/index";
+import { TBL } from "../src/engine/theme";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../src/spec/annotations";
 import { validateSpec } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
@@ -460,5 +461,36 @@ describe("byte-identical guarantees", () => {
     const a = renderChart(spec, rows, { width: 720, height: 400, document }).svg.outerHTML;
     const b = renderChart(spec, rows, { width: 720, height: 400, document }).svg.outerHTML;
     expect(a).toBe(b);
+  });
+});
+
+describe("yAxis annotation default color", () => {
+  const ROWS: TidyRow[] = [
+    { year: "2025", value: "25" },
+    { year: "2035", value: "110" },
+  ] as unknown as TidyRow[];
+  const base: ChartSpec = {
+    chartType: "line",
+    title: "t",
+    xAxisType: "numeric",
+    columns: { x: "year", value: "value" },
+    data: "x",
+  };
+  // A yAxis reference line renders as a <g class="tbl-annotation-line-N"> carrying the stroke.
+  const markerStroke = (svg: SVGSVGElement): string | null => {
+    const g = svg.querySelector('g[class^="tbl-annotation-line"]');
+    return g ? g.getAttribute("stroke") : null;
+  };
+
+  it("defaults to the dim annotation neutral (matching xAxis), not a categorical hue", () => {
+    const spec = { ...base, annotations: { yAxis: [{ y: 80, label: "threshold" }] } } as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    expect(markerStroke(svg)).toBe(TBL.color.annotationDim);
+  });
+
+  it("still honors an explicit marker color", () => {
+    const spec = { ...base, annotations: { yAxis: [{ y: 80, label: "threshold", color: "red" }] } } as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    expect(markerStroke(svg)).not.toBe(TBL.color.annotationDim);
   });
 });
