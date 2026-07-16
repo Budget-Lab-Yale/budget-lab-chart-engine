@@ -129,7 +129,9 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?}`. |
 | `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, value_format?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
 
-Marker/label `color` is a named color or `"#hex"`; the label color matches its line.
+Marker/label `color` is a named color or `"#hex"`; the label color matches its line. When
+`color` is omitted, both `xAxis` and `yAxis` reference lines default to the dim annotation
+neutral (`annotationDim`) so they read as chrome rather than a data series.
 
 **`{value}` token.** Any `xAxis`/`yAxis`/`points` `label` may contain a literal `{value}` token,
 substituted with the marker's own numeric value (`x` when it parses as a number, `y`, or the

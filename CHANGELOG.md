@@ -4,6 +4,15 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed — annotations
+
+- **Horizontal (`yAxis`) reference lines default to the dim annotation neutral**, matching
+  vertical (`xAxis`) lines, instead of borrowing the categorical data palette (which made an
+  uncolored line render amber). An explicit `color` still overrides. Reference lines now read
+  as chrome, not as a data series, and the two axes are consistent.
+
 ## [1.3.2] - 2026-07-16
 
 ### Added — bars
