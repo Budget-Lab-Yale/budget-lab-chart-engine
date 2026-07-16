@@ -21,12 +21,12 @@ export function resolveAnnotations(spec: ChartSpec): ResolvedAnnotations {
   };
 }
 
-/** Small multiples: scope `xAxis`/`yAxis` markers to the pane whose facet value is `facetValue`.
- *  A marker with no `facet` key always passes through (today's all-panes behavior); a marker
- *  WITH a `facet` key is kept only when it equals `facetValue`. `bands`/`points` are unaffected
- *  (out of scope — unchanged, all-panes). `facetValue === undefined` (non-faceted chart, or a
- *  faceted chart's shared-mode probe called without a pane) returns `resolved` UNCHANGED (same
- *  reference) so non-faceted rendering stays byte-identical. */
+/** Small multiples: scope `xAxis`/`yAxis` markers and `points` to the pane whose facet value is
+ *  `facetValue`. An annotation with no `facet` key always passes through (all-panes behavior); one
+ *  WITH a `facet` key is kept only when it equals `facetValue`. `bands` are unaffected (all-panes).
+ *  `facetValue === undefined` (non-faceted chart, or a faceted chart's shared-mode probe called
+ *  without a pane) returns `resolved` UNCHANGED (same reference) so non-faceted rendering stays
+ *  byte-identical. */
 export function filterAnnotationsByFacet(
   resolved: ResolvedAnnotations,
   facetValue: string | undefined,
@@ -38,7 +38,7 @@ export function filterAnnotationsByFacet(
     xAxis: keep(resolved.xAxis),
     yAxis: keep(resolved.yAxis),
     bands: resolved.bands,
-    points: resolved.points,
+    points: keep(resolved.points),
   };
 }
 

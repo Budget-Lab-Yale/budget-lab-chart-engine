@@ -10,7 +10,7 @@ import { resolveColumns, SINGLE_SERIES_KEY } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
-import { computeYAxis, computeBarYExtent } from "./scales";
+import { computeYAxis, computeBarYExtent, computeWaterfallYExtent } from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
@@ -251,6 +251,8 @@ export function renderPane(
       // column IS the series column (redundant encoding) this simply mirrors `series`.
       if (cols.shape) row._shape = r[cols.shape] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
+      // Waterfall step kind (delta/total/skip).
+      if (cols.kind) row._kind = r[cols.kind] ?? "";
       if (spec.projected_field) {
         row._projected = isTruthyFlag(r[spec.projected_field]);
       }
@@ -382,6 +384,16 @@ export function renderPane(
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
     const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
+    hardDomain = [resolvedMin, resolvedMax];
+  } else if (chartType === "waterfall") {
+    // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
+    // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
+    // axis and bars agree. Zero baseline; reference-line (yAxis) values fold in for headroom.
+    includeZero = policy.min == null;
+    const markerYs = ann.yAxis.map((m) => m.y).filter(Number.isFinite);
+    const wfExtent = computeWaterfallYExtent(dataInScope);
+    const resolvedMin = policy.min ?? Math.min(wfExtent.min, ...markerYs);
+    const resolvedMax = Math.max(policy.max ?? wfExtent.max, ...markerYs);
     hardDomain = [resolvedMin, resolvedMax];
   } else if (chartType === "area") {
     // Stacked area: zero baseline; the axis extent comes from the per-x STACKED TOTAL (the

@@ -1,0 +1,14 @@
+chartType: stacked
+title: "Net change by quarter — select 'Total' to pin the net pill"
+subtitle: "Percentage points"
+xAxisType: categorical
+columns:
+  x: quarter
+  value: value
+  series: component
+series_order: ["Policy", "Offset"]
+barStack:
+  netDisplay: dot
+source: "The Budget Lab"
+note: "Task 1 demo: click (pin) or hover the 'Total' legend row — a black net-value pill appears at each net dot, below it by default and flipping above when space is tight. Selecting a segment series still shows its per-segment pills; both compose."
+data: data.csv

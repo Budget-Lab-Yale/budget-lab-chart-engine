@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { computeYAxis, makeTickFormatter } from "../src/engine/scales";
+import {
+  computeYAxis,
+  makeTickFormatter,
+  computeWaterfallSteps,
+  computeWaterfallYExtent,
+} from "../src/engine/scales";
+import type { PreparedRow } from "../src/engine/marks/index";
+
+const wfRow = (cat: string, y: number | null, kind?: string): PreparedRow =>
+  ({ series: "", time: cat, _xc: cat, _y: y, ...(kind ? { _kind: kind } : {}) }) as PreparedRow;
 
 describe("computeYAxis", () => {
   it("honors a hard domain override (ignoring the data extent), niced like the tracker", () => {
@@ -43,5 +52,45 @@ describe("makeTickFormatter", () => {
   it("appends a units suffix", () => {
     const fmt = makeTickFormatter([0, 4, 8], "%");
     expect(fmt(4)).toBe("4%");
+  });
+});
+
+describe("computeWaterfallSteps", () => {
+  it("floats deltas on the running cumulative; explicit total rebases, blank total = auto sum", () => {
+    const steps = computeWaterfallSteps([
+      wfRow("Start", 100, "total"),
+      wfRow("Up", 20),
+      wfRow("Down", -30),
+      wfRow("End", null, "total"),
+    ]);
+    expect(steps.map((s) => [s.cat, s.base, s.top, s.level])).toEqual([
+      ["Start", 0, 100, 100], // explicit total: bar 0→100, running := 100
+      ["Up", 100, 120, 120], // delta +20
+      ["Down", 90, 120, 90], // delta −30 (falls)
+      ["End", 0, 90, 90], // blank total: bar 0→running(90)
+    ]);
+    expect(steps.map((s) => s.rise)).toEqual([true, true, false, true]);
+  });
+
+  it("skip steps keep their slot and leave the running total untouched", () => {
+    const steps = computeWaterfallSteps([
+      wfRow("A", 10),
+      wfRow("Gap", null, "skip"),
+      wfRow("B", 5),
+    ]);
+    expect(steps[1]).toMatchObject({ cat: "Gap", kind: "skip", base: 10, top: 10, level: 10 });
+    expect(steps[2]).toMatchObject({ cat: "B", base: 10, top: 15, level: 15 }); // B builds from 10, not the gap
+  });
+});
+
+describe("computeWaterfallYExtent", () => {
+  it("spans the whole cumulative path (including a dip below zero) with headroom", () => {
+    const ext = computeWaterfallYExtent([
+      wfRow("Start", 50, "total"),
+      wfRow("Down", -90), // running → −40
+      wfRow("Up", 100), // running → 60
+    ]);
+    expect(ext.min).toBeLessThanOrEqual(-40);
+    expect(ext.max).toBeGreaterThanOrEqual(60);
   });
 });

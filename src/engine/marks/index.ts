@@ -8,6 +8,7 @@ import { buildAreaMarks } from "./area";
 import { buildBarMarks } from "./bar";
 import { buildStackedMarks } from "./stacked";
 import { buildPointMarks } from "./point";
+import { buildWaterfallMarks } from "./waterfall";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -32,6 +33,9 @@ export interface PreparedRow {
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
    *  facet_field that splits this row's pane). */
   _facet?: string;
+  /** Waterfall charts: the row's step kind from `columns.kind` — "total"/"skip"/else delta.
+   *  Absent when the column isn't mapped (⇒ every row is a delta). */
+  _kind?: string;
   /** Small-multiples (shared mode): the pane's grid COLUMN index as a String, bound to Plot's
    *  `fx` facet channel by the orchestrator-built marks. */
   _fxCol?: string;
@@ -205,6 +209,7 @@ const REGISTRY: Record<ChartType, MarkBuilder> = {
   // Both point types share one builder; it branches on x-scale (numeric vs categorical point).
   scatter: buildPointMarks,
   dotplot: buildPointMarks,
+  waterfall: buildWaterfallMarks,
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {

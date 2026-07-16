@@ -49,7 +49,11 @@ describe("filterAnnotationsByFacet", () => {
         { y: 3, label: "facet-b", facet: "B" },
       ],
       bands: [{ start: "1", end: "2", label: "band" }],
-      points: [{ x: "1", y: 1, label: "point" }],
+      points: [
+        { x: "1", y: 1, label: "no-facet" },
+        { x: "2", y: 2, label: "facet-a", facet: "A" },
+        { x: "3", y: 3, label: "facet-b", facet: "B" },
+      ],
     },
   } as ChartSpec);
 
@@ -58,22 +62,23 @@ describe("filterAnnotationsByFacet", () => {
     expect(out).toBe(resolved); // identity — byte-identical non-faceted rendering
   });
 
-  it("keeps markers with no facet key, plus markers matching the given facet value", () => {
+  it("keeps markers/points with no facet key, plus those matching the given facet value", () => {
     const out = filterAnnotationsByFacet(resolved, "A");
     expect(out.xAxis.map((m) => m.label)).toEqual(["no-facet", "facet-a"]);
     expect(out.yAxis.map((m) => m.label)).toEqual(["no-facet", "facet-a"]);
+    expect(out.points.map((p) => p.label)).toEqual(["no-facet", "facet-a"]);
   });
 
-  it("a facet value with no matching keyed markers still keeps the unkeyed ones", () => {
+  it("a facet value with no matching keyed markers/points still keeps the unkeyed ones", () => {
     const out = filterAnnotationsByFacet(resolved, "C");
     expect(out.xAxis.map((m) => m.label)).toEqual(["no-facet"]);
     expect(out.yAxis.map((m) => m.label)).toEqual(["no-facet"]);
+    expect(out.points.map((p) => p.label)).toEqual(["no-facet"]);
   });
 
-  it("bands and points pass through unfiltered regardless of facet value", () => {
+  it("bands pass through unfiltered regardless of facet value", () => {
     const out = filterAnnotationsByFacet(resolved, "A");
     expect(out.bands).toEqual(resolved.bands);
-    expect(out.points).toEqual(resolved.points);
   });
 });
 
@@ -492,5 +497,45 @@ describe("yAxis annotation default color", () => {
     const spec = { ...base, annotations: { yAxis: [{ y: 80, label: "threshold", color: "red" }] } } as ChartSpec;
     const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
     expect(markerStroke(svg)).not.toBe(TBL.color.annotationDim);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Point callouts on categorical (bar-type) charts — new capability
+// ---------------------------------------------------------------------------
+
+describe("point callouts on a categorical bar chart", () => {
+  const BASE: ChartSpec = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    columns: { x: "cat", value: "v" },
+    data: "d",
+  } as ChartSpec;
+  const ROWS = [
+    { cat: "A", v: "3" },
+    { cat: "B", v: "7" },
+    { cat: "C", v: "5" },
+  ] as unknown as TidyRow[];
+
+  it("renders a callout at a category (band center) — previously a silent no-op", () => {
+    const spec = { ...BASE, annotations: { points: [{ x: "B", y: 6, label: "HERE" }] } };
+    const { svg } = renderChart(spec, ROWS, { width: 400, height: 300, document });
+    expect(labelTexts(svg)).toContain("HERE");
+  });
+
+  it("drops a callout whose x is not one of the categories", () => {
+    const spec = { ...BASE, annotations: { points: [{ x: "nope", y: 6, label: "GONE" }] } };
+    const { svg } = renderChart(spec, ROWS, { width: 400, height: 300, document });
+    expect(labelTexts(svg)).not.toContain("GONE");
+  });
+
+  it("wraps the label to multiple lines when maxWidth is set", () => {
+    const spec = { ...BASE, annotations: { points: [{ x: "B", y: 6, label: "two words", maxWidth: 12 }] } };
+    const { svg } = renderChart(spec, ROWS, { width: 400, height: 300, document });
+    // wrapToWidth joins lines with "\n"; Plot renders each as a tspan under the text element.
+    const el = Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "").includes("two"));
+    expect(el).toBeTruthy();
+    expect(el!.querySelectorAll("tspan").length).toBeGreaterThan(1);
   });
 });

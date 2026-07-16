@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -131,6 +131,12 @@ export interface PointCallout {
   /** Vertical nudge (px, signed: + = UP) of the label from the point. */
   dy?: number;
   connector?: boolean;
+  /** Wrap the label to at most this width (px), breaking on spaces into multiple lines. Omit ⇒
+   *  the label renders on one line. */
+  maxWidth?: number;
+  /** Small multiples only: scope this callout to the pane whose facet value equals `facet`. Omit
+   *  ⇒ render in every pane. Ignored on a non-faceted chart. */
+  facet?: string;
 }
 
 /** Unified annotation block: vertical reference lines (xAxis), horizontal reference lines (yAxis),
@@ -212,6 +218,12 @@ export interface ColumnMap {
    *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
    *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
   section?: string;
+  /** Waterfall charts: column flagging each step's row TYPE — `total` (an absolute bar anchored
+   *  at zero; an explicit value rebases the running cumulative, a blank value = the auto running
+   *  total), `skip` (no bar — the category slot is kept so facets stay aligned; label the gap
+   *  with a point annotation), or `delta` (the default — a signed step floating on the running
+   *  cumulative). Omit ⇒ every row is a delta. */
+  kind?: string;
 }
 
 /** One option in an inline title selector's dropdown. `label` defaults to `id` when absent.
@@ -372,6 +384,18 @@ export interface ChartSpec {
      *  can sit at the bottom of the stack while keeping its legend position/color. Series omitted
      *  here keep their relative `series_order` position after the listed ones. */
     stackOrder?: string[];
+  };
+  /** Waterfall-chart display options. A waterfall is a vertical, single-series categorical chart
+   *  whose bars float on a running cumulative (see `columns.kind`). Ignored by other chart types. */
+  waterfall?: {
+    /** Semantic bar colors, resolved through the palette. Any subset overrides the defaults
+     *  (increase = blue, decrease = red, total = navy). `category_colors` still wins per bar. */
+    colors?: { increase?: ColorRef; decrease?: ColorRef; total?: ColorRef };
+    /** Draw dotted connector lines linking each bar's end level to the next bar's start level.
+     *  Default true. */
+    connectors?: boolean;
+    /** Connector color; defaults to the dim neutral. */
+    connectorColor?: ColorRef;
   };
   /** Series keys to visually highlight (dimming all others). */
   highlightSeries?: string[];

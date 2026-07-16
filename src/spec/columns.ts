@@ -20,6 +20,8 @@ export interface ResolvedColumns {
   shape: string | null;
   /** Column grouping categories into sections (horizontal bars), or null. */
   section: string | null;
+  /** Column flagging a waterfall step's kind (delta/total/skip), or null. */
+  kind: string | null;
 }
 
 /**
@@ -40,6 +42,7 @@ export function resolveColumns(
   const facet = c.facet ?? null;
   const shape = c.shape != null && c.shape !== "" ? c.shape : null;
   const section = c.section != null && c.section !== "" ? c.section : null;
+  const kind = c.kind != null && c.kind !== "" ? c.kind : null;
 
   let series: string | null;
   if (c.series != null && c.series !== "") {
@@ -50,5 +53,5 @@ export function resolveColumns(
     series = "series";
   }
 
-  return { x, value, series, facet, shape, section };
+  return { x, value, series, facet, shape, section, kind };
 }

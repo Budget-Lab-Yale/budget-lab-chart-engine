@@ -1,0 +1,13 @@
+chartType: waterfall
+title: "Deficit contributions with a mid-run subtotal"
+subtitle: "Billions of dollars"
+xAxisType: categorical
+columns:
+  x: step
+  value: amount
+  kind: kind
+valueLabels:
+  show: true
+source: "The Budget Lab"
+note: "Stress case: an opening total, a mid-run 'Subtotal' (blank-value total that shows the running cumulative WITHOUT resetting it), and a closing total — interleaved increases and decreases. Confirm deltas after the subtotal keep building from the same running level."
+data: data.csv

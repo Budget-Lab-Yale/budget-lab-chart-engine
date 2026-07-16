@@ -1,0 +1,13 @@
+model,step,value,kind
+Original,Initial estimate,2.32,total
+Original,ETR: April to annual,-0.57,
+Original,Updated ETR measure,-0.32,
+Original,Apply ns elasticity,,skip
+Original,Modeling updates,-0.05,
+Original,50% passthrough,-0.69,
+New model,Initial estimate,2.32,total
+New model,ETR: April to annual,-0.57,
+New model,Updated ETR measure,-0.19,
+New model,Apply ns elasticity,-0.25,
+New model,Modeling updates,-0.29,
+New model,50% passthrough,-0.51,
