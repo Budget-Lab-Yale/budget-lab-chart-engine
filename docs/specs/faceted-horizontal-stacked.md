@@ -1,6 +1,6 @@
 # Spec: horizontal stacked bars with small multiples
 
-Status: proposed · Target: minor release (1.4.0) · Author: The Budget Lab / drafted 2026-07-15
+Status: proposed · Target: patch release (1.3.2) · Author: The Budget Lab / drafted 2026-07-15
 
 ## Motivation
 
@@ -104,7 +104,7 @@ with `netDisplay: none` or `normalize` (like the motivating spec) are unaffected
   and stacked bars"; note the pane behavior of `barStack.netDisplay` (dot kept at reduced
   size, text/labels suppressed).
 - Cross-reference from the `barStack.*` table (L185-189) to the small-multiples section.
-- CHANGELOG entry under `### Added — bars`, minor bump to 1.4.0, git tag `v1.4.0`
+- CHANGELOG entry under `### Added — bars`, patch bump to 1.3.2, git tag `v1.3.2`
   (budget-lab-charts consumes by re-pinning the tag).
 
 ## QA

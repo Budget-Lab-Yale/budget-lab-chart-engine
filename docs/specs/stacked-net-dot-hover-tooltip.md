@@ -1,6 +1,6 @@
 # Spec: total-dot stacked charts hover with the band tooltip, not value pills
 
-Status: proposed · Target: minor release (can ride 1.4.0) · Author: The Budget Lab / drafted 2026-07-15
+Status: proposed · Target: patch release (can ride 1.3.2) · Author: The Budget Lab / drafted 2026-07-15
 
 ## Rule
 
@@ -75,8 +75,8 @@ shown — the rule is a house style, not a preference.
 ## Interaction with the faceted-horizontal-stacked spec
 
 `docs/specs/faceted-horizontal-stacked.md` adds horizontal stacked panes. If both land in
-1.4.0, a faceted horizontal diverging stack with `netDisplay: dot` gets: net dot r: 7 in
-panes (that spec) + tooltip-not-pills hover (this spec). Implement this spec's gate on
+1.3.2, a faceted horizontal diverging stack with `netDisplay: dot` gets the reduced-radius net
+dot in panes (that spec) + tooltip-not-pills hover (this spec). Implement this spec's gate on
 `showTotalDot`, not on orientation, and the two compose without coordination.
 
 ## QA
