@@ -1,8 +1,0 @@
-chartType: bar
-title: "legend: false — hide the legend, keep series coloring (feature test)"
-subtitle: Share of total, by decile
-xAxisType: categorical
-columns: { x: category, value: value, series: group }
-legend: false
-data: data.csv
-note: "Confirm: no legend renders; both series colors still applied; hover tooltip still works."
