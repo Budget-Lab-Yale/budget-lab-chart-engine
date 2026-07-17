@@ -257,7 +257,8 @@ export function buildExportSvg(
   if (xAxisTitle) bottomH += 14;
 
   // Chart region. `contentHeight` is the height occupied by the chart/figure body below
-  // `chartTop`; for the single chart it fills the fixed frame, for a figure it can extend it.
+  // `chartTop`; a figure or a single horizontal bar/stacked chart can extend past the fixed
+  // frame, everything else fills it.
   let contentHeight: number;
   if (!isFigure) {
     // Single chart: horizontal bar/stacked charts size from the shared intrinsic-height helper
@@ -347,8 +348,9 @@ export function buildExportSvg(
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
-  // single row of panes) doesn't leave a big band of whitespace below. The single chart keeps the
-  // fixed 4:3 frame.
+  // single row of panes) doesn't leave a big band of whitespace below. Single horizontal bar/
+  // stacked charts do the same (their row count can outgrow the 750 frame); every other single
+  // chart keeps the fixed 4:3 frame.
   const H_eff = isFigure || isSingleHorizontalBar ? Math.round(chartTop + contentHeight + bottomH) : H;
   if (H_eff !== H) {
     root.setAttribute("height", String(H_eff));
