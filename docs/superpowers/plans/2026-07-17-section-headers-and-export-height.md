@@ -555,7 +555,168 @@ git commit -m "fix: section-aware hover widen so highlight never spills into sec
 
 ---
 
-### Task 4: Full verification + live/PNG visual proof
+### Task 4: Shared figure pane-height helper — fix waterfall export squash + grow horizontal-stacked figures (Fix 2 extension)
+
+**Files:**
+- Modify: `src/engine/figure.ts` (add `figurePaneHeight` export near `horizontalBarChartHeight`)
+- Modify: `src/engine/render-live.ts:1906-1921` (mountFigure pane-height + horizontal-bar gate)
+- Modify: `src/embed/export-png.ts:67-73` (delete local pane-height constants), `:284-303`, `:312-333` (figure branch uses the helper; broaden the horizontal-bar gate to include stacked)
+- Test: `test/figure-height.test.ts` (extend)
+
+**Interfaces:**
+- Produces: `figurePaneHeight(spec: ChartSpec): number | undefined` in `figure.ts` — the fixed per-pane px height for a small-multiples figure by chart type; **`undefined` for horizontal `bar`/`stacked`** (those grow with row count via `renderFigure`'s auto-height when `opts.height` is undefined). Values: waterfall → 420, dotplot/bar/stacked (non-horizontal) → 320, everything else → 240. This is the single source of truth shared by the live figure mount and the PNG export.
+- Consumes: existing `renderFigure` auto-height for horizontal bar/stacked (`figure.ts:288-330`, which already treats stacked as horizontal-bar for gutter/height via `isHorizontalBar`/`isHorizontalStacked`).
+
+**Why:** `render-live.ts:1914` sizes waterfall figure panes at 420px but the export (`export-png.ts:70-71`) omitted that case, exporting them at 240px (squashed). And horizontal *stacked* figures don't grow on either path (only horizontal *bar* does), though `renderFigure` already computes a correct grown height for them. One shared helper fixes both and stops the two paths drifting.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `test/figure-height.test.ts`:
+
+```ts
+import { figurePaneHeight } from "../src/engine/figure";
+
+describe("figurePaneHeight", () => {
+  const base = { columns: { x: "category", value: "value", facet: "panel" }, xAxisType: "categorical", data: "x" };
+  it("waterfall figure panes are 420 (matches the live mount, not the old 240)", () => {
+    expect(figurePaneHeight({ ...base, chartType: "waterfall" } as any)).toBe(420);
+  });
+  it("dotplot/bar/stacked (vertical) figure panes are 320", () => {
+    expect(figurePaneHeight({ ...base, chartType: "dotplot" } as any)).toBe(320);
+    expect(figurePaneHeight({ ...base, chartType: "bar" } as any)).toBe(320);
+    expect(figurePaneHeight({ ...base, chartType: "stacked" } as any)).toBe(320);
+  });
+  it("line/scatter/area figure panes are 240", () => {
+    expect(figurePaneHeight({ ...base, chartType: "line" } as any)).toBe(240);
+    expect(figurePaneHeight({ ...base, chartType: "scatter" } as any)).toBe(240);
+  });
+  it("horizontal bar AND horizontal stacked figures grow (undefined ⇒ auto-height)", () => {
+    expect(figurePaneHeight({ ...base, chartType: "bar", orientation: "horizontal" } as any)).toBeUndefined();
+    expect(figurePaneHeight({ ...base, chartType: "stacked", orientation: "horizontal" } as any)).toBeUndefined();
+  });
+});
+```
+
+Also add an export-integration test proving the waterfall figure pane grows and a horizontal-stacked figure grows. Build a synthetic small-multiples spec (facet column, ≥2 panes) for each and assert the rendered pane height:
+
+```ts
+import { renderFigure } from "../src/engine/index";
+
+it("waterfall figure export renders 420px panes, not 240 (regression: export drift)", () => {
+  const spec = {
+    chartType: "waterfall",
+    columns: { x: "step", value: "value", facet: "model" },
+    xAxisType: "categorical",
+    small_multiples: { facet_field: "model" },
+    data: "x",
+  } as any;
+  const rows: TidyRow[] = [];
+  for (const m of ["Original", "New"]) {
+    ["Start", "Step 1", "Step 2", "End"].forEach((s, i) =>
+      rows.push({ step: s, model: m, value: String(2 - i * 0.4) } as TidyRow),
+    );
+  }
+  const fig = renderFigure(spec, rows, { gridWidth: 920, gridGap: 20, height: figurePaneHeight(spec), columns: 2 });
+  const paneH = Number((fig.panes[0]!.svg as SVGSVGElement).getAttribute("height"));
+  expect(paneH).toBe(420);
+});
+
+it("horizontal stacked figure grows its pane height with row count", () => {
+  const spec = {
+    chartType: "stacked",
+    orientation: "horizontal",
+    columns: { x: "category", value: "value", series: "series", facet: "panel" },
+    xAxisType: "categorical",
+    small_multiples: { facet_field: "panel" },
+    data: "x",
+  } as any;
+  const rows: TidyRow[] = [];
+  for (const p of ["P1", "P2"]) {
+    for (let c = 0; c < 20; c++) {
+      for (const s of ["A", "B"]) rows.push({ category: `C${c}`, series: s, value: "1", panel: p } as TidyRow);
+    }
+  }
+  // undefined height ⇒ renderFigure auto-grows for horizontal bar/stacked.
+  const fig = renderFigure(spec, rows, { gridWidth: 920, gridGap: 20, height: figurePaneHeight(spec), columns: 2 });
+  const paneH = Number((fig.panes[0]!.svg as SVGSVGElement).getAttribute("height"));
+  expect(paneH).toBeGreaterThan(420); // 20 categories ⇒ taller than any fixed pane height
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `npx vitest run test/figure-height.test.ts -t "figurePaneHeight"` and `-t "waterfall figure export"` and `-t "horizontal stacked figure grows"`.
+Expected: FAIL — `figurePaneHeight` not exported; and (before the caller change) the horizontal-stacked figure comes back at the fixed 320, not grown.
+
+- [ ] **Step 3: Add `figurePaneHeight` to `figure.ts`**
+
+Insert after `horizontalBarChartHeight`:
+
+```ts
+/** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of
+ *  truth shared by the live figure mount (render-live) and the PNG export (export-png), so the
+ *  two can't drift (the export previously omitted waterfall's taller pane, squashing it to 240).
+ *  Returns undefined for horizontal bar/stacked figures, whose height GROWS with row count:
+ *  renderFigure computes it from horizontalBarHeight when opts.height is undefined. */
+export function figurePaneHeight(spec: ChartSpec): number | undefined {
+  const horizontal = spec.orientation === "horizontal";
+  if (horizontal && (spec.chartType === "bar" || spec.chartType === "stacked")) return undefined;
+  if (spec.chartType === "waterfall") return 420;
+  if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked") return 320;
+  return 240;
+}
+```
+
+- [ ] **Step 4: Use the helper in the live figure mount (`render-live.ts`)**
+
+At `render-live.ts:1913-1921`, replace the local `TALL_PANE_TYPES`/`paneHeight`/`figHeight` height computation and broaden the horizontal gate to include stacked (keep `paneMinWidth` at `:1910` unchanged — that's a width heuristic):
+
+```ts
+const isHorizontalBarFig =
+  (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
+const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
+const figHeight = figurePaneHeight(spec); // undefined for horizontal bar/stacked ⇒ auto-grow
+```
+
+Add `figurePaneHeight` to the existing `./figure` import. **Then grep every use of `isHorizontalBarFig` in this function and confirm broadening it to include horizontal stacked is correct at each site** (it drives pane-title offset + the horizontal-bar height read-back — both apply equally to horizontal stacked, which shares the left-gutter fy topology). Report each site you checked.
+
+- [ ] **Step 5: Use the helper in the PNG export (`export-png.ts`)**
+
+Delete the local constants `PANE_CHART_H`, `TALL_PANE_CHART_H`, `TALL_PANE_TYPES` (`export-png.ts:67-71`). Broaden the figure horizontal gate (`:284`) and source the pane height from the helper (`:287`):
+
+```ts
+const isHorizontalBarFig =
+  (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
+```
+
+```ts
+const paneChartH = figurePaneHeight(spec); // undefined ⇒ grows (horizontal bar/stacked)
+```
+
+Since `figurePaneHeight` already returns `undefined` for horizontal bar/stacked, simplify the two `renderFigure` calls (`:302-303`) to pass `height: paneChartH` directly (drop the `isHorizontalBarFig ? undefined : paneChartH` ternary). The effPaneH read-back (`:312-321`), `useGridW` (`:294`/`:300`), and `titleDx` (`:325-327`) stay gated on the now-broadened `isHorizontalBarFig`. Add `figurePaneHeight` to the `../engine/figure.js` import. Confirm `paneChartH`'s remaining uses tolerate `undefined` (the `?? paneChartH` fallbacks at `:321`/`:302` and `effPaneH` read-back already handle the horizontal-bar undefined case).
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `npx vitest run test/figure-height.test.ts`
+Expected: PASS (all figurePaneHeight + both growth integration tests).
+
+- [ ] **Step 7: Regenerate any affected figure goldens and eyeball**
+
+Growing horizontal-stacked figures and fixing waterfall panes changes those goldens' heights. Run `npx vitest run -u` scoped to golden/figure tests, then `git diff --stat test/**/*.golden.svg` — confirm ONLY waterfall-figure and horizontal-stacked-figure heights changed (and their dependent layout), and that no unrelated (vertical bar, line, single-chart) golden moved. If an unrelated golden changes, stop and report.
+
+- [ ] **Step 8: Full suite, typecheck, commit**
+
+Run: `npm test && npx tsc --noEmit`
+Expected: PASS.
+
+```bash
+git add src/engine/figure.ts src/engine/render-live.ts src/embed/export-png.ts test/figure-height.test.ts test/**/*.golden.svg
+git commit -m "fix: unify figure pane-height (fixes waterfall export squash; grows horizontal-stacked figures)"
+```
+
+---
+
+### Task 5: Full verification + live/PNG visual proof
 
 **Files:** none (verification only).
 
