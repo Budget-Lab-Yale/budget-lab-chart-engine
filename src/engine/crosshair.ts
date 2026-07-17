@@ -702,12 +702,18 @@ export function widenBandsToMidpoints(
   bands: Array<{ min: number; max: number }>,
   lo: number,
   hi: number,
+  boundaryAfter?: boolean[],
 ): Array<{ min: number; max: number }> {
   if (!bands.length) return [];
   const centers = bands.map((b) => (b.min + b.max) / 2);
   return centers.map((c, i) => {
-    const prev = i > 0 ? centers[i - 1]! : null;
-    const next = i < centers.length - 1 ? centers[i + 1]! : null;
+    // A section boundary BEFORE band i (boundaryAfter[i-1]) or AFTER it (boundaryAfter[i]) removes
+    // that neighbor for widening, so the edge falls back to a symmetric self half-step and never
+    // crosses the spacer/header gap.
+    const hasPrev = i > 0 && !(boundaryAfter?.[i - 1]);
+    const hasNext = i < centers.length - 1 && !(boundaryAfter?.[i]);
+    const prev = hasPrev ? centers[i - 1]! : null;
+    const next = hasNext ? centers[i + 1]! : null;
     // Outer edges extend half the nearest gap past the bar center (symmetric with the
     // inner midpoints); a single band falls back to its own half-width. Clamp to [lo, hi]
     // so the highlight never exceeds the plot area.
@@ -953,29 +959,42 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
  *   in fy-domain (translate) order to `opts.categories` — the analog of the vertical
  *   fx-faceted branch in readCategoryBands.
  */
-function readCategoryBandsH(svgEl: SVGSVGElement, opts: BandCrosshairOptions): CategoryBandH[] {
+function readCategoryBandsH(
+  svgEl: SVGSVGElement,
+  opts: BandCrosshairOptions,
+): { bands: CategoryBandH[]; boundaryAfter: boolean[] } {
   const { isFaceted, categories = [] } = opts;
 
   if (isFaceted) {
     // Grouped horizontal: Plot wraps each fy category in a <g translate(0,ty)> inside the
-    // bar mark group. Read each facet group's absolute y-range from its rects.
+    // bar mark group. Read each facet group's absolute y-range from its rects. Sectioned axes
+    // also emit an empty fy facet per section spacer slot (no <rect>); a real band immediately
+    // followed by one of these is flagged in `boundaryAfter` so the hover highlight clamps at
+    // the spacer instead of widening across it into the section header.
     const groups = Array.from(svgEl.querySelectorAll<SVGGElement>('g[aria-label="bar"] > g'));
     if (groups.length) {
-      const parsed: Array<{ y: number; g: SVGGElement }> = [];
+      const parsed: Array<{ y: number; g: SVGGElement; hasRect: boolean }> = [];
       for (const g of groups) {
-        // Skip empty facet groups (sectioned axes emit an empty fy facet per section spacer slot);
-        // they carry no bars and would otherwise shift the facet→category index mapping.
-        if (!g.querySelector("rect")) continue;
         const transform = g.getAttribute("transform") ?? "";
         const m = /translate\(\s*-?[\d.]+\s*[ ,]\s*([\d.+-]+)/.exec(transform);
         const ty = m ? parseFloat(m[1]!) : 0;
-        parsed.push({ y: ty, g });
+        parsed.push({ y: ty, g, hasRect: !!g.querySelector("rect") });
       }
       parsed.sort((a, b) => a.y - b.y);
-      return parsed.map((p, i) => {
-        const cat = categories[i] ?? String(i);
+      const bands: CategoryBandH[] = [];
+      const boundaryAfter: boolean[] = [];
+      let sawEmptySinceLastReal = false;
+      let ci = 0;
+      for (const p of parsed) {
+        if (!p.hasRect) {
+          if (bands.length) sawEmptySinceLastReal = true; // spacer block AFTER a real band
+          continue;
+        }
+        if (sawEmptySinceLastReal && bands.length) boundaryAfter[bands.length - 1] = true;
+        sawEmptySinceLastReal = false;
+        const cat = categories[ci] ?? String(ci);
+        ci++;
         const rects = Array.from(p.g.querySelectorAll<SVGRectElement>("rect"));
-        if (!rects.length) return { category: cat, yMin: p.y, yMax: p.y + 1 };
         let yMin = Infinity;
         let yMax = -Infinity;
         for (const rect of rects) {
@@ -984,14 +1003,16 @@ function readCategoryBandsH(svgEl: SVGSVGElement, opts: BandCrosshairOptions): C
           if (ry < yMin) yMin = ry;
           if (ry + rh > yMax) yMax = ry + rh;
         }
-        return { category: cat, yMin, yMax };
-      });
+        bands.push({ category: cat, yMin, yMax });
+        boundaryAfter.push(false);
+      }
+      return { bands, boundaryAfter };
     }
     // Fall through to the single-band path if no facet groups were found (defensive).
   }
 
   const allRects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'));
-  if (!allRects.length) return [];
+  if (!allRects.length) return { bands: [], boundaryAfter: [] };
 
   // Group rects by rounded y-coordinate (each horizontal category row has a distinct y).
   const yToBand = new Map<number, { yMin: number; yMax: number }>();
@@ -1010,11 +1031,12 @@ function readCategoryBandsH(svgEl: SVGSVGElement, opts: BandCrosshairOptions): C
 
   // Sort by y position (top to bottom) to match category declaration order.
   const sortedKeys = Array.from(yToBand.keys()).sort((a, b) => a - b);
-  return sortedKeys.map((key, i) => {
+  const bands = sortedKeys.map((key, i) => {
     const band = yToBand.get(key)!;
     const cat = categories[i] ?? String(i);
     return { category: cat, yMin: band.yMin, yMax: band.yMax };
   });
+  return { bands, boundaryAfter: bands.map(() => false) };
 }
 
 /**
@@ -1122,11 +1144,12 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       // between adjacent rows (clamped to the plot's vertical edges).
       const scaleY = H / rect.height;
       const svgY = (evt.clientY - rect.top) * scaleY;
-      const raw = readCategoryBandsH(svgEl, opts);
+      const { bands: raw, boundaryAfter } = readCategoryBandsH(svgEl, opts);
       const wide = widenBandsToMidpoints(
         raw.map((b) => ({ min: b.yMin, max: b.yMax })),
         mt,
         H - mb,
+        boundaryAfter,
       );
       const bands: CategoryBandH[] = raw.map((b, i) => ({
         category: b.category,
@@ -1959,7 +1982,7 @@ export function attachSecondaryBandCursor(
       // Horizontal bars: categories on Y. Shade the category ROW (a full-width strip widened to
       // the band midpoints) and place a value pill at each bar's tip (to the right of a positive
       // bar's end, left of a negative one). No x-axis category highlight (categories are on Y).
-      const rawH = readCategoryBandsH(svgEl, {
+      const { bands: rawH } = readCategoryBandsH(svgEl, {
         rows: opts.rows,
         isFaceted: opts.isFaceted,
         categories: opts.categories,
