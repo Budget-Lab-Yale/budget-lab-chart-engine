@@ -6,7 +6,7 @@ import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from ".
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
-import { sharedColumnWidths, horizontalBarChartHeight } from "../engine/figure.js";
+import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
 import {
@@ -63,12 +63,8 @@ function drawLines(
   return drawLinesDoc(document, root, lines, x, firstBaseline, lineHeight, opt);
 }
 
-// Small-multiples figure layout tokens.
-const PANE_CHART_H = 240; // per-pane mini-chart height — matches the live PANE_HEIGHT so the
-                          // exported panes keep the same (squarer) proportion as on screen.
-// Dot-plot AND bar/stacked panes render taller (matches the live render-live TALL_PANE_TYPES).
-const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
-const TALL_PANE_CHART_H = 320;
+// Small-multiples figure layout tokens. Per-pane chart height comes from figurePaneHeight
+// (engine/figure.ts) — the single source of truth shared with the live figure mount.
 const PANE_TITLE_H = 18; // per-pane title band height
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
@@ -284,10 +280,12 @@ export function buildExportSvg(
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
-    const paneChartH = TALL_PANE_TYPES.has(spec.chartType) ? TALL_PANE_CHART_H : PANE_CHART_H;
-    // Horizontal bar figures grow with their row count — let renderFigure compute the pane height
-    // (pass undefined) and read it back from the rendered SVG for the layout math below.
-    const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+    // Horizontal bar/stacked figures grow with their row count — figurePaneHeight returns
+    // undefined for them, so renderFigure computes the height and we read it back from the
+    // rendered SVG for the layout math below.
+    const paneChartH = figurePaneHeight(spec);
+    const isHorizontalBarFig =
+      (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
@@ -299,8 +297,8 @@ export function buildExportSvg(
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
     const useGridW = isShared || isHorizontalBarFig;
     const fig = useGridW
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) })
-      : renderFigure(spec, rows, { width: equalPaneW, height: isHorizontalBarFig ? undefined : paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) })
+      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
     // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
     const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
@@ -313,12 +311,14 @@ export function buildExportSvg(
       colX.push(acc);
       acc += colWidth(c) + COL_GAP;
     }
-    // Effective pane height: the renderFigure-computed height for horizontal bars (read from the
-    // rendered SVG), else the fixed pane height.
+    // Effective pane height: the renderFigure-computed height for horizontal bar/stacked (read
+    // from the rendered SVG — renderFigure always sizes these via horizontalBarHeight), else the
+    // fixed pane height from figurePaneHeight. The trailing `?? 240` is a type-level floor only;
+    // it never fires in practice (both branches always yield a real number).
     const effPaneH =
-      isHorizontalBarFig && fig.panes[0]?.svg
-        ? Number((fig.panes[0].svg as SVGSVGElement).getAttribute("height")) || paneChartH
-        : paneChartH;
+      (isHorizontalBarFig && fig.panes[0]?.svg
+        ? Number((fig.panes[0].svg as SVGSVGElement).getAttribute("height")) || undefined
+        : paneChartH) ?? 240;
     const gridTop = chartTop;
     fig.panes.forEach((pane, i) => {
       const col = i % cols;

@@ -19,7 +19,7 @@ import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { renderFigure, horizontalBarChartHeight } from "./figure.js";
+import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
@@ -1164,8 +1164,6 @@ const HBAR_PANE_MIN_WIDTH = 240;
 // Width reserved (once) for the shared category-label gutter on the leftmost horizontal pane
 // when computing the no-stack natural width.
 const HBAR_GUTTER_RESERVE = 200;
-// Per-pane mini-chart height (both modes — each pane is an independent mini-SVG).
-const PANE_HEIGHT = 240;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
@@ -1908,17 +1906,19 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // reflow floor (fewer, roomier columns) than a plain bar pane.
   const isWaterfallFig = spec.chartType === "waterfall";
   const paneMinWidth = isPointFigure ? 160 : isWaterfallFig ? 320 : PANE_MIN_WIDTH;
-  // Dot-plot AND bar/stacked panes render ~33% taller (320) so the marks have room to read;
-  // waterfall panes taller still (420) to clear rotated step labels; line/scatter keep the default.
-  const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
-  const paneHeight = isWaterfallFig ? 420 : TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
-  // Horizontal bar figures grow their height with the row count — let renderFigure compute it
-  // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
-  const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+  // Horizontal bar AND horizontal stacked figures grow their height with the row count — let
+  // renderFigure compute it (passing undefined) rather than forcing the fixed pane height. Also
+  // drives the pane-title offset (both share the left-gutter fy topology — see figure.ts).
+  const isHorizontalBarFig =
+    (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
   // chart), not the floating tooltip. Used to give a lone pane that treatment (see `coordinated`).
   const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
-  const figHeight = isHorizontalBarFig ? undefined : paneHeight;
+  // Dot-plot AND bar/stacked (vertical) panes render ~33% taller (320); waterfall panes taller
+  // still (420) to clear rotated step labels; line/scatter keep the default (240); horizontal
+  // bar/stacked panes grow with row count (undefined). Single source of truth shared with the
+  // PNG export (export-png.ts) so the two paths can't drift.
+  const figHeight = figurePaneHeight(spec);
 
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven

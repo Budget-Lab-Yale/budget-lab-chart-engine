@@ -99,6 +99,19 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
   });
 }
 
+/** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of
+ *  truth shared by the live figure mount (render-live) and the PNG export (export-png), so the
+ *  two can't drift (the export previously omitted waterfall's taller pane, squashing it to 240).
+ *  Returns undefined for horizontal bar/stacked figures, whose height GROWS with row count:
+ *  renderFigure computes it from horizontalBarHeight when opts.height is undefined. */
+export function figurePaneHeight(spec: ChartSpec): number | undefined {
+  const horizontal = spec.orientation === "horizontal";
+  if (horizontal && (spec.chartType === "bar" || spec.chartType === "stacked")) return undefined;
+  if (spec.chartType === "waterfall") return 420;
+  if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked") return 320;
+  return 240;
+}
+
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
  *  — i.e. the number of section spacer slots a sectioned horizontal axis inserts. */
 function countSections(
