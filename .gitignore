@@ -17,3 +17,5 @@ examples/**/*.html
 # snapshot baselines and diffs — baselines live in the archive repo, not here
 examples/**/baseline*.png
 **/*.diff.png
+# engine-fix spec: contains unreleased Budget Lab tariff-model data — never commit
+docs/specs/ENGINE-FIX-SPEC-section-headers.md
