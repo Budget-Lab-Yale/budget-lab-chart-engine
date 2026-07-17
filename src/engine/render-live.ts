@@ -72,7 +72,7 @@ const FIXED_CHART_HEIGHT = 400;
 
 /** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
  *  band slots (grouped → nSeries bars per category; stacked/single → one), plus section spacer
- *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarHeight`,
+ *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
