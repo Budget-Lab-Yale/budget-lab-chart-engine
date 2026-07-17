@@ -76,6 +76,7 @@ export function renderTableHtml(
       const cornerTh = doc.createElement("th");
       cornerTh.rowSpan = tierCount;
       cornerTh.className = "tbl-table-stub-header";
+      cornerTh.classList.add("is-header-bottom");
       appendRichHtml(cornerTh, model.stubHeader, doc);
       tr.appendChild(cornerTh);
     }
@@ -86,6 +87,7 @@ export function renderTableHtml(
       th.scope = "col";
       th.colSpan = hCell.colSpan;
       th.rowSpan = hCell.rowSpan;
+      if (tierIdx + hCell.rowSpan === tierCount) th.classList.add("is-header-bottom");
       // A leaf header over a text column left-aligns to match its (left-aligned) cells.
       const leafForCell = hCell.leafKey != null ? leaves.find((l) => l.key === hCell.leafKey) : undefined;
       if (leafForCell?.isText) th.classList.add("is-text");

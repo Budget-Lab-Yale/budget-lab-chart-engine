@@ -734,11 +734,9 @@ body {
   white-space: nowrap;
 }
 
-/* Header→body separator (bug #4): a single continuous rule under the WHOLE header block,
-   including the stub corner. Applied to the bottom-tier <th> AND the rowspanning corner so it
-   does not break over the stub in multi-tier tables. */
-.tbl-table thead tr:last-child th,
-.tbl-table thead th.tbl-table-stub-header {
+/* Header→body separator: every header cell whose bottom edge is the header base, so the rule
+   stays continuous across rowspanning cells (stub corner, blank-group data columns). */
+.tbl-table thead th.is-header-bottom {
   border-bottom: 1px solid var(--tbl-axis-stroke);
 }
 

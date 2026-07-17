@@ -65,9 +65,11 @@ describe("CHART_CSS — table rules", () => {
     expect(CHART_CSS).toMatch(/th\.tbl-table-stub\.is-emphasis\s*\{[^}]*font-weight:\s*var\(--tw-bold\)/);
   });
 
-  it("puts the header→body bottom rule on the bottom-tier th AND the stub corner (bug #4)", () => {
+  it("puts the header→body bottom rule on every header cell whose bottom edge is the header base (is-header-bottom)", () => {
+    // Generalizes the old one-off stub-corner patch (bug #4) into a single predicate-driven
+    // class so the rule also reaches rowspanning blank-group data columns.
     expect(CHART_CSS).toMatch(
-      /thead tr:last-child th,\s*\.tbl-table thead th\.tbl-table-stub-header\s*\{[^}]*border-bottom/,
+      /\.tbl-table thead th\.is-header-bottom\s*\{[^}]*border-bottom/,
     );
   });
 
