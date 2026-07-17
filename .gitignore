@@ -19,3 +19,5 @@ examples/**/baseline*.png
 **/*.diff.png
 # engine-fix spec: contains unreleased Budget Lab tariff-model data — never commit
 docs/specs/ENGINE-FIX-SPEC-section-headers.md
+# SDD scratch (briefs, ledger, review packages)
+.superpowers/
