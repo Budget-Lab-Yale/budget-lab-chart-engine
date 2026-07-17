@@ -6,7 +6,7 @@ import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from ".
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult } from "../engine/index.js";
-import { sharedColumnWidths } from "../engine/figure.js";
+import { sharedColumnWidths, horizontalBarChartHeight } from "../engine/figure.js";
 import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
 import {
@@ -189,6 +189,8 @@ export function buildExportSvg(
   opts: { selections?: Record<string, string> } = {},
 ): SVGSVGElement {
   const isFigure = spec.small_multiples != null;
+  const isSingleHorizontalBar =
+    !isFigure && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
 
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
@@ -258,8 +260,11 @@ export function buildExportSvg(
   // `chartTop`; for the single chart it fills the fixed frame, for a figure it can extend it.
   let contentHeight: number;
   if (!isFigure) {
-    // Single chart — unchanged: fills the height left after the chrome inside the 750 frame.
-    contentHeight = Math.max(160, H - chartTop - bottomH);
+    // Single chart: horizontal bar/stacked charts size from the shared intrinsic-height helper
+    // (growing the export frame with row count); everything else fills the fixed 750 frame.
+    contentHeight = isSingleHorizontalBar
+      ? horizontalBarChartHeight(spec, rows)
+      : Math.max(160, H - chartTop - bottomH);
     const { svg: chartSvg } = renderChart(spec, rows, {
       width: INNER_W,
       height: contentHeight,
@@ -344,7 +349,7 @@ export function buildExportSvg(
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
   // single row of panes) doesn't leave a big band of whitespace below. The single chart keeps the
   // fixed 4:3 frame.
-  const H_eff = isFigure ? Math.round(chartTop + contentHeight + bottomH) : H;
+  const H_eff = isFigure || isSingleHorizontalBar ? Math.round(chartTop + contentHeight + bottomH) : H;
   if (H_eff !== H) {
     root.setAttribute("height", String(H_eff));
     bgRect.setAttribute("height", String(H_eff));

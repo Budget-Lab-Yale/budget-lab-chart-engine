@@ -19,6 +19,10 @@ import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABE
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
+// TEMPORARY (Task 1 of 3): Task 2 replaces this with an imported constant (value 2) from ./axes
+// and deletes this line. Left inline here so this task's tests pass in isolation.
+const SECTION_SPACER_SLOTS = 1;
+
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
 // without a module cycle through figure.ts).
 export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
@@ -64,6 +68,39 @@ export function horizontalBarHeight(opts: {
   const slotPx = Math.max(catBarPx, labelPx);
   const inner = (nCategories + Math.max(0, nSpacers)) * slotPx;
   return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx));
+}
+
+/** Intrinsic px height of a SINGLE horizontal bar/stacked chart. Single source of truth shared by
+ *  the live mount (computeChartHeight) and the PNG export (buildExportSvg), so per-row height,
+ *  section-spacer reservation and the export frame all agree. Caller must confirm the chart is a
+ *  horizontal bar/stacked before calling. */
+export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+  const cols = resolveColumns(spec, rows);
+  const categories = orderedCategories(rows, cols.x, spec);
+  const nCats = Math.max(1, categories.length);
+  const series = new Set<string>();
+  for (const r of rows) {
+    const s = cols.series ? (r[cols.series] as string) : "";
+    if (s) series.add(s);
+  }
+  const nSeries =
+    spec.series_order && spec.series_order.length ? spec.series_order.length : Math.max(1, series.size);
+  const grouped = spec.chartType === "bar" && nSeries > 1;
+  const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, categories) : 0;
+  const nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
+  const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX });
+  const maxLabelLines = categories.reduce(
+    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
+    1,
+  );
+  return horizontalBarHeight({
+    nCategories: nCats,
+    nSeries,
+    grouped,
+    nSpacers,
+    maxLabelLines,
+    extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
+  });
 }
 
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)

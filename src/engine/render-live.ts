@@ -19,8 +19,8 @@ import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figure.js";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
+import { renderFigure, horizontalBarChartHeight } from "./figure.js";
+import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import { resolveColor } from "./palette.js";
@@ -80,58 +80,7 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }
-  const cols = resolveColumns(spec, rows);
-  const catList: string[] = [];
-  const catSeen = new Set<string>();
-  const series = new Set<string>();
-  const sectionOf = new Map<string, string>();
-  for (const r of rows) {
-    const cat = r[cols.x];
-    if (typeof cat === "string" && cat !== "" && !catSeen.has(cat)) {
-      catSeen.add(cat);
-      catList.push(cat);
-    }
-    const s = cols.series ? r[cols.series] : null;
-    if (typeof s === "string" && s !== "") series.add(s);
-    if (cols.section && typeof cat === "string" && cat !== "" && !sectionOf.has(cat)) {
-      const sec = r[cols.section];
-      if (typeof sec === "string") sectionOf.set(cat, sec);
-    }
-  }
-  const nCats = Math.max(1, catList.length);
-  // series_order, when present, is the authoritative series count (it filters/orders).
-  const nSeries =
-    spec.series_order && spec.series_order.length
-      ? spec.series_order.length
-      : Math.max(1, series.size);
-  const grouped = spec.chartType === "bar" && nSeries > 1;
-  // Section count (distinct sections present, filtered by section_order when set). The first
-  // section has no spacer slot (its header sits in the top margin), so spacers = sections − 1.
-  let nSections = 0;
-  if (cols.section) {
-    const present = new Set(catList.map((c) => sectionOf.get(c) ?? ""));
-    nSections =
-      spec.section_order && spec.section_order.length
-        ? spec.section_order.filter((s) => present.has(s)).length
-        : present.size;
-  }
-  const nSpacers = Math.max(0, nSections - 1);
-  // Tallest wrapped category label at the gutter width. Standalone horizontal bars now render
-  // their category labels at the (larger) faceted size (task 17), so size the gutter + wrap
-  // estimate at that font — mirrors figure.ts's shared-gutter computation for faceted panes.
-  const gutter = horizontalLeftGutter(catList, { fontSize: FACETED_CAT_LABEL_PX });
-  const maxLabelLines = catList.reduce(
-    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
-    1,
-  );
-  return horizontalBarHeight({
-    nCategories: nCats,
-    nSeries,
-    grouped,
-    nSpacers,
-    maxLabelLines,
-    extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
-  });
+  return horizontalBarChartHeight(spec, rows);
 }
 
 // Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px
