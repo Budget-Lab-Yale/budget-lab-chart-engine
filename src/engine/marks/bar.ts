@@ -21,9 +21,9 @@ import {
   tblBandXAxis,
   tblBandYAxis,
   tblFacetGroupYAxis,
-  tblSectionHeaderYAxis,
   tblSectionTopHeader,
-  sectionSpacer,
+  sectionSpacerSlot,
+  SECTION_SPACER_SLOTS,
   isSectionSpacer,
   horizontalLeftGutter,
   FACETED_CAT_LABEL_PX,
@@ -97,12 +97,13 @@ export function buildBarMarks(
   }
 
   // Sectioned horizontal category axis (columns.section): order the categories grouped by section.
-  // Sections AFTER the first get an empty spacer band slot above them carrying a bold header; the
-  // FIRST section has no spacer (its header sits in the top margin) so the figure doesn't open with
-  // a big empty gap. Only for horizontal; vertical / unsectioned output is unchanged.
+  // Sections AFTER the first get a block of empty spacer band slots above them (SECTION_SPACER_SLOTS
+  // each) reserving symmetric whitespace for a bold header; the FIRST section has no spacer (its
+  // header sits in the top margin) so the figure doesn't open with a big empty gap. Only for
+  // horizontal; vertical / unsectioned output is unchanged.
   const sectioned = horizontal && data.some((r) => r._section != null);
   let bandDomain = categories;
-  const sectionHeaders: { value: string; label: string }[] = [];
+  const sectionHeaders: { category: string; label: string }[] = [];
   let topSectionHeader: { category: string; label: string } | null = null;
   if (sectioned) {
     // category → its section (first row wins; categories belong to one section).
@@ -135,9 +136,8 @@ export function buildBarMarks(
         topSectionHeader = { category: catsInSection[0] as string, label: labels[s] ?? s };
         firstRendered = true;
       } else {
-        const spacer = sectionSpacer(s);
-        domain.push(spacer);
-        sectionHeaders.push({ value: spacer, label: labels[s] ?? s });
+        for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
+        sectionHeaders.push({ category: catsInSection[0] as string, label: labels[s] ?? s });
       }
       for (const cat of catsInSection) domain.push(cat);
     }
@@ -228,7 +228,7 @@ export function buildBarMarks(
       ? []
       : [
           ...tblFacetGroupYAxis(categories, gutter, catFont),
-          ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
+          ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
           ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
         ],
     marginLeft: gutter,
@@ -288,7 +288,7 @@ export function buildBarMarks(
     // Sectioned horizontal (any series count): route onto the SAME fy topology the multi-series
     // sectioned path uses (below, ~L310): fy = category band (incl. spacer slots), inner y = a
     // single-value series band, x = value. An UNfaceted single-series mark that still carries
-    // fy-bound header marks (tblSectionHeaderYAxis/tblSectionTopHeader, pushed below) makes Plot
+    // fy-bound header marks (tblSectionTopHeader, pushed below) makes Plot
     // auto-facet the WHOLE plot from those header marks alone — a spurious fy domain derived from
     // the spacer sentinels + first category (2-3 phantom facets), which starves every real bar's
     // height and prints the raw " section:" sentinel as Plot's default fy-axis text (the
@@ -345,7 +345,7 @@ export function buildBarMarks(
           ? []
           : [
               ...tblBandYAxis(categories, gutter, catFont),
-              ...tblSectionHeaderYAxis(sectionHeaders, gutter, catFont, SECTION_HEADER_GAP),
+              ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
               ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
             ],
         marginLeft: gutter,

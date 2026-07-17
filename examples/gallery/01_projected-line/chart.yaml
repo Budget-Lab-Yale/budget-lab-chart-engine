@@ -1,8 +1,0 @@
-chartType: line
-title: "projected_field — dashed line runs (feature test)"
-subtitle: Index value, by series
-xAxisType: temporal
-series_order: ["Series A", "Series B", "Series C"]
-projected_field: projected
-data: data.csv
-note: "Confirm: dashed segments for projected windows and tails; line continuous at boundaries; one legend entry per series; hover works across boundaries."

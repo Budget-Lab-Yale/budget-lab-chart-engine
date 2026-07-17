@@ -290,3 +290,65 @@ describe("renderTableHtml — whole-row emphasis (Task 3)", () => {
     expect(stubTh.classList.contains("is-emphasis")).toBe(false);
   });
 });
+
+describe("renderTableHtml — header separator under blank-group column (Task 5)", () => {
+  // 2-tier header: "Group One" spans two leaves (A, B); "solo" has a BLANK top tier, so it
+  // rowspans the whole header as a single <th> in the FIRST header row; "Group Two" spans one leaf.
+  const blankGroupSpec: TableSpec = {
+    title: "T5", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["group", "metric"],
+    format: { default: { type: "number", decimals: 0 } },
+  };
+  const blankGroupRows = [
+    { row: "X", group: "Group One", metric: "A",    value: "1" },
+    { row: "X", group: "Group One", metric: "B",    value: "2" },
+    { row: "X", group: "",          metric: "Solo", value: "3" },
+    { row: "X", group: "Group Two", metric: "C",    value: "4" },
+    { row: "Y", group: "Group One", metric: "A",    value: "5" },
+    { row: "Y", group: "Group One", metric: "B",    value: "6" },
+    { row: "Y", group: "",          metric: "Solo", value: "7" },
+    { row: "Y", group: "Group Two", metric: "C",    value: "8" },
+  ] as unknown as import("../../../src/data/index").TidyRow[];
+
+  const m = buildTableModel(blankGroupSpec, blankGroupRows);
+  const l = layoutTable(m, { width: 800, measureText });
+  const table = renderTableHtml(m, l, document, blankGroupSpec);
+  const thead = table.querySelector("thead")!;
+  const trs = thead.querySelectorAll("tr");
+  const tierCount = m.headerRows.length;
+
+  it("every leaf <th> in the last header row has is-header-bottom", () => {
+    const lastRowThs = Array.from(trs[trs.length - 1]!.querySelectorAll("th"));
+    expect(lastRowThs.length).toBeGreaterThan(0);
+    lastRowThs.forEach((th) => {
+      expect(th.classList.contains("is-header-bottom")).toBe(true);
+    });
+  });
+
+  it("the blank-group column's rowspanning <th> (in the first header row) has is-header-bottom", () => {
+    const firstRowThs = Array.from(trs[0]!.querySelectorAll("th"));
+    // The blank-group leaf ("Solo") rowspans the full tier count and sits in the first row,
+    // alongside the stub corner (also rowSpan = tierCount) and any banner cells (rowSpan 1).
+    const soloTh = firstRowThs.find(
+      (th) => th.rowSpan === tierCount && !th.classList.contains("tbl-table-stub-header"),
+    );
+    expect(soloTh).toBeDefined();
+    expect(soloTh!.textContent?.trim()).toBe("Solo");
+    expect(soloTh!.classList.contains("is-header-bottom")).toBe(true);
+  });
+
+  it("the stub corner <th> has is-header-bottom", () => {
+    const corner = thead.querySelector("th.tbl-table-stub-header")!;
+    expect(corner.classList.contains("is-header-bottom")).toBe(true);
+  });
+
+  it("a banner/super-group <th> (colSpan > 1, rowSpan < tierCount) does NOT have is-header-bottom", () => {
+    const firstRowThs = Array.from(trs[0]!.querySelectorAll("th"));
+    const banner = firstRowThs.find((th) => th.textContent?.trim() === "Group One");
+    expect(banner).toBeDefined();
+    expect(banner!.colSpan).toBe(2);
+    expect(banner!.rowSpan).toBe(1);
+    expect(banner!.classList.contains("is-header-bottom")).toBe(false);
+  });
+});

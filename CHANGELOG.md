@@ -4,6 +4,45 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-07-17
+
+### Fixed — sectioned horizontal bars
+
+- **Section-header vertical spacing.** Non-first section headers had generous space below but
+  almost none above, so with many rows they crammed against the bar above. Each non-first section
+  now reserves a fixed spacer block and all headers render through one lifted-text mechanism, so
+  the whitespace above and below every header is symmetric and no longer scales with row count.
+- **Hover highlight no longer spills into section headers.** The band-hover highlight for a bar
+  adjacent to a section boundary is now clamped at the spacer instead of stretching across the
+  header band.
+
+### Fixed — PNG export height
+
+- **Single-chart horizontal `bar`/`stacked` exports are responsive to row count.** They previously
+  crammed every row into the fixed 4:3 frame (labels collided at high row counts); the export now
+  grows its height from the same helper the live mount uses.
+- **Waterfall small-multiples exports are no longer squashed.** The export pane height for
+  waterfall figures matches the live mount (was ~57% of it). Figure pane-height is now a single
+  source of truth shared by the live mount and the export.
+
+### Changed — figures
+
+- **Horizontal `bar`/`stacked` small multiples grow with row count, and each facet's pane is sized
+  to its own row count** — so bars are the same thickness across facets with different category
+  counts (the horizontal analog of `pane_widths: "equal-bar"`). Figures whose facets share the
+  same categories are unchanged.
+
+### Fixed — tables
+
+- **Header→body separator is continuous under blank-group columns.** A column whose top header
+  tier is blank (a standalone metric rendered as a rowspanning cell) was missing the separator;
+  the rule now applies to every header cell whose bottom edge is the header base.
+
+### Removed
+
+- Internal review gallery (`examples/gallery/`) and design spec docs (`docs/specs/`) — development
+  artifacts not part of the published engine.
+
 ## [1.4.0] - 2026-07-16
 
 ### Added — waterfall

@@ -203,6 +203,26 @@ describe("widenBandsToMidpoints", () => {
     widenBandsToMidpoints(bands, 0, 200);
     expect(bands).toEqual(copy);
   });
+
+  it("does NOT widen across a section boundary (boundaryAfter clamps the gap)", () => {
+    // Three rows; a section gap sits between row 1 (index 1) and row 2 (index 2).
+    const bands = [
+      { min: 0, max: 20 },
+      { min: 24, max: 44 }, // last row of section 1 (center 34)
+      { min: 90, max: 110 }, // first row of section 2 (center 100), big gap above (spacer block)
+    ];
+    const plain = widenBandsToMidpoints(bands, 0, 200);
+    // Without boundary info, band 1's bottom stretches to the midpoint across the gap (34↔100 ⇒ 67).
+    expect(plain[1]!.max).toBeCloseTo(67, 0);
+
+    const clamped = widenBandsToMidpoints(bands, 0, 200, [false, true, false]);
+    // With the boundary after band 1, band 1 must NOT reach toward band 2 across the gap.
+    expect(clamped[1]!.max).toBeLessThan(60);
+    // And band 2's top must NOT reach back up across the gap toward band 1.
+    expect(clamped[2]!.min).toBeGreaterThan(67);
+    // Within-section edge (band 0↔1) is unchanged from the plain widen.
+    expect(clamped[0]!.max).toBeCloseTo(plain[0]!.max, 5);
+  });
 });
 
 // ---------------------------------------------------------------------------

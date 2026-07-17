@@ -19,8 +19,8 @@ import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { renderFigure, horizontalBarHeight, SECTION_HEADER_TOP_PX } from "./figure.js";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX } from "./axes.js";
+import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
+import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import { resolveColor } from "./palette.js";
@@ -72,7 +72,7 @@ const FIXED_CHART_HEIGHT = 400;
 
 /** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
  *  band slots (grouped → nSeries bars per category; stacked/single → one), plus section spacer
- *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarHeight`,
+ *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
@@ -80,58 +80,7 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }
-  const cols = resolveColumns(spec, rows);
-  const catList: string[] = [];
-  const catSeen = new Set<string>();
-  const series = new Set<string>();
-  const sectionOf = new Map<string, string>();
-  for (const r of rows) {
-    const cat = r[cols.x];
-    if (typeof cat === "string" && cat !== "" && !catSeen.has(cat)) {
-      catSeen.add(cat);
-      catList.push(cat);
-    }
-    const s = cols.series ? r[cols.series] : null;
-    if (typeof s === "string" && s !== "") series.add(s);
-    if (cols.section && typeof cat === "string" && cat !== "" && !sectionOf.has(cat)) {
-      const sec = r[cols.section];
-      if (typeof sec === "string") sectionOf.set(cat, sec);
-    }
-  }
-  const nCats = Math.max(1, catList.length);
-  // series_order, when present, is the authoritative series count (it filters/orders).
-  const nSeries =
-    spec.series_order && spec.series_order.length
-      ? spec.series_order.length
-      : Math.max(1, series.size);
-  const grouped = spec.chartType === "bar" && nSeries > 1;
-  // Section count (distinct sections present, filtered by section_order when set). The first
-  // section has no spacer slot (its header sits in the top margin), so spacers = sections − 1.
-  let nSections = 0;
-  if (cols.section) {
-    const present = new Set(catList.map((c) => sectionOf.get(c) ?? ""));
-    nSections =
-      spec.section_order && spec.section_order.length
-        ? spec.section_order.filter((s) => present.has(s)).length
-        : present.size;
-  }
-  const nSpacers = Math.max(0, nSections - 1);
-  // Tallest wrapped category label at the gutter width. Standalone horizontal bars now render
-  // their category labels at the (larger) faceted size (task 17), so size the gutter + wrap
-  // estimate at that font — mirrors figure.ts's shared-gutter computation for faceted panes.
-  const gutter = horizontalLeftGutter(catList, { fontSize: FACETED_CAT_LABEL_PX });
-  const maxLabelLines = catList.reduce(
-    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
-    1,
-  );
-  return horizontalBarHeight({
-    nCategories: nCats,
-    nSeries,
-    grouped,
-    nSpacers,
-    maxLabelLines,
-    extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
-  });
+  return horizontalBarChartHeight(spec, rows);
 }
 
 // Fixed width of the right-side legend column. Chosen to fit typical series labels at 12px
@@ -1215,8 +1164,6 @@ const HBAR_PANE_MIN_WIDTH = 240;
 // Width reserved (once) for the shared category-label gutter on the leftmost horizontal pane
 // when computing the no-stack natural width.
 const HBAR_GUTTER_RESERVE = 200;
-// Per-pane mini-chart height (both modes — each pane is an independent mini-SVG).
-const PANE_HEIGHT = 240;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
@@ -1959,17 +1906,19 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // reflow floor (fewer, roomier columns) than a plain bar pane.
   const isWaterfallFig = spec.chartType === "waterfall";
   const paneMinWidth = isPointFigure ? 160 : isWaterfallFig ? 320 : PANE_MIN_WIDTH;
-  // Dot-plot AND bar/stacked panes render ~33% taller (320) so the marks have room to read;
-  // waterfall panes taller still (420) to clear rotated step labels; line/scatter keep the default.
-  const TALL_PANE_TYPES = new Set(["dotplot", "bar", "stacked"]);
-  const paneHeight = isWaterfallFig ? 420 : TALL_PANE_TYPES.has(spec.chartType) ? 320 : PANE_HEIGHT;
-  // Horizontal bar figures grow their height with the row count — let renderFigure compute it
-  // (passing undefined) rather than forcing the fixed pane height. Also drives the pane-title offset.
-  const isHorizontalBarFig = spec.chartType === "bar" && spec.orientation === "horizontal";
+  // Horizontal bar AND horizontal stacked figures grow their height with the row count — let
+  // renderFigure compute it (passing undefined) rather than forcing the fixed pane height. Also
+  // drives the pane-title offset (both share the left-gutter fy topology — see figure.ts).
+  const isHorizontalBarFig =
+    (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
   // chart), not the floating tooltip. Used to give a lone pane that treatment (see `coordinated`).
   const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
-  const figHeight = isHorizontalBarFig ? undefined : paneHeight;
+  // Dot-plot AND bar/stacked (vertical) panes render ~33% taller (320); waterfall panes taller
+  // still (420) to clear rotated step labels; line/scatter keep the default (240); horizontal
+  // bar/stacked panes grow with row count (undefined). Single source of truth shared with the
+  // PNG export (export-png.ts) so the two paths can't drift.
+  const figHeight = figurePaneHeight(spec);
 
   const drawGrid = (outerWidth: number): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven

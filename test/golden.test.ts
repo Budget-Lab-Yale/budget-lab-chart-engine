@@ -982,6 +982,41 @@ describe("bar builder — sectioned horizontal category axis", () => {
       .map((h) => h.text);
     expect(headers).toEqual(["Durable goods", "Nondurable goods", "Services"]);
   });
+
+  it("non-first section header has a comfortable, comparable whitespace budget above and below (dense chart)", () => {
+    const rows = parseCsv("./fixtures/sectioned-dense.csv");
+    const spec: ChartSpec = {
+      chartType: "bar",
+      orientation: "horizontal",
+      columns: { x: "category", value: "value", section: "panel" },
+      xAxisType: "categorical",
+      section_order: ["Group A", "Group B"],
+      data: "sectioned-dense.csv",
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, rows, { width: 720, height: 900 });
+
+    const texts = Array.from(svg.querySelectorAll("text"));
+    const header = texts.find((t) => t.textContent === "Group B");
+    expect(header).toBeTruthy();
+    const headerY = absY(header ?? null);
+
+    // Last bar of Group A (category "Hotel") and first bar of Group B (category "P01").
+    const rectY = (cat: string): number => {
+      const label = texts.find((t) => (t.textContent ?? "").trim() === cat);
+      return absY(label ?? null);
+    };
+    const lastAbove = rectY("Hotel");
+    const firstBelow = rectY("P01");
+
+    const gapAbove = headerY - lastAbove; // header sits below the last Group A row
+    const gapBelow = firstBelow - headerY; // and above the first Group B row
+    // 36 sits strictly between the measured pre-fix (~29px, one spacer slot) and post-fix (~45px,
+    // two-slot block + shared topHeaderLift) values at this figure height, so this is RED on the
+    // one-slot spacer and GREEN on the two-slot block.
+    expect(gapAbove).toBeGreaterThan(36);
+    // Comparable, not identical — within ~1.5x of each other (post-fix measures ~1.15).
+    expect(Math.max(gapAbove, gapBelow) / Math.min(gapAbove, gapBelow)).toBeLessThan(1.5);
+  });
 });
 
 // --- SINGLE-SERIES sectioned horizontal category axis (Task 16 / D1-D4 regression) ---

@@ -269,8 +269,9 @@ describe("computeChartHeight", () => {
       { ...base, columns: { x: "time", series: "series", section: "sec" } },
       rows,
     );
-    // 2 sections → 1 spacer slot (44px) + 16px top header → sectioned is taller.
-    expect(sectioned).toBe(unsectioned + 44 + 16);
+    // 2 sections → SECTION_SPACER_SLOTS (2) spacer slots (2 × 44px) + 16px top header → sectioned
+    // is taller.
+    expect(sectioned).toBe(unsectioned + 2 * 44 + 16);
   });
 });
 

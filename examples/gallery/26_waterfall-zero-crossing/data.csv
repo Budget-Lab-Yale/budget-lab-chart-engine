@@ -1,9 +1,0 @@
-step,amount,kind
-Start,50,total
-Inflows A,40,
-Outflows B,-70,
-Outflows C,-60,
-Rebound D,90,
-Drawdown E,-30,
-Recovery F,55,
-Net change,,total
