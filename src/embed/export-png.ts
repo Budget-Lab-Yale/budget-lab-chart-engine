@@ -311,21 +311,41 @@ export function buildExportSvg(
       colX.push(acc);
       acc += colWidth(c) + COL_GAP;
     }
-    // Effective pane height: the renderFigure-computed height for horizontal bar/stacked (read
-    // from the rendered SVG — renderFigure always sizes these via horizontalBarHeight), else the
-    // fixed pane height from figurePaneHeight. The trailing `?? 240` is a type-level floor only;
-    // it never fires in practice (both branches always yield a real number).
-    const effPaneH =
-      (isHorizontalBarFig && fig.panes[0]?.svg
-        ? Number((fig.panes[0].svg as SVGSVGElement).getAttribute("height")) || undefined
-        : paneChartH) ?? 240;
-    const gridTop = chartTop;
+    // Per-pane height: read each pane's own rendered height (ragged horizontal bar/stacked facets
+    // are sized individually via fig.paneHeights — see figure.ts), else the fixed pane height from
+    // figurePaneHeight. Reads the rendered SVG's height attribute directly (always set by
+    // renderFigure), so the `?? 240` fallback is a type-level floor that never fires in practice.
+    const paneH = (i: number): number =>
+      Number((fig.panes[i]?.svg as SVGSVGElement | undefined)?.getAttribute("height")) || paneChartH || 240;
+    // Each grid ROW's height = the tallest pane in that row (ragged facets keep their own height
+    // within the row; a busier sibling in the same row only grows the shared row band, never
+    // stretches a shorter pane's own SVG). Reduces to one uniform value when every paneH(i) is
+    // equal (the common case, and every non-horizontal-bar figure), matching the pre-fix math.
+    const rowHeights: number[] = [];
+    for (let r = 0; r < gridRows; r++) {
+      let h = 0;
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        if (i < fig.panes.length) h = Math.max(h, paneH(i));
+      }
+      rowHeights.push(h);
+    }
+    // Cumulative top y for each row (title band + row height + gap between rows).
+    const rowY: number[] = [];
+    {
+      let acc = chartTop;
+      for (let r = 0; r < gridRows; r++) {
+        rowY.push(acc);
+        acc += PANE_TITLE_H + rowHeights[r]! + ROW_GAP;
+      }
+    }
     fig.panes.forEach((pane, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
       const x = colX[col]!;
       const w = colWidth(col);
-      const y = gridTop + row * (PANE_TITLE_H + effPaneH + ROW_GAP);
+      const y = rowY[row]!;
+      const h = paneH(i);
       // Horizontal bars: align the pane title with the DATA area (offset by the pane's left gutter)
       // rather than over the category labels.
       const titleDx = isHorizontalBarFig
@@ -339,12 +359,11 @@ export function buildExportSvg(
         ps.setAttribute("x", String(x));
         ps.setAttribute("y", String(y + PANE_TITLE_H));
         ps.setAttribute("width", String(w));
-        ps.setAttribute("height", String(effPaneH));
+        ps.setAttribute("height", String(h));
         root.appendChild(ps);
       }
     });
-    contentHeight =
-      gridRows * (PANE_TITLE_H + effPaneH) + (gridRows - 1) * ROW_GAP;
+    contentHeight = rowHeights.reduce((s, h) => s + PANE_TITLE_H + h, 0) + (gridRows - 1) * ROW_GAP;
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
