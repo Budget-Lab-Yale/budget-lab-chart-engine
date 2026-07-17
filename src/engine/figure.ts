@@ -343,27 +343,34 @@ export function renderFigure(
     ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
     : TBL_MARGIN_LEFT;
   // Auto-height: grow the panes with the row count when the caller doesn't force a height. The
-  // per-facet inputs (nSeries/nSpacers/maxLabelLines/nSections/catsByFacet) are hoisted to this
-  // outer scope (not just computed inline) because perPaneHeights, below — computed AFTER
-  // paneValues exists — reuses them to size each pane to its OWN category count instead of the
-  // busiest one.
+  // per-facet inputs (nSpacers/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
+  // are hoisted to this outer scope (not just computed inline) because perPaneHeights, below —
+  // computed AFTER paneValues exists — reuses them.
+  //
+  // IMPORTANT: heights are NOT computed via one horizontalBarHeight() call PER FACET. That would
+  // apply HORIZONTAL_HEIGHT_FLOOR (400px) INDEPENDENTLY to each facet, so two facets that both
+  // fall under the floor (the common case for modest row counts — e.g. 5 vs 3 categories) would
+  // BOTH floor to 400px and render with wildly different bar thickness despite equal heights (the
+  // floor swallows the category-count signal that's supposed to drive uniform thickness). Instead:
+  // compute ONE shared per-slot pixel height from the BUSIEST facet (the floor applies only
+  // there), then size every facet by that SAME per-slot height × its own slot count, so bar
+  // thickness stays uniform whether or not the busiest facet itself needed the floor.
   let autoHeight: number | undefined;
-  let nSeries = 0;
   let nSpacers = 0;
-  let maxLabelLines = 1;
-  let nSections = 0;
   let catsByFacet: Map<string, Set<string>> | undefined;
+  let effSlotPx = 0;
+  let chromeExtra = 0;
   if (isHorizontalBar && opts.height == null) {
-    nSeries =
+    const nSeries =
       spec.series_order && spec.series_order.length
         ? spec.series_order.length
         : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
     // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1,
     // each reserving a SECTION_SPACER_SLOTS-slot block.
-    nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
+    const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
     nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
     const maxPx = hGutter - GUTTER_TEXT_PAD;
-    maxLabelLines = sharedCategories.reduce(
+    const maxLabelLines = sharedCategories.reduce(
       (m, c) => Math.max(m, labelLineCount(c, maxPx, FACETED_CAT_LABEL_PX)),
       1,
     );
@@ -379,14 +386,23 @@ export function renderFigure(
       catsByFacet.get(f)!.add(c);
     }
     const maxPaneCats = Math.max(1, ...[...catsByFacet.values()].map((s) => s.size));
-    autoHeight = horizontalBarHeight({
-      nCategories: maxPaneCats,
-      nSeries: Math.max(1, nSeries),
-      grouped: nSeries > 1 && !isHorizontalStacked,
-      nSpacers,
-      maxLabelLines,
-      extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
-    });
+    // Shared per-slot height: one bar budget per category (a stack is one bar; a grouped bar
+    // reserves nSeries bars), or the wrapped-label budget, whichever is taller — the SAME inputs
+    // horizontalBarHeight uses internally, kept in lockstep with it deliberately.
+    const barsPerCat = nSeries > 1 && !isHorizontalStacked ? Math.max(1, nSeries) : 1;
+    const slotPxNatural = Math.max(
+      barsPerCat * HORIZONTAL_PX_PER_BAR,
+      Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6,
+    );
+    chromeExtra = HORIZONTAL_CHROME_PX + (nSections > 0 ? SECTION_HEADER_TOP_PX : 0);
+    const busiestSlots = maxPaneCats + nSpacers;
+    const naturalBusiest = busiestSlots * slotPxNatural + chromeExtra;
+    const hBusy = Math.max(HORIZONTAL_HEIGHT_FLOOR, naturalBusiest);
+    // Back-solve the per-slot px the busiest facet ACTUALLY got (== slotPxNatural when the floor
+    // didn't fire; inflated when it did) so every other facet is scaled by the SAME ratio —
+    // otherwise a sub-floor busiest facet would silently give sparser facets thinner bars.
+    effSlotPx = (hBusy - chromeExtra) / busiestSlots;
+    autoHeight = Math.round(hBusy);
   }
   const effHeight = opts.height ?? autoHeight;
 
@@ -408,22 +424,18 @@ export function renderFigure(
 
   if (!paneValues.length) throw new Error("No panes: facet_field produced no values in scope.");
 
-  // Per-pane heights: each facet sized to ITS OWN category count so bar thickness is uniform
-  // across ragged facets (the horizontal analog of pane_widths "equal-bar"). Only for horizontal
-  // bar/stacked auto-height; other cases keep the single effHeight for every pane (undefined here
-  // ⇒ every pane below falls back to effHeight).
+  // Per-pane heights: every facet sized by the SAME shared per-slot height (effSlotPx/chromeExtra,
+  // computed above from the BUSIEST facet with the floor applied only there), scaled by ITS OWN
+  // slot count — so bar thickness is uniform across ragged facets (the horizontal analog of
+  // pane_widths "equal-bar") even when the busiest facet's natural height fell under
+  // HORIZONTAL_HEIGHT_FLOOR. Only for horizontal bar/stacked auto-height; other cases keep the
+  // single effHeight for every pane (undefined here ⇒ every pane below falls back to effHeight).
   const perPaneHeights: number[] | undefined =
     isHorizontalBar && opts.height == null
-      ? paneValues.map((v) =>
-          horizontalBarHeight({
-            nCategories: Math.max(1, catsByFacet?.get(v)?.size ?? 1),
-            nSeries: Math.max(1, nSeries),
-            grouped: nSeries > 1 && !isHorizontalStacked,
-            nSpacers,
-            maxLabelLines,
-            extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
-          }),
-        )
+      ? paneValues.map((v) => {
+          const slots = Math.max(1, catsByFacet?.get(v)?.size ?? 1) + nSpacers;
+          return Math.round(slots * effSlotPx + chromeExtra);
+        })
       : undefined;
 
   // 2. Grid layout. columns = config else default; rows = ceil(n / columns). col = i % columns,

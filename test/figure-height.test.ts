@@ -174,7 +174,7 @@ describe("renderFigure — per-facet pane heights (ragged horizontal facets, Tas
     });
   });
 
-  it("uniform bar thickness across ragged facets (the actual proof: rect heights ~equal)", () => {
+  it("uniform bar thickness across ragged facets, ABOVE the floor (rect heights ~equal)", () => {
     const rows = raggedRows();
     const fig = renderFigure(RAGGED_SPEC, rows, {
       gridWidth: 920,
@@ -228,6 +228,85 @@ describe("renderFigure — per-facet pane heights (ragged horizontal facets, Tas
     const fig = renderFigure(RAGGED_SPEC, rows, { gridWidth: 920, gridGap: 20, height: 500, columns: 1 });
     expect(fig.paneHeights).toBeUndefined();
     fig.panes.forEach((p) => expect(Number((p.svg as SVGSVGElement).getAttribute("height"))).toBe(500));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sub-floor ragged facets: the REAL regression this task guards against. Two facets — 5 categories
+// and 3 categories, stacked, 2 series — both fall well under HORIZONTAL_HEIGHT_FLOOR (400px) on
+// their OWN (5*22+80=190, 3*22+80=146). Sizing each facet independently via horizontalBarHeight()
+// per pane would floor BOTH to 400px (equal heights, but the 3-cat pane's bars would render ~5/3x
+// thicker than the 5-cat pane's — the floor swallows the category-count signal). The fix computes
+// ONE shared per-slot height from the BUSIEST facet (floored once), then scales every facet by
+// that SAME per-slot height, so thickness stays uniform and the sparser facet is genuinely
+// SHORTER (not both stuck at 400).
+// ---------------------------------------------------------------------------
+
+const SUBFLOOR_SPEC: ChartSpec = {
+  chartType: "stacked",
+  orientation: "horizontal",
+  title: "Sub-floor ragged facets",
+  columns: { x: "group", value: "share", series: "cut_size", facet: "section" },
+  xAxisType: "categorical",
+  small_multiples: { columns: 1, pane_order: ["Five cats", "Three cats"] },
+  barStack: { netDisplay: "none" },
+  yAxisPolicy: { max: 100 },
+  data: "x",
+} as unknown as ChartSpec;
+
+function subFloorRows(): TidyRow[] {
+  const rows: TidyRow[] = [];
+  for (let i = 1; i <= 5; i++) {
+    rows.push({ group: `R${i}`, section: "Five cats", cut_size: "A", share: "60" } as TidyRow);
+    rows.push({ group: `R${i}`, section: "Five cats", cut_size: "B", share: "40" } as TidyRow);
+  }
+  for (let i = 1; i <= 3; i++) {
+    rows.push({ group: `Q${i}`, section: "Three cats", cut_size: "A", share: "55" } as TidyRow);
+    rows.push({ group: `Q${i}`, section: "Three cats", cut_size: "B", share: "45" } as TidyRow);
+  }
+  return rows;
+}
+
+describe("renderFigure — per-facet pane heights, SUB-FLOOR ragged facets (Task 6 rework)", () => {
+  it("busiest facet is NOT both floored to 400: the 5-cat pane is taller than the 3-cat pane", () => {
+    const rows = subFloorRows();
+    const fig = renderFigure(SUBFLOOR_SPEC, rows, {
+      gridWidth: 920,
+      gridGap: 20,
+      height: figurePaneHeight(SUBFLOOR_SPEC),
+      columns: 1,
+    });
+    expect(fig.paneHeights).toBeDefined();
+    const [fiveH, threeH] = fig.paneHeights!;
+    expect(fiveH!).toBeGreaterThan(threeH!);
+    // The busiest (5-cat) facet still hits the floor (its own natural height, 190px, is sub-floor).
+    expect(fiveH).toBe(400);
+    // The sparser facet is proportionally SHORTER than the floor, not stretched/floored to it.
+    expect(threeH!).toBeLessThan(400);
+    fig.panes.forEach((p, i) => {
+      expect(Number((p.svg as SVGSVGElement).getAttribute("height"))).toBe(fig.paneHeights![i]);
+    });
+  });
+
+  it("uniform bar thickness holds even for sub-floor facets (the actual regression proof)", () => {
+    const rows = subFloorRows();
+    const fig = renderFigure(SUBFLOOR_SPEC, rows, {
+      gridWidth: 920,
+      gridGap: 20,
+      height: figurePaneHeight(SUBFLOOR_SPEC),
+      columns: 1,
+    });
+    const h0 = firstBarRectHeight(fig.panes[0]!.svg as SVGSVGElement);
+    const h1 = firstBarRectHeight(fig.panes[1]!.svg as SVGSVGElement);
+    expect(h0).toBeGreaterThan(0);
+    expect(Number.isNaN(h1)).toBe(false);
+    // Pre-fix (per-facet horizontalBarHeight, each floored independently): this gap measured ~35px
+    // (400 vs 272 paneHeights, both bars would visually differ by ~1.45x). Post-fix (one shared
+    // effSlotPx from the busiest facet): ~3px — the residual comes from HORIZONTAL_CHROME_PX (80)
+    // over-estimating the TRUE rendered chrome (~40px, marginTop+marginBottom) in the faceted-pane
+    // context; the model's fixed chrome constant is shared with the untouched single-chart sizing
+    // path, so it's out of scope to retune here. Well under half the pre-fix gap; not sub-pixel.
+    expect(Math.abs(h0 - h1)).toBeLessThan(4);
   });
 });
 
