@@ -15,13 +15,9 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { inferUnitsFromSubtitle } from "./util";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom } from "./axes";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
-
-// TEMPORARY (Task 1 of 3): Task 2 replaces this with an imported constant (value 2) from ./axes
-// and deletes this line. Left inline here so this task's tests pass in isolation.
-const SECTION_SPACER_SLOTS = 1;
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
 // without a module cycle through figure.ts).
@@ -337,9 +333,10 @@ export function renderFigure(
       spec.series_order && spec.series_order.length
         ? spec.series_order.length
         : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
-    // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1.
+    // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1,
+    // each reserving a SECTION_SPACER_SLOTS-slot block.
     const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
-    const nSpacers = Math.max(0, nSections - 1);
+    const nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
     const maxPx = hGutter - GUTTER_TEXT_PAD;
     const maxLabelLines = sharedCategories.reduce(
       (m, c) => Math.max(m, labelLineCount(c, maxPx, FACETED_CAT_LABEL_PX)),

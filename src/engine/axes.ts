@@ -547,47 +547,26 @@ export function tblFacetGroupYAxis(
 
 // --- Sectioned horizontal category axis ---------------------------------------------------
 // A sectioned category axis (columns.section) groups categories into contiguous sections along the
-// `fy`/`y` band. An empty SPACER band slot is inserted before each section — it carries no data
-// rows (so no bars render in it) and holds the section's bold header. The sentinel prefix uses a
-// leading space so it never collides with a real category value (which the engine trims/ignores).
+// `fy`/`y` band. A block of SECTION_SPACER_SLOTS empty spacer band slots is inserted before each
+// non-first section — it carries no data rows (so no bars render in it) and gives the section's
+// bold header symmetric whitespace above and below once lifted off its first bar. The sentinel
+// prefix uses a leading space so it never collides with a real category value (which the engine
+// trims/ignores). Every section header (first section included) is drawn via the single
+// `tblSectionTopHeader` mark below, lifted by a fixed px from its section's first bar.
 
 /** Sentinel prefix marking a section's empty spacer band slot. */
 export const SECTION_SPACER_PREFIX = " section:";
-/** The spacer band value for a section. */
-export function sectionSpacer(section: string): string {
-  return SECTION_SPACER_PREFIX + section;
+/** Number of empty band slots reserved above each non-first section. Two slots (~2×row) give the
+ *  header symmetric whitespace above and below at the dense row heights that exposed the defect;
+ *  the header is lifted a fixed px from its section's first bar, so both gaps read as deliberate. */
+export const SECTION_SPACER_SLOTS = 2;
+/** The i-th spacer band value for a section (unique per slot so the band domain has no dup keys). */
+export function sectionSpacerSlot(section: string, i: number): string {
+  return `${SECTION_SPACER_PREFIX}${i}:${section}`;
 }
 /** Whether a band value is a section spacer sentinel (not a real category). */
 export function isSectionSpacer(v: string): boolean {
   return v.startsWith(SECTION_SPACER_PREFIX);
-}
-
-// Section headers for a sectioned HORIZONTAL bar axis: a bold label left-justified at svg x=0
-// (pushed left by `marginLeft` so its `textAnchor:"start"` origin lands at the canvas left edge,
-// flush with the title above). Each spacer-based header is faceted on its empty spacer band slot
-// (which sits ABOVE its section) and anchored to the slot's BOTTOM, then lifted `gap` px — so it
-// sits a FIXED distance above its section's first bar (uniform across sections; the empty space
-// above it separates this section from the previous one).
-export function tblSectionHeaderYAxis(
-  spacers: { value: string; label: string }[],
-  marginLeft: number = TBL_MARGIN_LEFT,
-  fontSize: number = TBL.size.axis,
-  gap = 12,
-): Mark[] {
-  if (!spacers.length) return [];
-  return [
-    Plot.text(spacers, {
-      fy: (d: { value: string }) => d.value,
-      text: (d: { label: string }) => d.label,
-      frameAnchor: "bottom-left",
-      dx: -marginLeft,
-      dy: -gap,
-      textAnchor: "start",
-      fill: TBL.color.heading,
-      fontSize,
-      fontWeight: 700,
-    }),
-  ];
 }
 
 // The FIRST section has no leading spacer slot (so the figure doesn't open with a big empty gap);
