@@ -235,6 +235,74 @@ describe("renderTableHtml — config hooks", () => {
     expect(table.querySelector("tbody th.tbl-table-stub.is-nowrap")).not.toBeNull();
     expect(table.querySelector(".tbl-table-group-inner.is-nowrap")).not.toBeNull();
   });
+
+  it("stub_wrap keeps explicit data-column widths on the <col>s (Change A)", () => {
+    const m = buildTableModel(spec, rows);
+    const l = layoutTable(m, { width: 380, measureText, stubWrap: true, stubMinWidth: 80 });
+    const table = renderTableHtml(m, l, document, { ...spec, stub_wrap: true });
+    const cols = table.querySelectorAll("colgroup col");
+    // Every leaf <col> still carries its computed px width — stub_wrap no longer frees the data cols.
+    m.leaves.forEach((_, i) => {
+      expect((cols[i + 1] as HTMLElement).style.width).toBe(`${l.colW[i]}px`);
+    });
+  });
+
+  it("only opts.flexDataCols (multi-pane) frees the data <col> widths", () => {
+    const m = buildTableModel(spec, rows);
+    const l = layoutTable(m, { width: 800, measureText });
+    const table = renderTableHtml(m, l, document, spec, { flexDataCols: true });
+    const cols = table.querySelectorAll("colgroup col");
+    m.leaves.forEach((_, i) => {
+      expect((cols[i + 1] as HTMLElement).style.width).toBe("");
+    });
+  });
+
+  it("column_wrap adds the is-wrap class to the named column's body <td>s only", () => {
+    const wrapSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      column_wrap: { notes: true },
+    };
+    const wrapRows = [
+      { row: "r", metric: "notes", value: "some prose that could wrap" },
+      { row: "r", metric: "num", value: "12.5" },
+    ] as unknown as import("../../../src/data/index").TidyRow[];
+    const m = buildTableModel(wrapSpec, wrapRows);
+    const l = layoutTable(m, { width: 800, measureText, columnWrap: { notes: true } });
+    const table = renderTableHtml(m, l, document, wrapSpec);
+    const wrapped = table.querySelector('td[data-col="notes"]')!;
+    const other = table.querySelector('td[data-col="num"]')!;
+    expect(wrapped.classList.contains("is-wrap")).toBe(true);
+    expect(other.classList.contains("is-wrap")).toBe(false);
+  });
+
+  it("column_wrap: true wraps every data column's body cells", () => {
+    const m = buildTableModel(spec, rows);
+    const l = layoutTable(m, { width: 800, measureText });
+    const table = renderTableHtml(m, l, document, { ...spec, column_wrap: true });
+    const tds = table.querySelectorAll("tbody td");
+    expect(tds.length).toBeGreaterThan(0);
+    tds.forEach((td) => expect(td.classList.contains("is-wrap")).toBe(true));
+  });
+
+  it("a \\\\ token in a stub label renders a <br>", () => {
+    const brSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+      format: { default: { type: "number", decimals: 0 } },
+    };
+    const brRows = [
+      { row: "First\\\\second", metric: "x", value: "1" },
+    ] as unknown as import("../../../src/data/index").TidyRow[];
+    const m = buildTableModel(brSpec, brRows);
+    const l = layoutTable(m, { width: 400, measureText });
+    const table = renderTableHtml(m, l, document, brSpec);
+    const stubTh = table.querySelector("tbody th.tbl-table-stub")!;
+    expect(stubTh.querySelectorAll("br").length).toBe(1);
+    expect(stubTh.textContent).toBe("Firstsecond"); // <br> carries no text
+  });
 });
 
 describe("renderTableHtml — whole-row emphasis (Task 3)", () => {

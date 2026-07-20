@@ -136,6 +136,11 @@ export interface TableSpec {
   stub_nowrap?: boolean;
   /** Fixed px width for data columns: one number applies to all leaves, or a { leafKey: px } map. */
   column_width?: number | Record<string, number>;
+  /** Wrap body data cells onto multiple lines within the column width: `true` wraps every data
+   * column, or a { leafKey: true } map wraps only the named ones. Default false. Pair with
+   * `column_width` to cap the width; without a cap the column sizes to its natural width and nothing
+   * wraps. Affects body cells only — column headers keep header_max_lines / the `\\` break token. */
+  column_wrap?: boolean | Record<string, boolean>;
   /** Wrap bottom-tier (leaf) header labels to at most N lines. */
   header_max_lines?: number;
   /** Data source line (e.g. "U.S. Bureau of Labor Statistics"). */

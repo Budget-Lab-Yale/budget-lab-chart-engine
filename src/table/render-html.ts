@@ -33,9 +33,16 @@ export function renderTableHtml(
   // Stub wraps only when explicitly opted in (and not also forced nowrap); otherwise it stays on
   // one line and is clipped to the column when capped narrower than the label.
   const stubWrap = spec?.stub_wrap === true && !stubNowrap;
-  // Flexible data columns: pin only the stub, let data columns absorb the card width. Used for
-  // stub_wrap and for multi-pane (so all panes share the pinned stub and align).
-  const flexData = stubWrap || opts?.flexDataCols === true;
+  // Flexible data columns: leave the data <col>s width-less so they absorb the card width. Used
+  // ONLY for multi-pane (so all panes share the pinned stub and align). stub_wrap no longer drives
+  // this — otherwise its data columns would shrink below their content and headers would overlap;
+  // instead the data columns keep their computed widths and the table scrolls horizontally.
+  const flexData = opts?.flexDataCols === true;
+  // Per-leaf data-cell wrapping (column_wrap): true wraps all data columns, or a per-leaf-value map
+  // wraps only the named ones. Keyed by leaf VALUE (mirrors column_width / layout's colWrapEnabled).
+  const columnWrap = spec?.column_wrap;
+  const colWrapEnabled = (leafValue: string): boolean =>
+    columnWrap === true || (typeof columnWrap === "object" && columnWrap[leafValue] === true);
 
   const table = doc.createElement("table");
   table.className = "tbl-table";
@@ -231,6 +238,9 @@ export function renderTableHtml(
         const td = doc.createElement("td");
         // Text cells are left-aligned and wrap (is-text); numeric cells are centered tabular (is-num).
         td.className = cell.isText ? "is-text" : "is-num";
+        // column_wrap: force this column's body cells to wrap within their fixed width (is-wrap
+        // mirrors the stub's .is-wrap). Harmless on is-text cells (already wrapping).
+        if (colWrapEnabled(leaves[i]!.lastValue)) td.classList.add("is-wrap");
         td.setAttribute("data-col", leaves[i]!.key);
 
         // Sign class

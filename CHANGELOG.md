@@ -4,6 +4,26 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-07-20
+
+### Fixed — tables
+
+- **`stub_wrap` no longer collapses the data columns.** Turning on `stub_wrap` used to leave the
+  data `<col>`s width-less, so at narrow viewports the columns shrank below their content and the
+  (nowrap) leaf headers overflowed and overlapped. The data columns now keep their computed widths
+  and the table scrolls horizontally instead — only the stub wraps. `column_width` is honored again
+  even when `stub_wrap` is on.
+
+### Added — tables
+
+- **`\\` hard line break in cell text.** Two backslashes force a line break anywhere text renders
+  (cells, row/column labels, headers, group labels & notes), including inside a non-wrapping cell.
+  Recognized only outside math delimiters (`\\(` = break + literal `(`). Honored identically in the
+  live DOM (`<br>`) and PNG/SVG export.
+- **`column_wrap` spec field.** `true` (all data columns) or `{ <leafKey>: true }` wraps a data
+  column's **body** cells within their width — the data-column analogue of `stub_wrap`. Pair with
+  `column_width` to cap the width.
+
 ## [1.4.1] - 2026-07-17
 
 ### Fixed — sectioned horizontal bars

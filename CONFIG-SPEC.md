@@ -351,6 +351,7 @@ formatting).
 | `stub_wrap` | boolean | Allow row labels to wrap onto multiple lines so the stub can be narrower than the longest label. Default false. |
 | `stub_nowrap` | boolean | Keep row labels on one line (the stub is sized to the longest). Default false. |
 | `column_width` | number \| object | Fixed px width for data columns: one number for all, or `{ <leafKey>: px }`. |
+| `column_wrap` | boolean \| object | Wrap **body** data cells onto multiple lines within the column width: `true` (all data columns) or `{ <leafKey>: true }` (named ones). Default false. Pair with `column_width` to cap the width — without a cap the column sizes to its natural width and nothing wraps. Column headers are unaffected (use `header_max_lines` / the `\\` break token for those). |
 | `header_max_lines` | number | Wrap leaf-column headers to at most N lines. |
 | `spanner_rules` | boolean | Draw flanking rules on multi-column banner headers. Default true. |
 | `header_tier_rules` | boolean | Draw horizontal rules between header tiers. Default false. |
@@ -379,8 +380,18 @@ website**:
 
 - `\( … \)` — inline math (also `\[ … \]` and `$$ … $$`).
 - `\$` — a literal dollar sign.
+- `\\` — a **hard line break** (anywhere text renders: cells, row/column labels, headers, group
+  labels & notes). It splits the text onto a new line at that exact point, and it works even in a
+  one-line (`stub_nowrap` / non-wrapping) cell — a break forces two lines there without turning on
+  general wrapping. Recognized only **outside** a math delimiter: `\\(` reads as a break then a
+  literal `(`. Leading/trailing/consecutive `\\` produce empty lines.
 - Bare `$`, `_`, `^`, `*` are **only** special inside a delimiter, so ordinary text (including
   currency like `$2.50`) needs no escaping and renders unchanged.
+
+> **YAML/CSV escaping for `\\`.** In **CSV** (row/stub labels) there is no escaping, so `\\` is two
+> literal characters and works directly. In **double-quoted YAML** `\\` collapses to a single
+> backslash — use **single-quoted** YAML (`'Line one \\ line two'`) or write `\\\\`. This mirrors
+> the existing inline-math YAML gotcha.
 
 Inside a delimiter, the supported **linear** subset of LaTeX is:
 

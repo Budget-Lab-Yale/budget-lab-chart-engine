@@ -12,6 +12,18 @@ describe("validateTableSpec", () => {
   });
   it("requires stub/header/value", () => { expect(validateTableSpec({ title: "T", data: "d" }).valid).toBe(false); });
 
+  it("accepts column_wrap as a boolean or a { leafKey: boolean } map", () => {
+    expect(validateTableSpec({ ...ok, column_wrap: true }).valid).toBe(true);
+    expect(validateTableSpec({ ...ok, column_wrap: { notes: true } }).valid).toBe(true);
+    expect(validateTableSpec({ ...ok, column_wrap: 3 } as any).valid).toBe(false);
+    expect(validateTableSpec({ ...ok, column_wrap: { notes: "yes" } } as any).valid).toBe(false);
+  });
+
+  it("does not reject a \\\\ line-break token in a label (it is not math)", () => {
+    const r = validateTableSpec({ ...ok, row_labels: { r: "First line\\\\second line" } });
+    expect(r.valid).toBe(true);
+  });
+
   it("accepts group_order as a flat string[] (first tier) or string[][] (per level)", () => {
     expect(validateTableSpec({ ...ok, group_order: ["A", "B"] }).valid).toBe(true);
     expect(validateTableSpec({ ...ok, group_order: [["A"], ["B", "C"]] }).valid).toBe(true);

@@ -317,3 +317,29 @@ describe("renderTableSvg — whole-row emphasis (Task 3)", () => {
     expect(emphRects.some((r) => Number(r.getAttribute("x")) === 0)).toBe(false);
   });
 });
+
+describe("renderTableSvg — hard line break (\\\\)", () => {
+  const brSpec: TableSpec = {
+    title: "T", data: "d", value: "value",
+    stub: [{ label: "row" }],
+    header: ["metric"],
+    format: { default: { type: "number", decimals: 0 } },
+  };
+  const brRows = [
+    { row: "Without new tariff\\\\(Sec. 122 expires)", metric: "x", value: "1" },
+  ] as unknown as TidyRow[];
+
+  it("breaks a stub label at the token into two tspan lines (SVG/export parity with the DOM <br>)", () => {
+    const m = buildTableModel(brSpec, brRows);
+    const l = layoutTable(m, layoutOpts); // no stub_wrap — the hard break splits on its own
+    const svg = renderTableSvg(m, l, { document, spec: brSpec });
+    const rowG = svg.querySelector("g.tbl-table-row")!;
+    const stubText = rowG.querySelector("text")!;
+    const tspans = Array.from(stubText.querySelectorAll("tspan"));
+    expect(tspans.length).toBe(2);
+    expect(tspans[0]!.textContent).toBe("Without new tariff");
+    expect(tspans[1]!.textContent).toBe("(Sec. 122 expires)");
+    // Second line sits below the first.
+    expect(Number(tspans[1]!.getAttribute("dy"))).toBeGreaterThan(0);
+  });
+});
