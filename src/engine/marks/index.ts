@@ -9,6 +9,7 @@ import { buildBarMarks } from "./bar";
 import { buildStackedMarks } from "./stacked";
 import { buildPointMarks } from "./point";
 import { buildWaterfallMarks } from "./waterfall";
+import { buildHistogramMarks } from "./histogram";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -213,6 +214,7 @@ const REGISTRY: Partial<Record<ChartType, MarkBuilder>> = {
   scatter: buildPointMarks,
   dotplot: buildPointMarks,
   waterfall: buildWaterfallMarks,
+  histogram: buildHistogramMarks,
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {
