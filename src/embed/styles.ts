@@ -828,6 +828,13 @@ td.is-text {
   overflow-wrap: break-word;
 }
 
+/* column_wrap: force a data column's body cells to wrap within their (fixed) width, regardless of
+   whether the column is text- or number-typed. Mirrors the stub's .is-wrap. */
+td.is-wrap {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 /* Stub (row label) cells: left-aligned. */
 th.tbl-table-stub {
   text-align: left;

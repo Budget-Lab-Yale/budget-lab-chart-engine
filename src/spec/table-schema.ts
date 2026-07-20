@@ -110,6 +110,12 @@ export const TABLE_SPEC_SCHEMA = {
         { type: "object", additionalProperties: { type: "number" } },
       ],
     },
+    column_wrap: {
+      anyOf: [
+        { type: "boolean" },
+        { type: "object", additionalProperties: { type: "boolean" } },
+      ],
+    },
     header_max_lines: { type: "number" },
     source: { type: "string" },
     notes: {

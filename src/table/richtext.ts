@@ -21,7 +21,12 @@ export type RichRun =
   | { kind: "super"; text: string; italic: boolean }
   | { kind: "sub"; text: string; italic: boolean }
   // Sub and super stacked on the SAME horizontal position (e.g. \theta_1^K → θ with ¹ over ₁).
-  | { kind: "subsup"; sub: string; sup: string; subItalic: boolean; supItalic: boolean };
+  | { kind: "subsup"; sub: string; sup: string; subItalic: boolean; supItalic: boolean }
+  // A hard line break, authored as `\\` (two backslashes) OUTSIDE any math delimiter. Splits the
+  // surrounding text onto a new line; renders as <br> (HTML) / a new tspan line (SVG). Recognized
+  // only outside \( … \) — a `\\` inside math is left to the math parser (2-D math is rejected at
+  // validation, so it never reaches rendering).
+  | { kind: "break" };
 
 /** Script (sub/super) font size as a fraction of the surrounding text size. */
 export const SCRIPT_SCALE = 0.72;
@@ -77,14 +82,17 @@ export function hasMath(s: string): boolean {
   return s.includes("\\(") || s.includes("\\[") || s.includes("$$");
 }
 
-/** Find the earliest math-delimiter opener at or after `from`. */
-function nextOpener(s: string, from: number): { idx: number; open: string; close: string } | null {
-  let best: { idx: number; open: string; close: string } | null = null;
-  for (const d of DELIMS) {
-    const idx = s.indexOf(d.open, from);
-    if (idx >= 0 && (best == null || idx < best.idx)) best = { idx, open: d.open, close: d.close };
-  }
-  return best;
+/** True if the string contains a hard-break token (`\\`). Combined with hasMath to decide whether
+ *  a string can take the verbatim fast path. */
+export function hasBreak(s: string): boolean {
+  return s.includes("\\\\");
+}
+
+/** The math-delimiter opener starting exactly at `i`, or null. Break-first tokenizers must test
+ *  `\\` BEFORE this so `\\(` reads as break + literal `(` rather than a `\(` math opener. */
+function openerAt(s: string, i: number): { open: string; close: string } | null {
+  for (const d of DELIMS) if (s.startsWith(d.open, i)) return { open: d.open, close: d.close };
+  return null;
 }
 
 /** Convert the literal-text portions outside math: only the \$ escape is meaningful there. */
@@ -98,29 +106,59 @@ function unescapeText(s: string): string {
  * (when provided) and rendered as their literal source so output is never silently wrong.
  */
 export function parseRich(s: string, onUnsupported?: (cmd: string) => void): RichRun[] {
-  if (!hasMath(s)) return [{ kind: "text", text: s, italic: false }];
+  if (!hasMath(s) && !hasBreak(s)) return [{ kind: "text", text: s, italic: false }];
 
   const runs: RichRun[] = [];
   let i = 0;
+  let start = 0; // start of the pending literal-text run being accumulated
+  const flush = (end: number) => { if (end > start) pushText(runs, unescapeText(s.slice(start, end)), false); };
   while (i < s.length) {
-    const opener = nextOpener(s, i);
-    if (opener == null) {
-      pushText(runs, unescapeText(s.slice(i)), false);
-      break;
+    // Break token first, so `\\(` is break + literal `(` rather than a `\(` math opener.
+    if (s[i] === "\\" && s[i + 1] === "\\") { flush(i); runs.push({ kind: "break" }); i += 2; start = i; continue; }
+    const opener = openerAt(s, i);
+    if (opener != null) {
+      flush(i);
+      const contentStart = i + opener.open.length;
+      const closeIdx = s.indexOf(opener.close, contentStart);
+      if (closeIdx < 0) {
+        // Unterminated delimiter (author forgot the closer): render the remainder as math anyway
+        // rather than dumping raw LaTeX. Graceful and never throws.
+        parseMath(s.slice(contentStart), runs, onUnsupported);
+        return runs;
+      }
+      parseMath(s.slice(contentStart, closeIdx), runs, onUnsupported);
+      i = closeIdx + opener.close.length;
+      start = i;
+      continue;
     }
-    if (opener.idx > i) pushText(runs, unescapeText(s.slice(i, opener.idx)), false);
-    const contentStart = opener.idx + opener.open.length;
-    const closeIdx = s.indexOf(opener.close, contentStart);
-    if (closeIdx < 0) {
-      // Unterminated delimiter (author forgot the closer): render the remainder as math anyway
-      // rather than dumping raw LaTeX. Graceful and never throws.
-      parseMath(s.slice(contentStart), runs, onUnsupported);
-      break;
-    }
-    parseMath(s.slice(contentStart, closeIdx), runs, onUnsupported);
-    i = closeIdx + opener.close.length;
+    i++;
   }
+  flush(i);
   return runs;
+}
+
+/** Split a rich string at top-level `\\` break tokens (math regions are skipped so a `\\` inside
+ *  `\( … \)` never splits). Returns the raw substrings between breaks — so each segment can be
+ *  measured or rendered as its own rich string. Empty segments (leading/trailing/consecutive `\\`)
+ *  are preserved as empty strings. */
+export function splitBreaks(s: string): string[] {
+  if (!hasBreak(s)) return [s];
+  const segs: string[] = [];
+  let i = 0;
+  let start = 0;
+  while (i < s.length) {
+    if (s[i] === "\\" && s[i + 1] === "\\") { segs.push(s.slice(start, i)); i += 2; start = i; continue; }
+    const opener = openerAt(s, i);
+    if (opener != null) {
+      const closeIdx = s.indexOf(opener.close, i + opener.open.length);
+      if (closeIdx < 0) break;
+      i = closeIdx + opener.close.length;
+      continue;
+    }
+    i++;
+  }
+  segs.push(s.slice(start));
+  return segs;
 }
 
 /** Append a text run, merging into the previous run when both are plain non-italic text. */
@@ -159,7 +197,9 @@ function readScriptArg(s: string, i: number): { raw: string; next: number } {
 /** Render a (sub/super) script's source to display text + an italic decision. */
 function renderScript(raw: string, onUnsupported?: (cmd: string) => void): { text: string; italic: boolean } {
   const sub = parseMath(raw, [], onUnsupported, true);
-  const text = sub.map((r) => (r.kind === "text" || r.kind === "super" || r.kind === "sub" ? r.text : r.sub + r.sup)).join("");
+  // parseMath never emits break runs, but the union includes it: map subsup to its glyphs, break to
+  // nothing, everything else to its text.
+  const text = sub.map((r) => (r.kind === "subsup" ? r.sub + r.sup : r.kind === "break" ? "" : r.text)).join("");
   const italic = /[a-zA-Z]/.test(text) && sub.some((r) => (r.kind === "text" ? r.italic : false));
   return { text, italic };
 }
@@ -273,24 +313,28 @@ export function richWidth(
   weight: number,
   measure: (s: string, fontPx: number, weight: number) => number,
 ): number {
-  if (!hasMath(s)) return measure(s, fontPx, weight);
+  if (!hasMath(s) && !hasBreak(s)) return measure(s, fontPx, weight);
   const runs = parseRich(s);
   const sf = fontPx * SCRIPT_SCALE;
-  let w = 0;
+  // A broken string is as wide as its WIDEST line, not the sum: track the current line's width and
+  // keep the running max across breaks.
+  let maxW = 0;
+  let line = 0;
   for (const run of runs) {
-    if (run.kind === "text") w += measure(run.text, fontPx, weight);
-    else if (run.kind === "super" || run.kind === "sub") w += measure(run.text, sf, weight);
-    else w += Math.max(measure(run.sub, sf, weight), measure(run.sup, sf, weight));
+    if (run.kind === "break") { maxW = Math.max(maxW, line); line = 0; }
+    else if (run.kind === "text") line += measure(run.text, fontPx, weight);
+    else if (run.kind === "super" || run.kind === "sub") line += measure(run.text, sf, weight);
+    else line += Math.max(measure(run.sub, sf, weight), measure(run.sup, sf, weight));
   }
-  return w;
+  return Math.max(maxW, line);
 }
 
 /** Plain-text projection of a rich string (markup stripped, symbols mapped). Used for rough
  *  heuristics (e.g. banner flanking-rule placement) and as an accessible fallback. */
 export function richToPlain(s: string): string {
-  if (!hasMath(s)) return s;
+  if (!hasMath(s) && !hasBreak(s)) return s;
   return parseRich(s)
-    .map((r) => (r.kind === "subsup" ? r.sup + r.sub : r.text))
+    .map((r) => (r.kind === "break" ? " " : r.kind === "subsup" ? r.sup + r.sub : r.text))
     .join("");
 }
 
@@ -310,7 +354,9 @@ export function validateRichText(s: string): string[] {
  *  and a stacked <span class="tbl-msubsup"> as needed. */
 export function appendRichHtml(parent: Node, s: string, doc: Document): void {
   for (const run of parseRich(s)) {
-    if (run.kind === "text") {
+    if (run.kind === "break") {
+      parent.appendChild(doc.createElement("br"));
+    } else if (run.kind === "text") {
       if (run.italic) { const el = doc.createElement("i"); el.textContent = run.text; parent.appendChild(el); }
       else parent.appendChild(doc.createTextNode(run.text));
     } else if (run.kind === "super" || run.kind === "sub") {
@@ -360,16 +406,30 @@ export function renderRichSvgText(doc: Document, s: string, opts: RichSvgOpts): 
   const runs = parseRich(s);
   const sf = opts.fontSize * SCRIPT_SCALE;
   const m = opts.measure;
-  let total = 0;
+
+  // Split the run list into lines at hard breaks. A single-line string (the common case) yields
+  // one line, so its output is byte-identical to before.
+  const lines: RichRun[][] = [[]];
   for (const run of runs) {
-    if (run.kind === "text") total += m(run.text, opts.fontSize, opts.weight);
-    else if (run.kind === "super" || run.kind === "sub") total += m(run.text, sf, opts.weight);
-    else total += Math.max(m(run.sub, sf, opts.weight), m(run.sup, sf, opts.weight));
+    if (run.kind === "break") lines.push([]);
+    else lines[lines.length - 1]!.push(run);
   }
-  const startX = opts.anchor === "middle" ? opts.x - total / 2 : opts.anchor === "end" ? opts.x - total : opts.x;
+  const lineWidth = (line: RichRun[]): number => {
+    let w = 0;
+    for (const run of line) {
+      if (run.kind === "text") w += m(run.text, opts.fontSize, opts.weight);
+      else if (run.kind === "super" || run.kind === "sub") w += m(run.text, sf, opts.weight);
+      else if (run.kind === "subsup") w += Math.max(m(run.sub, sf, opts.weight), m(run.sup, sf, opts.weight));
+    }
+    return w;
+  };
+  const lineStartX = (line: RichRun[]): number => {
+    const w = lineWidth(line);
+    return opts.anchor === "middle" ? opts.x - w / 2 : opts.anchor === "end" ? opts.x - w : opts.x;
+  };
 
   const t = doc.createElementNS(SVG_NS, "text");
-  t.setAttribute("x", String(startX));
+  t.setAttribute("x", String(lineStartX(lines[0]!)));
   t.setAttribute("y", String(opts.baselineY));
   t.setAttribute("text-anchor", "start");
   t.setAttribute("font-family", opts.fontFamily);
@@ -380,10 +440,11 @@ export function renderRichSvgText(doc: Document, s: string, opts: RichSvgOpts): 
 
   // Position every tspan with ABSOLUTE x and y. Script rise/drop are explicit pixel offsets
   // (not `baseline-shift`, which Chromium's SVG rasterizer ignores), so super/sub land at the
-  // right height and a stacked cluster's two halves sit one above the other at the same x.
+  // right height and a stacked cluster's two halves sit one above the other at the same x. Each
+  // hard-break line drops the baseline by lineHeight and re-anchors from that line's own start.
   const supRise = opts.fontSize * 0.42;
   const subDrop = opts.fontSize * 0.16;
-  let cx = startX;
+  const lineHeight = opts.fontSize + 3; // matches the layout's per-line heights (12→15, 13→16)
   const put = (text: string, x: number, y: number, italic: boolean, script: boolean): void => {
     const ts = doc.createElementNS(SVG_NS, "tspan");
     ts.setAttribute("x", String(x));
@@ -394,24 +455,28 @@ export function renderRichSvgText(doc: Document, s: string, opts: RichSvgOpts): 
     t.appendChild(ts);
   };
 
-  for (const run of runs) {
-    if (run.kind === "text") {
-      put(run.text, cx, opts.baselineY, run.italic, false);
-      cx += m(run.text, opts.fontSize, opts.weight);
-    } else if (run.kind === "super") {
-      put(run.text, cx, opts.baselineY - supRise, run.italic, true);
-      cx += m(run.text, sf, opts.weight);
-    } else if (run.kind === "sub") {
-      put(run.text, cx, opts.baselineY + subDrop, run.italic, true);
-      cx += m(run.text, sf, opts.weight);
-    } else {
-      // Stacked sub+super on the same x; advance by the wider of the two.
-      const supW = m(run.sup, sf, opts.weight);
-      const subW = m(run.sub, sf, opts.weight);
-      put(run.sup, cx, opts.baselineY - supRise, run.supItalic, true);
-      put(run.sub, cx, opts.baselineY + subDrop, run.subItalic, true);
-      cx += Math.max(supW, subW);
+  lines.forEach((line, li) => {
+    let cx = lineStartX(line);
+    const baseY = opts.baselineY + li * lineHeight;
+    for (const run of line) {
+      if (run.kind === "text") {
+        put(run.text, cx, baseY, run.italic, false);
+        cx += m(run.text, opts.fontSize, opts.weight);
+      } else if (run.kind === "super") {
+        put(run.text, cx, baseY - supRise, run.italic, true);
+        cx += m(run.text, sf, opts.weight);
+      } else if (run.kind === "sub") {
+        put(run.text, cx, baseY + subDrop, run.italic, true);
+        cx += m(run.text, sf, opts.weight);
+      } else if (run.kind === "subsup") {
+        // Stacked sub+super on the same x; advance by the wider of the two.
+        const supW = m(run.sup, sf, opts.weight);
+        const subW = m(run.sub, sf, opts.weight);
+        put(run.sup, cx, baseY - supRise, run.supItalic, true);
+        put(run.sub, cx, baseY + subDrop, run.subItalic, true);
+        cx += Math.max(supW, subW);
+      }
     }
-  }
+  });
   return t;
 }

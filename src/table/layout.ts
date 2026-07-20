@@ -9,7 +9,7 @@
 import type { TableModel, HeaderCell, BodyRow, RowGroup } from "./model";
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
-import { richWidth } from "./richtext";
+import { richWidth, hasBreak, splitBreaks } from "./richtext";
 
 export interface LayoutOptions {
   width: number;
@@ -20,6 +20,10 @@ export interface LayoutOptions {
   stubNowrap?: boolean;
   /** Fixed px width for data columns: a single number (all leaves) or per-leaf-key map. */
   columnWidth?: number | Record<string, number>;
+  /** Allow body data cells to wrap within their column width: `true` (all leaves) or a per-leaf-key
+   *  map. Pairs with columnWidth to cap the width; without a cap the column sizes to its natural
+   *  (widest-segment) width and nothing wraps. */
+  columnWrap?: boolean | Record<string, boolean>;
   /** Wrap bottom-tier (leaf) header labels to at most N lines. */
   headerMaxLines?: number;
   /** Minimum px width for the stub column (a floor; or the wrap target when stubWrap is set). */
@@ -87,10 +91,19 @@ export const STUB_LINE_HEIGHT = 16; // per-line height for a wrapped stub label
 const NOTE_WRAP_PAD = 16;
 const NOTE_WRAP_MAX_LINES = 4;
 
+/** Split on hard breaks (`\\`) first — each segment is an independent line that soft-wraps within
+ * itself — then greedily word-wrap each segment via `wrapSegment`. Hard breaks are always honored;
+ * `maxLines` caps only the soft-wrapping WITHIN a segment. */
+function wrapToLines(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
+  const segments = splitBreaks(s);
+  if (segments.length === 1) return wrapSegment(s, maxWidth, maxLines, measure);
+  return segments.flatMap((seg) => wrapSegment(seg, maxWidth, maxLines, measure));
+}
+
 /** Greedy word-wrap into at most `maxLines` lines that each fit `maxWidth` px (via `measure`).
  * The final line absorbs any overflow rather than dropping words, so no text is lost. Returns a
  * single-element array when the text fits on one line. */
-function wrapToLines(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
+function wrapSegment(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
   if (maxLines <= 1 || measure(s) <= maxWidth) return [s];
   const words = s.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -118,6 +131,7 @@ export function layoutOptionsFromSpec(spec: TableSpec): Partial<LayoutOptions> {
     ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
     ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
     ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
+    ...(spec.column_wrap != null ? { columnWrap: spec.column_wrap } : {}),
     ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),
     ...(spec.stub_min_width != null ? { stubMinWidth: spec.stub_min_width } : {}),
     ...(spec.stub_wrap != null ? { stubWrap: spec.stub_wrap } : {}),
@@ -147,6 +161,15 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     if (cw == null) return undefined;
     if (typeof cw === "number") return cw;
     return cw[leafValue];
+  };
+
+  // Resolve whether a leaf's body cells wrap (opts.columnWrap: true for all, or a per-leaf-value
+  // map). Keyed by leaf VALUE like columnWidth, so a repeated value wraps every column sharing it.
+  const colWrapEnabled = (leafValue: string): boolean => {
+    const cw = opts.columnWrap;
+    if (cw == null) return false;
+    if (typeof cw === "boolean") return cw;
+    return cw[leafValue] === true;
   };
 
   // ---- Per-leaf natural width = max(label, sublabel, every body cell text) + padding. ----
@@ -216,8 +239,11 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
   if (opts.stubWrap) {
     for (const b of model.body) {
       if (b.kind !== "row") continue;
-      for (const w of b.row.label.split(/\s+/).filter(Boolean)) {
-        widestWord = Math.max(widestWord, richWidth(w, bodyFontPx, bodyWeight, measureText) + b.row.level * INDENT_STEP);
+      // Measure words per hard-break segment so the `\\` token itself is never counted as a word.
+      for (const seg of splitBreaks(b.row.label)) {
+        for (const w of seg.split(/\s+/).filter(Boolean)) {
+          widestWord = Math.max(widestWord, richWidth(w, bodyFontPx, bodyWeight, measureText) + b.row.level * INDENT_STEP);
+        }
       }
     }
   }
@@ -253,12 +279,14 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
 
   const totalWidth = stubWidth + colW.reduce((a, b) => a + b, 0);
 
-  // ---- Leaf-header wrapping (header_max_lines): resolve the actual lines per leaf now, using the
-  // final column widths, so the renderer draws exactly these. ----
+  // ---- Leaf-header wrapping: resolve the actual lines per leaf now, using the final column widths,
+  // so the renderer draws exactly these. Soft-wrapping needs header_max_lines; a hard break (`\\`)
+  // always splits, even without it (each segment stays on one line). ----
   const leafLines: (string[] | null)[] = leaves.map((leaf, i) => {
-    if (headerMaxLines == null || headerMaxLines <= 1) return null;
+    const softWrap = headerMaxLines != null && headerMaxLines > 1;
+    if (!softWrap && !hasBreak(leaf.label)) return null;
     const avail = Math.max(1, colW[i]! - padX);
-    const lines = wrapToLines(leaf.label, avail, headerMaxLines, measureHeader);
+    const lines = wrapToLines(leaf.label, avail, softWrap ? headerMaxLines! : 1, measureHeader);
     return lines.length > 1 ? lines : null;
   });
   const maxLeafLines = leafLines.reduce((m, l) => Math.max(m, l ? l.length : 1), 1);
@@ -321,20 +349,23 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
       y += h;
       return { group: entry.group, rect, noteLines, topGap, isFirst };
     }
-    // Row height grows to fit the tallest wrapped content: the row label (when stub_wrap is on) and
-    // any text cells that wrap to their column width.
+    // Row height grows to fit the tallest wrapped content: the row label (soft-wrapped when
+    // stub_wrap is on, hard-broken on `\\` regardless) and any data cell that wraps — text columns
+    // and column_wrap columns soft-wrap to their width; every cell hard-breaks on `\\`.
     const measureBody = (s: string) => richWidth(s, bodyFontPx, bodyWeight, measureText);
     let maxLines = 1;
     let stubLines: string[] | undefined;
-    if (opts.stubWrap) {
+    if (opts.stubWrap || hasBreak(entry.row.label)) {
       const avail = Math.max(1, stubWidth - padX - entry.row.level * INDENT_STEP);
-      const lines = wrapToLines(entry.row.label, avail, 99, measureBody);
+      const lines = wrapToLines(entry.row.label, avail, opts.stubWrap ? 99 : 1, measureBody);
       if (lines.length > 1) { stubLines = lines; maxLines = Math.max(maxLines, lines.length); }
     }
     let cellLines: (string[] | undefined)[] | undefined;
     entry.row.cells.forEach((cell, i) => {
-      if (!cell.isText || cell.text === "") return;
-      const lines = wrapToLines(cell.text, Math.max(1, colW[i]! - padX), 99, measureBody);
+      if (cell.text === "") return;
+      const softWrap = cell.isText || colWrapEnabled(leaves[i]!.lastValue);
+      if (!softWrap && !hasBreak(cell.text)) return;
+      const lines = wrapToLines(cell.text, Math.max(1, colW[i]! - padX), softWrap ? 99 : 1, measureBody);
       if (lines.length > 1) {
         if (!cellLines) cellLines = leaves.map(() => undefined);
         cellLines[i] = lines;

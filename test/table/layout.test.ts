@@ -307,6 +307,77 @@ describe("layoutTable — width + wrap config (5c)", () => {
     expect(flooredRow.stubLines).toBeUndefined();
   });
 
+  it("assigns data-column widths even with stub_wrap on (Change A regression guard)", () => {
+    const model = buildTableModel(cfgSpec, cfgRows);
+    const wrapped = layoutTable(model, { width: 800, measureText, stubWrap: true, stubMinWidth: 40 });
+    // Every leaf still gets a positive computed width — stub_wrap must not collapse the data cols.
+    expect(wrapped.colW.length).toBe(model.leaves.length);
+    wrapped.colW.forEach((w) => expect(w).toBeGreaterThan(0));
+  });
+
+  it("honors column_width when stub_wrap is on", () => {
+    const model = buildTableModel(cfgSpec, cfgRows);
+    const layout = layoutTable(model, { width: 800, measureText, stubWrap: true, stubMinWidth: 40, columnWidth: 90 });
+    layout.colW.forEach((w) => expect(w).toBe(90));
+  });
+
+  it("column_wrap wraps a text column within its (capped) width and grows the row height", () => {
+    // A text-valued data column: the header key ("notes") is constant, the VALUE column holds text.
+    const wrapSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+    };
+    const wrapRows = [
+      { row: "r1", metric: "notes", value: "a long descriptive note that must wrap" },
+      { row: "r2", metric: "notes", value: "short" },
+    ] as any;
+    const model = buildTableModel(wrapSpec, wrapRows);
+    const idx = model.leaves.findIndex((l) => l.lastValue === "notes");
+    // Cap the column narrow and enable column_wrap: the long cell wraps to multiple lines.
+    const layout = layoutTable(model, {
+      width: 800, measureText, columnWidth: { notes: 80 }, columnWrap: { notes: true },
+    });
+    const longRow = layout.rows.find((e) => "row" in e && e.row.label === "r1") as any;
+    expect(longRow.cellLines?.[idx]?.length).toBeGreaterThan(1);
+    expect(longRow.rect.h).toBeGreaterThan(layout.rowHeight);
+  });
+
+  it("natural column width is the widest \\\\-segment, not the whole string", () => {
+    const brSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["metric"],
+    };
+    const brRows = [
+      { row: "r", metric: "notes", value: "aaaaaaaa\\\\bb" },
+    ] as any;
+    const model = buildTableModel(brSpec, brRows);
+    const idx = model.leaves.findIndex((l) => l.lastValue === "notes");
+    const layout = layoutTable(model, { width: 800, measureText });
+    // Segments "aaaaaaaa" (8) and "bb" (2): natural width tracks the wider (8), not 8+2.
+    // measureText = length*7; layout adds padX = 16.
+    expect(layout.colW[idx]!).toBe(measureText("aaaaaaaa") + 16); // widest segment + padX
+    expect(layout.colW[idx]!).toBeLessThan(measureText("aaaaaaaabb") + 16); // not the full-string width
+  });
+
+  it("a stub label with \\\\ splits into lines even without stub_wrap", () => {
+    const brSpec: TableSpec = {
+      title: "T", data: "d", value: "value",
+      stub: [{ label: "row" }],
+      header: ["m"],
+      format: { default: { type: "number", decimals: 0 } },
+    };
+    const brRows = [
+      { row: "First line\\\\second line", m: "x", value: "1" },
+    ] as any;
+    const model = buildTableModel(brSpec, brRows);
+    const layout = layoutTable(model, { width: 800, measureText }); // no stub_wrap
+    const r = layout.rows.find((e) => "row" in e) as any;
+    expect(r.stubLines).toEqual(["First line", "second line"]);
+    expect(r.rect.h).toBeGreaterThan(layout.rowHeight);
+  });
+
   it("fillWidth widens the data columns to a shared total, leaving the stub unchanged", () => {
     const { model, layout } = build();
     const target = layout.totalWidth + 200;

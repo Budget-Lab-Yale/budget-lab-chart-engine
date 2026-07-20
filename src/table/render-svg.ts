@@ -22,7 +22,7 @@ import {
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
 import { tokens } from "../theme/tokens";
-import { hasMath, renderRichSvgText, richToPlain } from "./richtext";
+import { hasMath, hasBreak, renderRichSvgText, richToPlain } from "./richtext";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -88,7 +88,10 @@ export function renderTableSvg(
     str: string,
     o: { anchor: "start" | "middle" | "end"; weight: number; fill: string; size: number; cls?: string; italic?: boolean },
   ): SVGElement => {
-    if (!hasMath(str)) return text(x, y, str, o);
+    // A hard break routes through the rich emitter too (it lays the segments on separate lines),
+    // so a `\\` in a context without a pre-wrapped line array (banner, group label, corner) renders
+    // as a break instead of a literal backslash pair.
+    if (!hasMath(str) && !hasBreak(str)) return text(x, y, str, o);
     const rich = renderRichSvgText(doc, str, {
       x, baselineY: y, anchor: o.anchor, fontFamily: TBL.font, fontSize: o.size, weight: o.weight, fill: o.fill, measure,
       ...(o.cls ? { cls: o.cls } : {}),

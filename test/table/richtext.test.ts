@@ -5,6 +5,8 @@ import {
   richWidth,
   richToPlain,
   hasMath,
+  hasBreak,
+  splitBreaks,
   validateRichText,
   appendRichHtml,
   renderRichSvgText,
@@ -81,6 +83,59 @@ describe("parseRich — math subset", () => {
   });
 });
 
+describe("parseRich — hard line break \\\\", () => {
+  it("splits a text run at \\\\ and emits a break run between the segments", () => {
+    expect(parseRich("a\\\\b")).toEqual([
+      { kind: "text", text: "a", italic: false },
+      { kind: "break" },
+      { kind: "text", text: "b", italic: false },
+    ]);
+  });
+  it("\\\\( parses as a break followed by a literal ( (break wins over the \\( math opener)", () => {
+    expect(parseRich("\\\\(")).toEqual([
+      { kind: "break" },
+      { kind: "text", text: "(", italic: false },
+    ]);
+  });
+  it("\\(x\\) still parses as math (a single backslash opener is untouched)", () => {
+    expect(parseRich("\\(x\\)")).toEqual([{ kind: "text", text: "x", italic: true }]);
+  });
+  it("\\$ still renders a literal $ alongside a break", () => {
+    // "\$5" → "$5", then a break, then plain "done" (the \(g\) forces math-mode unescaping).
+    const runs = parseRich("\\$5\\\\done \\(g\\)");
+    expect(runs[0]).toEqual({ kind: "text", text: "$5", italic: false });
+    expect(runs[1]).toEqual({ kind: "break" });
+    expect(runs[2]).toEqual({ kind: "text", text: "done ", italic: false });
+  });
+  it("italic / sup / sub runs pass through unchanged around a break", () => {
+    const runs = parseRich("A\\\\\\(x^2\\)");
+    expect(runs[0]).toEqual({ kind: "text", text: "A", italic: false });
+    expect(runs[1]).toEqual({ kind: "break" });
+    expect(runs[2]).toEqual({ kind: "text", text: "x", italic: true });
+    expect(runs[3]).toEqual({ kind: "super", text: "2", italic: false });
+  });
+  it("leading / trailing / consecutive \\\\ produce empty lines (allowed)", () => {
+    expect(parseRich("\\\\a")).toEqual([{ kind: "break" }, { kind: "text", text: "a", italic: false }]);
+    expect(parseRich("a\\\\")).toEqual([{ kind: "text", text: "a", italic: false }, { kind: "break" }]);
+    expect(parseRich("a\\\\\\\\b")).toEqual([
+      { kind: "text", text: "a", italic: false },
+      { kind: "break" },
+      { kind: "break" },
+      { kind: "text", text: "b", italic: false },
+    ]);
+  });
+  it("a plain string with no math and no break still returns a single verbatim run", () => {
+    expect(hasBreak("plain")).toBe(false);
+    expect(parseRich("plain")).toEqual([{ kind: "text", text: "plain", italic: false }]);
+  });
+  it("splitBreaks returns the raw segments, not splitting inside math", () => {
+    expect(splitBreaks("a\\\\b\\\\c")).toEqual(["a", "b", "c"]);
+    expect(splitBreaks("no breaks")).toEqual(["no breaks"]);
+    // A \\ INSIDE math is not a top-level break (left to the math parser).
+    expect(splitBreaks("x\\(a\\)y")).toEqual(["x\\(a\\)y"]);
+  });
+});
+
 describe("richWidth", () => {
   it("equals plain measureText for non-math strings", () => {
     expect(richWidth("hello", 13, 400, measure)).toBe(measure("hello", 13, 400));
@@ -90,6 +145,17 @@ describe("richWidth", () => {
     const w = richWidth("\\(\\theta_1^K\\)", 13, 400, measure);
     const expected = measure("θ", 13, 400) + Math.max(measure("1", 13 * 0.72, 400), measure("K", 13 * 0.72, 400));
     expect(w).toBeCloseTo(expected, 6);
+  });
+  it("returns the widest segment's width (not the sum) for a broken string", () => {
+    // Segments "aaaa" (4) and "bb" (2): the width is the wider one.
+    const w = richWidth("aaaa\\\\bb", 10, 400, measure);
+    expect(w).toBe(measure("aaaa", 10, 400));
+  });
+});
+
+describe("richToPlain — breaks", () => {
+  it("joins segments with a single space", () => {
+    expect(richToPlain("Line one\\\\Line two")).toBe("Line one Line two");
   });
 });
 
@@ -129,6 +195,15 @@ describe("appendRichHtml", () => {
     // Base glyph present as text.
     expect(th.textContent).toContain("θ");
   });
+  it("emits a <br> at a hard break, with a text node on either side", () => {
+    const th = document.createElement("th");
+    appendRichHtml(th, "Line one\\\\Line two", document);
+    expect(th.querySelectorAll("br").length).toBe(1);
+    expect(th.childNodes.length).toBe(3); // text, <br>, text
+    expect(th.childNodes[0]!.textContent).toBe("Line one");
+    expect((th.childNodes[1] as Element).tagName).toBe("BR");
+    expect(th.childNodes[2]!.textContent).toBe("Line two");
+  });
 });
 
 describe("renderRichSvgText", () => {
@@ -157,5 +232,17 @@ describe("renderRichSvgText", () => {
     const w = richWidth("\\(\\sigma\\)", 13, 400, measure);
     expect(Number(t.getAttribute("x"))).toBeCloseTo(100 - w / 2, 6);
     expect(t.getAttribute("text-anchor")).toBe("start");
+  });
+
+  it("lays out a hard break on a new line (second segment dropped by lineHeight)", () => {
+    const t = renderRichSvgText(document, "one\\\\two", { ...base, anchor: "start" });
+    const one = Array.from(t.querySelectorAll("tspan")).find((ts) => ts.textContent === "one")!;
+    const two = Array.from(t.querySelectorAll("tspan")).find((ts) => ts.textContent === "two")!;
+    expect(one).toBeTruthy();
+    expect(two).toBeTruthy();
+    // Second line's baseline is below the first by one line height (fontSize + 3 = 16).
+    expect(Number(two.getAttribute("y"))).toBe(Number(one.getAttribute("y")) + base.fontSize + 3);
+    // Start-anchored: both lines begin at the same x.
+    expect(two.getAttribute("x")).toBe(one.getAttribute("x"));
   });
 });
