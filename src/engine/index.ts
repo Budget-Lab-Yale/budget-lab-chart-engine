@@ -757,7 +757,7 @@ export function buildLegendItems(
   }
 
   const markerShape: "line" | "rect" =
-    chartType === "bar" || chartType === "stacked" ? "rect" : "line";
+    chartType === "bar" || chartType === "stacked" || chartType === "histogram" ? "rect" : "line";
   // Line charts with point markers: each series carries its marker shape so the legend swatch
   // shows the same symbol as the chart (assigned by series index, matching the symbol scale).
   const withSymbols = markerShape === "line" && spec.points === true;
