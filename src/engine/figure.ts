@@ -9,7 +9,9 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec } from "../spec/types";
-import { resolveColumns } from "../spec/columns";
+import { resolveColumns, isPreBinned } from "../spec/columns";
+import { parseDate } from "./parse-time";
+import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
@@ -325,6 +327,26 @@ export function renderFigure(
   const facetField = cols.facet;
   if (!facetField) {
     throw new Error("small_multiples requires a facet column (set columns.facet).");
+  }
+
+  // Histogram shared mode (default): bin every pane to ONE set of thresholds computed over ALL
+  // in-scope rows, so panes share a common continuous x-domain and their bars line up. Per-pane
+  // mode omits these (each pane bins its own rows). Pre-binned histograms carry their edges in the
+  // data, so there is nothing to compute. Threaded into every pane's renderPane via opts.binThresholds.
+  let binThresholds: number[] | undefined;
+  if (spec.chartType === "histogram" && mode !== "per-pane" && !isPreBinned(cols)) {
+    const isTemporal = spec.xAxisType === "temporal";
+    const values = rows
+      .map((r) => (isTemporal ? parseDate(r[cols.x] ?? "").getTime() : +(r[cols.x] ?? "")))
+      .filter((v) => Number.isFinite(v));
+    const bw = spec.histogram?.binWidth;
+    binThresholds = isTemporal
+      ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
+      : computeThresholds(values, {
+          bins: spec.histogram?.bins,
+          binWidth: typeof bw === "number" ? bw : undefined,
+          domain: spec.histogram?.domain,
+        });
   }
 
   // Horizontal bars: the category axis runs down the left gutter (shared across panes). Compute the
@@ -654,7 +676,13 @@ export function renderFigure(
     const [lo, hi] = renderPane(
       spec,
       paneRows,
-      { ...opts, height: effHeight, pane: true, paneFacetValue: value },
+      {
+        ...opts,
+        height: effHeight,
+        pane: true,
+        paneFacetValue: value,
+        ...(binThresholds ? { binThresholds } : {}),
+      },
       "probe",
     ).yDomain;
     if (lo < yLo) yLo = lo;
@@ -701,6 +729,7 @@ export function renderFigure(
         pane: true,
         paneFacetValue: value,
         yDomain: sharedYDomain,
+        ...(binThresholds ? { binThresholds } : {}),
         width: colWidths[col],
         ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
         ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),
