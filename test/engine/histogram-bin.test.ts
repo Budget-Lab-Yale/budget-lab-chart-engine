@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { computeThresholds, binValues } from "../../src/engine/histogram-bin";
+import { calendarEdges, temporalThresholds } from "../../src/engine/histogram-bin";
+
+const ms = (iso: string) => Date.parse(iso + "T00:00:00Z");
 
 const rows = (xs: number[], series = "") => xs.map((x) => ({ series, x }));
 
@@ -57,5 +60,23 @@ describe("binValues", () => {
   it("honors explicit shared thresholds (ignores bins/binWidth)", () => {
     const out = binValues(rows([0, 3, 8]), { thresholds: [0, 4, 8] });
     expect(out.map((b) => [b._x0, b._x1, b._y])).toEqual([[0, 4, 2], [4, 8, 1]]);
+  });
+});
+
+describe("temporal edges", () => {
+  it("calendarEdges by month covers the range on UTC month boundaries", () => {
+    const e = calendarEdges(ms("2024-01-10"), ms("2024-03-05"), "month");
+    expect(e[0]).toBe(ms("2024-01-01"));
+    expect(e).toContain(ms("2024-02-01"));
+    expect(e).toContain(ms("2024-03-01"));
+    expect(e[e.length - 1]).toBeGreaterThanOrEqual(ms("2024-04-01"));
+  });
+  it("temporalThresholds with a day-count width steps in whole days", () => {
+    const t = temporalThresholds([ms("2024-01-01"), ms("2024-01-08")], 7, undefined, undefined);
+    expect(t[1]! - t[0]!).toBe(7 * 86400000);
+  });
+  it("temporalThresholds with a bin count divides the ms range evenly", () => {
+    const t = temporalThresholds([0, 100], undefined, 4, [0, 100]);
+    expect(t).toEqual([0, 25, 50, 75, 100]);
   });
 });

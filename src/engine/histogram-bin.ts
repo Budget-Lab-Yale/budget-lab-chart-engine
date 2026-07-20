@@ -52,6 +52,54 @@ function binIndex(x: number, t: number[]): number {
   return lo;
 }
 
+const DAY_MS = 86400000;
+
+/** UTC calendar-boundary edges spanning [startMs, endMs], inclusive of a trailing edge past endMs. */
+export function calendarEdges(
+  startMs: number, endMs: number,
+  interval: "day" | "week" | "month" | "quarter" | "year",
+): number[] {
+  const floor = (ms: number): number => {
+    const d = new Date(ms);
+    if (interval === "day") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    if (interval === "week") { const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); return day - ((new Date(day).getUTCDay()) * DAY_MS); }
+    if (interval === "month") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+    if (interval === "quarter") return Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / 3) * 3, 1);
+    return Date.UTC(d.getUTCFullYear(), 0, 1); // year
+  };
+  const next = (ms: number): number => {
+    const d = new Date(ms);
+    if (interval === "day") return ms + DAY_MS;
+    if (interval === "week") return ms + 7 * DAY_MS;
+    if (interval === "month") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+    if (interval === "quarter") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3, 1);
+    return Date.UTC(d.getUTCFullYear() + 1, 0, 1);
+  };
+  const edges: number[] = [];
+  let e = floor(startMs);
+  edges.push(e);
+  while (e <= endMs) { e = next(e); edges.push(e); }
+  return edges;
+}
+
+/** Thresholds for a temporal axis. `binWidth` may be a calendar interval name, a day count, or
+ *  undefined (then `bins`, then auto by day-count). */
+export function temporalThresholds(
+  valuesMs: number[], binWidth: number | string | undefined, bins: number | undefined,
+  domain: [number, number] | undefined,
+): number[] {
+  const [min, max] = domain ?? [Math.min(...valuesMs), Math.max(...valuesMs)];
+  if (typeof binWidth === "string") {
+    if (["day", "week", "month", "quarter", "year"].includes(binWidth)) {
+      return calendarEdges(min, max, binWidth as "day");
+    }
+    const days = Number(binWidth);
+    if (Number.isFinite(days) && days > 0) return computeThresholds(valuesMs, { binWidth: days * DAY_MS, domain: [min, max] });
+  }
+  if (typeof binWidth === "number" && binWidth > 0) return computeThresholds(valuesMs, { binWidth: binWidth * DAY_MS, domain: [min, max] });
+  return computeThresholds(valuesMs, { bins, domain: [min, max] });
+}
+
 export function binValues(rows: BinInput[], spec: BinSpec): BinnedRow[] {
   const values = rows.map((r) => r.x).filter(Number.isFinite);
   const t = computeThresholds(values, spec);
