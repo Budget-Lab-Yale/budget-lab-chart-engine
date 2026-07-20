@@ -22,6 +22,10 @@ export interface ResolvedColumns {
   section: string | null;
   /** Column flagging a waterfall step's kind (delta/total/skip), or null. */
   kind: string | null;
+  /** Histogram pre-binned data: column holding each bin's lower edge, or null. */
+  x0: string | null;
+  /** Histogram pre-binned data: column holding each bin's upper edge, or null. */
+  x1: string | null;
 }
 
 /**
@@ -43,6 +47,8 @@ export function resolveColumns(
   const shape = c.shape != null && c.shape !== "" ? c.shape : null;
   const section = c.section != null && c.section !== "" ? c.section : null;
   const kind = c.kind != null && c.kind !== "" ? c.kind : null;
+  const x0 = c.x0 != null && c.x0 !== "" ? c.x0 : null;
+  const x1 = c.x1 != null && c.x1 !== "" ? c.x1 : null;
 
   let series: string | null;
   if (c.series != null && c.series !== "") {
@@ -53,5 +59,10 @@ export function resolveColumns(
     series = "series";
   }
 
-  return { x, value, series, facet, shape, section, kind };
+  return { x, value, series, facet, shape, section, kind, x0, x1 };
+}
+
+/** True only when both bin-edge roles (`x0`/`x1`) are mapped — i.e. the data arrives pre-binned. */
+export function isPreBinned(cols: ResolvedColumns): boolean {
+  return cols.x0 != null && cols.x1 != null;
 }
