@@ -100,6 +100,23 @@ export function temporalThresholds(
   return computeThresholds(valuesMs, { bins, domain: [min, max] });
 }
 
+/** Normalize pre-computed bin heights (`_y`) per series. "proportion": each series' bins sum to 1;
+ *  "density": each series' area (Σ _y·width) sums to 1. "none"/undefined → returned unchanged.
+ *  Shared by `binValues` (raw counts) and the pipeline's pre-binned path so both normalize
+ *  identically. */
+export function normalizeBinned(rows: BinnedRow[], mode: BinSpec["normalize"]): BinnedRow[] {
+  if (!mode || mode === "none") return rows;
+  const totalBySeries = new Map<string, number>();
+  for (const r of rows) totalBySeries.set(r.series, (totalBySeries.get(r.series) ?? 0) + r._y);
+  return rows.map((r) => {
+    const total = totalBySeries.get(r.series) || 1;
+    let y = r._y;
+    if (mode === "proportion") y = y / total;
+    else if (mode === "density") y = y / (total * (r._x1 - r._x0));
+    return { ...r, _y: y };
+  });
+}
+
 export function binValues(rows: BinInput[], spec: BinSpec): BinnedRow[] {
   const values = rows.map((r) => r.x).filter(Number.isFinite);
   const t = computeThresholds(values, spec);
@@ -122,16 +139,12 @@ export function binValues(rows: BinInput[], spec: BinSpec): BinnedRow[] {
   const out: BinnedRow[] = [];
   for (const s of seriesOrder) {
     const counts = acc.get(s)!;
-    const total = counts.reduce((a, b) => a + b, 0) || 1;
     for (let i = 0; i < nBins; i++) {
-      const x0 = t[i]!, x1 = t[i + 1]!;
-      let y = counts[i]!;
-      if (spec.normalize === "proportion") y = y / total;
-      else if (spec.normalize === "density") y = y / (total * (x1 - x0));
-      const row: BinnedRow = { series: s, _x0: x0, _x1: x1, _y: y };
+      const row: BinnedRow = { series: s, _x0: t[i]!, _x1: t[i + 1]!, _y: counts[i]! };
       const f = facetOf.get(s); if (f !== undefined) row._facet = f;
       out.push(row);
     }
   }
-  return out;
+  // Normalize per series (over raw counts) — one implementation, shared with the pre-binned path.
+  return normalizeBinned(out, spec.normalize);
 }

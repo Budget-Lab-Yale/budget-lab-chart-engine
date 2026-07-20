@@ -6,7 +6,8 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
-import { resolveColumns, SINGLE_SERIES_KEY } from "../spec/columns";
+import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY } from "../spec/columns";
+import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
@@ -14,6 +15,10 @@ import { computeYAxis, computeBarYExtent, computeWaterfallYExtent } from "./scal
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
+import type { XAdapter } from "./x-adapter";
+import { parseDate } from "./parse-time";
+import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
+import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
@@ -91,6 +96,13 @@ export interface RenderOptions {
    *  once from `selections` for a static export. Absent (the common case — no title_selectors, or
    *  a multi-series chart) ⇒ byte-identical to before this field existed. */
   accentColor?: string;
+  /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
+   *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
+   *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
+   *  explicit thresholds. Absent → the pane computes its own thresholds from its own rows
+   *  (single chart, or per-pane mode where each pane bins independently). Ignored by non-histogram
+   *  chart types and by pre-binned histograms (which read x0/x1 directly). */
+  binThresholds?: number[];
 }
 
 export interface LegendItem {
@@ -231,9 +243,15 @@ export function renderPane(
 ): PaneResult {
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
+  const cols = resolveColumns(spec, rows);
+
+  // Histogram: raw rows are binned (or pre-binned x0/x1/value read directly) into `_x0/_x1/_y`
+  // PreparedRows, then rendered through the shared pane tail with a continuous histogram adapter.
+  if (spec.chartType === "histogram") {
+    return renderHistogramPane(spec, rows, opts, classNameSuffix, facetInfo, cols, xType);
+  }
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy);
-  const cols = resolveColumns(spec, rows);
 
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
@@ -284,6 +302,110 @@ export function renderPane(
 
   if (!data.length) throw new Error("No data.");
 
+  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, data);
+}
+
+/** [min(_x0), max(_x1)] over binned rows — the continuous bin-edge span the histogram x-scale
+ *  must cover (the already-binned counts must NOT drive the x domain). */
+function histogramDomainOf(binned: PreparedRow[]): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const r of binned) {
+    if (r._x0 != null && r._x0 < lo) lo = r._x0;
+    if (r._x1 != null && r._x1 > hi) hi = r._x1;
+  }
+  return Number.isFinite(lo) && Number.isFinite(hi) ? [lo, hi] : [0, 1];
+}
+
+/** Histogram pane: transform raw rows into binned `_x0/_x1/_y` PreparedRows (or read pre-binned
+ *  edges directly), build a CONTINUOUS x-adapter whose domain spans the bin edges, then hand off
+ *  to the shared pane tail. Binning is driven off the RAW rows (so the weight column is in hand)
+ *  using the same numeric/temporal x-parse the adapter uses. Shared-mode facet thresholds arrive
+ *  via `opts.binThresholds` (computed once over all rows by the figure orchestrator). */
+function renderHistogramPane(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  opts: RenderOptions,
+  classNameSuffix: string | undefined,
+  facetInfo: FacetInfo | undefined,
+  cols: ResolvedColumns,
+  xType: NonNullable<ChartSpec["xAxisType"]>,
+): PaneResult {
+  const isTemporal = xType === "temporal";
+  let binned: PreparedRow[];
+
+  if (isPreBinned(cols)) {
+    // Pre-binned: each row already carries a bin's lower/upper edge + its bar height (value).
+    // No engine binning; still honor `normalize` (validation forbids bins/binWidth/domain/weight
+    // here, but not normalize) so a pre-binned proportion/density histogram scales the same way.
+    const preRows: BinnedRow[] = rows.map((r) => {
+      const valRaw = r[cols.value];
+      const row: BinnedRow = {
+        series: cols.series ? String(r[cols.series] ?? "") : SINGLE_SERIES_KEY,
+        _x0: +r[cols.x0!]!,
+        _x1: +r[cols.x1!]!,
+        _y: valRaw === "" || valRaw == null ? 0 : +valRaw,
+      };
+      if (cols.facet) row._facet = String(r[cols.facet] ?? "");
+      return row;
+    });
+    binned = normalizeBinned(preRows, spec.histogram?.normalize) as PreparedRow[];
+  } else {
+    // Raw: parse x the SAME way the adapter would (numeric `+v`, temporal `parseDate` → epoch-ms),
+    // read the optional weight column off the raw row (blank ⇒ 0 contribution), and drop non-finite x.
+    const weightCol = spec.histogram?.weight;
+    const inputs: BinInput[] = rows
+      .map((r) => {
+        const xRaw = r[cols.x] ?? "";
+        const x = isTemporal ? parseDate(xRaw).getTime() : +xRaw;
+        const wRaw = weightCol ? r[weightCol] : undefined;
+        const weight =
+          weightCol != null ? (wRaw === "" || wRaw == null ? 0 : Number(wRaw)) : undefined;
+        const input: BinInput = {
+          series: cols.series ? String(r[cols.series] ?? "") : SINGLE_SERIES_KEY,
+          x,
+        };
+        if (weight !== undefined) input.weight = weight;
+        if (cols.facet) input._facet = String(r[cols.facet] ?? "");
+        return input;
+      })
+      .filter((r) => Number.isFinite(r.x));
+    const values = inputs.map((r) => r.x);
+    const bw = spec.histogram?.binWidth;
+    const thresholds =
+      opts.binThresholds ??
+      (isTemporal
+        ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
+        : computeThresholds(values, {
+            bins: spec.histogram?.bins,
+            binWidth: typeof bw === "number" ? bw : undefined,
+            domain: spec.histogram?.domain,
+          }));
+    binned = binValues(inputs, {
+      thresholds,
+      normalize: spec.histogram?.normalize,
+    }) as PreparedRow[];
+  }
+
+  if (!binned.length) throw new Error("No data.");
+
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned));
+  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
+}
+
+/** Shared pane-assembly tail: series order/colors → annotations → y-axis → x-opts → markBuilder →
+ *  assemblePlot → PaneResult. Consumed by BOTH the standard parse path (line/bar/…, which passes a
+ *  data-fitted adapter) and the histogram path (which passes binned `_x0/_x1/_y` rows + a
+ *  bin-edge-domain adapter). The y-extent block branches per chartType (histograms: `_y`, include 0). */
+function assemblePaneResult(
+  spec: ChartSpec,
+  opts: RenderOptions,
+  classNameSuffix: string | undefined,
+  facetInfo: FacetInfo | undefined,
+  adapter: XAdapter,
+  cols: ResolvedColumns,
+  data: PreparedRow[],
+): PaneResult {
   // Series order + colors. When series_order is set it acts as both filter and order.
   const seriesNames =
     spec.series_order && spec.series_order.length
@@ -385,6 +507,12 @@ export function renderPane(
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
     const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
     hardDomain = [resolvedMin, resolvedMax];
+  } else if (chartType === "histogram") {
+    // Histogram: the value axis is the (possibly normalized) bin height `_y`, which yForAxis
+    // already carries. Zero baseline is mandatory (bars grow from 0); an explicit min+max opts
+    // into a fixed domain, otherwise auto-fit-from-zero.
+    includeZero = true;
+    hardDomain = policy.min != null && policy.max != null ? [policy.min, policy.max] : null;
   } else if (chartType === "waterfall") {
     // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
     // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
