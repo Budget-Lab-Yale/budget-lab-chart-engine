@@ -4,6 +4,25 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-07-20
+
+### Added — histogram
+
+- **New `chartType: "histogram"`** — continuous-x binned bars. `xAxisType` must be `numeric` or
+  `temporal`. Bins are sized by `histogram.binWidth` (x-units, or for temporal x a calendar
+  interval name `day`/`week`/`month`/`quarter`/`year` or a day count) > `histogram.bins` (target
+  count) > auto (Freedman–Diaconis, falling back to Sturges' rule). `histogram.domain` fixes the
+  binning range; `histogram.weight` sums a column per bin instead of counting rows;
+  `histogram.normalize` renders `proportion` (each series' bins sum to 1) or `density` (area sums
+  to 1) bars instead of raw counts.
+- **Pre-binned input.** Mapping `columns.x0` + `columns.x1` supplies each row's bin edges directly
+  (uneven widths allowed), with `columns.value` as the bar height and the engine's own binning
+  fields rejected by validation.
+- **Overlapping multi-series** — each series draws a translucent bar layer over a shared bin set,
+  for comparing distributions rather than stacking totals.
+- **Faceting** via `columns.facet` + `small_multiples`: `shared` mode (default) bins every pane to
+  one common threshold set; `per-pane` bins each pane independently.
+
 ## [1.5.0] - 2026-07-20
 
 ### Fixed — tables
