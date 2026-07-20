@@ -65,6 +65,7 @@ export function binValues(rows: BinInput[], spec: BinSpec): BinnedRow[] {
   const acc = new Map<string, number[]>();
   for (const s of seriesOrder) acc.set(s, new Array(nBins).fill(0));
   for (const r of rows) {
+    if (!Number.isFinite(r.x)) continue; // non-finite x: excluded from counts and totals
     const i = binIndex(r.x, t);
     if (i < 0) continue;
     acc.get(r.series)![i]! += r.weight ?? 1;

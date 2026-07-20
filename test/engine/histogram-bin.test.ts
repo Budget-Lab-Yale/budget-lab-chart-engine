@@ -49,6 +49,11 @@ describe("binValues", () => {
     const area = out.reduce((s, b) => s + b._y * (b._x1 - b._x0), 0);
     expect(area).toBeCloseTo(1, 9);
   });
+  it("excludes non-finite x from counts and from the normalization total", () => {
+    const out = binValues([{ series: "", x: 1 }, { series: "", x: NaN }, { series: "", x: 4 }], { binWidth: 5, domain: [0, 5], normalize: "proportion" });
+    expect(out[0]!._y).toBeCloseTo(1, 9);          // 2 finite values, both in [0,5]; proportion sums to 1
+    expect(out.reduce((s, b) => s + b._y, 0)).toBeCloseTo(1, 9);
+  });
   it("honors explicit shared thresholds (ignores bins/binWidth)", () => {
     const out = binValues(rows([0, 3, 8]), { thresholds: [0, 4, 8] });
     expect(out.map((b) => [b._x0, b._x1, b._y])).toEqual([[0, 4, 2], [4, 8, 1]]);
