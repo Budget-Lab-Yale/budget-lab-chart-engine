@@ -49,13 +49,32 @@ const temporalMarginBottom = (xDomain: [Date, Date]): number => {
   return allJanuary ? 22 : 38;
 };
 
-export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdapter {
+export function makeXAdapter(
+  xType: XAxisType,
+  xAxisPolicy?: XAxisPolicy,
+  histogramDomain?: [number, number],
+): XAdapter {
   if (xType === "numeric") {
     return {
       parseX: (v) => +v,
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
       buildXOpts(data, faceted = false) {
+        // Histogram: the domain is the caller-supplied bin-edge span, not the data range (the
+        // "data" here is already-binned counts, which must NOT drive the x domain).
+        if (histogramDomain) {
+          return {
+            marginBottom: 22,
+            xPlotOpts: { type: "linear", label: null, axis: null, domain: histogramDomain },
+            axisMarks: tblXAxis(
+              { xTickFormat: (d: unknown) => `${+(d as number)}` },
+              faceted ? X_AXIS_LABEL_CLASS : undefined,
+            ),
+            markerToX: (m) => +m.x,
+            tooltipXParse: (v) => +v,
+            tooltipXFormat: (v) => `${+v}`,
+          };
+        }
         const xMax = d3.max(data, (d: any) => d._xn) as number;
         // Default OFF: a numeric axis fits its data range. Anchoring at zero is surprising for a
         // year axis (it squishes all history to the right); opt in with anchorAtZero: true.
@@ -87,10 +106,17 @@ export function makeXAdapter(xType: XAxisType, xAxisPolicy?: XAxisPolicy): XAdap
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
       buildXOpts(data, faceted = false) {
-        const xs = data.map((r) => +r._xd);
-        const xDomain: [Date, Date] = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
+        // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
+        let xDomain: [Date, Date];
+        if (histogramDomain) {
+          xDomain = [new Date(histogramDomain[0]), new Date(histogramDomain[1])];
+        } else {
+          const xs = data.map((r) => +r._xd);
+          xDomain = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
+        }
         return {
           marginBottom: temporalMarginBottom(xDomain),
+          xPlotOpts: histogramDomain ? { type: "utc", domain: xDomain } : undefined,
           axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
           markerToX: (m) => parseDate(m.x),
           // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
