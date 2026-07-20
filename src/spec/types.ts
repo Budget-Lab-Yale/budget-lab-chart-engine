@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -224,6 +224,24 @@ export interface ColumnMap {
    *  with a point annotation), or `delta` (the default — a signed step floating on the running
    *  cumulative). Omit ⇒ every row is a delta. */
   kind?: string;
+  /** Histogram pre-binned data: columns holding each bin's lower/upper edge. When BOTH are mapped,
+   *  the histogram treats data as pre-binned (no engine binning) and `value` is the bar height. */
+  x0?: string;
+  x1?: string;
+}
+
+export interface HistogramConfig {
+  /** Bin COUNT. Ignored when binWidth is set. */
+  bins?: number;
+  /** Bin WIDTH: a number in x-units (numeric x), or for temporal x a calendar interval name
+   *  ("day"|"week"|"month"|"quarter"|"year") or a number interpreted as days. */
+  binWidth?: number | string;
+  /** Explicit binning range [min, max]; default = data extent. */
+  domain?: [number, number];
+  /** Bar-height normalization. "proportion": each series sums to 1. "density": area = 1. Default "none". */
+  normalize?: "none" | "proportion" | "density";
+  /** Column summed per bin (weighted histogram); default = row count. Ignored when pre-binned. */
+  weight?: string;
 }
 
 /** One option in an inline title selector's dropdown. `label` defaults to `id` when absent.
@@ -397,6 +415,9 @@ export interface ChartSpec {
     /** Connector color; defaults to the dim neutral. */
     connectorColor?: ColorRef;
   };
+  // Histogram (continuous-x binned bars). Ignored by other chart types.
+  histogram?: HistogramConfig;
+
   /** Series keys to visually highlight (dimming all others). */
   highlightSeries?: string[];
   /**

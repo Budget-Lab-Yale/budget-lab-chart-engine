@@ -141,6 +141,42 @@ function waterfallSpecError(spec: {
   return null;
 }
 
+/** Histogram cross-field constraints the JSON schema can't express: the x-axis must be
+ *  numeric or temporal (a histogram bins a continuous axis); pre-binned mode (columns.x0 +
+ *  columns.x1 both mapped) requires BOTH edges, not just one; and bin config (bins/binWidth/
+ *  domain/weight) is meaningless — and therefore rejected — once the data already carries its
+ *  own bin edges. */
+function histogramSpecError(spec: {
+  chartType?: unknown;
+  xAxisType?: unknown;
+  columns?: { x0?: unknown; x1?: unknown };
+  histogram?: { bins?: unknown; binWidth?: unknown; domain?: unknown; weight?: unknown };
+}): string[] {
+  const errors: string[] = [];
+  if (spec.chartType !== "histogram") return errors;
+  const c = spec.columns ?? {};
+  const preBinned = c.x0 != null && c.x1 != null;
+  if (spec.xAxisType !== "numeric" && spec.xAxisType !== "temporal") {
+    errors.push('histogram requires xAxisType "numeric" or "temporal"');
+  }
+  if ((c.x0 != null) !== (c.x1 != null)) {
+    errors.push("histogram pre-binned mode requires BOTH columns.x0 and columns.x1");
+  }
+  if (
+    preBinned &&
+    spec.histogram &&
+    (spec.histogram.bins != null ||
+      spec.histogram.binWidth != null ||
+      spec.histogram.domain != null ||
+      spec.histogram.weight != null)
+  ) {
+    errors.push(
+      "histogram: bin config (bins/binWidth/domain/weight) is not allowed with pre-binned data (columns.x0/x1)",
+    );
+  }
+  return errors;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -165,6 +201,15 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; xAxisType?: unknown },
   );
   if (wfErr) return { valid: false, errors: [wfErr] };
+  const histErrors = histogramSpecError(
+    spec as {
+      chartType?: unknown;
+      xAxisType?: unknown;
+      columns?: { x0?: unknown; x1?: unknown };
+      histogram?: { bins?: unknown; binWidth?: unknown; domain?: unknown; weight?: unknown };
+    },
+  );
+  if (histErrors.length) return { valid: false, errors: histErrors };
   return { valid: true, errors: [] };
 }
 
