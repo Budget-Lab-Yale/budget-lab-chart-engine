@@ -201,7 +201,7 @@ export interface MarkLayers {
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;
 
-const REGISTRY: Record<ChartType, MarkBuilder> = {
+const REGISTRY: Partial<Record<ChartType, MarkBuilder>> = {
   line: buildLineMarks,
   area: buildAreaMarks,
   bar: buildBarMarks,
