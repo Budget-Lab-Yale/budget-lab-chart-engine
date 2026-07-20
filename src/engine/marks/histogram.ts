@@ -16,9 +16,12 @@ export function buildHistogramMarks(data: PreparedRow[], spec: ChartSpec, ctx: M
   const barColor = resolveColor(spec.bar_color);
   const highlightSet = spec.highlightSeries && spec.highlightSeries.length ? new Set(spec.highlightSeries) : null;
 
+  // bar_color is single-series-only (ChartSpec.bar_color TSDoc) and must win over the palette
+  // default (colors.get always returns a slot), so it is checked first — mirrors bar.ts precedence.
   const fillFor = (s: string): string => {
     if (highlightSet && !highlightSet.has(s)) return TBL.color.annotationDim;
-    return colors.get(s) || barColor || TBL.color.blue;
+    if (!isMulti) return barColor ?? colors.get(s) ?? TBL.color.blue;
+    return colors.get(s) ?? TBL.color.blue;
   };
 
   // One rect layer per series so z-order follows series order; overlap uses partial opacity.
@@ -41,8 +44,11 @@ export function buildHistogramMarks(data: PreparedRow[], spec: ChartSpec, ctx: M
   }
 
   // Rect tag order: Plot emits one <rect> per datum in series-layer order, data-row order within.
+  // Same triple predicate as the per-series rect filter above, so a null-edge row can't shift the tags.
   const seriesOrder: string[] = [];
-  for (const s of seriesNames) for (const d of data) if (d.series === s && d._y != null) seriesOrder.push(s);
+  for (const s of seriesNames)
+    for (const d of data)
+      if (d.series === s && d._y != null && d._x0 != null && d._x1 != null) seriesOrder.push(s);
 
   return {
     underlay: [],
