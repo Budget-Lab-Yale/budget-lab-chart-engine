@@ -1036,7 +1036,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
-        xFormat: tooltipXFormat,
+        // Temporal: use the date formatter. Numeric: omit so attachHistogramHover's rounding
+        // default formats the bin edges (raw tooltipXFormat would print float-accumulation noise).
+        xFormat: spec.xAxisType === "temporal" ? tooltipXFormat : undefined,
       });
     } else {
       attachCrosshair(svg, {
@@ -1778,7 +1780,8 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
-      xFormat: ctx.tooltipXFormat,
+      // Temporal: date formatter. Numeric: omit so the rounding default formats the bin edges.
+      xFormat: ctx.spec.xAxisType === "temporal" ? ctx.tooltipXFormat : undefined,
     });
     return undefined;
   }

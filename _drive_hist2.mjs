@@ -22,7 +22,8 @@ async function load(route, w = 1100, h = 780) {
 await load("01-auto-single");
 let ops = await page.$$eval('g[aria-label="rect"] rect', (rs) => Array.from(new Set(rs.map((r) => Number(r.getAttribute("fill-opacity") ?? "1")))));
 pass("#1 single-series bars are translucent (fill-opacity < 1)", ops.length && ops.every((o) => o < 1), `ops=${ops}`);
-let hasStroke = await page.$$eval('g[aria-label="rect"] rect', (rs) => rs.some((r) => { const s = r.getAttribute("stroke"); return s && s !== "none"; }));
+// stroke/fill are constant channels → Plot hoists them onto the parent <g>, not each <rect>
+let hasStroke = await page.$$eval('g[aria-label="rect"]', (gs) => gs.some((g) => { const s = g.getAttribute("stroke") || g.querySelector("rect")?.getAttribute("stroke"); return s && s !== "none"; }));
 pass("#1 single-series bars have a stroke (crisp edges)", hasStroke);
 await page.screenshot({ path: `${SHOT}/v2-01-transparency.png`, fullPage: true });
 
@@ -58,7 +59,7 @@ async function hoverCheck(route) {
   const tip = await page.evaluate(() => {
     const t = document.querySelector(".tbl-tooltip");
     if (!t) return null;
-    const vis = getComputedStyle(t).opacity !== "0" && t.offsetParent !== null;
+    const vis = getComputedStyle(t).opacity !== "0" && getComputedStyle(t).display !== "none";
     return { text: (t.textContent || "").trim(), vis };
   });
   const hlW = await page.evaluate(() => { const h = document.querySelector(".tbl-hist-hover-hl"); return h ? Number(h.getAttribute("width")) : 0; });
@@ -68,6 +69,7 @@ async function hoverCheck(route) {
   const h = await hoverCheck("01-auto-single");
   pass("#2 hover: hit layer wired (single)", h.wired);
   pass("#2 hover: tooltip appears with a bin range [x0,x1)", h.tip?.vis && /\[.*,.*\)/.test(h.tip.text), JSON.stringify(h.tip));
+  pass("#2 hover: numeric bin range has NO float noise (<=2 decimals)", h.tip && !/\.\d{3,}/.test(h.tip.text), h.tip?.text);
   pass("#2 hover: bin highlight rect shown", h.hlW > 0, `hlW=${h.hlW}`);
   await page.screenshot({ path: `${SHOT}/v2-hover-single.png`, fullPage: true });
 }
@@ -89,7 +91,8 @@ const fo = await page.evaluate(() => {
   const groupsPerPane = panes.map((p) => p.querySelectorAll('g[aria-label="rect"]').length);
   const rects = Array.from(document.querySelectorAll('g[aria-label="rect"] rect'));
   const ops = Array.from(new Set(rects.map((r) => Number(r.getAttribute("fill-opacity") ?? "1"))));
-  const fills = Array.from(new Set(rects.map((r) => r.getAttribute("fill"))));
+  // fill is a constant channel → on the <g>, not each <rect>
+  const fills = Array.from(new Set(Array.from(document.querySelectorAll('g[aria-label="rect"]')).map((g) => g.getAttribute("fill") || g.querySelector("rect")?.getAttribute("fill"))));
   return { paneCount: panes.length, groupsPerPane, ops, fillCount: fills.length };
 });
 pass("#4 faceted+overlap: multiple panes", fo.paneCount >= 3, `panes=${fo.paneCount}`);
