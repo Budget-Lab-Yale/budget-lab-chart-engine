@@ -1328,7 +1328,9 @@ export function buildHistogramTooltipHtml(
 ): string {
   const { colors, seriesLabels, seriesOrder, renderedFills } = opts;
   const yFormat = opts.yFormat ?? ((v: number) => String(v));
-  const xFormat = opts.xFormat ?? ((v: number) => `${+v}`);
+  // Round numeric bin edges so the range header never shows float-accumulation noise
+  // (e.g. 55.42799999999997). A caller-supplied xFormat (e.g. temporal dates) still wins.
+  const xFormat = opts.xFormat ?? ((v: number) => (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
 
   const header = `[${xFormat(bin.x0)}, ${xFormat(bin.x1)})`;
   let html = `<div class="tbl-tooltip-head">${escapeHtml(header)}</div>`;
@@ -1364,7 +1366,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   const yFormat =
     opts.yFormat ??
     ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-  const xFormat = opts.xFormat ?? ((v: number) => `${+v}`);
+  const xFormat = opts.xFormat ?? ((v: number) => (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
 
   const vb = svgEl.viewBox?.baseVal;
   const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
