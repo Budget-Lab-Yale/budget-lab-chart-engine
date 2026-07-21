@@ -27,6 +27,7 @@ import { resolveColor } from "./palette.js";
 import {
   attachCrosshair,
   attachBandCrosshair,
+  attachHistogramHover,
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
   attachCategoricalLineCrosshair,
@@ -1026,6 +1027,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           ...(waterfallCursor ? { waterfall: waterfallCursor } : {}),
         }) as (key: unknown, active?: boolean) => void;
       }
+    } else if (spec.chartType === "histogram") {
+      // Histogram: continuous numeric/temporal x, but BINNED bars — resolve the bin under the
+      // cursor by x-extent (not a snapped point) and show a per-bin tooltip headed by the bin range.
+      attachHistogramHover(svg, {
+        rows: dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        xFormat: tooltipXFormat,
+      });
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -1754,6 +1766,20 @@ function wireFigureSvg(
         ...(wfCursor ? { waterfall: wfCursor } : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
+    return undefined;
+  }
+
+  // Histogram panes: per-bin hover (numeric/temporal x, binned bars), same as the standalone path.
+  // No coordinated-cursor variant (histograms don't share an x-domain across panes).
+  if (ctx.spec.chartType === "histogram") {
+    attachHistogramHover(svg, {
+      rows: ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      xFormat: ctx.tooltipXFormat,
+    });
     return undefined;
   }
 
