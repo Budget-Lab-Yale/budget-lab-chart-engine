@@ -406,3 +406,106 @@ describe("single-facet small multiples — bar panes get the pill hover, not the
     container.remove();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Coordinated cursor — FACETED HISTOGRAM panes (shared mode). Hovering one pane echoes the same
+// bin (shaded region + per-series pills) on every OTHER pane. Shared mode bins all panes to ONE
+// set of thresholds, so the echo bin matches. Per-pane mode bins each pane independently, so it
+// must NOT coordinate.
+// ---------------------------------------------------------------------------
+
+/** Map a client x to SVG x 1:1 with the viewBox (jsdom has no layout). */
+function mockRect1to1(svg: SVGSVGElement): void {
+  const vb = svg.viewBox.baseVal;
+  Object.defineProperty(svg, "getBoundingClientRect", {
+    value: () => ({
+      width: vb.width, height: vb.height, top: 0, left: 0,
+      right: vb.width, bottom: vb.height, x: 0, y: 0,
+    }),
+    configurable: true,
+  });
+}
+
+describe("coordinated cursor — faceted histogram (shared mode: cross-pane bin echo)", () => {
+  const histSpec: ChartSpec = {
+    chartType: "histogram",
+    title: "Faceted hist",
+    xAxisType: "numeric",
+    histogram: { bins: 4, domain: [0, 20] },
+    columns: { x: "amount", facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
+    data: "inline",
+  } as ChartSpec;
+
+  const histRows: TidyRow[] = [];
+  for (const facet of ["A", "B"]) {
+    for (let v = 0; v < 16; v++) histRows.push({ facet, amount: String(v) } as TidyRow);
+  }
+
+  it("hovering one pane draws a coordinated bin region on the OTHER pane", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const teardown = mountChart(container, { spec: histSpec, rows: histRows, width: 838, height: 420 });
+    const paneSvgs = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    expect(paneSvgs.length).toBe(2);
+    // Coordinated (not tooltip) path: primary hover is emitOnly (no tooltip highlight rect).
+    paneSvgs.forEach((svg) => {
+      expect(svg.querySelector(".tbl-hist-hover-hit")).not.toBeNull();
+      expect(svg.querySelector(".tbl-hist-hover-hl")).toBeNull();
+    });
+
+    const [pane0, pane1] = paneSvgs as [SVGSVGElement, SVGSVGElement];
+    mockRect1to1(pane0);
+    // Hover the leftmost bin of pane 0.
+    const rects0 = Array.from(pane0.querySelectorAll<SVGRectElement>('g[aria-label="rect"] rect'));
+    const minX = Math.min(...rects0.map((r) => parseFloat(r.getAttribute("x")!)));
+    const leftRect = rects0.find((r) => parseFloat(r.getAttribute("x")!) === minX)!;
+    const cx = minX + parseFloat(leftRect.getAttribute("width")!) / 2;
+    const hit = pane0.querySelector(".tbl-hist-hover-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 120, bubbles: true }));
+
+    // The OTHER pane echoes: a visible coord group with the shaded bin region (opacity 0.12).
+    const echo = pane1.querySelector<SVGGElement>("g.tbl-coord");
+    expect(echo).not.toBeNull();
+    expect(echo!.getAttribute("opacity")).toBe("1");
+    expect(echo!.querySelectorAll('rect[opacity="0.12"]').length).toBe(1);
+    // The source pane also renders its own (active) coord group.
+    expect(pane0.querySelector('g.tbl-coord[opacity="1"]')).not.toBeNull();
+
+    // Leaving clears the echo on both panes.
+    hit.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+    expect(pane1.querySelector('g.tbl-coord[opacity="1"]')).toBeNull();
+    teardown();
+    container.remove();
+  });
+
+  it("per-pane mode does NOT coordinate (each pane keeps its own tooltip, no cross-pane echo)", () => {
+    const perPaneSpec = {
+      ...histSpec,
+      small_multiples: { columns: 2, mode: "per-pane" },
+    } as ChartSpec;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const teardown = mountChart(container, { spec: perPaneSpec, rows: histRows, width: 838, height: 420 });
+    const paneSvgs = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    expect(paneSvgs.length).toBe(2);
+    // Per-pane mode → plain tooltip hover (highlight rect present), no coordinated cursor.
+    paneSvgs.forEach((svg) => {
+      expect(svg.querySelector(".tbl-hist-hover-hl")).not.toBeNull();
+    });
+
+    const [pane0, pane1] = paneSvgs as [SVGSVGElement, SVGSVGElement];
+    mockRect1to1(pane0);
+    const rects0 = Array.from(pane0.querySelectorAll<SVGRectElement>('g[aria-label="rect"] rect'));
+    const minX = Math.min(...rects0.map((r) => parseFloat(r.getAttribute("x")!)));
+    const leftRect = rects0.find((r) => parseFloat(r.getAttribute("x")!) === minX)!;
+    const cx = minX + parseFloat(leftRect.getAttribute("width")!) / 2;
+    const hit = pane0.querySelector(".tbl-hist-hover-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 120, bubbles: true }));
+
+    // No coordinated echo on the other pane.
+    expect(pane1.querySelector("g.tbl-coord")).toBeNull();
+    teardown();
+    container.remove();
+  });
+});

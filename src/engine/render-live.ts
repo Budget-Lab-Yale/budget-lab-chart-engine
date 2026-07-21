@@ -28,6 +28,7 @@ import {
   attachCrosshair,
   attachBandCrosshair,
   attachHistogramHover,
+  attachSecondaryHistogramCursor,
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
   attachCategoricalLineCrosshair,
@@ -1792,17 +1793,33 @@ function wireFigureSvg(
     return undefined;
   }
 
-  // Histogram panes: per-bin hover (numeric/temporal x, binned bars), same as the standalone path.
-  // No coordinated-cursor variant (histograms don't share an x-domain across panes).
+  // Histogram panes: per-bin hover (numeric/temporal x, binned bars). In SHARED small-multiples
+  // mode every pane bins to ONE set of thresholds, so hovering one pane can echo the same bin on
+  // every other pane (coordinated cursor). Per-pane mode bins each pane independently, so it stays
+  // a plain per-pane tooltip; a non-faceted histogram also has no `onResolve`.
   if (ctx.spec.chartType === "histogram") {
+    const histCoord =
+      ctx.onResolve != null && (ctx.spec.small_multiples?.mode ?? "shared") !== "per-pane";
+    const histRows = ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y }));
     attachHistogramHover(svg, {
-      rows: ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
+      rows: histRows,
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
       label: histogramBinLabelOpts(ctx.spec),
+      ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
     });
+    if (histCoord) {
+      return attachSecondaryHistogramCursor(svg, {
+        rows: histRows,
+        colors: ctx.colors,
+        seriesLabels: ctx.seriesLabels,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        label: histogramBinLabelOpts(ctx.spec),
+      }) as (key: unknown, active?: boolean) => void;
+    }
     return undefined;
   }
 

@@ -1256,6 +1256,12 @@ export interface HistogramHoverOptions {
   /** Drives the friendly bin-range header (numeric range / temporal period-or-range). See
    *  `formatBinLabel`. When absent, defaults to a plain numeric en-dash range. */
   label?: BinLabelOpts;
+  /** Coordinated small-multiples: on each resolve, emit the hovered bin's `x0` (a DATA-x value, not
+   *  the index — so echo panes re-resolve their own bin robustly), or null on leave. */
+  onResolve?: (key: number | null) => void;
+  /** Coordinated small-multiples: hit-test + emit only (no highlight/tooltip drawn); the secondary
+   *  cursor renders the echo on every pane. */
+  emitOnly?: boolean;
 }
 
 /** A histogram bin: its edge values + per-series height. Derived from the binned rows. */
@@ -1359,33 +1365,36 @@ export function buildHistogramTooltipHtml(
  * across the plot height, and shows a shared tooltip headed by the bin range with each in-scope
  * series' height. Lifecycle mirrors attachBandCrosshair (idempotent re-attach; hide on leave).
  */
-export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverOptions): void {
-  if (!svgEl || !opts.rows?.length) return;
-
-  const bins = buildHistogramBins(opts.rows);
-  if (!bins.length) return;
-
-  const yFormat =
-    opts.yFormat ??
-    ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+/** The shared bin GEOMETRY for a histogram SVG: the sorted bins, the data-x→pixel map anchored on
+ *  the rendered rect extents, each bin's pixel span, the plot margins, and each series' rendered
+ *  fill. Reads only rect x/width attributes + margins (no layout / no scale API — works in jsdom).
+ *  Returns null when there are no bins. Shared by the primary hover and the coordinated (secondary)
+ *  cursor so both resolve bins from the SAME map. */
+function buildHistogramGeom(
+  svgEl: SVGSVGElement,
+  rows: Array<{ _x0?: number; _x1?: number; _y: number | null; series: string }>,
+): {
+  bins: HistogramBin[];
+  W: number; H: number; ml: number; mr: number; mt: number; mb: number;
+  xToPx: (x: number) => number;
+  spans: Array<{ min: number; max: number }>;
+  renderedFills: Map<string, string>;
+} | null {
+  const bins = buildHistogramBins(rows);
+  if (!bins.length) return null;
 
   const vb = svgEl.viewBox?.baseVal;
   const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
   const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
-
   const ml = +(svgEl.dataset.marginLeft ?? "") || 0;
   const mr = +(svgEl.dataset.marginRight ?? "") || 8;
   const mt = +(svgEl.dataset.marginTop ?? "") || 18;
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
 
-  const NS = "http://www.w3.org/2000/svg";
-  svgEl.querySelectorAll(".tbl-hist-hover-hit, .tbl-hist-hover-hl").forEach((el) => el.remove());
-
   // Establish the data-x → pixel mapping from the rendered rect geometry: the leftmost rect edge
   // maps to the smallest bin edge and the rightmost to the largest. Histogram bars are edge-to-edge
-  // (no band padding), so this single linear map places every bin's [x0,x1] span exactly — and it
-  // reads only rect x/width attributes, which are set at render time (no layout / no scale API,
-  // so it works in jsdom just like the band crosshair). Falls back to plot margins if no rects.
+  // (no band padding), so this single linear map places every bin's [x0,x1] span exactly. Falls
+  // back to plot margins if no rects.
   const rects = Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="rect"] rect'));
   let pxMinAll = Infinity;
   let pxMaxAll = -Infinity;
@@ -1405,7 +1414,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     : (x: number) => ml + ((x - dataXmin) / (span || 1)) * (W - ml - mr);
   const spans = bins.map((b) => ({ min: xToPx(b.x0), max: xToPx(b.x1) }));
 
-  // Bar tooltips color each swatch from the bar's ACTUAL rendered fill (bar_color / accent /
+  // Bar tooltips/pills color each swatch from the bar's ACTUAL rendered fill (bar_color / accent /
   // palette), matching the band tooltip — built once from the rendered rects (fill uniform per series).
   const renderedFills = (() => {
     const m = new Map<string, string>();
@@ -1418,14 +1427,35 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     return m;
   })();
 
+  return { bins, W, H, ml, mr, mt, mb, xToPx, spans, renderedFills };
+}
+
+export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverOptions): void {
+  if (!svgEl || !opts.rows?.length) return;
+
+  const geom = buildHistogramGeom(svgEl, opts.rows);
+  if (!geom) return;
+  const { bins, W, H, mt, mb, spans, renderedFills } = geom;
+  const emitOnly = opts.emitOnly ?? false;
+
+  const yFormat =
+    opts.yFormat ??
+    ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  const NS = "http://www.w3.org/2000/svg";
+  svgEl.querySelectorAll(".tbl-hist-hover-hit, .tbl-hist-hover-hl").forEach((el) => el.remove());
+
   // Highlight rect — drawn BEFORE the hit area so it sits above the bars but below the pointer
-  // layer. Hidden by default (opacity 0).
-  const hl = svgEl.ownerDocument.createElementNS(NS, "rect");
-  hl.classList.add("tbl-hist-hover-hl");
-  hl.setAttribute("fill", TBL.color.annotationDim);
-  hl.setAttribute("opacity", "0");
-  hl.style.pointerEvents = "none";
-  svgEl.appendChild(hl);
+  // layer. Hidden by default (opacity 0). emitOnly (coordinated figure): the secondary renderer
+  // draws the shaded region + labels on every pane, so skip the highlight + tooltip.
+  const hl = emitOnly ? null : svgEl.ownerDocument.createElementNS(NS, "rect");
+  if (hl) {
+    hl.classList.add("tbl-hist-hover-hl");
+    hl.setAttribute("fill", TBL.color.annotationDim);
+    hl.setAttribute("opacity", "0");
+    hl.style.pointerEvents = "none";
+    svgEl.appendChild(hl);
+  }
 
   const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
   hit.classList.add("tbl-hist-hover-hit");
@@ -1437,10 +1467,11 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
 
   /** Shade the hovered bin's x-span across the full plot height. */
   function showHighlight(min: number, max: number): void {
+    if (!hl) return;
     hl.setAttribute("x", String(min));
     hl.setAttribute("y", String(mt));
     hl.setAttribute("width", String(Math.max(0, max - min)));
@@ -1458,9 +1489,14 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     if (idx == null) { hide(); return; }
     const bin = bins[idx]!;
 
+    // Emit the bin's x0 (a DATA-x value) so echo panes re-resolve their own bin; then, for a
+    // coordinated pane, draw nothing here (the secondary cursor renders every pane, incl. this one).
+    opts.onResolve?.(bin.x0);
+    if (emitOnly) return;
+
     showHighlight(spans[idx]!.min, spans[idx]!.max);
 
-    tip.innerHTML = buildHistogramTooltipHtml(bin, {
+    tip!.innerHTML = buildHistogramTooltipHtml(bin, {
       colors: opts.colors,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
@@ -1473,26 +1509,121 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     const win = svgEl.ownerDocument.defaultView!;
     const vw = win.innerWidth;
     const vh = win.innerHeight;
-    tip.style.opacity = "1";
+    tip!.style.opacity = "1";
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
-    if (left + tip.offsetWidth + 4 > vw) left = evt.clientX - tip.offsetWidth - offset;
-    if (top + tip.offsetHeight + 4 > vh) top = evt.clientY - tip.offsetHeight - offset;
+    if (left + tip!.offsetWidth + 4 > vw) left = evt.clientX - tip!.offsetWidth - offset;
+    if (top + tip!.offsetHeight + 4 > vh) top = evt.clientY - tip!.offsetHeight - offset;
     if (left < 4) left = 4;
     if (top < 4) top = 4;
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
+    tip!.style.left = `${left}px`;
+    tip!.style.top = `${top}px`;
   }
 
   function hide(): void {
-    hl.setAttribute("opacity", "0");
-    tip.style.opacity = "0";
+    if (hl) hl.setAttribute("opacity", "0");
+    if (tip) tip.style.opacity = "0";
+    opts.onResolve?.(null);
   }
 
   hit.style.pointerEvents = "all";
   hit.addEventListener("pointermove", update as EventListener);
   hit.addEventListener("pointerleave", hide);
   hit.addEventListener("pointerdown", update as EventListener);
+}
+
+/**
+ * Attach a coordinated cursor to a HISTOGRAM small-multiples pane. Returns a driver keyed by a bin
+ * `x0` (data-x): `driver(x0, active)` re-resolves THIS pane's bin (shared mode guarantees identical
+ * thresholds, so the bin sets match; keying on x0 also degrades gracefully if edges ever drift),
+ * shades its span, and lays a per-series height pill above each bar (staggered on collision). When
+ * `active`, the bin range is drawn as an axis pill (same `formatBinLabel` as the hover tooltip).
+ * `driver(null)` clears. No pointer handlers (externally driven by the figure bus). Built on the
+ * SAME bin geometry as the primary hover (buildHistogramGeom). */
+export function attachSecondaryHistogramCursor(
+  svgEl: SVGSVGElement,
+  opts: HistogramHoverOptions,
+): (key: number | null, active?: boolean) => void {
+  const noop = (): void => {};
+  if (!svgEl || !opts.rows?.length) return noop;
+  const geom = buildHistogramGeom(svgEl, opts.rows);
+  if (!geom) return noop;
+  const { bins, H, mt, mb, xToPx, spans, renderedFills } = geom;
+  const plotH = H - mt - mb;
+  const yFormat =
+    opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+
+  // Bucket the rendered bar rects by bin (via each rect center → its span), reading only attributes
+  // so it works in jsdom (mirrors buildRectsByCategory for bars). Each carries the pill anchor.
+  const rectsByBin = new Map<number, Array<{ series: string; cx: number; y: number; fill: string | null }>>();
+  for (const r of Array.from(svgEl.querySelectorAll<SVGRectElement>('g[aria-label="rect"] rect'))) {
+    const rx = parseFloat(r.getAttribute("x") ?? "0");
+    const rw = parseFloat(r.getAttribute("width") ?? "0");
+    const cx = rx + rw / 2;
+    const idx = resolveHistogramBinIndex(spans, cx);
+    if (idx == null) continue;
+    if (!rectsByBin.has(idx)) rectsByBin.set(idx, []);
+    rectsByBin.get(idx)!.push({
+      series: r.getAttribute("data-series") ?? "",
+      cx,
+      y: parseFloat(r.getAttribute("y") ?? "0"),
+      fill: renderedRectFill(r, svgEl),
+    });
+  }
+
+  const order = opts.seriesOrder && opts.seriesOrder.length ? opts.seriesOrder : null;
+  const colorFor = (s: string) => renderedFills.get(s) || opts.colors?.get(s) || COORD_LABEL_DARK;
+  const doc = svgEl.ownerDocument;
+  const g = makeCoordGroup(svgEl);
+  const axisRows = makeAxisRows(svgEl, mt + plotH);
+
+  return (key: number | null, active = false): void => {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    if (key == null) {
+      g.setAttribute("opacity", "0");
+      return;
+    }
+    const idx = resolveHistogramBinIndex(spans, xToPx(key));
+    if (idx == null) {
+      g.setAttribute("opacity", "0");
+      return;
+    }
+    const bin = bins[idx]!;
+    // Shade the bin's full x-span across the plot height (same visual as the hover highlight).
+    addCoordRegion(g, doc, spans[idx]!.min, spans[idx]!.max - spans[idx]!.min, mt, plotH);
+    const weight = active ? 700 : 600;
+
+    // Per-series height pill ABOVE each bar (staggered on horizontal collision), matching the
+    // vertical-bar secondary convention. Ordered by seriesOrder when given.
+    const rects = rectsByBin.get(idx) ?? [];
+    const orderedRects = order
+      ? (order.map((s) => rects.find((r) => r.series === s)).filter(Boolean) as typeof rects)
+      : rects;
+    const valid = orderedRects
+      .map((rect) => ({ rect, v: bin.bySeries.get(rect.series) }))
+      .filter((x) => x.v != null && Number.isFinite(x.v)) as Array<
+      { rect: { series: string; cx: number; y: number; fill: string | null }; v: number }
+    >;
+    const ys = staggerBarLabels(
+      valid.map((x) => ({ cx: x.rect.cx, w: coordPillWidth(yFormat(x.v)), value: x.v, y: x.rect.y - 9 })),
+      COORD_PILL_H,
+    );
+    valid.forEach((x, i) =>
+      addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), x.rect.fill ?? colorFor(x.rect.series), weight),
+    );
+
+    // Active (hovered) pane: draw the bin range on the x-axis row as a frosted pill, using the SAME
+    // label formatter/opts as the hover tooltip so the coordinated label matches.
+    if (active) {
+      const rowYs = axisRows.get();
+      if (rowYs.length) {
+        const cx = (spans[idx]!.min + spans[idx]!.max) / 2;
+        const text = formatBinLabel(bin.x0, bin.x1, opts.label ?? { xType: "numeric", interval: null });
+        addCoordAxisLabel(g, doc, cx, [{ text, cy: rowYs[0]! }]);
+      }
+    }
+    g.setAttribute("opacity", "1");
+  };
 }
 
 // ---------------------------------------------------------------------------
