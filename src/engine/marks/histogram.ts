@@ -1,13 +1,16 @@
-// Histogram mark: continuous-x bars drawn from _x0 to _x1 (edge-to-edge, no band padding). Multiple
-// series overlay with partial fill-opacity, z-ordered by series order. Mirrors the bar mark's
-// data-series rect tagging so legend hover/pin dims the right bars.
+// Histogram mark: continuous-x bars drawn from _x0 to _x1 (edge-to-edge, no band padding). ALL bars
+// use a partial fill-opacity (transparency throughout — solid fills read too heavy, and this lets
+// overlapping series blend), with a full-opacity stroke in the series color so bin edges stay crisp.
+// Series are z-ordered by series order. Mirrors the bar mark's data-series rect tagging so legend
+// hover/pin dims the right bars.
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
-const OVERLAP_OPACITY = 0.5;
+// Fill transparency applied to every histogram bar (single- and multi-series alike).
+const FILL_OPACITY = 0.5;
 
 export function buildHistogramMarks(data: PreparedRow[], spec: ChartSpec, ctx: MarkContext): MarkLayers {
   const seriesNames = ctx.seriesNames ?? [""];
@@ -32,12 +35,11 @@ export function buildHistogramMarks(data: PreparedRow[], spec: ChartSpec, ctx: M
       Plot.rectY(seriesData, {
         x1: "_x0", x2: "_x1", y: "_y",
         fill: fillFor(s),
-        // Function channel (not the constant OVERLAP_OPACITY) so Plot emits fill-opacity on each
-        // <rect> rather than hoisting it onto the parent <g> — the per-rect attribute the overlap
-        // translucency + legend dim/pin model reads. (Same constant→group vs fn→per-rect Plot
-        // behavior documented in bar.ts.)
-        fillOpacity: isMulti ? () => OVERLAP_OPACITY : 1,
-        stroke: isMulti ? fillFor(s) : "none",
+        // Function channel (not a bare constant) so Plot emits fill-opacity on each <rect> rather
+        // than hoisting it onto the parent <g> — the per-rect attribute the legend dim/pin model
+        // reads. (Same constant→group vs fn→per-rect Plot behavior documented in bar.ts.)
+        fillOpacity: () => FILL_OPACITY,
+        stroke: fillFor(s),
         strokeOpacity: 1,
       }),
     );

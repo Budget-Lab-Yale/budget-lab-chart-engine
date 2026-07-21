@@ -116,7 +116,10 @@ export function makeXAdapter(
         }
         return {
           marginBottom: temporalMarginBottom(xDomain),
-          xPlotOpts: histogramDomain ? { type: "utc", domain: xDomain } : undefined,
+          // axis:null/label:null so Plot draws NO native axis — the engine's tblTemporalXAxis marks
+          // are the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
+          // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
+          xPlotOpts: histogramDomain ? { type: "utc", domain: xDomain, axis: null, label: null } : undefined,
           axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
           markerToX: (m) => parseDate(m.x),
           // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
