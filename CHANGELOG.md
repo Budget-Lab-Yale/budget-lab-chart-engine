@@ -22,6 +22,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   for comparing distributions rather than stacking totals.
 - **Faceting** via `columns.facet` + `small_multiples`: `shared` mode (default) bins every pane to
   one common threshold set; `per-pane` bins each pane independently.
+- **Per-bin hover tooltip** — hovering a histogram shades the bin under the cursor and shows its
+  range plus each series' value. In `shared` faceted mode the cursor is **coordinated across
+  panes**: hovering one pane echoes the same bin on the others.
+- **Friendly, configurable bin labels** (`histogram.bin_label`) — bin ranges read as `47.9 – 50.7`
+  (numeric, with an optional `unit`/`unit_position`) or collapse to a period name for temporal bins
+  (`July 2023`, `Q3 2023`, `2023`, or a `July – September 2023` range); `decimals` sets numeric
+  rounding.
+- Histogram bars render with a partial fill so overlapping series blend and single-series bars
+  don't read as heavy solid blocks.
 
 ## [1.5.0] - 2026-07-20
 
