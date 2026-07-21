@@ -208,6 +208,20 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `histogram.domain` | `[number, number]` | Explicit binning range `[min, max]`. Default: the data extent. |
 | `histogram.normalize` | enum | Bar-height normalization: `none` (default, raw counts/weights) \| `proportion` (each series' bins sum to 1) \| `density` (each series' area — Σ height × bin width — sums to 1). |
 | `histogram.weight` | string | Column **summed** per bin (a weighted histogram) instead of counting rows. Default: row count. Ignored (and rejected — see below) for pre-binned data. |
+| `histogram.bin_label` | object | Friendly formatting of the hover tooltip's bin-range header. See below. |
+
+**Bin-range tooltip labels (`histogram.bin_label`).** The hover tooltip header shows a friendly bin
+label instead of a mathematical interval. Numeric x renders an en-dash range (`47.9 – 50.7`).
+Temporal x whose `binWidth` is a calendar interval name collapses each bin to its period name
+(`month` → `July 2023`, `quarter` → `Q3 2023`, `year` → `2023`, `week` → `Week of July 2, 2023`,
+`day` → `July 5, 2023`); any other temporal binning (a bin count, or a day-count `binWidth`) renders
+a month range (`July – September 2023`, or `July 2023 – March 2024` across years).
+
+| field | type | notes |
+|---|---|---|
+| `histogram.bin_label.unit` | string | Applied to each **numeric** edge, e.g. `"$"`, `"%"`, `" yrs"`. Ignored for temporal labels. A suffix unit that begins with a space (`" yrs"`) is appended once to the range; a tight suffix (`"%"`) attaches to each edge. |
+| `histogram.bin_label.unit_position` | enum | `prefix` \| `suffix`. Default `suffix`. |
+| `histogram.bin_label.decimals` | integer | Numeric edge rounding. Default: smart trim to ≤2 fraction digits (drops float-accumulation noise). |
 
 **Bin-width precedence:** `binWidth` > `bins` > **auto**. With neither set, the engine picks a bin
 count itself via the Freedman–Diaconis rule, falling back to Sturges' rule when the data's IQR is

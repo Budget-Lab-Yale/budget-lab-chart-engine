@@ -16,6 +16,7 @@ import {
   attachHistogramHover,
   type HistogramBin,
 } from "../src/engine/crosshair";
+import { formatBinLabel } from "../src/engine/histogram-label";
 import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -87,6 +88,79 @@ describe("resolveHistogramBinIndex", () => {
 });
 
 // ---------------------------------------------------------------------------
+// formatBinLabel — PURE helper
+// ---------------------------------------------------------------------------
+
+describe("formatBinLabel (numeric)", () => {
+  const N = { xType: "numeric" as const, interval: null };
+
+  it("default: en-dash range with spaces, smart-trimmed to <=2 fraction digits", () => {
+    expect(formatBinLabel(47.9, 50.7, N)).toBe("47.9 – 50.7");
+  });
+
+  it("drops float-accumulation noise (max 2 fraction digits)", () => {
+    expect(formatBinLabel(55.42799999999997, 60, N)).toBe("55.43 – 60");
+  });
+
+  it("prefix unit applies to each edge", () => {
+    expect(formatBinLabel(47.9, 50.7, { ...N, unit: "$", unitPosition: "prefix" })).toBe("$47.9 – $50.7");
+  });
+
+  it("suffix unit (default position) applies to each edge", () => {
+    expect(formatBinLabel(47.9, 50.7, { ...N, unit: "%" })).toBe("47.9% – 50.7%");
+    expect(formatBinLabel(47.9, 50.7, { ...N, unit: " yrs" })).toBe("47.9 – 50.7 yrs");
+  });
+
+  it("explicit decimals: fixed fraction digits", () => {
+    expect(formatBinLabel(47.9, 50.68, { ...N, decimals: 1 })).toBe("47.9 – 50.7");
+    expect(formatBinLabel(1, 2, { ...N, decimals: 2 })).toBe("1.00 – 2.00");
+  });
+
+  it("thousands separators", () => {
+    expect(formatBinLabel(1000, 25000, N)).toBe("1,000 – 25,000");
+  });
+});
+
+describe("formatBinLabel (temporal single calendar period)", () => {
+  const T = (interval: "month" | "quarter" | "year" | "week" | "day") =>
+    ({ xType: "temporal" as const, interval });
+
+  it("month -> full month name + year", () => {
+    expect(formatBinLabel(Date.UTC(2023, 6, 1), Date.UTC(2023, 7, 1), T("month"))).toBe("July 2023");
+  });
+  it("quarter -> Qn year", () => {
+    expect(formatBinLabel(Date.UTC(2023, 6, 1), Date.UTC(2023, 9, 1), T("quarter"))).toBe("Q3 2023");
+  });
+  it("year -> year", () => {
+    expect(formatBinLabel(Date.UTC(2023, 0, 1), Date.UTC(2024, 0, 1), T("year"))).toBe("2023");
+  });
+  it("week -> Week of <date>", () => {
+    expect(formatBinLabel(Date.UTC(2023, 6, 2), Date.UTC(2023, 6, 9), T("week"))).toBe("Week of July 2, 2023");
+  });
+  it("day -> <date>", () => {
+    expect(formatBinLabel(Date.UTC(2023, 6, 5), Date.UTC(2023, 6, 6), T("day"))).toBe("July 5, 2023");
+  });
+});
+
+describe("formatBinLabel (temporal non-calendar range)", () => {
+  const T = { xType: "temporal" as const, interval: null };
+
+  it("same-year range uses one trailing year (inclusive end)", () => {
+    // [Jul 1 2023, Oct 1 2023) -> inclusive end lands in September.
+    expect(formatBinLabel(Date.UTC(2023, 6, 1), Date.UTC(2023, 9, 1), T)).toBe("July – September 2023");
+  });
+
+  it("cross-year range carries both years", () => {
+    // [Jul 1 2023, Apr 1 2024) -> inclusive end lands in March 2024.
+    expect(formatBinLabel(Date.UTC(2023, 6, 1), Date.UTC(2024, 3, 1), T)).toBe("July 2023 – March 2024");
+  });
+
+  it("collapses to a single month when start and inclusive end share month+year", () => {
+    expect(formatBinLabel(Date.UTC(2023, 6, 1), Date.UTC(2023, 7, 1), T)).toBe("July 2023");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildHistogramTooltipHtml — PURE helper
 // ---------------------------------------------------------------------------
 
@@ -100,13 +174,20 @@ function bin(x0: number, x1: number, entries: Array<[string, number]>): Histogra
 }
 
 describe("buildHistogramTooltipHtml", () => {
-  it("uses the bin RANGE [x0, x1) as the header, via xFormat", () => {
-    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), {
-      colors: COLORS,
-      xFormat: (v) => `${v}`,
-    });
+  it("uses a friendly numeric en-dash range as the header", () => {
+    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), { colors: COLORS });
     expect(html).toContain("tbl-tooltip-head");
-    expect(html).toContain("[0, 5)");
+    expect(html).toContain("0 – 5");
+    expect(html).not.toContain("[0, 5)");
+  });
+
+  it("passes label opts through to formatBinLabel (temporal single period)", () => {
+    // 2023-07-01 .. 2023-08-01 UTC, month interval → single month name.
+    const html = buildHistogramTooltipHtml(bin(Date.UTC(2023, 6, 1), Date.UTC(2023, 7, 1), [["A", 3]]), {
+      colors: COLORS,
+      label: { xType: "temporal", interval: "month" },
+    });
+    expect(html).toContain("July 2023");
   });
 
   it("emits one row per series with its height", () => {
@@ -289,9 +370,9 @@ describe("mountChart histogram hover dispatch", () => {
     const tip = document.querySelector<HTMLElement>(".tbl-tooltip")!;
     expect(tip).not.toBeNull();
     const head = tip.querySelector(".tbl-tooltip-head")!.textContent ?? "";
-    // Leftmost bin is [0, 5) — a formatted continuous range, not a single category.
-    expect(head).toMatch(/^\[.*,.*\)$/);
-    expect(head).toContain("[0");
+    // Leftmost bin is [0, 5) — now a friendly en-dash range "0 – 5", not the old "[0, 5)".
+    expect(head).toContain("0 – 5");
+    expect(head).not.toContain("[0");
     // A value row is present.
     expect(tip.querySelector(".tbl-tooltip-value")).not.toBeNull();
     // Highlight shown.
@@ -342,6 +423,34 @@ describe("mountChart histogram hover dispatch", () => {
     document.body.removeChild(container);
   });
 
+  it("temporal x (calendar interval): the header collapses to a single period name", () => {
+    const spec: ChartSpec = {
+      chartType: "histogram",
+      title: "Hist temporal month",
+      xAxisType: "temporal",
+      histogram: { binWidth: "month" },
+      columns: { x: "date" },
+      data: "inline",
+    };
+    const rows: TidyRow[] = [
+      "2023-07-03", "2023-07-15", "2023-08-02", "2023-09-20",
+    ].map((d) => ({ date: d })) as TidyRow[];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows, width: 640, height: 360 });
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    mock1to1(svg);
+    document.body.appendChild(container);
+    const firstRect = svg.querySelector<SVGRectElement>('g[aria-label="rect"] rect')!;
+    const cx = parseFloat(firstRect.getAttribute("x")!) + parseFloat(firstRect.getAttribute("width")!) / 2;
+    const hit = svg.querySelector(".tbl-hist-hover-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 100, bubbles: true }));
+    const tip = document.querySelector<HTMLElement>(".tbl-tooltip")!;
+    const head = tip.querySelector(".tbl-tooltip-head")!.textContent ?? "";
+    // First month bin -> "July 2023" (a single full-month name, not a range or epoch-ms).
+    expect(head).toBe("July 2023");
+    document.body.removeChild(container);
+  });
+
   it("temporal x: the bin-range header formats as dates, not raw epoch-ms", () => {
     const spec: ChartSpec = {
       chartType: "histogram",
@@ -366,10 +475,11 @@ describe("mountChart histogram hover dispatch", () => {
     hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 100, bubbles: true }));
     const tip = document.querySelector<HTMLElement>(".tbl-tooltip")!;
     const head = tip.querySelector(".tbl-tooltip-head")!.textContent ?? "";
-    // The adapter's temporal tooltip format is "%b %Y" (e.g. "Jan 2020"): a year appears, and the
-    // header is NOT a bare epoch-ms number.
+    // bins:3 (count-based, no calendar binWidth) -> a friendly month range with full month names,
+    // e.g. "January – ... 2020" / cross-year. A 4-digit year appears; no epoch-ms leaks through.
     expect(head).toMatch(/\d{4}/);
-    expect(head).not.toMatch(/\d{10,}/); // no epoch-ms leaking through
+    expect(head).toMatch(/January|February|March|April|May|June|July|August|September|October|November|December/);
+    expect(head).not.toMatch(/\d{10,}/);
     document.body.removeChild(container);
   });
 });

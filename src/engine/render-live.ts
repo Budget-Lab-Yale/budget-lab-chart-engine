@@ -36,12 +36,35 @@ import {
   attachHighlightPills,
 } from "./crosshair.js";
 import type { HighlightPillsHandle } from "./crosshair.js";
+import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
 import { TBL, markerSymbolForIndex } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
+
+const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
+
+/** Resolve the friendly bin-label options for a histogram from its spec: the x kind, the calendar
+ *  interval (only when `binWidth` is a calendar-interval NAME — count/day-count bins → null), and
+ *  the optional `bin_label` unit/rounding config. */
+function histogramBinLabelOpts(spec: ChartSpec): BinLabelOpts {
+  const xType = spec.xAxisType === "temporal" ? "temporal" : "numeric";
+  const bw = spec.histogram?.binWidth;
+  const interval: CalendarInterval | null =
+    xType === "temporal" && typeof bw === "string" && (CALENDAR_INTERVALS as readonly string[]).includes(bw)
+      ? (bw as CalendarInterval)
+      : null;
+  const cfg = spec.histogram?.bin_label;
+  return {
+    xType,
+    interval,
+    ...(cfg?.unit != null ? { unit: cfg.unit } : {}),
+    ...(cfg?.unit_position != null ? { unitPosition: cfg.unit_position } : {}),
+    ...(cfg?.decimals != null ? { decimals: cfg.decimals } : {}),
+  };
+}
 
 export interface MountOptions {
   spec: ChartSpec;
@@ -1036,9 +1059,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
-        // Temporal: use the date formatter. Numeric: omit so attachHistogramHover's rounding
-        // default formats the bin edges (raw tooltipXFormat would print float-accumulation noise).
-        xFormat: spec.xAxisType === "temporal" ? tooltipXFormat : undefined,
+        label: histogramBinLabelOpts(spec),
       });
     } else {
       attachCrosshair(svg, {
@@ -1780,8 +1801,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
-      // Temporal: date formatter. Numeric: omit so the rounding default formats the bin edges.
-      xFormat: ctx.spec.xAxisType === "temporal" ? ctx.tooltipXFormat : undefined,
+      label: histogramBinLabelOpts(ctx.spec),
     });
     return undefined;
   }

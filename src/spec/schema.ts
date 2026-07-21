@@ -377,6 +377,15 @@ export const CHART_SPEC_SCHEMA = {
         domain: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
         normalize: { type: "string", enum: ["none", "proportion", "density"] },
         weight: { type: "string" },
+        bin_label: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            unit: { type: "string" },
+            unit_position: { type: "string", enum: ["prefix", "suffix"] },
+            decimals: { type: "number" },
+          },
+        },
       },
     },
     highlightSeries: { type: "array", items: { type: "string" } },

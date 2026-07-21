@@ -242,6 +242,15 @@ export interface HistogramConfig {
   normalize?: "none" | "proportion" | "density";
   /** Column summed per bin (weighted histogram); default = row count. Ignored when pre-binned. */
   weight?: string;
+  /** Friendly formatting of the hover tooltip's bin-range header. See `formatBinLabel`. */
+  bin_label?: {
+    /** Unit applied to NUMERIC edges only, e.g. "$", "%", " yrs". Ignored for temporal labels. */
+    unit?: string;
+    /** Where the unit sits on each numeric edge. Default "suffix". */
+    unit_position?: "prefix" | "suffix";
+    /** Numeric edge rounding. Default = smart trim to ≤2 fraction digits. */
+    decimals?: number;
+  };
 }
 
 /** One option in an inline title selector's dropdown. `label` defaults to `id` when absent.

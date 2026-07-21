@@ -10,6 +10,7 @@ import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
+import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 
 type Row = Record<string, unknown>;
 
@@ -1249,9 +1250,12 @@ export interface HistogramHoverOptions {
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
   yFormat?: (v: number) => string;
-  /** Format a bin-edge value (numeric, or epoch-ms for temporal) for the tooltip range header —
-   *  the SAME x formatter the chart's axis/adapter uses (tooltipXFormat). Defaults to a plain number. */
+  /** Legacy: a bin-edge formatter. Superseded by `label` for the histogram header (kept so existing
+   *  callers don't break); no longer used to build the range header. */
   xFormat?: (v: number) => string;
+  /** Drives the friendly bin-range header (numeric range / temporal period-or-range). See
+   *  `formatBinLabel`. When absent, defaults to a plain numeric en-dash range. */
+  label?: BinLabelOpts;
 }
 
 /** A histogram bin: its edge values + per-series height. Derived from the binned rows. */
@@ -1308,10 +1312,10 @@ export function resolveHistogramBinIndex(
 }
 
 /**
- * PURE — build the tooltip inner HTML for ONE histogram bin. Header is the bin RANGE `[x0, x1)`
- * formatted with `xFormat`; then one row per series (ordered by `seriesOrder`) with a finite height
- * in this bin. Mirrors attachBandCrosshair's bar-swatch row markup (filled square + label + value).
- * No DOM access.
+ * PURE — build the tooltip inner HTML for ONE histogram bin. Header is the friendly bin label from
+ * `formatBinLabel` (numeric en-dash range / temporal period-or-range); then one row per series
+ * (ordered by `seriesOrder`) with a finite height in this bin. Mirrors attachBandCrosshair's
+ * bar-swatch row markup (filled square + label + value). No DOM access.
  */
 export function buildHistogramTooltipHtml(
   bin: HistogramBin,
@@ -1320,7 +1324,8 @@ export function buildHistogramTooltipHtml(
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
-    xFormat?: (v: number) => string;
+    /** Drives the friendly bin-range header. Absent ⇒ a plain numeric en-dash range. */
+    label?: BinLabelOpts;
     /** series → the bar's ACTUAL rendered fill, preferred over `colors` for the swatch so the
      *  tooltip marker matches the drawn bar (mirrors the band tooltip's fill-first rule). */
     renderedFills?: Map<string, string>;
@@ -1328,11 +1333,8 @@ export function buildHistogramTooltipHtml(
 ): string {
   const { colors, seriesLabels, seriesOrder, renderedFills } = opts;
   const yFormat = opts.yFormat ?? ((v: number) => String(v));
-  // Round numeric bin edges so the range header never shows float-accumulation noise
-  // (e.g. 55.42799999999997). A caller-supplied xFormat (e.g. temporal dates) still wins.
-  const xFormat = opts.xFormat ?? ((v: number) => (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
 
-  const header = `[${xFormat(bin.x0)}, ${xFormat(bin.x1)})`;
+  const header = formatBinLabel(bin.x0, bin.x1, opts.label ?? { xType: "numeric", interval: null });
   let html = `<div class="tbl-tooltip-head">${escapeHtml(header)}</div>`;
 
   const ordered =
@@ -1366,7 +1368,6 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   const yFormat =
     opts.yFormat ??
     ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-  const xFormat = opts.xFormat ?? ((v: number) => (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
 
   const vb = svgEl.viewBox?.baseVal;
   const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
@@ -1464,7 +1465,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
-      xFormat,
+      label: opts.label,
       renderedFills,
     });
 
