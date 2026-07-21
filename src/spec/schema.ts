@@ -383,7 +383,9 @@ export const CHART_SPEC_SCHEMA = {
           properties: {
             unit: { type: "string" },
             unit_position: { type: "string", enum: ["prefix", "suffix"] },
-            decimals: { type: "number" },
+            // Integer 0–10 (matches tooltip_decimals): a fractional/negative value would reach
+            // toLocaleString's fraction-digit options and throw RangeError at render time.
+            decimals: { type: "integer", minimum: 0, maximum: 10 },
           },
         },
       },
