@@ -12,7 +12,8 @@ import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
-import { resolveColumns } from "./columns";
+import { resolveColumns, isPreBinned } from "./columns";
+import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
 export interface ValidationResult {
@@ -141,6 +142,42 @@ function waterfallSpecError(spec: {
   return null;
 }
 
+/** Histogram cross-field constraints the JSON schema can't express: the x-axis must be
+ *  numeric or temporal (a histogram bins a continuous axis); pre-binned mode (columns.x0 +
+ *  columns.x1 both mapped) requires BOTH edges, not just one; and bin config (bins/binWidth/
+ *  domain/weight) is meaningless — and therefore rejected — once the data already carries its
+ *  own bin edges. */
+function histogramSpecError(spec: {
+  chartType?: unknown;
+  xAxisType?: unknown;
+  columns?: { x0?: unknown; x1?: unknown };
+  histogram?: { bins?: unknown; binWidth?: unknown; domain?: unknown; weight?: unknown };
+}): string[] {
+  const errors: string[] = [];
+  if (spec.chartType !== "histogram") return errors;
+  const c = spec.columns ?? {};
+  const preBinned = c.x0 != null && c.x1 != null;
+  if (spec.xAxisType !== "numeric" && spec.xAxisType !== "temporal") {
+    errors.push('histogram requires xAxisType "numeric" or "temporal"');
+  }
+  if ((c.x0 != null) !== (c.x1 != null)) {
+    errors.push("histogram pre-binned mode requires BOTH columns.x0 and columns.x1");
+  }
+  if (
+    preBinned &&
+    spec.histogram &&
+    (spec.histogram.bins != null ||
+      spec.histogram.binWidth != null ||
+      spec.histogram.domain != null ||
+      spec.histogram.weight != null)
+  ) {
+    errors.push(
+      "histogram: bin config (bins/binWidth/domain/weight) is not allowed with pre-binned data (columns.x0/x1)",
+    );
+  }
+  return errors;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -165,6 +202,15 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; xAxisType?: unknown },
   );
   if (wfErr) return { valid: false, errors: [wfErr] };
+  const histErrors = histogramSpecError(
+    spec as {
+      chartType?: unknown;
+      xAxisType?: unknown;
+      columns?: { x0?: unknown; x1?: unknown };
+      histogram?: { bins?: unknown; binWidth?: unknown; domain?: unknown; weight?: unknown };
+    },
+  );
+  if (histErrors.length) return { valid: false, errors: histErrors };
   return { valid: true, errors: [] };
 }
 
@@ -194,6 +240,98 @@ function timeParseError(xAxisType: XAxisType, value: string): string | null {
 
 const isNumericOrEmpty = (v: string): boolean => v === "" || Number.isFinite(Number(v));
 
+/** Histogram data validation. A histogram breaks the shared x/value contract two ways: a RAW
+ * histogram derives each bar's height from the row COUNT (or a summed weight column), so `value`
+ * is optional; and a PRE-BINNED histogram carries its own bin edges (columns.x0/x1) and a per-bin
+ * `value`, so there is no continuous `x`/`time` column to parse. This branch handles both, leaving
+ * the shared non-histogram path untouched. Series/facet columns validate exactly as the normal
+ * path does (existence only). */
+function validateHistogramData(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  columns: Set<string>,
+): ValidationResult {
+  const errors: string[] = [];
+
+  // series / facet column existence — mirrors the shared path.
+  const requiredRoles: Array<[string, string]> = [];
+  if (cols.series) requiredRoles.push(["series", cols.series]);
+  if (spec.small_multiples) {
+    if (!cols.facet) {
+      errors.push(`small_multiples requires a facet column — set columns.facet`);
+    } else {
+      requiredRoles.push(["facet", cols.facet]);
+    }
+  }
+
+  if (isPreBinned(cols)) {
+    // Pre-binned: x0, x1, value all required; each row must satisfy x1 > x0 (both finite).
+    const x0 = cols.x0 as string;
+    const x1 = cols.x1 as string;
+    requiredRoles.push(["x0", x0], ["x1", x1], ["value", cols.value]);
+    for (const [role, col] of requiredRoles) {
+      if (!columns.has(col)) {
+        errors.push(
+          `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
+        );
+      }
+    }
+    if (errors.length) return { valid: false, errors };
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] as TidyRow;
+      const rowNum = i + 2; // row 1 = header, data starts at 2
+      const loRaw = (row[x0] as string) ?? "";
+      const hiRaw = (row[x1] as string) ?? "";
+      const lo = Number(loRaw);
+      const hi = Number(hiRaw);
+      if (loRaw.trim() === "" || hiRaw.trim() === "" || !Number.isFinite(lo) || !Number.isFinite(hi)) {
+        errors.push(
+          `row ${rowNum}: bin edges must be finite numbers, got ${cols.x0}=${JSON.stringify(loRaw)}, ${cols.x1}=${JSON.stringify(hiRaw)}`,
+        );
+      } else if (!(hi > lo)) {
+        errors.push(
+          `row ${rowNum}: bin upper edge ${cols.x1}=${JSON.stringify(hiRaw)} must be greater than lower edge ${cols.x0}=${JSON.stringify(loRaw)}`,
+        );
+      }
+      const valRaw = (row[cols.value] as string) ?? "";
+      if (!isNumericOrEmpty(valRaw)) {
+        errors.push(`row ${rowNum}: ${cols.value} ${JSON.stringify(valRaw)} is not numeric`);
+      }
+    }
+    return { valid: errors.length === 0, errors };
+  }
+
+  // Raw (count mode): the x column is required; `value` is NOT (bar height = row count). Only a
+  // mapped histogram.weight column is required + numeric-checked.
+  requiredRoles.push(["x", cols.x]);
+  for (const [role, col] of requiredRoles) {
+    if (!columns.has(col)) {
+      errors.push(
+        `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
+      );
+    }
+  }
+  const weightCol = spec.histogram?.weight;
+  if (weightCol && !columns.has(weightCol)) {
+    errors.push(
+      `config/data mismatch: histogram.weight is "${weightCol}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
+    );
+  }
+  if (errors.length) return { valid: false, errors };
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] as TidyRow;
+    const rowNum = i + 2; // row 1 = header, data starts at 2
+    const xErr = timeParseError(spec.xAxisType, (row[cols.x] as string) ?? "");
+    if (xErr) errors.push(`row ${rowNum}: ${cols.x}: ${xErr}`);
+    if (weightCol) {
+      const w = (row[weightCol] as string) ?? "";
+      if (!isNumericOrEmpty(w)) errors.push(`row ${rowNum}: ${weightCol} ${JSON.stringify(w)} is not numeric`);
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
 /** Layers 2-3: cross-reference + CSV-format checks over the chart's data rows. Assumes the
  * spec already passed structural validation. */
 export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
@@ -204,6 +342,12 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
 
   const cols = resolveColumns(spec, rows);
   const columns = new Set(Object.keys(rows[0] as TidyRow));
+
+  // Histogram diverges from the shared x/value contract (optional value in count mode; pre-binned
+  // edge columns instead of a continuous x). Handle it separately, leaving the path below intact.
+  if (spec.chartType === "histogram") {
+    return validateHistogramData(spec, rows, cols, columns);
+  }
 
   // Required columns resolve from the `columns` role map (defaults x:"time", value:"value",
   // series:"series"). Series is optional (single-series charts); facet is required when faceting.

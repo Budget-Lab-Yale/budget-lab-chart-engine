@@ -241,7 +241,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -255,6 +255,8 @@ export const CHART_SPEC_SCHEMA = {
         shape: { type: "string" },
         section: { type: "string" },
         kind: { type: "string" },
+        x0: { type: "string" },
+        x1: { type: "string" },
       },
     },
 
@@ -364,6 +366,28 @@ export const CHART_SPEC_SCHEMA = {
         },
         connectors: { type: "boolean" },
         connectorColor: { type: "string" },
+      },
+    },
+    histogram: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        bins: { type: "number" },
+        binWidth: { anyOf: [{ type: "number" }, { type: "string" }] },
+        domain: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
+        normalize: { type: "string", enum: ["none", "proportion", "density"] },
+        weight: { type: "string" },
+        bin_label: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            unit: { type: "string" },
+            unit_position: { type: "string", enum: ["prefix", "suffix"] },
+            // Integer 0–10 (matches tooltip_decimals): a fractional/negative value would reach
+            // toLocaleString's fraction-digit options and throw RangeError at render time.
+            decimals: { type: "integer", minimum: 0, maximum: 10 },
+          },
+        },
       },
     },
     highlightSeries: { type: "array", items: { type: "string" } },

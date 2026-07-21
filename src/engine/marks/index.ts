@@ -9,6 +9,7 @@ import { buildBarMarks } from "./bar";
 import { buildStackedMarks } from "./stacked";
 import { buildPointMarks } from "./point";
 import { buildWaterfallMarks } from "./waterfall";
+import { buildHistogramMarks } from "./histogram";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -21,6 +22,9 @@ export interface PreparedRow {
   _xd?: Date | null;
   /** Parsed categorical x (band axis) — the raw string category key. */
   _xc?: string;
+  /** Histogram bin edges (numeric, or epoch-ms for temporal). Present on binned/pre-binned rows. */
+  _x0?: number;
+  _x1?: number;
   /** Confidence-band bounds, when the row's series has a band. */
   _lo?: number;
   _hi?: number;
@@ -201,7 +205,7 @@ export interface MarkLayers {
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;
 
-const REGISTRY: Record<ChartType, MarkBuilder> = {
+const REGISTRY: Partial<Record<ChartType, MarkBuilder>> = {
   line: buildLineMarks,
   area: buildAreaMarks,
   bar: buildBarMarks,
@@ -210,6 +214,7 @@ const REGISTRY: Record<ChartType, MarkBuilder> = {
   scatter: buildPointMarks,
   dotplot: buildPointMarks,
   waterfall: buildWaterfallMarks,
+  histogram: buildHistogramMarks,
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {

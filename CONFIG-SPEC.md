@@ -23,7 +23,7 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 | field | type | notes |
 |---|---|---|
-| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot`. |
+| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram`. |
 | `title` | string | Card title above the chart. Rendered verbatim. |
 | `xAxisType` | enum | `numeric` \| `temporal` \| `quarterly` \| `categorical`. Determines how the x column is parsed (see [CSV format](#csv-format)). |
 | `data` | string \| object | Usually just `data.csv` (see [Data](#data)). |
@@ -32,7 +32,8 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 > embedded in, supplied at embed time (`--eyebrow`), not a spec field.
 
 Axis constraints: `scatter` requires `xAxisType: numeric`; `dotplot` requires
-`xAxisType: categorical`.
+`xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
+histogram bins a continuous axis — it has no categorical or quarterly form).
 
 ### Column mapping
 
@@ -47,6 +48,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
 | `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
+| `columns.x0` / `columns.x1` | string | Histograms only: columns holding each row's bin **lower**/**upper** edge, for **pre-binned** input. Map both to switch the histogram to pre-binned mode; mapping only one is a validation error. See [Histogram](#histogram-options). |
 
 ### Text
 
@@ -192,6 +194,67 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
+
+### Histogram options
+
+`chartType: histogram` bins a continuous x column into edge-to-edge bars. `xAxisType` must be
+`numeric` or `temporal`. By default the engine bins **raw** rows (one row per observation); mapping
+`columns.x0` + `columns.x1` switches to **pre-binned** input instead (see below).
+
+| field | type | notes |
+|---|---|---|
+| `histogram.bins` | integer | Target bin **count**. Ignored when `binWidth` is set. |
+| `histogram.binWidth` | number \| string | Bin **width**. Numeric x: a number in x-units. Temporal x: a calendar interval name — `day` \| `week` \| `month` \| `quarter` \| `year` — **or** a plain number, interpreted as a day count. |
+| `histogram.domain` | `[number, number]` | Explicit binning range `[min, max]`. Default: the data extent. |
+| `histogram.normalize` | enum | Bar-height normalization: `none` (default, raw counts/weights) \| `proportion` (each series' bins sum to 1) \| `density` (each series' area — Σ height × bin width — sums to 1). |
+| `histogram.weight` | string | Column **summed** per bin (a weighted histogram) instead of counting rows. Default: row count. Ignored (and rejected — see below) for pre-binned data. |
+| `histogram.bin_label` | object | Friendly formatting of the hover tooltip's bin-range header. See below. |
+
+**Bin-range tooltip labels (`histogram.bin_label`).** The hover tooltip header shows a friendly bin
+label instead of a mathematical interval. Numeric x renders an en-dash range (`47.9 – 50.7`).
+Temporal x whose `binWidth` is a calendar interval name collapses each bin to its period name
+(`month` → `July 2023`, `quarter` → `Q3 2023`, `year` → `2023`, `week` → `Week of July 2, 2023`,
+`day` → `July 5, 2023`); any other temporal binning (a bin count, or a day-count `binWidth`) renders
+a month range (`July – September 2023`, or `July 2023 – March 2024` across years).
+
+| field | type | notes |
+|---|---|---|
+| `histogram.bin_label.unit` | string | Applied to each **numeric** edge, e.g. `"$"`, `"%"`, `" yrs"`. Ignored for temporal labels. A suffix unit that begins with a space (`" yrs"`) is appended once to the range; a tight suffix (`"%"`) attaches to each edge. |
+| `histogram.bin_label.unit_position` | enum | `prefix` \| `suffix`. Default `suffix`. |
+| `histogram.bin_label.decimals` | integer | Numeric edge rounding. Default: smart trim to ≤2 fraction digits (drops float-accumulation noise). |
+
+**Bin-width precedence:** `binWidth` > `bins` > **auto**. With neither set, the engine picks a bin
+count itself via the Freedman–Diaconis rule, falling back to Sturges' rule when the data's IQR is
+zero (e.g. a near-constant column).
+
+**Pre-binned input.** Map `columns.x0` + `columns.x1` to the columns holding each row's bin lower/
+upper edge; `columns.value` (default `"value"`) supplies the bar height directly, and the engine
+draws the given edges as-is rather than computing its own — edges may be uneven. Because there is
+no data left to bin, the `histogram` block's binning fields (`bins`, `binWidth`, `domain`,
+`weight`) are meaningless in this mode and **validation rejects the spec** if any are set alongside
+`columns.x0`/`x1`. (`histogram.normalize` still applies, reusing the same
+proportion/density logic over the given bin heights.)
+
+**Overlapping multi-series.** With `columns.series` set, each series draws its own translucent bar
+layer over a **shared** set of bins — series don't stack or dodge, they overlay, so the visual
+answers "how do these distributions compare" rather than "what's the combined total." `series_order`
+still controls z-order and legend/color assignment; a series with no observations in a bin renders
+a zero-height bar there (not a gap) so all series share the same bin count.
+
+**Faceting.** Combine `columns.facet` with `small_multiples` as usual. `small_multiples.mode`
+governs how bins are computed per pane:
+
+- `shared` (default) — one set of bin thresholds is computed across **all** in-scope rows and
+  reused by every pane, so panes share a common x-domain and their bars line up for cross-pane
+  comparison.
+- `per-pane` — each pane bins only its own rows, independently (its own thresholds, possibly a
+  different bin count/domain than its neighbors).
+
+> **Pre-binned + faceting caveat.** The `shared` mode's cross-pane threshold computation only
+> applies to **raw** data that the engine bins itself. Pre-binned panes (`columns.x0`/`x1`) already
+> carry their own edges per row, and those edges are **not** coordinated across panes in `shared`
+> mode — each pane simply renders the edges its own rows supply. If you need pre-binned facets to
+> line up on a common x-axis, give every facet the same bin edges yourself in the source data.
 
 ### Small multiples
 

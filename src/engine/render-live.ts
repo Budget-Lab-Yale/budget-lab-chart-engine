@@ -27,6 +27,8 @@ import { resolveColor } from "./palette.js";
 import {
   attachCrosshair,
   attachBandCrosshair,
+  attachHistogramHover,
+  attachSecondaryHistogramCursor,
   attachSecondaryLineCursor,
   attachSecondaryBandCursor,
   attachCategoricalLineCrosshair,
@@ -35,12 +37,35 @@ import {
   attachHighlightPills,
 } from "./crosshair.js";
 import type { HighlightPillsHandle } from "./crosshair.js";
+import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
 import { TBL, markerSymbolForIndex } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
+
+const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
+
+/** Resolve the friendly bin-label options for a histogram from its spec: the x kind, the calendar
+ *  interval (only when `binWidth` is a calendar-interval NAME — count/day-count bins → null), and
+ *  the optional `bin_label` unit/rounding config. */
+function histogramBinLabelOpts(spec: ChartSpec): BinLabelOpts {
+  const xType = spec.xAxisType === "temporal" ? "temporal" : "numeric";
+  const bw = spec.histogram?.binWidth;
+  const interval: CalendarInterval | null =
+    xType === "temporal" && typeof bw === "string" && (CALENDAR_INTERVALS as readonly string[]).includes(bw)
+      ? (bw as CalendarInterval)
+      : null;
+  const cfg = spec.histogram?.bin_label;
+  return {
+    xType,
+    interval,
+    ...(cfg?.unit != null ? { unit: cfg.unit } : {}),
+    ...(cfg?.unit_position != null ? { unitPosition: cfg.unit_position } : {}),
+    ...(cfg?.decimals != null ? { decimals: cfg.decimals } : {}),
+  };
+}
 
 export interface MountOptions {
   spec: ChartSpec;
@@ -1026,6 +1051,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           ...(waterfallCursor ? { waterfall: waterfallCursor } : {}),
         }) as (key: unknown, active?: boolean) => void;
       }
+    } else if (spec.chartType === "histogram") {
+      // Histogram: continuous numeric/temporal x, but BINNED bars — resolve the bin under the
+      // cursor by x-extent (not a snapped point) and show a per-bin tooltip headed by the bin range.
+      attachHistogramHover(svg, {
+        rows: dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        label: histogramBinLabelOpts(spec),
+      });
     } else {
       attachCrosshair(svg, {
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -1752,6 +1788,36 @@ function wireFigureSvg(
             }
           : {}),
         ...(wfCursor ? { waterfall: wfCursor } : {}),
+      }) as (key: unknown, active?: boolean) => void;
+    }
+    return undefined;
+  }
+
+  // Histogram panes: per-bin hover (numeric/temporal x, binned bars). In SHARED small-multiples
+  // mode every pane bins to ONE set of thresholds, so hovering one pane can echo the same bin on
+  // every other pane (coordinated cursor). Per-pane mode bins each pane independently, so it stays
+  // a plain per-pane tooltip; a non-faceted histogram also has no `onResolve`.
+  if (ctx.spec.chartType === "histogram") {
+    const histCoord =
+      ctx.onResolve != null && (ctx.spec.small_multiples?.mode ?? "shared") !== "per-pane";
+    const histRows = ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y }));
+    attachHistogramHover(svg, {
+      rows: histRows,
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      label: histogramBinLabelOpts(ctx.spec),
+      ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
+    });
+    if (histCoord) {
+      return attachSecondaryHistogramCursor(svg, {
+        rows: histRows,
+        colors: ctx.colors,
+        seriesLabels: ctx.seriesLabels,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        label: histogramBinLabelOpts(ctx.spec),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;

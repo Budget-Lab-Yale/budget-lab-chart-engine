@@ -1,0 +1,25 @@
+<!-- pane: East (East) -->
+<svg class="tblchart-p0" fill="currentColor" font-family="system-ui, sans-serif" font-size="10" text-anchor="middle" width="471" height="320" viewBox="0 0 471 320" style="background: transparent; color: rgb(74, 74, 74); font-family: Figtree, &quot;Source Sans 3&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 10.5px; overflow: visible;" data-margin-left="44" data-margin-right="16" data-margin-top="18" data-margin-bottom="22"><style>:where(.tblchart-p0) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.tblchart-p0 text),
+:where(.tblchart-p0 tspan) {
+  white-space: pre;
+}</style><g aria-label="rule" stroke="#F0F0F0" transform="translate(0,0.5)"><line x1="0" x2="471" y1="228" y2="228"></line><line x1="0" x2="471" y1="158" y2="158"></line><line x1="0" x2="471" y1="88" y2="88"></line><line x1="0" x2="471" y1="18" y2="18"></line></g><g aria-label="text" class="tbl-y-tick-label" fill="#666666" text-anchor="start" font-size="10.5" font-weight="500" transform="translate(-43.5,-5.5)"><text y="0.32em" transform="translate(44,298)">0</text><text y="0.32em" transform="translate(44,228)">1</text><text y="0.32em" transform="translate(44,158)">2</text><text y="0.32em" transform="translate(44,88)">3</text><text y="0.32em" transform="translate(44,18)">4</text></g><g aria-label="x-axis tick label" fill="#666666" font-size="10.5" font-variant="tabular-nums" font-weight="500" transform="translate(0.5,13.5)"><text y="0.71em" transform="translate(44,298)">0</text><text y="0.71em" transform="translate(126.2,298)">10</text><text y="0.71em" transform="translate(208.4,298)">20</text><text y="0.71em" transform="translate(290.6,298)">30</text><text y="0.71em" transform="translate(372.8,298)">40</text><text y="0.71em" transform="translate(455,298)">50</text></g><g aria-label="rule" stroke="#999999" transform="translate(0,0.5)"><line x1="0" x2="471" y1="298" y2="298"></line></g><g aria-label="rect" fill="#0072B2" stroke="#0072B2"><rect x="44" y="158" width="82.2" height="140" fill-opacity="0.5" data-series=""></rect><rect x="126.2" y="88" width="82.2" height="210" fill-opacity="0.5" data-series=""></rect><rect x="208.4" y="18" width="82.20000000000002" height="280" fill-opacity="0.5" data-series=""></rect><rect x="290.6" y="228" width="82.19999999999999" height="70" fill-opacity="0.5" data-series=""></rect><rect x="372.8" y="298" width="82.19999999999999" height="0" fill-opacity="0.5" data-series=""></rect></g></svg>
+
+<!-- pane: West (West) -->
+<svg class="tblchart-p1" fill="currentColor" font-family="system-ui, sans-serif" font-size="10" text-anchor="middle" width="429" height="320" viewBox="0 0 429 320" style="background: transparent; color: rgb(74, 74, 74); font-family: Figtree, &quot;Source Sans 3&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Arial, sans-serif; font-size: 10.5px; overflow: visible;" data-margin-left="2" data-margin-right="16" data-margin-top="18" data-margin-bottom="22"><style>:where(.tblchart-p1) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.tblchart-p1 text),
+:where(.tblchart-p1 tspan) {
+  white-space: pre;
+}</style><g aria-label="rule" stroke="#F0F0F0" transform="translate(0,0.5)"><line x1="0" x2="429" y1="228" y2="228"></line><line x1="0" x2="429" y1="158" y2="158"></line><line x1="0" x2="429" y1="88" y2="88"></line><line x1="0" x2="429" y1="18" y2="18"></line></g><g aria-label="x-axis tick label" fill="#666666" font-size="10.5" font-variant="tabular-nums" font-weight="500" transform="translate(0.5,13.5)"><text y="0.71em" transform="translate(2,298)">0</text><text y="0.71em" transform="translate(84.2,298)">10</text><text y="0.71em" transform="translate(166.4,298)">20</text><text y="0.71em" transform="translate(248.6,298)">30</text><text y="0.71em" transform="translate(330.8,298)">40</text><text y="0.71em" transform="translate(413,298)">50</text></g><g aria-label="rule" stroke="#999999" transform="translate(0,0.5)"><line x1="0" x2="429" y1="298" y2="298"></line></g><g aria-label="rect" fill="#0072B2" stroke="#0072B2"><rect x="2" y="228" width="82.2" height="70" fill-opacity="0.5" data-series=""></rect><rect x="84.2" y="88" width="82.2" height="210" fill-opacity="0.5" data-series=""></rect><rect x="166.4" y="228" width="82.19999999999999" height="70" fill-opacity="0.5" data-series=""></rect><rect x="248.6" y="88" width="82.20000000000002" height="210" fill-opacity="0.5" data-series=""></rect><rect x="330.8" y="158" width="82.19999999999999" height="140" fill-opacity="0.5" data-series=""></rect></g></svg>

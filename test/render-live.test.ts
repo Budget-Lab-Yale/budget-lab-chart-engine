@@ -626,6 +626,33 @@ describe("legend swatch shapes", () => {
     });
   });
 
+  // --- HISTOGRAM chart: multi-series swatches must carry is-rect (bars, not lines) ---
+  const HIST_MULTI_SPEC: ChartSpec = {
+    chartType: "histogram",
+    title: "Histogram multi-series",
+    xAxisType: "numeric",
+    series_order: ["A", "B"],
+    data: "inline",
+  };
+  const HIST_ROWS: TidyRow[] = [
+    { time: "1", series: "A", value: "" },
+    { time: "2", series: "A", value: "" },
+    { time: "3", series: "A", value: "" },
+    { time: "2", series: "B", value: "" },
+    { time: "4", series: "B", value: "" },
+    { time: "6", series: "B", value: "" },
+  ];
+
+  it("histogram chart legend swatches carry is-rect", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: HIST_MULTI_SPEC, rows: HIST_ROWS });
+    const swatches = container.querySelectorAll(".tbl-legend-swatch");
+    expect(swatches.length).toBeGreaterThan(0);
+    swatches.forEach((s) => {
+      expect(s.classList.contains("is-rect")).toBe(true);
+    });
+  });
+
   // --- LINE chart: swatches must stay unchanged (no is-rect) ---
   it("line chart legend swatches are unchanged — no is-rect", () => {
     const container = document.createElement("div");
