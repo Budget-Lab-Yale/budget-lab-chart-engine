@@ -1489,9 +1489,11 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     if (idx == null) { hide(); return; }
     const bin = bins[idx]!;
 
-    // Emit the bin's x0 (a DATA-x value) so echo panes re-resolve their own bin; then, for a
-    // coordinated pane, draw nothing here (the secondary cursor renders every pane, incl. this one).
-    opts.onResolve?.(bin.x0);
+    // Emit the bin CENTER (a DATA-x value) so echo panes re-resolve their own bin. Must be the
+    // center, not an edge: bars are edge-to-edge (bins[k-1].x1 === bins[k].x0) and
+    // resolveHistogramBinIndex is inclusive on both ends returning the FIRST match, so an edge value
+    // would resolve to the PREVIOUS bin. When emitOnly, draw nothing here (the secondary renders all).
+    opts.onResolve?.((bin.x0 + bin.x1) / 2);
     if (emitOnly) return;
 
     showHighlight(spans[idx]!.min, spans[idx]!.max);

@@ -479,6 +479,50 @@ describe("coordinated cursor — faceted histogram (shared mode: cross-pane bin 
     container.remove();
   });
 
+  it("hovering a MIDDLE bin echoes the SAME bin (not the previous one) — off-by-one regression", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const teardown = mountChart(container, { spec: histSpec, rows: histRows, width: 838, height: 420 });
+    const paneSvgs = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    const [pane0, pane1] = paneSvgs as [SVGSVGElement, SVGSVGElement];
+    mockRect1to1(pane0);
+
+    // Rects sorted left→right are the bins (single series → one rect per bin). Hover bin index 2.
+    const binRects = (svg: SVGSVGElement) =>
+      Array.from(svg.querySelectorAll<SVGRectElement>('g[aria-label="rect"] rect')).sort(
+        (a, b) => parseFloat(a.getAttribute("x")!) - parseFloat(b.getAttribute("x")!),
+      );
+    const rects0 = binRects(pane0);
+    expect(rects0.length).toBeGreaterThanOrEqual(3);
+    const target = rects0[2]!;
+    const tx = parseFloat(target.getAttribute("x")!);
+    const tw = parseFloat(target.getAttribute("width")!);
+    const cx = tx + tw / 2;
+
+    const hit = pane0.querySelector(".tbl-hist-hover-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 120, bubbles: true }));
+
+    // The echo region on the OTHER pane must cover bin 2's x-span, NOT bin 1's (panes share
+    // thresholds + width, so pane 1's bin-2 rect geometry equals pane 0's).
+    const rects1 = binRects(pane1);
+    const bin2 = rects1[2]!;
+    const bin1 = rects1[1]!;
+    const region = pane1.querySelector<SVGRectElement>('g.tbl-coord rect[opacity="0.12"]')!;
+    expect(region).not.toBeNull();
+    const rx = parseFloat(region.getAttribute("x")!);
+    expect(rx).toBeCloseTo(parseFloat(bin2.getAttribute("x")!), 1);
+    expect(Math.abs(rx - parseFloat(bin1.getAttribute("x")!))).toBeGreaterThan(1);
+    expect(parseFloat(region.getAttribute("width")!)).toBeCloseTo(parseFloat(bin2.getAttribute("width")!), 1);
+
+    // The source/active pane shades bin 2 as well.
+    const region0 = pane0.querySelector<SVGRectElement>('g.tbl-coord[opacity="1"] rect[opacity="0.12"]')!;
+    expect(region0).not.toBeNull();
+    expect(parseFloat(region0.getAttribute("x")!)).toBeCloseTo(tx, 1);
+
+    teardown();
+    container.remove();
+  });
+
   it("per-pane mode does NOT coordinate (each pane keeps its own tooltip, no cross-pane echo)", () => {
     const perPaneSpec = {
       ...histSpec,
