@@ -1,6 +1,6 @@
 {
   "name": "budget-lab-chart-engine",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Budget Lab chart engine — config-driven, Style-Guide-themed interactive charts (Observable Plot + D3).",
   "type": "module",
   "license": "UNLICENSED",

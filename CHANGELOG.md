@@ -4,6 +4,17 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-07-21
+
+### Fixed — interaction
+
+- **Bar value-pills no longer freeze the tab.** `staggerBarLabels` (the routine that spreads
+  overlapping bar value-labels apart) had a `while` loop that could never terminate: because
+  `(y + pad) - y` is not exactly `pad` in IEEE-754, the overlap test stayed true and the loop
+  spun forever. Any interaction laying out ≥2 colliding pills — hover with a coordinated cursor,
+  or legend series-selection with persistent pills — could hang the browser tab. The loop now
+  advances only on strict upward progress, guaranteeing termination.
+
 ## [1.6.0] - 2026-07-20
 
 ### Added — histogram

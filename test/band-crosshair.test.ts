@@ -1009,6 +1009,25 @@ describe("staggerBarLabels (per-bar value-label de-collision)", () => {
     expect(out[1]).toBe(100); // the left bar (cx 10) is on top
     expect(out[0]).toBeGreaterThanOrEqual(116); // the right bar pushed down
   });
+
+  it("terminates on the captured FP-noise geometry (regression: while(moved) infinite loop)", () => {
+    // Captured from a hung State of Tariffs tab: out[j]=55.908811709466455, pad=16, where
+    // (out[j] + pad) - out[j] === 15.999999999999993 < 16, which spun `while (moved)` forever.
+    // A middle bar overlaps two flanking bars whose placed y is the triggering value.
+    const out = staggerBarLabels(
+      [
+        { cx: 100, w: 40, value: 5, y: 55.908811709466455 },
+        { cx: 105, w: 40, value: 3, y: 55.908811709466455 },
+        { cx: 110, w: 40, value: 1, y: 55.908811709466455 },
+      ],
+      16,
+    );
+    // If this test returns at all, the loop terminated. Assert the de-collision still holds.
+    expect(out.every((v) => Number.isFinite(v))).toBe(true);
+    const sorted = [...out].sort((a, b) => a - b);
+    expect(sorted[1]! - sorted[0]!).toBeGreaterThanOrEqual(16 - 1e-6);
+    expect(sorted[2]! - sorted[1]!).toBeGreaterThanOrEqual(16 - 1e-6);
+  });
 });
 
 describe("attachSecondaryBandCursor (coordinated cursor)", () => {

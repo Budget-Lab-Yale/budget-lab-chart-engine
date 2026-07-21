@@ -2021,7 +2021,13 @@ export function staggerBarLabels(
       moved = false;
       for (const j of placed) {
         const horiz = Math.abs(labels[i]!.cx - labels[j]!.cx) < (labels[i]!.w + labels[j]!.w) / 2;
-        if (horiz && Math.abs(y - out[j]!) < pad) { y = out[j]! + pad; moved = true; }
+        if (horiz && Math.abs(y - out[j]!) < pad) {
+          // Progress guard: `(out[j] + pad) - out[j]` is not exactly `pad` in IEEE-754 (can be a
+          // hair < pad), so without requiring strict upward progress the `< pad` test stays true,
+          // y is reassigned to the same value, and `while (moved)` spins forever.
+          const ny = out[j]! + pad;
+          if (ny - y > 1e-6) { y = ny; moved = true; }
+        }
       }
     }
     out[i] = y;
