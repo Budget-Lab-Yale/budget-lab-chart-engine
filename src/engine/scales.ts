@@ -43,6 +43,15 @@ export function computeYAxis(
 const HEADROOM_DEFAULT = 1.05;
 const HEADROOM_NET_TEXT = 1.08;
 
+/** Guard a bar/stacked value extent against the degenerate all-zero case: when every in-scope
+ *  value is 0 the raw extent collapses to [0, 0], which makes the value scale singular and paints
+ *  full-height bars (bars are sized from real _y=0, but a [0,0] domain has no baseline to sit on).
+ *  Floor the axis RANGE to [0, 1] so the scale is finite and a flat 0 line renders; bars stay
+ *  zero-height because Plot draws them from their real _y (0), independent of this floor. */
+function floorDegenerateExtent(ext: { min: number; max: number }): { min: number; max: number } {
+  return ext.min === 0 && ext.max === 0 ? { min: 0, max: 1 } : ext;
+}
+
 /**
  * Compute the y-domain extent for bar/stacked charts.
  *
@@ -66,7 +75,7 @@ export function computeBarYExtent(
     // Grouped bar: bars rise/fall from zero; extent over raw _y values.
     const dataMax = Math.max(0, ...nums);
     const dataMin = Math.min(0, ...nums);
-    return { min: dataMin, max: dataMax * HEADROOM_DEFAULT };
+    return floorDegenerateExtent({ min: dataMin, max: dataMax * HEADROOM_DEFAULT });
   }
 
   // chartType === "stacked"
@@ -110,10 +119,10 @@ export function computeBarYExtent(
     (netDisplay === "text" || netDisplay === "auto");
   const headroom = netIsText ? HEADROOM_NET_TEXT : HEADROOM_DEFAULT;
 
-  return {
+  return floorDegenerateExtent({
     min: Math.min(0, negMin),
     max: posMax * headroom,
-  };
+  });
 }
 
 export type WaterfallKind = "delta" | "total" | "skip";

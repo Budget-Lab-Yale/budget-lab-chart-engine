@@ -1457,6 +1457,24 @@ const STACKED_HORIZONTAL_SPEC: ChartSpec = {
 };
 
 describe("golden SVG — stacked bars", () => {
+  it("all-zero stack renders zero-height bars, not full-height (degenerate-domain regression)", () => {
+    // Every series in every category is 0 — the reachable first-touch state that used to paint
+    // full-height single-color bars because the value domain collapsed to [0,0]. Bars must draw
+    // at zero height instead. (See scales.ts floorDegenerateExtent.)
+    const rows: TidyRow[] = [
+      { series: "Wages", time: "2021", value: "0" },
+      { series: "Benefits", time: "2021", value: "0" },
+      { series: "Taxes", time: "2021", value: "0" },
+      { series: "Wages", time: "2022", value: "0" },
+      { series: "Benefits", time: "2022", value: "0" },
+      { series: "Taxes", time: "2022", value: "0" },
+    ] as TidyRow[];
+    const { svg } = renderChart(STACKED_CUMULATIVE_SPEC, rows, { width: 720, height: 400, document });
+    const rects = svg.querySelectorAll('g[aria-label="bar"] rect');
+    expect(rects.length).toBe(6);
+    rects.forEach((r) => expect(Number(r.getAttribute("height"))).toBe(0));
+  });
+
   it("renders a cumulative HORIZONTAL stack (single y band, no fy faceting)", async () => {
     const rows = parseCsv("./fixtures/stacked-cumulative.csv");
     const { svg } = renderChart(STACKED_HORIZONTAL_SPEC, rows, { width: 720, height: 400, document });

@@ -37,7 +37,7 @@ The floor value that keeps the axis finite must not be the value the bars scale 
 - All existing non-degenerate stacked-bar golden snapshots → **byte-identical**.
 - Reproduce first: a failing extent/golden test with an all-zero dataset before the fix (systematic-debugging).
 
-This is scoped to `stacked`. `bar` (grouped) and the dumbbell's own value extent are separate and not degenerate in the same way (a dumbbell of all-equal dots renders correctly — dots at one position, no stem).
+The reported bug is `stacked`, but the grouped-`bar` branch of `computeBarYExtent` returns the identical degenerate `{min:0, max:0}` for all-zero data — the same latent defect. A single shared guard (`floorDegenerateExtent`, applied to both branch returns) fixes both; both are covered by tests. The dumbbell's own value extent is separate (a dumbbell of all-equal dots renders correctly — dots at one position, no stem).
 
 ---
 
