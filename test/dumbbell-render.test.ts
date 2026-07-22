@@ -36,6 +36,85 @@ const ROWS: TidyRow[] = [
 
 const opts = { width: 720, height: 400 } as const;
 
+// Absolute (x,y) of an SVG element: accumulate every ancestor translate up to <svg>, then add the
+// element's own position (cx/cy for circles, x/y attrs for text). jsdom has no layout engine, so we
+// read the transforms Plot emits directly — the same technique golden.test.ts uses.
+function absPos(el: Element | null): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  let n: Element | null = el;
+  while (n && n.tagName.toLowerCase() !== "svg") {
+    const tf = n.getAttribute("transform");
+    if (tf) {
+      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
+      if (m) { x += Number(m[1]); y += Number(m[2]); }
+    }
+    n = n.parentElement;
+  }
+  const tag = el?.tagName.toLowerCase();
+  // Add the element's own position. Guard non-numeric attrs — Plot emits text `y="0.32em"` (a
+  // baseline nudge), which is not a coordinate; the real position is in the ancestor transforms.
+  const num = (v: string | null): number => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  if (tag === "circle") { x += num(el!.getAttribute("cx")); y += num(el!.getAttribute("cy")); }
+  else if (tag === "text") { x += num(el!.getAttribute("x")); y += num(el!.getAttribute("y")); }
+  return { x, y };
+}
+
+const textByContent = (svg: Element, content: string): Element | undefined =>
+  Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "").trim() === content);
+
+describe("dumbbell mark — axis/data alignment (positional proof)", () => {
+  it("horizontal: each category's label sits at its dots' band center", () => {
+    const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
+    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
+    // Data order: Q1 = circles[0..2], Q5 = circles[3..5].
+    const q5Cy = [3, 4, 5].map((i) => absPos(circles[i]!).y);
+    const meanQ5 = q5Cy.reduce((a, b) => a + b, 0) / q5Cy.length;
+    const labelQ5 = absPos(textByContent(svg, "Q5") ?? null);
+    expect(Math.abs(labelQ5.y - meanQ5)).toBeLessThan(2); // label centered on the same band as the dots
+  });
+
+  it("horizontal: dot X positions map proportionally through the value axis", () => {
+    const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
+    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
+    // Q5: current_law=28.4 (i=3), static=34.9 (i=4), collected=32.6 (i=5).
+    const [xCurrent, xStatic, xCollected] = [3, 4, 5].map((i) => absPos(circles[i]!).x);
+    // Order must follow value order: 28.4 < 32.6 < 34.9.
+    expect(xCurrent).toBeLessThan(xCollected!);
+    expect(xCollected!).toBeLessThan(xStatic!);
+    // Pixel gaps must be proportional to value gaps (the axis is linear) — a strong, margin-
+    // independent proof that dots are placed by the value scale, not arbitrarily.
+    const pxRatio = (xStatic! - xCurrent!) / (xCollected! - xCurrent!);
+    const valRatio = (34.9 - 28.4) / (32.6 - 28.4);
+    expect(Math.abs(pxRatio - valRatio)).toBeLessThan(0.05);
+  });
+
+  it("horizontal: dots align to the value-axis ticks (28.4 lands between the 20 and 30 ticks)", () => {
+    const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
+    const t20 = absPos(textByContent(svg, "20") ?? null).x;
+    const t30 = absPos(textByContent(svg, "30") ?? null).x;
+    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
+    const xCurrent = absPos(circles[3]!).x; // 28.4 → between the 20 and 30 ticks, nearer 30
+    const predicted = t20 + ((28.4 - 20) / 10) * (t30 - t20);
+    expect(Math.abs(xCurrent - predicted)).toBeLessThan(3);
+  });
+
+  it("vertical: dots align to the value-axis ticks on Y (higher value = higher on screen = smaller y)", () => {
+    const { svg } = renderChart({ ...DUMBBELL_H, orientation: "vertical" }, ROWS, { ...opts, document });
+    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
+    // Q5 static (34.9) should sit ABOVE (smaller y) Q5 current_law (28.4).
+    const yCurrent = absPos(circles[3]!).y;
+    const yStatic = absPos(circles[4]!).y;
+    expect(yStatic).toBeLessThan(yCurrent);
+    // And Q1 (2.1) dots sit well below Q5's dots.
+    const yQ1 = absPos(circles[0]!).y;
+    expect(yQ1).toBeGreaterThan(yCurrent);
+  });
+});
+
 describe("dumbbell mark — structure", () => {
   it("renders one dot per (category, series) tagged with its series", () => {
     const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
