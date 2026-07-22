@@ -11,7 +11,7 @@ import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
-import { computeYAxis, computeBarYExtent, computeWaterfallYExtent } from "./scales";
+import { computeYAxis, computeBarYExtent, computeWaterfallYExtent, computeDumbbellValueExtent } from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
@@ -507,6 +507,20 @@ function assemblePaneResult(
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
     const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
+    hardDomain = [resolvedMin, resolvedMax];
+  } else if (chartType === "dumbbell") {
+    // Dumbbell: dots are POSITIONS, so the value axis fits the padded data extent and does NOT
+    // force zero (see computeDumbbellValueExtent). Orientation is handled by the mark (horizontal
+    // puts the value on x via yScaleOpts). Value-axis reference markers fold in for headroom — for
+    // horizontal they are annotations.xAxis, for vertical annotations.yAxis (mirrors the bar path).
+    const markerYs = [
+      ...ann.yAxis.map((m) => m.y),
+      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
+    ].filter(Number.isFinite);
+    includeZero = false;
+    const dbExtent = computeDumbbellValueExtent(dataInScope.map((d) => d._y));
+    const resolvedMin = policy.min ?? Math.min(dbExtent.min, ...markerYs);
+    const resolvedMax = Math.max(policy.max ?? dbExtent.max, ...markerYs);
     hardDomain = [resolvedMin, resolvedMax];
   } else if (chartType === "histogram") {
     // Histogram: the value axis is the (possibly normalized) bin height `_y`, which yForAxis
