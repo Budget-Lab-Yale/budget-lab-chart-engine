@@ -160,9 +160,22 @@ export function buildDumbbellMarks(
   }
 
   // --- Dots: one mark, all series; per-datum fill/stroke keyed off each series' marker style. ---
-  // Filter to finite values so Plot emits exactly one <circle> per rendered dot (keeps the tagging
-  // DOM order aligned with `dotData`).
-  const dotData = data.filter((d) => Number.isFinite(d._y as number));
+  // Filter to finite values, then draw in SERIES order (series-major, category order within) so the
+  // z-order is consistent everywhere: the first series is drawn first (bottom), the last on top —
+  // regardless of the incoming row grouping. Keeps overlapping dots stacked the same in every
+  // category. The tagging DOM order reads `dotData`, so it stays aligned.
+  const seriesRank = new Map(seriesNames.map((s, i) => [s, i]));
+  const catRank = new Map(categories.map((c, i) => [c, i]));
+  const dotData = data
+    .filter((d) => Number.isFinite(d._y as number))
+    .slice()
+    .sort((a, b) => {
+      const sr = (seriesRank.get(a.series) ?? 0) - (seriesRank.get(b.series) ?? 0);
+      if (sr !== 0) return sr;
+      const ac = (a as unknown as Record<string, string>)[catField] ?? "";
+      const bc = (b as unknown as Record<string, string>)[catField] ?? "";
+      return (catRank.get(ac) ?? 0) - (catRank.get(bc) ?? 0);
+    });
   const dotOpts = {
     ...(horizontal ? { y: catField, x: "_y" } : { x: catField, y: "_y" }),
     fill: (d: PreparedRow) => fillFor(d.series),
@@ -186,27 +199,30 @@ export function buildDumbbellMarks(
         );
         return Number.isFinite(row?._y as number) ? (row!._y as number) : undefined;
       };
+      // Place the label at the connector MIDPOINT (between the two dots), offset perpendicular to
+      // the stem, so it reads as a span annotation of the GAP — not as a point value competing with
+      // the value axis. Prefixed with a Δ so a small delta (e.g. "Δ1.7pp") isn't mistaken for a rate.
       const gapRows = categories
         .map((cat) => {
           const a = valueAt(cat, seriesA);
           const b = valueAt(cat, seriesB);
-          if (a == null || b == null) return null;
-          return { cat, at: Math.max(a, b), text: fmtValue(Math.abs(a - b), gapFmt) };
+          if (a == null || b == null || a === b) return null;
+          return { cat, mid: (a + b) / 2, text: `Δ${fmtValue(Math.abs(a - b), gapFmt)}` };
         })
-        .filter((g): g is { cat: string; at: number; text: string } => g != null);
+        .filter((g): g is { cat: string; mid: number; text: string } => g != null);
       if (gapRows.length) {
         const common = {
           text: (d: { text: string }) => d.text,
           fill: TBL.color.muted,
-          fontSize: TBL.size.annotation,
+          fontSize: TBL.size.annotation - 0.5,
           fontWeight: 600,
           className: GAP_LABEL_CLASS,
           ...facetChannels,
         };
         overlay.push(
           horizontal
-            ? Plot.text(gapRows, { ...common, y: "cat", x: "at", textAnchor: "start", dx: r + 6 })
-            : Plot.text(gapRows, { ...common, x: "cat", y: "at", textAnchor: "middle", dy: -(r + 6) }),
+            ? Plot.text(gapRows, { ...common, y: "cat", x: "mid", textAnchor: "middle", dy: -(r + 5) })
+            : Plot.text(gapRows, { ...common, x: "cat", y: "mid", textAnchor: "start", dx: r + 5 }),
         );
       }
     }

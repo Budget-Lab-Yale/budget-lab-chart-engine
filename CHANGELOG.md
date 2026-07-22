@@ -28,6 +28,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   cursor** that echoes the band across panes. (The categorical crosshair gained a horizontal mode.)
 - **Sections** (`columns.section`, horizontal) — group categories into labeled blocks with bold
   gutter headers, like horizontal bars.
+- **Horizontal dumbbells auto-grow their height** with the category-row count (and section spacers),
+  reusing the horizontal-bar height helper — no more cramped/overflowing rows at high category
+  counts. Standalone and faceted panes alike.
+- **Facet layout matches orientation**: horizontal dumbbell facets **stack vertically** (one
+  full-width pane per row — a horizontal value axis needs the width); vertical dumbbell facets sit
+  **side by side** in the usual grid.
+- **Consistent dot draw order** — dots render series-major (first series drawn first, last on top),
+  so overlapping dots stack identically in every category.
+- **Gap annotation** renders at the connector midpoint, prefixed with `Δ` (and skips zero-gap
+  categories), so it reads as a difference rather than a value competing with the axis.
 
 ### Fixed — bar/stacked
 

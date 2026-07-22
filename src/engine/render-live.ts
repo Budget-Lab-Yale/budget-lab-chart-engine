@@ -101,7 +101,13 @@ const FIXED_CHART_HEIGHT = 400;
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
-  if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
+  // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
+  // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
+  // same as a single-series horizontal bar, section spacers included).
+  const growsWithRows =
+    spec.orientation === "horizontal" &&
+    (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell");
+  if (!growsWithRows) {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }

@@ -5,6 +5,7 @@
 // orientations, and the gap annotation. Renders through the real headless engine path under jsdom.
 import { describe, it, expect } from "vitest";
 import { renderChart, renderFigure } from "../src/engine/index";
+import { computeChartHeight } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { tokens } from "../src/theme/tokens";
@@ -66,12 +67,16 @@ function absPos(el: Element | null): { x: number; y: number } {
 const textByContent = (svg: Element, content: string): Element | undefined =>
   Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "").trim() === content);
 
+// Select a dot by (category, series) — order-independent, since dots are drawn series-major.
+const dot = (svg: Element, category: string, series: string): Element =>
+  Array.from(svg.querySelectorAll('g[aria-label="dot"] circle')).find(
+    (c) => c.getAttribute("data-category") === category && c.getAttribute("data-series") === series,
+  )!;
+
 describe("dumbbell mark — axis/data alignment (positional proof)", () => {
   it("horizontal: each category's label sits at its dots' band center", () => {
     const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
-    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
-    // Data order: Q1 = circles[0..2], Q5 = circles[3..5].
-    const q5Cy = [3, 4, 5].map((i) => absPos(circles[i]!).y);
+    const q5Cy = ["current_law", "static", "collected"].map((s) => absPos(dot(svg, "Q5", s)).y);
     const meanQ5 = q5Cy.reduce((a, b) => a + b, 0) / q5Cy.length;
     const labelQ5 = absPos(textByContent(svg, "Q5") ?? null);
     expect(Math.abs(labelQ5.y - meanQ5)).toBeLessThan(2); // label centered on the same band as the dots
@@ -79,15 +84,14 @@ describe("dumbbell mark — axis/data alignment (positional proof)", () => {
 
   it("horizontal: dot X positions map proportionally through the value axis", () => {
     const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
-    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
-    // Q5: current_law=28.4 (i=3), static=34.9 (i=4), collected=32.6 (i=5).
-    const [xCurrent, xStatic, xCollected] = [3, 4, 5].map((i) => absPos(circles[i]!).x);
-    // Order must follow value order: 28.4 < 32.6 < 34.9.
-    expect(xCurrent).toBeLessThan(xCollected!);
-    expect(xCollected!).toBeLessThan(xStatic!);
-    // Pixel gaps must be proportional to value gaps (the axis is linear) — a strong, margin-
-    // independent proof that dots are placed by the value scale, not arbitrarily.
-    const pxRatio = (xStatic! - xCurrent!) / (xCollected! - xCurrent!);
+    // Q5: current_law=28.4, static=34.9, collected=32.6.
+    const xCurrent = absPos(dot(svg, "Q5", "current_law")).x;
+    const xStatic = absPos(dot(svg, "Q5", "static")).x;
+    const xCollected = absPos(dot(svg, "Q5", "collected")).x;
+    expect(xCurrent).toBeLessThan(xCollected); // value order: 28.4 < 32.6 < 34.9
+    expect(xCollected).toBeLessThan(xStatic);
+    // Pixel gaps must be proportional to value gaps (linear axis) — a margin-independent proof.
+    const pxRatio = (xStatic - xCurrent) / (xCollected - xCurrent);
     const valRatio = (34.9 - 28.4) / (32.6 - 28.4);
     expect(Math.abs(pxRatio - valRatio)).toBeLessThan(0.05);
   });
@@ -96,22 +100,83 @@ describe("dumbbell mark — axis/data alignment (positional proof)", () => {
     const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
     const t20 = absPos(textByContent(svg, "20") ?? null).x;
     const t30 = absPos(textByContent(svg, "30") ?? null).x;
-    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
-    const xCurrent = absPos(circles[3]!).x; // 28.4 → between the 20 and 30 ticks, nearer 30
+    const xCurrent = absPos(dot(svg, "Q5", "current_law")).x; // 28.4 → between 20 and 30 ticks
     const predicted = t20 + ((28.4 - 20) / 10) * (t30 - t20);
     expect(Math.abs(xCurrent - predicted)).toBeLessThan(3);
   });
 
   it("vertical: dots align to the value-axis ticks on Y (higher value = higher on screen = smaller y)", () => {
     const { svg } = renderChart({ ...DUMBBELL_H, orientation: "vertical" }, ROWS, { ...opts, document });
-    const circles = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'));
-    // Q5 static (34.9) should sit ABOVE (smaller y) Q5 current_law (28.4).
-    const yCurrent = absPos(circles[3]!).y;
-    const yStatic = absPos(circles[4]!).y;
+    // Q5 static (34.9) sits ABOVE (smaller y) Q5 current_law (28.4); Q1 (2.1) sits well below Q5.
+    const yCurrent = absPos(dot(svg, "Q5", "current_law")).y;
+    const yStatic = absPos(dot(svg, "Q5", "static")).y;
     expect(yStatic).toBeLessThan(yCurrent);
-    // And Q1 (2.1) dots sit well below Q5's dots.
-    const yQ1 = absPos(circles[0]!).y;
+    const yQ1 = absPos(dot(svg, "Q1", "current_law")).y;
     expect(yQ1).toBeGreaterThan(yCurrent);
+  });
+});
+
+describe("dumbbell mark — draw order, facet layout, auto-height", () => {
+  it("draws dots series-major (consistent z-order: first series first, last on top)", () => {
+    const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
+    const order = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle')).map((c) =>
+      c.getAttribute("data-series"),
+    );
+    // series_order = [current_law, static, collected] → all current_law dots, then all static, then
+    // all collected (regardless of the category-major input row order).
+    const firstIdx = (s: string) => order.indexOf(s);
+    const lastIdx = (s: string) => order.lastIndexOf(s);
+    expect(lastIdx("current_law")).toBeLessThan(firstIdx("static"));
+    expect(lastIdx("static")).toBeLessThan(firstIdx("collected"));
+  });
+
+  it("horizontal facets stack vertically (columns forced to 1)", () => {
+    const rows: TidyRow[] = [
+      { pane: "A", group: "Q1", measure: "static", rate: "2" },
+      { pane: "A", group: "Q1", measure: "collected", rate: "3" },
+      { pane: "B", group: "Q1", measure: "static", rate: "4" },
+      { pane: "B", group: "Q1", measure: "collected", rate: "5" },
+    ] as TidyRow[];
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
+      small_multiples: { mode: "shared" },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, document });
+    expect(fig.columns).toBe(1); // horizontal → one full-width pane per row
+    expect(fig.panes.length).toBe(2);
+  });
+
+  it("vertical facets sit side by side (grid columns > 1)", () => {
+    const rows: TidyRow[] = [
+      { pane: "A", group: "Q1", measure: "static", rate: "2" },
+      { pane: "A", group: "Q1", measure: "collected", rate: "3" },
+      { pane: "B", group: "Q1", measure: "static", rate: "4" },
+      { pane: "B", group: "Q1", measure: "collected", rate: "5" },
+    ] as TidyRow[];
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      orientation: "vertical",
+      columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
+      small_multiples: { mode: "shared" },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, document });
+    expect(fig.columns).toBeGreaterThan(1);
+  });
+
+  it("horizontal auto-height grows with the category-row count", () => {
+    const mk = (n: number): TidyRow[] =>
+      Array.from({ length: n }, (_, i) => [
+        { group: `G${i}`, measure: "static", rate: String(2 + i) },
+        { group: `G${i}`, measure: "collected", rate: String(3 + i) },
+      ]).flat() as TidyRow[];
+    const short = computeChartHeight(DUMBBELL_H, mk(3));
+    const tall = computeChartHeight(DUMBBELL_H, mk(20));
+    expect(tall).toBeGreaterThan(short);
+    // A vertical dumbbell does NOT grow with rows (fixed height).
+    expect(computeChartHeight({ ...DUMBBELL_H, orientation: "vertical" }, mk(20))).toBe(
+      computeChartHeight({ ...DUMBBELL_H, orientation: "vertical" }, mk(3)),
+    );
   });
 });
 
@@ -167,10 +232,12 @@ describe("dumbbell mark — structure", () => {
     const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
     const circles = svg.querySelectorAll('g[aria-label="dot"] circle');
     expect(circles.length).toBe(6);
-    // DOM order follows data order (Q1 c/s/c, then Q5 c/s/c).
-    expect(circles[0]?.getAttribute("data-series")).toBe("current_law");
-    expect(circles[1]?.getAttribute("data-series")).toBe("static");
-    expect(circles[5]?.getAttribute("data-series")).toBe("collected");
+    // Every (category, series) pair has exactly one dot, tagged with both.
+    for (const cat of ["Q1", "Q5"]) {
+      for (const s of ["current_law", "static", "collected"]) {
+        expect(dot(svg, cat, s)).toBeTruthy();
+      }
+    }
   });
 
   it("draws a connector stem only for categories whose dots differ (Q5, not coincident Q1)", () => {
@@ -181,10 +248,9 @@ describe("dumbbell mark — structure", () => {
 
   it("styles markers: ink = ink fill; hollow = page-bg fill + series-color stroke; filled = series fill", () => {
     const { svg, colors } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
-    const circles = svg.querySelectorAll('g[aria-label="dot"] circle');
-    const inkDot = circles[0]!; // current_law → ink
-    const hollowDot = circles[1]!; // static → hollow
-    const filledDot = circles[2]!; // collected → filled
+    const inkDot = dot(svg, "Q5", "current_law"); // ink
+    const hollowDot = dot(svg, "Q5", "static"); // hollow
+    const filledDot = dot(svg, "Q5", "collected"); // filled
     expect(inkDot.getAttribute("fill")?.toUpperCase()).toBe(INK.toUpperCase());
     expect(hollowDot.getAttribute("fill")?.toUpperCase()).toBe(PAGE_BG.toUpperCase());
     expect(hollowDot.getAttribute("stroke")?.toUpperCase()).toBe(colors.get("static")!.toUpperCase());
@@ -196,13 +262,13 @@ describe("dumbbell mark — structure", () => {
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(6);
   });
 
-  it("gap_annotation labels the |a − b| gap per stem", () => {
+  it("gap_annotation labels the |a − b| gap per stem as a Δ (skipping zero-gap categories)", () => {
     const spec: ChartSpec = { ...DUMBBELL_H, gap_annotation: { series_a: "static", series_b: "collected" } };
     const { svg } = renderChart(spec, ROWS, { ...opts, document });
     const labels = Array.from(svg.querySelectorAll("g.tbl-dumbbell-gap text")).map((t) => t.textContent);
-    // Q1 gap = 0.0, Q5 gap = |34.9 − 32.6| = 2.3.
-    expect(labels).toContain("2.3%");
-    expect(labels.length).toBe(2);
+    // Q1 static==collected (gap 0 → skipped); Q5 gap = |34.9 − 32.6| = 2.3, shown as a delta.
+    expect(labels).toContain("Δ2.3%");
+    expect(labels.length).toBe(1);
   });
 
   it("composes with faceting (top-decile breakout as a separate pane)", () => {
