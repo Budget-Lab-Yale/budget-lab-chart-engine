@@ -176,9 +176,12 @@ export function buildDumbbellMarks(
   const seriesColors = new Map<string, string>();
   for (const s of seriesNames) seriesColors.set(s, markerOf(s) === "ink" ? INK : seriesColor(s));
 
+  // Tag each dot with BOTH its series (legend hover/pin) and its category (so the live hover /
+  // coordinated cursor can resolve which category band the pointer is over, from the dots).
   const dotTagging = {
     selector: 'g[aria-label="dot"] circle',
     seriesOrder: dotData.map((d) => d.series),
+    categoryOrder: dotData.map((d) => (d as unknown as Record<string, string>)[catField] ?? ""),
   };
 
   if (horizontal) {
