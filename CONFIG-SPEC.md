@@ -284,6 +284,15 @@ its useful range); zero is included only when the dots cross it, and a zero rule
 Faceted dumbbells share a common value scale by default (`small_multiples.mode: per-pane` gives
 each pane its own).
 
+**Hover & coordinated cursor.** Hovering anywhere in a category's band (a row for horizontal, a
+column for vertical) highlights that band and shows a tooltip listing each series' value. In a
+faceted dumbbell the cursor is coordinated — hovering a category echoes the band highlight on every
+pane (unless `coordinated_cursor: false`).
+
+**Sections (horizontal).** `columns.section` groups the categories into labeled blocks with bold
+headers in the left gutter, exactly like horizontal bars (`section_order` / `section_labels`
+control order and header text). Horizontal orientation only.
+
 ```yaml
 chartType: dumbbell
 orientation: horizontal

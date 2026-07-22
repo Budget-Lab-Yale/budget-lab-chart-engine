@@ -23,6 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `value_format`. Single-dot / coincident categories draw no stem.
 - **Value axis fits the data** (no forced zero baseline), including zero only when the dots cross
   it. Faceted dumbbells share a common value scale by default.
+- **Per-category band hover** (both orientations) — hovering a category's row/column highlights the
+  band and shows a tooltip listing each series' value; faceted dumbbells get a **coordinated
+  cursor** that echoes the band across panes. (The categorical crosshair gained a horizontal mode.)
+- **Sections** (`columns.section`, horizontal) — group categories into labeled blocks with bold
+  gutter headers, like horizontal bars.
 
 ### Fixed — bar/stacked
 

@@ -115,6 +115,53 @@ describe("dumbbell mark — axis/data alignment (positional proof)", () => {
   });
 });
 
+describe("dumbbell mark — faceting (both orientations)", () => {
+  // Two facet panes: main quintiles and the top-decile breakout, sharing series/colors/legend.
+  const FACET_ROWS: TidyRow[] = [
+    { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
+    { pane: "Quintiles", group: "Q1", measure: "collected", rate: "2.0" },
+    { pane: "Quintiles", group: "Q5", measure: "static", rate: "30.1" },
+    { pane: "Quintiles", group: "Q5", measure: "collected", rate: "28.4" },
+    { pane: "Top decile", group: "Top 1%", measure: "static", rate: "39.0" },
+    { pane: "Top decile", group: "Top 1%", measure: "collected", rate: "35.1" },
+    { pane: "Top decile", group: "Top 0.1%", measure: "static", rate: "41.0" },
+    { pane: "Top decile", group: "Top 0.1%", measure: "collected", rate: "36.0" },
+  ] as TidyRow[];
+  const facetSpec = (orientation: "horizontal" | "vertical"): ChartSpec => ({
+    ...DUMBBELL_H,
+    orientation,
+    series_order: ["static", "collected"],
+    series_marker: { static: "hollow", collected: "filled" },
+    columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
+    small_multiples: { columns: 2, mode: "shared" },
+  });
+
+  // Each pane must contain ONLY its own facet's categories (proof the facet split is real, not one
+  // pane drawing everything). Checked for both orientations.
+  for (const orientation of ["horizontal", "vertical"] as const) {
+    it(`${orientation}: each pane draws only its facet's category dots`, () => {
+      const result = renderFigure(facetSpec(orientation), FACET_ROWS, { width: 838, height: 440, document });
+      expect(result.panes.length).toBe(2);
+      const catsInPane = (svg: SVGSVGElement | undefined): Set<string> =>
+        new Set(
+          Array.from(svg?.querySelectorAll('g[aria-label="dot"] circle[data-category]') ?? []).map((c) =>
+            c.getAttribute("data-category"),
+          ) as string[],
+        );
+      const p0 = catsInPane(result.panes[0]!.svg);
+      const p1 = catsInPane(result.panes[1]!.svg);
+      // Quintiles pane has Q1/Q5 only; top-decile pane has Top 1% / Top 0.1% only. No leakage.
+      expect(p0).toEqual(new Set(["Q1", "Q5"]));
+      expect(p1).toEqual(new Set(["Top 1%", "Top 0.1%"]));
+      const total = result.panes.reduce(
+        (n, p) => n + (p.svg?.querySelectorAll('g[aria-label="dot"] circle').length ?? 0),
+        0,
+      );
+      expect(total).toBe(8);
+    });
+  }
+});
+
 describe("dumbbell mark — structure", () => {
   it("renders one dot per (category, series) tagged with its series", () => {
     const { svg } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
