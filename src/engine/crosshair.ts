@@ -2560,24 +2560,34 @@ function readCategoryCentersFromAxis(svgEl: SVGSVGElement, plotBottom: number): 
  *  each category, the mean marker x in SVG user coords. Robust to rotated x-axis labels (whose
  *  bounding-box centers are offset and uneven) and to the dodge (symmetric offsets average back
  *  to the band center). Dot plots use this instead of the axis-label centers. */
-function readCategoryCentersFromMarks(svgEl: SVGSVGElement): Array<{ category: string; cx: number }> {
+// `cx` is the center along the CATEGORY axis: the screen-x for vertical charts (categories on x),
+// the screen-y for horizontal charts (categories on y). `axis` selects which. Reads the data
+// markers' bounding boxes (browser-only geometry — jsdom returns 0, so this is exercised live).
+function readCategoryCentersFromMarks(
+  svgEl: SVGSVGElement,
+  axis: "x" | "y" = "x",
+): Array<{ category: string; cx: number }> {
   const svgRect = svgEl.getBoundingClientRect();
   if (!svgRect.width) return [];
   const vb = svgEl.viewBox?.baseVal;
   const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
-  const sx = Wd / svgRect.width;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const scale = axis === "y" ? Hd / svgRect.height : Wd / svgRect.width;
   const byCat = new Map<string, number[]>();
   for (const el of Array.from(svgEl.querySelectorAll<SVGElement>("[data-category]"))) {
     const cat = el.getAttribute("data-category");
     if (!cat) continue;
     const r = el.getBoundingClientRect();
-    if (!r.width) continue;
-    const cx = ((r.left + r.right) / 2 - svgRect.left) * sx;
-    (byCat.get(cat) ?? byCat.set(cat, []).get(cat)!).push(cx);
+    if (!r.width && !r.height) continue;
+    const c =
+      axis === "y"
+        ? ((r.top + r.bottom) / 2 - svgRect.top) * scale
+        : ((r.left + r.right) / 2 - svgRect.left) * scale;
+    (byCat.get(cat) ?? byCat.set(cat, []).get(cat)!).push(c);
   }
-  return Array.from(byCat, ([category, xs]) => ({
+  return Array.from(byCat, ([category, cs]) => ({
     category,
-    cx: xs.reduce((a, b) => a + b, 0) / xs.length,
+    cx: cs.reduce((a, b) => a + b, 0) / cs.length,
   })).sort((a, b) => a.cx - b.cx);
 }
 
@@ -2635,6 +2645,9 @@ export interface CategoricalLineOptions {
   /** Dot plots: derive category centers from the data markers (data-category) rather than the
    *  x-axis labels — robust to rotated labels (whose bbox centers are offset / uneven). */
   centersFromMarks?: boolean;
+  /** "horizontal" puts categories on the Y axis (dumbbell rows): the cursor resolves a category by
+   *  its screen-Y, and the band highlight is a full-width horizontal strip. Default "vertical". */
+  orientation?: "vertical" | "horizontal";
 }
 
 /**
@@ -2657,17 +2670,26 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
   const plotBottom = mt + (H - mt - mb);
   const bandHighlight = opts.bandHighlight ?? false;
+  const horizontal = opts.orientation === "horizontal";
+  const plotRight = W - mr;
 
   const NS = "http://www.w3.org/2000/svg";
   svgEl.querySelectorAll(".tbl-catline-hit, .tbl-catline-guide, .tbl-catline-hl").forEach((el) => el.remove());
 
-  // Dot plots shade the hovered category band (bar-style); line charts draw a dashed guide.
+  // Band highlight: a strip over the hovered category. Vertical charts fix the y-extent (full plot
+  // height) and vary x/width per category; horizontal charts fix the x-extent (full plot width) and
+  // vary y/height. Line charts (no bandHighlight) draw a dashed guide instead.
   const hl = emitOnly || !bandHighlight ? null : svgEl.ownerDocument.createElementNS(NS, "rect");
   if (hl) {
     hl.classList.add("tbl-catline-hl");
     hl.setAttribute("fill", TBL.color.annotationDim);
-    hl.setAttribute("y", String(mt));
-    hl.setAttribute("height", String(plotBottom - mt));
+    if (horizontal) {
+      hl.setAttribute("x", String(ml));
+      hl.setAttribute("width", String(Math.max(0, plotRight - ml)));
+    } else {
+      hl.setAttribute("y", String(mt));
+      hl.setAttribute("height", String(plotBottom - mt));
+    }
     hl.setAttribute("opacity", "0");
     hl.style.pointerEvents = "none";
     svgEl.appendChild(hl);
@@ -2699,21 +2721,32 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   function update(evt: PointerEvent): void {
     const rect = svgEl.getBoundingClientRect();
     if (!rect.width) return;
-    if (!centers) centers = opts.centersFromMarks ? readCategoryCentersFromMarks(svgEl) : readCategoryCentersFromAxis(svgEl, plotBottom);
+    if (!centers)
+      centers = opts.centersFromMarks
+        ? readCategoryCentersFromMarks(svgEl, horizontal ? "y" : "x")
+        : readCategoryCentersFromAxis(svgEl, plotBottom);
     if (!centers.length) return;
-    const svgX = (evt.clientX - rect.left) * (W / rect.width);
-    const category = nearestCategory(centers, svgX);
+    // Resolve the category by the cursor's position ALONG the category axis (y for horizontal).
+    const svgCoord = horizontal
+      ? (evt.clientY - rect.top) * (H / rect.height)
+      : (evt.clientX - rect.left) * (W / rect.width);
+    const category = nearestCategory(centers, svgCoord);
     if (!category) { hide(); return; }
     opts.onResolve?.(category);
     if (emitOnly) return;
     const idx = centers.findIndex((c) => c.category === category);
     const cx = centers[idx]!.cx;
     if (bandHighlight && hl) {
-      // Shade the category's band — a uniform width (the center spacing) so every category band
-      // is the same size, shifted to stay within the plot.
-      const b = uniformBand(centers, idx, ml, W - mr);
-      hl.setAttribute("x", String(b.min));
-      hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
+      // Shade the category's band — a uniform extent (the center spacing) so every band is the
+      // same size. Horizontal: vary y/height within the plot; vertical: vary x/width.
+      const b = horizontal ? uniformBand(centers, idx, mt, plotBottom) : uniformBand(centers, idx, ml, plotRight);
+      if (horizontal) {
+        hl.setAttribute("y", String(b.min));
+        hl.setAttribute("height", String(Math.max(0, b.max - b.min)));
+      } else {
+        hl.setAttribute("x", String(b.min));
+        hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
+      }
       hl.setAttribute("opacity", "0.12");
     } else if (guide) {
       guide.setAttribute("x1", String(cx));
@@ -2770,6 +2803,8 @@ export function attachSecondaryCategoricalLineCursor(
   const mt = +(svgEl.dataset.marginTop ?? "") || 18;
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
   const plotH = H - mt - mb;
+  const horizontal = opts.orientation === "horizontal";
+  const plotW = W - ml - mr;
 
   const valByCat = new Map<string, Map<string, number>>();
   for (const r of opts.rows) {
@@ -2793,11 +2828,24 @@ export function attachSecondaryCategoricalLineCursor(
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
     if (category == null) { g.setAttribute("opacity", "0"); return; }
-    if (!centers) centers = opts.centersFromMarks ? readCategoryCentersFromMarks(svgEl) : readCategoryCentersFromAxis(svgEl, mt + plotH);
+    if (!centers)
+      centers = opts.centersFromMarks
+        ? readCategoryCentersFromMarks(svgEl, horizontal ? "y" : "x")
+        : readCategoryCentersFromAxis(svgEl, mt + plotH);
     const c = centers.find((x) => x.category === category);
     const vals = valByCat.get(category);
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
     const cx = c.cx;
+    if (horizontal) {
+      // Horizontal dumbbell facets: echo the hovered category as a full-width row strip. (The
+      // per-series secondary dots/pills are a vertical-only nicety; the row echo is the coordinated
+      // cursor's core across panes.)
+      const idx = centers.findIndex((x) => x.category === category);
+      const b = uniformBand(centers, idx, mt, mt + plotH);
+      addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      g.setAttribute("opacity", "1");
+      return;
+    }
     if (opts.bandHighlight) {
       // Shade the category's band (bar-style) on every pane — uniform width (center spacing) so
       // every category band is the same size, matching the primary hover.

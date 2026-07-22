@@ -930,6 +930,20 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
         dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
       });
+    } else if (spec.chartType === "dumbbell") {
+      // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
+      // lists each series' value). Reuses the categorical crosshair with orientation — horizontal
+      // resolves the band on Y. No bars/dodge; dots sit at the band center.
+      attachCategoricalLineCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        bandHighlight: true,
+        centersFromMarks: true,
+        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+      });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
@@ -1575,6 +1589,32 @@ function wireFigureSvg(
     coordAccentLabel?: boolean;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
+  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
+  // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
+  // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
+  if (ctx.spec.chartType === "dumbbell") {
+    const dbUseCoord = ctx.onResolve != null;
+    const orientation = ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical";
+    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+    const dbOpts = {
+      rows: dbRows,
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v: number) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      bandHighlight: true,
+      centersFromMarks: true,
+      orientation: orientation as "vertical" | "horizontal",
+    };
+    attachCategoricalLineCrosshair(svg, {
+      ...dbOpts,
+      ...(dbUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+    });
+    if (dbUseCoord) {
+      return attachSecondaryCategoricalLineCursor(svg, dbOpts) as (key: unknown, active?: boolean) => void;
+    }
+    return undefined;
+  }
   // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
   // a category shades that band + shows per-series value pills on EVERY pane (and highlights the
   // category on the hovered pane). Mirrors the bar/line coordinated path; resolves the category
