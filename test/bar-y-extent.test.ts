@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBarYExtent } from "../src/engine/scales";
+import { computeBarYExtent, computeDumbbellValueExtent } from "../src/engine/scales";
 import type { PreparedRow } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
 
@@ -162,6 +162,39 @@ describe("computeBarYExtent — all-zero data (degenerate extent guard)", () => 
     );
     expect(result.min).toBe(0);
     expect(result.max).toBeCloseTo(15 * 1.08);
+  });
+});
+
+describe("computeDumbbellValueExtent", () => {
+  it("all-positive values: fits the data extent WITHOUT forcing zero (padded)", () => {
+    const r = computeDumbbellValueExtent([2.1, 34.9, 28.4]);
+    // Does not anchor at 0 (that would waste the axis for a 2%..35% rate view).
+    expect(r.min).toBeGreaterThan(0);
+    expect(r.min).toBeLessThan(2.1);
+    expect(r.max).toBeGreaterThan(34.9);
+  });
+
+  it("values crossing zero: extent spans zero (for a zero rule)", () => {
+    const r = computeDumbbellValueExtent([-5, 10]);
+    expect(r.min).toBeLessThan(0);
+    expect(r.max).toBeGreaterThan(0);
+  });
+
+  it("all-equal values: non-degenerate extent (dot not flush to the frame)", () => {
+    const r = computeDumbbellValueExtent([5, 5, 5]);
+    expect(r.max).toBeGreaterThan(r.min);
+    expect(r.min).toBeLessThan(5);
+    expect(r.max).toBeGreaterThan(5);
+  });
+
+  it("all-zero values: finite non-degenerate extent, does not collapse", () => {
+    const r = computeDumbbellValueExtent([0, 0]);
+    expect(r.max).toBeGreaterThan(r.min);
+  });
+
+  it("empty / all-null: safe default, does not throw", () => {
+    expect(computeDumbbellValueExtent([])).toEqual({ min: 0, max: 1 });
+    expect(computeDumbbellValueExtent([null, undefined])).toEqual({ min: 0, max: 1 });
   });
 });
 

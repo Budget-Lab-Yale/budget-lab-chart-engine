@@ -125,6 +125,31 @@ export function computeBarYExtent(
   });
 }
 
+/** Fraction of the data span added as breathing room on each side of a dumbbell's value axis, so
+ *  the extreme dots don't sit flush against the frame. */
+const DUMBBELL_PAD_FRACTION = 0.05;
+
+/**
+ * Value-axis extent for a dumbbell (connected dot plot). Unlike bars, dots are POSITIONS not
+ * magnitudes-from-zero, so the axis fits the data extent and does NOT force zero in — a 2%..35%
+ * rate view keeps its useful range. Zero is included only when the data genuinely crosses it
+ * (some dots negative, some positive), which the padded [min, max] span already covers; the mark
+ * draws a zero rule in that case. Padded on both sides for breathing room; a zero-span set
+ * (all dots equal, including all-zero) still returns a finite, non-degenerate range.
+ */
+export function computeDumbbellValueExtent(
+  values: Array<number | null | undefined>,
+): { min: number; max: number } {
+  const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (!nums.length) return { min: 0, max: 1 };
+  const lo = Math.min(...nums);
+  const hi = Math.max(...nums);
+  const span = hi - lo;
+  // Zero-span (all dots equal): pad off the value's magnitude so the axis is finite, or ±1 at 0.
+  const pad = span > 0 ? span * DUMBBELL_PAD_FRACTION : Math.abs(hi) * DUMBBELL_PAD_FRACTION || 1;
+  return { min: lo - pad, max: hi + pad };
+}
+
 export type WaterfallKind = "delta" | "total" | "skip";
 
 /** One resolved waterfall step, in DATA (= category declaration) order. `base`/`top` are the
