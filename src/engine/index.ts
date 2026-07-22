@@ -118,6 +118,9 @@ export interface LegendItem {
    *  d3 symbol name for this series (shown on the swatch so series can be told apart by shape,
    *  not just color). */
   markerSymbol?: string;
+  /** Dumbbell "hollow" marker: render the point swatch as a ring (page-background fill, series-
+   *  color stroke) instead of a solid dot, matching the chart's hollow dots. */
+  hollow?: boolean;
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
   /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
@@ -769,6 +772,22 @@ export function buildLegendItems(
       }
       return { ...base, markerShape: "point" as const, markerSymbol: "circle" };
     });
+  }
+
+  // Dumbbell: one dot per series, styled by its marker (filled/ink → solid colored dot; hollow →
+  // ring). Colors come from layers.seriesColors (ink resolves to the ink token there). A single
+  // series has nothing to distinguish, so no legend (mirrors the point-chart rule).
+  if (chartType === "dumbbell") {
+    if (seriesNames.length <= 1) return null;
+    return seriesNames.map((name) => ({
+      series: name,
+      label: labelFor(name),
+      color: legendColorFor(name),
+      dashed: false,
+      markerShape: "point" as const,
+      markerSymbol: "circle",
+      ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
+    }));
   }
 
   const markerShape: "line" | "rect" =

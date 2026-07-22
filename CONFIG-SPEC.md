@@ -23,7 +23,7 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 | field | type | notes |
 |---|---|---|
-| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram`. |
+| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram` \| `dumbbell`. |
 | `title` | string | Card title above the chart. Rendered verbatim. |
 | `xAxisType` | enum | `numeric` \| `temporal` \| `quarterly` \| `categorical`. Determines how the x column is parsed (see [CSV format](#csv-format)). |
 | `data` | string \| object | Usually just `data.csv` (see [Data](#data)). |
@@ -33,7 +33,8 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 Axis constraints: `scatter` requires `xAxisType: numeric`; `dotplot` requires
 `xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
-histogram bins a continuous axis — it has no categorical or quarterly form).
+histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
+`xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`).
 
 ### Column mapping
 
@@ -43,6 +44,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | field | type | notes |
 |---|---|---|
 | `columns.x` | string | Column holding the x value. Default `"time"`. |
+| `columns.category` | string | Dumbbell only: the categorical-axis column — a synonym for `columns.x` (wins when both are set). |
 | `columns.value` | string | Column holding the numeric y value. Default `"value"`. |
 | `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. |
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
@@ -255,6 +257,46 @@ governs how bins are computed per pane:
 > carry their own edges per row, and those edges are **not** coordinated across panes in `shared`
 > mode — each pane simply renders the edges its own rows supply. If you need pre-binned facets to
 > line up on a common x-axis, give every facet the same bin edges yourself in the source data.
+
+### Dumbbell options
+
+`chartType: dumbbell` draws a **connected dot plot**: one dot per series in each category, joined
+by a connector "stem", so the **gap** between series is the visual subject — for two or three
+values that compare but don't sum (e.g. current-law vs. static vs. collected effective rates).
+`xAxisType` must be `categorical`; `orientation` decides the rendering (`horizontal`, default —
+categories down the left, values along x — or `vertical`). Map the categorical column via
+`columns.category` (or `columns.x`), the value via `columns.value`, and the dot identity via
+`columns.series`. Series color/order/labels reuse the shared `series_*` fields; category order
+reuses `category_order` (or `x_order`); faceting reuses `columns.facet` + `small_multiples`.
+
+| field | type | notes |
+|---|---|---|
+| `orientation` | enum | `horizontal` (default; categories on the y band, values on x) \| `vertical`. |
+| `series_marker` | object | Per-series dot style: `filled` (solid series color) \| `hollow` (ring — series-color outline, page-background center) \| `ink` (filled neutral ink). Unlisted series default to `filled`. Lets "static/ask" read hollow and "collected" filled. The legend swatch matches (a hollow series shows a ring). |
+| `connector` | object | Stem styling: `connector.color` (a color token/hex), `connector.width` (px, default 1.5), `connector.style` (`solid` default \| `dashed` \| `dotted`). Default a subtle neutral line drawn behind the dots. A single-dot (or exactly-coincident) category draws no stem. |
+| `dot_radius` | number | Dot radius in px. Default 5. |
+| `gap_annotation` | boolean \| object | Label the numeric gap between two series on each stem. `true` uses the first two series in order; an object names them: `{ series_a, series_b, format? }`. `format` (else `value_format`) formats the number. Default off. |
+| `value_axis_title` | string | Short caption on the value axis. |
+| `value_format` | object | Number format for values in labels: `{ decimals, prefix, suffix }` (e.g. `{ decimals: 1, suffix: "%" }`). |
+
+The value axis **fits the data** and does **not** force a zero baseline (a 2%–35% rate view keeps
+its useful range); zero is included only when the dots cross it, and a zero rule is drawn there.
+Faceted dumbbells share a common value scale by default (`small_multiples.mode: per-pane` gives
+each pane its own).
+
+```yaml
+chartType: dumbbell
+orientation: horizontal
+xAxisType: categorical
+columns: { category: group, series: measure, value: rate }
+category_order: [Quintile 1, Quintile 2, Quintile 3, Quintile 4, Quintile 5]
+series_order: [current_law, static, collected]
+series_labels: { current_law: Current law, static: Static rate, collected: Collected after behavior }
+series_marker: { current_law: ink, static: hollow, collected: filled }
+value_axis_title: Effective tax rate
+value_format: { decimals: 1, suffix: "%" }
+gap_annotation: { series_a: static, series_b: collected }
+```
 
 ### Small multiples
 

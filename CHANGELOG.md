@@ -4,6 +4,34 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-07-22
+
+### Added — dumbbell
+
+- **New `chartType: "dumbbell"`** — a connected dot plot: one dot per series in each category joined
+  by a connector stem, so the GAP between two or three non-summing values (e.g. current-law vs.
+  static vs. collected effective rates) is the visual subject. `xAxisType` must be `categorical`;
+  `orientation` (`horizontal` default \| `vertical`) flips the rendering. Map the categorical column
+  via `columns.category` (a synonym for `columns.x`); category order via `category_order` (synonym
+  for `x_order`). Reuses the shared `series_*` fields, `columns.facet` + `small_multiples`, and the
+  standard legend/hover/PNG-SVG export.
+- **Marker styles** — `series_marker` sets each series' dot to `filled` (solid series color),
+  `hollow` (ring: series-color outline, page-background center), or `ink` (filled neutral). The
+  legend swatch matches (hollow reads as a ring).
+- **Connector, gap annotation, formatting** — `connector` (color/width/solid|dashed|dotted),
+  `gap_annotation` (label the |a − b| gap per stem), `dot_radius`, `value_axis_title`,
+  `value_format`. Single-dot / coincident categories draw no stem.
+- **Value axis fits the data** (no forced zero baseline), including zero only when the dots cross
+  it. Faceted dumbbells share a common value scale by default.
+
+### Fixed — bar/stacked
+
+- **All-zero bar/stacked charts no longer render full-height bars.** When every value was `0` the
+  value extent collapsed to `[0, 0]`, making the scale singular and painting full-height,
+  single-color bars labeled `0%`. The axis range is now floored to `[0, 1]` while bars stay sized to
+  their real `0` (zero height). Affects both `stacked` and grouped `bar`; some-categories-zero
+  charts and all non-degenerate charts are unchanged.
+
 ## [1.6.1] - 2026-07-21
 
 ### Fixed — interaction

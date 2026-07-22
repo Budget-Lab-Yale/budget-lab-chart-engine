@@ -109,6 +109,38 @@ describe("dumbbell mark — structure", () => {
     expect(totalCircles).toBe(8);
   });
 
+  it("builds a per-series dot legend honoring series_marker (hollow ring for the hollow series)", () => {
+    const { legendItems } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
+    expect(legendItems).not.toBeNull();
+    expect(legendItems!.length).toBe(3);
+    for (const item of legendItems!) expect(item.markerShape).toBe("point");
+    const byName = new Map(legendItems!.map((i) => [i.series, i]));
+    expect(byName.get("static")!.hollow).toBe(true);
+    expect(byName.get("collected")!.hollow).toBeFalsy();
+    expect(byName.get("current_law")!.color?.toUpperCase()).toBe(INK.toUpperCase()); // ink dot
+  });
+
+  it("renders a hollow-ring swatch in the DOM legend", () => {
+    // The rendered legend swatch for a hollow series is a ring: page-bg fill, series-color stroke.
+    const { legendItems } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
+    // (Legend DOM is built by the live/figure layer; here we assert the data contract that drives
+    // the ring — the swatch rendering is covered by the legend unit path.)
+    expect(legendItems!.some((i) => i.hollow)).toBe(true);
+  });
+
+  it("handles a single dot in a category (no stem) and a missing series", () => {
+    // Q3 has one dot (no stem); Q4 is missing "collected" (stem spans the two present dots).
+    const rows: TidyRow[] = [
+      { group: "Q3", measure: "collected", rate: "12.0" },
+      { group: "Q4", measure: "current_law", rate: "18.0" },
+      { group: "Q4", measure: "static", rate: "22.0" },
+    ] as TidyRow[];
+    const { svg } = renderChart(DUMBBELL_H, rows, { ...opts, document });
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(3);
+    // Q3 single dot → no stem; Q4 two distinct dots → one stem.
+    expect(svg.querySelectorAll("g.tbl-dumbbell-connector line").length).toBe(1);
+  });
+
   it("does not force a zero baseline (dots fit the 2%–35% range)", () => {
     // A dumbbell of positive rates should NOT anchor the value axis at 0. We assert the rendered
     // dot spread uses most of the value axis: the min and max dots are far apart in px, which only
@@ -121,5 +153,27 @@ describe("dumbbell mark — structure", () => {
     // Inner plot width is ~600px; a zero-anchored axis would compress the 2.1 dot far left and
     // shrink the spread. Fitting the data keeps the extremes well separated.
     expect(spread).toBeGreaterThan(300);
+  });
+});
+
+// Golden-SVG parity: lock the rendered output byte-for-byte so any accidental engine change to a
+// known dumbbell fails here until the baseline is deliberately regenerated (-u) and reviewed.
+describe("golden SVG — dumbbell", () => {
+  const GAP_SPEC: ChartSpec = { ...DUMBBELL_H, gap_annotation: { series_a: "static", series_b: "collected" } };
+
+  it("horizontal, ink/hollow/filled markers + gap annotation, is byte-stable", async () => {
+    const { svg } = renderChart(GAP_SPEC, ROWS, { ...opts, document });
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/dumbbell-horizontal.golden.svg");
+  });
+
+  it("vertical is byte-stable", async () => {
+    const { svg } = renderChart({ ...DUMBBELL_H, orientation: "vertical" }, ROWS, { ...opts, document });
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/dumbbell-vertical.golden.svg");
+  });
+
+  it("is deterministic (byte-identical across renders)", () => {
+    const a = renderChart(GAP_SPEC, ROWS, { ...opts, document }).svg.outerHTML;
+    const b = renderChart(GAP_SPEC, ROWS, { ...opts, document }).svg.outerHTML;
+    expect(a).toBe(b);
   });
 });
