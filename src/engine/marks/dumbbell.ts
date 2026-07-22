@@ -15,6 +15,8 @@ import {
   horizontalLeftGutter,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
+  sectionSpacerSlot,
+  SECTION_SPACER_SLOTS,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { tokens } from "../../theme/tokens";
@@ -30,6 +32,7 @@ const DOT_KEYLINE = "#ffffff"; // thin white keyline on filled/ink dots (matches
 // (the connector is a rule like a gridline; the gap label is text like the axis ticks).
 const CONNECTOR_CLASS = "tbl-dumbbell-connector";
 const GAP_LABEL_CLASS = "tbl-dumbbell-gap";
+const SECTION_HEADER_CLASS = "tbl-dumbbell-section";
 
 type MarkerStyle = "filled" | "hollow" | "ink";
 
@@ -68,6 +71,44 @@ export function buildDumbbellMarks(
         categories.push(c);
       }
     }
+  }
+
+  // --- Sections (horizontal only): group categories into labeled blocks along the band, with a
+  // block of empty spacer slots reserving header room before each non-first section (mirrors the
+  // horizontal-bar section layout, but on a plain y band rather than fy facets). ---
+  const sectioned = horizontal && data.some((r) => r._section != null);
+  let bandDomain: string[] = categories;
+  const sectionHeaders: { anchor: string; label: string; lift: boolean }[] = [];
+  if (sectioned) {
+    const sectionOf = new Map<string, string>();
+    for (const row of data) {
+      const cat = (row as unknown as Record<string, unknown>)[catField] as string | undefined;
+      if (cat && row._section != null && !sectionOf.has(cat)) sectionOf.set(cat, row._section);
+    }
+    const seenSec = new Set<string>();
+    const encountered: string[] = [];
+    for (const cat of categories) {
+      const s = sectionOf.get(cat) ?? "";
+      if (!seenSec.has(s)) { seenSec.add(s); encountered.push(s); }
+    }
+    const order = spec.section_order?.length ? spec.section_order.filter((s) => seenSec.has(s)) : encountered;
+    const labels = spec.section_labels ?? {};
+    const domain: string[] = [];
+    for (const s of order) {
+      const cats = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
+      if (!cats.length) continue;
+      const first = domain.length === 0;
+      if (!first) {
+        for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
+        // Non-first: header sits in the reserved spacer band (centered, no lift).
+        sectionHeaders.push({ anchor: sectionSpacerSlot(s, 0), label: labels[s] ?? s, lift: false });
+      } else {
+        // First section: header lifts above the first row into the (reserved) top margin.
+        sectionHeaders.push({ anchor: cats[0] as string, label: labels[s] ?? s, lift: true });
+      }
+      for (const cat of cats) domain.push(cat);
+    }
+    bandDomain = domain;
   }
 
   // --- Marker styling (filled / hollow / ink), per series ---
@@ -190,6 +231,25 @@ export function buildDumbbellMarks(
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
       : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+    // Bold section headers: anchored to their band slot (spacer for non-first sections; the first
+    // section's header lifts above its first row into the reserved top margin).
+    const headerLift = catFont + 8;
+    const sectionMarks = sectioned && !ctx.hideCategoryLabels
+      ? sectionHeaders.map((h) =>
+          Plot.text([h], {
+            y: () => h.anchor,
+            text: () => h.label,
+            frameAnchor: "left",
+            dx: -gutter,
+            dy: h.lift ? -headerLift : 0,
+            textAnchor: "start",
+            fill: TBL.color.heading,
+            fontSize: catFont,
+            fontWeight: 700,
+            className: SECTION_HEADER_CLASS,
+          }),
+        )
+      : [];
     return {
       underlay,
       overlay,
@@ -200,9 +260,10 @@ export function buildDumbbellMarks(
           : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
       ],
       dashedNames: new Set<string>(),
-      yScaleOpts: { type: "band", domain: categories, padding: 0.4, axis: null },
-      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
+      yScaleOpts: { type: "band", domain: bandDomain, padding: 0.4, axis: null },
+      xAxisMarks: ctx.hideCategoryLabels ? [] : [...tblBandYAxis(categories, gutter, catFont), ...sectionMarks],
       marginLeft: gutter,
+      ...(sectioned ? { marginTop: headerLift + 12 } : {}),
       seriesColors,
     };
   }

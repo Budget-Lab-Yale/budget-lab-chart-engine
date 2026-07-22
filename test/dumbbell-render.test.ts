@@ -220,6 +220,30 @@ describe("dumbbell mark — structure", () => {
     expect(svg.querySelectorAll("g.tbl-dumbbell-connector line").length).toBe(1);
   });
 
+  it("horizontal sections: renders bold section headers and keeps all category dots", () => {
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      series_order: ["static", "collected"],
+      series_marker: { static: "hollow", collected: "filled" },
+      columns: { category: "group", series: "measure", value: "rate", section: "band" },
+      section_order: ["Quintiles", "Top decile"],
+    };
+    const rows: TidyRow[] = [
+      { group: "Q1", band: "Quintiles", measure: "static", rate: "2.1" },
+      { group: "Q1", band: "Quintiles", measure: "collected", rate: "2.0" },
+      { group: "Q5", band: "Quintiles", measure: "static", rate: "30.1" },
+      { group: "Q5", band: "Quintiles", measure: "collected", rate: "28.4" },
+      { group: "Top 1%", band: "Top decile", measure: "static", rate: "39.0" },
+      { group: "Top 1%", band: "Top decile", measure: "collected", rate: "35.1" },
+    ] as TidyRow[];
+    const { svg } = renderChart(spec, rows, { ...opts, document });
+    // 3 categories × 2 series = 6 dots (spacer slots carry no dots).
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(6);
+    const headers = Array.from(svg.querySelectorAll("g.tbl-dumbbell-section text")).map((t) => t.textContent);
+    expect(headers).toContain("Quintiles");
+    expect(headers).toContain("Top decile");
+  });
+
   it("does not force a zero baseline (dots fit the 2%–35% range)", () => {
     // A dumbbell of positive rates should NOT anchor the value axis at 0. We assert the rendered
     // dot spread uses most of the value axis: the min and max dots are far apart in px, which only

@@ -104,9 +104,10 @@ function sectionColumnError(spec: {
   columns?: { section?: unknown };
 }): string | null {
   if (spec.columns?.section == null) return null;
-  if (spec.chartType !== "bar" || spec.orientation !== "horizontal") {
+  const sectionable = spec.chartType === "bar" || spec.chartType === "dumbbell";
+  if (!sectionable || spec.orientation !== "horizontal") {
     return (
-      `columns.section requires chartType "bar" with orientation "horizontal" ` +
+      `columns.section requires a horizontal "bar" or "dumbbell" chart ` +
       `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
     );
   }
