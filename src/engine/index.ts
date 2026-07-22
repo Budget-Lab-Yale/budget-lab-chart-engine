@@ -6,7 +6,7 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
-import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY } from "../spec/columns";
+import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
@@ -427,9 +427,10 @@ function assemblePaneResult(
   // x_order; unlisted ones keep their encounter order after (order-only — unlike series_order,
   // x_order does NOT filter). Stable sort preserves within-category row order. No-op off the
   // categorical axis.
-  if (spec.xAxisType === "categorical" && spec.x_order && spec.x_order.length) {
-    const rank = new Map(spec.x_order.map((c, i) => [c, i] as const));
-    const last = spec.x_order.length;
+  const catOrder = categoryOrderFor(spec);
+  if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
+    const rank = new Map(catOrder.map((c, i) => [c, i] as const));
+    const last = catOrder.length;
     dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
   }
 

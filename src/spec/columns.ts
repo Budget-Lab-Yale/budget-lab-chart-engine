@@ -41,7 +41,9 @@ export function resolveColumns(
   rows?: ReadonlyArray<Record<string, unknown>>,
 ): ResolvedColumns {
   const c = spec.columns ?? {};
-  const x = c.x ?? "time";
+  // Dumbbell's `columns.category` is a synonym for the categorical x/y band (see ColumnMap.category);
+  // it wins over `x` so the dumbbell's authored vocabulary resolves onto the shared x role.
+  const x = c.category ?? c.x ?? "time";
   const value = c.value ?? "value";
   const facet = c.facet ?? null;
   const shape = c.shape != null && c.shape !== "" ? c.shape : null;
@@ -65,4 +67,14 @@ export function resolveColumns(
 /** True only when both bin-edge roles (`x0`/`x1`) are mapped — i.e. the data arrives pre-binned. */
 export function isPreBinned(cols: ResolvedColumns): boolean {
   return cols.x0 != null && cols.x1 != null;
+}
+
+/** The categorical-axis render order, honoring the dumbbell's `category_order` as a synonym for
+ *  `x_order` (order-only, never filters). `category_order` wins when both are set; undefined when
+ *  neither is. Read at every `x_order` consumption site so the two spellings behave identically. */
+export function categoryOrderFor(spec: {
+  category_order?: string[];
+  x_order?: string[];
+}): string[] | undefined {
+  return spec.category_order ?? spec.x_order;
 }

@@ -52,7 +52,7 @@ The tool ships an interim custom-SVG dumbbell built from the exact data contract
 ### Goals
 
 1. A first-class `dumbbell` chart type: a categorical axis × numeric value axis, rendered as per-category dots joined by a connector.
-2. **Both orientations** — `horizontal` (categories down `y`, values along `x`) and `vertical` (categories along `x`, values up `y`).
+2. **Both orientations** — `horizontal` (categories down screen-`y`, values along `x`) and `vertical` (categories along screen-`x`, values up `y`). Both declare `xAxisType: categorical` (the engine has no `yAxisType`; orientation flips the rendering).
 3. **N series per category** (2 or 3 typical); connector spans min→max of present dots.
 4. **Faceting** (`columns.facet` + `small_multiples`), including a top-decile breakout pane sharing series/colors/legend and a common value scale.
 5. Per-series **marker styles** (filled / hollow / ink) and connector styling.
@@ -79,12 +79,12 @@ The dumbbell is, structurally, "point dots + one connector rule per category":
 
 #### 1. Spec surface
 
-`ChartType` gains `"dumbbell"`. The categorical axis is validated exactly like bars: `horizontal` requires `yAxisType: categorical`; `vertical` requires `xAxisType: categorical`.
+`ChartType` gains `"dumbbell"`. **Axis convention (correction to the tool's spec):** this engine has no `yAxisType` field — the categorical axis is always declared via `xAxisType: categorical` and `orientation` decides which screen axis it renders on (exactly how bars work). So a dumbbell requires `xAxisType: categorical` for BOTH orientations; `orientation: horizontal` (default) puts categories on screen-y, `vertical` on screen-x. The tool's `yAxisType: categorical` is dropped.
 
 ```yaml
 chartType: dumbbell
-orientation: horizontal            # default horizontal
-yAxisType: categorical             # (xAxisType: categorical for vertical)
+orientation: horizontal            # default horizontal (categories on screen-y)
+xAxisType: categorical             # categorical axis (both orientations)
 columns: { category: group, series: measure, value: rate }
 category_order: [Quintile 1, Quintile 2, Quintile 3, Quintile 4, Quintile 5]
 series_order: [current_law, static, collected]

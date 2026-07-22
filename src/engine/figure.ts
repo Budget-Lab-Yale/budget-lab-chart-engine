@@ -9,7 +9,7 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec } from "../spec/types";
-import { resolveColumns, isPreBinned } from "../spec/columns";
+import { resolveColumns, isPreBinned, categoryOrderFor } from "../spec/columns";
 import { parseDate } from "./parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
@@ -150,8 +150,8 @@ function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): st
       seen.push(v);
     }
   }
-  if (spec.x_order && spec.x_order.length) {
-    const order = spec.x_order;
+  const order = categoryOrderFor(spec);
+  if (order && order.length) {
     const rank = new Map(order.map((c, i) => [c, i] as const));
     seen.sort((a, b) => (rank.get(a) ?? order.length) - (rank.get(b) ?? order.length));
   }

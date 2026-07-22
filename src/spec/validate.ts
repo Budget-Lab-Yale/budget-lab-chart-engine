@@ -12,7 +12,7 @@ import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
-import { resolveColumns, isPreBinned } from "./columns";
+import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
@@ -48,6 +48,16 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   }
   if (spec.chartType === "dotplot" && spec.xAxisType !== "categorical") {
     return `chartType "dotplot" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
+  }
+  return null;
+}
+
+/** Dumbbell cross-field constraint: like bars, the categorical axis is declared via
+ *  `xAxisType: categorical` (NOT a separate yAxisType); `orientation` then flips it to screen-y
+ *  (horizontal, default) or screen-x (vertical). A non-categorical xAxisType has no meaning. */
+function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
+  if (spec.chartType === "dumbbell" && spec.xAxisType !== "categorical") {
+    return `chartType "dumbbell" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
   }
   return null;
 }
@@ -188,6 +198,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
+  const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
+  if (dbErr) return { valid: false, errors: [dbErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
   if (tsErr) return { valid: false, errors: [tsErr] };
   const secErr = sectionColumnError(
@@ -454,12 +466,14 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // Cross-reference: every category named by x_order must appear in the categorical x column.
   // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
   // typo. Only checked on a categorical x-axis (it is a no-op for numeric/temporal x).
-  if (spec.xAxisType === "categorical" && spec.x_order?.length) {
+  const catOrder = categoryOrderFor(spec);
+  if (spec.xAxisType === "categorical" && catOrder?.length) {
     const xValues = new Set(rows.map((r) => r[cols.x] as string));
-    const unknown = spec.x_order.filter((v) => !xValues.has(v));
+    const unknown = catOrder.filter((v) => !xValues.has(v));
     if (unknown.length) {
+      const field = spec.category_order ? "category_order" : "x_order";
       errors.push(
-        `x_order names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+        `${field} names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
       );
     }
   }
