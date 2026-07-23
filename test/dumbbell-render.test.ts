@@ -352,9 +352,18 @@ describe("dumbbell mark — structure", () => {
     const { svg } = renderChart(spec, rows, { ...opts, document });
     // 3 categories × 2 series = 6 dots (spacer slots carry no dots).
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(6);
-    const headers = Array.from(svg.querySelectorAll("g.tbl-dumbbell-section text")).map((t) => t.textContent);
+    const headerEls = Array.from(svg.querySelectorAll("g.tbl-dumbbell-section text"));
+    const headers = headerEls.map((t) => t.textContent);
     expect(headers).toContain("Quintiles");
     expect(headers).toContain("Top decile");
+    // Regression guard: the "Top decile" header must sit JUST ABOVE its section's first row
+    // (Top 1%), not stranded a full empty slot above it. It should be above the row, and within
+    // ~1.5 row-heights (≈33px) of it — the earlier bug parked it ~2 slots up.
+    const topHeader = headerEls.find((t) => t.textContent === "Top decile")!;
+    const firstRowY = absPos(dot(svg, "Top 1%", "static")).y;
+    const headerY = absPos(topHeader).y;
+    expect(headerY).toBeLessThan(firstRowY); // above the row
+    expect(firstRowY - headerY).toBeLessThan(45); // tight to it, not stranded
   });
 
   it("does not force a zero baseline (dots fit the 2%–35% range)", () => {

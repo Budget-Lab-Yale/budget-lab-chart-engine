@@ -80,6 +80,34 @@ describe("dumbbell hover — plumbing", () => {
     expect(container.querySelectorAll(".figure-pane .tbl-catline-hit").length).toBe(2);
   });
 
+  it("tooltip swatches are dots matching the legend markers (hollow ring / filled / ink)", () => {
+    const rows = ROWS.map((r) => ({ _xc: r.group as string, series: r.measure as string, _y: Number(r.rate) }));
+    const html = buildBandTooltipHtml("Q5", rows, {
+      seriesLabels: SPEC.series_labels,
+      seriesOrder: SPEC.series_order,
+      yFormat: (v) => `${v.toFixed(1)}%`,
+      swatchShape: "dot",
+      swatchMarkers: new Map([
+        ["current_law", "ink"],
+        ["static", "hollow"],
+        ["collected", "filled"],
+      ]),
+      renderedFills: new Map([
+        ["current_law", "#1A1A2E"],
+        ["static", "#E69F00"],
+        ["collected", "#8856BF"],
+      ]),
+    });
+    // Every swatch is a circle (border-radius:50%), never a line/square.
+    expect(html).toContain("border-radius:50%");
+    expect(html).not.toContain("is-square");
+    // Hollow → a ring: white fill + series-color border.
+    expect(html).toMatch(/background:#ffffff;border-radius:50%;border:2px solid #E69F00/);
+    // Ink → filled with the ink token; filled → the series color.
+    expect(html).toContain("background:#1A1A2E;border-radius:50%");
+    expect(html).toContain("background:#8856BF;border-radius:50%");
+  });
+
   it("tooltip HTML lists each series' value for the hovered category", () => {
     const html = buildBandTooltipHtml(
       "Q5",

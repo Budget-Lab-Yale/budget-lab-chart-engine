@@ -803,15 +803,19 @@ export function buildBandTooltipHtml(
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
-    /** Series swatch shape — "rect" (filled square, matching a bar legend) or the default line. */
-    swatchShape?: "line" | "rect";
+    /** Series swatch shape — "rect" (filled square, bar legend), "dot" (circle, dumbbell — honors
+     *  `swatchMarkers` for hollow rings / ink), or the default line. */
+    swatchShape?: "line" | "rect" | "dot";
+    /** Dumbbell only: series → marker style, so the "dot" swatch renders a hollow ring / ink dot to
+     *  match the chart + legend. Absent → all dots filled. */
+    swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
     /** Series → the bar's ACTUAL rendered fill (bar_color / accent / category_colors), preferred
      *  over the series' base `colors` for the swatch so the tooltip marker matches the drawn bar
      *  — the same fill-first rule the 1.3.x value pill uses. Absent → fall back to `colors`. */
     renderedFills?: Map<string, string>;
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, renderedFills } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -833,10 +837,21 @@ export function buildBandTooltipHtml(
     total += v;
     const dot = renderedFills?.get(series) || colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
-    // Swatch matches the chart's legend marker: a filled square for bars (default here is the
-    // small line swatch, used by line charts).
-    const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
-    html += `<div class="tbl-tooltip-row"><span class="${swCls}" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+    // Swatch matches the chart's legend marker: filled square (bars), a circle/ring/ink dot
+    // (dumbbell — honoring the series' marker), else the default line swatch (line charts).
+    let swatch: string;
+    if (swatchShape === "dot") {
+      const marker = swatchMarkers?.get(series) ?? "filled";
+      const style =
+        marker === "hollow"
+          ? `background:#ffffff;border-radius:50%;border:2px solid ${dot}`
+          : `background:${dot};border-radius:50%`;
+      swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
+    } else {
+      const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
+      swatch = `<span class="${swCls}" style="background: ${dot}"></span>`;
+    }
+    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
   // Total row: only for stacked charts with 2+ series, and only when showTotalDot is not
@@ -1643,19 +1658,23 @@ export function attachSecondaryHistogramCursor(
 // but the guide/region still render (browser carries pixel correctness).
 
 /** Read a linear value→pixel mapper from Plot's y-scale, or null if unavailable. */
-function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
+function readLinearScale(svgEl: SVGSVGElement, axis: "x" | "y"): ((v: number) => number) | null {
   const scaleFn = (svgEl as unknown as { scale?: (n: string) => unknown }).scale;
   if (typeof scaleFn !== "function") return null;
   try {
-    const y = scaleFn.call(svgEl, "y") as { domain?: number[]; range?: number[] } | undefined;
-    const d = y?.domain;
-    const r = y?.range;
+    const s = scaleFn.call(svgEl, axis) as { domain?: number[]; range?: number[] } | undefined;
+    const d = s?.domain;
+    const r = s?.range;
     if (!d || !r || d.length < 2 || r.length < 2 || d[1] === d[0]) return null;
     const d0 = d[0]!, d1 = d[1]!, r0 = r[0]!, r1 = r[1]!;
     return (v: number) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
   } catch {
     return null;
   }
+}
+/** The VALUE→pixel scale for the value axis (y for vertical charts). */
+function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
+  return readLinearScale(svgEl, "y");
 }
 
 const COORD_NS = "http://www.w3.org/2000/svg";
@@ -2648,6 +2667,12 @@ export interface CategoricalLineOptions {
   /** "horizontal" puts categories on the Y axis (dumbbell rows): the cursor resolves a category by
    *  its screen-Y, and the band highlight is a full-width horizontal strip. Default "vertical". */
   orientation?: "vertical" | "horizontal";
+  /** Tooltip swatch shape (dumbbell passes "dot"); see buildBandTooltipHtml. */
+  swatchShape?: "line" | "rect" | "dot";
+  /** Dumbbell: series → marker style, so the tooltip dot renders hollow/ink to match the chart. */
+  swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
+  /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend. */
+  renderedFills?: Map<string, string>;
 }
 
 /**
@@ -2758,6 +2783,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
+      ...(opts.swatchShape ? { swatchShape: opts.swatchShape } : {}),
+      ...(opts.swatchMarkers ? { swatchMarkers: opts.swatchMarkers } : {}),
+      ...(opts.renderedFills ? { renderedFills: opts.renderedFills } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
@@ -2843,6 +2871,19 @@ export function attachSecondaryCategoricalLineCursor(
       const idx = centers.findIndex((x) => x.category === category);
       const b = uniformBand(centers, idx, mt, mt + plotH);
       addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      // Active (hovered) pane: a highlight ring + value pill per series, at each dot's value-x on
+      // this category's row (cy). The value axis is x for horizontal, so read the x scale.
+      if (active) {
+        const toPx = readLinearScale(svgEl, "x");
+        const cy = c.cx; // for horizontal, centers' `cx` holds the category's Y position
+        if (toPx) {
+          const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
+          const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
+          for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
+          const pillY = Math.max(mt + 9, b.min + 11); // just inside the top of the row strip
+          for (const p of pts) addCoordPill(g, doc, p.x, pillY, "middle", yFormat(p.v), colorFor(p.s), active ? 700 : 600);
+        }
+      }
       g.setAttribute("opacity", "1");
       return;
     }

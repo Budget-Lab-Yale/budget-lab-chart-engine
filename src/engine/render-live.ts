@@ -938,8 +938,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       });
     } else if (spec.chartType === "dumbbell") {
       // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
-      // lists each series' value). Reuses the categorical crosshair with orientation — horizontal
-      // resolves the band on Y. No bars/dodge; dots sit at the band center.
+      // lists each series' value with a DOT swatch that matches the legend/chart marker — hollow
+      // ring / ink / filled). Reuses the categorical crosshair with orientation.
+      const dbMarkers = new Map(seriesOrder.map((s) => [s, spec.series_marker?.[s] ?? "filled"] as const));
+      const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
       attachCategoricalLineCrosshair(svg, {
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
@@ -949,6 +951,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         bandHighlight: true,
         centersFromMarks: true,
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+        swatchShape: "dot",
+        swatchMarkers: dbMarkers,
+        renderedFills: dbFills,
       });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
@@ -1602,6 +1607,8 @@ function wireFigureSvg(
     const dbUseCoord = ctx.onResolve != null;
     const orientation = ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical";
     const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ctx.spec.series_marker?.[s] ?? "filled"] as const));
+    const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
     const dbOpts = {
       rows: dbRows,
       colors: ctx.colors,
@@ -1611,6 +1618,9 @@ function wireFigureSvg(
       bandHighlight: true,
       centersFromMarks: true,
       orientation: orientation as "vertical" | "horizontal",
+      swatchShape: "dot" as const,
+      swatchMarkers: dbMarkers,
+      renderedFills: dbFills,
     };
     attachCategoricalLineCrosshair(svg, {
       ...dbOpts,

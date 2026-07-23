@@ -78,7 +78,7 @@ export function buildDumbbellMarks(
   // horizontal-bar section layout, but on a plain y band rather than fy facets). ---
   const sectioned = horizontal && data.some((r) => r._section != null);
   let bandDomain: string[] = categories;
-  const sectionHeaders: { anchor: string; label: string; lift: boolean }[] = [];
+  const sectionHeaders: { anchor: string; label: string }[] = [];
   if (sectioned) {
     const sectionOf = new Map<string, string>();
     for (const row of data) {
@@ -97,15 +97,13 @@ export function buildDumbbellMarks(
     for (const s of order) {
       const cats = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
       if (!cats.length) continue;
-      const first = domain.length === 0;
-      if (!first) {
+      // Spacer slots separate non-first sections; every header sits just ABOVE its section's first
+      // row (lifted into that whitespace, or the top margin for the first section) — the horizontal-
+      // bar idiom. Anchoring to the first category, not a spacer, keeps the header tight to its rows.
+      if (domain.length > 0) {
         for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
-        // Non-first: header sits in the reserved spacer band (centered, no lift).
-        sectionHeaders.push({ anchor: sectionSpacerSlot(s, 0), label: labels[s] ?? s, lift: false });
-      } else {
-        // First section: header lifts above the first row into the (reserved) top margin.
-        sectionHeaders.push({ anchor: cats[0] as string, label: labels[s] ?? s, lift: true });
       }
+      sectionHeaders.push({ anchor: cats[0] as string, label: labels[s] ?? s });
       for (const cat of cats) domain.push(cat);
     }
     bandDomain = domain;
@@ -247,9 +245,9 @@ export function buildDumbbellMarks(
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
       : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
-    // Bold section headers: anchored to their band slot (spacer for non-first sections; the first
-    // section's header lifts above its first row into the reserved top margin).
-    const headerLift = catFont + 8;
+    // Bold section headers, lifted just above each section's first row (≈ one band-row height +
+    // the font, so the header clears the row's dots and sits in the reserved spacer whitespace).
+    const headerLift = 22 + catFont;
     const sectionMarks = sectioned && !ctx.hideCategoryLabels
       ? sectionHeaders.map((h) =>
           Plot.text([h], {
@@ -257,7 +255,7 @@ export function buildDumbbellMarks(
             text: () => h.label,
             frameAnchor: "left",
             dx: -gutter,
-            dy: h.lift ? -headerLift : 0,
+            dy: -headerLift,
             textAnchor: "start",
             fill: TBL.color.heading,
             fontSize: catFont,
