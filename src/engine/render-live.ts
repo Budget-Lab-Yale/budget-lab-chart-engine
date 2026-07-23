@@ -1623,9 +1623,12 @@ function wireFigureSvg(
       renderedFills: dbFills,
       markerless: true,
     };
+    // NOT emitOnly: every pane shows its own hover TOOLTIP (dot swatches matching the legend) — the
+    // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
+    // before the emitOnly gate), so hovering one pane drives the coordinated band echo on the others.
     attachCategoricalLineCrosshair(svg, {
       ...dbOpts,
-      ...(dbUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+      ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (dbUseCoord) {
       return attachSecondaryCategoricalLineCursor(svg, dbOpts) as (key: unknown, active?: boolean) => void;

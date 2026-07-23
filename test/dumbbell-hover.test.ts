@@ -98,14 +98,14 @@ describe("dumbbell hover — plumbing", () => {
         ["collected", "#8856BF"],
       ]),
     });
-    // Every swatch is a circle (border-radius:50%), never a line/square.
-    expect(html).toContain("border-radius:50%");
+    // Every swatch is a real circle: explicit width/height + border-radius (not the 18×3 line).
+    expect(html).toContain("width:11px;height:11px;border-radius:50%");
     expect(html).not.toContain("is-square");
     // Hollow → a ring: white fill + series-color border.
-    expect(html).toMatch(/background:#ffffff;border-radius:50%;border:2px solid #E69F00/);
+    expect(html).toContain("background:#ffffff;border:2px solid #E69F00");
     // Ink → filled with the ink token; filled → the series color.
-    expect(html).toContain("background:#1A1A2E;border-radius:50%");
-    expect(html).toContain("background:#8856BF;border-radius:50%");
+    expect(html).toContain("background:#1A1A2E");
+    expect(html).toContain("background:#8856BF");
   });
 
   it("spreadPillCentersX de-collides overlapping coordinated pills (collision avoidance)", () => {

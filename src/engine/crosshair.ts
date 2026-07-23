@@ -842,10 +842,14 @@ export function buildBandTooltipHtml(
     let swatch: string;
     if (swatchShape === "dot") {
       const marker = swatchMarkers?.get(series) ?? "filled";
+      // Explicit circle dimensions — the base .tbl-tooltip-swatch is a thin line (18×3), so without
+      // width/height an inline border-radius just rounds a line. Hollow → ring (page-bg + colored
+      // border); filled/ink → solid dot in `dot` (ink already resolved to the ink token upstream).
+      const base = "display:inline-block;width:11px;height:11px;border-radius:50%;box-sizing:border-box";
       const style =
         marker === "hollow"
-          ? `background:#ffffff;border-radius:50%;border:2px solid ${dot}`
-          : `background:${dot};border-radius:50%`;
+          ? `${base};background:#ffffff;border:2px solid ${dot}`
+          : `${base};background:${dot}`;
       swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
     } else {
       const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
@@ -2896,6 +2900,22 @@ export function attachSecondaryCategoricalLineCursor(
     const vals = valByCat.get(category);
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
     const cx = c.cx;
+    // Dumbbell (markerless): the coordinated cursor is a pure BAND ECHO — shade the hovered
+    // category on the OTHER panes; the source pane shows its own tooltip + highlight via its
+    // primary crosshair, and its value read-out is the tooltip (not pills). No dots, no pills.
+    if (opts.markerless) {
+      if (active) { g.setAttribute("opacity", "0"); return; }
+      const idx = centers.findIndex((x) => x.category === category);
+      if (horizontal) {
+        const b = uniformBand(centers, idx, mt, mt + plotH);
+        addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      } else {
+        const b = uniformBand(centers, idx, ml, W - mr);
+        addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
+      }
+      g.setAttribute("opacity", "1");
+      return;
+    }
     if (horizontal) {
       // Horizontal dumbbell facets: echo the hovered category as a full-width row strip. (The
       // per-series secondary dots/pills are a vertical-only nicety; the row echo is the coordinated
