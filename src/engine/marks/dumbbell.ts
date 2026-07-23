@@ -75,16 +75,14 @@ export function buildDumbbellMarks(
     }
   }
 
-  // --- Sections (horizontal only) — built on the SAME fy-facet topology as horizontal bars, so
-  // the header placement/spacing is Plot-managed (not hand-tuned px). Non-first sections get a
-  // block of spacer slots above them; the first section's header sits in the reserved top margin,
-  // the rest lift above their first row. `sectionHeaders`/`topSectionHeader` feed tblSectionTopHeader
-  // exactly as bar.ts does. ---
-  type SectionHeader = { category: string; label: string };
+  // --- Sections (horizontal only) — fy-facet topology + placement identical to horizontal bars
+  // (tblSectionTopHeader: first header in the top margin, the rest lifted above their first row,
+  // with balanced whitespace). The gap-mask + header halo (below) keep the gridlines from crossing
+  // the headers. ---
   const sectioned = horizontal && data.some((r) => r._section != null);
   let bandDomain: string[] = categories;
-  const sectionHeaders: SectionHeader[] = [];
-  let topSectionHeader: SectionHeader | null = null;
+  const sectionHeaders: { category: string; label: string }[] = [];
+  let topSectionHeader: { category: string; label: string } | null = null;
   if (sectioned) {
     const sectionOf = new Map<string, string>();
     for (const row of data) {
