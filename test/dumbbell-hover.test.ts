@@ -7,7 +7,7 @@
 // with a coordinated grid, and the tooltip HTML the hover shows lists each series' value.
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
-import { buildBandTooltipHtml } from "../src/engine/crosshair";
+import { buildBandTooltipHtml, spreadPillCentersX } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -106,6 +106,21 @@ describe("dumbbell hover — plumbing", () => {
     // Ink → filled with the ink token; filled → the series color.
     expect(html).toContain("background:#1A1A2E;border-radius:50%");
     expect(html).toContain("background:#8856BF;border-radius:50%");
+  });
+
+  it("spreadPillCentersX de-collides overlapping coordinated pills (collision avoidance)", () => {
+    // Two 40px-wide pills whose ideal centers are only 10px apart must be pushed to ≥ their
+    // half-widths + gap (20+20+4 = 44) apart, order preserved, within bounds.
+    const out = spreadPillCentersX([{ x: 100, w: 40 }, { x: 110, w: 40 }], 0, 1000);
+    expect(out[1]! - out[0]!).toBeGreaterThanOrEqual(44 - 0.01);
+    expect(out[0]!).toBeLessThan(out[1]!);
+    // Non-overlapping pills are left essentially where they are.
+    const far = spreadPillCentersX([{ x: 100, w: 30 }, { x: 400, w: 30 }], 0, 1000);
+    expect(far[0]!).toBeCloseTo(100, 0);
+    expect(far[1]!).toBeCloseTo(400, 0);
+    // A pill near the left edge is clamped so its box stays inside [lo, hi].
+    const clamped = spreadPillCentersX([{ x: 2, w: 40 }], 0, 1000);
+    expect(clamped[0]!).toBeGreaterThanOrEqual(20 - 0.01);
   });
 
   it("tooltip HTML lists each series' value for the hovered category", () => {

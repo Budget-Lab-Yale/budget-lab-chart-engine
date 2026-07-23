@@ -1621,6 +1621,7 @@ function wireFigureSvg(
       swatchShape: "dot" as const,
       swatchMarkers: dbMarkers,
       renderedFills: dbFills,
+      markerless: true,
     };
     attachCategoricalLineCrosshair(svg, {
       ...dbOpts,

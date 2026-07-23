@@ -1796,6 +1796,34 @@ export function spreadLabelYs(ys: number[], minGap: number, lo: number, hi: numb
   return out;
 }
 
+/**
+ * PURE — de-collide pill CENTERS along X so adjacent pills (each `w` wide) don't overlap. Pills are
+ * pushed apart to at least half-width-sums + a small gap, preserving input order (sorted by x), then
+ * the run is clamped into [lo, hi]. Returns centers in the INPUT order.
+ */
+export function spreadPillCentersX(items: Array<{ x: number; w: number }>, lo: number, hi: number): number[] {
+  const n = items.length;
+  if (n === 0) return [];
+  if (n === 1) return [Math.max(lo + items[0]!.w / 2, Math.min(items[0]!.x, hi - items[0]!.w / 2))];
+  const GAP = 4;
+  const order = items.map((_, i) => i).sort((a, b) => items[a]!.x - items[b]!.x);
+  const placed = order.map((i) => items[i]!.x);
+  for (let k = 1; k < n; k++) {
+    const prev = order[k - 1]!, cur = order[k]!;
+    const minC = placed[k - 1]! + items[prev]!.w / 2 + items[cur]!.w / 2 + GAP;
+    if (placed[k]! < minC) placed[k] = minC;
+  }
+  // Clamp the run within [lo, hi]: shift left if it overflows the right, then right if it overflows left.
+  const lastHalf = items[order[n - 1]!]!.w / 2;
+  const over = placed[n - 1]! + lastHalf - hi;
+  if (over > 0) for (let k = 0; k < n; k++) placed[k]! -= over;
+  const firstHalf = items[order[0]!]!.w / 2;
+  if (placed[0]! - firstHalf < lo) { const s = lo - (placed[0]! - firstHalf); for (let k = 0; k < n; k++) placed[k]! += s; }
+  const out = new Array<number>(n);
+  order.forEach((origIdx, k) => { out[origIdx] = placed[k]!; });
+  return out;
+}
+
 /** Create the (re-attachable) coordinated-cursor group on an SVG. */
 function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
   svgEl.querySelectorAll(".tbl-coord").forEach((el) => el.remove());
@@ -2673,6 +2701,10 @@ export interface CategoricalLineOptions {
   swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
   /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend. */
   renderedFills?: Map<string, string>;
+  /** Coordinated cursor: skip the white-fill highlight ring over each point. The dumbbell's own
+   *  dots (filled/hollow/ink) are already visible, and a ring would recolor them — so it draws the
+   *  band + value pills only (like bars). Dot plots keep the ring (it sits over dodged points). */
+  markerless?: boolean;
 }
 
 /**
@@ -2871,18 +2903,20 @@ export function attachSecondaryCategoricalLineCursor(
       const idx = centers.findIndex((x) => x.category === category);
       const b = uniformBand(centers, idx, mt, mt + plotH);
       addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
-      // Active (hovered) pane: a highlight ring + value pill per series, at each dot's value-x on
-      // this category's row (cy). The value axis is x for horizontal, so read the x scale.
-      if (active) {
-        const toPx = readLinearScale(svgEl, "x");
-        const cy = c.cx; // for horizontal, centers' `cx` holds the category's Y position
-        if (toPx) {
-          const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
-          const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
-          for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
-          const pillY = Math.max(mt + 9, b.min + 11); // just inside the top of the row strip
-          for (const p of pts) addCoordPill(g, doc, p.x, pillY, "middle", yFormat(p.v), colorFor(p.s), active ? 700 : 600);
-        }
+      // A value pill per series on EVERY pane (matching bars — the whole point of a coordinated
+      // cursor is reading values across panes, not just the hovered one); `active` only bolds them.
+      // Pills sit just above the row at each dot's value-x, de-collided along X so they never
+      // overlap. No highlight ring (the dumbbell's own dots are visible; a ring would recolor them).
+      const toPx = readLinearScale(svgEl, "x");
+      const cy = c.cx; // for horizontal, centers' `cx` holds the category's Y position
+      if (toPx) {
+        const weight = active ? 700 : 600;
+        const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
+        const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
+        if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
+        const centersX = spreadPillCentersX(pts.map((p) => ({ x: p.x, w: coordPillWidth(yFormat(p.v)) })), ml, ml + plotW);
+        const pillY = Math.max(mt + 9, b.min - 2); // just above the row strip
+        pts.forEach((p, i) => addCoordPill(g, doc, centersX[i]!, pillY, "middle", yFormat(p.v), colorFor(p.s), weight));
       }
       g.setAttribute("opacity", "1");
       return;
@@ -2906,7 +2940,8 @@ export function attachSecondaryCategoricalLineCursor(
       const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
       const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, y: toPy(vals.get(s)!), dx: opts.dodge?.get(s) ?? 0 }));
       // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
-      for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
+      // Skipped for the dumbbell (markerless): its own dots are visible; a white ring would recolor them.
+      if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
       if (opts.dodge) {
         // Value pills: side by side around the center line (each on its series' side), both on
         // the SAME vertical side of the dots — above when there's room, else below.

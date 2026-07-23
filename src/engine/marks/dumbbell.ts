@@ -12,6 +12,8 @@ import { TBL } from "../theme";
 import { resolveColor } from "../palette";
 import {
   tblBandYAxis,
+  tblFacetGroupYAxis,
+  tblSectionTopHeader,
   horizontalLeftGutter,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
@@ -32,7 +34,6 @@ const DOT_KEYLINE = "#ffffff"; // thin white keyline on filled/ink dots (matches
 // (the connector is a rule like a gridline; the gap label is text like the axis ticks).
 const CONNECTOR_CLASS = "tbl-dumbbell-connector";
 const GAP_LABEL_CLASS = "tbl-dumbbell-gap";
-const SECTION_HEADER_CLASS = "tbl-dumbbell-section";
 
 type MarkerStyle = "filled" | "hollow" | "ink";
 
@@ -73,12 +74,16 @@ export function buildDumbbellMarks(
     }
   }
 
-  // --- Sections (horizontal only): group categories into labeled blocks along the band, with a
-  // block of empty spacer slots reserving header room before each non-first section (mirrors the
-  // horizontal-bar section layout, but on a plain y band rather than fy facets). ---
+  // --- Sections (horizontal only) — built on the SAME fy-facet topology as horizontal bars, so
+  // the header placement/spacing is Plot-managed (not hand-tuned px). Non-first sections get a
+  // block of spacer slots above them; the first section's header sits in the reserved top margin,
+  // the rest lift above their first row. `sectionHeaders`/`topSectionHeader` feed tblSectionTopHeader
+  // exactly as bar.ts does. ---
+  type SectionHeader = { category: string; label: string };
   const sectioned = horizontal && data.some((r) => r._section != null);
   let bandDomain: string[] = categories;
-  const sectionHeaders: { anchor: string; label: string }[] = [];
+  const sectionHeaders: SectionHeader[] = [];
+  let topSectionHeader: SectionHeader | null = null;
   if (sectioned) {
     const sectionOf = new Map<string, string>();
     for (const row of data) {
@@ -97,13 +102,12 @@ export function buildDumbbellMarks(
     for (const s of order) {
       const cats = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
       if (!cats.length) continue;
-      // Spacer slots separate non-first sections; every header sits just ABOVE its section's first
-      // row (lifted into that whitespace, or the top margin for the first section) — the horizontal-
-      // bar idiom. Anchoring to the first category, not a spacer, keeps the header tight to its rows.
-      if (domain.length > 0) {
+      if (domain.length === 0) {
+        topSectionHeader = { category: cats[0] as string, label: labels[s] ?? s };
+      } else {
         for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
+        sectionHeaders.push({ category: cats[0] as string, label: labels[s] ?? s });
       }
-      sectionHeaders.push({ anchor: cats[0] as string, label: labels[s] ?? s });
       for (const cat of cats) domain.push(cat);
     }
     bandDomain = domain;
@@ -140,19 +144,28 @@ export function buildDumbbellMarks(
   const connWidth = connCfg.width ?? 1.5;
   const connDash =
     connCfg.style === "dashed" ? "5 3" : connCfg.style === "dotted" ? "1 3" : undefined;
+  // Category-axis binding. Sectioned horizontal puts each category (and spacer) on an `fy` facet
+  // row with a single inner-y slot — the bar section topology — so header/spacing is Plot-managed.
+  // Otherwise the category is the plain band (y for horizontal, x for vertical). Sections and
+  // small-multiples panes both want `fy`, so they are mutually exclusive (sectioned → no panes).
+  const SINGLE_SLOT = "_v";
+  const bandBind = (field: string): Record<string, unknown> =>
+    sectioned ? { fy: field, y: () => SINGLE_SLOT } : horizontal ? { y: field } : { x: field };
+  const catChannels = sectioned ? {} : facetChannels;
+
   const connOpts = {
     stroke: connColor,
     strokeWidth: connWidth,
     className: CONNECTOR_CLASS,
     ...(connDash ? { strokeDasharray: connDash } : {}),
-    ...facetChannels,
+    ...catChannels,
   };
 
   const underlay: unknown[] = [];
   if (conn.length) {
     underlay.push(
       horizontal
-        ? Plot.ruleY(conn, { y: "cat", x1: "lo", x2: "hi", ...connOpts })
+        ? Plot.ruleY(conn, { ...bandBind("cat"), x1: "lo", x2: "hi", ...connOpts })
         : Plot.ruleX(conn, { x: "cat", y1: "lo", y2: "hi", ...connOpts }),
     );
   }
@@ -175,12 +188,13 @@ export function buildDumbbellMarks(
       return (catRank.get(ac) ?? 0) - (catRank.get(bc) ?? 0);
     });
   const dotOpts = {
-    ...(horizontal ? { y: catField, x: "_y" } : { x: catField, y: "_y" }),
+    ...bandBind(catField),
+    ...(horizontal ? { x: "_y" } : { y: "_y" }),
     fill: (d: PreparedRow) => fillFor(d.series),
     stroke: (d: PreparedRow) => strokeFor(d.series),
     strokeWidth: (d: PreparedRow) => strokeWidthFor(d.series),
     r,
-    ...facetChannels,
+    ...catChannels,
   };
   const overlay: unknown[] = [Plot.dot(dotData, dotOpts)];
 
@@ -215,11 +229,11 @@ export function buildDumbbellMarks(
           fontSize: TBL.size.annotation - 0.5,
           fontWeight: 600,
           className: GAP_LABEL_CLASS,
-          ...facetChannels,
+          ...catChannels,
         };
         overlay.push(
           horizontal
-            ? Plot.text(gapRows, { ...common, y: "cat", x: "mid", textAnchor: "middle", dy: -(r + 5) })
+            ? Plot.text(gapRows, { ...bandBind("cat"), ...common, x: "mid", textAnchor: "middle", dy: -(r + 5) })
             : Plot.text(gapRows, { ...common, x: "cat", y: "mid", textAnchor: "start", dx: r + 5 }),
         );
       }
@@ -240,30 +254,49 @@ export function buildDumbbellMarks(
   };
 
   if (horizontal) {
-    // Category band on `y`; value on `x` (assemblePlot moves the value domain to x when yScaleOpts
-    // is present). Left gutter sized to the longest category label (shared/suppressed in faceted panes).
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
       : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
-    // Bold section headers, lifted just above each section's first row (≈ one band-row height +
-    // the font, so the header clears the row's dots and sits in the reserved spacer whitespace).
-    const headerLift = 22 + catFont;
-    const sectionMarks = sectioned && !ctx.hideCategoryLabels
-      ? sectionHeaders.map((h) =>
-          Plot.text([h], {
-            y: () => h.anchor,
-            text: () => h.label,
-            frameAnchor: "left",
-            dx: -gutter,
-            dy: -headerLift,
-            textAnchor: "start",
-            fill: TBL.color.heading,
-            fontSize: catFont,
-            fontWeight: 700,
-            className: SECTION_HEADER_CLASS,
-          }),
-        )
-      : [];
+
+    if (sectioned) {
+      // fy-facet topology (identical to horizontal bars): category band on `fy` (incl. spacer
+      // slots), a single inner-y slot for the dots, value on `x`. Headers + labels come from the
+      // shared fy-bound helpers (tblFacetGroupYAxis + tblSectionTopHeader) so spacing is Plot-managed.
+      const SECTION_HEADER_GAP = 10;
+      const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
+      const hMarginTop = Math.max(SECTION_HEADER_GAP + 12, topSectionHeader ? topHeaderLift + SECTION_HEADER_GAP : 0);
+      // With fy faceting Plot emits dots facet-by-facet (category order), series within — so tag in
+      // that order, not the series-major draw order used for the flat band.
+      const tagOrder = categories.flatMap((cat) =>
+        dotData.filter((d) => (d as unknown as Record<string, string>)[catField] === cat),
+      );
+      return {
+        underlay,
+        overlay,
+        tagging: [
+          { selector: 'g[aria-label="dot"] circle', seriesOrder: tagOrder.map((d) => d.series), categoryOrder: tagOrder.map((d) => (d as unknown as Record<string, string>)[catField] ?? "") },
+          ...(ctx.hideCategoryLabels
+            ? []
+            : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
+        ],
+        dashedNames: new Set<string>(),
+        yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
+        fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: 0.02, align: 0, axis: null },
+        xAxisMarks: ctx.hideCategoryLabels
+          ? []
+          : [
+              ...tblFacetGroupYAxis(categories, gutter, catFont),
+              ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
+              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
+            ],
+        marginLeft: gutter,
+        marginTop: hMarginTop,
+        marginBottom: 26,
+        seriesColors,
+      };
+    }
+
+    // Non-sectioned horizontal: plain category band on `y`, value on `x`.
     return {
       underlay,
       overlay,
@@ -275,9 +308,8 @@ export function buildDumbbellMarks(
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: bandDomain, padding: 0.4, axis: null },
-      xAxisMarks: ctx.hideCategoryLabels ? [] : [...tblBandYAxis(categories, gutter, catFont), ...sectionMarks],
+      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
-      ...(sectioned ? { marginTop: headerLift + 12 } : {}),
       seriesColors,
     };
   }

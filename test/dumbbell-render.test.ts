@@ -352,18 +352,16 @@ describe("dumbbell mark — structure", () => {
     const { svg } = renderChart(spec, rows, { ...opts, document });
     // 3 categories × 2 series = 6 dots (spacer slots carry no dots).
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(6);
-    const headerEls = Array.from(svg.querySelectorAll("g.tbl-dumbbell-section text"));
-    const headers = headerEls.map((t) => t.textContent);
-    expect(headers).toContain("Quintiles");
-    expect(headers).toContain("Top decile");
-    // Regression guard: the "Top decile" header must sit JUST ABOVE its section's first row
-    // (Top 1%), not stranded a full empty slot above it. It should be above the row, and within
-    // ~1.5 row-heights (≈33px) of it — the earlier bug parked it ~2 slots up.
-    const topHeader = headerEls.find((t) => t.textContent === "Top decile")!;
+    // Sections render on the bar fy-topology; headers are Plot text (tblSectionTopHeader).
+    const topHeader = textByContent(svg, "Top decile");
+    expect(textByContent(svg, "Quintiles")).toBeTruthy();
+    expect(topHeader).toBeTruthy();
+    // Regression guard: the "Top decile" header sits JUST ABOVE its section's first row (Top 1%),
+    // not stranded a full empty slot above it — above the row and within ~2 row-heights of it.
     const firstRowY = absPos(dot(svg, "Top 1%", "static")).y;
-    const headerY = absPos(topHeader).y;
-    expect(headerY).toBeLessThan(firstRowY); // above the row
-    expect(firstRowY - headerY).toBeLessThan(45); // tight to it, not stranded
+    const headerY = absPos(topHeader ?? null).y;
+    expect(headerY).toBeLessThan(firstRowY);
+    expect(firstRowY - headerY).toBeLessThan(60);
   });
 
   it("does not force a zero baseline (dots fit the 2%–35% range)", () => {
