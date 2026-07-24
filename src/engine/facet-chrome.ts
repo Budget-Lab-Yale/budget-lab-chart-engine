@@ -14,6 +14,8 @@
 // Reusable for B3 (fx+fy small-multiples grids): `collapseFacetChrome` takes the facet
 // geometry (column count now; a `rows` dimension is the documented extension point below).
 
+import { isSectionSpacer, CAT_LABEL_CLASS } from "./axes";
+
 /** ClassName stamped on the light-gridline ruleY mark (assemble-plot / axes). */
 export const GRIDLINE_CLASS = "tbl-gridline";
 /** ClassName stamped on the zero-baseline ruleY mark (assemble-plot). */
@@ -55,6 +57,69 @@ export interface CollapseFacetChromeYOptions {
   marginTop: number;
   /** Bottom margin in px. */
   marginBottom: number;
+  /** The fy band domain (category + section-spacer sentinels), in render order. When present and
+   *  containing spacer slots, the continuous gridlines + baseline are drawn as SEGMENTS that skip
+   *  each section gap — so the value axis visibly stops between sections (long section headers then
+   *  sit in clear space, crossing no line). Absent / no spacers → gridlines span the full height. */
+  fyDomain?: string[];
+}
+
+/** Subtract a set of [top,bottom] gap ranges from a [top,bottom] span, returning the surviving
+ *  sub-segments (in order). PURE. */
+function segmentsMinusGaps(
+  top: number,
+  bottom: number,
+  gaps: Array<[number, number]>,
+): Array<[number, number]> {
+  let segs: Array<[number, number]> = [[top, bottom]];
+  for (const [gt, gb] of gaps) {
+    const next: Array<[number, number]> = [];
+    for (const [st, sb] of segs) {
+      if (gb <= st || gt >= sb) { next.push([st, sb]); continue; } // no overlap
+      if (gt > st) next.push([st, gt]);
+      if (gb < sb) next.push([gb, sb]);
+    }
+    segs = next;
+  }
+  return segs.filter(([a, b]) => b - a > 0.5);
+}
+
+/** Absolute-y of an element, accumulating ancestor translate(y). */
+function absElY(el: Element): number {
+  let y = 0;
+  let n: Element | null = el;
+  while (n && n.tagName.toLowerCase() !== "svg") {
+    const m = /translate\(\s*-?[\d.]+[ ,]+(-?[\d.]+)/.exec(n.getAttribute("transform") ?? "");
+    if (m) y += Number(m[1]);
+    n = n.parentElement;
+  }
+  const own = Number(el.getAttribute("y"));
+  return Number.isFinite(own) ? y + own : y;
+}
+
+/** Absolute-y section-gap ranges — the empty bands between sections. Derived GEOMETRICALLY from the
+ *  category-label y-centers: a section break is a consecutive-label spacing much larger than the
+ *  normal row spacing (the reserved section spacers). Each gap spans the empty band between the two
+ *  rows it separates (excluding the rows themselves). Robust to how Plot lays out the gridlines
+ *  (one group vs per-facet) since it reads the labels, not the gridlines. */
+function sectionGapRanges(svg: SVGSVGElement): Array<[number, number]> {
+  const ys = Array.from(svg.querySelectorAll<SVGTextElement>(`g.${CAT_LABEL_CLASS} text`))
+    .map(absElY)
+    .filter((y) => Number.isFinite(y))
+    .sort((a, b) => a - b);
+  if (ys.length < 2) return [];
+  const spacings: number[] = [];
+  for (let i = 1; i < ys.length; i++) spacings.push(ys[i]! - ys[i - 1]!);
+  // Normal row spacing = the SMALLEST gap between adjacent labels (within-section rows are evenly
+  // spaced; the section gaps are strictly larger). Median would misfire with few rows (it can land
+  // ON the large gap). A section break is any spacing well above that normal row pitch.
+  const normal = Math.min(...spacings);
+  const gaps: Array<[number, number]> = [];
+  for (let i = 1; i < ys.length; i++) {
+    const s = ys[i]! - ys[i - 1]!;
+    if (s > normal * 1.6) gaps.push([ys[i - 1]! + normal / 2, ys[i]! - normal / 2]);
+  }
+  return gaps;
 }
 
 /** A line collapses to a horizontal full-width rule at a fixed y-pixel. We read the
@@ -222,11 +287,20 @@ function stretchLinesToFullHeight(
   group: SVGGElement,
   topLocalY: number,
   bottomLocalY: number,
+  gapsLocal: Array<[number, number]> = [],
 ): void {
-  const lines = group.querySelectorAll<SVGLineElement>("line");
-  for (const line of Array.from(lines)) {
-    line.setAttribute("y1", String(topLocalY));
-    line.setAttribute("y2", String(bottomLocalY));
+  const segs = segmentsMinusGaps(topLocalY, bottomLocalY, gapsLocal);
+  for (const line of Array.from(group.querySelectorAll<SVGLineElement>("line"))) {
+    if (!segs.length) { line.remove(); continue; }
+    line.setAttribute("y1", String(segs[0]![0]));
+    line.setAttribute("y2", String(segs[0]![1]));
+    // Additional surviving segments (a line broken by ≥1 gap): clone the line per extra segment.
+    for (let k = 1; k < segs.length; k++) {
+      const clone = line.cloneNode(true) as SVGLineElement;
+      clone.setAttribute("y1", String(segs[k]![0]));
+      clone.setAttribute("y2", String(segs[k]![1]));
+      line.parentNode?.insertBefore(clone, line.nextSibling);
+    }
   }
 }
 
@@ -247,7 +321,7 @@ function stretchLinesToFullHeight(
  */
 export function collapseFacetChromeY(
   svg: SVGSVGElement,
-  { height, marginTop, marginBottom }: CollapseFacetChromeYOptions,
+  { height, marginTop, marginBottom, fyDomain }: CollapseFacetChromeYOptions,
 ): void {
   const collapseDuplicateGroups = (className: string): SVGGElement[] => {
     const groups = Array.from(svg.querySelectorAll<SVGGElement>(`g.${className}`));
@@ -321,6 +395,11 @@ export function collapseFacetChromeY(
   //         plot height. The top is extended a few px ABOVE the first bar (topAbs) so the scale has
   //         immediate context above the topmost bar; the zero baseline is not extended (it reads as
   //         a spine and shouldn't float above the data).
+  // Section gaps (abs y): only when the fy domain carries section spacers (i.e. a sectioned chart);
+  // the ranges themselves are detected from the category-label spacing. The continuous gridlines/
+  // baseline are then drawn as segments that skip each gap.
+  const isSectioned = !!fyDomain?.some((v) => isSectionSpacer(v));
+  const gaps = isSectioned ? sectionGapRanges(svg) : [];
   const GRIDLINE_TOP_EXTEND = 8;
   for (const cls of [GRIDLINE_CLASS, ZERO_BASELINE_CLASS]) {
     const kept = collapseDuplicateGroups(cls);
@@ -328,7 +407,8 @@ export function collapseFacetChromeY(
     if (!group) continue;
     const ty = readTranslateY(group);
     const top = cls === GRIDLINE_CLASS ? topAbs - GRIDLINE_TOP_EXTEND : topAbs;
-    stretchLinesToFullHeight(group, top - ty, bottomAbs - ty);
+    const gapsLocal = gaps.map(([a, b]) => [a - ty, b - ty] as [number, number]);
+    stretchLinesToFullHeight(group, top - ty, bottomAbs - ty, gapsLocal);
   }
 
   // 4. Value-axis marker rules (annotations.xAxis on horizontal bars): each marker is its own

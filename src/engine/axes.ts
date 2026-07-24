@@ -589,12 +589,6 @@ export function tblSectionTopHeader(
       fill: TBL.color.heading,
       fontSize,
       fontWeight: 700,
-      // Page-background halo so the (light) value gridlines/baseline don't run through the header
-      // text where a long section title extends past the gutter into the plot. paint-order:stroke
-      // draws the halo behind the glyph fill.
-      stroke: "#ffffff",
-      strokeWidth: 5,
-      paintOrder: "stroke",
     }),
   ];
 }

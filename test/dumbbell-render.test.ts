@@ -364,6 +364,43 @@ describe("dumbbell mark — structure", () => {
     expect(firstRowY - headerY).toBeLessThan(60);
   });
 
+  it("horizontal sections: the value gridlines/baseline BREAK across the section gap (no line crosses it)", () => {
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      series_order: ["static", "collected"],
+      columns: { category: "group", series: "measure", value: "rate", section: "band" },
+      section_order: ["Quintiles", "Top decile"],
+    };
+    const rows: TidyRow[] = [
+      { group: "Q1", band: "Quintiles", measure: "static", rate: "2.1" },
+      { group: "Q1", band: "Quintiles", measure: "collected", rate: "2.0" },
+      { group: "Q5", band: "Quintiles", measure: "static", rate: "30.1" },
+      { group: "Q5", band: "Quintiles", measure: "collected", rate: "28.4" },
+      { group: "Top 1%", band: "Top decile", measure: "static", rate: "39.0" },
+      { group: "Top 1%", band: "Top decile", measure: "collected", rate: "35.1" },
+    ] as TidyRow[];
+    const { svg } = renderChart(spec, rows, { ...opts, document });
+    // The gap sits between the last Quintiles row (Q5) and the first Top-decile row (Top 1%).
+    const midGapY = (absPos(dot(svg, "Q5", "static")).y + absPos(dot(svg, "Top 1%", "static")).y) / 2;
+    // Collect every value gridline + baseline <line> segment's absolute y-span.
+    const lineSpans = Array.from(
+      svg.querySelectorAll<SVGLineElement>("g.tbl-gridline line, g.tbl-zero-baseline line"),
+    ).map((l) => {
+      let ty = 0;
+      let n: Element | null = l.parentElement;
+      while (n && n.tagName.toLowerCase() !== "svg") {
+        const m = /translate\(\s*[-\d.]+[ ,]+(-?[\d.]+)/.exec(n.getAttribute("transform") ?? "");
+        if (m) ty += Number(m[1]);
+        n = n.parentElement;
+      }
+      return [ty + Number(l.getAttribute("y1")), ty + Number(l.getAttribute("y2"))].sort((a, b) => a - b) as [number, number];
+    });
+    expect(lineSpans.length).toBeGreaterThan(0);
+    // No gridline/baseline segment may cross the section-gap midpoint — the axis stops in the gap.
+    const crossing = lineSpans.filter(([y1, y2]) => y1 < midGapY && y2 > midGapY);
+    expect(crossing.length).toBe(0);
+  });
+
   it("does not force a zero baseline (dots fit the 2%–35% range)", () => {
     // A dumbbell of positive rates should NOT anchor the value axis at 0. We assert the rendered
     // dot spread uses most of the value axis: the min and max dots are far apart in px, which only

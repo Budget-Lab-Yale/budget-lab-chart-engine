@@ -19,7 +19,6 @@ import {
   CAT_LABEL_CLASS,
   sectionSpacerSlot,
   SECTION_SPACER_SLOTS,
-  isSectionSpacer,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { tokens } from "../../theme/tokens";
@@ -269,14 +268,9 @@ export function buildDumbbellMarks(
       const tagOrder = categories.flatMap((cat) =>
         dotData.filter((d) => (d as unknown as Record<string, string>)[catField] === cat),
       );
-      // "Stop the axis between sections": mask the value gridlines + baseline across each section-gap
-      // (spacer) band with a page-background strip, so a long section header can extend over clear
-      // space instead of crossing the axis lines. Prepended to xAxisMarks so it paints AFTER the
-      // chrome gridlines but BEFORE the section-header text (which then reads over the clear gap).
-      const [vMin, vMax] = ctx.yDomain ?? [0, 1];
-      const gapMask = bandDomain
-        .filter(isSectionSpacer)
-        .map((slot) => Plot.rect([{ slot }], { fy: "slot", x1: vMin, x2: vMax, fill: PAGE_BG, stroke: "none" }));
+      // The section gap is cleared by BREAKING the continuous value gridlines/baseline across it
+      // (assemble-plot's collapseFacetChromeY reads the fy spacer slots) — so no mask is needed and
+      // the header sits in genuinely empty space.
       return {
         underlay,
         overlay,
@@ -290,9 +284,8 @@ export function buildDumbbellMarks(
         yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
         fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: 0.02, align: 0, axis: null },
         xAxisMarks: ctx.hideCategoryLabels
-          ? gapMask
+          ? []
           : [
-              ...gapMask,
               ...tblFacetGroupYAxis(categories, gutter, catFont),
               ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
               ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),

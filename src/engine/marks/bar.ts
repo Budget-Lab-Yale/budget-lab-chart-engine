@@ -30,7 +30,6 @@ import {
   CAT_LABEL_CLASS,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
-import { tokens } from "../../theme/tokens";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -218,16 +217,6 @@ export function buildBarMarks(
   // caller's resolved left-gutter width (shared/figure-supplied or computed). For unsectioned
   // multi-series charts `sectionHeaders` is empty and `topSectionHeader` null, so the header
   // marks contribute nothing — identical to composing the group labels alone.
-  // "Stop the axis between sections": mask the value gridlines + baseline across each section-gap
-  // (spacer) band with a page-background strip, so a bold section header longer than the category
-  // labels can extend over clear space instead of crossing the axis lines. Empty (no-op) when
-  // there are no spacers (unsectioned grouped bars). Prepended to xAxisMarks so it paints AFTER the
-  // chrome gridlines but BEFORE the section-header text.
-  const [vMinB, vMaxB] = ctx.yDomain ?? [0, 1];
-  const gapMask = bandDomain
-    .filter(isSectionSpacer)
-    .map((slot) => Plot.rect([{ slot }], { fy: "slot", x1: vMinB, x2: vMaxB, fill: tokens.structural.background, stroke: "none" }));
-
   const fyCategoryBandLayer = (
     gutter: number,
   ): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom"> => ({
@@ -236,9 +225,8 @@ export function buildBarMarks(
     // fy-bound marks below).
     fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
     xAxisMarks: ctx.hideCategoryLabels
-      ? gapMask
+      ? []
       : [
-          ...gapMask,
           ...tblFacetGroupYAxis(categories, gutter, catFont),
           ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
           ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
