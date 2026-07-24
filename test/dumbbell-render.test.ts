@@ -401,6 +401,40 @@ describe("dumbbell mark — structure", () => {
     expect(crossing.length).toBe(0);
   });
 
+  it("vertical facets, per-pane mode: each pane gets its OWN (non-shared) y scale", () => {
+    const rows: TidyRow[] = [
+      { pane: "Low", group: "Q1", measure: "static", rate: "2" },
+      { pane: "Low", group: "Q1", measure: "collected", rate: "3" },
+      { pane: "Low", group: "Q2", measure: "static", rate: "5" },
+      { pane: "Low", group: "Q2", measure: "collected", rate: "6" },
+      { pane: "High", group: "Top 1%", measure: "static", rate: "40" },
+      { pane: "High", group: "Top 1%", measure: "collected", rate: "44" },
+      { pane: "High", group: "Top 0.1%", measure: "static", rate: "46" },
+      { pane: "High", group: "Top 0.1%", measure: "collected", rate: "48" },
+    ] as TidyRow[];
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      orientation: "vertical",
+      series_order: ["static", "collected"],
+      columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
+      small_multiples: { columns: 2, mode: "per-pane" },
+    };
+    const fig = renderFigure(spec, rows, { width: 900, height: 420, document });
+    expect(fig.panes.length).toBe(2);
+    // Per-pane mode → each pane's value (y) axis is fitted to its OWN data, so the rendered tick
+    // labels differ. Read the numeric y-tick labels from each pane's SVG.
+    const ticks = (svg: SVGSVGElement | undefined): number[] =>
+      Array.from(svg?.querySelectorAll("text") ?? [])
+        .map((t) => Number((t.textContent ?? "").replace("%", "")))
+        .filter((n) => Number.isFinite(n));
+    const low = ticks(fig.panes[0]!.svg);
+    const high = ticks(fig.panes[1]!.svg);
+    // The Low pane's largest tick is far below the High pane's largest — independent scales.
+    expect(Math.max(...low)).toBeLessThan(Math.max(...high) - 20);
+    // And the High pane's floor is well above the Low pane's floor (it doesn't start near 0).
+    expect(Math.min(...high)).toBeGreaterThan(Math.min(...low) + 20);
+  });
+
   it("does not force a zero baseline (dots fit the 2%–35% range)", () => {
     // A dumbbell of positive rates should NOT anchor the value axis at 0. We assert the rendered
     // dot spread uses most of the value axis: the min and max dots are far apart in px, which only
