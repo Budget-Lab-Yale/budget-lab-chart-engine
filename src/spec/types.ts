@@ -162,6 +162,28 @@ export interface SeriesStyle {
   dashed?: boolean;
 }
 
+/** One shaded region between a line and its baseline (LINE charts only). Entries in `shading` are
+ *  independent and paint in list order, so several regions may cover one series with different
+ *  tints — overlapping fills deliberately compound their opacity.
+ *
+ *  The baseline is zero when zero lies inside the resolved y-domain, else the nearer domain edge,
+ *  so a fill never leaves the frame. `side` always keys off ZERO, never off that clamped baseline. */
+export interface ShadeRegion {
+  /** Series to fill under. Omitted → every in-scope series gets its own region, each in its own color. */
+  series?: string;
+  /** Which side of zero to fill. Default "both". */
+  side?: "both" | "positive" | "negative";
+  /** Inclusive x lower bound, in the same string form as `annotations.bands.start`. Omitted → the
+   *  series' first point. A bound falling between two points is interpolated to that exact x. */
+  from?: string;
+  /** Inclusive x upper bound. Omitted → the series' last point. */
+  to?: string;
+  /** Fill color (named palette token or raw "#hex"). Omitted → the series' own resolved color. */
+  color?: ColorRef;
+  /** Fill opacity. Default 0.18, matching confidence bands. */
+  fillOpacity?: number;
+}
+
 /** Where a chart's data comes from. A bare string is sugar for `{ file }`. */
 export type DataSource =
   | string
@@ -373,6 +395,9 @@ export interface ChartSpec {
   shape_legend_title?: string;
 
   confidence_bands?: ConfidenceBand[];
+
+  /** Line charts ONLY: shaded regions between a line and its baseline. See ShadeRegion. */
+  shading?: ShadeRegion[];
 
   /** Line charts: draw a marker (dot) at each data point. Default false. */
   points?: boolean;

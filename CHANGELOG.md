@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
+### Added — line-to-baseline shading
+
+- **New `shading` field (line charts).** A list of independent regions, each filling between a line
+  and its baseline: `{series?, side?, from?, to?, color?, fillOpacity?}`. Omit `series` to shade every
+  in-scope series in its own color. Several regions may cover one series, so a base tint plus a
+  differently-colored projection window is a two-entry spec.
+- **`side: positive | negative`** restricts a fill to one side of zero, splitting the series at its
+  zero crossings and interpolating each crossing so the fill closes flat on the baseline rather than
+  on a slanted edge.
+- **`from`/`to`** restrict a fill to an x range. A bound falling between two data points is
+  interpolated to that exact x, so the edge lands where the spec says instead of at the nearest
+  point. Categorical axes crop on category boundaries (bounds must name existing categories).
+- Baseline is zero when zero is in view, else the nearer domain edge, so a fill never leaves the
+  frame. Shading does not expand the y-domain — use `yAxisPolicy.includeZero` for that.
+- Fills paint behind the gridlines and beneath `confidence_bands`, and dim with their series in the
+  legend.
+- Validation rejects `shading` on a non-line chart, an unknown series, a categorical bound naming a
+  missing category, and a `side` that could never match the data.
+
 ### Fixed — marks escaping a truncated value axis
 
 - **Line marks are now clipped to the plot frame.** A `yAxisPolicy.min`/`max` narrower than the data

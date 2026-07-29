@@ -111,6 +111,11 @@ export interface MarkContext {
    *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
    *  via horizontalLeftGutter (single-chart unchanged). */
   categoryGutter?: number;
+  /** The x-adapter's `parseX` — turns a spec x STRING into the value the x scale uses (number,
+   *  Date, or the category itself), honoring the chart's xAxisType including quarterly. Threaded so
+   *  a builder can resolve author-supplied x bounds (line `shading` from/to) without reaching for
+   *  the adapter itself. Returns null for a value that doesn't parse on this axis. */
+  parseXValue?: (v: string) => number | Date | string | null;
   /** The pane's final computed y-domain (post auto/hard/bar-extent resolution, or the forced
    *  shared-mode override) — the SAME value assemblePlot uses for the value axis. The area
    *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =

@@ -661,6 +661,8 @@ function assemblePaneResult(
     // Final resolved y-domain (post auto/hard/bar-extent/shared-mode override) — the area
     // builder's projected-range veil needs it to span the full plot height.
     yDomain,
+    // Lets a builder resolve author-supplied x strings (line `shading` from/to) on this chart's axis.
+    parseXValue: adapter.parseX,
     ...(clipMarks ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
     // Shared-mode small multiples: pass the facet field names so the mark builder binds

@@ -155,6 +155,21 @@ const CONFIDENCE_BAND = {
   },
 } as const;
 
+// One shaded line-to-baseline region (line charts only). Every field is optional: a bare `{}` means
+// "fill under every series, both sides, full x range, in each series' own color".
+const SHADE_REGION = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    series: { type: "string" },
+    side: { type: "string", enum: ["both", "positive", "negative"] },
+    from: { type: "string" },
+    to: { type: "string" },
+    color: { type: "string" },
+    fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as const;
+
 // data: a bare string (filename) is sugar for { file }; otherwise an object — either a
 // local { file } or a remote { url, format, map? }.
 const DATA_SOURCE = {
@@ -315,6 +330,7 @@ export const CHART_SPEC_SCHEMA = {
     shape_legend_title: { type: "string" },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
+    shading: { type: "array", items: SHADE_REGION },
     points: { type: "boolean" },
     projected_field: { type: "string" },
     projected_style: {
