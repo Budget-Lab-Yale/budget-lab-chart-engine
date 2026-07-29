@@ -11,7 +11,13 @@ import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
-import { computeYAxis, computeBarYExtent, computeWaterfallYExtent, computeDumbbellValueExtent } from "./scales";
+import {
+  computeYAxis,
+  computeBarYExtent,
+  computeWaterfallYExtent,
+  computeDumbbellValueExtent,
+  computeDrawnValueExtent,
+} from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
@@ -634,6 +640,17 @@ function assemblePaneResult(
     : undefined;
   const shapeIsSeries = hasShape && cols.shape === cols.series;
 
+  // Truncated value axis (a hard yAxisPolicy.min/max, or a shared-mode figure domain, narrower than
+  // the data): clip the data marks so they stop at the frame instead of spilling over the title and
+  // legend. Compared against the PAINTED extent rather than the padded axis extent so a chart whose
+  // data fits stays unclipped — and therefore byte-identical, since Plot's `clip` wraps the mark in
+  // an extra <g>. Fires in both directions and either sign, which `yDomain[0] > 0` did not.
+  const drawnExtent = computeDrawnValueExtent(dataInScope, spec, chartType);
+  const domainEps = Math.abs(yDomain[1] - yDomain[0]) * 1e-9;
+  const clipMarks =
+    drawnExtent != null &&
+    (drawnExtent.min < yDomain[0] - domainEps || drawnExtent.max > yDomain[1] + domainEps);
+
   // Chart-type-specific marks, then assemble the Plot.
   const layers = markBuilderFor(spec.chartType)(dataInScope, spec, {
     xField: adapter.xField,
@@ -644,8 +661,7 @@ function assemblePaneResult(
     // Final resolved y-domain (post auto/hard/bar-extent/shared-mode override) — the area
     // builder's projected-range veil needs it to span the full plot height.
     yDomain,
-    // Truncated bar axis (y-domain excludes 0): clip bars so they don't overflow below the plot.
-    ...((chartType === "bar" || chartType === "stacked") && yDomain[0] > 0 ? { clipMarks: true } : {}),
+    ...(clipMarks ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
     // Shared-mode small multiples: pass the facet field names so the mark builder binds
     // fx/fy on its marks (they face into the grid). Absent → single frame.

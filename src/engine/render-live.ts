@@ -227,6 +227,11 @@ function addLineHitPaths(svgEl: SVGSVGElement): void {
     hit.setAttribute("data-series", series);
     hit.setAttribute("d", d);
     hit.setAttribute("fill", "none");
+    // A truncated value axis clips the visible line to the frame, but `d` still carries the
+    // off-frame geometry — an unclipped root-level clone would leave a phantom hit zone over the
+    // title/legend. Plot's frame clip is a userSpaceOnUse rect, so the same reference works here.
+    const clipRef = path.closest("[clip-path]")?.getAttribute("clip-path");
+    if (clipRef) hit.setAttribute("clip-path", clipRef);
     // Invisible but reliably hit-testable: pointer-events:stroke is geometry-based, but a
     // painted-with-zero-opacity stroke is the safest cross-browser choice (some engines treat
     // stroke="transparent" as non-painted). The 14px width gives a ~7px-each-side hit zone.

@@ -88,8 +88,11 @@ export interface MarkContext {
   /** Point charts: true when the shape column IS the series column (redundant color+shape
    *  encoding) — the symbol scale then keys off series identity and the legend is combined. */
   shapeIsSeries?: boolean;
-  /** Bars: clip marks to the plot frame. Set when the y-domain excludes 0 (a truncated/non-zero
-   *  baseline), so bars drawn from 0 don't overflow below the plot into the x-axis labels. */
+  /** Clip the data marks to the plot frame. Set by assemblePaneResult when the resolved value
+   *  domain is narrower than the geometry this chart type paints (see `computeDrawnValueExtent`) —
+   *  a hard `yAxisPolicy.min`/`max`, or a shared figure domain that cuts into the data. Honored by
+   *  bar, stacked, waterfall and line; area / scatter / dotplot / dumbbell do not read it yet, so
+   *  their marks still overflow a truncated axis. Value labels and annotations are never clipped. */
   clipMarks?: boolean;
   /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
    *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */

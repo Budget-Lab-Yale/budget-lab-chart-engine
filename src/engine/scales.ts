@@ -229,6 +229,77 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
   };
 }
 
+/**
+ * Value-axis extent of the geometry a chart type actually PAINTS — no label headroom, no breathing
+ * pad. The `compute*Extent` helpers above answer "how big should the axis be?", so they add padding;
+ * this answers "what will overflow the frame if the axis is narrower than the data?", which must be
+ * padding-free or the clip gate (see assemblePaneResult) would fire on charts whose data fits and only their
+ * headroom doesn't — churning the DOM (Plot's `clip` wraps the mark in an extra <g>) for no visual gain.
+ *
+ * Returns null for chart types whose mark builder does not honor `MarkContext.clipMarks`; wiring a
+ * new type is exactly two steps — a case here plus `...clipOpt` on its marks. Not wired yet:
+ * area, scatter/dotplot, dumbbell. Histogram renders through renderHistogramPane, which has its
+ * own (currently unclipped) path.
+ */
+export function computeDrawnValueExtent(
+  data: PreparedRow[],
+  spec: ChartSpec,
+  chartType: ChartType,
+): { min: number; max: number } | null {
+  const finite = (v: unknown): v is number => Number.isFinite(v as number);
+
+  if (chartType === "line") {
+    // Lines/CI bands paint at the value itself — no zero baseline, no padding.
+    const vals: number[] = [];
+    for (const r of data) {
+      if (finite(r._y)) vals.push(r._y as number);
+      if (finite(r._lo)) vals.push(r._lo as number);
+      if (finite(r._hi)) vals.push(r._hi as number);
+    }
+    if (!vals.length) return null;
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  }
+
+  if (chartType === "bar") {
+    // Every bar spans 0 → value, so zero is always painted.
+    const vals = data.map((r) => r._y).filter(finite);
+    if (!vals.length) return null;
+    return { min: Math.min(0, ...vals), max: Math.max(0, ...vals) };
+  }
+
+  if (chartType === "stacked") {
+    if (spec.barStack?.normalize === true) return { min: 0, max: 100 };
+    // Positives stack up and negatives down from zero, per category — mirrors computeBarYExtent's
+    // stacking, minus its headroom factor.
+    const posSum = new Map<string, number>();
+    const negSum = new Map<string, number>();
+    for (const r of data) {
+      if (!finite(r._y)) continue;
+      const cat = r._xc ?? "";
+      const y = r._y as number;
+      const into = y >= 0 ? posSum : negSum;
+      into.set(cat, (into.get(cat) ?? 0) + y);
+    }
+    if (!posSum.size && !negSum.size) return null;
+    return {
+      min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
+      max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
+    };
+  }
+
+  if (chartType === "waterfall") {
+    // The painted geometry is every bar's base/top along the cumulative path, plus the zero baseline.
+    const vals: number[] = [0];
+    for (const s of computeWaterfallSteps(data)) {
+      if (s.kind === "skip") continue;
+      vals.push(s.base, s.top);
+    }
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  }
+
+  return null;
+}
+
 /** Decimal places for a waterfall's value text: an explicit `valueLabels.decimals` wins; else the
  *  minimum precision the data needs (capped at 2), computed across BOTH the step deltas AND the
  *  running totals so the hover delta and the always-on running-total label always agree. */

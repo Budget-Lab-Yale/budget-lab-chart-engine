@@ -23,6 +23,11 @@ export function buildLineMarks(
   // Lines render at the full weight in panes too (matches single charts) for legibility.
   const solidStroke = TBL.strokeWidth.solid;
   const dashedStroke = TBL.strokeWidth.dashed;
+  // Truncated value axis (see assemblePaneResult's clip gate): clip the data marks to the frame. Geometric,
+  // not a data filter — the stroke runs to its true crossing with the axis edge and is cut there, so
+  // a series that leaves and re-enters the domain resumes at the right x. No-op (and byte-identical)
+  // when the domain covers the data.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
 
   // Underlay: confidence-band areas, painted behind the gridlines.
   const underlay: unknown[] = [];
@@ -33,7 +38,15 @@ export function buildLineMarks(
         data.filter(
           (r) => r.series === band.series && Number.isFinite(r._lo) && Number.isFinite(r._hi),
         ),
-        { x: xField, y1: "_lo", y2: "_hi", fill: bandColor, fillOpacity: 0.18, ...facetChannels },
+        {
+          x: xField,
+          y1: "_lo",
+          y2: "_hi",
+          fill: bandColor,
+          fillOpacity: 0.18,
+          ...facetChannels,
+          ...clipOpt,
+        },
       ),
     );
   }
@@ -59,6 +72,7 @@ export function buildLineMarks(
         strokeDasharray: TBL.dashArray,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
         ...facetChannels,
+        ...clipOpt,
       }),
     );
   }
@@ -98,6 +112,7 @@ export function buildLineMarks(
           ...(projDashed ? { strokeDasharray: TBL.dashArray } : {}),
           defined: (r: PreparedRow) => Number.isFinite(r._y),
           ...facetChannels,
+          ...clipOpt,
         }),
       );
     }
@@ -111,6 +126,7 @@ export function buildLineMarks(
           strokeWidth: solidStroke,
           defined: (r: PreparedRow) => Number.isFinite(r._y),
           ...facetChannels,
+          ...clipOpt,
         }),
       );
     }
@@ -124,6 +140,7 @@ export function buildLineMarks(
         strokeWidth: solidStroke,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
         ...facetChannels,
+        ...clipOpt,
       }),
     );
   }
@@ -148,6 +165,7 @@ export function buildLineMarks(
         stroke: "#ffffff",
         strokeWidth: 1,
         ...facetChannels,
+        ...clipOpt,
       }),
     );
   }

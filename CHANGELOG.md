@@ -4,6 +4,30 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed — marks escaping a truncated value axis
+
+- **Line marks are now clipped to the plot frame.** A `yAxisPolicy.min`/`max` narrower than the data
+  used to let lines, confidence bands and point markers paint outside the frame entirely — a spike
+  rendered over the title and legend and off the top of the SVG, not merely inside the plot box. The
+  clip is geometric, so the stroke runs to its true crossing with the axis edge and stops there;
+  nothing is dropped or clamped, and a series that re-enters the range resumes at the correct x.
+  Pre-clipping the source data as a workaround is no longer needed (and was never right — it either
+  fakes a plateau or reads as missing data, and the chart's CSV download shipped the altered values).
+- **The clip gate now fires in both directions and either sign.** It was `yDomain[0] > 0`, which only
+  caught a raised floor on positive data: a bar taller than a hard `max`, or a bar below a negative
+  `min`, still overflowed. The gate compares the resolved domain against the geometry each chart type
+  actually paints (`computeDrawnValueExtent`), so label headroom alone never triggers it and charts
+  whose data fits stay byte-identical.
+- **Waterfall charts now clip.** `clipMarks` was read by the waterfall builder but never set for
+  `chartType: "waterfall"`, so a truncated waterfall's bars and connectors spilled out of the frame.
+- **Line hover hit-paths inherit the clip.** The invisible fat clone used for click-to-select is
+  inserted at the SVG root and kept the off-frame geometry, leaving a phantom hit zone over the
+  title/legend on a clipped chart.
+
+Area, scatter, dotplot and dumbbell still do not clip — they will overflow a truncated axis.
+
 ## [1.7.0] - 2026-07-22
 
 ### Added — dumbbell
