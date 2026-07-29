@@ -236,11 +236,32 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
  * padding-free or the clip gate (see assemblePaneResult) would fire on charts whose data fits and only their
  * headroom doesn't — churning the DOM (Plot's `clip` wraps the mark in an extra <g>) for no visual gain.
  *
- * Returns null for chart types whose mark builder does not honor `MarkContext.clipMarks`; wiring a
- * new type is exactly two steps — a case here plus `...clipOpt` on its marks. Not wired yet:
- * area, scatter/dotplot. Histogram renders through renderHistogramPane, which has its own
- * (currently unclipped) path.
+ * Every chart type is covered. A new one needs a case here plus `...clipOpt` on its marks, or it
+ * silently stops clipping — returning null is how a type opts out, not a default.
  */
+/** Cumulative stack tops/bottoms per x — positives stack up from zero, negatives down — with zero
+ *  always included because the stack is drawn from it. Shared by stacked bars and areas, which
+ *  differ only in how an x is keyed. */
+function stackedExtent(
+  data: PreparedRow[],
+  keyOf: (r: PreparedRow) => string,
+): { min: number; max: number } | null {
+  const posSum = new Map<string, number>();
+  const negSum = new Map<string, number>();
+  for (const r of data) {
+    if (!Number.isFinite(r._y as number)) continue;
+    const key = keyOf(r);
+    const y = r._y as number;
+    const into = y >= 0 ? posSum : negSum;
+    into.set(key, (into.get(key) ?? 0) + y);
+  }
+  if (!posSum.size && !negSum.size) return null;
+  return {
+    min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
+    max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
+  };
+}
+
 export function computeDrawnValueExtent(
   data: PreparedRow[],
   spec: ChartSpec,
@@ -248,8 +269,9 @@ export function computeDrawnValueExtent(
 ): { min: number; max: number } | null {
   const finite = (v: unknown): v is number => Number.isFinite(v as number);
 
-  if (chartType === "line") {
-    // Lines/CI bands paint at the value itself — no zero baseline, no padding.
+  if (chartType === "line" || chartType === "scatter" || chartType === "dotplot") {
+    // Positions, not magnitudes: no zero baseline, no padding. CI band bounds count as painted
+    // geometry on a line; the point types have no bands, so those fields are simply absent.
     const vals: number[] = [];
     for (const r of data) {
       if (finite(r._y)) vals.push(r._y as number);
@@ -258,6 +280,13 @@ export function computeDrawnValueExtent(
     }
     if (!vals.length) return null;
     return { min: Math.min(...vals), max: Math.max(...vals) };
+  }
+
+  if (chartType === "histogram") {
+    // Bin heights, drawn from zero. `_y` is already the (possibly normalized) height.
+    const vals = data.map((r) => r._y).filter(finite);
+    if (!vals.length) return null;
+    return { min: Math.min(0, ...vals), max: Math.max(0, ...vals) };
   }
 
   if (chartType === "bar") {
@@ -269,22 +298,14 @@ export function computeDrawnValueExtent(
 
   if (chartType === "stacked") {
     if (spec.barStack?.normalize === true) return { min: 0, max: 100 };
-    // Positives stack up and negatives down from zero, per category — mirrors computeBarYExtent's
-    // stacking, minus its headroom factor.
-    const posSum = new Map<string, number>();
-    const negSum = new Map<string, number>();
-    for (const r of data) {
-      if (!finite(r._y)) continue;
-      const cat = r._xc ?? "";
-      const y = r._y as number;
-      const into = y >= 0 ? posSum : negSum;
-      into.set(cat, (into.get(cat) ?? 0) + y);
-    }
-    if (!posSum.size && !negSum.size) return null;
-    return {
-      min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
-      max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
-    };
+    // Stacked bars key on the category band. Mirrors computeBarYExtent's stacking, minus headroom.
+    return stackedExtent(data, (r) => r._xc ?? "");
+  }
+
+  if (chartType === "area") {
+    // Same cumulative-top geometry as a stacked bar, but an area's x may be numeric or temporal, so
+    // key the stack the way renderPane's own area branch does.
+    return stackedExtent(data, (r) => r.time || String(r._xn ?? r._xc ?? ""));
   }
 
   if (chartType === "dumbbell") {

@@ -91,8 +91,9 @@ export interface MarkContext {
   /** Clip the data marks to the plot frame. Set by assemblePaneResult when the resolved value
    *  domain is narrower than the geometry this chart type paints (see `computeDrawnValueExtent`) —
    *  a hard `yAxisPolicy.min`/`max`, or a shared figure domain that cuts into the data. Honored by
-   *  bar, stacked, waterfall, line and dumbbell; area / scatter / dotplot do not read it yet, so
-   *  their marks still overflow a truncated axis. Value labels and annotations are never clipped. */
+   *  EVERY chart type — a builder that ignores it silently stops clipping. Value labels, gap
+   *  annotations and reference markers are deliberately never clipped: a half-cut label reads worse
+   *  than one sitting past the axis. */
   clipMarks?: boolean;
   /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
    *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */

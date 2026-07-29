@@ -41,6 +41,9 @@ export function buildHistogramMarks(data: PreparedRow[], spec: ChartSpec, ctx: M
         fillOpacity: () => FILL_OPACITY,
         stroke: fillFor(s),
         strokeOpacity: 1,
+        // Truncated value axis (see assemblePaneResult's clip gate): bars grow from 0, so a hard
+        // `min` above zero would push them below the frame into the x-axis labels.
+        ...(ctx.clipMarks ? { clip: true as const } : {}),
       }),
     );
   }

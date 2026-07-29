@@ -411,33 +411,37 @@ describe.skipIf(!HAS_BROWSER)("rasterized — faceted clip confines marks to the
     expect(inside).toBeGreaterThan(0);
   }, 60_000);
 
-  it("positive control: an AREA chart is not wired to clipMarks and DOES leak above the frame", async () => {
-    // Guards the detector above: if `above` could never be non-zero, that assertion proves nothing.
-    // Doubles as a live record of the unwired chart types (see MarkContext.clipMarks).
+  it("positive control: an annotation rule is unclipped BY DESIGN and paints outside the frame", async () => {
+    // Guards the two assertions above: if this detector could never see ink outside the frame, a
+    // count of 0 would prove nothing. Annotation reference lines are drawn with `clip: false` and
+    // negative left/right insets so they run edge to edge, which is exactly the outside-the-frame
+    // ink this needs — and unlike the data marks, that is deliberate and will not be "fixed".
     const spec = {
-      chartType: "area",
-      title: "area",
+      chartType: "line",
+      title: "ann",
       xAxisType: "numeric",
       series_order: ["S"],
       columns: { x: "time", value: "value", series: "series" },
-      yAxisPolicy: { min: 0, max: 20 },
+      annotations: { yAxis: [{ y: 10, color: "#FF00FF", style: "solid", strokeWidth: 3 }] },
     } as unknown as ChartSpec;
     const rows = [
-      { time: "2020", series: "S", value: "10" },
-      { time: "2021", series: "S", value: "95" },
-      { time: "2022", series: "S", value: "12" },
+      { time: "2020", series: "S", value: "8" },
+      { time: "2021", series: "S", value: "12" },
     ] as unknown as TidyRow[];
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
-    expect(svg.querySelectorAll("clipPath").length).toBe(0);
-    const frameTop = Number(svg.getAttribute("data-margin-top"));
-    const fills = new Set<string>();
-    for (const p of Array.from(svg.querySelectorAll('g[aria-label="area"] path'))) {
-      const f = p.getAttribute("fill") ?? (p.parentElement as Element | null)?.getAttribute("fill");
-      if (f && f.startsWith("#")) fills.add(f);
-    }
-    expect(fills.size).toBeGreaterThan(0);
+    const frameLeft = Number(svg.getAttribute("data-margin-left") ?? 44);
+    expect(frameLeft).toBeGreaterThan(0);
+
     const png = await raster(svg);
-    const { above } = countInk(png, Array.from(fills).map(hexToRgb), frameTop, 1);
-    expect(above).toBeGreaterThan(0);
+    // The rule is drawn at 0.8 stroke-opacity over white, so match on hue rather than exact RGB.
+    let leftOfFrame = 0;
+    for (let y = 0; y < png.height; y++) {
+      for (let x = 0; x < Math.min(frameLeft - 2, png.width); x++) {
+        const i = (y * png.width + x) * 4;
+        const [r, g, b] = [png.data[i]!, png.data[i + 1]!, png.data[i + 2]!];
+        if (png.data[i + 3]! > 200 && r > 150 && b > 150 && g < 120) leftOfFrame++;
+      }
+    }
+    expect(leftOfFrame).toBeGreaterThan(0);
   }, 60_000);
 });

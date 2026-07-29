@@ -295,6 +295,135 @@ describe("dumbbell marks — a fitted axis makes truncation ordinary", () => {
   });
 });
 
+describe("area / scatter / dotplot / histogram — the remaining types", () => {
+  const spiky = rows([["2020", 10], ["2021", 95], ["2022", 12]]);
+
+  it("area: clips when a stack top exceeds the hard max", () => {
+    const spec = {
+      chartType: "area",
+      title: "t",
+      xAxisType: "numeric",
+      series_order: ["A"],
+      columns: { x: "time", value: "value", series: "series" },
+      yAxisPolicy: { min: 0, max: 20 },
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, spiky, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+  });
+
+  it("area: keys the stack per x, so two series summing past the ceiling clip even when neither does", () => {
+    const spec = {
+      chartType: "area",
+      title: "t",
+      xAxisType: "numeric",
+      series_order: ["A", "B"],
+      columns: { x: "time", value: "value", series: "series" },
+      yAxisPolicy: { min: 0, max: 20 },
+    } as unknown as ChartSpec;
+    // Each series peaks at 12 (inside the 20 ceiling); the stack reaches 24 (outside it).
+    const data = [
+      ...rows([["2020", 12], ["2021", 12]], "A"),
+      ...rows([["2020", 12], ["2021", 12]], "B"),
+    ];
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+  });
+
+  it("area: does NOT clip when the domain covers the stacked total", () => {
+    const spec = {
+      chartType: "area",
+      title: "t",
+      xAxisType: "numeric",
+      series_order: ["A"],
+      columns: { x: "time", value: "value", series: "series" },
+      yAxisPolicy: { min: 0, max: 200 },
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, spiky, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(0);
+  });
+
+  for (const chartType of ["scatter", "dotplot"] as const) {
+    it(`${chartType}: clips an out-of-range point`, () => {
+      const spec = {
+        chartType,
+        title: "t",
+        xAxisType: chartType === "dotplot" ? "categorical" : "numeric",
+        series_order: ["A"],
+        columns: {
+          x: chartType === "dotplot" ? "cat" : "time",
+          value: "value",
+          series: "series",
+        },
+        yAxisPolicy: { min: 0, max: 20 },
+      } as unknown as ChartSpec;
+      const data =
+        chartType === "dotplot"
+          ? ([
+              { cat: "x", value: "10", series: "A" },
+              { cat: "y", value: "95", series: "A" },
+            ] as unknown as TidyRow[])
+          : spiky;
+      const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+      expect(clipCount(svg)).toBe(1);
+    });
+
+    it(`${chartType}: does NOT clip when every point fits`, () => {
+      const spec = {
+        chartType,
+        title: "t",
+        xAxisType: chartType === "dotplot" ? "categorical" : "numeric",
+        series_order: ["A"],
+        columns: {
+          x: chartType === "dotplot" ? "cat" : "time",
+          value: "value",
+          series: "series",
+        },
+        yAxisPolicy: { min: 0, max: 200 },
+      } as unknown as ChartSpec;
+      const data =
+        chartType === "dotplot"
+          ? ([
+              { cat: "x", value: "10", series: "A" },
+              { cat: "y", value: "95", series: "A" },
+            ] as unknown as TidyRow[])
+          : spiky;
+      const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+      expect(clipCount(svg)).toBe(0);
+    });
+  }
+
+  it("histogram: clips when a hard min above zero would push bars below the frame", () => {
+    const spec = {
+      chartType: "histogram",
+      title: "t",
+      xAxisType: "numeric",
+      columns: { x: "amount" },
+      histogram: { bins: 4 },
+      yAxisPolicy: { min: 1, max: 6 },
+    } as unknown as ChartSpec;
+    const data = [1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 5, 5].map((n) => ({
+      amount: String(n),
+    })) as unknown as TidyRow[];
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+  });
+
+  it("histogram: does NOT clip on the default zero-baseline axis", () => {
+    const spec = {
+      chartType: "histogram",
+      title: "t",
+      xAxisType: "numeric",
+      columns: { x: "amount" },
+      histogram: { bins: 4 },
+    } as unknown as ChartSpec;
+    const data = [1, 1, 2, 2, 2, 3, 4, 4, 5].map((n) => ({
+      amount: String(n),
+    })) as unknown as TidyRow[];
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(0);
+  });
+});
+
 describe("computeDrawnValueExtent", () => {
   const prep = (ys: number[]): PreparedRow[] =>
     ys.map((y, i) => ({ series: "A", _y: y, _xc: `c${i}` })) as unknown as PreparedRow[];
@@ -354,9 +483,45 @@ describe("computeDrawnValueExtent", () => {
     });
   });
 
-  it("returns null for the chart types that do not honor clipMarks yet", () => {
-    for (const t of ["area", "scatter", "dotplot", "histogram"] as const) {
-      expect(computeDrawnValueExtent(prep([1, 2]), {} as ChartSpec, t)).toBeNull();
+  it("scatter / dotplot: raw positions, like a line", () => {
+    for (const t of ["scatter", "dotplot"] as const) {
+      expect(computeDrawnValueExtent(prep([12, 30]), {} as ChartSpec, t)).toEqual({
+        min: 12,
+        max: 30,
+      });
+    }
+  });
+
+  it("histogram: bin heights from zero", () => {
+    expect(computeDrawnValueExtent(prep([3, 8]), {} as ChartSpec, "histogram")).toEqual({
+      min: 0,
+      max: 8,
+    });
+  });
+
+  it("area: cumulative stack tops keyed per x, not raw values", () => {
+    const stack = [
+      { series: "A", _y: 10, _xn: 2020, time: "2020" },
+      { series: "B", _y: 15, _xn: 2020, time: "2020" },
+      { series: "A", _y: 4, _xn: 2021, time: "2021" },
+    ] as unknown as PreparedRow[];
+    expect(computeDrawnValueExtent(stack, {} as ChartSpec, "area")).toEqual({ min: 0, max: 25 });
+  });
+
+  it("covers every chart type — none silently opts out of clipping", () => {
+    const ALL = [
+      "line",
+      "area",
+      "bar",
+      "stacked",
+      "scatter",
+      "dotplot",
+      "waterfall",
+      "histogram",
+      "dumbbell",
+    ] as const;
+    for (const t of ALL) {
+      expect(computeDrawnValueExtent(prep([1, 2]), {} as ChartSpec, t), t).not.toBeNull();
     }
   });
 

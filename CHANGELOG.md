@@ -82,7 +82,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   off the canvas (one measured at `cx ≈ 2849` on a 720px chart). Gap annotations stay unclipped, so a
   label is never cut in half.
 
-Area, scatter and dotplot still do not clip — they will overflow a truncated axis.
+Every chart type now clips. Value labels, gap annotations and reference lines stay unclipped by
+design — a half-cut label reads worse than one sitting past the axis.
 
 ### Fixed — bar/stacked
 

@@ -105,12 +105,18 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `yAxisPolicy.tickCount` | integer | Approximate target number of y-ticks. Default 5. |
 | `yAxisPolicy.autoWiden.step` | number | When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
 
-**Truncating the axis below the data.** When `min`/`max` cut into the data, **bar**, **stacked**,
-**waterfall**, **line** and **dumbbell** charts clip their marks to the plot frame: the geometry runs to its true
-crossing with the axis edge and stops there. Nothing is dropped or clamped, so the shape resumes at
-the correct x when a series re-enters the range — do *not* pre-clip the source data (that either
-fakes a plateau or reads as missing data, and the chart's CSV download would ship the altered
-values). **Area, scatter and dotplot do not clip yet** and will overflow a truncated axis.
+**Truncating the axis below the data.** When `min`/`max` cut into the data, **every chart type**
+clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
+stops there. Nothing is dropped or clamped, so the shape resumes at the correct x when a series
+re-enters the range — do *not* pre-clip the source data (that either fakes a plateau or reads as
+missing data, and the chart's CSV download would ship the altered values). Value labels, gap
+annotations and reference lines are deliberately **not** clipped: a half-cut label reads worse than
+one sitting past the axis.
+
+Note that `min`/`max` are **nice'd outward** to land on clean tick boundaries, so the rendered
+ceiling can sit above the number you wrote (`max: 15` with 5 ticks renders a 20 ceiling) — clipping
+only engages once the *nice'd* domain still cuts the data.
+
 A line leaving the frame is honest but easy to misread as the end of the series, so pair a truncated
 axis with a note or an `annotations.yAxis` marker at the ceiling.
 
