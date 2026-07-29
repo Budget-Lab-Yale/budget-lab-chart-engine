@@ -7,7 +7,7 @@
 // with a coordinated grid, and the tooltip HTML the hover shows lists each series' value.
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
-import { buildBandTooltipHtml, spreadPillCentersX } from "../src/engine/crosshair";
+import { buildBandTooltipHtml, spreadPillCentersX, uniformBand } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -138,5 +138,71 @@ describe("dumbbell hover — plumbing", () => {
     expect(html).toContain("28.4%");
     expect(html).toContain("34.9%");
     expect(html).toContain("32.6%");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// uniformBand — the hover strip's extent along the category axis.
+//
+// Sizing it from the GLOBAL average spacing, (last - first) / (n - 1), is only correct when the
+// centers are evenly spaced. A sectioned horizontal dumbbell inserts spacer slots between sections,
+// which inflates that average: on the 8-category / 3-section demo the real row pitch is 38px but the
+// section gaps are 114px, so the average came out 59.71 and every band rendered 1.57x too tall,
+// bleeding into the rows above and below. The true pitch is the SMALLEST adjacent gap — rows are
+// evenly pitched within a section, and only spacers are wider.
+// ---------------------------------------------------------------------------
+
+describe("uniformBand — band extent along a category axis", () => {
+  const at = (...cx: number[]) => cx.map((v, i) => ({ category: `c${i}`, cx: v }));
+  const height = (b: { min: number; max: number }) => +(b.max - b.min).toFixed(4);
+
+  it("uses the center pitch on evenly spaced categories", () => {
+    const centers = at(50, 100, 150, 200);
+    const b = uniformBand(centers, 1, 0, 400);
+    expect(height(b)).toBe(50);
+    expect(b.min).toBe(75);
+    expect(b.max).toBe(125);
+  });
+
+  it("uses the ROW pitch, not the inflated average, when section spacers widen some gaps", () => {
+    // The real geometry measured off the sectioned demo: 38px rows, 114px section gaps.
+    const centers = at(38, 76, 114, 228, 266, 304, 418, 456);
+    const clothing = uniformBand(centers, 4, 18, 480);
+    expect(height(clothing)).toBe(38);
+    expect(clothing.min).toBe(266 - 19);
+    expect(clothing.max).toBe(266 + 19);
+  });
+
+  it("gives every category the same band height across sections", () => {
+    const centers = at(38, 76, 114, 228, 266, 304, 418, 456);
+    const heights = centers.map((_, i) => height(uniformBand(centers, i, 18, 480)));
+    expect(new Set(heights).size).toBe(1);
+    expect(heights[0]).toBe(38);
+  });
+
+  it("never spans into a neighbouring row", () => {
+    const centers = at(38, 76, 114, 228, 266, 304, 418, 456);
+    for (let i = 1; i < centers.length; i++) {
+      const prev = uniformBand(centers, i - 1, 18, 480);
+      const cur = uniformBand(centers, i, 18, 480);
+      expect(prev.max).toBeLessThanOrEqual(cur.min + 0.0001);
+    }
+  });
+
+  it("still clamps to the plot bounds, keeping the height", () => {
+    const centers = at(38, 76, 114);
+    const first = uniformBand(centers, 0, 30, 480);
+    expect(first.min).toBe(30);
+    expect(height(first)).toBe(38);
+  });
+
+  it("returns the full range for a single category", () => {
+    expect(uniformBand(at(100), 0, 10, 200)).toEqual({ min: 10, max: 200 });
+  });
+
+  it("does not collapse to a zero-height band when two categories coincide", () => {
+    // A duplicate center would make the smallest gap 0; fall back rather than emit nothing.
+    const centers = at(50, 50, 150);
+    expect(height(uniformBand(centers, 2, 0, 300))).toBeGreaterThan(0);
   });
 });

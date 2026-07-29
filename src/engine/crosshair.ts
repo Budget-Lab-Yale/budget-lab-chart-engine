@@ -2642,12 +2642,11 @@ function readCategoryCentersFromMarks(
   })).sort((a, b) => a.cx - b.cx);
 }
 
-/** A uniform-width hover band for category `idx`: width = the center-to-center spacing (so every
- *  category band is the SAME size), centered on the category, shifted inward to stay within
- *  [lo, hi]. Only one band shows at a time, so the inward shift overlapping a neighbour is never
- *  visible. Fixes the point-scale outer-padding asymmetry that made edge bands narrower than the
- *  interior ones. */
-function uniformBand(
+/** A uniform-width hover band for category `idx`: width = one ROW PITCH (so every category band is
+ *  the SAME size), centered on the category, shifted inward to stay within [lo, hi]. Only one band
+ *  shows at a time, so the inward shift overlapping a neighbour is never visible. Fixes the
+ *  point-scale outer-padding asymmetry that made edge bands narrower than the interior ones. */
+export function uniformBand(
   centers: Array<{ category: string; cx: number }>,
   idx: number,
   lo: number,
@@ -2655,7 +2654,19 @@ function uniformBand(
 ): { min: number; max: number } {
   const n = centers.length;
   if (n < 2) return { min: lo, max: hi };
-  const step = (centers[n - 1]!.cx - centers[0]!.cx) / (n - 1);
+  // The band is one ROW PITCH tall, taken as the smallest gap between adjacent centers. The pitch is
+  // NOT the global average `(last - first) / (n - 1)`: a sectioned axis inserts spacer slots between
+  // sections, and averaging over them inflated every band (38px rows, 114px section gaps → a 59.7px
+  // band that bled into the neighbouring rows). Rows are evenly pitched WITHIN a section and only
+  // spacers are wider, so the minimum gap is the true pitch — and on an unsectioned axis every gap
+  // is equal, so this is exactly the old value. Coincident centers give a 0 gap and are skipped;
+  // if that leaves nothing, fall back to the span so the band is still visible.
+  let step = Infinity;
+  for (let i = 1; i < n; i++) {
+    const gap = centers[i]!.cx - centers[i - 1]!.cx;
+    if (gap > 0 && gap < step) step = gap;
+  }
+  if (!Number.isFinite(step)) step = (centers[n - 1]!.cx - centers[0]!.cx) / (n - 1) || hi - lo;
   let min = centers[idx]!.cx - step / 2;
   let max = centers[idx]!.cx + step / 2;
   if (min < lo) { max += lo - min; min = lo; }
