@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 // Determinism self-check for the visual snapshot harness.
 //
-// Renders the example chart twice via headless Chromium and confirms the two
+// Renders a fixture chart twice via headless Chromium and confirms the two
 // PNG buffers are pixel-identical (diffPixels === 0).  No committed baseline
 // is required — this only proves the render is stable on this machine.
+//
+// It is also the only check that exercises the BUILT dist/ end to end: the vitest
+// suite imports from src/, so it would pass even if the build emitted a broken
+// bundle — and dist/ is what consumers get, since they install by git tag and
+// rebuild via `prepare`. CI runs browser-free, so this stays a local gate.
 //
 // Run AFTER `npm run build`:
 //   npm run build && npm run snapshot:selftest
@@ -34,22 +39,9 @@ for (const p of [liveBundlePath, renderPngPath, comparePath, cliIndexPath]) {
 
 const { renderChartPng } = await import(pathToFileURL(renderPngPath).href);
 const { comparePng } = await import(pathToFileURL(comparePath).href);
-// runSnapshot builds the HTML from spec+data internally, so we use it to get
-// the HTML rather than duplicating all the spec/data/embed wiring here.
-// But runSnapshot returns {exitCode, message}, not the HTML or PNG buffer.
-// So we import the lower-level helpers via the CLI module's re-exported pieces.
-// Actually the cleanest path: import runSnapshot with update:false using a
-// temp baseline path, but we want the raw PNG buffers for comparison.
-// Instead: build the HTML directly using the snapshot path modules.
 
-// The spec/data/embed helpers were bundled into dist/cli/index.js as non-exports.
-// We added dist/snapshot/*.js but the HTML-building functions are not in there.
-// Use a small inline helper that mirrors what the CLI does, importing from the
-// dist Node-library entries that ARE separate: dist/spec/index.js, dist/data/index.js.
-// For buildStandaloneHtml + CHART_CSS, these were NOT emitted as separate files by
-// the original build — they're inlined into dist/cli/index.js.
-// Solution: add them as build entries (done in build.mjs above with the snapshot entries).
-// Let's check if they exist; if not, guide the user.
+// The HTML is assembled here rather than via the CLI's `runSnapshot`, which returns
+// {exitCode, message} — this check needs the raw PNG buffers to compare.
 
 const bundleStandalonePath = resolve(repoRoot, "dist", "embed", "bundle-standalone.js");
 const stylesPath = resolve(repoRoot, "dist", "embed", "styles.js");
@@ -73,9 +65,15 @@ const dataIndexPath = resolve(repoRoot, "dist", "data", "index.js");
 const { validateSpec, validateChart } = await import(pathToFileURL(specIndexPath).href);
 const { loadData } = await import(pathToFileURL(dataIndexPath).href);
 
-// ── 4. Build chart HTML for the example spec ─────────────────────────────────
+// ── 4. Build chart HTML for the fixture spec ──────────────────────────────────
 
-const exampleSpecPath = resolve(repoRoot, "examples", "augmented-occupations", "chart.yaml");
+// The engine ships no bundled example data (examples/ was removed in a32714a), so this renders the
+// same in-repo fixture the CLI and serve tests were repointed onto by that commit.
+const exampleSpecPath = resolve(repoRoot, "test", "fixtures", "sample-chart", "chart.yaml");
+if (!existsSync(exampleSpecPath)) {
+  console.error(`FAIL: ${exampleSpecPath} not found.\nThe selftest needs an in-repo spec to render.`);
+  process.exit(1);
+}
 const specDir = dirname(exampleSpecPath);
 
 const specText = await readFile(exampleSpecPath, "utf8");
