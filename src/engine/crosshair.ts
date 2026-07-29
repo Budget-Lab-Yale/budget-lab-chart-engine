@@ -803,15 +803,19 @@ export function buildBandTooltipHtml(
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
-    /** Series swatch shape — "rect" (filled square, matching a bar legend) or the default line. */
-    swatchShape?: "line" | "rect";
+    /** Series swatch shape — "rect" (filled square, bar legend), "dot" (circle, dumbbell — honors
+     *  `swatchMarkers` for hollow rings / ink), or the default line. */
+    swatchShape?: "line" | "rect" | "dot";
+    /** Dumbbell only: series → marker style, so the "dot" swatch renders a hollow ring / ink dot to
+     *  match the chart + legend. Absent → all dots filled. */
+    swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
     /** Series → the bar's ACTUAL rendered fill (bar_color / accent / category_colors), preferred
      *  over the series' base `colors` for the swatch so the tooltip marker matches the drawn bar
      *  — the same fill-first rule the 1.3.x value pill uses. Absent → fall back to `colors`. */
     renderedFills?: Map<string, string>;
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, renderedFills } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -833,10 +837,25 @@ export function buildBandTooltipHtml(
     total += v;
     const dot = renderedFills?.get(series) || colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
-    // Swatch matches the chart's legend marker: a filled square for bars (default here is the
-    // small line swatch, used by line charts).
-    const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
-    html += `<div class="tbl-tooltip-row"><span class="${swCls}" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+    // Swatch matches the chart's legend marker: filled square (bars), a circle/ring/ink dot
+    // (dumbbell — honoring the series' marker), else the default line swatch (line charts).
+    let swatch: string;
+    if (swatchShape === "dot") {
+      const marker = swatchMarkers?.get(series) ?? "filled";
+      // Explicit circle dimensions — the base .tbl-tooltip-swatch is a thin line (18×3), so without
+      // width/height an inline border-radius just rounds a line. Hollow → ring (page-bg + colored
+      // border); filled/ink → solid dot in `dot` (ink already resolved to the ink token upstream).
+      const base = "display:inline-block;width:11px;height:11px;border-radius:50%;box-sizing:border-box";
+      const style =
+        marker === "hollow"
+          ? `${base};background:#ffffff;border:2px solid ${dot}`
+          : `${base};background:${dot}`;
+      swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
+    } else {
+      const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
+      swatch = `<span class="${swCls}" style="background: ${dot}"></span>`;
+    }
+    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
   // Total row: only for stacked charts with 2+ series, and only when showTotalDot is not
@@ -1643,19 +1662,23 @@ export function attachSecondaryHistogramCursor(
 // but the guide/region still render (browser carries pixel correctness).
 
 /** Read a linear value→pixel mapper from Plot's y-scale, or null if unavailable. */
-function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
+function readLinearScale(svgEl: SVGSVGElement, axis: "x" | "y"): ((v: number) => number) | null {
   const scaleFn = (svgEl as unknown as { scale?: (n: string) => unknown }).scale;
   if (typeof scaleFn !== "function") return null;
   try {
-    const y = scaleFn.call(svgEl, "y") as { domain?: number[]; range?: number[] } | undefined;
-    const d = y?.domain;
-    const r = y?.range;
+    const s = scaleFn.call(svgEl, axis) as { domain?: number[]; range?: number[] } | undefined;
+    const d = s?.domain;
+    const r = s?.range;
     if (!d || !r || d.length < 2 || r.length < 2 || d[1] === d[0]) return null;
     const d0 = d[0]!, d1 = d[1]!, r0 = r[0]!, r1 = r[1]!;
     return (v: number) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
   } catch {
     return null;
   }
+}
+/** The VALUE→pixel scale for the value axis (y for vertical charts). */
+function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
+  return readLinearScale(svgEl, "y");
 }
 
 const COORD_NS = "http://www.w3.org/2000/svg";
@@ -1772,6 +1795,34 @@ export function spreadLabelYs(ys: number[], minGap: number, lo: number, hi: numb
   const overflow = placed[n - 1]! - hi;
   if (overflow > 0) for (let i = 0; i < n; i++) placed[i]! -= overflow;
   if (placed[0]! < lo) { const s = lo - placed[0]!; for (let i = 0; i < n; i++) placed[i]! += s; }
+  const out = new Array<number>(n);
+  order.forEach((origIdx, k) => { out[origIdx] = placed[k]!; });
+  return out;
+}
+
+/**
+ * PURE — de-collide pill CENTERS along X so adjacent pills (each `w` wide) don't overlap. Pills are
+ * pushed apart to at least half-width-sums + a small gap, preserving input order (sorted by x), then
+ * the run is clamped into [lo, hi]. Returns centers in the INPUT order.
+ */
+export function spreadPillCentersX(items: Array<{ x: number; w: number }>, lo: number, hi: number): number[] {
+  const n = items.length;
+  if (n === 0) return [];
+  if (n === 1) return [Math.max(lo + items[0]!.w / 2, Math.min(items[0]!.x, hi - items[0]!.w / 2))];
+  const GAP = 4;
+  const order = items.map((_, i) => i).sort((a, b) => items[a]!.x - items[b]!.x);
+  const placed = order.map((i) => items[i]!.x);
+  for (let k = 1; k < n; k++) {
+    const prev = order[k - 1]!, cur = order[k]!;
+    const minC = placed[k - 1]! + items[prev]!.w / 2 + items[cur]!.w / 2 + GAP;
+    if (placed[k]! < minC) placed[k] = minC;
+  }
+  // Clamp the run within [lo, hi]: shift left if it overflows the right, then right if it overflows left.
+  const lastHalf = items[order[n - 1]!]!.w / 2;
+  const over = placed[n - 1]! + lastHalf - hi;
+  if (over > 0) for (let k = 0; k < n; k++) placed[k]! -= over;
+  const firstHalf = items[order[0]!]!.w / 2;
+  if (placed[0]! - firstHalf < lo) { const s = lo - (placed[0]! - firstHalf); for (let k = 0; k < n; k++) placed[k]! += s; }
   const out = new Array<number>(n);
   order.forEach((origIdx, k) => { out[origIdx] = placed[k]!; });
   return out;
@@ -2560,33 +2611,42 @@ function readCategoryCentersFromAxis(svgEl: SVGSVGElement, plotBottom: number): 
  *  each category, the mean marker x in SVG user coords. Robust to rotated x-axis labels (whose
  *  bounding-box centers are offset and uneven) and to the dodge (symmetric offsets average back
  *  to the band center). Dot plots use this instead of the axis-label centers. */
-function readCategoryCentersFromMarks(svgEl: SVGSVGElement): Array<{ category: string; cx: number }> {
+// `cx` is the center along the CATEGORY axis: the screen-x for vertical charts (categories on x),
+// the screen-y for horizontal charts (categories on y). `axis` selects which. Reads the data
+// markers' bounding boxes (browser-only geometry — jsdom returns 0, so this is exercised live).
+function readCategoryCentersFromMarks(
+  svgEl: SVGSVGElement,
+  axis: "x" | "y" = "x",
+): Array<{ category: string; cx: number }> {
   const svgRect = svgEl.getBoundingClientRect();
   if (!svgRect.width) return [];
   const vb = svgEl.viewBox?.baseVal;
   const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
-  const sx = Wd / svgRect.width;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const scale = axis === "y" ? Hd / svgRect.height : Wd / svgRect.width;
   const byCat = new Map<string, number[]>();
   for (const el of Array.from(svgEl.querySelectorAll<SVGElement>("[data-category]"))) {
     const cat = el.getAttribute("data-category");
     if (!cat) continue;
     const r = el.getBoundingClientRect();
-    if (!r.width) continue;
-    const cx = ((r.left + r.right) / 2 - svgRect.left) * sx;
-    (byCat.get(cat) ?? byCat.set(cat, []).get(cat)!).push(cx);
+    if (!r.width && !r.height) continue;
+    const c =
+      axis === "y"
+        ? ((r.top + r.bottom) / 2 - svgRect.top) * scale
+        : ((r.left + r.right) / 2 - svgRect.left) * scale;
+    (byCat.get(cat) ?? byCat.set(cat, []).get(cat)!).push(c);
   }
-  return Array.from(byCat, ([category, xs]) => ({
+  return Array.from(byCat, ([category, cs]) => ({
     category,
-    cx: xs.reduce((a, b) => a + b, 0) / xs.length,
+    cx: cs.reduce((a, b) => a + b, 0) / cs.length,
   })).sort((a, b) => a.cx - b.cx);
 }
 
-/** A uniform-width hover band for category `idx`: width = the center-to-center spacing (so every
- *  category band is the SAME size), centered on the category, shifted inward to stay within
- *  [lo, hi]. Only one band shows at a time, so the inward shift overlapping a neighbour is never
- *  visible. Fixes the point-scale outer-padding asymmetry that made edge bands narrower than the
- *  interior ones. */
-function uniformBand(
+/** A uniform-width hover band for category `idx`: width = one ROW PITCH (so every category band is
+ *  the SAME size), centered on the category, shifted inward to stay within [lo, hi]. Only one band
+ *  shows at a time, so the inward shift overlapping a neighbour is never visible. Fixes the
+ *  point-scale outer-padding asymmetry that made edge bands narrower than the interior ones. */
+export function uniformBand(
   centers: Array<{ category: string; cx: number }>,
   idx: number,
   lo: number,
@@ -2594,7 +2654,19 @@ function uniformBand(
 ): { min: number; max: number } {
   const n = centers.length;
   if (n < 2) return { min: lo, max: hi };
-  const step = (centers[n - 1]!.cx - centers[0]!.cx) / (n - 1);
+  // The band is one ROW PITCH tall, taken as the smallest gap between adjacent centers. The pitch is
+  // NOT the global average `(last - first) / (n - 1)`: a sectioned axis inserts spacer slots between
+  // sections, and averaging over them inflated every band (38px rows, 114px section gaps → a 59.7px
+  // band that bled into the neighbouring rows). Rows are evenly pitched WITHIN a section and only
+  // spacers are wider, so the minimum gap is the true pitch — and on an unsectioned axis every gap
+  // is equal, so this is exactly the old value. Coincident centers give a 0 gap and are skipped;
+  // if that leaves nothing, fall back to the span so the band is still visible.
+  let step = Infinity;
+  for (let i = 1; i < n; i++) {
+    const gap = centers[i]!.cx - centers[i - 1]!.cx;
+    if (gap > 0 && gap < step) step = gap;
+  }
+  if (!Number.isFinite(step)) step = (centers[n - 1]!.cx - centers[0]!.cx) / (n - 1) || hi - lo;
   let min = centers[idx]!.cx - step / 2;
   let max = centers[idx]!.cx + step / 2;
   if (min < lo) { max += lo - min; min = lo; }
@@ -2635,6 +2707,19 @@ export interface CategoricalLineOptions {
   /** Dot plots: derive category centers from the data markers (data-category) rather than the
    *  x-axis labels — robust to rotated labels (whose bbox centers are offset / uneven). */
   centersFromMarks?: boolean;
+  /** "horizontal" puts categories on the Y axis (dumbbell rows): the cursor resolves a category by
+   *  its screen-Y, and the band highlight is a full-width horizontal strip. Default "vertical". */
+  orientation?: "vertical" | "horizontal";
+  /** Tooltip swatch shape (dumbbell passes "dot"); see buildBandTooltipHtml. */
+  swatchShape?: "line" | "rect" | "dot";
+  /** Dumbbell: series → marker style, so the tooltip dot renders hollow/ink to match the chart. */
+  swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
+  /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend. */
+  renderedFills?: Map<string, string>;
+  /** Coordinated cursor: skip the white-fill highlight ring over each point. The dumbbell's own
+   *  dots (filled/hollow/ink) are already visible, and a ring would recolor them — so it draws the
+   *  band + value pills only (like bars). Dot plots keep the ring (it sits over dodged points). */
+  markerless?: boolean;
 }
 
 /**
@@ -2657,17 +2742,26 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
   const plotBottom = mt + (H - mt - mb);
   const bandHighlight = opts.bandHighlight ?? false;
+  const horizontal = opts.orientation === "horizontal";
+  const plotRight = W - mr;
 
   const NS = "http://www.w3.org/2000/svg";
   svgEl.querySelectorAll(".tbl-catline-hit, .tbl-catline-guide, .tbl-catline-hl").forEach((el) => el.remove());
 
-  // Dot plots shade the hovered category band (bar-style); line charts draw a dashed guide.
+  // Band highlight: a strip over the hovered category. Vertical charts fix the y-extent (full plot
+  // height) and vary x/width per category; horizontal charts fix the x-extent (full plot width) and
+  // vary y/height. Line charts (no bandHighlight) draw a dashed guide instead.
   const hl = emitOnly || !bandHighlight ? null : svgEl.ownerDocument.createElementNS(NS, "rect");
   if (hl) {
     hl.classList.add("tbl-catline-hl");
     hl.setAttribute("fill", TBL.color.annotationDim);
-    hl.setAttribute("y", String(mt));
-    hl.setAttribute("height", String(plotBottom - mt));
+    if (horizontal) {
+      hl.setAttribute("x", String(ml));
+      hl.setAttribute("width", String(Math.max(0, plotRight - ml)));
+    } else {
+      hl.setAttribute("y", String(mt));
+      hl.setAttribute("height", String(plotBottom - mt));
+    }
     hl.setAttribute("opacity", "0");
     hl.style.pointerEvents = "none";
     svgEl.appendChild(hl);
@@ -2699,21 +2793,32 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   function update(evt: PointerEvent): void {
     const rect = svgEl.getBoundingClientRect();
     if (!rect.width) return;
-    if (!centers) centers = opts.centersFromMarks ? readCategoryCentersFromMarks(svgEl) : readCategoryCentersFromAxis(svgEl, plotBottom);
+    if (!centers)
+      centers = opts.centersFromMarks
+        ? readCategoryCentersFromMarks(svgEl, horizontal ? "y" : "x")
+        : readCategoryCentersFromAxis(svgEl, plotBottom);
     if (!centers.length) return;
-    const svgX = (evt.clientX - rect.left) * (W / rect.width);
-    const category = nearestCategory(centers, svgX);
+    // Resolve the category by the cursor's position ALONG the category axis (y for horizontal).
+    const svgCoord = horizontal
+      ? (evt.clientY - rect.top) * (H / rect.height)
+      : (evt.clientX - rect.left) * (W / rect.width);
+    const category = nearestCategory(centers, svgCoord);
     if (!category) { hide(); return; }
     opts.onResolve?.(category);
     if (emitOnly) return;
     const idx = centers.findIndex((c) => c.category === category);
     const cx = centers[idx]!.cx;
     if (bandHighlight && hl) {
-      // Shade the category's band — a uniform width (the center spacing) so every category band
-      // is the same size, shifted to stay within the plot.
-      const b = uniformBand(centers, idx, ml, W - mr);
-      hl.setAttribute("x", String(b.min));
-      hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
+      // Shade the category's band — a uniform extent (the center spacing) so every band is the
+      // same size. Horizontal: vary y/height within the plot; vertical: vary x/width.
+      const b = horizontal ? uniformBand(centers, idx, mt, plotBottom) : uniformBand(centers, idx, ml, plotRight);
+      if (horizontal) {
+        hl.setAttribute("y", String(b.min));
+        hl.setAttribute("height", String(Math.max(0, b.max - b.min)));
+      } else {
+        hl.setAttribute("x", String(b.min));
+        hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
+      }
       hl.setAttribute("opacity", "0.12");
     } else if (guide) {
       guide.setAttribute("x1", String(cx));
@@ -2725,6 +2830,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
+      ...(opts.swatchShape ? { swatchShape: opts.swatchShape } : {}),
+      ...(opts.swatchMarkers ? { swatchMarkers: opts.swatchMarkers } : {}),
+      ...(opts.renderedFills ? { renderedFills: opts.renderedFills } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
@@ -2770,6 +2878,8 @@ export function attachSecondaryCategoricalLineCursor(
   const mt = +(svgEl.dataset.marginTop ?? "") || 18;
   const mb = +(svgEl.dataset.marginBottom ?? "") || 28;
   const plotH = H - mt - mb;
+  const horizontal = opts.orientation === "horizontal";
+  const plotW = W - ml - mr;
 
   const valByCat = new Map<string, Map<string, number>>();
   for (const r of opts.rows) {
@@ -2793,11 +2903,55 @@ export function attachSecondaryCategoricalLineCursor(
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
     if (category == null) { g.setAttribute("opacity", "0"); return; }
-    if (!centers) centers = opts.centersFromMarks ? readCategoryCentersFromMarks(svgEl) : readCategoryCentersFromAxis(svgEl, mt + plotH);
+    if (!centers)
+      centers = opts.centersFromMarks
+        ? readCategoryCentersFromMarks(svgEl, horizontal ? "y" : "x")
+        : readCategoryCentersFromAxis(svgEl, mt + plotH);
     const c = centers.find((x) => x.category === category);
     const vals = valByCat.get(category);
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
     const cx = c.cx;
+    // Dumbbell (markerless): the coordinated cursor is a pure BAND ECHO — shade the hovered
+    // category on the OTHER panes; the source pane shows its own tooltip + highlight via its
+    // primary crosshair, and its value read-out is the tooltip (not pills). No dots, no pills.
+    if (opts.markerless) {
+      if (active) { g.setAttribute("opacity", "0"); return; }
+      const idx = centers.findIndex((x) => x.category === category);
+      if (horizontal) {
+        const b = uniformBand(centers, idx, mt, mt + plotH);
+        addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      } else {
+        const b = uniformBand(centers, idx, ml, W - mr);
+        addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
+      }
+      g.setAttribute("opacity", "1");
+      return;
+    }
+    if (horizontal) {
+      // Horizontal dumbbell facets: echo the hovered category as a full-width row strip. (The
+      // per-series secondary dots/pills are a vertical-only nicety; the row echo is the coordinated
+      // cursor's core across panes.)
+      const idx = centers.findIndex((x) => x.category === category);
+      const b = uniformBand(centers, idx, mt, mt + plotH);
+      addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      // A value pill per series on EVERY pane (matching bars — the whole point of a coordinated
+      // cursor is reading values across panes, not just the hovered one); `active` only bolds them.
+      // Pills sit just above the row at each dot's value-x, de-collided along X so they never
+      // overlap. No highlight ring (the dumbbell's own dots are visible; a ring would recolor them).
+      const toPx = readLinearScale(svgEl, "x");
+      const cy = c.cx; // for horizontal, centers' `cx` holds the category's Y position
+      if (toPx) {
+        const weight = active ? 700 : 600;
+        const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
+        const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
+        if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
+        const centersX = spreadPillCentersX(pts.map((p) => ({ x: p.x, w: coordPillWidth(yFormat(p.v)) })), ml, ml + plotW);
+        const pillY = Math.max(mt + 9, b.min - 2); // just above the row strip
+        pts.forEach((p, i) => addCoordPill(g, doc, centersX[i]!, pillY, "middle", yFormat(p.v), colorFor(p.s), weight));
+      }
+      g.setAttribute("opacity", "1");
+      return;
+    }
     if (opts.bandHighlight) {
       // Shade the category's band (bar-style) on every pane — uniform width (center spacing) so
       // every category band is the same size, matching the primary hover.
@@ -2817,7 +2971,8 @@ export function attachSecondaryCategoricalLineCursor(
       const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
       const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, y: toPy(vals.get(s)!), dx: opts.dodge?.get(s) ?? 0 }));
       // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
-      for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
+      // Skipped for the dumbbell (markerless): its own dots are visible; a white ring would recolor them.
+      if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
       if (opts.dodge) {
         // Value pills: side by side around the center line (each on its series' side), both on
         // the SAME vertical side of the dots — above when there's room, else below.

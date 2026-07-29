@@ -341,13 +341,9 @@ export function buildBarMarks(
         tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...catLabelTagging],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
-        xAxisMarks: ctx.hideCategoryLabels
-          ? []
-          : [
-              ...tblBandYAxis(categories, gutter, catFont),
-              ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
-              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
-            ],
+        // This is the NON-sectioned single-series horizontal path (sectioned routes to fy above),
+        // so there are no section headers to place here — just the plain category labels.
+        xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
         marginLeft: gutter,
         marginTop: hMarginTop,
         marginBottom: hMarginBottom,

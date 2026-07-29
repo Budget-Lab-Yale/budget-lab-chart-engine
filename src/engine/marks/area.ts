@@ -48,6 +48,10 @@ export function buildAreaMarks(
       strokeWidth: 0.75,
       defined: (r: PreparedRow) => Number.isFinite(r._y),
       ...facetChannels,
+      // Truncated value axis (see assemblePaneResult's clip gate): a stack top above a hard `max`
+      // would otherwise paint over the title and legend. The veil below spans yDomain, so it is
+      // already inside the frame and needs no clip.
+      ...(ctx.clipMarks ? { clip: true as const } : {}),
     }),
   ];
 

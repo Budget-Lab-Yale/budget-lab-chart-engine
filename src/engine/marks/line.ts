@@ -4,9 +4,21 @@
 // buildLineChart so other chart types can register their own builder (marks/index.ts).
 import { Plot } from "../vendor";
 import { TBL, markerSymbolForIndex } from "../theme";
+import { resolveColor } from "../palette";
+import { buildShadeRuns } from "../shade";
+import type { ShadeXField } from "../shade";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { splitProjectedRuns } from "./projected";
+
+/** Stamped on every `shading` fill group so tagging (and any future styling) can address the fills
+ *  without catching confidence bands, which render as `g[aria-label="area"]` too. Plot puts `class`
+ *  on the INNER <g> when a mark is clipped, so selectors built on this must stay descendant
+ *  selectors. */
+export const SHADE_CLASS = "tbl-shade";
+
+/** Matches the confidence-band tint, so a chart carrying both reads as one family. */
+const SHADE_FILL_OPACITY = 0.18;
 
 export function buildLineMarks(
   data: PreparedRow[],
@@ -23,9 +35,65 @@ export function buildLineMarks(
   // Lines render at the full weight in panes too (matches single charts) for legibility.
   const solidStroke = TBL.strokeWidth.solid;
   const dashedStroke = TBL.strokeWidth.dashed;
+  // Truncated value axis (see assemblePaneResult's clip gate): clip the data marks to the frame. Geometric,
+  // not a data filter — the stroke runs to its true crossing with the axis edge and is cut there, so
+  // a series that leaves and re-enters the domain resumes at the right x. No-op (and byte-identical)
+  // when the domain covers the data.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
 
-  // Underlay: confidence-band areas, painted behind the gridlines.
   const underlay: unknown[] = [];
+
+  // Shaded line-to-baseline regions (spec.shading). Pushed FIRST so they paint under the confidence
+  // bands — a CI band is the more specific statement and should read on top of a broad fill — and,
+  // being in the underlay, both sit behind the gridlines.
+  //
+  // Baseline = clamp(0, ...yDomain): zero when zero is in view, else the nearer domain edge, so a
+  // fill can never leave the frame. `side` still keys off ZERO, not off this clamped baseline.
+  const shadeSeriesOrder: string[] = [];
+  if (spec.shading?.length && ctx.yDomain) {
+    const [domainLo, domainHi] = ctx.yDomain;
+    const baseline = Math.min(Math.max(0, domainLo), domainHi);
+    const parseBound = (v: string | undefined) =>
+      v == null ? null : (ctx.parseXValue?.(v) ?? null);
+    for (const region of spec.shading) {
+      const targets =
+        region.series != null
+          ? [region.series]
+          : (ctx.seriesNames ?? Array.from(new Set(data.map((r) => r.series))));
+      for (const seriesKey of targets) {
+        const seriesPoints = data.filter((r) => r.series === seriesKey);
+        if (!seriesPoints.length) continue;
+        const runs = buildShadeRuns(seriesPoints, xField as ShadeXField, {
+          side: region.side ?? "both",
+          from: parseBound(region.from),
+          to: parseBound(region.to),
+        });
+        if (!runs.length) continue;
+        const fill =
+          (region.color && (resolveColor(region.color) || region.color)) ||
+          colors.get(seriesKey) ||
+          TBL.color.blue;
+        // One mark per (region, series) with z: "_seg" — Plot emits one path per run, in _seg
+        // first-appearance order, which is the order pushed onto shadeSeriesOrder below.
+        underlay.push(
+          Plot.areaY(runs.flatMap((r) => r.rows), {
+            x: xField,
+            y1: baseline,
+            y2: "_y",
+            z: "_seg",
+            fill,
+            fillOpacity: region.fillOpacity ?? SHADE_FILL_OPACITY,
+            className: SHADE_CLASS,
+            ...facetChannels,
+            ...clipOpt,
+          }),
+        );
+        for (let i = 0; i < runs.length; i++) shadeSeriesOrder.push(seriesKey);
+      }
+    }
+  }
+
+  // Confidence-band areas, painted behind the gridlines.
   for (const band of spec.confidence_bands ?? []) {
     const bandColor = colors.get(band.series) || TBL.color.blue;
     underlay.push(
@@ -33,7 +101,15 @@ export function buildLineMarks(
         data.filter(
           (r) => r.series === band.series && Number.isFinite(r._lo) && Number.isFinite(r._hi),
         ),
-        { x: xField, y1: "_lo", y2: "_hi", fill: bandColor, fillOpacity: 0.18, ...facetChannels },
+        {
+          x: xField,
+          y1: "_lo",
+          y2: "_hi",
+          fill: bandColor,
+          fillOpacity: 0.18,
+          ...facetChannels,
+          ...clipOpt,
+        },
       ),
     );
   }
@@ -59,6 +135,7 @@ export function buildLineMarks(
         strokeDasharray: TBL.dashArray,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
         ...facetChannels,
+        ...clipOpt,
       }),
     );
   }
@@ -98,6 +175,7 @@ export function buildLineMarks(
           ...(projDashed ? { strokeDasharray: TBL.dashArray } : {}),
           defined: (r: PreparedRow) => Number.isFinite(r._y),
           ...facetChannels,
+          ...clipOpt,
         }),
       );
     }
@@ -111,6 +189,7 @@ export function buildLineMarks(
           strokeWidth: solidStroke,
           defined: (r: PreparedRow) => Number.isFinite(r._y),
           ...facetChannels,
+          ...clipOpt,
         }),
       );
     }
@@ -124,6 +203,7 @@ export function buildLineMarks(
         strokeWidth: solidStroke,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
         ...facetChannels,
+        ...clipOpt,
       }),
     );
   }
@@ -148,6 +228,7 @@ export function buildLineMarks(
         stroke: "#ffffff",
         strokeWidth: 1,
         ...facetChannels,
+        ...clipOpt,
       }),
     );
   }
@@ -189,6 +270,10 @@ export function buildLineMarks(
   const xScaleOpts = categorical ? { type: "point" as const, padding: 0.08 } : undefined;
 
   const tagging = [{ selector: 'g[aria-label="line"] path', seriesOrder }];
+  // Shade fills get data-series too, so legend hover/pin/dim covers them with no extra wiring.
+  if (shadeSeriesOrder.length) {
+    tagging.push({ selector: `g.${SHADE_CLASS} path`, seriesOrder: shadeSeriesOrder });
+  }
   // Per-series symbol scale for the markers (series → distinct shape, in MARKER_SYMBOLS order).
   let symbolScaleOpts: { domain: string[]; range: string[] } | undefined;
   if (pointData.length) {

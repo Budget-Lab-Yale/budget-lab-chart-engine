@@ -6,12 +6,18 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec } from "../spec/types";
-import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY } from "../spec/columns";
+import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
-import { computeYAxis, computeBarYExtent, computeWaterfallYExtent } from "./scales";
+import {
+  computeYAxis,
+  computeBarYExtent,
+  computeWaterfallYExtent,
+  computeDumbbellValueExtent,
+  computeDrawnValueExtent,
+} from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
@@ -118,6 +124,9 @@ export interface LegendItem {
    *  d3 symbol name for this series (shown on the swatch so series can be told apart by shape,
    *  not just color). */
   markerSymbol?: string;
+  /** Dumbbell "hollow" marker: render the point swatch as a ring (page-background fill, series-
+   *  color stroke) instead of a solid dot, matching the chart's hollow dots. */
+  hollow?: boolean;
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
   /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
@@ -427,9 +436,10 @@ function assemblePaneResult(
   // x_order; unlisted ones keep their encounter order after (order-only — unlike series_order,
   // x_order does NOT filter). Stable sort preserves within-category row order. No-op off the
   // categorical axis.
-  if (spec.xAxisType === "categorical" && spec.x_order && spec.x_order.length) {
-    const rank = new Map(spec.x_order.map((c, i) => [c, i] as const));
-    const last = spec.x_order.length;
+  const catOrder = categoryOrderFor(spec);
+  if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
+    const rank = new Map(catOrder.map((c, i) => [c, i] as const));
+    const last = catOrder.length;
     dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
   }
 
@@ -506,6 +516,20 @@ function assemblePaneResult(
     const barExtent = computeBarYExtent(dataInScope, spec, chartType);
     const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
     const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
+    hardDomain = [resolvedMin, resolvedMax];
+  } else if (chartType === "dumbbell") {
+    // Dumbbell: dots are POSITIONS, so the value axis fits the padded data extent and does NOT
+    // force zero (see computeDumbbellValueExtent). Orientation is handled by the mark (horizontal
+    // puts the value on x via yScaleOpts). Value-axis reference markers fold in for headroom — for
+    // horizontal they are annotations.xAxis, for vertical annotations.yAxis (mirrors the bar path).
+    const markerYs = [
+      ...ann.yAxis.map((m) => m.y),
+      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
+    ].filter(Number.isFinite);
+    includeZero = false;
+    const dbExtent = computeDumbbellValueExtent(dataInScope.map((d) => d._y));
+    const resolvedMin = policy.min ?? Math.min(dbExtent.min, ...markerYs);
+    const resolvedMax = Math.max(policy.max ?? dbExtent.max, ...markerYs);
     hardDomain = [resolvedMin, resolvedMax];
   } else if (chartType === "histogram") {
     // Histogram: the value axis is the (possibly normalized) bin height `_y`, which yForAxis
@@ -616,6 +640,17 @@ function assemblePaneResult(
     : undefined;
   const shapeIsSeries = hasShape && cols.shape === cols.series;
 
+  // Truncated value axis (a hard yAxisPolicy.min/max, or a shared-mode figure domain, narrower than
+  // the data): clip the data marks so they stop at the frame instead of spilling over the title and
+  // legend. Compared against the PAINTED extent rather than the padded axis extent so a chart whose
+  // data fits stays unclipped — and therefore byte-identical, since Plot's `clip` wraps the mark in
+  // an extra <g>. Fires in both directions and either sign, which `yDomain[0] > 0` did not.
+  const drawnExtent = computeDrawnValueExtent(dataInScope, spec, chartType);
+  const domainEps = Math.abs(yDomain[1] - yDomain[0]) * 1e-9;
+  const clipMarks =
+    drawnExtent != null &&
+    (drawnExtent.min < yDomain[0] - domainEps || drawnExtent.max > yDomain[1] + domainEps);
+
   // Chart-type-specific marks, then assemble the Plot.
   const layers = markBuilderFor(spec.chartType)(dataInScope, spec, {
     xField: adapter.xField,
@@ -626,8 +661,9 @@ function assemblePaneResult(
     // Final resolved y-domain (post auto/hard/bar-extent/shared-mode override) — the area
     // builder's projected-range veil needs it to span the full plot height.
     yDomain,
-    // Truncated bar axis (y-domain excludes 0): clip bars so they don't overflow below the plot.
-    ...((chartType === "bar" || chartType === "stacked") && yDomain[0] > 0 ? { clipMarks: true } : {}),
+    // Lets a builder resolve author-supplied x strings (line `shading` from/to) on this chart's axis.
+    parseXValue: adapter.parseX,
+    ...(clipMarks ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
     // Shared-mode small multiples: pass the facet field names so the mark builder binds
     // fx/fy on its marks (they face into the grid). Absent → single frame.
@@ -754,6 +790,22 @@ export function buildLegendItems(
       }
       return { ...base, markerShape: "point" as const, markerSymbol: "circle" };
     });
+  }
+
+  // Dumbbell: one dot per series, styled by its marker (filled/ink → solid colored dot; hollow →
+  // ring). Colors come from layers.seriesColors (ink resolves to the ink token there). A single
+  // series has nothing to distinguish, so no legend (mirrors the point-chart rule).
+  if (chartType === "dumbbell") {
+    if (seriesNames.length <= 1) return null;
+    return seriesNames.map((name) => ({
+      series: name,
+      label: labelFor(name),
+      color: legendColorFor(name),
+      dashed: false,
+      markerShape: "point" as const,
+      markerSymbol: "circle",
+      ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
+    }));
   }
 
   const markerShape: "line" | "rect" =

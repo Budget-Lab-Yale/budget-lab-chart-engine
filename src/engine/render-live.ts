@@ -101,7 +101,13 @@ const FIXED_CHART_HEIGHT = 400;
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
-  if (spec.orientation !== "horizontal" || (spec.chartType !== "bar" && spec.chartType !== "stacked")) {
+  // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
+  // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
+  // same as a single-series horizontal bar, section spacers included).
+  const growsWithRows =
+    spec.orientation === "horizontal" &&
+    (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell");
+  if (!growsWithRows) {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }
@@ -221,6 +227,11 @@ function addLineHitPaths(svgEl: SVGSVGElement): void {
     hit.setAttribute("data-series", series);
     hit.setAttribute("d", d);
     hit.setAttribute("fill", "none");
+    // A truncated value axis clips the visible line to the frame, but `d` still carries the
+    // off-frame geometry — an unclipped root-level clone would leave a phantom hit zone over the
+    // title/legend. Plot's frame clip is a userSpaceOnUse rect, so the same reference works here.
+    const clipRef = path.closest("[clip-path]")?.getAttribute("clip-path");
+    if (clipRef) hit.setAttribute("clip-path", clipRef);
     // Invisible but reliably hit-testable: pointer-events:stroke is geometry-based, but a
     // painted-with-zero-opacity stroke is the safest cross-browser choice (some engines treat
     // stroke="transparent" as non-painted). The 14px width gives a ~7px-each-side hit zone.
@@ -930,6 +941,25 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
         dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
       });
+    } else if (spec.chartType === "dumbbell") {
+      // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
+      // lists each series' value with a DOT swatch that matches the legend/chart marker — hollow
+      // ring / ink / filled). Reuses the categorical crosshair with orientation.
+      const dbMarkers = new Map(seriesOrder.map((s) => [s, spec.series_marker?.[s] ?? "filled"] as const));
+      const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
+      attachCategoricalLineCrosshair(svg, {
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        colors,
+        seriesLabels,
+        seriesOrder,
+        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        bandHighlight: true,
+        centersFromMarks: true,
+        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+        swatchShape: "dot",
+        swatchMarkers: dbMarkers,
+        renderedFills: dbFills,
+      });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
@@ -1575,6 +1605,41 @@ function wireFigureSvg(
     coordAccentLabel?: boolean;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
+  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
+  // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
+  // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
+  if (ctx.spec.chartType === "dumbbell") {
+    const dbUseCoord = ctx.onResolve != null;
+    const orientation = ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical";
+    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ctx.spec.series_marker?.[s] ?? "filled"] as const));
+    const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
+    const dbOpts = {
+      rows: dbRows,
+      colors: ctx.colors,
+      seriesLabels: ctx.seriesLabels,
+      seriesOrder: ctx.seriesOrder,
+      yFormat: (v: number) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      bandHighlight: true,
+      centersFromMarks: true,
+      orientation: orientation as "vertical" | "horizontal",
+      swatchShape: "dot" as const,
+      swatchMarkers: dbMarkers,
+      renderedFills: dbFills,
+      markerless: true,
+    };
+    // NOT emitOnly: every pane shows its own hover TOOLTIP (dot swatches matching the legend) — the
+    // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
+    // before the emitOnly gate), so hovering one pane drives the coordinated band echo on the others.
+    attachCategoricalLineCrosshair(svg, {
+      ...dbOpts,
+      ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+    });
+    if (dbUseCoord) {
+      return attachSecondaryCategoricalLineCursor(svg, dbOpts) as (key: unknown, active?: boolean) => void;
+    }
+    return undefined;
+  }
   // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
   // a category shades that band + shows per-series value pills on EVERY pane (and highlights the
   // category on the hovered pane). Mirrors the bar/line coordinated path; resolves the category

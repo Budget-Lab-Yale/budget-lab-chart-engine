@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
 // `chartType` is a union so adding bar/etc. later is additive.
 
-export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -162,6 +162,28 @@ export interface SeriesStyle {
   dashed?: boolean;
 }
 
+/** One shaded region between a line and its baseline (LINE charts only). Entries in `shading` are
+ *  independent and paint in list order, so several regions may cover one series with different
+ *  tints — overlapping fills deliberately compound their opacity.
+ *
+ *  The baseline is zero when zero lies inside the resolved y-domain, else the nearer domain edge,
+ *  so a fill never leaves the frame. `side` always keys off ZERO, never off that clamped baseline. */
+export interface ShadeRegion {
+  /** Series to fill under. Omitted → every in-scope series gets its own region, each in its own color. */
+  series?: string;
+  /** Which side of zero to fill. Default "both". */
+  side?: "both" | "positive" | "negative";
+  /** Inclusive x lower bound, in the same string form as `annotations.bands.start`. Omitted → the
+   *  series' first point. A bound falling between two points is interpolated to that exact x. */
+  from?: string;
+  /** Inclusive x upper bound. Omitted → the series' last point. */
+  to?: string;
+  /** Fill color (named palette token or raw "#hex"). Omitted → the series' own resolved color. */
+  color?: ColorRef;
+  /** Fill opacity. Default 0.18, matching confidence bands. */
+  fillOpacity?: number;
+}
+
 /** Where a chart's data comes from. A bare string is sugar for `{ file }`. */
 export type DataSource =
   | string
@@ -204,6 +226,10 @@ export interface SmallMultiplesConfig {
 export interface ColumnMap {
   /** Column holding the x value (any xAxisType). Default "time". */
   x?: string;
+  /** Dumbbell charts: the categorical axis column (income group, etc.). A synonym for `x` — the
+   *  dumbbell's categorical axis IS the engine's x/y band, so `category` resolves onto the same
+   *  role bars read via `x`. `x` still works; `category` wins when both are set. */
+  category?: string;
   /** Column holding the numeric value. Default "value". */
   value?: string;
   /** Column holding the series key. Omit ⇒ single implicit series. Default "series" (if present). */
@@ -343,6 +369,9 @@ export interface ChartSpec {
    *  order) — x_order only reorders categories WITHIN each section; it can never split a
    *  section's categories apart or reorder the sections themselves. */
   x_order?: string[];
+  /** Dumbbell charts: category render order along the categorical axis — a synonym for `x_order`
+   *  (order-only, never filters). `category_order` wins when both are set. See `categoryOrderFor`. */
+  category_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
    *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
   x_labels?: Record<string, string>;
@@ -366,6 +395,9 @@ export interface ChartSpec {
   shape_legend_title?: string;
 
   confidence_bands?: ConfidenceBand[];
+
+  /** Line charts ONLY: shaded regions between a line and its baseline. See ShadeRegion. */
+  shading?: ShadeRegion[];
 
   /** Line charts: draw a marker (dot) at each data point. Default false. */
   points?: boolean;
@@ -426,6 +458,26 @@ export interface ChartSpec {
   };
   // Histogram (continuous-x binned bars). Ignored by other chart types.
   histogram?: HistogramConfig;
+
+  // Dumbbell (connected dot plot). A categorical axis × numeric value axis rendered as per-category
+  // dots joined by a connector; `orientation` flips it (horizontal = categories on screen-y). The
+  // categorical axis is declared via `xAxisType: categorical` (like bars), NOT a separate yAxisType.
+  // Series color/order/labels reuse the shared `series_*` fields; category order reuses
+  // `category_order`/`x_order`; faceting reuses `columns.facet` + `small_multiples`.
+  /** Per-series dot style: solid fill, hollow ring (series-color outline, page-background center),
+   *  or filled neutral ink. Absent series default to "filled". */
+  series_marker?: Record<string, "filled" | "hollow" | "ink">;
+  /** Connector "stem" styling; defaults to a light muted 1.5px solid line drawn behind the dots. */
+  connector?: { color?: ColorRef; width?: number; style?: "solid" | "dashed" | "dotted" };
+  /** Dot radius (px). Default from theme; dots size consistently across a facet. */
+  dot_radius?: number;
+  /** Label the numeric gap between two named series on each stem. `true` uses the first two series
+   *  in series order; an object names the pair explicitly. Default off. */
+  gap_annotation?: boolean | { series_a: string; series_b: string; format?: ValueFormat };
+  /** Value-axis title (short caption on the numeric axis). */
+  value_axis_title?: string;
+  /** Number format for dot values in axis ticks / hover / gap labels (reuses ValueFormat). */
+  value_format?: ValueFormat;
 
   /** Series keys to visually highlight (dimming all others). */
   highlightSeries?: string[];

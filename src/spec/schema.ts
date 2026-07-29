@@ -155,6 +155,21 @@ const CONFIDENCE_BAND = {
   },
 } as const;
 
+// One shaded line-to-baseline region (line charts only). Every field is optional: a bare `{}` means
+// "fill under every series, both sides, full x range, in each series' own color".
+const SHADE_REGION = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    series: { type: "string" },
+    side: { type: "string", enum: ["both", "positive", "negative"] },
+    from: { type: "string" },
+    to: { type: "string" },
+    color: { type: "string" },
+    fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as const;
+
 // data: a bare string (filename) is sugar for { file }; otherwise an object — either a
 // local { file } or a remote { url, format, map? }.
 const DATA_SOURCE = {
@@ -241,7 +256,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -249,6 +264,7 @@ export const CHART_SPEC_SCHEMA = {
       additionalProperties: false,
       properties: {
         x: { type: "string" },
+        category: { type: "string" },
         value: { type: "string" },
         series: { type: "string" },
         facet: { type: "string" },
@@ -304,6 +320,7 @@ export const CHART_SPEC_SCHEMA = {
     section_order: { type: "array", items: { type: "string" } },
     section_labels: { type: "object", additionalProperties: { type: "string" } },
     x_order: { type: "array", items: { type: "string" } },
+    category_order: { type: "array", items: { type: "string" } },
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 
     // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
@@ -313,6 +330,7 @@ export const CHART_SPEC_SCHEMA = {
     shape_legend_title: { type: "string" },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
+    shading: { type: "array", items: SHADE_REGION },
     points: { type: "boolean" },
     projected_field: { type: "string" },
     projected_style: {
@@ -390,6 +408,39 @@ export const CHART_SPEC_SCHEMA = {
         },
       },
     },
+    // Dumbbell (connected dot plot). Categorical axis via xAxisType; orientation flips it.
+    series_marker: {
+      type: "object",
+      additionalProperties: { type: "string", enum: ["filled", "hollow", "ink"] },
+    },
+    connector: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        color: { type: "string" },
+        width: { type: "number", exclusiveMinimum: 0 },
+        style: { type: "string", enum: ["solid", "dashed", "dotted"] },
+      },
+    },
+    dot_radius: { type: "number", exclusiveMinimum: 0 },
+    gap_annotation: {
+      anyOf: [
+        { type: "boolean" },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["series_a", "series_b"],
+          properties: {
+            series_a: { type: "string" },
+            series_b: { type: "string" },
+            format: VALUE_FORMAT,
+          },
+        },
+      ],
+    },
+    value_axis_title: { type: "string" },
+    value_format: VALUE_FORMAT,
+
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
     legend: { type: "boolean" },

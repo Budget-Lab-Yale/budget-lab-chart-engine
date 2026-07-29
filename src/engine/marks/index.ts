@@ -10,6 +10,7 @@ import { buildStackedMarks } from "./stacked";
 import { buildPointMarks } from "./point";
 import { buildWaterfallMarks } from "./waterfall";
 import { buildHistogramMarks } from "./histogram";
+import { buildDumbbellMarks } from "./dumbbell";
 
 /** A data row after parsing: canonical series/time plus the engine's derived fields. */
 export interface PreparedRow {
@@ -87,8 +88,12 @@ export interface MarkContext {
   /** Point charts: true when the shape column IS the series column (redundant color+shape
    *  encoding) — the symbol scale then keys off series identity and the legend is combined. */
   shapeIsSeries?: boolean;
-  /** Bars: clip marks to the plot frame. Set when the y-domain excludes 0 (a truncated/non-zero
-   *  baseline), so bars drawn from 0 don't overflow below the plot into the x-axis labels. */
+  /** Clip the data marks to the plot frame. Set by assemblePaneResult when the resolved value
+   *  domain is narrower than the geometry this chart type paints (see `computeDrawnValueExtent`) —
+   *  a hard `yAxisPolicy.min`/`max`, or a shared figure domain that cuts into the data. Honored by
+   *  EVERY chart type — a builder that ignores it silently stops clipping. Value labels, gap
+   *  annotations and reference markers are deliberately never clipped: a half-cut label reads worse
+   *  than one sitting past the axis. */
   clipMarks?: boolean;
   /** Area: visual stack order bottom→top, overriding series_order for stacking only (legend +
    *  colors stay series_order). Set by the live layer for selected-to-bottom restacking. */
@@ -107,6 +112,11 @@ export interface MarkContext {
    *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
    *  via horizontalLeftGutter (single-chart unchanged). */
   categoryGutter?: number;
+  /** The x-adapter's `parseX` — turns a spec x STRING into the value the x scale uses (number,
+   *  Date, or the category itself), honoring the chart's xAxisType including quarterly. Threaded so
+   *  a builder can resolve author-supplied x bounds (line `shading` from/to) without reaching for
+   *  the adapter itself. Returns null for a value that doesn't parse on this axis. */
+  parseXValue?: (v: string) => number | Date | string | null;
   /** The pane's final computed y-domain (post auto/hard/bar-extent resolution, or the forced
    *  shared-mode override) — the SAME value assemblePlot uses for the value axis. The area
    *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =
@@ -215,6 +225,7 @@ const REGISTRY: Partial<Record<ChartType, MarkBuilder>> = {
   dotplot: buildPointMarks,
   waterfall: buildWaterfallMarks,
   histogram: buildHistogramMarks,
+  dumbbell: buildDumbbellMarks,
 };
 
 export function markBuilderFor(chartType: ChartType): MarkBuilder {

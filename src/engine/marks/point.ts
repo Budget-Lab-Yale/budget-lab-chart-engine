@@ -53,6 +53,9 @@ export function buildPointMarks(
     strokeWidth: 1,
     defined: (d: PreparedRow) => Number.isFinite(d._y),
     ...facetChannels,
+    // Truncated value axis (see assemblePaneResult's clip gate): an out-of-range point would
+    // otherwise land outside the frame, or off the canvas entirely.
+    ...(ctx.clipMarks ? { clip: true as const } : {}),
     ...extra,
   });
 

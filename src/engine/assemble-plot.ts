@@ -815,6 +815,10 @@ export function assemblePlot({
       height: svgHeight,
       marginTop: (plotOpts.marginTop as number) ?? 18,
       marginBottom: (plotOpts.marginBottom as number) ?? 24,
+      // The fy band domain (categories + section spacers) drives the section-gap gridline break.
+      ...(Array.isArray(layers.fyScaleOpts?.domain)
+        ? { fyDomain: layers.fyScaleOpts!.domain as string[] }
+        : {}),
     });
   } else if (gridFaceted) {
     // Shared-mode small-multiples grid: Plot repeated the y-tick labels in every column and

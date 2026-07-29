@@ -9,7 +9,7 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec } from "../spec/types";
-import { resolveColumns, isPreBinned } from "../spec/columns";
+import { resolveColumns, isPreBinned, categoryOrderFor } from "../spec/columns";
 import { parseDate } from "./parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
@@ -108,9 +108,9 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
  *  renderFigure computes it from horizontalBarHeight when opts.height is undefined. */
 export function figurePaneHeight(spec: ChartSpec): number | undefined {
   const horizontal = spec.orientation === "horizontal";
-  if (horizontal && (spec.chartType === "bar" || spec.chartType === "stacked")) return undefined;
+  if (horizontal && (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell")) return undefined;
   if (spec.chartType === "waterfall") return 420;
-  if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked") return 320;
+  if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell") return 320;
   return 240;
 }
 
@@ -150,8 +150,8 @@ function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): st
       seen.push(v);
     }
   }
-  if (spec.x_order && spec.x_order.length) {
-    const order = spec.x_order;
+  const order = categoryOrderFor(spec);
+  if (order && order.length) {
     const rank = new Map(order.map((c, i) => [c, i] as const));
     seen.sort((a, b) => (rank.get(a) ?? order.length) - (rank.get(b) ?? order.length));
   }
@@ -359,6 +359,10 @@ export function renderFigure(
   const isHorizontalStacked = spec.chartType === "stacked" && spec.orientation === "horizontal";
   const isHorizontalBar =
     (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
+  // Horizontal dumbbells are wide (a value axis spanning the frame); their facets STACK vertically
+  // (one pane per row, full width) rather than sitting side by side, and each pane's height grows
+  // with its own category-row count — like a horizontal bar. (Vertical dumbbells facet in a grid.)
+  const isHorizontalDumbbell = spec.chartType === "dumbbell" && spec.orientation === "horizontal";
   const sharedCategories = isHorizontalBar ? orderedCategories(rows, cols.x, spec) : [];
   // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
   const hGutter = isHorizontalBar
@@ -458,7 +462,12 @@ export function renderFigure(
           const slots = Math.max(1, catsByFacet?.get(v)?.size ?? 1) + nSpacers;
           return Math.round(slots * effSlotPx + chromeExtra);
         })
-      : undefined;
+      : isHorizontalDumbbell && opts.height == null
+        ? // Each stacked pane grows with its OWN category count (facets can be ragged — e.g. a
+          // 5-quintile pane above a 3-row top-decile pane), sized by the shared horizontal-bar
+          // height helper (grouped=false → one row per category).
+          paneValues.map((v) => horizontalBarChartHeight(spec, rows.filter((r) => (r[facetField] as string) === v)))
+        : undefined;
 
   // 2. Grid layout. columns = config else default; rows = ceil(n / columns). col = i % columns,
   //    row = floor(i / columns).
@@ -466,13 +475,18 @@ export function renderFigure(
   // default — which is a SINGLE ROW when pane_widths is set (variable widths are per-column across
   // one row of panes), and the ≈ceil(sqrt(n)) grid otherwise. Clamp to [1, paneValues.length].
   const variableWidths = sm.pane_widths != null && sm.pane_widths !== "equal";
-  const requestedColumns = opts.columns && opts.columns > 0
-    ? opts.columns
-    : sm.columns && sm.columns > 0
-      ? sm.columns
-      : variableWidths
-        ? paneValues.length
-        : defaultColumns(paneValues.length);
+  // Horizontal dumbbells ALWAYS stack vertically (one full-width pane per row) — this wins over the
+  // responsive `opts.columns` reflow and the sqrt-grid default, because a horizontal value axis
+  // needs the full width to be readable and side-by-side horizontal panes crowd it.
+  const requestedColumns = isHorizontalDumbbell
+    ? 1
+    : opts.columns && opts.columns > 0
+      ? opts.columns
+      : sm.columns && sm.columns > 0
+        ? sm.columns
+        : variableWidths
+          ? paneValues.length
+          : defaultColumns(paneValues.length);
   const columns = Math.max(1, Math.min(requestedColumns, paneValues.length));
   const gridRows = Math.ceil(paneValues.length / columns);
 

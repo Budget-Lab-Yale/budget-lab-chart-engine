@@ -43,6 +43,15 @@ export function computeYAxis(
 const HEADROOM_DEFAULT = 1.05;
 const HEADROOM_NET_TEXT = 1.08;
 
+/** Guard a bar/stacked value extent against the degenerate all-zero case: when every in-scope
+ *  value is 0 the raw extent collapses to [0, 0], which makes the value scale singular and paints
+ *  full-height bars (bars are sized from real _y=0, but a [0,0] domain has no baseline to sit on).
+ *  Floor the axis RANGE to [0, 1] so the scale is finite and a flat 0 line renders; bars stay
+ *  zero-height because Plot draws them from their real _y (0), independent of this floor. */
+function floorDegenerateExtent(ext: { min: number; max: number }): { min: number; max: number } {
+  return ext.min === 0 && ext.max === 0 ? { min: 0, max: 1 } : ext;
+}
+
 /**
  * Compute the y-domain extent for bar/stacked charts.
  *
@@ -66,7 +75,7 @@ export function computeBarYExtent(
     // Grouped bar: bars rise/fall from zero; extent over raw _y values.
     const dataMax = Math.max(0, ...nums);
     const dataMin = Math.min(0, ...nums);
-    return { min: dataMin, max: dataMax * HEADROOM_DEFAULT };
+    return floorDegenerateExtent({ min: dataMin, max: dataMax * HEADROOM_DEFAULT });
   }
 
   // chartType === "stacked"
@@ -110,10 +119,35 @@ export function computeBarYExtent(
     (netDisplay === "text" || netDisplay === "auto");
   const headroom = netIsText ? HEADROOM_NET_TEXT : HEADROOM_DEFAULT;
 
-  return {
+  return floorDegenerateExtent({
     min: Math.min(0, negMin),
     max: posMax * headroom,
-  };
+  });
+}
+
+/** Fraction of the data span added as breathing room on each side of a dumbbell's value axis, so
+ *  the extreme dots don't sit flush against the frame. */
+const DUMBBELL_PAD_FRACTION = 0.05;
+
+/**
+ * Value-axis extent for a dumbbell (connected dot plot). Unlike bars, dots are POSITIONS not
+ * magnitudes-from-zero, so the axis fits the data extent and does NOT force zero in — a 2%..35%
+ * rate view keeps its useful range. Zero is included only when the data genuinely crosses it
+ * (some dots negative, some positive), which the padded [min, max] span already covers; the mark
+ * draws a zero rule in that case. Padded on both sides for breathing room; a zero-span set
+ * (all dots equal, including all-zero) still returns a finite, non-degenerate range.
+ */
+export function computeDumbbellValueExtent(
+  values: Array<number | null | undefined>,
+): { min: number; max: number } {
+  const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (!nums.length) return { min: 0, max: 1 };
+  const lo = Math.min(...nums);
+  const hi = Math.max(...nums);
+  const span = hi - lo;
+  // Zero-span (all dots equal): pad off the value's magnitude so the axis is finite, or ±1 at 0.
+  const pad = span > 0 ? span * DUMBBELL_PAD_FRACTION : Math.abs(hi) * DUMBBELL_PAD_FRACTION || 1;
+  return { min: lo - pad, max: hi + pad };
 }
 
 export type WaterfallKind = "delta" | "total" | "skip";
@@ -193,6 +227,106 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
     min: lo < 0 ? lo * HEADROOM_NET_TEXT : lo,
     max: hi > 0 ? hi * HEADROOM_NET_TEXT : hi,
   };
+}
+
+/**
+ * Value-axis extent of the geometry a chart type actually PAINTS — no label headroom, no breathing
+ * pad. The `compute*Extent` helpers above answer "how big should the axis be?", so they add padding;
+ * this answers "what will overflow the frame if the axis is narrower than the data?", which must be
+ * padding-free or the clip gate (see assemblePaneResult) would fire on charts whose data fits and only their
+ * headroom doesn't — churning the DOM (Plot's `clip` wraps the mark in an extra <g>) for no visual gain.
+ *
+ * Every chart type is covered. A new one needs a case here plus `...clipOpt` on its marks, or it
+ * silently stops clipping — returning null is how a type opts out, not a default.
+ */
+/** Cumulative stack tops/bottoms per x — positives stack up from zero, negatives down — with zero
+ *  always included because the stack is drawn from it. Shared by stacked bars and areas, which
+ *  differ only in how an x is keyed. */
+function stackedExtent(
+  data: PreparedRow[],
+  keyOf: (r: PreparedRow) => string,
+): { min: number; max: number } | null {
+  const posSum = new Map<string, number>();
+  const negSum = new Map<string, number>();
+  for (const r of data) {
+    if (!Number.isFinite(r._y as number)) continue;
+    const key = keyOf(r);
+    const y = r._y as number;
+    const into = y >= 0 ? posSum : negSum;
+    into.set(key, (into.get(key) ?? 0) + y);
+  }
+  if (!posSum.size && !negSum.size) return null;
+  return {
+    min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
+    max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
+  };
+}
+
+export function computeDrawnValueExtent(
+  data: PreparedRow[],
+  spec: ChartSpec,
+  chartType: ChartType,
+): { min: number; max: number } | null {
+  const finite = (v: unknown): v is number => Number.isFinite(v as number);
+
+  if (chartType === "line" || chartType === "scatter" || chartType === "dotplot") {
+    // Positions, not magnitudes: no zero baseline, no padding. CI band bounds count as painted
+    // geometry on a line; the point types have no bands, so those fields are simply absent.
+    const vals: number[] = [];
+    for (const r of data) {
+      if (finite(r._y)) vals.push(r._y as number);
+      if (finite(r._lo)) vals.push(r._lo as number);
+      if (finite(r._hi)) vals.push(r._hi as number);
+    }
+    if (!vals.length) return null;
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  }
+
+  if (chartType === "histogram") {
+    // Bin heights, drawn from zero. `_y` is already the (possibly normalized) height.
+    const vals = data.map((r) => r._y).filter(finite);
+    if (!vals.length) return null;
+    return { min: Math.min(0, ...vals), max: Math.max(0, ...vals) };
+  }
+
+  if (chartType === "bar") {
+    // Every bar spans 0 → value, so zero is always painted.
+    const vals = data.map((r) => r._y).filter(finite);
+    if (!vals.length) return null;
+    return { min: Math.min(0, ...vals), max: Math.max(0, ...vals) };
+  }
+
+  if (chartType === "stacked") {
+    if (spec.barStack?.normalize === true) return { min: 0, max: 100 };
+    // Stacked bars key on the category band. Mirrors computeBarYExtent's stacking, minus headroom.
+    return stackedExtent(data, (r) => r._xc ?? "");
+  }
+
+  if (chartType === "area") {
+    // Same cumulative-top geometry as a stacked bar, but an area's x may be numeric or temporal, so
+    // key the stack the way renderPane's own area branch does.
+    return stackedExtent(data, (r) => r.time || String(r._xn ?? r._xc ?? ""));
+  }
+
+  if (chartType === "dumbbell") {
+    // Dots are POSITIONS, not magnitudes from zero, so zero is not part of the painted geometry
+    // (see computeDumbbellValueExtent) — and no padding here, unlike that one.
+    const vals = data.map((r) => r._y).filter(finite);
+    if (!vals.length) return null;
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  }
+
+  if (chartType === "waterfall") {
+    // The painted geometry is every bar's base/top along the cumulative path, plus the zero baseline.
+    const vals: number[] = [0];
+    for (const s of computeWaterfallSteps(data)) {
+      if (s.kind === "skip") continue;
+      vals.push(s.base, s.top);
+    }
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  }
+
+  return null;
 }
 
 /** Decimal places for a waterfall's value text: an explicit `valueLabels.decimals` wins; else the

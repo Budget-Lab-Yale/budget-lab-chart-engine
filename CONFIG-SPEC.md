@@ -23,7 +23,7 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 | field | type | notes |
 |---|---|---|
-| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram`. |
+| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram` \| `dumbbell`. |
 | `title` | string | Card title above the chart. Rendered verbatim. |
 | `xAxisType` | enum | `numeric` \| `temporal` \| `quarterly` \| `categorical`. Determines how the x column is parsed (see [CSV format](#csv-format)). |
 | `data` | string \| object | Usually just `data.csv` (see [Data](#data)). |
@@ -33,7 +33,8 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 Axis constraints: `scatter` requires `xAxisType: numeric`; `dotplot` requires
 `xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
-histogram bins a continuous axis — it has no categorical or quarterly form).
+histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
+`xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`).
 
 ### Column mapping
 
@@ -43,6 +44,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | field | type | notes |
 |---|---|---|
 | `columns.x` | string | Column holding the x value. Default `"time"`. |
+| `columns.category` | string | Dumbbell only: the categorical-axis column — a synonym for `columns.x` (wins when both are set). |
 | `columns.value` | string | Column holding the numeric y value. Default `"value"`. |
 | `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. |
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
@@ -103,6 +105,21 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `yAxisPolicy.tickCount` | integer | Approximate target number of y-ticks. Default 5. |
 | `yAxisPolicy.autoWiden.step` | number | When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
 
+**Truncating the axis below the data.** When `min`/`max` cut into the data, **every chart type**
+clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
+stops there. Nothing is dropped or clamped, so the shape resumes at the correct x when a series
+re-enters the range — do *not* pre-clip the source data (that either fakes a plateau or reads as
+missing data, and the chart's CSV download would ship the altered values). Value labels, gap
+annotations and reference lines are deliberately **not** clipped: a half-cut label reads worse than
+one sitting past the axis.
+
+Note that `min`/`max` are **nice'd outward** to land on clean tick boundaries, so the rendered
+ceiling can sit above the number you wrote (`max: 15` with 5 ticks renders a 20 ceiling) — clipping
+only engages once the *nice'd* domain still cuts the data.
+
+A line leaving the frame is honest but easy to misread as the end of the series, so pair a truncated
+axis with a note or an `annotations.yAxis` marker at the ceiling.
+
 ### Series
 
 The series **column** is set via `columns.series`. These options reference the series **keys**
@@ -151,6 +168,44 @@ equals `facet`; omit to render in every pane (unchanged default). Ignored on a n
 | field | type | notes |
 |---|---|---|
 | `confidence_bands` | array | Each `{series, lower, upper}`. `series` is the data key the band wraps; `lower`/`upper` are CSV column names. Renders as a tinted area behind the line. |
+
+### Shading (line charts)
+
+`shading` fills the region between a line and its baseline. **`chartType: line` only** — `area`
+already fills to the axis, and the other types have no line to fill under.
+
+| field | type | notes |
+|---|---|---|
+| `shading` | array | Each `{series?, side?, from?, to?, color?, fillOpacity?}`. Entries are **independent** and paint in list order, so one series may carry several regions; overlapping fills compound their opacity (that is how you deepen a tint). |
+| `shading[].series` | string | Series to fill under. **Omitted → every in-scope series** gets its own region in its own color. |
+| `shading[].side` | string | `both` (default) \| `positive` \| `negative` — which side of **zero** to fill. Runs are split at the zero crossing, interpolated so the fill closes flat on the baseline. |
+| `shading[].from` / `.to` | string | Inclusive x bounds, same string form as `annotations.bands.start`/`end` — **quote numbers in YAML** (`from: "2026"`), exactly as `annotations` x values require. Omitted → the series' first/last point. A bound falling **between** two points is interpolated to that exact x, so the fill edge lands where you asked rather than at the nearest point. On a categorical x-axis there is no position between categories, so bounds must **name existing categories** and crop on category boundaries. |
+| `shading[].color` | color | Named palette token or `"#hex"`. Omitted → the series' own resolved color. |
+| `shading[].fillOpacity` | number | 0–1. Default `0.18`, matching confidence bands. |
+
+**Baseline.** Zero when zero is inside the resolved y-domain, otherwise the nearer domain edge — so
+a fill never leaves the plot frame. Shading does **not** expand the domain: if you want the zero
+baseline actually visible on a chart whose data sits well away from it, set
+`yAxisPolicy.includeZero: true`. `side` always keys off zero, never off that clamped baseline.
+
+Fills paint in the underlay — behind the gridlines, and beneath any `confidence_bands` on the same
+chart. They carry their series' identity, so legend hover/pin dims them with their line.
+
+Validation rejects a region naming a series the data lacks, a categorical bound naming a missing
+category, and a `side` that could never match (e.g. `side: negative` where the series is never
+negative).
+
+```yaml
+chartType: line
+shading:
+  - series: Primary deficit
+    side: negative              # shade only the deficit years
+  - series: Primary deficit
+    from: "2026"                # a flatter tint over the projection window
+    to: "2035"
+    color: gray
+    fillOpacity: 0.10
+```
 
 ### Line & area options
 
@@ -255,6 +310,55 @@ governs how bins are computed per pane:
 > carry their own edges per row, and those edges are **not** coordinated across panes in `shared`
 > mode — each pane simply renders the edges its own rows supply. If you need pre-binned facets to
 > line up on a common x-axis, give every facet the same bin edges yourself in the source data.
+
+### Dumbbell options
+
+`chartType: dumbbell` draws a **connected dot plot**: one dot per series in each category, joined
+by a connector "stem", so the **gap** between series is the visual subject — for two or three
+values that compare but don't sum (e.g. current-law vs. static vs. collected effective rates).
+`xAxisType` must be `categorical`; `orientation` decides the rendering (`horizontal`, default —
+categories down the left, values along x — or `vertical`). Map the categorical column via
+`columns.category` (or `columns.x`), the value via `columns.value`, and the dot identity via
+`columns.series`. Series color/order/labels reuse the shared `series_*` fields; category order
+reuses `category_order` (or `x_order`); faceting reuses `columns.facet` + `small_multiples`.
+
+| field | type | notes |
+|---|---|---|
+| `orientation` | enum | `horizontal` (default; categories on the y band, values on x) \| `vertical`. |
+| `series_marker` | object | Per-series dot style: `filled` (solid series color) \| `hollow` (ring — series-color outline, page-background center) \| `ink` (filled neutral ink). Unlisted series default to `filled`. Lets "static/ask" read hollow and "collected" filled. The legend swatch matches (a hollow series shows a ring). |
+| `connector` | object | Stem styling: `connector.color` (a color token/hex), `connector.width` (px, default 1.5), `connector.style` (`solid` default \| `dashed` \| `dotted`). Default a subtle neutral line drawn behind the dots. A single-dot (or exactly-coincident) category draws no stem. |
+| `dot_radius` | number | Dot radius in px. Default 5. |
+| `gap_annotation` | boolean \| object | Label the numeric gap between two series on each stem. `true` uses the first two series in order; an object names them: `{ series_a, series_b, format? }`. `format` (else `value_format`) formats the number. Default off. |
+| `value_axis_title` | string | Short caption on the value axis. |
+| `value_format` | object | Number format for values in labels: `{ decimals, prefix, suffix }` (e.g. `{ decimals: 1, suffix: "%" }`). |
+
+The value axis **fits the data** and does **not** force a zero baseline (a 2%–35% rate view keeps
+its useful range); zero is included only when the dots cross it, and a zero rule is drawn there.
+Faceted dumbbells share a common value scale by default (`small_multiples.mode: per-pane` gives
+each pane its own).
+
+**Hover & coordinated cursor.** Hovering anywhere in a category's band (a row for horizontal, a
+column for vertical) highlights that band and shows a tooltip listing each series' value. In a
+faceted dumbbell the cursor is coordinated — hovering a category echoes the band highlight on every
+pane (unless `coordinated_cursor: false`).
+
+**Sections (horizontal).** `columns.section` groups the categories into labeled blocks with bold
+headers in the left gutter, exactly like horizontal bars (`section_order` / `section_labels`
+control order and header text). Horizontal orientation only.
+
+```yaml
+chartType: dumbbell
+orientation: horizontal
+xAxisType: categorical
+columns: { category: group, series: measure, value: rate }
+category_order: [Quintile 1, Quintile 2, Quintile 3, Quintile 4, Quintile 5]
+series_order: [current_law, static, collected]
+series_labels: { current_law: Current law, static: Static rate, collected: Collected after behavior }
+series_marker: { current_law: ink, static: hollow, collected: filled }
+value_axis_title: Effective tax rate
+value_format: { decimals: 1, suffix: "%" }
+gap_annotation: { series_a: static, series_b: collected }
+```
 
 ### Small multiples
 

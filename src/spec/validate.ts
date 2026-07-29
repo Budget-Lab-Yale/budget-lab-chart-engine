@@ -12,7 +12,7 @@ import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
-import { resolveColumns, isPreBinned } from "./columns";
+import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
@@ -48,6 +48,16 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   }
   if (spec.chartType === "dotplot" && spec.xAxisType !== "categorical") {
     return `chartType "dotplot" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
+  }
+  return null;
+}
+
+/** Dumbbell cross-field constraint: like bars, the categorical axis is declared via
+ *  `xAxisType: categorical` (NOT a separate yAxisType); `orientation` then flips it to screen-y
+ *  (horizontal, default) or screen-x (vertical). A non-categorical xAxisType has no meaning. */
+function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
+  if (spec.chartType === "dumbbell" && spec.xAxisType !== "categorical") {
+    return `chartType "dumbbell" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
   }
   return null;
 }
@@ -94,9 +104,10 @@ function sectionColumnError(spec: {
   columns?: { section?: unknown };
 }): string | null {
   if (spec.columns?.section == null) return null;
-  if (spec.chartType !== "bar" || spec.orientation !== "horizontal") {
+  const sectionable = spec.chartType === "bar" || spec.chartType === "dumbbell";
+  if (!sectionable || spec.orientation !== "horizontal") {
     return (
-      `columns.section requires chartType "bar" with orientation "horizontal" ` +
+      `columns.section requires a horizontal "bar" or "dumbbell" chart ` +
       `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
     );
   }
@@ -178,6 +189,15 @@ function histogramSpecError(spec: {
   return errors;
 }
 
+/** `shading` fills between a line and its baseline, so it only means anything on a line chart:
+ *  `area` already fills to the axis, and the rest have no line to fill under. */
+function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): string | null {
+  if (!spec.shading?.length) return null;
+  return spec.chartType === "line"
+    ? null
+    : `shading is supported on chartType "line" only (got ${JSON.stringify(spec.chartType)})`;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -188,6 +208,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
+  const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
+  if (dbErr) return { valid: false, errors: [dbErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
   if (tsErr) return { valid: false, errors: [tsErr] };
   const secErr = sectionColumnError(
@@ -211,6 +233,8 @@ export function validateSpec(spec: unknown): ValidationResult {
     },
   );
   if (histErrors.length) return { valid: false, errors: histErrors };
+  const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
+  if (shadeErr) return { valid: false, errors: [shadeErr] };
   return { valid: true, errors: [] };
 }
 
@@ -451,15 +475,55 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // Cross-reference: `shading` regions against the data — the series they name, the categories
+  // their bounds name, and whether a `side` filter can ever match anything.
+  for (const [i, region] of (spec.shading ?? []).entries()) {
+    const where = `shading[${i}]`;
+    if (region.series != null && !seriesSeen.has(region.series)) {
+      errors.push(
+        `${where} names series ${JSON.stringify(region.series)} not found in the data (data series: ${knownSeries})`,
+      );
+      continue;
+    }
+    if (spec.xAxisType === "categorical") {
+      const xValues = new Set(rows.map((r) => r[cols.x] as string));
+      for (const [key, bound] of [["from", region.from], ["to", region.to]] as const) {
+        if (bound != null && !xValues.has(bound)) {
+          errors.push(
+            `${where}.${key} names category ${JSON.stringify(bound)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+          );
+        }
+      }
+    }
+    // A side filter that can never match is a spec mistake, and it is decidable from the DATA (is
+    // this series ever negative?) without knowing the resolved y-domain.
+    const side = region.side ?? "both";
+    if (side !== "both") {
+      const values = rows
+        .filter((r) => region.series == null || r[cols.series ?? ""] === region.series)
+        .map((r) => Number(r[cols.value] as string))
+        .filter(Number.isFinite);
+      const matches = values.some((v) => (side === "positive" ? v > 0 : v < 0));
+      if (values.length && !matches) {
+        const scope = region.series == null ? "the data" : `series ${JSON.stringify(region.series)}`;
+        errors.push(
+          `${where}.side is "${side}" but no ${side} values exist in ${scope} — the region would fill nothing`,
+        );
+      }
+    }
+  }
+
   // Cross-reference: every category named by x_order must appear in the categorical x column.
   // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
   // typo. Only checked on a categorical x-axis (it is a no-op for numeric/temporal x).
-  if (spec.xAxisType === "categorical" && spec.x_order?.length) {
+  const catOrder = categoryOrderFor(spec);
+  if (spec.xAxisType === "categorical" && catOrder?.length) {
     const xValues = new Set(rows.map((r) => r[cols.x] as string));
-    const unknown = spec.x_order.filter((v) => !xValues.has(v));
+    const unknown = catOrder.filter((v) => !xValues.has(v));
     if (unknown.length) {
+      const field = spec.category_order ? "category_order" : "x_order";
       errors.push(
-        `x_order names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
+        `${field} names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
       );
     }
   }

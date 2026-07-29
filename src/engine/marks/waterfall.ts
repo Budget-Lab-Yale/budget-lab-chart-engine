@@ -94,6 +94,9 @@ export function buildWaterfallMarks(
         stroke: connColor,
         strokeWidth: 1,
         strokeDasharray: "1 3",
+        // A connector sits at its step's cumulative level, so it goes off-frame with the bar it
+        // leaves; clip it alongside the bars (the value labels stay unclipped by design).
+        ...clipOpt,
       }),
     );
   }

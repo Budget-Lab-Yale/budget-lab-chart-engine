@@ -41,7 +41,7 @@ function buildSymbolSwatch(
 
 /** Build a point-marker legend swatch (an inline SVG): just the filled symbol, no line. Used
  *  for point charts — colored by series in the color legend, neutral gray in the shape legend. */
-function buildPointSwatch(doc: Document, color: string, symbol: string): SVGSVGElement {
+function buildPointSwatch(doc: Document, color: string, symbol: string, hollow = false): SVGSVGElement {
   const svg = doc.createElementNS(SVG_NS, "svg");
   svg.setAttribute("width", "18");
   svg.setAttribute("height", "16");
@@ -52,9 +52,11 @@ function buildPointSwatch(doc: Document, color: string, symbol: string): SVGSVGE
   // center, which reads as slightly low for a small marker beside 12px text.
   path.setAttribute("d", symbolPathD(symbol, 100));
   path.setAttribute("transform", "translate(9,7)");
-  path.setAttribute("fill", color);
-  path.setAttribute("stroke", "#ffffff");
-  path.setAttribute("stroke-width", "1");
+  // Hollow (dumbbell): a ring — page-background fill, series-color stroke — matching the chart's
+  // hollow dots. Solid otherwise, with the usual white keyline.
+  path.setAttribute("fill", hollow ? "#ffffff" : color);
+  path.setAttribute("stroke", hollow ? color : "#ffffff");
+  path.setAttribute("stroke-width", hollow ? "1.5" : "1");
   svg.appendChild(path);
   return svg;
 }
@@ -236,7 +238,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, nonInteractive } of safeItems) {
+  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -261,7 +263,7 @@ export function renderLegend(
       // Point chart: a filled colored marker (no line). The symbol is the series' shape in the
       // redundant (combined) case, else a plain circle (shape lives in the shape legend).
       swatch.classList.add("is-point");
-      swatch.appendChild(buildPointSwatch(doc, color || SHAPE_LEGEND_COLOR, markerSymbol || "circle"));
+      swatch.appendChild(buildPointSwatch(doc, color || SHAPE_LEGEND_COLOR, markerSymbol || "circle", hollow));
     } else if (markerShape === "chip") {
       // Point chart color-only legend: a filled rounded-square color key (in the is-point box).
       swatch.classList.add("is-point");

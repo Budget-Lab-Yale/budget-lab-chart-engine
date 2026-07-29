@@ -4,6 +4,95 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-07-29
+
+### Added — dumbbell
+
+- **New `chartType: "dumbbell"`** — a connected dot plot: one dot per series in each category joined
+  by a connector stem, so the GAP between two or three non-summing values (e.g. current-law vs.
+  static vs. collected effective rates) is the visual subject. `xAxisType` must be `categorical`;
+  `orientation` (`horizontal` default \| `vertical`) flips the rendering. Map the categorical column
+  via `columns.category` (a synonym for `columns.x`); category order via `category_order` (synonym
+  for `x_order`). Reuses the shared `series_*` fields, `columns.facet` + `small_multiples`, and the
+  standard legend/hover/PNG-SVG export.
+- **Marker styles** — `series_marker` sets each series' dot to `filled` (solid series color),
+  `hollow` (ring: series-color outline, page-background center), or `ink` (filled neutral). The
+  legend swatch matches (hollow reads as a ring).
+- **Connector, gap annotation, formatting** — `connector` (color/width/solid|dashed|dotted),
+  `gap_annotation` (label the |a − b| gap per stem), `dot_radius`, `value_axis_title`,
+  `value_format`. Single-dot / coincident categories draw no stem.
+- **Value axis fits the data** (no forced zero baseline), including zero only when the dots cross
+  it. Faceted dumbbells share a common value scale by default.
+- **Per-category band hover** (both orientations) — hovering a category's row/column highlights the
+  band and shows a tooltip listing each series' value; faceted dumbbells get a **coordinated
+  cursor** that echoes the band across panes. (The categorical crosshair gained a horizontal mode.)
+- **Sections** (`columns.section`, horizontal) — group categories into labeled blocks with bold
+  gutter headers, like horizontal bars.
+- **Horizontal dumbbells auto-grow their height** with the category-row count (and section spacers),
+  reusing the horizontal-bar height helper — no more cramped/overflowing rows at high category
+  counts. Standalone and faceted panes alike.
+- **Facet layout matches orientation**: horizontal dumbbell facets **stack vertically** (one
+  full-width pane per row — a horizontal value axis needs the width); vertical dumbbell facets sit
+  **side by side** in the usual grid.
+- **Consistent dot draw order** — dots render series-major (first series drawn first, last on top),
+  so overlapping dots stack identically in every category.
+- **Gap annotation** renders at the connector midpoint, prefixed with `Δ` (and skips zero-gap
+  categories), so it reads as a difference rather than a value competing with the axis.
+
+### Added — line-to-baseline shading
+
+- **New `shading` field (line charts).** A list of independent regions, each filling between a line
+  and its baseline: `{series?, side?, from?, to?, color?, fillOpacity?}`. Omit `series` to shade every
+  in-scope series in its own color. Several regions may cover one series, so a base tint plus a
+  differently-colored projection window is a two-entry spec.
+- **`side: positive | negative`** restricts a fill to one side of zero, splitting the series at its
+  zero crossings and interpolating each crossing so the fill closes flat on the baseline rather than
+  on a slanted edge.
+- **`from`/`to`** restrict a fill to an x range. A bound falling between two data points is
+  interpolated to that exact x, so the edge lands where the spec says instead of at the nearest
+  point. Categorical axes crop on category boundaries (bounds must name existing categories).
+- Baseline is zero when zero is in view, else the nearer domain edge, so a fill never leaves the
+  frame. Shading does not expand the y-domain — use `yAxisPolicy.includeZero` for that.
+- Fills paint behind the gridlines and beneath `confidence_bands`, and dim with their series in the
+  legend.
+- Validation rejects `shading` on a non-line chart, an unknown series, a categorical bound naming a
+  missing category, and a `side` that could never match the data.
+
+### Fixed — marks escaping a truncated value axis
+
+- **Line marks are now clipped to the plot frame.** A `yAxisPolicy.min`/`max` narrower than the data
+  used to let lines, confidence bands and point markers paint outside the frame entirely — a spike
+  rendered over the title and legend and off the top of the SVG, not merely inside the plot box. The
+  clip is geometric, so the stroke runs to its true crossing with the axis edge and stops there;
+  nothing is dropped or clamped, and a series that re-enters the range resumes at the correct x.
+  Pre-clipping the source data as a workaround is no longer needed (and was never right — it either
+  fakes a plateau or reads as missing data, and the chart's CSV download shipped the altered values).
+- **The clip gate now fires in both directions and either sign.** It was `yDomain[0] > 0`, which only
+  caught a raised floor on positive data: a bar taller than a hard `max`, or a bar below a negative
+  `min`, still overflowed. The gate compares the resolved domain against the geometry each chart type
+  actually paints (`computeDrawnValueExtent`), so label headroom alone never triggers it and charts
+  whose data fits stay byte-identical.
+- **Waterfall charts now clip.** `clipMarks` was read by the waterfall builder but never set for
+  `chartType: "waterfall"`, so a truncated waterfall's bars and connectors spilled out of the frame.
+- **Line hover hit-paths inherit the clip.** The invisible fat clone used for click-to-select is
+  inserted at the SVG root and kept the off-frame geometry, leaving a phantom hit zone over the
+  title/legend on a clipped chart.
+- **Dumbbell dots and connector stems now clip.** A dumbbell fits its data rather than forcing a zero
+  baseline, so an author-set `yAxisPolicy.min`/`max` is ordinary — and an out-of-range dot landed far
+  off the canvas (one measured at `cx ≈ 2849` on a 720px chart). Gap annotations stay unclipped, so a
+  label is never cut in half.
+
+Every chart type now clips. Value labels, gap annotations and reference lines stay unclipped by
+design — a half-cut label reads worse than one sitting past the axis.
+
+### Fixed — bar/stacked
+
+- **All-zero bar/stacked charts no longer render full-height bars.** When every value was `0` the
+  value extent collapsed to `[0, 0]`, making the scale singular and painting full-height,
+  single-color bars labeled `0%`. The axis range is now floored to `[0, 1]` while bars stay sized to
+  their real `0` (zero height). Affects both `stacked` and grouped `bar`; some-categories-zero
+  charts and all non-degenerate charts are unchanged.
+
 ## [1.6.1] - 2026-07-21
 
 ### Fixed — interaction
