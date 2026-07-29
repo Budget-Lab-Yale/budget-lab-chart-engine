@@ -1102,17 +1102,22 @@ describe("renderLegend handle.toggle (single source of truth)", () => {
 // ---------------------------------------------------------------------------
 
 describe("formatValue tooltip precision", () => {
+  const NONE = { prefix: "", suffix: "" };
   it("defaults to 2 decimals", () => {
-    expect(formatValue(0.0024, "")).toBe("0.00");
-    expect(formatValue(1.5, "%")).toBe("1.50%");
+    expect(formatValue(0.0024, NONE)).toBe("0.00");
+    expect(formatValue(1.5, { prefix: "", suffix: "%" })).toBe("1.50%");
   });
   it("honors an explicit decimals count (tooltip more precise than the axis)", () => {
-    expect(formatValue(0.0024, "")).toBe("0.00"); // axis-style
-    expect(formatValue(0.0024, "", 4)).toBe("0.0024"); // tooltip-style
-    expect(formatValue(0.0286, "", 4)).toBe("0.0286");
+    expect(formatValue(0.0024, NONE)).toBe("0.00"); // axis-style
+    expect(formatValue(0.0024, NONE, 4)).toBe("0.0024"); // tooltip-style
+    expect(formatValue(0.0286, NONE, 4)).toBe("0.0286");
   });
   it("renders an em dash for non-finite values", () => {
-    expect(formatValue(NaN, "", 4)).toBe("—");
+    expect(formatValue(NaN, NONE, 4)).toBe("—");
+  });
+  it("carries both affixes, with the prefix inside the minus sign", () => {
+    expect(formatValue(1200, { prefix: "$", suffix: " bn" })).toBe("$1200.00 bn");
+    expect(formatValue(-5, { prefix: "$", suffix: "" })).toBe("-$5.00");
   });
 });
 

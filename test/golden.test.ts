@@ -96,6 +96,7 @@ const AUGMENTED_SPEC: ChartSpec = {
   title:
     "Proportion of Workers in Occupations Augmented by AI by Duration of Unemployment",
   subtitle: "Percent. Three-month moving average.",
+  value_suffix: "%",
   source: "CPS, Anthropic, The Budget Lab analysis",
   xAxisType: "temporal",
   series_order: ["<5 Weeks", "5-14 Weeks", "15-26 Weeks", "27+ Weeks"],
@@ -427,8 +428,9 @@ describe("golden SVG — bars", () => {
       document,
     });
     // A top tick-label row (frameAnchor:"top" text marks) in addition to the default bottom row —
-    // 6 tick values (0%..5%) rendered twice (top + bottom).
-    const tickTexts = Array.from(svg.querySelectorAll("text")).filter((t) => /^\d%$/.test(t.textContent ?? ""));
+    // 6 tick values (0..5) rendered twice (top + bottom). Matched on the bare number: this fixture's
+    // subtitle is "Percentage points" and it sets no `value_suffix`, so the ticks carry no unit.
+    const tickTexts = Array.from(svg.querySelectorAll("text")).filter((t) => /^\d$/.test(t.textContent ?? ""));
     expect(tickTexts.length).toBe(12);
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/bar-horizontal-both-ticks.golden.svg");
   });
@@ -760,6 +762,7 @@ const FIG7_FACETED_SPEC: ChartSpec = {
   chartType: "bar",
   title: "Consumer Price Effects by PCE Spending Category",
   subtitle: "Percent change in consumer prices",
+  value_suffix: "%",
   xAxisType: "categorical",
   orientation: "horizontal",
   series_order: ["Pre-Substitution", "Post-Substitution"],
@@ -854,6 +857,7 @@ describe("bar builder — sectioned horizontal category axis", () => {
     chartType: "bar",
     title: "t",
     subtitle: "Percent change in consumer prices",
+    value_suffix: "%",
     xAxisType: "categorical",
     orientation: "horizontal",
     series_order: ["Pre-Substitution", "Post-Substitution"],
@@ -1148,7 +1152,7 @@ describe("assemblePlot — fy/fx facet invariant guard", () => {
   const baseArgs = {
     yDomain: [0, 1] as [number, number],
     yTicks: [0, 1],
-    units: "",
+    valueAffixes: { prefix: "", suffix: "" },
     xOpts: baseXOpts,
     seriesNames: ["Series"],
     colors: new Map([["Series", TBL.color.blue]]),
@@ -1440,6 +1444,7 @@ const STACKED_100_SPEC: ChartSpec = {
   chartType: "stacked",
   title: "Share of spending by level of government",
   subtitle: "Percent",
+  value_suffix: "%",
   xAxisType: "categorical",
   series_order: ["Federal", "State", "Local"],
   barStack: { normalize: true },
@@ -1747,7 +1752,7 @@ function buildFacetedPlot() {
     layers,
     yDomain,
     yTicks,
-    units: "",
+    valueAffixes: { prefix: "", suffix: "" },
     xOpts,
     seriesNames: ["Series"],
     colors: new Map([["Series", TBL.color.blue]]),
@@ -2312,7 +2317,7 @@ describe("axes primitives — pane titles + tick density (task B3)", () => {
     expect(temporalXTicks(xDomain, 0.5).length).toBe(dense.length); // floor->0, max->1
     expect(temporalXTicks(xDomain, -3).length).toBe(dense.length); // max(1, -3)=1
     // Sentinel against an unused import.
-    expect(typeof makeTickFormatter([0, 1], "")).toBe("function");
+    expect(typeof makeTickFormatter([0, 1], { prefix: "", suffix: "" })).toBe("function");
     expect(typeof d3.timeFormat).toBe("function");
   });
 });

@@ -4,6 +4,44 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-07-29
+
+### Added — explicit value units
+
+- **New `value_prefix` / `value_suffix`.** State a chart's units instead of having them guessed:
+  `value_suffix: "%"`, `value_suffix: " pp"`, `value_prefix: "$"`, or both
+  (`value_prefix: "$"` + `value_suffix: " billion"`). They apply everywhere a number is rendered —
+  axis ticks, the horizontal-bar value axis, stacked segment and net labels, waterfall running
+  totals, and hover tooltips.
+- Concatenated **literally**, so the author owns spacing (`%` wants none, `" pp"` does). A prefix sits
+  **after** a minus sign, so a negative currency value reads `-$5`, not `$-5`.
+- A narrower explicitly-set format still wins locally: a per-annotation `value_format`, and a
+  dumbbell's `gap_annotation.format` (else its chart-level `value_format`) for the gap label.
+
+### Removed — units inferred from the subtitle
+
+- **`subtitle` no longer affects number formatting.** It was substring-matched for `"percent"` and,
+  on a hit, `%` was appended to every rendered value. Consequences, all now gone:
+  - `subtitle: "Percentage points"` rendered a 2 pp change as **`2%`** — a change presented as a rate.
+    This is the reported bug.
+  - `subtitle: "Percentiles"` also got `%`, because the match was a bare substring test.
+  - The condition's second clause (`includes("percentage point")`) was unreachable, since any such
+    string already contains `"percent"`.
+- **Breaking for charts that relied on the inference**: their axes lose `%` until they set
+  `value_suffix: "%"`. In `budget-lab-charts` that is three figures (`ai-fiscal/debt-to-gdp`,
+  `tariff-model-update-july2026/etr-vintages`, `recession-indicators/ui-percent`); five others were
+  being mislabelled and are corrected by the removal alone.
+- Chart-level `value_format`'s doc comment claimed it formatted "axis ticks / hover / gap labels";
+  only the gap label ever read it. The comment now says what it does.
+
+### Changed — internal
+
+- The threaded `units: string` became `valueAffixes: ValueAffixes` (`{prefix, suffix}`) on
+  `AssembleOptions`, `PaneResult`, `RenderResult`, `FigurePane` and `FigureRenderResult`;
+  `makeTickFormatter`, `formatValue` and the stacked/waterfall label formatters take it in place of a
+  bare suffix string. `inferUnitsFromSubtitle` is deleted, replaced by `resolveValueAffixes` and
+  `applyValueAffixes`.
+
 ## [1.7.0] - 2026-07-29
 
 ### Added — dumbbell

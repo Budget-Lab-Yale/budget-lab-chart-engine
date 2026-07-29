@@ -13,7 +13,8 @@ import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { resolveColor } from "../palette";
 import { CAT_LABEL_CLASS } from "../axes";
-import { inferUnitsFromSubtitle } from "../util";
+import { applyValueAffixes, resolveValueAffixes } from "../util";
+import type { ValueAffixes } from "../../spec/types";
 import { computeWaterfallSteps, waterfallValueDecimals } from "../scales";
 import type { WaterfallStep } from "../scales";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
@@ -24,14 +25,13 @@ const DEFAULT_INCREASE = "blue";
 const DEFAULT_DECREASE = "red";
 const DEFAULT_TOTAL = "navy";
 
-/** Fixed-precision value-label formatter with the subtitle-inferred units suffix. `decimals` is
- *  the shared waterfall precision (see waterfallValueDecimals), so labels and the hover delta agree. */
-function makeLevelFormatter(units: string, decimals: number): (v: number) => string {
+/** Fixed-precision value-label formatter carrying the chart's value affixes. `decimals` is the
+ *  shared waterfall precision (see waterfallValueDecimals), so labels and the hover delta agree. */
+function makeLevelFormatter(affixes: ValueAffixes, decimals: number): (v: number) => string {
   const maxFrac = decimals;
   return (v: number) => {
     if (!Number.isFinite(v)) return "";
-    const s = v.toFixed(maxFrac);
-    return units ? `${s}${units}` : s;
+    return applyValueAffixes(v.toFixed(maxFrac), affixes);
   };
 }
 
@@ -109,8 +109,10 @@ export function buildWaterfallMarks(
   //     rising bar / below a falling one. Color-matched to the bar and drawn at ONE uniform
   //     size + weight for totals and deltas alike (pane-aware — smaller in small-multiples). ---
   if (spec.valueLabels?.show === true) {
-    const units = inferUnitsFromSubtitle(spec.subtitle);
-    const fmt = makeLevelFormatter(units, waterfallValueDecimals(data, spec.valueLabels?.decimals));
+    const fmt = makeLevelFormatter(
+      resolveValueAffixes(spec),
+      waterfallValueDecimals(data, spec.valueLabels?.decimals),
+    );
     const labelSize = ctx.pane ? 10.5 : TBL_VALUE_LABEL.fontSize;
     const pushLabels = (rising: boolean): void => {
       const rows = barSteps

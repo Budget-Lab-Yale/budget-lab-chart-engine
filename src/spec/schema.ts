@@ -288,6 +288,8 @@ export const CHART_SPEC_SCHEMA = {
       additionalProperties: TITLE_SELECTOR,
     },
     subtitle: { type: "string" },
+    value_prefix: { type: "string" },
+    value_suffix: { type: "string" },
     source: { type: "string" },
     note: { type: "string" },
     x_axis_title: { type: "string" },

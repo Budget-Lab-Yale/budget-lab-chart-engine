@@ -1,7 +1,8 @@
 // Y-axis domain/tick computation + tick formatting. Pure; no DOM.
 import { d3 } from "./vendor";
-import type { ChartSpec, ChartType } from "../spec/types";
+import type { ChartSpec, ChartType, ValueAffixes } from "../spec/types";
 import type { PreparedRow } from "./marks/index";
+import { applyValueAffixes } from "./util";
 
 export interface YAxisResult {
   domain: [number, number];
@@ -352,8 +353,11 @@ export function waterfallValueDecimals(data: PreparedRow[], explicit?: number): 
 
 /** A tick formatter that uses the minimum decimal precision needed across the whole
  * tick array — no ".0" when every tick is an integer; one decimal when ticks step by
- * 0.5; etc. Optionally appends a units suffix (e.g. "%"). */
-export function makeTickFormatter(ticks: number[], units = ""): (d: number) => string {
+ * 0.5; etc. Wraps each tick in the chart's value affixes (e.g. "%", "$"). */
+export function makeTickFormatter(
+  ticks: number[],
+  affixes: ValueAffixes = { prefix: "", suffix: "" },
+): (d: number) => string {
   const maxFrac = ticks.reduce((max, t) => {
     if (!Number.isFinite(t)) return max;
     const s = String(t);
@@ -362,7 +366,6 @@ export function makeTickFormatter(ticks: number[], units = ""): (d: number) => s
   }, 0);
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
-    const s = d.toFixed(maxFrac);
-    return units ? `${s}${units}` : s;
+    return applyValueAffixes(d.toFixed(maxFrac), affixes);
   };
 }

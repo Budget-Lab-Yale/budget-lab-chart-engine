@@ -56,12 +56,41 @@ it defaults to `x: time`, `value: value`, `series: series`.
 
 | field | type | notes |
 |---|---|---|
-| `subtitle` | string | Below the title (often the units). |
+| `subtitle` | string | Below the title (conventionally naming the units). **Display text only** — it does not affect number formatting; use `value_prefix`/`value_suffix` for that. |
 | `source` | string | Source line below the chart. |
 | `note` | string | Note line below the chart, above the source. |
 | `x_axis_title` | string | Caption below the x-axis. |
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
 | `tooltip_decimals` | integer | Decimal places for values in hover tooltips (independent of axis ticks). Default 2. |
+
+### Value units
+
+| field | type | notes |
+|---|---|---|
+| `value_prefix` | string | Text placed **before** every rendered value — axis ticks, value labels, tooltips. Concatenated literally, so include any space you want (`"$"` vs `"USD "`). On a negative value it sits **after** the minus sign: `-$5`. |
+| `value_suffix` | string | Text placed **after** every rendered value. Concatenated literally, so include any leading space you want (`" pp"`, `" billion"`); `"%"` normally wants none. |
+
+```yaml
+subtitle: Percentage points     # prose; read by nothing
+value_suffix: " pp"             # -> axis "2 pp", tooltip "2.00 pp"
+```
+
+```yaml
+value_prefix: "$"
+value_suffix: " billion"        # -> "$1200 billion", "-$40 billion"
+```
+
+No spacing is inserted for you, because `%` wants none and ` pp` does — only the author knows which.
+
+**Precedence.** A narrower explicitly-set format still wins locally: a per-annotation
+`value_format` (on an `annotations.xAxis`/`yAxis`/`points` marker) formats that annotation's
+`{value}`, and a dumbbell's `gap_annotation.format` — else its chart-level `value_format` — formats
+the gap label. Everything else uses `value_prefix`/`value_suffix`.
+
+> **Changed in 1.8.0.** Units used to be **guessed from the subtitle** by substring-matching
+> `"percent"`. That put `%` on percentage-*point* charts (a 2 pp change rendered as `2%`) and on any
+> subtitle merely containing those letters, e.g. `"Percentiles"`. The inference is gone: a chart that
+> wants a `%` must now say `value_suffix: "%"`.
 
 ### Inline title selector
 

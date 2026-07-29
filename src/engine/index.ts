@@ -5,7 +5,7 @@
 // This is the tracker's buildLineChart, generalized: data prep + axis computation are
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
-import type { ChartSpec } from "../spec/types";
+import type { ChartSpec, ValueAffixes } from "../spec/types";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
@@ -29,7 +29,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
-import { inferUnitsFromSubtitle, isTruthyFlag } from "./util";
+import { resolveValueAffixes, isTruthyFlag } from "./util";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -160,7 +160,7 @@ export interface RenderResult {
   seriesOrder: string[];
   dashedNames: Set<string>;
   colors: Map<string, string>;
-  units: string;
+  valueAffixes: ValueAffixes;
   xAxisTitle: string | null;
   /** Rows actually rendered (series-filtered), for the crosshair. */
   dataInScope: PreparedRow[];
@@ -202,7 +202,7 @@ export interface PaneResult {
   /** Series order (also the filter when spec.series_order is set). */
   seriesNames: string[];
   colors: Map<string, string>;
-  units: string;
+  valueAffixes: ValueAffixes;
   /** The y-domain this pane was rendered against (after the auto/hard/bar-extent resolution,
    *  or the forced opts.yDomain). The shared-mode orchestrator probe-renders over all rows and
    *  reads this to obtain the one shared domain. */
@@ -617,7 +617,7 @@ function assemblePaneResult(
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
-  const units = inferUnitsFromSubtitle(spec.subtitle);
+  const valueAffixes = resolveValueAffixes(spec);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
   // Approximation: uses TBL_MARGIN_TOP (matches tblPlotDefaults default) and the adapter's
@@ -713,7 +713,7 @@ function assemblePaneResult(
     layers,
     yDomain,
     yTicks,
-    units,
+    valueAffixes,
     xOpts,
     seriesNames,
     colors,
@@ -735,7 +735,7 @@ function assemblePaneResult(
     svg,
     seriesNames,
     colors,
-    units,
+    valueAffixes,
     yDomain,
     dataInScope,
     layers,
@@ -871,7 +871,7 @@ export function renderChart(
   opts: RenderOptions = {},
 ): RenderResult {
   const pane = renderPane(spec, rows, opts);
-  const { svg, seriesNames, colors, units, dataInScope, layers } = pane;
+  const { svg, seriesNames, colors, valueAffixes, dataInScope, layers } = pane;
 
   const seriesLabels = spec.series_labels ?? {};
   const legendItems = buildLegendItems(spec, seriesNames, colors, layers);
@@ -887,7 +887,7 @@ export function renderChart(
     seriesOrder: seriesNames,
     dashedNames: layers.dashedNames,
     colors,
-    units,
+    valueAffixes,
     xAxisTitle: spec.x_axis_title ?? null,
     dataInScope,
     tooltipXParse: pane.tooltipXParse,

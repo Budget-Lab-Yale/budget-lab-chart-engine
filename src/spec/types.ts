@@ -24,6 +24,14 @@ export interface ValueFormat {
   suffix?: string;
 }
 
+/** The chart-wide value affixes, resolved from `value_prefix`/`value_suffix`. Threaded through the
+ *  render so axis ticks, value labels and tooltips all format numbers the same way. Empty strings
+ *  mean "nothing to add", so an unset chart renders bare numbers. */
+export interface ValueAffixes {
+  prefix: string;
+  suffix: string;
+}
+
 export interface XAxisMarker {
   x: string;
   /** May contain a literal `{value}` token, replaced with this marker's own `x` — formatted
@@ -332,6 +340,14 @@ export interface ChartSpec {
    *  for small magnitudes that round to 0.00 on a 2-decimal axis. Default 2. */
   tooltip_decimals?: number;
 
+  /** Text placed BEFORE every rendered value — axis ticks, value labels, tooltips. Concatenated
+   *  literally, so include any space you want (`"$"` vs `"USD "`); on a negative value it sits after
+   *  the minus sign (`-$5`). Nothing is inferred from `subtitle` — that is prose only. */
+  value_prefix?: string;
+  /** Text placed AFTER every rendered value. Concatenated literally, so include any leading space
+   *  you want (`" pp"`, `" billion"`); `"%"` normally wants none. */
+  value_suffix?: string;
+
   // Axes
   xAxisType: XAxisType;
   xAxisPolicy?: XAxisPolicy;
@@ -476,7 +492,9 @@ export interface ChartSpec {
   gap_annotation?: boolean | { series_a: string; series_b: string; format?: ValueFormat };
   /** Value-axis title (short caption on the numeric axis). */
   value_axis_title?: string;
-  /** Number format for dot values in axis ticks / hover / gap labels (reuses ValueFormat). */
+  /** Number format for a dumbbell's GAP LABEL (reuses ValueFormat); `gap_annotation.format` wins
+   *  over it. It does NOT drive axis ticks or hover — those come from `value_prefix`/`value_suffix`
+   *  like every other chart type. */
   value_format?: ValueFormat;
 
   /** Series keys to visually highlight (dimming all others). */
