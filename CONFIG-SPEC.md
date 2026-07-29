@@ -106,11 +106,11 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `yAxisPolicy.autoWiden.step` | number | When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
 
 **Truncating the axis below the data.** When `min`/`max` cut into the data, **bar**, **stacked**,
-**waterfall** and **line** charts clip their marks to the plot frame: the geometry runs to its true
+**waterfall**, **line** and **dumbbell** charts clip their marks to the plot frame: the geometry runs to its true
 crossing with the axis edge and stops there. Nothing is dropped or clamped, so the shape resumes at
 the correct x when a series re-enters the range — do *not* pre-clip the source data (that either
 fakes a plateau or reads as missing data, and the chart's CSV download would ship the altered
-values). **Area, scatter, dotplot and dumbbell do not clip yet** and will overflow a truncated axis.
+values). **Area, scatter and dotplot do not clip yet** and will overflow a truncated axis.
 A line leaving the frame is honest but easy to misread as the end of the series, so pair a truncated
 axis with a note or an `annotations.yAxis` marker at the ceiling.
 

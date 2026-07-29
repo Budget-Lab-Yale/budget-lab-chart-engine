@@ -151,12 +151,19 @@ export function buildDumbbellMarks(
     sectioned ? { fy: field, y: () => SINGLE_SLOT } : horizontal ? { y: field } : { x: field };
   const catChannels = sectioned ? {} : facetChannels;
 
+  // Truncated value axis (see assemblePaneResult's clip gate): clip the dots + stems to the frame.
+  // Reachable here more easily than on other types, because a dumbbell fits its data instead of
+  // forcing a zero baseline, so an author-set yAxisPolicy min/max is ordinary. Gap labels stay
+  // unclipped — a half-cut number is worse than one sitting past the axis.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
+
   const connOpts = {
     stroke: connColor,
     strokeWidth: connWidth,
     className: CONNECTOR_CLASS,
     ...(connDash ? { strokeDasharray: connDash } : {}),
     ...catChannels,
+    ...clipOpt,
   };
 
   const underlay: unknown[] = [];
@@ -193,6 +200,7 @@ export function buildDumbbellMarks(
     strokeWidth: (d: PreparedRow) => strokeWidthFor(d.series),
     r,
     ...catChannels,
+    ...clipOpt,
   };
   const overlay: unknown[] = [Plot.dot(dotData, dotOpts)];
 

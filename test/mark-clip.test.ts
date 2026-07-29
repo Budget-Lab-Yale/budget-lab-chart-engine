@@ -227,6 +227,74 @@ describe("waterfall marks — clipMarks is now actually set", () => {
   });
 });
 
+describe("dumbbell marks — a fitted axis makes truncation ordinary", () => {
+  // A dumbbell fits its data instead of forcing a zero baseline, so an author-set min/max is a
+  // normal thing to write — which is exactly how an unclipped dot ended up ~4x beyond the canvas.
+  const DB_BASE = {
+    chartType: "dumbbell",
+    title: "t",
+    xAxisType: "categorical",
+    series_order: ["Current", "Proposed"],
+    columns: { category: "cat", value: "value", series: "series" },
+  } as unknown as ChartSpec;
+
+  const pairs = (vals: Array<[string, number, number]>): TidyRow[] =>
+    vals.flatMap(([cat, a, b]) => [
+      { cat, series: "Current", value: String(a) },
+      { cat, series: "Proposed", value: String(b) },
+    ]) as unknown as TidyRow[];
+
+  const SPIKY = pairs([["A", 5, 12], ["B", 8, 85]]);
+
+  for (const orientation of ["horizontal", "vertical"] as const) {
+    it(`clips ${orientation} dots and stems when a dot exceeds the hard max`, () => {
+      const spec = { ...DB_BASE, orientation, yAxisPolicy: { min: 0, max: 20 } } as ChartSpec;
+      const { svg } = renderChart(spec, SPIKY, { width: 720, height: 400, document });
+      expect(clipCount(svg)).toBe(1);
+      // Both the dot mark and the connector stems sit inside the clip.
+      expect(svg.querySelector('g[aria-label="dot"] circle')!.closest("[clip-path]")).not.toBeNull();
+      expect(svg.querySelector('g[aria-label="rule"] line')).not.toBeNull();
+    });
+  }
+
+  it("clips when a hard min cuts below the lowest dot", () => {
+    const spec = { ...DB_BASE, yAxisPolicy: { min: 6, max: 20 } } as ChartSpec;
+    const { svg } = renderChart(spec, pairs([["A", 2, 12]]), { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+  });
+
+  it("does NOT clip on the fitted auto domain (the padded extent contains every dot)", () => {
+    const { svg } = renderChart(DB_BASE, SPIKY, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(0);
+  });
+
+  it("does NOT clip when the hard domain contains every dot", () => {
+    const spec = { ...DB_BASE, yAxisPolicy: { min: 0, max: 100 } } as ChartSpec;
+    const { svg } = renderChart(spec, SPIKY, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(0);
+  });
+
+  it("does NOT clip when the hard max only eats the dumbbell's breathing pad", () => {
+    // computeDumbbellValueExtent pads 5% past the data, so a max at exactly the data max still
+    // contains every dot and must not trigger the extra <g>.
+    const spec = { ...DB_BASE, yAxisPolicy: { min: 5, max: 85 } } as ChartSpec;
+    const { svg } = renderChart(spec, SPIKY, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(0);
+  });
+
+  it("keeps the gap annotation unclipped so a label is never cut in half", () => {
+    const spec = {
+      ...DB_BASE,
+      gap_annotation: true,
+      yAxisPolicy: { min: 0, max: 20 },
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, SPIKY, { width: 720, height: 400, document });
+    const texts = Array.from(svg.querySelectorAll('g[aria-label="text"]'));
+    expect(texts.length).toBeGreaterThan(0);
+    for (const t of texts) expect(t.closest("[clip-path]")).toBeNull();
+  });
+});
+
 describe("computeDrawnValueExtent", () => {
   const prep = (ys: number[]): PreparedRow[] =>
     ys.map((y, i) => ({ series: "A", _y: y, _xc: `c${i}` })) as unknown as PreparedRow[];
@@ -279,8 +347,15 @@ describe("computeDrawnValueExtent", () => {
     expect(computeDrawnValueExtent(wf, {} as ChartSpec, "waterfall")).toEqual({ min: 0, max: 140 });
   });
 
+  it("dumbbell: raw dot positions, with neither zero nor the breathing pad", () => {
+    expect(computeDrawnValueExtent(prep([12, 30]), {} as ChartSpec, "dumbbell")).toEqual({
+      min: 12,
+      max: 30,
+    });
+  });
+
   it("returns null for the chart types that do not honor clipMarks yet", () => {
-    for (const t of ["area", "scatter", "dotplot", "dumbbell", "histogram"] as const) {
+    for (const t of ["area", "scatter", "dotplot", "histogram"] as const) {
       expect(computeDrawnValueExtent(prep([1, 2]), {} as ChartSpec, t)).toBeNull();
     }
   });

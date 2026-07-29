@@ -238,8 +238,8 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
  *
  * Returns null for chart types whose mark builder does not honor `MarkContext.clipMarks`; wiring a
  * new type is exactly two steps — a case here plus `...clipOpt` on its marks. Not wired yet:
- * area, scatter/dotplot, dumbbell. Histogram renders through renderHistogramPane, which has its
- * own (currently unclipped) path.
+ * area, scatter/dotplot. Histogram renders through renderHistogramPane, which has its own
+ * (currently unclipped) path.
  */
 export function computeDrawnValueExtent(
   data: PreparedRow[],
@@ -285,6 +285,14 @@ export function computeDrawnValueExtent(
       min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
       max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
     };
+  }
+
+  if (chartType === "dumbbell") {
+    // Dots are POSITIONS, not magnitudes from zero, so zero is not part of the painted geometry
+    // (see computeDumbbellValueExtent) — and no padding here, unlike that one.
+    const vals = data.map((r) => r._y).filter(finite);
+    if (!vals.length) return null;
+    return { min: Math.min(...vals), max: Math.max(...vals) };
   }
 
   if (chartType === "waterfall") {

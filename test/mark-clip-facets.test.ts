@@ -362,6 +362,55 @@ describe.skipIf(!HAS_BROWSER)("rasterized — faceted clip confines marks to the
     expect(belowByBucket[1]).toBeGreaterThan(belowByBucket[2]!);
   }, 60_000);
 
+  it("dumbbell: the runaway dot is trimmed at the frame, and the in-range dots survive", async () => {
+    // Unclipped, this spec put a dot at cx ≈ 2849 on a 720px canvas. Count DOT-colored ink to the
+    // right of the frame — geometry alone can't prove the clip renders, only that it's attached.
+    const spec = {
+      chartType: "dumbbell",
+      title: "db",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      series_order: ["Current", "Proposed"],
+      columns: { category: "cat", value: "value", series: "series" },
+      yAxisPolicy: { min: 0, max: 20 },
+    } as unknown as ChartSpec;
+    const rows = [
+      { cat: "A", series: "Current", value: "5" },
+      { cat: "A", series: "Proposed", value: "12" },
+      { cat: "B", series: "Current", value: "8" },
+      { cat: "B", series: "Proposed", value: "85" },
+    ] as unknown as TidyRow[];
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(svg.querySelectorAll("clipPath").length).toBe(1);
+
+    const fills = new Set<string>();
+    for (const c of Array.from(svg.querySelectorAll('g[aria-label="dot"] circle'))) {
+      const f = c.getAttribute("fill");
+      if (f && f.startsWith("#")) fills.add(f);
+    }
+    expect(fills.size).toBeGreaterThan(0);
+    const colors = Array.from(fills).map(hexToRgb);
+
+    const png = await raster(svg);
+    // Split at the frame's RIGHT edge: everything past it must be empty of dot ink. countInk splits
+    // on y, so transpose the question by bucketing across x and reading the far bucket.
+    const frameRight = 720 - 16;
+    let beyond = 0;
+    let inside = 0;
+    const want = new Set(colors.map(([r, g, b]) => (r << 16) | (g << 8) | b));
+    for (let y = 0; y < png.height; y++) {
+      for (let x = 0; x < png.width; x++) {
+        const i = (y * png.width + x) * 4;
+        if (png.data[i + 3]! < 200) continue;
+        if (!want.has((png.data[i]! << 16) | (png.data[i + 1]! << 8) | png.data[i + 2]!)) continue;
+        if (x > frameRight) beyond++;
+        else inside++;
+      }
+    }
+    expect(beyond).toBe(0);
+    expect(inside).toBeGreaterThan(0);
+  }, 60_000);
+
   it("positive control: an AREA chart is not wired to clipMarks and DOES leak above the frame", async () => {
     // Guards the detector above: if `above` could never be non-zero, that assertion proves nothing.
     // Doubles as a live record of the unwired chart types (see MarkContext.clipMarks).
