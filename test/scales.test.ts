@@ -49,9 +49,20 @@ describe("makeTickFormatter", () => {
     expect(fmt(0.5)).toBe("0.5");
   });
 
-  it("appends a units suffix", () => {
-    const fmt = makeTickFormatter([0, 4, 8], "%");
+  it("appends the value suffix", () => {
+    const fmt = makeTickFormatter([0, 4, 8], { prefix: "", suffix: "%" });
     expect(fmt(4)).toBe("4%");
+  });
+
+  it("prepends the value prefix, keeping it inside the minus sign", () => {
+    const fmt = makeTickFormatter([-8, 0, 8], { prefix: "$", suffix: "" });
+    expect(fmt(4)).toBe("$4");
+    expect(fmt(-4)).toBe("-$4");
+  });
+
+  it("applies both affixes", () => {
+    const fmt = makeTickFormatter([0, 500, 1000], { prefix: "$", suffix: " bn" });
+    expect(fmt(500)).toBe("$500 bn");
   });
 });
 

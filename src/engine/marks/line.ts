@@ -17,8 +17,10 @@ import { splitProjectedRuns } from "./projected";
  *  selectors. */
 export const SHADE_CLASS = "tbl-shade";
 
-/** Matches the confidence-band tint, so a chart carrying both reads as one family. */
-const SHADE_FILL_OPACITY = 0.18;
+/** Shading is the subject of the chart, not chrome behind it, so it reads at half opacity rather than
+ *  the confidence-band tint (0.18) it originally borrowed. Override per region with `fillOpacity`.
+ *  Note two overlapping regions compound — 0.5 over 0.5 renders as 0.75. */
+const SHADE_FILL_OPACITY = 0.5;
 
 export function buildLineMarks(
   data: PreparedRow[],
@@ -47,15 +49,18 @@ export function buildLineMarks(
   // bands — a CI band is the more specific statement and should read on top of a broad fill — and,
   // being in the underlay, both sit behind the gridlines.
   //
-  // Baseline = clamp(0, ...yDomain): zero when zero is in view, else the nearer domain edge, so a
-  // fill can never leave the frame. `side` still keys off ZERO, not off this clamped baseline.
+  // Each region's baseline is `region.baseline ?? 0` — a threshold rather than zero when the author
+  // wants the breach shaded. `side` is measured against that raw value; the DRAWN edge is clamped
+  // into the y-domain so a fill can never leave the frame, exactly as the zero case always did.
   const shadeSeriesOrder: string[] = [];
   if (spec.shading?.length && ctx.yDomain) {
     const [domainLo, domainHi] = ctx.yDomain;
-    const baseline = Math.min(Math.max(0, domainLo), domainHi);
+    const clampToDomain = (v: number) => Math.min(Math.max(v, domainLo), domainHi);
     const parseBound = (v: string | undefined) =>
       v == null ? null : (ctx.parseXValue?.(v) ?? null);
     for (const region of spec.shading) {
+      const regionBaseline = region.baseline ?? 0;
+      const drawnBaseline = clampToDomain(regionBaseline);
       const targets =
         region.series != null
           ? [region.series]
@@ -65,6 +70,7 @@ export function buildLineMarks(
         if (!seriesPoints.length) continue;
         const runs = buildShadeRuns(seriesPoints, xField as ShadeXField, {
           side: region.side ?? "both",
+          baseline: regionBaseline,
           from: parseBound(region.from),
           to: parseBound(region.to),
         });
@@ -78,7 +84,7 @@ export function buildLineMarks(
         underlay.push(
           Plot.areaY(runs.flatMap((r) => r.rows), {
             x: xField,
-            y1: baseline,
+            y1: drawnBaseline,
             y2: "_y",
             z: "_seg",
             fill,

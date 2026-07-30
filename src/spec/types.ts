@@ -24,6 +24,14 @@ export interface ValueFormat {
   suffix?: string;
 }
 
+/** The chart-wide value affixes, resolved from `value_prefix`/`value_suffix`. Threaded through the
+ *  render so axis ticks, value labels and tooltips all format numbers the same way. Empty strings
+ *  mean "nothing to add", so an unset chart renders bare numbers. */
+export interface ValueAffixes {
+  prefix: string;
+  suffix: string;
+}
+
 export interface XAxisMarker {
   x: string;
   /** May contain a literal `{value}` token, replaced with this marker's own `x` — formatted
@@ -171,7 +179,12 @@ export interface SeriesStyle {
 export interface ShadeRegion {
   /** Series to fill under. Omitted → every in-scope series gets its own region, each in its own color. */
   series?: string;
-  /** Which side of zero to fill. Default "both". */
+  /** The value the fill runs to, and what `side` is measured against. Default 0. Set it to a rule's
+   *  threshold (0.5, 15, -0.7) to shade only the breach — the part of the line beyond that level,
+   *  filled back to it, rather than back to zero. Pair it with an `annotations.yAxis` marker at the
+   *  same `y` to draw the threshold line itself. */
+  baseline?: number;
+  /** Which side of `baseline` to fill. Default "both". */
   side?: "both" | "positive" | "negative";
   /** Inclusive x lower bound, in the same string form as `annotations.bands.start`. Omitted → the
    *  series' first point. A bound falling between two points is interpolated to that exact x. */
@@ -180,7 +193,7 @@ export interface ShadeRegion {
   to?: string;
   /** Fill color (named palette token or raw "#hex"). Omitted → the series' own resolved color. */
   color?: ColorRef;
-  /** Fill opacity. Default 0.18, matching confidence bands. */
+  /** Fill opacity, 0–1. Default 0.5. */
   fillOpacity?: number;
 }
 
@@ -332,6 +345,14 @@ export interface ChartSpec {
    *  for small magnitudes that round to 0.00 on a 2-decimal axis. Default 2. */
   tooltip_decimals?: number;
 
+  /** Text placed BEFORE every rendered value — axis ticks, value labels, tooltips. Concatenated
+   *  literally, so include any space you want (`"$"` vs `"USD "`); on a negative value it sits after
+   *  the minus sign (`-$5`). Nothing is inferred from `subtitle` — that is prose only. */
+  value_prefix?: string;
+  /** Text placed AFTER every rendered value. Concatenated literally, so include any leading space
+   *  you want (`" pp"`, `" billion"`); `"%"` normally wants none. */
+  value_suffix?: string;
+
   // Axes
   xAxisType: XAxisType;
   xAxisPolicy?: XAxisPolicy;
@@ -476,7 +497,9 @@ export interface ChartSpec {
   gap_annotation?: boolean | { series_a: string; series_b: string; format?: ValueFormat };
   /** Value-axis title (short caption on the numeric axis). */
   value_axis_title?: string;
-  /** Number format for dot values in axis ticks / hover / gap labels (reuses ValueFormat). */
+  /** Number format for a dumbbell's GAP LABEL (reuses ValueFormat); `gap_annotation.format` wins
+   *  over it. It does NOT drive axis ticks or hover — those come from `value_prefix`/`value_suffix`
+   *  like every other chart type. */
   value_format?: ValueFormat;
 
   /** Series keys to visually highlight (dimming all others). */

@@ -4,7 +4,7 @@
 // RE-RENDERED at the container's width (the x-axis compresses; height stays fixed) down to a
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
-import type { ChartSpec, TitleSelector } from "../spec/types.js";
+import type { ChartSpec, TitleSelector, ValueAffixes } from "../spec/types.js";
 import { resolveColumns } from "../spec/columns.js";
 import {
   parseTitleTokens,
@@ -19,6 +19,7 @@ import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { waterfallValueDecimals } from "./scales.js";
+import { applyValueAffixes } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
@@ -348,9 +349,9 @@ function cssAttrEscape(value: string): string {
 
 /** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
  *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
-export function formatValue(v: number, units: string, decimals = 2): string {
+export function formatValue(v: number, affixes: ValueAffixes, decimals = 2): string {
   if (!Number.isFinite(v)) return "—";
-  return `${v.toFixed(decimals)}${units}`;
+  return applyValueAffixes(v.toFixed(decimals), affixes);
 }
 
 // Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
@@ -797,7 +798,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       return;
     }
     const {
-      svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, units,
+      svg, legendItems, seriesLabels, seriesOrder, dashedNames, colors, valueAffixes,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, showTotalDot,
       shapeLegendItems, colorLegendTitle, shapeLegendTitle,
     } = built;
@@ -919,7 +920,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         xLabel: spec.x_axis_title ?? "x",
         yLabel: spec.y_axis_title ?? "Value",
         xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
       });
     } else if (spec.chartType === "dotplot") {
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
@@ -929,7 +930,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         bandHighlight: true,
         centersFromMarks: true,
       });
@@ -938,7 +939,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         chartType: "dotplot",
         colors,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
       });
     } else if (spec.chartType === "dumbbell") {
@@ -952,7 +953,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         bandHighlight: true,
         centersFromMarks: true,
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
@@ -968,7 +969,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
@@ -1010,7 +1011,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           ? waterfallValueDecimals(dataInScope, spec.valueLabels?.decimals)
           : undefined;
       const bandYFormat = (v: number): string =>
-        formatValue(v, units, wfDecimals ?? spec.tooltip_decimals);
+        formatValue(v, valueAffixes, wfDecimals ?? spec.tooltip_decimals);
 
       // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
       // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
@@ -1089,7 +1090,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         colors,
         seriesLabels,
         seriesOrder,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         label: histogramBinLabelOpts(spec),
       });
     } else {
@@ -1100,7 +1101,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesField: "series",
         xParse: tooltipXParse as ((v: unknown) => number) | undefined,
         xFormat: tooltipXFormat,
-        yFormat: (v) => formatValue(v, units, spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         colors,
         dashedSeries: dashedNames,
         seriesLabels,
@@ -1586,7 +1587,7 @@ function wireFigureSvg(
     dashedNames: Set<string>;
     seriesLabels: Record<string, string>;
     seriesOrder: string[];
-    units: string;
+    valueAffixes: ValueAffixes;
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
     showTotalDot?: boolean;
@@ -1619,7 +1620,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v: number) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v: number) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       bandHighlight: true,
       centersFromMarks: true,
       orientation: orientation as "vertical" | "horizontal",
@@ -1655,7 +1656,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       bandHighlight: true,
       centersFromMarks: true,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
@@ -1666,7 +1667,7 @@ function wireFigureSvg(
         chartType: "dotplot",
         colors: ctx.colors,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         dodge,
       }),
     );
@@ -1676,7 +1677,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         symbols,
         bandHighlight: true,
         centersFromMarks: true,
@@ -1701,7 +1702,7 @@ function wireFigureSvg(
       xLabel: ctx.spec.x_axis_title ?? "x",
       yLabel: ctx.spec.y_axis_title ?? "Value",
       xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
     });
     return undefined;
   }
@@ -1730,7 +1731,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -1748,7 +1749,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         symbols: markerSymbols,
       }) as (key: unknown, active?: boolean) => void;
     }
@@ -1786,7 +1787,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
       swatchShape: "rect",
       orientation: horizontal ? "horizontal" : "vertical",
@@ -1810,7 +1811,7 @@ function wireFigureSvg(
         categories: cats,
         colors: ctx.colors,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         horizontal,
         showTotalDot: ctx.showTotalDot,
       }),
@@ -1843,7 +1844,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, wfDecimals ?? ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, wfDecimals ?? ctx.spec.tooltip_decimals),
         horizontal,
         ...(horizontal
           ? {
@@ -1871,7 +1872,7 @@ function wireFigureSvg(
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       label: histogramBinLabelOpts(ctx.spec),
       ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
     });
@@ -1881,7 +1882,7 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         label: histogramBinLabelOpts(ctx.spec),
       }) as (key: unknown, active?: boolean) => void;
     }
@@ -1895,7 +1896,7 @@ function wireFigureSvg(
     seriesField: "series",
     xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
     xFormat: ctx.tooltipXFormat,
-    yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+    yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
     colors: ctx.colors,
     dashedSeries: ctx.dashedNames,
     seriesLabels: ctx.seriesLabels,
@@ -1919,7 +1920,7 @@ function wireFigureSvg(
       seriesField: "series",
       xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
       xFormat: ctx.tooltipXFormat,
-      yFormat: (v) => formatValue(v, ctx.units, ctx.spec.tooltip_decimals),
+      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
@@ -2185,7 +2186,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         dashedNames: pane.dashedNames ?? new Set(),
         seriesLabels: fig.seriesLabels,
         seriesOrder: pane.seriesOrder ?? [],
-        units: pane.units ?? fig.units,
+        valueAffixes: pane.valueAffixes ?? fig.valueAffixes,
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,

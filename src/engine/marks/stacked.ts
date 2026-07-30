@@ -22,7 +22,8 @@ import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
-import { inferUnitsFromSubtitle } from "../util";
+import { applyValueAffixes, resolveValueAffixes } from "../util";
+import type { ValueAffixes } from "../../spec/types";
 import { tokens } from "../../theme/tokens";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -47,7 +48,7 @@ const WHITE = "#FFFFFF";
  *  prepends an explicit + / U+2212. */
 function makeValueFormatter(
   values: number[],
-  units: string,
+  affixes: ValueAffixes,
   signed: boolean,
   decimals?: number,
 ): (d: number) => string {
@@ -67,8 +68,9 @@ function makeValueFormatter(
         );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
-    const mag = Math.abs(d).toFixed(maxFrac);
-    const body = units ? `${mag}${units}` : mag;
+    // `mag` is unsigned, so the affix helper's minus-handling is inert here and the explicit
+    // −/+ below lands outside the prefix: −$5, not $−5.
+    const body = applyValueAffixes(Math.abs(d).toFixed(maxFrac), affixes);
     if (!signed) return body;
     return d < 0 ? `−${body}` : `+${body}`;
   };
@@ -147,13 +149,13 @@ export function buildStackedMarks(
             ? "dot"
             : "text";
 
-  const units = inferUnitsFromSubtitle(spec.subtitle);
+  const affixes = resolveValueAffixes(spec);
   const allValues = data
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
   // Net text above a cumulative stack is unsigned (always positive); diverging net is signed.
-  const netFmt = makeValueFormatter([...netByCat.values()], units, netMode === "dot", spec.valueLabels?.decimals);
-  const segFmt = makeValueFormatter(allValues, units, false, spec.valueLabels?.decimals);
+  const netFmt = makeValueFormatter([...netByCat.values()], affixes, netMode === "dot", spec.valueLabels?.decimals);
+  const segFmt = makeValueFormatter(allValues, affixes, false, spec.valueLabels?.decimals);
 
   // --- Color: categorical (default) or monochromatic by stack position ---
   // For mono, segments are colored darkest-at-bottom → lightest-at-top by their VISUAL

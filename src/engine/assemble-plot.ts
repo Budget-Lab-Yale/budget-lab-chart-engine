@@ -22,7 +22,7 @@ import {
 import { makeTickFormatter } from "./scales";
 import { resolveColor } from "./palette";
 import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
-import type { ChartSpec, PointCallout, XAxisMarker } from "../spec/types";
+import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
 
@@ -49,7 +49,8 @@ export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
   yTicks: number[];
-  units: string;
+  /** The chart's value prefix/suffix, applied to every tick and `{value}` substitution. */
+  valueAffixes: ValueAffixes;
   xOpts: XOpts;
   seriesNames: string[];
   colors: Map<string, string>;
@@ -115,7 +116,7 @@ export function assemblePlot({
   layers,
   yDomain,
   yTicks,
-  units,
+  valueAffixes,
   xOpts,
   seriesNames,
   colors,
@@ -189,7 +190,7 @@ export function assemblePlot({
   // the stagger would size its collision boxes from the short literal token instead of the
   // (usually longer) rendered number. Labels without the token are returned unchanged, so
   // charts that don't use it get byte-identical output.
-  const yTickFallbackFmt = makeTickFormatter(yTicks, units);
+  const yTickFallbackFmt = makeTickFormatter(yTicks, valueAffixes);
   const yAxisAnn = ann.yAxis.map((m) =>
     m.label ? { ...m, label: substituteValueToken(m.label, m.y, m.value_format, yTickFallbackFmt) } : m,
   );
@@ -330,7 +331,7 @@ export function assemblePlot({
   if (horizontal) {
     // 2h. Vertical gridlines + x value-tick labels (skip 0 from the light grid; baseline
     //     is painted darker below). Tick labels go at the bottom (default), top, or both.
-    const xTickFmt = makeTickFormatter(yTicks, units);
+    const xTickFmt = makeTickFormatter(yTicks, valueAffixes);
     const xTicksMode = spec.x_axis_ticks ?? "bottom";
     const showBottomTicks = xTicksMode !== "top";
     const showTopTicks = xTicksMode === "top" || xTicksMode === "both";
@@ -390,7 +391,7 @@ export function assemblePlot({
     //    chart edges sit flush with the canvas.)
     marks.push(
       ...gridAndYLabels(yTicks, {
-        yTickFormat: makeTickFormatter(yTicks, units),
+        yTickFormat: makeTickFormatter(yTicks, valueAffixes),
         marginLeft: effMarginLeft,
         marginRight: effMarginRight,
         ...(faceted ? { gridlineClassName: GRIDLINE_CLASS } : {}),

@@ -71,7 +71,7 @@ describe("shading — mark emission", () => {
 });
 
 describe("shading — fill resolution", () => {
-  it("defaults to the series' own color at the confidence-band opacity", () => {
+  it("defaults to the series' own color at half opacity", () => {
     const spec = { ...BASE, series_order: ["A"], shading: [{ series: "A" }] } as ChartSpec;
     const { svg, colors } = renderChart(spec, CROSSING, OPTS) as unknown as {
       svg: SVGSVGElement;
@@ -79,7 +79,7 @@ describe("shading — fill resolution", () => {
     };
     const group = svg.querySelector(`g.${SHADE_CLASS}`)!;
     expect(group.getAttribute("fill")).toBe(colors.get("A"));
-    expect(group.getAttribute("fill-opacity")).toBe("0.18");
+    expect(group.getAttribute("fill-opacity")).toBe("0.5");
   });
 
   it("honors an explicit palette-token color", () => {
@@ -346,6 +346,101 @@ describe("shading — validation", () => {
     const res = validateChartData(
       { ...BASE, shading: [{ series: "A", side: "negative" }] } as ChartSpec,
       CROSSING,
+    );
+    expect(res.valid).toBe(true);
+  });
+});
+
+describe("shading — non-zero baseline (rule thresholds)", () => {
+  /** The y of the fill's flat edge: the most-repeated y in the path. */
+  function edgeY(svg: SVGSVGElement): number {
+    const d = shadePaths(svg)[0]!.getAttribute("d")!;
+    const ys = Array.from(d.matchAll(/[ML,](-?[\d.]+),(-?[\d.]+)/g)).map((m) => Number(m[2]));
+    const counts = new Map<number, number>();
+    for (const y of ys) counts.set(y, (counts.get(y) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+  }
+
+  /** Pixel y of a value, from the resolved domain and the frame. */
+  function yOf(svg: SVGSVGElement, value: number, lo: number, hi: number): number {
+    const top = Number(svg.getAttribute("data-margin-top"));
+    const bottom = 400 - Number(svg.getAttribute("data-margin-bottom"));
+    return top + ((hi - value) / (hi - lo)) * (bottom - top);
+  }
+
+  const SAHM = rows([[2020, 0.1], [2021, 0.9], [2022, 0.2]]);
+
+  it("closes the fill on the threshold, not on zero", () => {
+    const spec = {
+      ...BASE,
+      yAxisPolicy: { min: 0, max: 1 },
+      shading: [{ series: "A", side: "positive", baseline: 0.5 }],
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, SAHM, OPTS);
+    expect(shadePaths(svg).length).toBe(1);
+    expect(edgeY(svg)).toBeCloseTo(yOf(svg, 0.5, 0, 1), 6);
+    // Emphatically NOT the zero line, which is the frame floor here.
+    expect(edgeY(svg)).not.toBeCloseTo(yOf(svg, 0, 0, 1), 6);
+  });
+
+  it("emits nothing when the series never breaches the threshold", () => {
+    const spec = {
+      ...BASE,
+      shading: [{ series: "A", side: "positive", baseline: 5 }],
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, SAHM, OPTS);
+    expect(shadePaths(svg).length).toBe(0);
+  });
+
+  it("handles a negative threshold with side: negative", () => {
+    const spec = {
+      ...BASE,
+      yAxisPolicy: { min: -2, max: 0 },
+      shading: [{ series: "A", side: "negative", baseline: -0.7 }],
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, rows([[2020, -0.2], [2021, -1.5], [2022, -0.2]]), OPTS);
+    expect(shadePaths(svg).length).toBe(1);
+    expect(edgeY(svg)).toBeCloseTo(yOf(svg, -0.7, -2, 0), 6);
+  });
+
+  it("defaults to zero when baseline is omitted", () => {
+    const withOut = { ...BASE, yAxisPolicy: { min: 0, max: 1 }, shading: [{ series: "A" }] } as unknown as ChartSpec;
+    const withZero = {
+      ...BASE,
+      yAxisPolicy: { min: 0, max: 1 },
+      shading: [{ series: "A", baseline: 0 }],
+    } as unknown as ChartSpec;
+    expect(renderChart(withOut, SAHM, OPTS).svg.outerHTML).toBe(
+      renderChart(withZero, SAHM, OPTS).svg.outerHTML,
+    );
+  });
+
+  it("two regions on one series can use different baselines", () => {
+    const spec = {
+      ...BASE,
+      yAxisPolicy: { min: 0, max: 1 },
+      shading: [
+        { series: "A", side: "positive", baseline: 0.25, color: "gray" },
+        { series: "A", side: "positive", baseline: 0.5 },
+      ],
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, SAHM, OPTS);
+    expect(shadePaths(svg).length).toBe(2);
+  });
+
+  it("validation rejects a threshold the data never crosses, naming the level", () => {
+    const res = validateChartData(
+      { ...BASE, shading: [{ series: "A", side: "positive", baseline: 5 }] } as ChartSpec,
+      SAHM,
+    );
+    expect(res.valid).toBe(false);
+    expect(res.errors.join()).toMatch(/values above 5/);
+  });
+
+  it("validation accepts a threshold the data does cross", () => {
+    const res = validateChartData(
+      { ...BASE, shading: [{ series: "A", side: "positive", baseline: 0.5 }] } as ChartSpec,
+      SAHM,
     );
     expect(res.valid).toBe(true);
   });

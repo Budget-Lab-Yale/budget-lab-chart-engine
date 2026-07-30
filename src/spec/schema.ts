@@ -162,6 +162,7 @@ const SHADE_REGION = {
   additionalProperties: false,
   properties: {
     series: { type: "string" },
+    baseline: { type: "number" },
     side: { type: "string", enum: ["both", "positive", "negative"] },
     from: { type: "string" },
     to: { type: "string" },
@@ -288,6 +289,8 @@ export const CHART_SPEC_SCHEMA = {
       additionalProperties: TITLE_SELECTOR,
     },
     subtitle: { type: "string" },
+    value_prefix: { type: "string" },
+    value_suffix: { type: "string" },
     source: { type: "string" },
     note: { type: "string" },
     x_axis_title: { type: "string" },

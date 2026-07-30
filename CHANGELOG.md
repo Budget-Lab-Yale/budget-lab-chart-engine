@@ -4,7 +4,64 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.8.0] - 2026-07-30
+
+### Added — shading baseline
+
+- **`shading[].baseline`** (default `0`) sets the level a fill runs to and what `side` is measured
+  against, so a threshold rule can shade just its breach instead of filling back to zero:
+  `{side: positive, baseline: 0.5}` fills only where the line is above 0.5, closing flat on 0.5.
+  Negative thresholds work identically (`{side: negative, baseline: -0.7}`).
+- Runs split at the **baseline** crossing, interpolated to the exact level, so the fill's edge is flat
+  on the threshold rather than a slanted segment. A point sitting exactly on the baseline is a
+  boundary, and a series that touches it without crossing stays one run.
+- Regions are independent, so one series can carry fills at several thresholds. Pair a region with an
+  `annotations.yAxis` marker at the same `y` to draw the threshold line itself.
+- Omitting `baseline` is byte-identical to `baseline: 0` (asserted in the tests).
+
+### Changed — shading opacity
+
+- **`shading[].fillOpacity` now defaults to 0.5**, up from the 0.18 it borrowed from confidence bands.
+  Shading is usually the subject of the chart rather than chrome behind it, so it reads at half
+  opacity. Set `fillOpacity` per region to go back to a lighter wash. Two overlapping regions still
+  compound — 0.5 over 0.5 renders as 0.75 — so drop the lower one when layering a base tint under an
+  accent window.
+
+### Added — explicit value units
+
+- **New `value_prefix` / `value_suffix`.** State a chart's units instead of having them guessed:
+  `value_suffix: "%"`, `value_suffix: " pp"`, `value_prefix: "$"`, or both
+  (`value_prefix: "$"` + `value_suffix: " billion"`). They apply everywhere a number is rendered —
+  axis ticks, the horizontal-bar value axis, stacked segment and net labels, waterfall running
+  totals, and hover tooltips.
+- Concatenated **literally**, so the author owns spacing (`%` wants none, `" pp"` does). A prefix sits
+  **after** a minus sign, so a negative currency value reads `-$5`, not `$-5`.
+- A narrower explicitly-set format still wins locally: a per-annotation `value_format`, and a
+  dumbbell's `gap_annotation.format` (else its chart-level `value_format`) for the gap label.
+
+### Removed — units inferred from the subtitle
+
+- **`subtitle` no longer affects number formatting.** It was substring-matched for `"percent"` and,
+  on a hit, `%` was appended to every rendered value. Consequences, all now gone:
+  - `subtitle: "Percentage points"` rendered a 2 pp change as **`2%`** — a change presented as a rate.
+    This is the reported bug.
+  - `subtitle: "Percentiles"` also got `%`, because the match was a bare substring test.
+  - The condition's second clause (`includes("percentage point")`) was unreachable, since any such
+    string already contains `"percent"`.
+- **Breaking for charts that relied on the inference**: their axes lose `%` until they set
+  `value_suffix: "%"`. In `budget-lab-charts` that is three figures (`ai-fiscal/debt-to-gdp`,
+  `tariff-model-update-july2026/etr-vintages`, `recession-indicators/ui-percent`); five others were
+  being mislabelled and are corrected by the removal alone.
+- Chart-level `value_format`'s doc comment claimed it formatted "axis ticks / hover / gap labels";
+  only the gap label ever read it. The comment now says what it does.
+
+### Changed — internal
+
+- The threaded `units: string` became `valueAffixes: ValueAffixes` (`{prefix, suffix}`) on
+  `AssembleOptions`, `PaneResult`, `RenderResult`, `FigurePane` and `FigureRenderResult`;
+  `makeTickFormatter`, `formatValue` and the stacked/waterfall label formatters take it in place of a
+  bare suffix string. `inferUnitsFromSubtitle` is deleted, replaced by `resolveValueAffixes` and
+  `applyValueAffixes`.
 
 ### Fixed — dev tooling
 

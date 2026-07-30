@@ -8,7 +8,7 @@
 //               plot area + left margin stay so panes remain aligned).
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
-import type { ChartSpec } from "../spec/types";
+import type { ChartSpec, ValueAffixes } from "../spec/types";
 import { resolveColumns, isPreBinned, categoryOrderFor } from "../spec/columns";
 import { parseDate } from "./parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
@@ -16,7 +16,7 @@ import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
-import { inferUnitsFromSubtitle } from "./util";
+import { resolveValueAffixes } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
@@ -255,8 +255,9 @@ export interface FigurePane {
   seriesOrder?: string[];
   /** This pane's dashed series. */
   dashedNames?: Set<string>;
-  /** This pane's units (each pane infers independently). */
-  units?: string;
+  /** This pane's value prefix/suffix. Every pane resolves the same chart-level fields, so these
+   *  are identical across a figure; kept per-pane because each pane renders independently. */
+  valueAffixes?: ValueAffixes;
   /** This pane's x-value parse/format for the crosshair. */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
@@ -294,7 +295,7 @@ export interface FigureRenderResult {
   colors: Map<string, string>;
   seriesOrder: string[];
   dashedNames: Set<string>;
-  units: string;
+  valueAffixes: ValueAffixes;
   xAxisTitle: string | null;
   dataInScope: PreparedRow[];
   tooltipXParse?: (v: string) => number;
@@ -623,7 +624,7 @@ export function renderFigure(
         colors: p.colors,
         seriesOrder: p.seriesNames,
         dashedNames: p.layers.dashedNames,
-        units: p.units || inferUnitsFromSubtitle(spec.subtitle),
+        valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
         tooltipXParse: p.tooltipXParse,
         tooltipXFormat: p.tooltipXFormat,
         showTotalDot: p.layers.showTotalDot,
@@ -657,7 +658,7 @@ export function renderFigure(
       colors: first?.colors ?? new Map(),
       seriesOrder: first?.seriesOrder ?? [],
       dashedNames: first?.dashedNames ?? new Set(),
-      units: first?.units ?? inferUnitsFromSubtitle(spec.subtitle),
+      valueAffixes: first?.valueAffixes ?? resolveValueAffixes(spec),
       xAxisTitle: spec.x_axis_title ?? null,
       dataInScope: first?.dataInScope ?? [],
       tooltipXParse: first?.tooltipXParse,
@@ -768,7 +769,7 @@ export function renderFigure(
       colors: p.colors,
       seriesOrder: p.seriesNames,
       dashedNames: p.layers.dashedNames,
-      units: p.units || inferUnitsFromSubtitle(spec.subtitle),
+      valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
       tooltipXParse: p.tooltipXParse,
       tooltipXFormat: p.tooltipXFormat,
       showTotalDot: p.layers.showTotalDot,
@@ -802,7 +803,7 @@ export function renderFigure(
     colors: first?.colors ?? new Map(),
     seriesOrder: first?.seriesOrder ?? [],
     dashedNames: first?.dashedNames ?? new Set(),
-    units: first?.units ?? inferUnitsFromSubtitle(spec.subtitle),
+    valueAffixes: first?.valueAffixes ?? resolveValueAffixes(spec),
     xAxisTitle: spec.x_axis_title ?? null,
     dataInScope: first?.dataInScope ?? [],
     tooltipXParse: first?.tooltipXParse,
