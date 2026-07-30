@@ -179,7 +179,12 @@ export interface SeriesStyle {
 export interface ShadeRegion {
   /** Series to fill under. Omitted → every in-scope series gets its own region, each in its own color. */
   series?: string;
-  /** Which side of zero to fill. Default "both". */
+  /** The value the fill runs to, and what `side` is measured against. Default 0. Set it to a rule's
+   *  threshold (0.5, 15, -0.7) to shade only the breach — the part of the line beyond that level,
+   *  filled back to it, rather than back to zero. Pair it with an `annotations.yAxis` marker at the
+   *  same `y` to draw the threshold line itself. */
+  baseline?: number;
+  /** Which side of `baseline` to fill. Default "both". */
   side?: "both" | "positive" | "negative";
   /** Inclusive x lower bound, in the same string form as `annotations.bands.start`. Omitted → the
    *  series' first point. A bound falling between two points is interpolated to that exact x. */
@@ -188,7 +193,7 @@ export interface ShadeRegion {
   to?: string;
   /** Fill color (named palette token or raw "#hex"). Omitted → the series' own resolved color. */
   color?: ColorRef;
-  /** Fill opacity. Default 0.18, matching confidence bands. */
+  /** Fill opacity, 0–1. Default 0.5. */
   fillOpacity?: number;
 }
 

@@ -4,7 +4,28 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.8.0] - 2026-07-29
+## [1.8.0] - 2026-07-30
+
+### Added — shading baseline
+
+- **`shading[].baseline`** (default `0`) sets the level a fill runs to and what `side` is measured
+  against, so a threshold rule can shade just its breach instead of filling back to zero:
+  `{side: positive, baseline: 0.5}` fills only where the line is above 0.5, closing flat on 0.5.
+  Negative thresholds work identically (`{side: negative, baseline: -0.7}`).
+- Runs split at the **baseline** crossing, interpolated to the exact level, so the fill's edge is flat
+  on the threshold rather than a slanted segment. A point sitting exactly on the baseline is a
+  boundary, and a series that touches it without crossing stays one run.
+- Regions are independent, so one series can carry fills at several thresholds. Pair a region with an
+  `annotations.yAxis` marker at the same `y` to draw the threshold line itself.
+- Omitting `baseline` is byte-identical to `baseline: 0` (asserted in the tests).
+
+### Changed — shading opacity
+
+- **`shading[].fillOpacity` now defaults to 0.5**, up from the 0.18 it borrowed from confidence bands.
+  Shading is usually the subject of the chart rather than chrome behind it, so it reads at half
+  opacity. Set `fillOpacity` per region to go back to a lighter wash. Two overlapping regions still
+  compound — 0.5 over 0.5 renders as 0.75 — so drop the lower one when layering a base tint under an
+  accent window.
 
 ### Added — explicit value units
 

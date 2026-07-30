@@ -495,19 +495,21 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         }
       }
     }
-    // A side filter that can never match is a spec mistake, and it is decidable from the DATA (is
-    // this series ever negative?) without knowing the resolved y-domain.
+    // A side filter that can never match is a spec mistake, and it is decidable from the DATA (does
+    // this series ever cross the baseline?) without knowing the resolved y-domain.
     const side = region.side ?? "both";
+    const baseline = region.baseline ?? 0;
     if (side !== "both") {
       const values = rows
         .filter((r) => region.series == null || r[cols.series ?? ""] === region.series)
         .map((r) => Number(r[cols.value] as string))
         .filter(Number.isFinite);
-      const matches = values.some((v) => (side === "positive" ? v > 0 : v < 0));
+      const matches = values.some((v) => (side === "positive" ? v > baseline : v < baseline));
       if (values.length && !matches) {
         const scope = region.series == null ? "the data" : `series ${JSON.stringify(region.series)}`;
+        const level = baseline === 0 ? `${side} values` : `values ${side === "positive" ? "above" : "below"} ${baseline}`;
         errors.push(
-          `${where}.side is "${side}" but no ${side} values exist in ${scope} — the region would fill nothing`,
+          `${where}.side is "${side}" but no ${level} exist in ${scope} — the region would fill nothing`,
         );
       }
     }

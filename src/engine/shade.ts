@@ -20,6 +20,9 @@ export interface ShadeRun {
 
 export interface BuildShadeRunsOptions {
   side: ShadeSide;
+  /** The value `side` is measured against, and the level a run's synthesized edge points sit at.
+   *  0 for the ordinary "above/below zero" fill; a threshold (0.5, -0.7, 15) for a rule-breach fill. */
+  baseline: number;
   /** Pre-parsed lower bound (number / Date / category string); null ⇒ open-ended. */
   from: number | Date | string | null;
   /** Pre-parsed upper bound; null ⇒ open-ended. */
@@ -60,13 +63,19 @@ function interpolate(
   return out;
 }
 
-/** Continuous position where the segment a→b crosses zero. Callers guarantee a strict sign change. */
-function zeroCrossing(a: PreparedRow, b: PreparedRow, xField: ShadeXField): number {
+/** Continuous position where the segment a→b crosses `baseline`. Callers guarantee the two points sit
+ *  strictly on opposite sides of it, so `yb - ya` is non-zero. */
+function baselineCrossing(
+  a: PreparedRow,
+  b: PreparedRow,
+  xField: ShadeXField,
+  baseline: number,
+): number {
   const pa = posOf(a, xField);
   const pb = posOf(b, xField);
   const ya = a._y as number;
   const yb = b._y as number;
-  return pa + ((0 - ya) / (yb - ya)) * (pb - pa);
+  return pa + ((baseline - ya) / (yb - ya)) * (pb - pa);
 }
 
 /** Crop to [lo, hi] on a CONTINUOUS axis, inserting an interpolated point at a bound that falls
@@ -127,26 +136,28 @@ function cropCategorical(
 }
 
 /**
- * Split a cropped sequence into the runs that lie on `side` of ZERO.
+ * Split a cropped sequence into the runs that lie on `side` of `baseline`.
  *
- * A point is ELIGIBLE when its value is strictly on the requested side, or exactly zero. Runs are
- * maximal stretches of eligible points; a run with no strictly-on-side point is dropped, so a series
- * that merely touches zero from the far side contributes nothing. Treating zero as eligible rather
- * than as a boundary is what keeps a series that touches zero without crossing in ONE run.
+ * A point is ELIGIBLE when its value is strictly on the requested side, or exactly at the baseline.
+ * Runs are maximal stretches of eligible points; a run with no strictly-on-side point is dropped, so
+ * a series that merely touches the baseline from the far side contributes nothing. Treating the
+ * baseline as eligible rather than as a boundary is what keeps a series that touches it without
+ * crossing in ONE run.
  *
- * Where a run's edge point is strictly on-side and its neighbour outside the run is strictly
- * opposite, the crossing between them is synthesized so the fill closes flat on the baseline. When
- * the edge point is already zero it IS the crossing, so nothing is added.
+ * Where a run's edge point is strictly on-side and its neighbour outside the run is strictly on the
+ * far side, the crossing between them is synthesized so the fill closes flat on the baseline. When
+ * the edge point already sits at the baseline it IS the crossing, so nothing is added.
  */
 function splitBySide(
   cropped: PreparedRow[],
   xField: ShadeXField,
   side: Exclude<ShadeSide, "both">,
+  baseline: number,
 ): PreparedRow[][] {
   const continuous = xField !== "_xc";
   const wanted = (r: PreparedRow) =>
-    side === "positive" ? (r._y as number) > 0 : (r._y as number) < 0;
-  const eligible = (r: PreparedRow) => wanted(r) || (r._y as number) === 0;
+    side === "positive" ? (r._y as number) > baseline : (r._y as number) < baseline;
+  const eligible = (r: PreparedRow) => wanted(r) || (r._y as number) === baseline;
 
   const runs: PreparedRow[][] = [];
   let i = 0;
@@ -162,13 +173,13 @@ function splitBySide(
 
     if (continuous) {
       const before = cropped[start - 1];
-      if (before && !eligible(before) && (run[0]!._y as number) !== 0) {
-        run.unshift(interpolateToZero(before, run[0]!, xField));
+      if (before && !eligible(before) && (run[0]!._y as number) !== baseline) {
+        run.unshift(interpolateToBaseline(before, run[0]!, xField, baseline));
       }
       const after = cropped[i];
       const last = run[run.length - 1]!;
-      if (after && !eligible(after) && (last._y as number) !== 0) {
-        run.push(interpolateToZero(last, after, xField));
+      if (after && !eligible(after) && (last._y as number) !== baseline) {
+        run.push(interpolateToBaseline(last, after, xField, baseline));
       }
     }
     runs.push(run);
@@ -176,12 +187,18 @@ function splitBySide(
   return runs;
 }
 
-/** The zero-crossing point of a→b, carrying a's non-positional fields. */
-function interpolateToZero(a: PreparedRow, b: PreparedRow, xField: ShadeXField): PreparedRow {
-  const point = interpolate(a, b, zeroCrossing(a, b, xField), xField);
-  // Pin to exactly 0: the interpolation is algebraically zero, but float error can leave ±1e-16,
-  // which would then read as a signed value to anything re-inspecting the run.
-  point._y = 0;
+/** The baseline-crossing point of a→b, carrying a's non-positional fields. */
+function interpolateToBaseline(
+  a: PreparedRow,
+  b: PreparedRow,
+  xField: ShadeXField,
+  baseline: number,
+): PreparedRow {
+  const point = interpolate(a, b, baselineCrossing(a, b, xField, baseline), xField);
+  // Pin to exactly the baseline: the interpolation lands there algebraically, but float error can
+  // leave a hair either side, which would read as an off-baseline value to anything re-inspecting
+  // the run (and leave the fill edge a fraction of a pixel off flat).
+  point._y = baseline;
   return point;
 }
 
@@ -216,7 +233,9 @@ export function buildShadeRuns(
   if (!cropped.length) return [];
 
   const runs =
-    opts.side === "both" ? [cropped] : splitBySide(cropped, xField, opts.side);
+    opts.side === "both"
+      ? [cropped]
+      : splitBySide(cropped, xField, opts.side, opts.baseline);
 
   return runs.map((rows, i) => ({
     rows: rows.map((r) => ({ ...r, _seg: `shade-${i}` }) as PreparedRow),

@@ -162,6 +162,7 @@ const SHADE_REGION = {
   additionalProperties: false,
   properties: {
     series: { type: "string" },
+    baseline: { type: "number" },
     side: { type: "string", enum: ["both", "positive", "negative"] },
     from: { type: "string" },
     to: { type: "string" },

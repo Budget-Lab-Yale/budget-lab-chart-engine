@@ -18,33 +18,36 @@ function shape(runs: Array<{ rows: PreparedRow[] }>): Array<Array<[number, numbe
 }
 
 const FULL = { from: null, to: null };
+const AT_ZERO = { baseline: 0 };
 
 describe("buildShadeRuns — side: both (crop only)", () => {
   it("returns one run covering every point when unbounded", () => {
     const runs = buildShadeRuns(pts([[2020, 5], [2021, -3], [2022, 8]]), "_xn", {
       side: "both",
+      ...AT_ZERO,
       ...FULL,
     });
     expect(shape(runs)).toEqual([[[2020, 5], [2021, -3], [2022, 8]]]);
   });
 
   it("does not split at a zero crossing", () => {
-    const runs = buildShadeRuns(pts([[0, 4], [1, -4]]), "_xn", { side: "both", ...FULL });
+    const runs = buildShadeRuns(pts([[0, 4], [1, -4]]), "_xn", { side: "both", ...AT_ZERO, ...FULL });
     expect(runs.length).toBe(1);
   });
 
   it("returns nothing for empty input", () => {
-    expect(buildShadeRuns([], "_xn", { side: "both", ...FULL })).toEqual([]);
+    expect(buildShadeRuns([], "_xn", { side: "both", ...AT_ZERO, ...FULL })).toEqual([]);
   });
 
   it("keeps a single point as a one-point run", () => {
-    const runs = buildShadeRuns(pts([[2020, 5]]), "_xn", { side: "both", ...FULL });
+    const runs = buildShadeRuns(pts([[2020, 5]]), "_xn", { side: "both", ...AT_ZERO, ...FULL });
     expect(shape(runs)).toEqual([[[2020, 5]]]);
   });
 
   it("tags each run with a distinct _seg so Plot cannot bridge them", () => {
     const runs = buildShadeRuns(pts([[0, 5], [1, -5], [2, 5]]), "_xn", {
       side: "positive",
+      ...AT_ZERO,
       ...FULL,
     });
     const segs = runs.map((r) => (r.rows[0] as unknown as { _seg: string })._seg);
@@ -62,80 +65,81 @@ describe("buildShadeRuns — x-range crop", () => {
   const data = pts([[2020, 10], [2021, 20], [2022, 30], [2023, 40]]);
 
   it("interpolates a synthetic point when a bound falls between two points", () => {
-    const runs = buildShadeRuns(data, "_xn", { side: "both", from: 2020.5, to: 2022.5 });
+    const runs = buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 2020.5, to: 2022.5 });
     expect(shape(runs)).toEqual([[[2020.5, 15], [2021, 20], [2022, 30], [2022.5, 35]]]);
   });
 
   it("inserts nothing when a bound lands exactly on a point", () => {
-    const runs = buildShadeRuns(data, "_xn", { side: "both", from: 2021, to: 2022 });
+    const runs = buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 2021, to: 2022 });
     expect(shape(runs)).toEqual([[[2021, 20], [2022, 30]]]);
   });
 
   it("clamps a bound outside the data to the data extent", () => {
-    const runs = buildShadeRuns(data, "_xn", { side: "both", from: 1990, to: 2050 });
+    const runs = buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 1990, to: 2050 });
     expect(shape(runs)).toEqual([[[2020, 10], [2021, 20], [2022, 30], [2023, 40]]]);
   });
 
   it("supports an open-ended lower bound", () => {
-    const runs = buildShadeRuns(data, "_xn", { side: "both", from: null, to: 2021 });
+    const runs = buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: null, to: 2021 });
     expect(shape(runs)).toEqual([[[2020, 10], [2021, 20]]]);
   });
 
   it("supports an open-ended upper bound", () => {
-    const runs = buildShadeRuns(data, "_xn", { side: "both", from: 2022, to: null });
+    const runs = buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 2022, to: null });
     expect(shape(runs)).toEqual([[[2022, 30], [2023, 40]]]);
   });
 
   it("returns nothing when from > to", () => {
-    expect(buildShadeRuns(data, "_xn", { side: "both", from: 2023, to: 2020 })).toEqual([]);
+    expect(buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 2023, to: 2020 })).toEqual([]);
   });
 
   it("returns nothing when the range falls entirely outside the data", () => {
-    expect(buildShadeRuns(data, "_xn", { side: "both", from: 2030, to: 2040 })).toEqual([]);
+    expect(buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 2030, to: 2040 })).toEqual([]);
   });
 
   it("yields a degenerate two-point run when from === to between points", () => {
     // A zero-width range paints nothing visible, but must not produce a malformed run.
-    const runs = buildShadeRuns(data, "_xn", { side: "both", from: 2021.5, to: 2021.5 });
+    const runs = buildShadeRuns(data, "_xn", { side: "both", ...AT_ZERO, from: 2021.5, to: 2021.5 });
     expect(shape(runs)).toEqual([[[2021.5, 25]]]);
   });
 });
 
 describe("buildShadeRuns — side split at zero", () => {
   it("keeps an all-positive series as one run for side: positive", () => {
-    const runs = buildShadeRuns(pts([[0, 3], [1, 7]]), "_xn", { side: "positive", ...FULL });
+    const runs = buildShadeRuns(pts([[0, 3], [1, 7]]), "_xn", { side: "positive", ...AT_ZERO, ...FULL });
     expect(shape(runs)).toEqual([[[0, 3], [1, 7]]]);
   });
 
   it("returns nothing for side: negative on an all-positive series", () => {
-    expect(buildShadeRuns(pts([[0, 3], [1, 7]]), "_xn", { side: "negative", ...FULL })).toEqual([]);
+    expect(buildShadeRuns(pts([[0, 3], [1, 7]]), "_xn", { side: "negative", ...AT_ZERO, ...FULL })).toEqual([]);
   });
 
   it("keeps an all-negative series as one run for side: negative", () => {
-    const runs = buildShadeRuns(pts([[0, -3], [1, -7]]), "_xn", { side: "negative", ...FULL });
+    const runs = buildShadeRuns(pts([[0, -3], [1, -7]]), "_xn", { side: "negative", ...AT_ZERO, ...FULL });
     expect(shape(runs)).toEqual([[[0, -3], [1, -7]]]);
   });
 
   it("interpolates the zero crossing so the fill closes flat on the baseline", () => {
     // 10 → -10 across x 0→1 crosses zero at x = 0.5.
-    const runs = buildShadeRuns(pts([[0, 10], [1, -10]]), "_xn", { side: "positive", ...FULL });
+    const runs = buildShadeRuns(pts([[0, 10], [1, -10]]), "_xn", { side: "positive", ...AT_ZERO, ...FULL });
     expect(shape(runs)).toEqual([[[0, 10], [0.5, 0]]]);
   });
 
   it("gives the negative side the same crossing point", () => {
-    const runs = buildShadeRuns(pts([[0, 10], [1, -10]]), "_xn", { side: "negative", ...FULL });
+    const runs = buildShadeRuns(pts([[0, 10], [1, -10]]), "_xn", { side: "negative", ...AT_ZERO, ...FULL });
     expect(shape(runs)).toEqual([[[0.5, 0], [1, -10]]]);
   });
 
   it("interpolates an asymmetric crossing correctly", () => {
     // 30 → -10 across x 0→4: zero at x = 3.
-    const runs = buildShadeRuns(pts([[0, 30], [4, -10]]), "_xn", { side: "positive", ...FULL });
+    const runs = buildShadeRuns(pts([[0, 30], [4, -10]]), "_xn", { side: "positive", ...AT_ZERO, ...FULL });
     expect(shape(runs)).toEqual([[[0, 30], [3, 0]]]);
   });
 
   it("splits a series that crosses zero twice into two positive runs", () => {
     const runs = buildShadeRuns(pts([[0, 10], [1, -10], [2, 10]]), "_xn", {
       side: "positive",
+      ...AT_ZERO,
       ...FULL,
     });
     expect(shape(runs)).toEqual([
@@ -147,6 +151,7 @@ describe("buildShadeRuns — side split at zero", () => {
   it("uses an exact-zero point as the run boundary without synthesizing a crossing", () => {
     const runs = buildShadeRuns(pts([[0, 10], [1, 0], [2, -10]]), "_xn", {
       side: "positive",
+      ...AT_ZERO,
       ...FULL,
     });
     expect(shape(runs)).toEqual([[[0, 10], [1, 0]]]);
@@ -155,6 +160,7 @@ describe("buildShadeRuns — side split at zero", () => {
   it("does not split a series that only touches zero without crossing", () => {
     const runs = buildShadeRuns(pts([[0, 10], [1, 0], [2, 10]]), "_xn", {
       side: "positive",
+      ...AT_ZERO,
       ...FULL,
     });
     expect(shape(runs)).toEqual([[[0, 10], [1, 0], [2, 10]]]);
@@ -163,6 +169,7 @@ describe("buildShadeRuns — side split at zero", () => {
   it("never emits a run consisting only of a zero point", () => {
     const runs = buildShadeRuns(pts([[0, -10], [1, 0], [2, -10]]), "_xn", {
       side: "positive",
+      ...AT_ZERO,
       ...FULL,
     });
     expect(runs).toEqual([]);
@@ -170,8 +177,8 @@ describe("buildShadeRuns — side split at zero", () => {
 
   it("returns nothing for an all-zero series on either side", () => {
     const flat = pts([[0, 0], [1, 0]]);
-    expect(buildShadeRuns(flat, "_xn", { side: "positive", ...FULL })).toEqual([]);
-    expect(buildShadeRuns(flat, "_xn", { side: "negative", ...FULL })).toEqual([]);
+    expect(buildShadeRuns(flat, "_xn", { side: "positive", ...AT_ZERO, ...FULL })).toEqual([]);
+    expect(buildShadeRuns(flat, "_xn", { side: "negative", ...AT_ZERO, ...FULL })).toEqual([]);
   });
 });
 
@@ -179,7 +186,7 @@ describe("buildShadeRuns — crop and side split composed", () => {
   it("crops first, then splits, with the bound inside a negative stretch", () => {
     // Points: +10, -10, -10, +10. Crop to [0.5, 2.5] lands mid-descent and mid-ascent.
     const data = pts([[0, 10], [1, -10], [2, -10], [3, 10]]);
-    const runs = buildShadeRuns(data, "_xn", { side: "negative", from: 0.75, to: 2.5 });
+    const runs = buildShadeRuns(data, "_xn", { side: "negative", ...AT_ZERO, from: 0.75, to: 2.5 });
     // Crop interpolates mid-descent at 0.75 (10 → -10 over 0 → 1, so y = -5) and mid-ascent at
     // 2.5 (-10 → 10 over 2 → 3, so y = 0). Every cropped point is then already on the negative
     // side (or at zero), so the side split leaves one run — no crossing to synthesize.
@@ -188,7 +195,7 @@ describe("buildShadeRuns — crop and side split composed", () => {
 
   it("keeps only the positive part of a cropped range", () => {
     const data = pts([[0, 20], [1, 20], [2, -20], [3, -20]]);
-    const runs = buildShadeRuns(data, "_xn", { side: "positive", from: 0.5, to: 2.5 });
+    const runs = buildShadeRuns(data, "_xn", { side: "positive", ...AT_ZERO, from: 0.5, to: 2.5 });
     expect(shape(runs)).toEqual([[[0.5, 20], [1, 20], [1.5, 0]]]);
   });
 });
@@ -208,6 +215,7 @@ describe("buildShadeRuns — temporal x", () => {
     const data = tpts([["2020-01-01", 0], ["2020-01-03", 20]]);
     const runs = buildShadeRuns(data, "_xd", {
       side: "both",
+      ...AT_ZERO,
       from: d("2020-01-02"),
       to: null,
     });
@@ -218,7 +226,7 @@ describe("buildShadeRuns — temporal x", () => {
 
   it("interpolates a zero crossing on epoch ms", () => {
     const data = tpts([["2020-01-01", 10], ["2020-01-03", -10]]);
-    const runs = buildShadeRuns(data, "_xd", { side: "positive", ...FULL });
+    const runs = buildShadeRuns(data, "_xd", { side: "positive", ...AT_ZERO, ...FULL });
     const rows = runs[0]!.rows;
     expect(rows.length).toBe(2);
     expect((rows[1]!._xd as Date).toISOString()).toBe(d("2020-01-02").toISOString());
@@ -233,7 +241,7 @@ describe("buildShadeRuns — categorical x", () => {
   const data = cpts([["a", 10], ["b", 20], ["c", -5], ["d", 8]]);
 
   it("crops by category position, interpolating nothing", () => {
-    const runs = buildShadeRuns(data, "_xc", { side: "both", from: "b", to: "c" });
+    const runs = buildShadeRuns(data, "_xc", { side: "both", ...AT_ZERO, from: "b", to: "c" });
     expect(runs[0]!.rows.map((r) => [r._xc, r._y])).toEqual([
       ["b", 20],
       ["c", -5],
@@ -241,11 +249,104 @@ describe("buildShadeRuns — categorical x", () => {
   });
 
   it("splits at a sign change on the enclosing points, with no synthetic crossing", () => {
-    const runs = buildShadeRuns(data, "_xc", { side: "positive", ...FULL });
+    const runs = buildShadeRuns(data, "_xc", { side: "positive", ...AT_ZERO, ...FULL });
     expect(runs.map((r) => r.rows.map((row) => row._xc))).toEqual([["a", "b"], ["d"]]);
   });
 
   it("returns nothing when a bound names a category the data lacks", () => {
-    expect(buildShadeRuns(data, "_xc", { side: "both", from: "zz", to: null })).toEqual([]);
+    expect(buildShadeRuns(data, "_xc", { side: "both", ...AT_ZERO, from: "zz", to: null })).toEqual([]);
+  });
+});
+
+// A non-zero baseline: `side` is measured against it and the synthesized edge points sit ON it, so a
+// rule-breach fill (Sahm 0.5, UI 15.0, CFNAI -0.7) closes flat on the threshold instead of running
+// back to zero. Zero is the default, not a special case.
+
+describe("buildShadeRuns — non-zero baseline", () => {
+  it("measures side against the baseline, not zero", () => {
+    // Every value is positive; only the last exceeds 0.5. Crossing 0.3 -> 0.9 hits 0.5 at x = 1⅓.
+    const runs = buildShadeRuns(pts([[0, 0.1], [1, 0.3], [2, 0.9]]), "_xn", {
+      side: "positive",
+      baseline: 0.5,
+      ...FULL,
+    });
+    expect(runs.length).toBe(1);
+    const rows = runs[0]!.rows;
+    expect(rows[0]!._y).toBe(0.5);
+    expect(rows[0]!._xn).toBeCloseTo(1 + 1 / 3, 10);
+    expect(rows[rows.length - 1]!._y).toBe(0.9);
+  });
+
+  it("fills nothing when the series never reaches the threshold", () => {
+    expect(
+      buildShadeRuns(pts([[0, 0.1], [1, 0.4]]), "_xn", { side: "positive", baseline: 0.5, ...FULL }),
+    ).toEqual([]);
+  });
+
+  it("splits into one run per breach, each closing flat on the threshold", () => {
+    const runs = buildShadeRuns(pts([[0, 0], [1, 1], [2, 0], [3, 1], [4, 0]]), "_xn", {
+      side: "positive",
+      baseline: 0.5,
+      ...FULL,
+    });
+    expect(runs.length).toBe(2);
+    for (const r of runs) {
+      expect(r.rows[0]!._y).toBe(0.5);
+      expect(r.rows[r.rows.length - 1]!._y).toBe(0.5);
+    }
+  });
+
+  it("works with a NEGATIVE baseline and side: negative (the CFNAI -0.7 case)", () => {
+    const runs = buildShadeRuns(pts([[0, -0.2], [1, -1.2], [2, -0.2]]), "_xn", {
+      side: "negative",
+      baseline: -0.7,
+      ...FULL,
+    });
+    expect(runs.length).toBe(1);
+    const rows = runs[0]!.rows;
+    expect(rows[0]!._y).toBe(-0.7);
+    expect(rows[rows.length - 1]!._y).toBe(-0.7);
+    expect(rows.some((r) => r._y === -1.2)).toBe(true);
+  });
+
+  it("treats a point sitting exactly ON the baseline as a boundary, not a run of its own", () => {
+    expect(
+      buildShadeRuns(pts([[0, 0.2], [1, 0.5], [2, 0.2]]), "_xn", {
+        side: "positive",
+        baseline: 0.5,
+        ...FULL,
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not split a series that touches the baseline without crossing", () => {
+    const runs = buildShadeRuns(pts([[0, 0.9], [1, 0.5], [2, 0.9]]), "_xn", {
+      side: "positive",
+      baseline: 0.5,
+      ...FULL,
+    });
+    expect(runs.length).toBe(1);
+    expect(runs[0]!.rows.map((r) => r._y)).toEqual([0.9, 0.5, 0.9]);
+  });
+
+  it("side: both ignores the baseline for splitting", () => {
+    const runs = buildShadeRuns(pts([[0, 0.1], [1, 0.9]]), "_xn", {
+      side: "both",
+      baseline: 0.5,
+      ...FULL,
+    });
+    expect(runs.length).toBe(1);
+    expect(runs[0]!.rows.map((r) => r._y)).toEqual([0.1, 0.9]);
+  });
+
+  it("composes with an x-range crop", () => {
+    const runs = buildShadeRuns(pts([[0, 0], [1, 2], [2, 2], [3, 0]]), "_xn", {
+      side: "positive",
+      baseline: 1,
+      from: 1,
+      to: 2,
+    });
+    expect(runs.length).toBe(1);
+    expect(runs[0]!.rows.map((r) => [r._xn, r._y])).toEqual([[1, 2], [2, 2]]);
   });
 });

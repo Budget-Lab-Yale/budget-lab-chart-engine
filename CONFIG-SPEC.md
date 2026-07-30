@@ -207,13 +207,14 @@ already fills to the axis, and the other types have no line to fill under.
 |---|---|---|
 | `shading` | array | Each `{series?, side?, from?, to?, color?, fillOpacity?}`. Entries are **independent** and paint in list order, so one series may carry several regions; overlapping fills compound their opacity (that is how you deepen a tint). |
 | `shading[].series` | string | Series to fill under. **Omitted → every in-scope series** gets its own region in its own color. |
-| `shading[].side` | string | `both` (default) \| `positive` \| `negative` — which side of **zero** to fill. Runs are split at the zero crossing, interpolated so the fill closes flat on the baseline. |
+| `shading[].baseline` | number | The level the fill runs to, and what `side` is measured against. **Default 0.** Set it to a rule's threshold to shade only the breach — the part of the line beyond that level, filled back to it. Negative thresholds work the same way (`baseline: -0.7` with `side: negative`). |
+| `shading[].side` | string | `both` (default) \| `positive` \| `negative` — which side of `baseline` to fill. Runs are split at the baseline crossing, interpolated so the fill closes flat on it rather than on a slanted edge. |
 | `shading[].from` / `.to` | string | Inclusive x bounds, same string form as `annotations.bands.start`/`end` — **quote numbers in YAML** (`from: "2026"`), exactly as `annotations` x values require. Omitted → the series' first/last point. A bound falling **between** two points is interpolated to that exact x, so the fill edge lands where you asked rather than at the nearest point. On a categorical x-axis there is no position between categories, so bounds must **name existing categories** and crop on category boundaries. |
 | `shading[].color` | color | Named palette token or `"#hex"`. Omitted → the series' own resolved color. |
-| `shading[].fillOpacity` | number | 0–1. Default `0.18`, matching confidence bands. |
+| `shading[].fillOpacity` | number | 0–1. **Default `0.5`.** Two overlapping regions compound — 0.5 over 0.5 renders as 0.75 — so drop the lower one if you are layering a base tint under an accent window. |
 
-**Baseline.** Zero when zero is inside the resolved y-domain, otherwise the nearer domain edge — so
-a fill never leaves the plot frame. Shading does **not** expand the domain: if you want the zero
+**Baseline.** `baseline` (default 0) is what `side` measures against and where the fill's flat edge
+sits. The drawn edge is clamped into the resolved y-domain, so a fill never leaves the plot frame. Shading does **not** expand the domain: if you want the zero
 baseline actually visible on a chart whose data sits well away from it, set
 `yAxisPolicy.includeZero: true`. `side` always keys off zero, never off that clamped baseline.
 
@@ -223,6 +224,18 @@ chart. They carry their series' identity, so legend hover/pin dims them with the
 Validation rejects a region naming a series the data lacks, a categorical bound naming a missing
 category, and a `side` that could never match (e.g. `side: negative` where the series is never
 negative).
+
+```yaml
+# Shade only where a rule is breached, filling back to its threshold rather than to zero.
+chartType: line
+shading:
+  - series: Sahm rule
+    side: positive
+    baseline: 0.5
+annotations:
+  yAxis:
+    - { y: 0.5, label: "Threshold (0.5)", color: grey }   # draw the threshold line itself
+```
 
 ```yaml
 chartType: line
