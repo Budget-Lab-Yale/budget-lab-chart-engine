@@ -24,8 +24,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "snapshot:selftest": "node scripts/snapshot-selftest.mjs",
-    "gallery": "node dist/cli/index.js serve examples/gallery"
+    "snapshot:selftest": "node scripts/snapshot-selftest.mjs"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",

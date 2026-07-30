@@ -63,6 +63,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   bare suffix string. `inferUnitsFromSubtitle` is deleted, replaced by `resolveValueAffixes` and
   `applyValueAffixes`.
 
+### Fixed — dev tooling
+
+- **`npm run snapshot:selftest` works again.** It opened
+  `examples/augmented-occupations/chart.yaml`, deleted in a32714a ("prepare v1.1.0") — the commit
+  that repointed the CLI and serve tests onto `test/fixtures/sample-chart` but missed this script.
+  It has been failing with an ENOENT since v1.1.0, through eleven releases, despite being part of
+  the README's documented release checklist. Now renders that same fixture, with an explicit
+  missing-spec guard matching the script's existing build-artefact checks.
+- **Removed the broken `npm run gallery` alias.** It served `examples/gallery`, deleted in b436746.
+  The engine intentionally ships no bundled figures, so the alias had nothing to point at; use
+  `tbl-chart serve <dir>` against whatever directory you are reviewing.
+
+Neither script affects published output. The selftest matters because it is the only check that
+exercises the built `dist/` end to end — the vitest suite imports from `src/`, and CI runs
+browser-free — and `dist/` is what consumers get when they install by tag.
+
 ## [1.7.0] - 2026-07-29
 
 ### Added — dumbbell
