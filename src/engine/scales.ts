@@ -17,6 +17,70 @@ export interface ComputeYAxisOptions {
   domain?: [number, number] | null;
 }
 
+/**
+ * A y-domain's `[lower, upper]` NUMERIC bounds, whichever way round it runs.
+ *
+ * `yAxisPolicy: { min: 0, max: -3 }` is how a chart REVERSES its value axis (CFNAI and friends,
+ * where more-negative is worse and belongs at the top). That resolves to a DESCENDING domain, which
+ * is exactly what Plot wants — but it means `domain[0]` is the axis' visual BOTTOM, not its numeric
+ * floor. Every comparison of a value against the domain must come through here; reading the pair as
+ * `[lo, hi]` directly inverts silently on those charts (it clamped `shading` baselines to the far
+ * edge, and dropped the zero rule from domains that straddle zero).
+ */
+export function domainBounds(domain: readonly [number, number]): [number, number] {
+  return domain[0] <= domain[1] ? [domain[0], domain[1]] : [domain[1], domain[0]];
+}
+
+/** True when the value axis runs descending (a reversed axis, see `domainBounds`). A pixel offset
+ *  meant to clear a mark's data-space end — a value label above a rising bar — has to point the
+ *  OTHER way on such an axis, because "up in data space" is down in pixels. */
+export function isReversedDomain(domain: readonly [number, number]): boolean {
+  return domain[0] > domain[1];
+}
+
+export interface ResolveHardDomainOptions {
+  /** `yAxisPolicy.min` — the axis' BOTTOM, which is its numeric ceiling when reversed. */
+  min?: number;
+  /** `yAxisPolicy.max` — the axis' TOP, which is its numeric floor when reversed. */
+  max?: number;
+  /** The chart type's own computed extent, always ascending (`computeBarYExtent` and friends). */
+  auto?: { min: number; max: number };
+  /** Values that must stay inside the frame — reference-marker levels, callout `y`s. */
+  fold?: number[];
+}
+
+/**
+ * The hard value-axis domain for a chart: the author's pinned bounds, an auto extent for whichever
+ * end they left open, and fold values widening it so a reference marker stays visible. Returns null
+ * when nothing pins or fits the axis, which is the caller's signal to auto-fit from the data.
+ *
+ * Reversal (`min > max`) is preserved: the arithmetic runs on the domain's NUMERIC bounds and
+ * re-orients at the end, so a fold value can widen a reversed domain but never flip or collapse it.
+ * The per-type copies of this logic all did `Math.max(policy.max, ...folds)`, which read -0.7 as
+ * above -4 and painted bars off the top of the canvas.
+ *
+ * The floor/ceiling asymmetry below is pre-existing behavior, kept exactly: a fold beyond the pinned
+ * CEILING widens it, a pinned FLOOR is authoritative. It keeps ascending output byte-identical.
+ */
+export function resolveHardDomain({
+  min,
+  max,
+  auto,
+  fold,
+}: ResolveHardDomainOptions): [number, number] | null {
+  const reversed = min != null && max != null && min > max;
+  const pinnedLo = reversed ? max : min;
+  const pinnedHi = reversed ? min : max;
+  const folds = (fold ?? []).filter(Number.isFinite);
+
+  const lo = pinnedLo ?? (auto ? Math.min(auto.min, ...folds) : null);
+  const hiBase = pinnedHi ?? auto?.max;
+  if (lo == null || hiBase == null) return null;
+  const hi = Math.max(hiBase, ...folds);
+
+  return reversed ? [hi, lo] : [lo, hi];
+}
+
 /** Compute a "nice" y-domain + tick array up front so gridlines and labels can be
  * rendered as explicit marks with full positioning control. */
 export function computeYAxis(

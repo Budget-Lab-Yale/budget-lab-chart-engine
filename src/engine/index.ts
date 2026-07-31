@@ -17,6 +17,8 @@ import {
   computeWaterfallYExtent,
   computeDumbbellValueExtent,
   computeDrawnValueExtent,
+  resolveHardDomain,
+  domainBounds,
 } from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
@@ -498,55 +500,55 @@ function assemblePaneResult(
   let hardDomain: [number, number] | null;
   let includeZero: boolean;
 
+  // Value-axis reference markers, for the branches that fold them in so a marker stays visible.
+  // The value axis is x on a horizontal chart, so annotations.xAxis plays the yAxis role there
+  // (see assemblePlot's horizontal xAxis marker path).
+  const valueAxisMarkers = (): number[] =>
+    [
+      ...ann.yAxis.map((m) => m.y),
+      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
+    ].filter(Number.isFinite);
+
   if (chartType === "bar" || chartType === "stacked") {
     // Bar/stacked: zero baseline by default (axis extent from stacked totals + value-label
     // headroom). An explicit yAxisPolicy.min OPTS OUT of the forced zero — a truncated bar axis
     // (use sparingly; e.g. a level series whose variation is small relative to its magnitude).
     // Reference-line (markers) values are folded into the extent so a marker stays visible.
-    // Horizontal bars: the VALUE axis is x, not y — annotations.xAxis markers there play the same
-    // role annotations.yAxis markers play for vertical bars (see assemblePlot's horizontal xAxis
-    // marker path), so their numeric `x` folds into this same value extent (mirrors the vertical
-    // yAxis fold below; the `chartType` gate already means this hardDomain IS the value axis
-    // regardless of orientation).
-    const markerYs = [
-      ...ann.yAxis.map((m) => m.y),
-      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
-    ].filter(Number.isFinite);
     includeZero = policy.min == null;
-    const barExtent = computeBarYExtent(dataInScope, spec, chartType);
-    const resolvedMin = policy.min ?? Math.min(barExtent.min, ...markerYs);
-    const resolvedMax = Math.max(policy.max ?? barExtent.max, ...markerYs);
-    hardDomain = [resolvedMin, resolvedMax];
+    hardDomain = resolveHardDomain({
+      min: policy.min,
+      max: policy.max,
+      auto: computeBarYExtent(dataInScope, spec, chartType),
+      fold: valueAxisMarkers(),
+    });
   } else if (chartType === "dumbbell") {
     // Dumbbell: dots are POSITIONS, so the value axis fits the padded data extent and does NOT
     // force zero (see computeDumbbellValueExtent). Orientation is handled by the mark (horizontal
-    // puts the value on x via yScaleOpts). Value-axis reference markers fold in for headroom — for
-    // horizontal they are annotations.xAxis, for vertical annotations.yAxis (mirrors the bar path).
-    const markerYs = [
-      ...ann.yAxis.map((m) => m.y),
-      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
-    ].filter(Number.isFinite);
+    // puts the value on x via yScaleOpts).
     includeZero = false;
-    const dbExtent = computeDumbbellValueExtent(dataInScope.map((d) => d._y));
-    const resolvedMin = policy.min ?? Math.min(dbExtent.min, ...markerYs);
-    const resolvedMax = Math.max(policy.max ?? dbExtent.max, ...markerYs);
-    hardDomain = [resolvedMin, resolvedMax];
+    hardDomain = resolveHardDomain({
+      min: policy.min,
+      max: policy.max,
+      auto: computeDumbbellValueExtent(dataInScope.map((d) => d._y)),
+      fold: valueAxisMarkers(),
+    });
   } else if (chartType === "histogram") {
     // Histogram: the value axis is the (possibly normalized) bin height `_y`, which yForAxis
     // already carries. Zero baseline is mandatory (bars grow from 0); an explicit min+max opts
     // into a fixed domain, otherwise auto-fit-from-zero.
     includeZero = true;
-    hardDomain = policy.min != null && policy.max != null ? [policy.min, policy.max] : null;
+    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max });
   } else if (chartType === "waterfall") {
     // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
     // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
     // axis and bars agree. Zero baseline; reference-line (yAxis) values fold in for headroom.
     includeZero = policy.min == null;
-    const markerYs = ann.yAxis.map((m) => m.y).filter(Number.isFinite);
-    const wfExtent = computeWaterfallYExtent(dataInScope);
-    const resolvedMin = policy.min ?? Math.min(wfExtent.min, ...markerYs);
-    const resolvedMax = Math.max(policy.max ?? wfExtent.max, ...markerYs);
-    hardDomain = [resolvedMin, resolvedMax];
+    hardDomain = resolveHardDomain({
+      min: policy.min,
+      max: policy.max,
+      auto: computeWaterfallYExtent(dataInScope),
+      fold: ann.yAxis.map((m) => m.y).filter(Number.isFinite),
+    });
   } else if (chartType === "area") {
     // Stacked area: zero baseline; the axis extent comes from the per-x STACKED TOTAL (the
     // cumulative top), not individual series values. Annotation y values are folded in for headroom.
@@ -564,21 +566,34 @@ function assemblePaneResult(
       if ((r._y as number) < minVal) minVal = r._y as number;
     }
     const stackMax = totalByX.size ? Math.max(...totalByX.values()) : 0;
-    const resolvedMin = policy.min ?? Math.min(0, minVal, ...markerYs);
-    const resolvedMax = Math.max(policy.max ?? stackMax, ...markerYs);
-    hardDomain = [resolvedMin, resolvedMax];
+    hardDomain = resolveHardDomain({
+      min: policy.min,
+      max: policy.max,
+      auto: { min: Math.min(0, minVal), max: stackMax },
+      fold: markerYs,
+    });
   } else {
     // Line (and future non-bar types): unchanged behavior.
     includeZero = policy.includeZero === true;
+    // A reversed request (min > max) carries the numeric FLOOR in `max`, so autoWiden — "round the
+    // bound the data overflows out to a clean multiple of `step`" — extends it DOWNWARD there,
+    // where on an ascending axis the same rule raises the ceiling.
+    const reversed = policy.min != null && policy.max != null && policy.min > policy.max;
     let yMax = policy.max;
     if (policy.autoWiden && yMax != null) {
-      const dataMax = Math.max(...(yForAxis.filter(Number.isFinite) as number[]));
-      if (dataMax > yMax) {
-        const step = policy.autoWiden.step || 1;
-        yMax = Math.ceil(dataMax / step) * step;
+      const step = policy.autoWiden.step || 1;
+      const finite = yForAxis.filter(Number.isFinite) as number[];
+      if (finite.length) {
+        if (reversed) {
+          const dataMin = Math.min(...finite);
+          if (dataMin < yMax) yMax = Math.floor(dataMin / step) * step;
+        } else {
+          const dataMax = Math.max(...finite);
+          if (dataMax > yMax) yMax = Math.ceil(dataMax / step) * step;
+        }
       }
     }
-    hardDomain = policy.min != null && yMax != null ? [policy.min, yMax] : null;
+    hardDomain = resolveHardDomain({ min: policy.min, max: yMax });
   }
 
   // Shared-mode small multiples: opts.yDomain is the ONE domain the orchestrator computed over
@@ -644,12 +659,15 @@ function assemblePaneResult(
   // the data): clip the data marks so they stop at the frame instead of spilling over the title and
   // legend. Compared against the PAINTED extent rather than the padded axis extent so a chart whose
   // data fits stays unclipped — and therefore byte-identical, since Plot's `clip` wraps the mark in
-  // an extra <g>. Fires in both directions and either sign, which `yDomain[0] > 0` did not.
+  // an extra <g>. Fires in both directions and either sign, which `yDomain[0] > 0` did not — and
+  // against the domain's NUMERIC bounds, so a reversed axis is judged on real overflow rather than
+  // clipping unconditionally.
   const drawnExtent = computeDrawnValueExtent(dataInScope, spec, chartType);
-  const domainEps = Math.abs(yDomain[1] - yDomain[0]) * 1e-9;
+  const [clipLo, clipHi] = domainBounds(yDomain);
+  const domainEps = Math.abs(clipHi - clipLo) * 1e-9;
   const clipMarks =
     drawnExtent != null &&
-    (drawnExtent.min < yDomain[0] - domainEps || drawnExtent.max > yDomain[1] + domainEps);
+    (drawnExtent.min < clipLo - domainEps || drawnExtent.max > clipHi + domainEps);
 
   // Chart-type-specific marks, then assemble the Plot.
   const layers = markBuilderFor(spec.chartType)(dataInScope, spec, {

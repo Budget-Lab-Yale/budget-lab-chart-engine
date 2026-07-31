@@ -4,6 +4,45 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.1] - 2026-07-31
+
+### Fixed — reversed value axis
+
+`yAxisPolicy: {min: 0, max: -4}` (min > max) reverses the value axis, putting the numerically lower
+value at the top — the right treatment for indices where more-negative is worse (CFNAI, output gaps).
+It was never a declared feature: it worked because a descending `domain` is ordinary Plot input, and
+it broke wherever engine code read the domain pair as `[lo, hi]`. Charts already relying on it were
+getting silently wrong output. This release makes it work on every chart type, and documents it
+(CONFIG-SPEC, "Reversing the axis").
+
+- **`shading` baselines closed on the frame instead of their threshold.** The reported bug: with
+  `{min: 0.0, max: -3.0}`, a `baseline: -0.7` clamped to `-3.0`, so every fill ran to the top of the
+  frame rather than stopping at the threshold. The clamp now takes the domain's numeric bounds
+  (`domainBounds`), the one place that answers "which end of this pair is the floor".
+- **A reference marker destroyed a reversed domain.** Five per-type domain branches folded marker
+  values in with `Math.max(policy.max, ...markerYs)`, which read -0.7 as above -4 and collapsed the
+  ceiling: a bar chart with `{min: 0, max: -4}` and a marker at -0.7 painted its first bar at
+  `y = -136`, `height = 514` on a 400px canvas — over the title and off the top of the SVG. Those
+  five branches (plus histogram and line) now share one `resolveHardDomain`, so a fold value widens
+  a domain's numeric bounds and never flips or collapses its orientation.
+- **Value labels were painted inside the bars they label.** Waterfall running totals and stacked's
+  net total keyed a pixel offset off a data-space sign (`rising`, `posTop`). Each now picks its side
+  — and the horizontal net label its `textAnchor` — from the axis orientation.
+- **The zero baseline was dropped** from reversed domains that straddle zero, and the **mark clip**
+  engaged unconditionally (harmless visually, but it wrapped every reversed chart in a clip group it
+  did not need). The `annotations.yAxis` label collision-avoidance pass skipped reversed axes
+  entirely and now runs.
+- **`autoWiden` now extends whichever end the data overflows** — on a reversed axis that is `max`,
+  the numeric floor, rounded outward with `floor` rather than `ceil`.
+- Honored on the types that compute their own domain: a reversed 100%-normalized stack puts 100 at
+  the bottom, a reversed histogram hangs its bins from the ceiling. Reversal applies to the value
+  axis wherever it lives — `y` vertically, `x` horizontally, where `min` is the LEFT edge (so
+  reversing puts the lower value at the right and negative bars grow left-to-right).
+
+Ascending output is unchanged and byte-identical — the golden snapshots are the check, and
+`resolveHardDomain` preserves the pre-existing floor/ceiling asymmetry (a fold value can widen a
+pinned ceiling; a pinned floor is authoritative) exactly.
+
 ## [1.8.0] - 2026-07-30
 
 ### Added — shading baseline

@@ -15,7 +15,7 @@ import { resolveColor } from "../palette";
 import { CAT_LABEL_CLASS } from "../axes";
 import { applyValueAffixes, resolveValueAffixes } from "../util";
 import type { ValueAffixes } from "../../spec/types";
-import { computeWaterfallSteps, waterfallValueDecimals } from "../scales";
+import { computeWaterfallSteps, waterfallValueDecimals, isReversedDomain } from "../scales";
 import type { WaterfallStep } from "../scales";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
 import type { ChartSpec } from "../../spec/types";
@@ -114,6 +114,10 @@ export function buildWaterfallMarks(
       waterfallValueDecimals(data, spec.valueLabels?.decimals),
     );
     const labelSize = ctx.pane ? 10.5 : TBL_VALUE_LABEL.fontSize;
+    // `rising` is a DATA-space property (delta >= 0) while `dy` is a PIXEL offset, so a reversed
+    // value axis — where a rising bar grows downward — needs the offset flipped, or the label is
+    // painted inside the bar instead of clear of its end.
+    const reversed = ctx.yDomain ? isReversedDomain(ctx.yDomain) : false;
     const pushLabels = (rising: boolean): void => {
       const rows = barSteps
         .filter((s) => s.rise === rising)
@@ -125,7 +129,7 @@ export function buildWaterfallMarks(
           y: "level",
           text: (d: { level: number }) => fmt(d.level),
           textAnchor: "middle",
-          dy: rising ? -TBL_VALUE_LABEL.gap : TBL_VALUE_LABEL.gapBelow,
+          dy: rising !== reversed ? -TBL_VALUE_LABEL.gap : TBL_VALUE_LABEL.gapBelow,
           fontSize: labelSize,
           fontWeight: TBL_VALUE_LABEL.fontWeight,
           fill: (d: { fill: string }) => d.fill,

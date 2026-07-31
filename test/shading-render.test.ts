@@ -444,4 +444,46 @@ describe("shading — non-zero baseline (rule thresholds)", () => {
     );
     expect(res.valid).toBe(true);
   });
+
+  // A REVERSED value axis (yAxisPolicy.min > max — e.g. CFNAI, where more-negative is worse and
+  // belongs at the top) resolves to a DESCENDING domain. Everything that reads the domain as
+  // [lo, hi] has to take the sorted extent, or a threshold baseline clamps to the wrong edge and
+  // the fill runs to the frame instead of stopping at the threshold.
+  it("closes a threshold fill on the threshold when the axis is reversed", () => {
+    const spec = {
+      ...BASE,
+      yAxisPolicy: { min: 0, max: -3 },
+      shading: [{ series: "A", side: "negative", baseline: -0.7 }],
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, rows([[2020, -0.2], [2021, -1.5], [2022, -0.2]]), OPTS);
+    expect(shadePaths(svg).length).toBe(1);
+    // Domain is [0, -3]: 0 at the frame floor, -3 at the frame ceiling.
+    expect(edgeY(svg)).toBeCloseTo(yOf(svg, -0.7, 0, -3), 6);
+    // Emphatically NOT the far edge (-3), which is the frame ceiling here.
+    expect(edgeY(svg)).not.toBeCloseTo(yOf(svg, -3, 0, -3), 6);
+  });
+
+  it("still clamps a threshold outside a reversed domain to the near edge", () => {
+    const spec = {
+      ...BASE,
+      yAxisPolicy: { min: 0, max: -3 },
+      // A baseline BELOW the domain's numeric floor (0) must draw at 0 — the frame floor.
+      shading: [{ series: "A", side: "negative", baseline: 5 }],
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, rows([[2020, -0.2], [2021, -1.5], [2022, -0.2]]), OPTS);
+    expect(shadePaths(svg).length).toBe(1);
+    expect(edgeY(svg)).toBeCloseTo(yOf(svg, 0, 0, -3), 6);
+  });
+
+  it("puts a reversed axis' fill geometry at the mirror of the ascending one", () => {
+    // Same data, same threshold, domain flipped: the fill's flat edge must sit the same DISTANCE
+    // from the threshold's own position either way — i.e. the two renders mirror vertically.
+    const base = { ...BASE, shading: [{ series: "A", side: "negative", baseline: -0.7 }] };
+    const data = rows([[2020, -0.2], [2021, -1.5], [2022, -0.2]]);
+    const up = renderChart({ ...base, yAxisPolicy: { min: -3, max: 0 } } as unknown as ChartSpec, data, OPTS);
+    const down = renderChart({ ...base, yAxisPolicy: { min: 0, max: -3 } } as unknown as ChartSpec, data, OPTS);
+    const top = Number(up.svg.getAttribute("data-margin-top"));
+    const bottom = 400 - Number(up.svg.getAttribute("data-margin-bottom"));
+    expect(edgeY(down.svg)).toBeCloseTo(top + bottom - edgeY(up.svg), 6);
+  });
 });

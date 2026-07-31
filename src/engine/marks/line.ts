@@ -7,6 +7,7 @@ import { TBL, markerSymbolForIndex } from "../theme";
 import { resolveColor } from "../palette";
 import { buildShadeRuns } from "../shade";
 import type { ShadeXField } from "../shade";
+import { domainBounds } from "../scales";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { splitProjectedRuns } from "./projected";
@@ -52,9 +53,11 @@ export function buildLineMarks(
   // Each region's baseline is `region.baseline ?? 0` — a threshold rather than zero when the author
   // wants the breach shaded. `side` is measured against that raw value; the DRAWN edge is clamped
   // into the y-domain so a fill can never leave the frame, exactly as the zero case always did.
+  // The clamp reads the domain's NUMERIC bounds (domainBounds), not the raw pair: a reversed axis
+  // runs descending, and clamping against that as [lo, hi] pinned every threshold to the far edge.
   const shadeSeriesOrder: string[] = [];
   if (spec.shading?.length && ctx.yDomain) {
-    const [domainLo, domainHi] = ctx.yDomain;
+    const [domainLo, domainHi] = domainBounds(ctx.yDomain);
     const clampToDomain = (v: number) => Math.min(Math.max(v, domainLo), domainHi);
     const parseBound = (v: string | undefined) =>
       v == null ? null : (ctx.parseXValue?.(v) ?? null);
