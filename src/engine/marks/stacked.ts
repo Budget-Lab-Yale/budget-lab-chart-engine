@@ -19,6 +19,7 @@
 // we pass NO order/reverse option and rely on data being supplied in declaration order.
 import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
+import { isReversedDomain } from "../scales";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
@@ -266,10 +267,26 @@ export function buildStackedMarks(
       fontSize: TBL_VALUE_LABEL.fontSize,
       fontWeight: TBL_VALUE_LABEL.fontWeight,
     };
+    // `posTop` is the stack's END in DATA space; dx/dy are PIXEL offsets. On a reversed value axis
+    // that end is the stack's near side in pixels, so the offset (and the horizontal anchor) has to
+    // point the other way or the total is painted over the stack it labels.
+    const reversed = ctx.yDomain ? isReversedDomain(ctx.yDomain) : false;
     overlay.push(
       horizontal
-        ? Plot.text(netRows, { ...common, y: "_xc", x: "posTop", textAnchor: "start", dx: TBL_VALUE_LABEL.gap })
-        : Plot.text(netRows, { ...common, x: "_xc", y: "posTop", textAnchor: "middle", dy: -TBL_VALUE_LABEL.gap }),
+        ? Plot.text(netRows, {
+            ...common,
+            y: "_xc",
+            x: "posTop",
+            textAnchor: reversed ? "end" : "start",
+            dx: reversed ? -TBL_VALUE_LABEL.gap : TBL_VALUE_LABEL.gap,
+          })
+        : Plot.text(netRows, {
+            ...common,
+            x: "_xc",
+            y: "posTop",
+            textAnchor: "middle",
+            dy: reversed ? TBL_VALUE_LABEL.gapBelow : -TBL_VALUE_LABEL.gap,
+          }),
     );
   } else if (netMode === "dot") {
     // Black-stroked white dot at the true net y (KEPT in panes). The net value is shown on hover

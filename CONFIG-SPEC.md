@@ -149,6 +149,32 @@ only engages once the *nice'd* domain still cuts the data.
 A line leaving the frame is honest but easy to misread as the end of the series, so pair a truncated
 axis with a note or an `annotations.yAxis` marker at the ceiling.
 
+**Reversing the axis.** Set `min` **greater than** `max` to flip the value axis, so the numerically
+lower value sits at the top: `yAxisPolicy: { min: 0.0, max: -3.0 }` puts `-3.0` at the ceiling and
+`0.0` at the floor. Use it for indices where more-negative is worse (CFNAI, output gaps) and the
+conventional reading is "down is bad, so draw it up."
+
+Reversal works on **every chart type**, and on the value axis wherever it lives. `min` is the axis'
+NEAR edge — the bottom on a vertical chart, the left on a horizontal one — and `max` is the far edge,
+so reversing moves the numerically lower value to the top (vertical) or the right (horizontal). On
+horizontal bars that means negative data grows left-to-right from a zero line at the left, the mirror
+of its ascending layout. Both bounds must be pinned: `min` alone, or `max` alone, is read as
+ascending.
+
+A reversed axis is a scale flip and nothing more, so the rest of the engine follows it:
+
+| | Behavior |
+|---|---|
+| Ticks and gridlines | Run top-to-bottom in descending order. |
+| Zero baseline | Still drawn whenever the domain straddles zero. |
+| `shading` baselines | Close on their threshold, not on the frame edge. |
+| Reference markers, `annotations.points` | Fold in without moving either pinned bound. |
+| Clipping | Engages only on real overflow, in either direction. |
+| Value labels | Stay clear of the mark's end, on whichever pixel side that now is. |
+| `autoWiden` | Extends whichever end the data overflows — on a reversed axis that is `max`, the numeric floor. |
+| Small multiples | The one shared domain stays reversed across every pane. |
+| Bars, stacks, histograms, waterfalls | Still grow from zero; on a reversed all-positive domain they hang from the ceiling. |
+
 ### Series
 
 The series **column** is set via `columns.series`. These options reference the series **keys**

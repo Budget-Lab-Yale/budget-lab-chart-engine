@@ -19,7 +19,7 @@ import {
   ANNOTATION_LINE_CLASS,
   X_ANNOTATION_LINE_CLASS,
 } from "./facet-chrome";
-import { makeTickFormatter } from "./scales";
+import { domainBounds, makeTickFormatter } from "./scales";
 import { resolveColor } from "./palette";
 import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
@@ -238,7 +238,9 @@ export function assemblePlot({
     };
     // Vertical scale (needs height) → the stagger row each fixed y-marker label lands in.
     const innerHForRows = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-    if (innerHForRows != null && innerHForRows > 0 && yDomain[1] > yDomain[0]) {
+    // The py formula below is orientation-free (it divides by the SIGNED span), so a reversed axis
+    // reserves its rows correctly too — only a DEGENERATE domain has to bail out.
+    if (innerHForRows != null && innerHForRows > 0 && yDomain[1] !== yDomain[0]) {
       for (const m of yAxisAnn) {
         if (!m.label) continue;
         const py = TBL_MARGIN_TOP + ((yDomain[1] - m.y) / (yDomain[1] - yDomain[0])) * innerHForRows;
@@ -407,7 +409,9 @@ export function assemblePlot({
     // 4. Zero baseline (darker rule painted over the light gridlines) — ONLY when 0 is within
     //    the y-domain. Drawing it for a domain that excludes 0 (e.g. an index/percent range
     //    starting at 1%) leaves a stray dark rule (most visible per-pane in small multiples).
-    if (yDomain[0] <= 0 && yDomain[1] >= 0) {
+    //    Containment is orientation-free: a reversed axis straddling zero still gets its rule.
+    const [zeroLo, zeroHi] = domainBounds(yDomain);
+    if (zeroLo <= 0 && zeroHi >= 0) {
       marks.push(
         Plot.ruleY([0], {
           stroke: TBL.color.axisStroke,
