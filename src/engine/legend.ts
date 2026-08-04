@@ -82,6 +82,19 @@ function buildColorChip(doc: Document, color: string): SVGSVGElement {
   return svg;
 }
 
+/** A left-to-right gradient of hard-edged equal bands — one per color. Used for a legend chip that
+ *  keys several differently-colored fills under one label. */
+export function bandedGradient(colors: string[]): string {
+  const stops = colors
+    .map((c, i) => {
+      const from = ((i / colors.length) * 100).toFixed(4);
+      const to = (((i + 1) / colors.length) * 100).toFixed(4);
+      return `${c} ${from}% ${to}%`;
+    })
+    .join(", ");
+  return `linear-gradient(to right, ${stops})`;
+}
+
 /** Neutral gray used for the shape-legend markers (shape conveys the shape-channel value, not a
  *  color — so its swatches are uncolored). */
 const SHAPE_LEGEND_COLOR = "#555B66";
@@ -272,7 +285,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false } of safeItems) {
+  for (const { series, label: displayLabel, color, colors: swatchColors, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -298,7 +311,13 @@ export function renderLegend(
       // Annotation fills key their TINT, which for a 10 %-opaque band is nearly white — the
       // hairline is what keeps such a swatch from reading as a gap.
       if (outlined) swatch.classList.add("is-outlined");
-      if (color) swatch.style.background = color;
+      // Several tints (one concept, differently-colored fills) → equal vertical bands, via the same
+      // hard-stop gradient the dashed swatch uses.
+      if (swatchColors && swatchColors.length > 1) {
+        swatch.style.background = bandedGradient(swatchColors);
+      } else if (color) {
+        swatch.style.background = color;
+      }
     } else if (markerShape === "point") {
       // Point chart: a filled colored marker (no line). The symbol is the series' shape in the
       // redundant (combined) case, else a plain circle (shape lives in the shape legend).

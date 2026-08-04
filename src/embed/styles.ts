@@ -14,6 +14,7 @@
 // tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
 
 import { TOKENS_CSS } from "../theme/tokens";
+import { SWATCH_OUTLINE } from "../engine/theme";
 
 // Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated
 // verbatim from the Style-Guide palette so the HTML/CSS matches the SVG side exactly. Only
@@ -410,7 +411,7 @@ body {
 /* Annotation-derived fill swatch: an inset hairline so a near-white tint (an annotations.bands
    fill is 10% opaque) still reads as a swatch rather than a gap. */
 .tbl-legend-swatch.is-rect.is-outlined {
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 0 0 1px ${SWATCH_OUTLINE};
 }
 .tbl-legend-swatch.is-dot {
   width: 14px;

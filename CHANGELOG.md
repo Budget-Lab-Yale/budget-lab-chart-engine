@@ -41,6 +41,14 @@ thin intervals out of a crowded plot frame.
   connectors, the crosshair) stays correct. Not supported on a categorical x-axis or with
   `small_multiples` — both are validation errors. See CONFIG-SPEC, "X-axis rug".
 
+**Multi-series charts with shaded areas.** A `shading` region with no `series` paints one fill per
+series, each in that series' color, so a single-color chip cannot key it honestly. Such a row's chip
+now shows **every** tint as equal vertical bands (live legend and PNG export alike), and rows merge by
+label rather than by color — so writing one region per series under a shared label collapses to that
+same one banded row instead of three identically-worded ones. A region that names a `series` is keyed
+by **that** series' color (it was keyed by the first series'). `shading[].label` with neither
+`legend: true` nor `rug: true` is now a validation error rather than a silent no-op.
+
 Charts using neither feature render byte-identically (the goldens are unchanged).
 
 ## [1.8.1] - 2026-07-31

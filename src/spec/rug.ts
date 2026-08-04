@@ -15,8 +15,9 @@ export interface ResolvedRugTrack {
   /** Raw color ref (named token or "#hex"); undefined ⇒ the caller's neutral default. */
   color: string | undefined;
   intervals: RugInterval[];
-  /** Where this track came from — the legend builder keys derived and explicit tracks identically,
-   *  but validation reports them differently. */
+  /** Where this track came from. Read by the legend builder to avoid double-keying: a DERIVED
+   *  track's row is already produced from its source band / shading entry, so only an explicit
+   *  `rug.tracks` entry — which has no band or fill of its own — needs a row minted here. */
   origin: "bands" | "shading" | "tracks";
   /** False only when the author explicitly opted the track out of the legend. */
   legend: boolean;
@@ -94,8 +95,7 @@ export function resolveRugTracks(spec: ChartSpec): ResolvedRugTrack[] {
   return [...bandTracks, ...shadeTracks, ...explicit];
 }
 
-/** Strip height in px (`rug.height`, default 8). */
-export const RUG_DEFAULT_HEIGHT = 8;
+const RUG_DEFAULT_HEIGHT = 8;
 /** Gap between the plot frame's bottom edge and the top of the strip. */
 export const RUG_GAP = 3;
 /** Gap below the strip, before the x-axis tick labels. */

@@ -228,8 +228,9 @@ region) and its `label` renders as a **legend row** above the plot instead of as
 |---|---|
 | needs a `label` | The label *is* the legend key. `legend: true` with no label is a validation error. |
 | **replaces** the in-chart label | A keyed band or reference line draws no text in the frame and reserves no auto-stagger row. Moving the label out is the point; asking for both would re-create the clutter. |
-| one row per **label** | Entries sharing a label collapse into a single row — three recession bands become one "US recessions" key. |
+| one row per **label** | Entries sharing a label collapse into a single row — three recession bands become one "US recessions" key. (A fill and a reference line sharing a label stay separate rows: one swatch can't be both.) |
 | swatch | Fills get a rect chip in the tint you will actually see (the fill color flattened over white at its `fillOpacity`, with a hairline so a 10 %-opaque band still reads as a chip). Reference lines get a line swatch in the marker's color, dashed when the marker is. A `rug: true` entry is keyed by its **solid** rug color instead — the block, not the tint, is what the reader matches. |
+| **multi-series fills** | A `shading` region with no `series` paints one fill per series, each in that series' color. Its chip then shows **every** tint as equal bands, rather than keying the gold and purple fills with the blue one. Writing one region per series under a shared label collapses to that same single banded row. Give the region an explicit `color` to key it with one chip instead. |
 | row order | Series → `bands` → `shading` → `xAxis` → `yAxis` → explicit `rug.tracks`, each in spec order. Not author-controllable. |
 | `legend: false` | Suppresses the row (including one implied by `rug: true`). Chart-level `legend: false` suppresses the whole legend, in which case a keyed label stays in the frame rather than being lost. |
 
@@ -334,7 +335,7 @@ already fills to the axis, and the other types have no line to fill under.
 | `shading[].from` / `.to` | string | Inclusive x bounds, same string form as `annotations.bands.start`/`end` — **quote numbers in YAML** (`from: "2026"`), exactly as `annotations` x values require. Omitted → the series' first/last point. A bound falling **between** two points is interpolated to that exact x, so the fill edge lands where you asked rather than at the nearest point. On a categorical x-axis there is no position between categories, so bounds must **name existing categories** and crop on category boundaries. |
 | `shading[].color` | color | Named palette token or `"#hex"`. Omitted → the series' own resolved color. |
 | `shading[].fillOpacity` | number | 0–1. **Default `0.5`.** Two overlapping regions compound — 0.5 over 0.5 renders as 0.75 — so drop the lower one if you are layering a base tint under an accent window. |
-| `shading[].label` | string | What the fill **means** ("False positives"). A fill has no in-chart text of its own, so this is purely a key: it names the region in the legend (with `legend: true`) and groups regions into one [rug](#x-axis-rug) track. Regions sharing a label collapse to one legend row. |
+| `shading[].label` | string | What the fill **means** ("False positives"). A fill has no in-chart text of its own, so this is purely a key: it names the region in the legend (with `legend: true`) and groups regions into one [rug](#x-axis-rug) track. Regions sharing a label collapse to one legend row. **Requires `legend: true` or `rug: true`** — a label with neither has nothing to do, so validation rejects it. |
 | `shading[].legend` | boolean | Key this fill in the legend — see [Keying annotations in the legend](#keying-annotations-in-the-legend-legend-true). |
 | `shading[].rug` | boolean | Also draw this region's span as a solid block on the [x-axis rug](#x-axis-rug). Needs a `label` and **both** `from` and `to`. |
 

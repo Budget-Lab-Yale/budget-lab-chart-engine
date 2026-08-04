@@ -190,6 +190,28 @@ serve a value tooltip on top of the annotation highlight — two answers to one 
 present, the hit rect's height is clamped to the top of the strip, so the crosshair hides as the
 pointer enters it. Gated on rug presence; every other chart is untouched.
 
+### D. Multi-series fills (added after the multi-series pressure test)
+
+A `shading` region with no `series` is documented convenience for "fill under every series", and each
+fill takes its own series' color. One label over N differently-colored fills therefore cannot be keyed
+by one chip — the first implementation keyed all three with the *first* series' tint, and a region that
+did name a series was keyed by the first series' tint too (a plain bug).
+
+Resolved by making the swatch carry a **list** of tints (`LegendItem.colors`), one per fill the row
+actually names, rendered as equal vertical bands — a hard-stop `linear-gradient` in the live legend
+(the same technique the dashed swatch already uses) and N rects in the PNG export. `shadeSwatchColors`
+derives the list the way the fills are derived: explicit `color` → that one; else the named series'
+color; else one per in-scope series.
+
+Row dedupe consequently merges on **(label, swatch shape, dashed)** rather than including color, and
+unions the tints. That makes the two ways of writing the same thing agree: one region covering three
+series, and three regions sharing a label, produce the identical banded row. A rect and a rule sharing
+a label stay separate rows — one swatch cannot be both.
+
+`shading[].label` has no meaning without `legend`/`rug` (a fill draws no text of its own), so a label
+with neither is now a validation error, matching how this repo already treats `columns.section` and
+`x_axis_ticks` no-ops rather than letting dead configuration render nothing.
+
 ## Validation
 
 New errors in `spec/validate.ts`:

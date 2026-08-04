@@ -9,6 +9,7 @@ import type { FigureRenderResult } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
+import { SWATCH_OUTLINE } from "../engine/theme.js";
 import {
   SVG_NS,
   W,
@@ -77,7 +78,15 @@ const SHAPE_LEGEND_COLOR = "#555B66";
 
 function drawLegend(
   root: SVGElement,
-  items: Array<{ label: string; color: string | undefined; dashed: boolean; markerSymbol?: string; markerShape?: string; outlined?: boolean }>,
+  items: Array<{
+    label: string;
+    color: string | undefined;
+    dashed: boolean;
+    markerSymbol?: string;
+    markerShape?: string;
+    outlined?: boolean;
+    colors?: string[];
+  }>,
   firstBaseline: number,
   leadingTitle?: string,
 ): number {
@@ -145,15 +154,27 @@ function drawLegend(
       // Color chip — a filled rounded square (color key), matching the live legend. An annotation
       // fill's tint can be near-white, so those rows carry a hairline (matching .is-outlined).
       const chip = 13;
+      const chipX = x + (SW - chip) / 2;
+      const chipY = cy - chip / 2;
+      // Several tints under one label → equal vertical bands, matching the live legend's chip.
+      const tints = item.colors && item.colors.length > 1 ? item.colors : null;
+      if (tints) {
+        const band = chip / tints.length;
+        tints.forEach((c, i) => {
+          root.appendChild(
+            svgEl("rect", { x: chipX + i * band, y: chipY, width: band + 0.5, height: chip, fill: c }),
+          );
+        });
+      }
       root.appendChild(
         svgEl("rect", {
-          x: x + (SW - chip) / 2,
-          y: cy - chip / 2,
+          x: chipX,
+          y: chipY,
           width: chip,
           height: chip,
           rx: 4,
-          fill: color,
-          ...(item.outlined ? { stroke: "rgba(0,0,0,0.18)", "stroke-width": 1 } : {}),
+          ...(tints ? { fill: "none" } : { fill: color }),
+          ...(item.outlined ? { stroke: SWATCH_OUTLINE, "stroke-width": 1 } : {}),
         }),
       );
     } else {

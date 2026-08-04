@@ -1148,7 +1148,7 @@ describe("figure — faceted + sectioned horizontal bars, SINGLE series per pane
 // throws if the layer never declared the matching scale.
 
 describe("assemblePlot — fy/fx facet invariant guard", () => {
-  const baseXOpts = makeXAdapter("categorical").buildXOpts([{ _xc: "a" }, { _xc: "b" }], false);
+  const baseXOpts = makeXAdapter("categorical").buildXOpts([{ _xc: "a" }, { _xc: "b" }]);
   const baseArgs = {
     yDomain: [0, 1] as [number, number],
     yTicks: [0, 1],
@@ -1721,9 +1721,9 @@ function buildFacetedPlot() {
 
   // Shared temporal x-axis built through the REAL adapter with the faceted flag set, so the
   // adapter (not the test) is what tags the x-axis label marks with X_AXIS_LABEL_CLASS. This
-  // exercises the production path end-to-end: buildXOpts(data, faceted=true) → tblTemporalXAxis
-  // with the class → grid collapse keeps the bottom row.
-  const xOpts = makeXAdapter("temporal").buildXOpts(data, true);
+  // exercises the production path end-to-end: buildXOpts(data, { faceted: true }) →
+  // tblTemporalXAxis with the class → grid collapse keeps the bottom row.
+  const xOpts = makeXAdapter("temporal").buildXOpts(data, { faceted: true });
 
   const layers: MarkLayers = {
     underlay: [],

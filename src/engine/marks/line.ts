@@ -4,7 +4,7 @@
 // buildLineChart so other chart types can register their own builder (marks/index.ts).
 import { Plot } from "../vendor";
 import { TBL, markerSymbolForIndex } from "../theme";
-import { resolveColor } from "../palette";
+import { resolveColorOr } from "../palette";
 import { buildShadeRuns } from "../shade";
 import { labelMovedToLegend, annotationKey } from "../annotation-legend";
 import type { ShadeXField } from "../shade";
@@ -83,10 +83,7 @@ export function buildLineMarks(
           to: parseBound(region.to),
         });
         if (!runs.length) continue;
-        const fill =
-          (region.color && (resolveColor(region.color) || region.color)) ||
-          colors.get(seriesKey) ||
-          TBL.color.blue;
+        const fill = resolveColorOr(region.color, colors.get(seriesKey) || TBL.color.blue);
         // One mark per (region, series) with z: "_seg" — Plot emits one path per run, in _seg
         // first-appearance order, which is the order pushed onto shadeSeriesOrder below.
         underlay.push(

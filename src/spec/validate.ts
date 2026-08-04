@@ -13,6 +13,8 @@ import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
+import { resolveAnnotations } from "./annotations";
+import { resolveRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
@@ -203,6 +205,12 @@ interface LegendFlagged {
   label?: string;
   legend?: boolean;
   rug?: boolean;
+  /** Band bounds (`annotations.bands`). */
+  start?: string;
+  end?: string;
+  /** Shading bounds. */
+  from?: string;
+  to?: string;
 }
 
 /**
@@ -213,20 +221,15 @@ interface LegendFlagged {
  * rug rules are harder constraints: it needs a linear x scale to place blocks on, one plot frame to
  * hang under, and closed intervals to draw.
  */
-function legendAndRugErrors(spec: {
-  xAxisType?: unknown;
-  small_multiples?: unknown;
-  annotations?: { bands?: LegendFlagged[]; xAxis?: LegendFlagged[]; yAxis?: LegendFlagged[] };
-  xAxisPolicy?: { bands?: LegendFlagged[]; markers?: LegendFlagged[] };
-  yAxisPolicy?: { markers?: LegendFlagged[] };
-  shading?: Array<LegendFlagged & { from?: string; to?: string }>;
-  rug?: { tracks?: Array<{ label?: string; intervals?: Array<{ from?: string; to?: string }> }> };
-}): string[] {
+function legendAndRugErrors(spec: ChartSpec): string[] {
   const errors: string[] = [];
-  const bands = spec.annotations?.bands ?? spec.xAxisPolicy?.bands ?? [];
-  const xMarkers = spec.annotations?.xAxis ?? spec.xAxisPolicy?.markers ?? [];
-  const yMarkers = spec.annotations?.yAxis ?? spec.yAxisPolicy?.markers ?? [];
-  const shading = spec.shading ?? [];
+  // Through resolveAnnotations, so the unified-block-over-legacy-policy precedence is stated once —
+  // a second copy here could admit a spec the engine reads differently.
+  const resolved = resolveAnnotations(spec);
+  const bands = resolved.bands as LegendFlagged[];
+  const xMarkers = resolved.xAxis as LegendFlagged[];
+  const yMarkers = resolved.yAxis as LegendFlagged[];
+  const shading = (spec.shading ?? []) as LegendFlagged[];
 
   const needsLabel = (entries: LegendFlagged[], where: string): void => {
     entries.forEach((e, i) => {
@@ -242,6 +245,12 @@ function legendAndRugErrors(spec: {
   needsLabel(shading, "shading");
 
   shading.forEach((s, i) => {
+    if (s.label && s.legend !== true && s.rug !== true) {
+      errors.push(
+        `shading[${i}]: \`label\` on a fill has no effect without \`legend: true\` or \`rug: true\` ` +
+          `— a fill draws no text of its own, so its label exists only to key it`,
+      );
+    }
     if (s.rug === true && (s.from == null || s.to == null)) {
       errors.push(
         `shading[${i}]: rug: true needs BOTH \`from\` and \`to\` — a rug block is a closed span, ` +
@@ -250,8 +259,7 @@ function legendAndRugErrors(spec: {
     }
   });
 
-  const flagged = [...bands, ...shading].some((e) => e.rug === true);
-  const hasRug = spec.rug != null || flagged;
+  const hasRug = spec.rug != null || [...bands, ...shading].some((e) => e.rug === true);
   if (!hasRug) return errors;
 
   const xAxisType = spec.xAxisType as XAxisType | undefined;
@@ -272,25 +280,22 @@ function legendAndRugErrors(spec: {
 
   // Every interval, declared or derived, parsed on this chart's axis. An unparseable bound would
   // silently drop its block; a reversed one would draw a zero-width sliver at the floor width.
+  // Indexed BEFORE the rug filter, so `annotations.bands[2]` names the entry the author wrote.
   const allIntervals: Array<{ where: string; from?: string; to?: string }> = [
-    ...bands
-      .filter((b) => b.rug === true)
-      .map((b, i) => ({
-        where: `annotations.bands[${i}]`,
-        from: (b as { start?: string }).start,
-        to: (b as { end?: string }).end,
-      })),
-    ...shading
-      .filter((s) => s.rug === true)
-      .map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to })),
-    ...tracks.flatMap((t, ti) =>
-      (t.intervals ?? []).map((iv, ii) => ({
-        where: `rug.tracks[${ti}].intervals[${ii}]`,
-        from: iv.from,
-        to: iv.to,
-      })),
-    ),
-  ];
+    ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b })),
+    ...shading.map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to, e: s })),
+  ]
+    .filter(({ e }) => e.rug === true)
+    .concat(
+      tracks.flatMap((t, ti) =>
+        (t.intervals ?? []).map((iv, ii) => ({
+          where: `rug.tracks[${ti}].intervals[${ii}]`,
+          from: iv.from,
+          to: iv.to,
+          e: {} as LegendFlagged,
+        })),
+      ),
+    );
   if (xAxisType && xAxisType !== "categorical") {
     for (const iv of allIntervals) {
       if (iv.from == null || iv.to == null) continue;
@@ -304,11 +309,9 @@ function legendAndRugErrors(spec: {
     }
   }
 
-  const hasTrack =
-    bands.some((b) => b.rug === true && !!b.label) ||
-    shading.some((s) => s.rug === true && !!s.label && s.from != null && s.to != null) ||
-    tracks.some((t) => !!t.label && !!t.intervals?.length);
-  if (!hasTrack) {
+  // Asked of the RESOLVER, not of a re-written copy of its predicates: this error exists to predict
+  // exactly what resolveRugTracks will return, so it must not be able to disagree with it.
+  if (!resolveRugTracks(spec).length) {
     errors.push(
       "the x-axis rug resolves to no tracks — flag a band or shading region with `rug: true` " +
         "(each needs a `label`), or declare `rug.tracks`",
@@ -318,10 +321,10 @@ function legendAndRugErrors(spec: {
 }
 
 /** Sortable position of a rug bound. Only meaningful for bounds that already parsed. */
-function rugBoundOrder(xAxisType: XAxisType, value: string): number | string {
+function rugBoundOrder(xAxisType: XAxisType, value: string): number {
   if (xAxisType === "numeric") return Number(value);
   if (xAxisType === "temporal") return +new Date(value);
-  return value; // quarterly: the fixed YYYYQ# form sorts lexicographically
+  return Number(value.slice(0, 4)) * 4 + Number(value[5]); // quarterly: YYYYQ#
 }
 
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
@@ -361,7 +364,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (histErrors.length) return { valid: false, errors: histErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
-  const rugErrors = legendAndRugErrors(spec as Parameters<typeof legendAndRugErrors>[0]);
+  const rugErrors = legendAndRugErrors(spec as ChartSpec);
   if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };
 }

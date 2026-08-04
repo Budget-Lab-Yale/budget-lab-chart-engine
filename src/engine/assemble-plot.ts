@@ -21,8 +21,14 @@ import {
   X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
-import { resolveColor } from "./palette";
-import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
+import { resolveColorOr } from "./palette";
+import {
+  resolveAnnotations,
+  filterAnnotationsByFacet,
+  substituteValueToken,
+  xMarkerLabel,
+  yMarkerLabel,
+} from "../spec/annotations";
 import { resolveRugTracks, rugHeight } from "../spec/rug";
 import { labelMovedToLegend, annotationKey } from "./annotation-legend";
 import { drawRug } from "./rug";
@@ -211,16 +217,9 @@ export function assemblePlot({
   // charts that don't use it get byte-identical output.
   const yTickFallbackFmt = makeTickFormatter(yTicks, valueAffixes);
   const yAxisAnn = ann.yAxis.map((m) =>
-    m.label ? { ...m, label: substituteValueToken(m.label, m.y, m.value_format, yTickFallbackFmt) } : m,
+    m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
-  const xAxisAnn = ann.xAxis.map((m) => {
-    if (!m.label) return m;
-    const xNum = Number(m.x);
-    // Numerically formatted only when value_format is given AND x parses as a number;
-    // otherwise the raw x string is substituted (dates/quarters/categories, or no format).
-    const fmt = m.value_format != null && Number.isFinite(xNum) ? m.value_format : undefined;
-    return { ...m, label: substituteValueToken(m.label, xNum, fmt, () => m.x) };
-  });
+  const xAxisAnn = ann.xAxis.map((m) => (m.label ? { ...m, label: xMarkerLabel(m) } : m));
   const pointsAnn = (points ?? ann.points).map((p) =>
     Number.isFinite(p.y as number)
       ? { ...p, label: substituteValueToken(p.label, p.y as number, p.value_format, yTickFallbackFmt) }
@@ -323,7 +322,7 @@ export function assemblePlot({
         x2: "x2",
         y1: "y1",
         y2: "y2",
-        fill: band.color || TBL.color.annotationDim,
+        fill: resolveColorOr(band.color, TBL.color.annotationDim),
         fillOpacity: 0.1,
         ...(bandClass ? { className: bandClass } : {}),
       }),
@@ -466,13 +465,14 @@ export function assemblePlot({
     mx: number | Date,
     m: XAxisMarker,
     topDy: number,
-    fyOpts?: { ruleClassName: string; labelFy: string | undefined },
-    /** Deterministic className for a marker KEYED in the legend, so the post-render pass can tag it
-     *  with its annotation key. Ignored when `fyOpts` already supplies one (same string). */
-    keyedClassName?: string,
+    /** `ruleClassName`: a deterministic class on the rule — set for grouped horizontal bars (so the
+     *  fy chrome collapse can find it) and/or for a marker keyed in the legend (so the post-render
+     *  pass can tag it with its annotation key); the two derive the same string. `labelFy` binds the
+     *  label to one fy category so it renders once. */
+    fyOpts?: { ruleClassName?: string; labelFy?: string | undefined },
   ): void => {
-    const mColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
-    const ruleClass = fyOpts?.ruleClassName ?? keyedClassName;
+    const mColor = resolveColorOr(m.color, TBL.color.annotationDim);
+    const ruleClass = fyOpts?.ruleClassName;
     marks.push(
       Plot.ruleX([mx], {
         stroke: mColor,
@@ -532,7 +532,12 @@ export function assemblePlot({
           keyedClass = `${X_ANNOTATION_LINE_CLASS}-${markerIdx}`;
           annotationGroups.push({ className: keyedClass, key: annotationKey(m.label as string) });
         }
-        drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4, undefined, keyedClass);
+        drawXAxisMarker(
+          mx,
+          m,
+          staggerDy.get(`m${markerIdx}`) ?? 4,
+          keyedClass ? { ruleClassName: keyedClass } : undefined,
+        );
       });
     }
   };
@@ -596,7 +601,7 @@ export function assemblePlot({
   //     an explicit marker.color overrides. The label color always matches its line.
   const markerList = yAxisAnn;
   markerList.forEach((m, i) => {
-    const markerColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
+    const markerColor = resolveColorOr(m.color, TBL.color.annotationDim);
     // The rule already carries a per-marker className unconditionally, so a keyed yAxis marker needs
     // no new class — only the key→class pairing.
     if (keyedInLegend(m)) {
@@ -675,7 +680,7 @@ export function assemblePlot({
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
-    const pColor = (p.color && (resolveColor(p.color) || p.color)) || TBL.color.heading;
+    const pColor = resolveColorOr(p.color, TBL.color.heading);
     // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
     // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28).
     const dx = p.dx != null ? p.dx : 0;
@@ -902,7 +907,6 @@ export function assemblePlot({
     // hover-dim in both directions.
     keyFor: (track) => (track.legend ? annotationKey(track.label) : undefined),
     parseX: (v: string) => xOpts.markerToX({ x: v }),
-    ...(document ? { document } : {}),
   });
 
   return svg;

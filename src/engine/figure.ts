@@ -585,9 +585,9 @@ export function renderFigure(
       : Array.from({ length: columns }, () => (opts.width ?? availW) - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT);
     const { mode: ppXLabelMode, marginBottom: ppMarginBottom } = coordinateXLabels(perPaneDataW);
     let firstLayers: MarkLayers | undefined;
-    // The first pane's value axis, for formatting a `{value}` token in a keyed annotation label the
-    // way that axis does (per-pane mode: each pane has its own scale, so the first one keys them).
-    let firstValueAxis: { yTicks: number[]; valueAffixes: ValueAffixes } | undefined;
+    // The first pane's value formatter, for a `{value}` token in a keyed annotation label (per-pane
+    // mode: each pane has its own scale, so the first one keys them).
+    let firstFormatValue: ((v: number) => string) | undefined;
     const panes: FigurePane[] = paneValues.map((value, i) => {
       // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
       // renders a standalone single frame for these rows only.
@@ -620,7 +620,7 @@ export function renderFigure(
       );
       if (i === 0) {
         firstLayers = p.layers;
-        firstValueAxis = { yTicks: p.yTicks, valueAffixes: p.valueAffixes };
+        firstFormatValue = p.formatValue;
       }
       return {
         value,
@@ -646,7 +646,7 @@ export function renderFigure(
       first?.seriesOrder ?? [],
       first?.colors ?? new Map(),
       firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
-      firstValueAxis,
+      firstFormatValue,
     );
 
     return {
@@ -739,8 +739,8 @@ export function renderFigure(
   //    bars instead pass the shared category gutter + suppress the CATEGORY labels there (and let the
   //    bar layer own the left margin, so the gutter sizing in the mark builder is authoritative).
   let firstLayers: MarkLayers | undefined;
-  // Shared mode: every pane shares one value scale, so this IS the figure's value axis.
-  let firstValueAxis: { yTicks: number[]; valueAffixes: ValueAffixes } | undefined;
+  // Shared mode: every pane shares one value scale, so this IS the figure's value formatter.
+  let firstFormatValue: ((v: number) => string) | undefined;
   const panes: FigurePane[] = paneValues.map((value, i) => {
     const col = i % columns;
     const paneRows = rows.filter((r) => (r[facetField] as string) === value);
@@ -771,7 +771,7 @@ export function renderFigure(
     );
     if (i === 0) {
       firstLayers = p.layers;
-      firstValueAxis = { yTicks: p.yTicks, valueAffixes: p.valueAffixes };
+      firstFormatValue = p.formatValue;
     }
     return {
       value,
@@ -797,7 +797,7 @@ export function renderFigure(
     first?.seriesOrder ?? [],
     first?.colors ?? new Map(),
     firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
-    firstValueAxis,
+    firstFormatValue,
   );
 
   return {

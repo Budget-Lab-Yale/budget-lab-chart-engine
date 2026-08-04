@@ -9,6 +9,7 @@ import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { buildAnnotationLegendItems, flattenOverWhite, annotationKey } from "../src/engine/annotation-legend";
 import { SHADE_CLASS } from "../src/engine/marks/line";
+import { TBL_COLORS } from "../src/engine/palette";
 import { validateSpec } from "../src/spec/validate";
 import { TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
@@ -382,5 +383,142 @@ describe("keyed labels and the {value} token", () => {
       },
     } as ChartSpec;
     expect(renderChart(spec, DATA, OPTS).legendItems?.[0]?.label).toBe("Target ($2.50)");
+  });
+});
+
+describe("multi-series charts with shaded areas", () => {
+  const BASE_MS = {
+    ...BASE,
+    columns: { x: "time", value: "value", series: "series" },
+    series_order: ["A", "B", "C"],
+  } as ChartSpec;
+  const ROWS_MS = ["A", "B", "C"].flatMap((s) =>
+    [2000, 2010, 2020].map((t) => ({ time: String(t), series: s, value: "-1" })),
+  ) as unknown as TidyRow[];
+  const key = (spec: ChartSpec) => renderChart(spec, ROWS_MS, OPTS).legendItems ?? [];
+  const annRow = (spec: ChartSpec) => key(spec).find((i) => i.annotation)!;
+
+  it("keys one region covering every series with ONE row showing every tint", () => {
+    const spec = { ...BASE_MS, shading: [{ label: "Below zero", legend: true }] } as ChartSpec;
+    const rows = key(spec);
+    expect(rows.filter((i) => i.annotation).length).toBe(1);
+    // Three fills get painted, one per series, so the chip carries three tints in series order.
+    expect(annRow(spec).colors?.length).toBe(3);
+  });
+
+  it("collapses per-series regions sharing a label into that same one row", () => {
+    const perSeries = {
+      ...BASE_MS,
+      shading: ["A", "B", "C"].map((s) => ({ series: s, label: "Below zero", legend: true })),
+    } as ChartSpec;
+    const shared = { ...BASE_MS, shading: [{ label: "Below zero", legend: true }] } as ChartSpec;
+    // The two ways to write the same thing key identically.
+    expect(annRow(perSeries).colors).toEqual(annRow(shared).colors);
+  });
+
+  it("keys a region by the series it NAMES, not by the first series", () => {
+    const spec = {
+      ...BASE_MS,
+      shading: [{ series: "C", label: "C shortfall", legend: true, fillOpacity: 1 }],
+    } as ChartSpec;
+    const row = annRow(spec);
+    expect(row.colors).toBeUndefined(); // one fill, one tint
+    const { colors } = renderChart(spec, ROWS_MS, OPTS);
+    expect(row.color).toBe(colors.get("C"));
+  });
+
+  it("an explicit color overrides the per-series tints", () => {
+    const spec = {
+      ...BASE_MS,
+      shading: [{ label: "Below zero", legend: true, color: "grey", fillOpacity: 1 }],
+    } as ChartSpec;
+    expect(annRow(spec).colors).toBeUndefined();
+    expect(annRow(spec).color).toBe(TBL_COLORS.grey);
+  });
+
+  it("keeps a rect and a rule that share a label as separate rows", () => {
+    const spec = {
+      ...BASE_MS,
+      shading: [{ label: "Balance", legend: true }],
+      annotations: { yAxis: [{ y: 0, label: "Balance", legend: true }] },
+    } as ChartSpec;
+    expect(key(spec).filter((i) => i.annotation).map((i) => i.markerShape)).toEqual(["rect", "line"]);
+  });
+
+  it("a keyed fill keeps its own series key, so it stays with its line", () => {
+    const spec = { ...BASE_MS, shading: [{ label: "Below zero", legend: true }] } as ChartSpec;
+    const { svg } = renderChart(spec, ROWS_MS, OPTS);
+    const fills = Array.from(svg.querySelectorAll(`g.${SHADE_CLASS} path`));
+    expect(fills.map((f) => f.getAttribute("data-series"))).toEqual(["A", "B", "C"]);
+    expect(new Set(fills.map((f) => f.getAttribute("data-annotation")))).toEqual(
+      new Set([annotationKey("Below zero")]),
+    );
+  });
+
+  it("renders the multi-tint chip as banded hard stops", () => {
+    const spec = { ...BASE_MS, shading: [{ label: "Below zero", legend: true }] } as ChartSpec;
+    const { legendItems, svg } = renderChart(spec, ROWS_MS, OPTS);
+    const parent = document.createElement("div");
+    renderLegend(parent, legendItems ?? [], { svg });
+    const chip = parent.querySelector<HTMLElement>(
+      `.tbl-legend-item[data-annotation] .tbl-legend-swatch.is-rect`,
+    )!;
+    expect(chip.style.background).toContain("linear-gradient");
+    expect(chip.style.background.match(/33\.3333%/g)?.length).toBe(2);
+  });
+});
+
+describe("keyed annotations on point / dumbbell charts", () => {
+  // These chart types build their legend rows on their own branch. Before the fix that branch
+  // RETURNED, so the annotation rows were never appended — while assemble-plot still suppressed the
+  // in-frame label (it asks the spec, not the legend), losing the name from the chart entirely.
+  const cases: Array<[string, ChartSpec, TidyRow[]]> = [
+    [
+      "scatter",
+      {
+        chartType: "scatter",
+        title: "t",
+        xAxisType: "numeric",
+        columns: { x: "time", value: "value" },
+        annotations: { yAxis: [{ y: 3, label: "Target", legend: true }] },
+      } as unknown as ChartSpec,
+      DATA,
+    ],
+    [
+      "dumbbell",
+      {
+        chartType: "dumbbell",
+        title: "t",
+        xAxisType: "categorical",
+        columns: { category: "cat", value: "value", series: "series" },
+        annotations: { yAxis: [{ y: 3, label: "Target", legend: true }] },
+      } as unknown as ChartSpec,
+      [
+        { cat: "x", series: "A", value: "1" },
+        { cat: "x", series: "B", value: "5" },
+      ] as unknown as TidyRow[],
+    ],
+  ];
+
+  for (const [name, spec, rows] of cases) {
+    it(`keys the annotation on a single-series ${name} chart`, () => {
+      const { legendItems, svg } = renderChart(spec, rows, OPTS);
+      expect(legendItems?.map((i) => i.label)).toContain("Target");
+      expect(labelTexts(svg)).not.toContain("Target");
+    });
+  }
+});
+
+describe("dead-configuration validation", () => {
+  it("rejects a shading label with neither legend nor rug", () => {
+    const res = validateSpec({ ...BASE, data: "d.csv", shading: [{ label: "Below zero" }] });
+    expect(res.valid).toBe(false);
+    expect(res.errors.join(" ")).toMatch(/has no effect without/);
+  });
+
+  it("accepts it once opted in", () => {
+    expect(
+      validateSpec({ ...BASE, data: "d.csv", shading: [{ label: "Below zero", legend: true }] }).valid,
+    ).toBe(true);
   });
 });

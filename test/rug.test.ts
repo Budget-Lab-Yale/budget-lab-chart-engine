@@ -10,6 +10,7 @@ import { buildExportSvg } from "../src/embed/export-png";
 import { resolveRugTracks, rugAllowance, RUG_GAP, RUG_PAD } from "../src/spec/rug";
 import { validateSpec } from "../src/spec/validate";
 import { TBL_COLORS } from "../src/engine/palette";
+import { SWATCH_OUTLINE } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -232,7 +233,7 @@ describe("rug + annotation legend in the PNG export", () => {
     expect(text).toContain("US recessions");
     expect(text).toContain("False positives");
     // The keyed chips carry the hairline that keeps a pale tint legible.
-    expect(svg.querySelector('rect[stroke="rgba(0,0,0,0.18)"]')).not.toBeNull();
+    expect(svg.querySelector(`rect[stroke="${SWATCH_OUTLINE}"]`)).not.toBeNull();
   });
 });
 

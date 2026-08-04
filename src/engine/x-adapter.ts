@@ -24,26 +24,34 @@ export interface XOpts {
   tooltipXFormat?: (v: number) => string;
 }
 
+/** Per-chart options for `buildXOpts`. Named rather than positional: the axis has accumulated four
+ *  independent switches, and the positional form left three of the four adapters declaring
+ *  placeholder params they never read just to reach the last one. */
+export interface BuildXOptsOptions {
+  /** Shared-mode small multiples: tag the x-axis label marks with `X_AXIS_LABEL_CLASS` so the grid
+   *  chrome collapse can keep the bottom-row copies and drop the duplicate rows. Default false →
+   *  no class → output byte-identical. */
+  faceted?: boolean;
+  /** Categorical axis: horizontal / wrapped / rotated category labels. */
+  labelMode?: BandLabelMode;
+  /** Categorical axis: stamp the hover-accent hook class on the category labels — passed true for
+   *  bar/stacked charts only (see index.ts), so other categorical chart types (categorical-x line,
+   *  dot plot) stay byte-identical. */
+  tagCategoryLabels?: boolean;
+  /** Reserved px between the plot frame's bottom edge and the tick labels — the x-axis rug's strip
+   *  lives here (see spec/rug.ts `rugAllowance`). The adapter adds it to BOTH its `marginBottom`
+   *  and its label `dy`, in one place, so the two can never drift: room is always made for exactly
+   *  the offset the labels took. Default 0. Ignored on the categorical axis, where the rug is not
+   *  supported. */
+  bottomGutter?: number;
+}
+
 export interface XAdapter {
   parseX: (v: string) => number | Date | string | null;
   xField: string;
   validate: (r: Record<string, unknown>) => boolean;
-  /** Build the per-chart x options. `faceted` (shared-mode small multiples) tags the x-axis
-   *  label marks with `X_AXIS_LABEL_CLASS` so the grid chrome collapse can keep the bottom-row
-   *  copies and drop the duplicate rows. Default (false) → no class → output byte-identical.
-   *  `tagCategoryLabels` (categorical axis only): stamp the hover-accent hook class on the
-   *  category labels — passed true for bar/stacked charts only (see index.ts), so other
-   *  categorical chart types (categorical-x line, dot plot) stay byte-identical.
-   *  `axisLabelDy` pushes the tick labels DOWN by that many px — the x-axis rug's way of opening a
-   *  gap for its strip between the axis and its labels (the caller grows `marginBottom` to match).
-   *  Default 0. Ignored on the categorical axis, where the rug is not supported. */
-  buildXOpts: (
-    data: Array<Record<string, any>>,
-    faceted?: boolean,
-    labelMode?: BandLabelMode,
-    tagCategoryLabels?: boolean,
-    axisLabelDy?: number,
-  ) => XOpts;
+  /** Build the per-chart x options. See BuildXOptsOptions. */
+  buildXOpts: (data: Array<Record<string, any>>, opts?: BuildXOptsOptions) => XOpts;
 }
 
 // Margin for the two-line month/year axis vs the collapsed year-only axis.
@@ -63,17 +71,17 @@ export function makeXAdapter(
       parseX: (v) => +v,
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
-      buildXOpts(data, faceted = false, _labelMode, _tagCategoryLabels, axisLabelDy = 0) {
+      buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range (the
         // "data" here is already-binned counts, which must NOT drive the x domain).
         if (histogramDomain) {
           return {
-            marginBottom: 22,
+            marginBottom: 22 + bottomGutter,
             xPlotOpts: { type: "linear", label: null, axis: null, domain: histogramDomain },
             axisMarks: tblXAxis(
               { xTickFormat: (d: unknown) => `${+(d as number)}` },
               faceted ? X_AXIS_LABEL_CLASS : undefined,
-              axisLabelDy,
+              bottomGutter,
             ),
             markerToX: (m) => +m.x,
             tooltipXParse: (v) => +v,
@@ -88,14 +96,14 @@ export function makeXAdapter(
           ? Math.min(0, d3.min(data, (d: any) => d._xn) as number)
           : (d3.min(data, (d: any) => d._xn) as number);
         return {
-          marginBottom: 22,
+          marginBottom: 22 + bottomGutter,
           xPlotOpts: { label: null, axis: null, domain: [xMin, xMax] },
           // Plain numeric tick labels with NO thousands separator — years (1960, 2030) and
           // index axes read better ungrouped than "1,960".
           axisMarks: tblXAxis(
             { xTickFormat: (d: unknown) => `${+(d as number)}` },
             faceted ? X_AXIS_LABEL_CLASS : undefined,
-            axisLabelDy,
+            bottomGutter,
           ),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
@@ -111,7 +119,7 @@ export function makeXAdapter(
       parseX: (v) => parseDate(v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
-      buildXOpts(data, faceted = false, _labelMode, _tagCategoryLabels, axisLabelDy = 0) {
+      buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
         let xDomain: [Date, Date];
         if (histogramDomain) {
@@ -121,12 +129,12 @@ export function makeXAdapter(
           xDomain = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
         }
         return {
-          marginBottom: temporalMarginBottom(xDomain),
+          marginBottom: temporalMarginBottom(xDomain) + bottomGutter,
           // axis:null/label:null so Plot draws NO native axis — the engine's tblTemporalXAxis marks
           // are the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
           // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
           xPlotOpts: histogramDomain ? { type: "utc", domain: xDomain, axis: null, label: null } : undefined,
-          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, axisLabelDy),
+          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter),
           markerToX: (m) => parseDate(m.x),
           // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
           // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
@@ -143,12 +151,12 @@ export function makeXAdapter(
       parseX: (v) => parseQuarter(v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
-      buildXOpts(data, faceted = false, _labelMode, _tagCategoryLabels, axisLabelDy = 0) {
+      buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
         const xs = data.map((r) => +r._xd);
         const xDomain: [Date, Date] = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
         return {
-          marginBottom: temporalMarginBottom(xDomain),
-          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, axisLabelDy),
+          marginBottom: temporalMarginBottom(xDomain) + bottomGutter,
+          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter),
           markerToX: (m) => parseQuarter(m.x),
           tooltipXParse: (v) => +(parseQuarter(v) as Date),
           tooltipXFormat: (v) => formatQuarter(new Date(v)),
@@ -162,7 +170,7 @@ export function makeXAdapter(
       parseX: (v) => v,
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
-      buildXOpts(data, faceted = false, labelMode: BandLabelMode = "single", tagCategoryLabels = false) {
+      buildXOpts(data, { faceted = false, labelMode = "single", tagCategoryLabels = false }: BuildXOptsOptions = {}) {
         // Category domain in data-encounter order (Style-Guide: declaration order is
         // authoritative; never auto-sort by magnitude).
         const seen = new Set<string>();

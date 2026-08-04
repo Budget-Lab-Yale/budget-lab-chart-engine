@@ -31,6 +31,12 @@ export const TBL = {
   dashArray: "5 3",
 } as const;
 
+/** Hairline around an annotation-derived legend fill swatch. Such a swatch shows the fill's TINT,
+ *  which for a 10 %-opaque band is nearly white — without the outline it reads as a gap. Shared by
+ *  the live legend CSS (embed/styles.ts) and the PNG export, which must agree visually. Not a
+ *  Style-Guide token (it is chrome on chrome), so it lives here with the other layout constants. */
+export const SWATCH_OUTLINE = "rgba(0, 0, 0, 0.18)";
+
 // Per-series point-marker symbols (d3 symbol names), in a fixed, distinguishable order so a
 // series' shape is stable and series can be told apart without relying on color (accessibility).
 // Assigned by series index; wraps if there are more series than shapes.
