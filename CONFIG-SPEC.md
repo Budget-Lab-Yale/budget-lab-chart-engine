@@ -230,9 +230,25 @@ region) and its `label` renders as a **legend row** above the plot instead of as
 | **replaces** the in-chart label | A keyed band or reference line draws no text in the frame and reserves no auto-stagger row. Moving the label out is the point; asking for both would re-create the clutter. |
 | one row per **label** | Entries sharing a label collapse into a single row — three recession bands become one "US recessions" key. |
 | swatch | Fills get a rect chip in the tint you will actually see (the fill color flattened over white at its `fillOpacity`, with a hairline so a 10 %-opaque band still reads as a chip). Reference lines get a line swatch in the marker's color, dashed when the marker is. A `rug: true` entry is keyed by its **solid** rug color instead — the block, not the tint, is what the reader matches. |
-| non-interactive | These rows are chrome, not series: no hover-dim, no click-to-pin. They sort after the real series. |
 | row order | Series → `bands` → `shading` → `xAxis` → `yAxis` → explicit `rug.tracks`, each in spec order. Not author-controllable. |
 | `legend: false` | Suppresses the row (including one implied by `rug: true`). Chart-level `legend: false` suppresses the whole legend, in which case a keyed label stays in the frame rather than being lost. |
+
+**Hover and pin.** Keyed rows are interactive, in both directions:
+
+- **Hovering a row** brightens every chart element it names — all its bands, all its fills, its
+  reference line, all its rug blocks — and dims everything else, the data line included. Clicking
+  pins that highlight; a reset button appears beside the legend to clear it.
+- **Hovering a rug block** does the reverse: it marks its legend row and brightens that track's other
+  parts, dimming the rest. Clicking pins it. While the pointer is on the strip the value crosshair
+  stands down, so a rug hover gives one answer rather than two.
+- Selecting a **series** row dims the keyed annotations too — the two live in one universe, so any
+  selection spotlights its own subject.
+- A keyed `shading` fill answers to **both** keys: it dims with its own line (as it always has) and
+  lights up with its annotation row.
+
+In-frame regions — band rects and `shading` fills — are deliberately **not** hover targets. They sit
+where the reader sweeps the crosshair to read values, so hovering them would flicker the whole chart
+on and off as the pointer crossed each region. The rug is the hoverable key.
 
 A chart with **one** series and keyed annotations gets a legend built from those rows alone — which
 is the case the feature was built for. `annotations.points` cannot be keyed: a callout *is* its

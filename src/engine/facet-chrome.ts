@@ -38,6 +38,10 @@ export const ANNOTATION_LINE_CLASS = "tbl-annotation-line";
  *  top-to-bottom like the zero baseline. Single-band horizontal charts are untagged (no facets,
  *  nothing to collapse → byte-identical output). */
 export const X_ANNOTATION_LINE_CLASS = "tbl-annotation-vline";
+/** ClassName PREFIX stamped on an `annotations.bands` rect (assemble-plot appends a per-band index)
+ *  — ONLY when that band is keyed in the legend, so the post-render pass can tag it with the
+ *  annotation key that drives legend hover-dim. An unkeyed band stays untagged and byte-identical. */
+export const X_BAND_CLASS = "tbl-annotation-band";
 
 export interface CollapseFacetChromeOptions {
   /** Outer SVG width in px. Gridlines are stretched to span 0..width (the full pane,

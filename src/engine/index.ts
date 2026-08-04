@@ -138,6 +138,12 @@ export interface LegendItem {
   outlined?: boolean;
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
+  /** True for a row that keys an ANNOTATION (a band, a `shading` fill, a reference line, a rug
+   *  track) rather than a series. Interactive, but in its own selection dimension: `series` holds
+   *  the annotation key and the chart elements it names carry it as `data-annotation`. Separate
+   *  from the series dimension because an element can only carry one `data-series` — a keyed
+   *  `shading` fill needs to dim with its line AND light up with its annotation row. */
+  annotation?: boolean;
   /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
    *  but should sort AFTER the real series in the right-legend column. */
   isExtra?: boolean;

@@ -32,7 +32,8 @@ false positive — a categorical timeline that stays legible at any interval wid
 - Legend entries for `annotations.points` (a callout **is** its label; moving it to a legend loses
   the coordinate it points at).
 - Multi-row rugs. One strip; overlapping intervals paint in track order.
-- Rug hover/tooltip.
+- A rug tooltip. Hovering a block highlights its legend row (see C) — that is the answer; a
+  second, value-shaped answer over the strip would compete with the crosshair.
 - Rug on small multiples or on a categorical x-axis (validated out; see Validation).
 
 ## Design
@@ -63,9 +64,9 @@ is why the article's fills are described in prose in the `note` line instead.
 - Rows **dedupe by (label, swatch kind, color)**, first-appearance order preserved. This is what
   makes the michez chart work: three recession bands → one "US recessions" row; three
   false-negative shading regions → one "False negatives" row.
-- Rows are **non-interactive** (`nonInteractive: true`) and `isExtra: true`: they are not series,
-  so they carry no `data-series` and take no part in hover-dim / click-to-pin, and they sort after
-  the real series in the right-hand legend column.
+- Rows are interactive in their own selection dimension — see **C. Reciprocal highlighting**, added
+  after the first review — and `isExtra: true`, so they sort after the real series in the right-hand
+  legend column.
 - Row order: series rows → mark-layer extras (the stacked "Total") → **bands → shading → xAxis →
   yAxis**, each group in spec order. Not author-controllable in this release.
 - `legend: false` at the chart level still suppresses everything, unchanged.
@@ -148,6 +149,47 @@ interval on a 26-year axis is still visible (that being the entire point). Inter
 outside the x-domain are dropped. The strip is `<g class="tbl-rug" aria-hidden="true">` — the
 legend is its accessible name.
 
+### C. Reciprocal highlighting (added after the first review)
+
+A keyed row and the chart elements it names should highlight each other. Hovering the row brightens
+its parts and dims the rest; hovering the part marks the row.
+
+**Why a separate selection dimension.** The obvious implementation — give annotation rows a
+`data-series` key and reuse the series machinery — breaks a shipped behavior: a `shading` fill already
+carries its series' `data-series` so it dims *with its line*, and an element can only carry one. So
+annotations get their own attribute, `data-annotation`, and `LegendItem.annotation: true` says which
+attribute a row matches. A keyed fill then carries **both** keys and answers to both.
+
+Dimming, however, treats the two as **one universe**: an element stays bright when *either* of its
+keys is selected, and the "is a strict subset selected?" test counts series + annotation rows
+together. That is what makes hovering "False negatives" spotlight the gold fills and blocks while the
+data line drops back — and, symmetrically, makes hovering a series row dim the annotations.
+`pinnedSeries()` and the `onHighlight` callback keep reporting **series only**, so the area restack
+and the value-pill renderer never see an annotation key.
+
+**Tagging.** One key per row, derived from the **label** (`__annotation:<label>`) rather than the
+entry's index — precisely because one row stands for many elements. Applied by:
+
+| element | mechanism |
+|---|---|
+| band rect | a deterministic `className` (`tbl-annotation-band-<i>`) stamped **only when keyed**, tagged post-render — so an unkeyed band emits no class attribute and stays byte-identical |
+| `xAxis` rule | same, reusing `X_ANNOTATION_LINE_CLASS-<i>` |
+| `yAxis` rule | already carries `ANNOTATION_LINE_CLASS-<i>` unconditionally; only the key→class pairing is new |
+| `shading` fill | a sparse `annotationOrder` array on the existing `layers.tagging` entry, parallel to `seriesOrder` |
+| rug block | set directly in `drawRug`, via a `keyFor(track)` callback |
+
+**Chart → legend, scoped to the rug.** The reverse hover is wired on the **rug blocks only**, resolved
+with `elementsFromPoint` (the crosshair's transparent full-SVG hit rect sits on top, so this is the
+same piercing technique the existing click-to-pin uses). In-frame regions are deliberately excluded:
+band rects and fills sit exactly where the reader sweeps the crosshair to read values, so hovering
+them would dim the line being read, on and off, at every region boundary. The rug sits below the axis,
+its blocks are discrete, and "what is this block?" is the question a reader actually has there.
+
+One consequence to handle: the crosshair hit rect covers the whole SVG, so the strip would otherwise
+serve a value tooltip on top of the annotation highlight — two answers to one hover. When a rug is
+present, the hit rect's height is clamped to the top of the strip, so the crosshair hides as the
+pointer enters it. Gated on rug presence; every other chart is untouched.
+
 ## Validation
 
 New errors in `spec/validate.ts`:
@@ -171,7 +213,10 @@ New errors in `spec/validate.ts`:
 | `src/engine/annotation-legend.ts` | **new.** Pure `buildAnnotationLegendItems(spec, colors, seriesNames)` + `annotationLabelSuppressed` helpers |
 | `src/engine/rug.ts` | **new.** `drawRug(svg, tracks, opts)` — the post-render injection |
 | `src/engine/index.ts` | `LegendItem.outlined`; append annotation rows in `buildLegendItems`; rug allowance in `renderPane` |
-| `src/engine/legend.ts` | outlined rect swatch |
+| `src/engine/legend.ts` | outlined rect swatch; the annotation selection dimension + `hoverAnnotation`/`toggleAnnotation` |
+| `src/engine/render-live.ts` | rug-block hover/click → the legend handle; clamp the crosshair hit rect above the strip |
+| `src/engine/marks/line.ts`, `marks/index.ts` | `annotationOrder` on the shading fills' tagging entry |
+| `src/engine/facet-chrome.ts` | `X_BAND_CLASS` (keyed bands only) |
 | `src/engine/axes.ts` | `axisLabelDy` shift on the three x-axis label builders |
 | `src/engine/x-adapter.ts` | thread `axisLabelDy` through `buildXOpts` |
 | `src/engine/assemble-plot.ts` | skip suppressed band / marker labels; draw the rug |
@@ -184,7 +229,9 @@ New errors in `spec/validate.ts`:
 - `test/annotation-legend.test.ts` — rows from each of the four shapes; dedupe by label; `rug: true`
   implies a row and keys it solid; `legend: false` suppresses; in-chart band/marker label is gone
   when the row exists and still present when it isn't; a single-series chart gets a legend built
-  from extras alone.
+  from extras alone. Plus reciprocal highlighting: every element a row names carries its key; a keyed
+  fill keeps its series key too; row hover brightens its parts and dims the line; `hoverAnnotation`
+  marks the row; unknown keys no-op; pin + reset; a series row dims the annotations.
 - `test/rug.test.ts` — `resolveRugTracks` grouping/order; `marginBottom` grows by the allowance and
   the tick labels shift with it; block geometry against `svg.scale("x")`; the 2px floor; out-of-domain
   intervals dropped; `rug.height` honored.

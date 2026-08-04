@@ -140,8 +140,17 @@ export interface MarkLayers {
   /** Post-render data-series tagging. For each entry, the elements matched by `selector`
    *  (in DOM order) are tagged data-series from `seriesOrder` by index. When `shapeOrder` is
    *  present (point charts), the same elements are ALSO tagged data-shape by index, so the shape
-   *  legend can dim by shape value independently of the color (series) legend. */
-  tagging: { selector: string; seriesOrder: string[]; shapeOrder?: string[]; categoryOrder?: string[] }[];
+   *  legend can dim by shape value independently of the color (series) legend. `annotationOrder`
+   *  (sparse) additionally tags an element with the ANNOTATION key of the spec entry that produced
+   *  it — a `shading` fill keyed in the legend carries both, so it dims with its own line AND
+   *  lights up when its annotation row is hovered. */
+  tagging: {
+    selector: string;
+    seriesOrder: string[];
+    shapeOrder?: string[];
+    categoryOrder?: string[];
+    annotationOrder?: Array<string | undefined>;
+  }[];
   /** Series rendered dashed (drives legend swatches + tooltip styling). */
   dashedNames: Set<string>;
   /** Optional: a mark layer that owns its x-scale (bars) supplies band-scale options here;

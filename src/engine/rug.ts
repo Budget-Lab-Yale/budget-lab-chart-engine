@@ -31,6 +31,9 @@ export interface DrawRugOptions {
   parseX: (v: string) => number | Date | string | null;
   /** Document to build into (jsdom in tests); defaults to the svg's own. */
   document?: Document;
+  /** The annotation key a track's blocks should carry as `data-annotation`, so the strip joins the
+   *  legend's hover-dim in both directions. Return undefined for a track with no legend row. */
+  keyFor?: (track: ResolvedRugTrack) => string | undefined;
 }
 
 /** Plot's `svg.scale("x")` as a value→pixel function, or null when the scale is unreadable
@@ -65,7 +68,7 @@ function readXScale(svg: SVGSVGElement): ((v: number) => number) | null {
 export function drawRug(
   svg: SVGSVGElement,
   tracks: ResolvedRugTrack[],
-  { height, parseX, document: docOpt }: DrawRugOptions,
+  { height, parseX, document: docOpt, keyFor }: DrawRugOptions,
 ): void {
   if (!tracks.length) return;
   const toPx = readXScale(svg);
@@ -92,6 +95,7 @@ export function drawRug(
 
   for (const track of tracks) {
     const fill = (track.color && (resolveColor(track.color) || track.color)) || TBL.color.annotationDim;
+    const key = keyFor?.(track);
     for (const iv of track.intervals) {
       const from = parseX(iv.from);
       const to = parseX(iv.to);
@@ -110,6 +114,7 @@ export function drawRug(
       rect.setAttribute("width", String(round(width)));
       rect.setAttribute("height", String(round(height)));
       rect.setAttribute("fill", fill);
+      if (key) rect.setAttribute("data-annotation", key);
       g.appendChild(rect);
     }
   }

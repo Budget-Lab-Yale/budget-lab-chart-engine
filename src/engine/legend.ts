@@ -101,6 +101,11 @@ export interface LegendHandle {
   element: HTMLElement;
   /** Toggle a series' pinned state (no-op for an unknown/non-interactive series). */
   toggle(series: string): void;
+  /** Hover an ANNOTATION key (or null to clear) — the reciprocal of hovering its legend row, for
+   *  when the pointer is over the chart element instead. No-op for an unknown key. */
+  hoverAnnotation(key: string | null): void;
+  /** Toggle an annotation key's pinned state, so a click holds the highlight. No-op if unknown. */
+  toggleAnnotation(key: string): void;
   /** Pinned series in click order (the live layer uses this to compute a restack order). */
   pinnedSeries(): string[];
   /** Re-point the hover-dim root to a new SVG (after the chart body is re-rendered) and re-apply
@@ -173,12 +178,19 @@ export function renderLegend(
   const safeShapeItems = shapeItems ?? [];
   // Two independent selection dimensions: COLOR (series) and SHAPE. Point charts with dual
   // encoding use both; every other chart uses only color (shape sets stay empty → no-op).
-  const allSeries = safeItems.filter((i) => !i.nonInteractive).map((i) => i.series);
+  const allSeries = safeItems.filter((i) => !i.nonInteractive && !i.annotation).map((i) => i.series);
   const allShapes = safeShapeItems.map((i) => i.shape);
   const pinned = new Set<string>();
   let hovered: string | null = null;
   const pinnedShape = new Set<string>();
   let hoveredShape: string | null = null;
+  // ANNOTATION dimension (bands / fills / reference lines / rug tracks). Kept separate from
+  // `pinned` so `pinnedSeries()` and the onHighlight callback — which feed the area restack and the
+  // value pills — keep seeing series keys only, while dimming treats both dimensions as ONE
+  // universe: selecting anything dims everything that doesn't carry the selected key.
+  const allAnnotations = safeItems.filter((i) => i.annotation).map((i) => i.series);
+  const pinnedAnn = new Set<string>();
+  let hoveredAnn: string | null = null;
 
   // Circular reset button — declared up front (applyHighlight toggles its visibility) but
   // appended at the END of the legend so it sits after the last item. Hidden until pinned,
@@ -190,16 +202,25 @@ export function renderLegend(
     if (hovered) active.add(hovered);
     const activeShape = new Set(pinnedShape);
     if (hoveredShape) activeShape.add(hoveredShape);
-    // Dim a dimension only when a strict subset of it is active (not everything, not nothing).
-    const dimColor = active.size > 0 && active.size < allSeries.length;
+    const activeAnn = new Set(pinnedAnn);
+    if (hoveredAnn) activeAnn.add(hoveredAnn);
+    // Series and annotations share ONE universe for dimming: a selection of either kind dims
+    // everything else, which is what makes hovering "False negatives" spotlight the gold fills and
+    // rug blocks and drop the line back. Dim only for a strict subset (not all, not none).
+    const selected = active.size + activeAnn.size;
+    const dimColor = selected > 0 && selected < allSeries.length + allAnnotations.length;
     const dimShape = activeShape.size > 0 && activeShape.size < allShapes.length;
     if (svg) {
-      // A marker stays bright only if it matches the active selection in BOTH dimensions
-      // (intersection). Line/bar marks carry only data-series → the shape test is a no-op.
-      svg.querySelectorAll("[data-series]").forEach((p) => {
+      // An element stays bright when EITHER of its keys is selected: a keyed `shading` fill carries
+      // both its series and its annotation key, so it lights up from its line's legend row and from
+      // its annotation row alike. The shape test still intersects (point charts only; other marks
+      // carry no data-shape).
+      svg.querySelectorAll("[data-series], [data-annotation]").forEach((p) => {
         const s = p.getAttribute("data-series");
+        const ann = p.getAttribute("data-annotation");
         const sh = p.getAttribute("data-shape");
-        const colorOk = !dimColor || active.has(s as string);
+        const colorOk =
+          !dimColor || (s != null && active.has(s)) || (ann != null && activeAnn.has(ann));
         const shapeOk = !dimShape || (sh != null && activeShape.has(sh));
         p.classList.toggle("tbl-dimmed", !(colorOk && shapeOk));
       });
@@ -209,13 +230,20 @@ export function renderLegend(
         const sh = btn.dataset.shape;
         btn.classList.toggle("is-pinned", pinnedShape.has(sh));
         btn.setAttribute("aria-pressed", String(pinnedShape.has(sh)));
+      } else if (btn.dataset.annotation != null) {
+        const key = btn.dataset.annotation;
+        btn.classList.toggle("is-pinned", pinnedAnn.has(key));
+        btn.setAttribute("aria-pressed", String(pinnedAnn.has(key)));
+        // Hovering the chart element highlights its row too, so the reciprocity shows in the legend
+        // and not only in the plot.
+        btn.classList.toggle("is-hovered", hoveredAnn === key);
       } else {
         const s = btn.dataset.series as string;
         btn.classList.toggle("is-pinned", pinned.has(s));
         btn.setAttribute("aria-pressed", String(pinned.has(s)));
       }
     });
-    resetBtn.hidden = pinned.size === 0 && pinnedShape.size === 0;
+    resetBtn.hidden = pinned.size === 0 && pinnedShape.size === 0 && pinnedAnn.size === 0;
     // Notify after the dim classes are toggled so the callback reads the fresh dim state
     // (e.g. recoloring net-total labels by the behind-segment's dim class). Runs on every
     // highlight change — pin, hover, focus, blur, and reset. The active color-series set is
@@ -231,6 +259,12 @@ export function renderLegend(
     else pinned.add(series);
     applyHighlight();
   };
+  const togglePinAnnotation = (key: string): void => {
+    if (!allAnnotations.includes(key)) return;
+    if (pinnedAnn.has(key)) pinnedAnn.delete(key);
+    else pinnedAnn.add(key);
+    applyHighlight();
+  };
   const togglePinShape = (shape: string): void => {
     if (!allShapes.includes(shape)) return;
     if (pinnedShape.has(shape)) pinnedShape.delete(shape);
@@ -238,7 +272,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, outlined = false } of safeItems) {
+  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -246,7 +280,10 @@ export function renderLegend(
       : doc.createElement("button");
     if (!nonInteractive) {
       (btn as HTMLButtonElement).type = "button";
-      btn.dataset.series = series; // data key — matches path[data-series]
+      // An annotation row's key lives on data-ANNOTATION, matching the chart elements it names
+      // (bands / fills / rules / rug blocks) rather than any series' paths.
+      if (annotation) btn.dataset.annotation = series;
+      else btn.dataset.series = series; // data key — matches path[data-series]
       btn.setAttribute("aria-pressed", "false");
     }
     btn.className = "tbl-legend-item";
@@ -296,11 +333,20 @@ export function renderLegend(
     btn.appendChild(labelEl);
 
     if (!nonInteractive) {
-      btn.addEventListener("pointerenter", () => { hovered = series; applyHighlight(); });
-      btn.addEventListener("pointerleave", () => { hovered = null; applyHighlight(); });
-      btn.addEventListener("focus", () => { hovered = series; applyHighlight(); });
-      btn.addEventListener("blur", () => { hovered = null; applyHighlight(); });
-      btn.addEventListener("click", () => { togglePin(series); });
+      const enter = annotation
+        ? () => { hoveredAnn = series; applyHighlight(); }
+        : () => { hovered = series; applyHighlight(); };
+      const leave = annotation
+        ? () => { hoveredAnn = null; applyHighlight(); }
+        : () => { hovered = null; applyHighlight(); };
+      btn.addEventListener("pointerenter", enter);
+      btn.addEventListener("pointerleave", leave);
+      btn.addEventListener("focus", enter);
+      btn.addEventListener("blur", leave);
+      btn.addEventListener("click", () => {
+        if (annotation) togglePinAnnotation(series);
+        else togglePin(series);
+      });
     }
 
     colorContainer.appendChild(btn);
@@ -311,7 +357,12 @@ export function renderLegend(
   resetBtn.setAttribute("aria-label", "Clear pinned highlights");
   resetBtn.innerHTML = '<span class="tbl-legend-reset-icon">⟲</span>';
   resetBtn.hidden = true;
-  resetBtn.addEventListener("click", () => { pinned.clear(); pinnedShape.clear(); applyHighlight(); });
+  resetBtn.addEventListener("click", () => {
+    pinned.clear();
+    pinnedShape.clear();
+    pinnedAnn.clear();
+    applyHighlight();
+  });
   colorContainer.appendChild(resetBtn);
 
   // Two-group layout: assemble the color group then the SHAPE group. The shape markers are
@@ -346,6 +397,13 @@ export function renderLegend(
   return {
     element: legend,
     toggle: togglePin,
+    hoverAnnotation: (key: string | null) => {
+      const next = key != null && allAnnotations.includes(key) ? key : null;
+      if (next === hoveredAnn) return;
+      hoveredAnn = next;
+      applyHighlight();
+    },
+    toggleAnnotation: togglePinAnnotation,
     pinnedSeries: () => [...pinned],
     rebind: (newSvg: Element) => {
       svg = newSvg;

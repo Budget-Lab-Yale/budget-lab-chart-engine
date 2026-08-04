@@ -24,6 +24,7 @@ import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figu
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
+import { RUG_CLASS } from "./rug.js";
 import { resolveColor } from "./palette.js";
 import {
   attachCrosshair,
@@ -186,6 +187,31 @@ function resolveSeriesAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | n
   for (const el of stack) {
     const series = el.getAttribute?.("data-series");
     if (series) return series;
+    if (el === svgEl) break; // don't search past the chart's own SVG
+  }
+  return null;
+}
+
+/**
+ * The annotation key of the RUG BLOCK under the cursor, or null. Hit-tests through the crosshair's
+ * transparent overlay exactly like `resolveSeriesAtPoint`, then requires the hit to be inside the
+ * rug strip.
+ *
+ * Deliberately scoped to the rug rather than to every `[data-annotation]` element. The in-frame
+ * annotations — band rects and `shading` fills — are large regions sitting right where the reader
+ * sweeps the crosshair to read values, so hovering them would dim the very line being read, on and
+ * off, as the pointer crossed each region. The rug sits below the axis, its blocks are discrete, and
+ * "what is this block?" is the question a reader actually has there — so it is the one place where
+ * chart-to-legend hover helps rather than fights.
+ */
+function resolveRugAnnotationAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | null {
+  const doc = svgEl.ownerDocument as Document & {
+    elementsFromPoint?: (x: number, y: number) => Element[];
+  };
+  if (typeof doc.elementsFromPoint !== "function") return null;
+  for (const el of doc.elementsFromPoint(evt.clientX, evt.clientY)) {
+    const key = el.getAttribute?.("data-annotation");
+    if (key && el.closest?.(`g.${RUG_CLASS}`)) return key;
     if (el === svgEl) break; // don't search past the chart's own SVG
   }
   return null;
@@ -1114,6 +1140,36 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
     currentOverlay = attachYAxisOverlay(canvasScroll, svg);
+
+    // --- Reciprocal annotation highlight: hovering a rug block lights up its legend row and every
+    // other chart element carrying the same key (its bands, its fills, its other blocks), and dims
+    // the rest — the mirror image of hovering the legend row. Clicking pins it, so the highlight can
+    // be held and works on touch. Wired on the SVG (events bubble up from the crosshair overlay), so
+    // there is no z-order fight with that overlay.
+    if (legendHandle) {
+      const handle = legendHandle;
+      // The crosshair's hit rect covers the WHOLE svg, so without this the rug strip would serve a
+      // value tooltip ("Oct 2008: 0.73") on top of the annotation highlight — two answers to one
+      // hover. Stop the hit area at the top of the strip so the crosshair hides as the pointer
+      // enters it. Gated on a rug actually being present, so every other chart is untouched.
+      const firstBlock = svg.querySelector(`g.${RUG_CLASS} rect`);
+      if (firstBlock) {
+        const stripTop = Number(firstBlock.getAttribute("y"));
+        if (Number.isFinite(stripTop)) {
+          svg
+            .querySelectorAll<SVGRectElement>(".tbl-crosshair-hit, .tbl-band-crosshair-hit")
+            .forEach((el) => el.setAttribute("height", String(stripTop)));
+        }
+      }
+      svg.addEventListener("pointermove", (evt) => {
+        handle.hoverAnnotation(resolveRugAnnotationAtPoint(svg, evt as MouseEvent));
+      });
+      svg.addEventListener("pointerleave", () => { handle.hoverAnnotation(null); });
+      svg.addEventListener("click", (evt) => {
+        const key = resolveRugAnnotationAtPoint(svg, evt as MouseEvent);
+        if (key) handle.toggleAnnotation(key);
+      });
+    }
 
     // --- Two-way selection: clicking a bar/segment/line PINS that series via the legend
     // handle (single source of truth). Only wire when an interactive legend exists; a

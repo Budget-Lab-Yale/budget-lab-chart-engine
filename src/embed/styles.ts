@@ -3,7 +3,7 @@
 //   figure-card, figure-title, figure-subtitle, figure-canvas, figure-legend-slot,
 //   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix,
 //   tbl-legend / tbl-legend-item / tbl-legend-swatch (.is-dashed) / tbl-legend-reset /
-//   tbl-legend-reset-icon / .is-pinned, tbl-dimmed,
+//   tbl-legend-reset-icon / .is-pinned / .is-hovered, tbl-dimmed,
 //   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch (.is-dashed) /
 //   tbl-tooltip-label / tbl-tooltip-value,
 //   inline-select-wrap / inline-select / inline-select-caret / inline-select-popover (title
@@ -375,6 +375,13 @@ body {
   color: var(--tbl-text-heading);
   background: var(--tbl-bg-subtle);
   box-shadow: inset 0 -1px 0 var(--legend-color, var(--tbl-navy));
+}
+/* Driven from the CHART side: hovering a rug block marks its annotation row, so the reciprocity is
+   visible in the legend and not only in the plot. Matches the :hover treatment, since it is the
+   same state arrived at from the other direction. */
+.tbl-legend-item.is-hovered {
+  background: var(--tbl-bg-subtle);
+  color: var(--tbl-text-heading);
 }
 .tbl-legend-swatch {
   width: 18px;

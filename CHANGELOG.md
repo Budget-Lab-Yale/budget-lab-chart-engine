@@ -17,9 +17,19 @@ thin intervals out of a crowded plot frame.
   legend row above the plot and drops the in-chart text. Entries sharing a label collapse into one
   row, so three recession bands become one "US recessions" key. `shading` gains a `label` for this
   (a fill had no text of its own, and was previously described only in the `note` line). Rows are
-  non-interactive chrome — no hover-dim, no pin — and sort after the real series. A single-series
-  chart now gets a legend built from these rows alone. See CONFIG-SPEC, "Keying annotations in the
-  legend".
+  interactive in their own selection dimension and sort after the real series. A single-series chart
+  now gets a legend built from these rows alone. See CONFIG-SPEC, "Keying annotations in the legend".
+- **Reciprocal highlighting between a keyed row and the chart.** Hovering a row brightens every
+  element it names — all its bands, fills, reference line and rug blocks — and dims the rest,
+  including the data line; hovering a **rug block** does the reverse, marking its row and brightening
+  that track's other parts. Either can be clicked to pin. Annotations get their own selection
+  dimension (`data-annotation`) rather than borrowing `data-series`, which is what lets a keyed
+  `shading` fill answer to both keys: it still dims with its own line, and it also lights up with its
+  annotation row. Series and annotations share one universe for dimming, so selecting a series dims
+  the annotations too. While the pointer is on the rug strip the value crosshair stands down, so the
+  hover gives one answer instead of two. In-frame regions (band rects, fills) are deliberately not
+  hover targets — they sit where the reader sweeps the crosshair, and hovering them would flicker the
+  chart as the pointer crossed each region.
 - **`rug`: a thin strip of solid interval blocks under the x-axis.** For timeline categories that are
   illegible as fills — the article's false-negative runs are 1–3 months on a 26-year axis, so as
   fills they are hairlines. Flag a band or shading region with `rug: true` and its interval joins the

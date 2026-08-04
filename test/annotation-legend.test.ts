@@ -7,7 +7,8 @@
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
-import { buildAnnotationLegendItems, flattenOverWhite } from "../src/engine/annotation-legend";
+import { buildAnnotationLegendItems, flattenOverWhite, annotationKey } from "../src/engine/annotation-legend";
+import { SHADE_CLASS } from "../src/engine/marks/line";
 import { validateSpec } from "../src/spec/validate";
 import { TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
@@ -202,7 +203,7 @@ describe("annotation legend swatches", () => {
 });
 
 describe("annotation legend interaction", () => {
-  it("renders annotation rows as non-interactive spans with no data-series", () => {
+  it("renders annotation rows as buttons keyed on data-annotation, not data-series", () => {
     const spec = {
       ...BASE,
       annotations: { bands: [{ start: "2001", end: "2003", label: "Recession", legend: true }] },
@@ -210,11 +211,128 @@ describe("annotation legend interaction", () => {
     const { legendItems, svg } = renderChart(spec, DATA, OPTS);
     const parent = document.createElement("div");
     const handle = renderLegend(parent, legendItems ?? [], { svg });
-    const row = parent.querySelector(".tbl-legend-item");
-    expect(row?.tagName.toLowerCase()).toBe("span");
-    expect((row as HTMLElement).dataset.series).toBeUndefined();
+    const row = parent.querySelector<HTMLElement>(".tbl-legend-item");
+    expect(row?.tagName.toLowerCase()).toBe("button");
+    expect(row?.dataset.annotation).toBe(annotationKey("Recession"));
+    expect(row?.dataset.series).toBeUndefined();
+    // Annotation pins live in their own dimension, so the area-restack / value-pill consumers of
+    // pinnedSeries() never see them.
+    row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     expect(handle?.pinnedSeries()).toEqual([]);
+    expect(row?.classList.contains("is-pinned")).toBe(true);
     expect(parent.querySelector(".tbl-legend-swatch.is-rect.is-outlined")).not.toBeNull();
+  });
+});
+
+describe("reciprocal annotation highlight", () => {
+  // Two labelled tracks that also produce in-frame marks + rug blocks, plus a series line to dim.
+  const SPEC = {
+    ...BASE,
+    annotations: {
+      bands: [
+        { start: "2001", end: "2002", color: "grey", label: "US recessions", rug: true },
+        { start: "2007", end: "2008", color: "grey", label: "US recessions", rug: true },
+      ],
+      yAxis: [{ y: 3, label: "Threshold", color: "grey", legend: true }],
+    },
+    shading: [
+      { from: "2001", to: "2002", label: "False negatives", color: "amber", rug: true },
+    ],
+    rug: {},
+  } as ChartSpec;
+
+  const RECESSIONS = annotationKey("US recessions");
+  const FALSE_NEG = annotationKey("False negatives");
+
+  const mount = () => {
+    const { legendItems, svg } = renderChart(SPEC, DATA, OPTS);
+    const parent = document.createElement("div");
+    const handle = renderLegend(parent, legendItems ?? [], { svg })!;
+    return { handle, parent, svg };
+  };
+  const dimmed = (svg: SVGSVGElement, selector: string): boolean[] =>
+    Array.from(svg.querySelectorAll(selector)).map((el) => el.classList.contains("tbl-dimmed"));
+  const rowFor = (parent: HTMLElement, key: string): HTMLElement =>
+    parent.querySelector<HTMLElement>(`.tbl-legend-item[data-annotation="${key}"]`)!;
+
+  it("tags every chart element a row names with that row's key", () => {
+    const { svg } = mount();
+    const keys = Array.from(svg.querySelectorAll("[data-annotation]")).map((el) =>
+      el.getAttribute("data-annotation"),
+    );
+    // Two band rects + one shading fill + one threshold rule + three rug blocks (2 grey, 1 gold).
+    expect(keys.filter((k) => k === RECESSIONS).length).toBe(4);
+    expect(keys.filter((k) => k === FALSE_NEG).length).toBe(2);
+    expect(keys.filter((k) => k === annotationKey("Threshold")).length).toBe(1);
+  });
+
+  it("keeps the series key on a keyed shading fill, so it still dims with its line", () => {
+    const { svg } = mount();
+    const fill = svg.querySelector(`g.${SHADE_CLASS} path`);
+    expect(fill?.getAttribute("data-annotation")).toBe(FALSE_NEG);
+    expect(fill?.getAttribute("data-series")).not.toBeNull();
+  });
+
+  it("legend → chart: hovering a row brightens its parts and dims the rest", () => {
+    const { handle, parent, svg } = mount();
+    rowFor(parent, RECESSIONS).dispatchEvent(new window.PointerEvent("pointerenter"));
+    // Its own elements stay bright...
+    expect(dimmed(svg, `[data-annotation="${RECESSIONS}"]`)).not.toContain(true);
+    // ...while the other annotations and the data line drop back.
+    expect(dimmed(svg, `[data-annotation="${FALSE_NEG}"]`)).not.toContain(false);
+    expect(dimmed(svg, 'g[aria-label="line"] path')).not.toContain(false);
+    rowFor(parent, RECESSIONS).dispatchEvent(new window.PointerEvent("pointerleave"));
+    expect(dimmed(svg, "[data-annotation]")).not.toContain(true);
+    expect(handle.pinnedSeries()).toEqual([]);
+  });
+
+  it("chart → legend: hoverAnnotation lights the row and its parts", () => {
+    const { handle, parent, svg } = mount();
+    handle.hoverAnnotation(FALSE_NEG);
+    expect(rowFor(parent, FALSE_NEG).classList.contains("is-hovered")).toBe(true);
+    expect(rowFor(parent, RECESSIONS).classList.contains("is-hovered")).toBe(false);
+    expect(dimmed(svg, `[data-annotation="${FALSE_NEG}"]`)).not.toContain(true);
+    expect(dimmed(svg, `[data-annotation="${RECESSIONS}"]`)).not.toContain(false);
+    handle.hoverAnnotation(null);
+    expect(dimmed(svg, "[data-annotation]")).not.toContain(true);
+  });
+
+  it("ignores an unknown annotation key", () => {
+    const { handle, svg } = mount();
+    handle.hoverAnnotation("__annotation:nope");
+    expect(dimmed(svg, "[data-annotation]")).not.toContain(true);
+    handle.toggleAnnotation("__annotation:nope");
+    expect(dimmed(svg, "[data-annotation]")).not.toContain(true);
+  });
+
+  it("toggleAnnotation pins the highlight, and the reset button clears it", () => {
+    const { handle, parent, svg } = mount();
+    handle.toggleAnnotation(RECESSIONS);
+    expect(dimmed(svg, `[data-annotation="${FALSE_NEG}"]`)).not.toContain(false);
+    const reset = parent.querySelector<HTMLButtonElement>(".tbl-legend-reset")!;
+    expect(reset.hidden).toBe(false);
+    reset.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    expect(dimmed(svg, "[data-annotation]")).not.toContain(true);
+    expect(reset.hidden).toBe(true);
+  });
+
+  it("a series row dims the annotations too — one universe, not two", () => {
+    const spec = {
+      ...SPEC,
+      columns: { x: "time", value: "value", series: "series" },
+      series_order: ["A", "B"],
+    } as ChartSpec;
+    const data = [
+      ...DATA.map((r) => ({ ...r, series: "A" })),
+      ...DATA.map((r) => ({ ...r, series: "B" })),
+    ] as unknown as TidyRow[];
+    const { legendItems, svg } = renderChart(spec, data, OPTS);
+    const parent = document.createElement("div");
+    renderLegend(parent, legendItems ?? [], { svg });
+    parent
+      .querySelector<HTMLElement>('.tbl-legend-item[data-series="A"]')!
+      .dispatchEvent(new window.PointerEvent("pointerenter"));
+    expect(dimmed(svg, `[data-annotation="${RECESSIONS}"]`)).not.toContain(false);
   });
 });
 
