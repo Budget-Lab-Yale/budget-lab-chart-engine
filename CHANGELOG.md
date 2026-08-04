@@ -41,13 +41,28 @@ thin intervals out of a crowded plot frame.
   connectors, the crosshair) stays correct. Not supported on a categorical x-axis or with
   `small_multiples` — both are validation errors. See CONFIG-SPEC, "X-axis rug".
 
-**Multi-series charts with shaded areas.** A `shading` region with no `series` paints one fill per
-series, each in that series' color, so a single-color chip cannot key it honestly. Such a row's chip
-now shows **every** tint as equal vertical bands (live legend and PNG export alike), and rows merge by
-label rather than by color — so writing one region per series under a shared label collapses to that
-same one banded row instead of three identically-worded ones. A region that names a `series` is keyed
-by **that** series' color (it was keyed by the first series'). `shading[].label` with neither
-`legend: true` nor `rug: true` is now a validation error rather than a silent no-op.
+**Multi-series charts with shaded areas** (found by a 16-case pressure suite):
+
+- A `shading` region with no `series` paints one fill per series, each in that series' color, so a
+  single-color chip cannot key it honestly. Such a row's chip now shows **every** tint as equal
+  vertical bands (live legend and PNG export alike), **widening** so the bands stay legible — at the
+  fixed 14 px, seven series gave 2 px bands. Rows merge by label rather than by color, so writing one
+  region per series under a shared label collapses to that same one banded row instead of three
+  identically-worded ones.
+- A region naming a `series` is keyed by **that** series' color (it was keyed by the first series').
+- **A rug block and its own legend chip could disagree**: a rug-flagged region with no explicit color
+  keyed the series tint while the block drew the neutral, so the key pointed at a color that was
+  nowhere on the strip. Both now come from one resolution — explicit `color`, else the named series'
+  color, else the neutral — and a rug-flagged chip is always a single solid chip, because what it keys
+  is the block.
+- **`rug.rows: per-track`** gives each track its own row. The single strip is right for near-disjoint
+  tracks (the michez read), but a track spanning the axis painted the tracks under it away entirely
+  while they kept their legend rows. A track `single` would cover completely is now a validation error
+  naming this field.
+- Two keyed fills that would resolve to the **same** swatch (both derived from the series palette,
+  same scope, same opacity — the natural above/below pair) are now a validation error.
+- `shading[].label` with neither `legend: true` nor `rug: true` is now a validation error rather than
+  a silent no-op.
 
 Charts using neither feature render byte-identically (the goldens are unchanged).
 

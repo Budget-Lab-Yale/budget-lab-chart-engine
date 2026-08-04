@@ -186,6 +186,7 @@ const RUG = {
   additionalProperties: false,
   properties: {
     height: { type: "number", exclusiveMinimum: 0 },
+    rows: { type: "string", enum: ["single", "per-track"] },
     tracks: {
       type: "array",
       items: {

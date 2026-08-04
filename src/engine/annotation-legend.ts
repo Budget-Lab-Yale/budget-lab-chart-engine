@@ -84,10 +84,20 @@ function shadeSwatchColors(
   seriesNames: string[],
   colors: Map<string, string>,
 ): string[] {
-  const opacity = region.fillOpacity ?? SHADE_FILL_OPACITY;
-  const solid = region.rug === true;
-  const tint = (c: string): string => (solid ? c : flattenOverWhite(c, opacity));
   const explicit = resolveColor(region.color);
+  // A rug-flagged region is keyed by its BLOCK, and the strip can only draw ONE color — so the chip
+  // is a single solid swatch resolved exactly as `drawRug` resolves the block (spec/rug.ts
+  // `rugTrackColor`). Without this the chip showed the series tints while the block drew the
+  // neutral: a key pointing at a color that is nowhere on the strip.
+  if (region.rug === true) {
+    return [
+      explicit ||
+        (region.series != null ? colors.get(region.series) : undefined) ||
+        TBL.color.annotationDim,
+    ];
+  }
+  const opacity = region.fillOpacity ?? SHADE_FILL_OPACITY;
+  const tint = (c: string): string => flattenOverWhite(c, opacity);
   if (explicit) return [tint(explicit)];
   const targets = region.series != null ? [region.series] : seriesNames;
   const out = targets

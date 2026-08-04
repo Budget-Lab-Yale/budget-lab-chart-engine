@@ -14,7 +14,7 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
 import { resolveAnnotations } from "./annotations";
-import { resolveRugTracks } from "./rug";
+import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
@@ -211,6 +211,10 @@ interface LegendFlagged {
   /** Shading bounds. */
   from?: string;
   to?: string;
+  /** Shading swatch inputs — an explicit color, its series scope, and its tint strength. */
+  color?: string;
+  series?: string;
+  fillOpacity?: number;
 }
 
 /**
@@ -243,6 +247,30 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
   needsLabel(xMarkers, "annotations.xAxis");
   needsLabel(yMarkers, "annotations.yAxis");
   needsLabel(shading, "shading");
+
+  // Keyed fills whose swatch is DERIVED (no explicit color) are keyed by the series palette, so two
+  // of them over the same series scope at the same opacity render the same chip — e.g. an
+  // above-target and a below-target fill on a three-series chart both key as the same three tints.
+  const derivedChips = new Map<string, string[]>();
+  shading.forEach((s) => {
+    const keyed = s.legend === true || s.rug === true;
+    if (!keyed || !s.label || s.color) return;
+    // A rug-flagged fill keys SOLID, everything else keys by its tint — different rules, so they
+    // can't collide with each other.
+    const scope = `${s.series ?? "*"}|${s.rug === true ? "solid" : (s.fillOpacity ?? 0.5)}`;
+    const labels = derivedChips.get(scope) ?? [];
+    if (!labels.includes(s.label)) labels.push(s.label);
+    derivedChips.set(scope, labels);
+  });
+  for (const labels of derivedChips.values()) {
+    if (labels.length > 1) {
+      errors.push(
+        `shading: ${labels.map((l) => JSON.stringify(l)).join(" and ")} would key with the SAME legend ` +
+          `swatch — both take their tint from the series colors at the same opacity. Give at least one ` +
+          `an explicit \`color\` (or a different \`fillOpacity\`) so the two concepts read apart`,
+      );
+    }
+  }
 
   shading.forEach((s, i) => {
     if (s.label && s.legend !== true && s.rug !== true) {
@@ -307,6 +335,16 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
         errors.push(`${iv.where}: rug interval runs backwards (${iv.from} → ${iv.to})`);
       }
     }
+  }
+
+  // A track the single strip would paint away entirely still claims a legend row, so the reader is
+  // keyed to blocks that aren't drawn. Partial cover stays legal — that is how the michez strip reads
+  // a false negative running into its recession.
+  for (const label of fullyHiddenRugTracks(spec)) {
+    errors.push(
+      `rug: the track ${JSON.stringify(label)} is completely covered by a later track, so its blocks ` +
+        `would never be visible. Set \`rug.rows: per-track\` to give each track its own row`,
+    );
   }
 
   // Asked of the RESOLVER, not of a re-written copy of its predicates: this error exists to predict

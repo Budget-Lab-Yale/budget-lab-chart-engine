@@ -9,9 +9,7 @@
 // guard). Pixel positions come from Plot's own `svg.scale("x")` — the accessor crosshair.ts reads —
 // so blocks land on the real scale, not a re-derivation of it. No layout measurement, so the strip
 // is identical in live HTML, the PNG export, and the jsdom goldens, which all consume this one SVG.
-import { TBL } from "./theme";
-import { resolveColorOr } from "./palette";
-import { RUG_GAP } from "../spec/rug";
+import { RUG_GAP, RUG_ROW_GAP } from "../spec/rug";
 import { readLinearScale } from "./plot-scale";
 import type { ResolvedRugTrack } from "../spec/rug";
 
@@ -25,14 +23,21 @@ export const RUG_CLASS = "tbl-rug";
 const MIN_BLOCK_WIDTH = 2;
 
 export interface DrawRugOptions {
-  /** Strip height in px (`rug.height`). */
+  /** Height of ONE row (`rug.height`). */
   height: number;
+  /** `per-track` gives each track its own row, so no track can be painted away by a later one.
+   *  `single` (the default) puts them all in one row — right when they are near-disjoint in x. */
+  rows?: "single" | "per-track";
   /** The chart's x-value parser (the adapter's `parseX`) — turns a track's bound STRINGS into the
    *  numeric/Date values the x scale takes. */
   parseX: (v: string) => number | Date | string | null;
   /** The annotation key a track's blocks should carry as `data-annotation`, so the strip joins the
    *  legend's hover-dim in both directions. Return undefined for a track with no legend row. */
   keyFor?: (track: ResolvedRugTrack) => string | undefined;
+  /** A track's block color. Supplied by the caller (not resolved here) because it may come from the
+   *  chart's SERIES colors, which this module has no business knowing — and because the legend chip
+   *  must resolve it the same way. See `spec/rug.ts#rugTrackColor`. */
+  colorFor: (track: ResolvedRugTrack) => string;
 }
 
 /**
@@ -46,7 +51,7 @@ export interface DrawRugOptions {
 export function drawRug(
   svg: SVGSVGElement,
   tracks: ResolvedRugTrack[],
-  { height, parseX, keyFor }: DrawRugOptions,
+  { height, rows = "single", parseX, keyFor, colorFor }: DrawRugOptions,
 ): void {
   if (!tracks.length) return;
   const toPx = readLinearScale(svg, "x");
@@ -71,9 +76,11 @@ export function drawRug(
   // The legend rows are the strip's accessible name; the blocks themselves are decoration.
   g.setAttribute("aria-hidden", "true");
 
-  for (const track of tracks) {
-    const fill = resolveColorOr(track.color, TBL.color.annotationDim);
+  const perTrack = rows === "per-track";
+  tracks.forEach((track, trackIdx) => {
+    const fill = colorFor(track);
     const key = keyFor?.(track);
+    const rowTop = top + (perTrack ? trackIdx * (height + RUG_ROW_GAP) : 0);
     for (const iv of track.intervals) {
       const from = parseX(iv.from);
       const to = parseX(iv.to);
@@ -91,14 +98,14 @@ export function drawRug(
       const width = Math.max(hi - lo, MIN_BLOCK_WIDTH);
       const rect = doc.createElementNS(SVG_NS, "rect");
       rect.setAttribute("x", String(round(lo)));
-      rect.setAttribute("y", String(round(top)));
+      rect.setAttribute("y", String(round(rowTop)));
       rect.setAttribute("width", String(round(width)));
       rect.setAttribute("height", String(round(height)));
       rect.setAttribute("fill", fill);
       if (key) rect.setAttribute("data-annotation", key);
       g.appendChild(rect);
     }
-  }
+  });
 
   if (g.childElementCount) svg.appendChild(g);
 }

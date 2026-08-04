@@ -11,7 +11,7 @@ import { buildAnnotationLegendItems, flattenOverWhite, annotationKey } from "../
 import { SHADE_CLASS } from "../src/engine/marks/line";
 import { TBL_COLORS } from "../src/engine/palette";
 import { validateSpec } from "../src/spec/validate";
-import { TBL } from "../src/engine/theme";
+import { TBL, swatchWidthFor } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -519,6 +519,87 @@ describe("dead-configuration validation", () => {
   it("accepts it once opted in", () => {
     expect(
       validateSpec({ ...BASE, data: "d.csv", shading: [{ label: "Below zero", legend: true }] }).valid,
+    ).toBe(true);
+  });
+});
+
+describe("banded chip width", () => {
+  it("grows so each band stays legible, then caps", () => {
+    expect(swatchWidthFor(1)).toBe(14);
+    expect(swatchWidthFor(3)).toBe(14); // 3 bands already fit the default chip
+    expect(swatchWidthFor(7)).toBe(21);
+    expect(swatchWidthFor(9)).toBe(27);
+    expect(swatchWidthFor(40)).toBe(30); // capped — a chip cannot key forty series
+  });
+
+  it("applies the width to the rendered chip", () => {
+    const spec = {
+      ...BASE,
+      columns: { x: "time", value: "value", series: "series" },
+      series_order: ["A", "B", "C", "D", "E", "F", "G"],
+      shading: [{ label: "Below zero", legend: true }],
+    } as ChartSpec;
+    const rows = ["A", "B", "C", "D", "E", "F", "G"].flatMap((s) =>
+      [2000, 2010].map((t) => ({ time: String(t), series: s, value: "-1" })),
+    ) as unknown as TidyRow[];
+    const { legendItems, svg } = renderChart(spec, rows, OPTS);
+    const parent = document.createElement("div");
+    renderLegend(parent, legendItems ?? [], { svg });
+    const chip = parent.querySelector<HTMLElement>(
+      ".tbl-legend-item[data-annotation] .tbl-legend-swatch.is-rect",
+    )!;
+    expect(chip.style.width).toBe(`${swatchWidthFor(7)}px`);
+  });
+});
+
+describe("indistinguishable keyed fills", () => {
+  it("rejects two derived-color fills that would key the same", () => {
+    const res = validateSpec({
+      ...BASE,
+      data: "d.csv",
+      shading: [
+        { side: "negative", label: "Below", legend: true },
+        { side: "positive", label: "Above", legend: true },
+      ],
+    });
+    expect(res.valid).toBe(false);
+    expect(res.errors.join(" ")).toMatch(/would key with the SAME legend swatch/);
+  });
+
+  it("accepts them once one carries an explicit color", () => {
+    expect(
+      validateSpec({
+        ...BASE,
+        data: "d.csv",
+        shading: [
+          { side: "negative", label: "Below", legend: true, color: "amber" },
+          { side: "positive", label: "Above", legend: true },
+        ],
+      }).valid,
+    ).toBe(true);
+  });
+
+  it("accepts them when they differ by opacity, or by series scope", () => {
+    expect(
+      validateSpec({
+        ...BASE,
+        data: "d.csv",
+        shading: [
+          { side: "negative", label: "Below", legend: true, fillOpacity: 0.5 },
+          { side: "positive", label: "Above", legend: true, fillOpacity: 0.25 },
+        ],
+      }).valid,
+    ).toBe(true);
+    expect(
+      validateSpec({
+        ...BASE,
+        data: "d.csv",
+        columns: { x: "time", value: "value", series: "series" },
+        shading: [
+          { series: "A", label: "A below", legend: true },
+          { series: "B", label: "B below", legend: true },
+        ],
+      }).valid,
     ).toBe(true);
   });
 });

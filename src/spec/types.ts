@@ -256,8 +256,16 @@ export interface RugTrack {
  *  Not supported on `xAxisType: categorical` (a band scale has no position between categories) or
  *  with `small_multiples`; both are validation errors. */
 export interface RugConfig {
-  /** Strip height in px. Default 8. The x-axis tick labels shift down to make room. */
+  /** Strip height in px — per ROW when `rows: per-track`. Default 8. The x-axis tick labels shift
+   *  down to make room. */
   height?: number;
+  /** How tracks share the strip.
+   *  - `single` (default): all tracks paint into ONE row, later over earlier. Right when the tracks
+   *    are near-disjoint in x — a short run sitting at the head of a longer one reads as adjacency.
+   *  - `per-track`: each track gets its own row, so no track can hide another. Use it when tracks
+   *    genuinely overlap (per-series breach windows, or a span-the-axis track over shorter ones).
+   *  A track that `single` would hide COMPLETELY is a validation error pointing here. */
+  rows?: "single" | "per-track";
   /** Standalone tracks with literal intervals — for a timeline concept that has no band or fill of
    *  its own. Appended after the tracks derived from `rug: true` flags. */
   tracks?: RugTrack[];

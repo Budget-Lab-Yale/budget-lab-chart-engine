@@ -7,10 +7,10 @@ import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { RUG_CLASS } from "../src/engine/rug";
 import { buildExportSvg } from "../src/embed/export-png";
-import { resolveRugTracks, rugAllowance, RUG_GAP, RUG_PAD } from "../src/spec/rug";
+import { resolveRugTracks, rugAllowance, RUG_GAP, RUG_PAD, RUG_ROW_GAP } from "../src/spec/rug";
 import { validateSpec } from "../src/spec/validate";
 import { TBL_COLORS } from "../src/engine/palette";
-import { SWATCH_OUTLINE } from "../src/engine/theme";
+import { SWATCH_OUTLINE, TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -95,13 +95,40 @@ describe("rug geometry", () => {
     expect(allowance).toBe(RUG_GAP + 8 + RUG_PAD);
     expect(Number(rugged.dataset.marginBottom) - Number(plain.dataset.marginBottom)).toBe(allowance);
 
-    // The tick labels keep their distance below the axis: the frame bottom rose by the allowance
-    // and the labels moved down by it, so their absolute y is unchanged.
+    // The tick labels keep their distance below the axis: the frame bottom rose by the allowance and
+    // the labels moved down by it, so their absolute y is unchanged. Asserted on a TEMPORAL axis —
+    // its ticks are Plot.text marks carrying a real `y`, whereas the numeric axis (Plot.axisX)
+    // positions text by a group transform, so reading `y` there yields NaN and compares vacuously.
+    const temporal = (withRug: boolean) =>
+      renderChart(
+        {
+          ...BASE,
+          xAxisType: "temporal",
+          ...(withRug
+            ? {
+                rug: {},
+                annotations: {
+                  bands: [
+                    { start: "2002-01-01", end: "2004-01-01", label: "R", color: "grey", rug: true },
+                  ],
+                },
+              }
+            : {}),
+        } as unknown as ChartSpec,
+        [
+          { time: "2000-01-01", value: "1" },
+          { time: "2010-01-01", value: "2" },
+        ] as unknown as TidyRow[],
+        OPTS,
+      ).svg;
     const tickY = (svg: SVGSVGElement): number[] =>
       Array.from(svg.querySelectorAll("text"))
         .filter((t) => /^\d{4}$/.test(t.textContent ?? ""))
         .map((t) => Number(t.getAttribute("y")));
-    expect(tickY(rugged)).toEqual(tickY(plain));
+    const ruggedTicks = tickY(temporal(true));
+    expect(ruggedTicks.length).toBeGreaterThan(0);
+    expect(ruggedTicks.every(Number.isFinite)).toBe(true);
+    expect(ruggedTicks).toEqual(tickY(temporal(false)));
   });
 
   it("draws the strip below the frame, above the tick labels", () => {
@@ -299,5 +326,118 @@ describe("rug validation", () => {
 
   it("accepts the michez-rule shape", () => {
     expect(validateSpec(spec(MICHEZ as unknown as Record<string, unknown>)).valid).toBe(true);
+  });
+});
+
+describe("rug.rows — one strip or a row per track", () => {
+  const OVERLAP = {
+    ...BASE,
+    rug: {
+      tracks: [
+        { label: "Wide", color: "blue", intervals: [{ from: "2002", to: "2018" }] },
+        { label: "Inside it", color: "red", intervals: [{ from: "2006", to: "2010" }] },
+      ],
+    },
+  } as ChartSpec;
+
+  it("defaults to one row, later tracks over earlier", () => {
+    const { svg } = renderChart(OVERLAP, DATA, OPTS);
+    expect(new Set(blocks(svg).map((r) => r.getAttribute("y"))).size).toBe(1);
+  });
+
+  it("per-track gives each track its own row, so none can hide another", () => {
+    const spec = { ...OVERLAP, rug: { ...OVERLAP.rug, rows: "per-track" } } as ChartSpec;
+    const { svg } = renderChart(spec, DATA, OPTS);
+    const ys = blocks(svg).map((r) => num(r, "y"));
+    expect(new Set(ys).size).toBe(2);
+    expect(ys[1]! - ys[0]!).toBe(8 + RUG_ROW_GAP);
+  });
+
+  it("the allowance grows with the row count", () => {
+    const single = rugAllowance(OVERLAP);
+    const perTrack = rugAllowance({ ...OVERLAP, rug: { ...OVERLAP.rug, rows: "per-track" } } as ChartSpec);
+    expect(single).toBe(RUG_GAP + 8 + RUG_PAD);
+    expect(perTrack).toBe(RUG_GAP + 2 * 8 + RUG_ROW_GAP + RUG_PAD);
+    // The whole strip sits inside the space the allowance reserved — its lowest edge stops RUG_PAD
+    // short of where the tick labels were pushed to.
+    const { svg } = renderChart(
+      { ...OVERLAP, rug: { ...OVERLAP.rug, rows: "per-track" } } as ChartSpec,
+      DATA,
+      OPTS,
+    );
+    const frameBottom = 400 - Number(svg.dataset.marginBottom);
+    const lowestBlock = Math.max(...blocks(svg).map((r) => num(r, "y") + num(r, "height")));
+    expect(lowestBlock).toBe(frameBottom + perTrack - RUG_PAD);
+  });
+
+  it("rejects a track the single strip would cover completely", () => {
+    const spec = {
+      ...BASE,
+      data: "d.csv",
+      rug: {
+        tracks: [
+          { label: "Short", color: "grey", intervals: [{ from: "2006", to: "2008" }] },
+          { label: "Spans the axis", color: "red", intervals: [{ from: "2000", to: "2020" }] },
+        ],
+      },
+    };
+    const res = validateSpec(spec);
+    expect(res.valid).toBe(false);
+    expect(res.errors.join(" ")).toMatch(/"Short" is completely covered/);
+    // per-track is the remedy the message names, and it clears the error.
+    expect(validateSpec({ ...spec, rug: { ...spec.rug, rows: "per-track" } }).valid).toBe(true);
+  });
+
+  it("allows PARTIAL cover — a short run at the head of a longer one is the michez read", () => {
+    expect(validateSpec({ ...OVERLAP, data: "d.csv" } as unknown as Record<string, unknown>).valid).toBe(true);
+  });
+});
+
+describe("a rug block and its legend chip are one color", () => {
+  const MS = {
+    ...BASE,
+    columns: { x: "time", value: "value", series: "series" },
+    series_order: ["A", "B"],
+  } as ChartSpec;
+  const ROWS = ["A", "B"].flatMap((s) =>
+    [2000, 2010, 2020].map((t) => ({ time: String(t), series: s, value: "-1" })),
+  ) as unknown as TidyRow[];
+
+  it("takes the SERIES color when the region names one", () => {
+    const spec = {
+      ...MS,
+      shading: [{ series: "B", label: "B below", rug: true, from: "2000", to: "2010" }],
+      rug: {},
+    } as ChartSpec;
+    const { svg, legendItems, colors } = renderChart(spec, ROWS, OPTS);
+    const row = legendItems!.find((i) => i.annotation)!;
+    expect(row.color).toBe(colors.get("B"));
+    expect(row.colors).toBeUndefined(); // a block is one color, so its key is one chip
+    expect(blocks(svg)[0]!.getAttribute("fill")).toBe(row.color);
+  });
+
+  it("falls back to the neutral when the region spans every series", () => {
+    const spec = {
+      ...MS,
+      shading: [{ label: "Any below", rug: true, from: "2000", to: "2010" }],
+      rug: {},
+    } as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, ROWS, OPTS);
+    const row = legendItems!.find((i) => i.annotation)!;
+    // No single series color could stand for a track covering all of them.
+    expect(row.color).toBe(TBL.color.annotationDim);
+    expect(blocks(svg)[0]!.getAttribute("fill")).toBe(row.color);
+  });
+
+  it("an explicit color wins for both", () => {
+    const spec = {
+      ...MS,
+      shading: [{ series: "B", label: "B below", rug: true, from: "2000", to: "2010", color: "amber" }],
+      rug: {},
+    } as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, ROWS, OPTS);
+    const row = legendItems!.find((i) => i.annotation)!;
+    expect(row.color).toBe(TBL_COLORS.amber);
+    expect(blocks(svg)[0]!.getAttribute("fill")).toBe(TBL_COLORS.amber);
   });
 });

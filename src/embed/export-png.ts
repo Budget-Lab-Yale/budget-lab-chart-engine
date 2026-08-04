@@ -9,7 +9,7 @@ import type { FigureRenderResult } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
-import { SWATCH_OUTLINE } from "../engine/theme.js";
+import { SWATCH_OUTLINE, swatchWidthFor } from "../engine/theme.js";
 import {
   SVG_NS,
   W,
@@ -107,7 +107,9 @@ function drawLegend(
 
   for (const item of items) {
     const color = item.color ?? NAVY;
-    const itemW = SW + GAP + measureText(item.label, legendFont);
+    // A banded chip can be wider than the standard swatch column, so the row must reserve it.
+    const swatchW = item.colors && item.colors.length > 1 ? Math.max(SW, swatchWidthFor(item.colors.length)) : SW;
+    const itemW = swatchW + GAP + measureText(item.label, legendFont);
     if (x > MARGIN && x + itemW > MARGIN + INNER_W) {
       x = MARGIN;
       y += ROW_H;
@@ -153,16 +155,18 @@ function drawLegend(
     } else if (item.markerShape === "rect" || item.markerShape === "chip") {
       // Color chip — a filled rounded square (color key), matching the live legend. An annotation
       // fill's tint can be near-white, so those rows carry a hairline (matching .is-outlined).
-      const chip = 13;
-      const chipX = x + (SW - chip) / 2;
-      const chipY = cy - chip / 2;
-      // Several tints under one label → equal vertical bands, matching the live legend's chip.
+      // Several tints under one label → equal vertical bands, matching the live legend's chip, which
+      // also widens so the bands stay legible.
       const tints = item.colors && item.colors.length > 1 ? item.colors : null;
+      const chipH = 13;
+      const chipW = tints ? swatchWidthFor(tints.length) : chipH;
+      const chipX = x + (SW - chipW) / 2;
+      const chipY = cy - chipH / 2;
       if (tints) {
-        const band = chip / tints.length;
+        const band = chipW / tints.length;
         tints.forEach((c, i) => {
           root.appendChild(
-            svgEl("rect", { x: chipX + i * band, y: chipY, width: band + 0.5, height: chip, fill: c }),
+            svgEl("rect", { x: chipX + i * band, y: chipY, width: band + 0.5, height: chipH, fill: c }),
           );
         });
       }
@@ -170,8 +174,8 @@ function drawLegend(
         svgEl("rect", {
           x: chipX,
           y: chipY,
-          width: chip,
-          height: chip,
+          width: chipW,
+          height: chipH,
           rx: 4,
           ...(tints ? { fill: "none" } : { fill: color }),
           ...(item.outlined ? { stroke: SWATCH_OUTLINE, "stroke-width": 1 } : {}),
@@ -183,7 +187,7 @@ function drawLegend(
       );
     }
     root.appendChild(
-      textEl(x + SW + GAP, y, item.label, {
+      textEl(x + swatchW + GAP, y, item.label, {
         size: 13,
         weight: W_BODY,
         fill: BODY,

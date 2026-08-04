@@ -31,7 +31,8 @@ false positive — a categorical timeline that stays legible at any interval wid
 
 - Legend entries for `annotations.points` (a callout **is** its label; moving it to a legend loses
   the coordinate it points at).
-- Multi-row rugs. One strip; overlapping intervals paint in track order.
+- ~~Multi-row rugs.~~ Revisited: see E. One strip remains the default, but a track that the single
+  strip would erase is a validation error, and `rug.rows: per-track` stacks them.
 - A rug tooltip. Hovering a block highlights its legend row (see C) — that is the answer; a
   second, value-shaped answer over the strip would compete with the crosshair.
 - Rug on small multiples or on a categorical x-axis (validated out; see Validation).
@@ -211,6 +212,29 @@ a label stay separate rows — one swatch cannot be both.
 `shading[].label` has no meaning without `legend`/`rug` (a fill draws no text of its own), so a label
 with neither is now a validation error, matching how this repo already treats `columns.section` and
 `x_axis_ticks` no-ops rather than letting dead configuration render nothing.
+
+### E. What the pressure suite found (multi-series, 16 cases)
+
+A generated suite — series counts 1/3/7/9, one vs several concepts per series, regions scoped to one
+series vs all, shared vs distinct labels, rug on/off, right-hand legend, overlapping tracks, long
+labels, dashed series, area+temporal — measured against the live DOM rather than eyeballed. Four
+defects, each fixed:
+
+| found | fix |
+|---|---|
+| A keyed fill naming a series was keyed by the **first** series' color | resolve the swatch from the fills the row actually names (`shadeSwatchColors`) |
+| At 7 and 9 series the banded chip stayed 14 px → 2 px and 1.5 px bands | the chip widens to hold `SWATCH_MIN_BAND` per band, capped at `SWATCH_MAX_WIDTH` |
+| A rug block and its own chip could be **different colors** — the chip took the series tint, the block the neutral | one shared resolution, `spec/rug.ts#rugTrackColor`, used by `drawRug` and the legend; a rug-flagged chip is single + solid, because it keys the block |
+| A track spanning the axis painted earlier tracks away **entirely**, while they kept their legend rows | `rug.rows: per-track`, plus a validation error (`fullyHiddenRugTracks`, pure interval math) when `single` would erase a track |
+
+Two more were ruled *correct as-is*: partial cover in one row (the michez read — a false negative at
+the head of its recession), and the two-concepts-one-palette collision, which no automatic choice can
+resolve honestly and is therefore a validation error telling the author to give one an explicit color.
+
+The suite also caught a **test** defect: two assertions read a `y` attribute off numeric-axis tick
+labels, which `Plot.axisX` positions by a group transform. Both sides were `NaN`, and `toEqual`
+treats `NaN` as equal to `NaN`, so the assertion passed without checking anything. They now assert on
+the temporal axis (real `y` values) and prove the values are finite first.
 
 ## Validation
 

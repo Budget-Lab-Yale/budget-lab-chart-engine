@@ -230,7 +230,9 @@ region) and its `label` renders as a **legend row** above the plot instead of as
 | **replaces** the in-chart label | A keyed band or reference line draws no text in the frame and reserves no auto-stagger row. Moving the label out is the point; asking for both would re-create the clutter. |
 | one row per **label** | Entries sharing a label collapse into a single row — three recession bands become one "US recessions" key. (A fill and a reference line sharing a label stay separate rows: one swatch can't be both.) |
 | swatch | Fills get a rect chip in the tint you will actually see (the fill color flattened over white at its `fillOpacity`, with a hairline so a 10 %-opaque band still reads as a chip). Reference lines get a line swatch in the marker's color, dashed when the marker is. A `rug: true` entry is keyed by its **solid** rug color instead — the block, not the tint, is what the reader matches. |
-| **multi-series fills** | A `shading` region with no `series` paints one fill per series, each in that series' color. Its chip then shows **every** tint as equal bands, rather than keying the gold and purple fills with the blue one. Writing one region per series under a shared label collapses to that same single banded row. Give the region an explicit `color` to key it with one chip instead. |
+| **multi-series fills** | A `shading` region with no `series` paints one fill per series, each in that series' color. Its chip then shows **every** tint as equal bands (widening so the bands stay legible, up to 30 px), rather than keying the gold and purple fills with the blue one. Writing one region per series under a shared label collapses to that same single banded row. Give the region an explicit `color` to key it with one chip instead. |
+| **`rug: true` keys the block** | A rug-flagged fill's chip is a single **solid** chip in the block's own color — the strip can draw only one color, and the chip's job there is to key the block. That color is the region's `color`, else the color of the `series` it names, else the annotation neutral (a region covering *every* series has no one color a strip could carry). |
+| ambiguous swatches rejected | Two keyed fills that would resolve to the **same** swatch — both taking their tint from the series palette, over the same series scope, at the same `fillOpacity` — are a validation error. This bites the natural above-target / below-target pair: give at least one an explicit `color` (or a different `fillOpacity`). |
 | row order | Series → `bands` → `shading` → `xAxis` → `yAxis` → explicit `rug.tracks`, each in spec order. Not author-controllable. |
 | `legend: false` | Suppresses the row (including one implied by `rug: true`). Chart-level `legend: false` suppresses the whole legend, in which case a keyed label stays in the frame rather than being lost. |
 
@@ -280,7 +282,8 @@ Tracks are usually **derived, not declared**: flag an `annotations.bands` or `sh
 | field | type | notes |
 |---|---|---|
 | `rug` | object | `{height?, tracks?}`. Both optional — `rug: {}` is valid and correct when every track is derived from a `rug: true` flag. |
-| `rug.height` | number | Strip height in px. **Default 8.** The tick labels shift down to make room, so the plot area shrinks by `height + 5` and nothing overlaps. |
+| `rug.height` | number | Height in px of **one row**. **Default 8.** The tick labels shift down to make room for the whole strip, so nothing overlaps. |
+| `rug.rows` | enum | `single` (default) \| `per-track`. **`single`** paints every track into one row, later over earlier — right when the tracks are near-disjoint in x, where a short run at the head of a longer one reads as adjacency (that is how the michez strip shows a false negative running into its recession). **`per-track`** gives each track its own row, so no track can hide another; use it for per-series breach windows, or when one track spans the axis. A track that `single` would cover *completely* is a validation error naming this field. |
 | `rug.tracks` | array | Standalone tracks, for a timeline concept with no band or fill of its own. Each `{label, intervals, color?, legend?}`. Appended after the derived tracks. |
 | `rug.tracks[].intervals` | array | Each `{from, to}` — closed x-value spans in the same string form as `annotations.bands.start`/`end` (**quote numbers in YAML**). Must not be empty. |
 | `rug.tracks[].color` | color | Named token or `"#hex"`, painted **solid**. Default: the dim annotation neutral. |
@@ -299,6 +302,11 @@ point. Blocks are clamped to the plot's x extent; an interval wholly outside the
 
 A `rug: true` band still paints its in-chart tint. To show a concept **only** on the rug, declare it
 as an explicit `rug.tracks` entry instead of as a band.
+
+**Multi-series charts.** One strip is a single timeline, so it cannot say *which series* is in a given
+state — a region covering every series draws one neutral track ("some series is below balance here").
+For per-series timelines, give each region its own `series` and `label` and set `rug.rows: per-track`:
+each series then gets its own row, in its own color, and the rows read as a small gantt.
 
 ```yaml
 # The michez-rule chart: recessions from the bands, false negatives/positives from the fills.

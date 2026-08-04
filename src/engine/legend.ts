@@ -4,6 +4,7 @@
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
 import { symbolPathD } from "./symbols";
+import { swatchWidthFor } from "./theme";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -315,6 +316,8 @@ export function renderLegend(
       // hard-stop gradient the dashed swatch uses.
       if (swatchColors && swatchColors.length > 1) {
         swatch.style.background = bandedGradient(swatchColors);
+        // Widen past the CSS default so each band stays legible (7 tints in 14px is 2px each).
+        swatch.style.width = `${swatchWidthFor(swatchColors.length)}px`;
       } else if (color) {
         swatch.style.background = color;
       }

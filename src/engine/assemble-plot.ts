@@ -21,7 +21,7 @@ import {
   X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
-import { resolveColorOr } from "./palette";
+import { resolveColor, resolveColorOr } from "./palette";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
@@ -29,7 +29,7 @@ import {
   xMarkerLabel,
   yMarkerLabel,
 } from "../spec/annotations";
-import { resolveRugTracks, rugHeight } from "../spec/rug";
+import { resolveRugTracks, rugHeight, rugTrackColor } from "../spec/rug";
 import { labelMovedToLegend, annotationKey } from "./annotation-legend";
 import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
@@ -903,9 +903,13 @@ export function assemblePlot({
   // that combination anyway).
   drawRug(svg, resolveRugTracks(spec), {
     height: rugHeight(spec),
+    ...(spec.rug?.rows ? { rows: spec.rug.rows } : {}),
     // A keyed track's blocks carry its annotation key, so the strip participates in legend
     // hover-dim in both directions.
     keyFor: (track) => (track.legend ? annotationKey(track.label) : undefined),
+    // The SAME resolution the legend chip uses, so a block and its key always match.
+    colorFor: (track) =>
+      rugTrackColor(track, (s) => colors.get(s), resolveColor, TBL.color.annotationDim),
     parseX: (v: string) => xOpts.markerToX({ x: v }),
   });
 
