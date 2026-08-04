@@ -33,12 +33,16 @@ export interface XAdapter {
    *  copies and drop the duplicate rows. Default (false) → no class → output byte-identical.
    *  `tagCategoryLabels` (categorical axis only): stamp the hover-accent hook class on the
    *  category labels — passed true for bar/stacked charts only (see index.ts), so other
-   *  categorical chart types (categorical-x line, dot plot) stay byte-identical. */
+   *  categorical chart types (categorical-x line, dot plot) stay byte-identical.
+   *  `axisLabelDy` pushes the tick labels DOWN by that many px — the x-axis rug's way of opening a
+   *  gap for its strip between the axis and its labels (the caller grows `marginBottom` to match).
+   *  Default 0. Ignored on the categorical axis, where the rug is not supported. */
   buildXOpts: (
     data: Array<Record<string, any>>,
     faceted?: boolean,
     labelMode?: BandLabelMode,
     tagCategoryLabels?: boolean,
+    axisLabelDy?: number,
   ) => XOpts;
 }
 
@@ -59,7 +63,7 @@ export function makeXAdapter(
       parseX: (v) => +v,
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
-      buildXOpts(data, faceted = false) {
+      buildXOpts(data, faceted = false, _labelMode, _tagCategoryLabels, axisLabelDy = 0) {
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range (the
         // "data" here is already-binned counts, which must NOT drive the x domain).
         if (histogramDomain) {
@@ -69,6 +73,7 @@ export function makeXAdapter(
             axisMarks: tblXAxis(
               { xTickFormat: (d: unknown) => `${+(d as number)}` },
               faceted ? X_AXIS_LABEL_CLASS : undefined,
+              axisLabelDy,
             ),
             markerToX: (m) => +m.x,
             tooltipXParse: (v) => +v,
@@ -90,6 +95,7 @@ export function makeXAdapter(
           axisMarks: tblXAxis(
             { xTickFormat: (d: unknown) => `${+(d as number)}` },
             faceted ? X_AXIS_LABEL_CLASS : undefined,
+            axisLabelDy,
           ),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
@@ -105,7 +111,7 @@ export function makeXAdapter(
       parseX: (v) => parseDate(v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
-      buildXOpts(data, faceted = false) {
+      buildXOpts(data, faceted = false, _labelMode, _tagCategoryLabels, axisLabelDy = 0) {
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
         let xDomain: [Date, Date];
         if (histogramDomain) {
@@ -120,7 +126,7 @@ export function makeXAdapter(
           // are the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
           // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
           xPlotOpts: histogramDomain ? { type: "utc", domain: xDomain, axis: null, label: null } : undefined,
-          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
+          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, axisLabelDy),
           markerToX: (m) => parseDate(m.x),
           // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
           // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
@@ -137,12 +143,12 @@ export function makeXAdapter(
       parseX: (v) => parseQuarter(v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
-      buildXOpts(data, faceted = false) {
+      buildXOpts(data, faceted = false, _labelMode, _tagCategoryLabels, axisLabelDy = 0) {
         const xs = data.map((r) => +r._xd);
         const xDomain: [Date, Date] = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
         return {
           marginBottom: temporalMarginBottom(xDomain),
-          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined),
+          axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, axisLabelDy),
           markerToX: (m) => parseQuarter(m.x),
           tooltipXParse: (v) => +(parseQuarter(v) as Date),
           tooltipXFormat: (v) => formatQuarter(new Date(v)),

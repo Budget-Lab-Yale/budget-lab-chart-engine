@@ -22,6 +22,9 @@ import {
 import { domainBounds, makeTickFormatter } from "./scales";
 import { resolveColor } from "./palette";
 import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
+import { resolveRugTracks, rugHeight } from "../spec/rug";
+import { labelMovedToLegend } from "./annotation-legend";
+import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
@@ -183,6 +186,13 @@ export function assemblePlot({
   // unchanged, so non-faceted output stays byte-identical.
   const ann = filterAnnotationsByFacet(resolveAnnotations(spec), paneFacetValue);
 
+  // A band / reference line opted into the legend (`legend: true`, or implied by `rug: true`) is
+  // keyed THERE, so it draws no text inside the frame and reserves no auto-stagger row. Moving the
+  // label out of a busy plot is the entire point of that flag — drawing both would re-create the
+  // clutter it exists to remove.
+  const keyedInLegend = (e: { label?: string; legend?: boolean; rug?: boolean }): boolean =>
+    labelMovedToLegend(spec, e);
+
   // Substitute a `{value}` token in yAxis/xAxis/points labels with the annotation's own
   // coordinate value (per-annotation `value_format`, else the chart's y-tick format) BEFORE
   // anything below reads `.label` — both the auto-stagger geometry (which estimates label px
@@ -242,7 +252,7 @@ export function assemblePlot({
     // reserves its rows correctly too — only a DEGENERATE domain has to bail out.
     if (innerHForRows != null && innerHForRows > 0 && yDomain[1] !== yDomain[0]) {
       for (const m of yAxisAnn) {
-        if (!m.label) continue;
+        if (!m.label || keyedInLegend(m)) continue;
         const py = TBL_MARGIN_TOP + ((yDomain[1] - m.y) / (yDomain[1] - yDomain[0])) * innerHForRows;
         // Applied SVG dy = labelSide base (top -7 / middle 0 / bottom +6) minus labelDy (+ = UP).
         const relSide = m.labelSide ?? "top";
@@ -265,7 +275,7 @@ export function assemblePlot({
     type L = { id: string; iv: Iv };
     const labels: L[] = [];
     ann.bands.forEach((b, i) => {
-      if (!b.label) return;
+      if (!b.label || keyedInLegend(b)) return;
       const px = toPx(xOpts.markerToX({ x: b.start }));
       if (px == null) return;
       const w = b.label.length * LABEL_CHAR_PX;
@@ -273,7 +283,7 @@ export function assemblePlot({
     });
     xAxisAnn.forEach((m, i) => {
       // Only "top" labels live in the top band and auto-stagger; middle/bottom sit elsewhere.
-      if (!m.label || (m.labelPosition ?? "top") !== "top") return;
+      if (!m.label || keyedInLegend(m) || (m.labelPosition ?? "top") !== "top") return;
       const px = toPx(xOpts.markerToX(m));
       if (px == null) return;
       const side = m.labelSide ?? "right";
@@ -306,7 +316,7 @@ export function assemblePlot({
         fillOpacity: 0.1,
       }),
     );
-    if (band.label) {
+    if (band.label && !keyedInLegend(band)) {
       // Band label at the top of the region, just inside its left edge (auto-staggered). Deferred
       // to labelMarks so it paints over the axis rules that cross it.
       labelMarks.push(
@@ -455,7 +465,7 @@ export function assemblePlot({
         ...(fyOpts ? { className: fyOpts.ruleClassName } : {}),
       }),
     );
-    if (m.label) {
+    if (m.label && !keyedInLegend(m)) {
       const labelFy = fyOpts?.labelFy;
       // labelSide = which SIDE of the vertical line the label sits (its relation to the line):
       // left → left of the line, middle → centered on it, right → right of it (default).
@@ -581,7 +591,7 @@ export function assemblePlot({
         className: `${ANNOTATION_LINE_CLASS}-${i}`,
       }),
     );
-    if (m.label) {
+    if (m.label && !keyedInLegend(m)) {
       // On an fx-faceted chart (grouped bars), an unfaceted mark repeats in every facet — bind
       // the label to the appropriate end fx category so a single label renders once.
       const fxDomain = faceted ? (layers.fxScaleOpts?.domain as string[] | undefined) : undefined;
@@ -842,6 +852,18 @@ export function assemblePlot({
       if (categoryOrder && i < categoryOrder.length) el.setAttribute("data-category", categoryOrder[i] as string);
     });
   }
+
+  // X-axis rug, LAST: a strip of solid interval blocks in the bottom margin, between the frame's
+  // bottom edge and the tick labels. renderPane already grew `marginBottom` (and pushed the labels
+  // down) by `rugAllowance(spec)` to open that gap — this only fills it, and must not re-add the
+  // allowance. `parseX` resolves the tracks' x strings on this chart's own axis; a categorical
+  // chart's band scale is unreadable as a linear scale, so drawRug no-ops there (validation rejects
+  // that combination anyway).
+  drawRug(svg, resolveRugTracks(spec), {
+    height: rugHeight(spec),
+    parseX: (v: string) => xOpts.markerToX({ x: v }),
+    ...(document ? { document } : {}),
+  });
 
   return svg;
 }

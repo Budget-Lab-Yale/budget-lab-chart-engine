@@ -41,6 +41,7 @@ const X_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["top", "middle", "bottom"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      legend: { type: "boolean" },
       facet: { type: "string" },
     },
   },
@@ -57,6 +58,8 @@ const X_BAND_ARRAY = {
       end: { type: "string" },
       label: { type: "string" },
       color: { type: "string" },
+      legend: { type: "boolean" },
+      rug: { type: "boolean" },
     },
   },
 } as const;
@@ -78,6 +81,7 @@ const Y_MARKER_ARRAY = {
       labelPosition: { type: "string", enum: ["left", "middle", "right"] },
       labelDx: { type: "number" },
       labelDy: { type: "number" },
+      legend: { type: "boolean" },
       facet: { type: "string" },
     },
   },
@@ -168,6 +172,45 @@ const SHADE_REGION = {
     to: { type: "string" },
     color: { type: "string" },
     fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+    label: { type: "string" },
+    legend: { type: "boolean" },
+    rug: { type: "boolean" },
+  },
+} as const;
+
+// The x-axis rug: a thin strip of solid interval blocks under the x-axis. `tracks` is optional —
+// tracks are usually DERIVED from `rug: true` on bands/shading (see spec/rug.ts), so a chart may
+// carry `rug: {}` (or only `height`) and still draw a strip.
+const RUG = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    height: { type: "number", exclusiveMinimum: 0 },
+    tracks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "intervals"],
+        properties: {
+          label: { type: "string", minLength: 1 },
+          color: { type: "string" },
+          legend: { type: "boolean" },
+          intervals: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["from", "to"],
+              properties: {
+                from: { type: "string" },
+                to: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -334,6 +377,7 @@ export const CHART_SPEC_SCHEMA = {
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
     shading: { type: "array", items: SHADE_REGION },
+    rug: RUG,
     points: { type: "boolean" },
     projected_field: { type: "string" },
     projected_style: {

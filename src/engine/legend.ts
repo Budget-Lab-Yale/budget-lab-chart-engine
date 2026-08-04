@@ -238,7 +238,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive } of safeItems) {
+  for (const { series, label: displayLabel, color, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, outlined = false } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -258,6 +258,9 @@ export function renderLegend(
     swatch.className = "tbl-legend-swatch";
     if (markerShape === "rect") {
       swatch.classList.add("is-rect");
+      // Annotation fills key their TINT, which for a 10 %-opaque band is nearly white — the
+      // hairline is what keeps such a swatch from reading as a gap.
+      if (outlined) swatch.classList.add("is-outlined");
       if (color) swatch.style.background = color;
     } else if (markerShape === "point") {
       // Point chart: a filled colored marker (no line). The symbol is the series' shape in the

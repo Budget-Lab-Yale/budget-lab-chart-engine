@@ -4,6 +4,35 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-08-04
+
+### Added — annotation legend entries, and an x-axis rug
+
+Both come out of the recession-indicators michez-rule chart, and both are about getting names and
+thin intervals out of a crowded plot frame.
+
+- **`legend: true` on `annotations.bands` / `xAxis` / `yAxis` and on `shading`.** The engine's legend
+  was series-only, so a chart whose subject is its annotations had to label each one *inside* the
+  frame — or mint dummy CSV series to get legend rows. The flag moves the entry's `label` to a
+  legend row above the plot and drops the in-chart text. Entries sharing a label collapse into one
+  row, so three recession bands become one "US recessions" key. `shading` gains a `label` for this
+  (a fill had no text of its own, and was previously described only in the `note` line). Rows are
+  non-interactive chrome — no hover-dim, no pin — and sort after the real series. A single-series
+  chart now gets a legend built from these rows alone. See CONFIG-SPEC, "Keying annotations in the
+  legend".
+- **`rug`: a thin strip of solid interval blocks under the x-axis.** For timeline categories that are
+  illegible as fills — the article's false-negative runs are 1–3 months on a 26-year axis, so as
+  fills they are hairlines. Flag a band or shading region with `rug: true` and its interval joins the
+  track named by its `label`, so the dates stay stated once; `rug.tracks` covers a concept with no
+  band or fill of its own. Blocks are floored at 2px so a single month stays visible, clamped to the
+  plot's x extent, and keyed in the legend by their solid color. The strip claims its space by
+  growing `marginBottom` and shifting the tick labels down by the same amount, so every consumer
+  that derives geometry from `height - marginTop - marginBottom` (the annotation stagger, callout
+  connectors, the crosshair) stays correct. Not supported on a categorical x-axis or with
+  `small_multiples` — both are validation errors. See CONFIG-SPEC, "X-axis rug".
+
+Charts using neither feature render byte-identically (the goldens are unchanged).
+
 ## [1.8.1] - 2026-07-31
 
 ### Fixed — reversed value axis

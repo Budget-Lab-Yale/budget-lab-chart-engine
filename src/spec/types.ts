@@ -55,6 +55,9 @@ export interface XAxisMarker {
   labelDy?: number;
   /** Horizontal nudge (px, signed: + = right) of the label from the line. Default 4. */
   labelDx?: number;
+  /** Key this line in the chart LEGEND (a line swatch in the marker's color) instead of labelling
+   *  it inside the plot frame. Needs a `label`; markers sharing one label collapse to a single row. */
+  legend?: boolean;
   /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
    *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
   facet?: string;
@@ -68,6 +71,14 @@ export interface XAxisBand {
   label?: string;
   /** Fill color; defaults to a subtle neutral gray. */
   color?: ColorRef;
+  /** Key this band in the chart LEGEND instead of labelling it inside the plot frame. Needs a
+   *  `label`; bands sharing one label collapse to a single legend row. `false` always suppresses
+   *  the row; absent defaults to `rug === true` (a rug block with no key is unreadable). See
+   *  `engine/annotation-legend.ts`. */
+  legend?: boolean;
+  /** Also draw this band's interval as a solid block on the x-axis rug — the thin timeline strip
+   *  under the axis (see `ChartSpec.rug`). Bands sharing one `label` form one rug track. */
+  rug?: boolean;
 }
 
 export interface XAxisPolicy {
@@ -102,6 +113,10 @@ export interface YAxisMarker {
   labelDx?: number;
   /** Vertical nudge (px, signed: + = UP) of the label from its `labelPosition`. Default above. */
   labelDy?: number;
+  /** Key this line in the chart LEGEND (a line swatch in the marker's color, dashed when the
+   *  marker is) instead of labelling it inside the plot frame. Needs a `label`; markers sharing
+   *  one label collapse to a single row. */
+  legend?: boolean;
   /** Small multiples only: scope this marker to the pane whose facet value equals `facet`.
    *  Omit to render in every pane (unchanged default). Ignored on a non-faceted chart. */
   facet?: string;
@@ -195,6 +210,57 @@ export interface ShadeRegion {
   color?: ColorRef;
   /** Fill opacity, 0–1. Default 0.5. */
   fillOpacity?: number;
+  /** What this fill MEANS ("False positives"). A fill has no in-chart text of its own, so this is
+   *  purely a legend/rug key: it names the region in the chart legend and groups regions into one
+   *  rug track. Regions sharing a label collapse to a single legend row. */
+  label?: string;
+  /** Key this fill in the chart legend (a rect swatch tinted like the fill). Needs a `label`;
+   *  `false` always suppresses, absent defaults to `rug === true`. */
+  legend?: boolean;
+  /** Also draw this region's `from`→`to` span as a solid block on the x-axis rug (see
+   *  `ChartSpec.rug`). Both bounds must be given — an open-ended region has no interval to draw. */
+  rug?: boolean;
+}
+
+/** One closed interval on the x-axis rug. Bounds are x-value strings in the same form as
+ *  `annotations.bands.start`/`end` (numeric, date, or quarter — parsed under the chart's
+ *  `xAxisType`), both required: a rug block is a span, not a point. */
+export interface RugInterval {
+  from: string;
+  to: string;
+}
+
+/** One category on the x-axis rug: a labelled, colored set of intervals. Tracks all paint into the
+ *  SAME strip in resolution order (later tracks over earlier), so they read as one timeline rather
+ *  than a stack of rows. */
+export interface RugTrack {
+  /** Legend key for this track. Required — a solid block with no key is unreadable. */
+  label: string;
+  /** Block color, painted solid. Defaults to the dim annotation neutral. */
+  color?: ColorRef;
+  /** The spans to draw. */
+  intervals: RugInterval[];
+  /** Set false to draw the blocks without a legend row (rare — you must key them some other way). */
+  legend?: boolean;
+}
+
+/** The x-axis rug: a thin strip of solid interval blocks between the x-axis line and its tick
+ *  labels, for timeline categories that are illegible as fills (a one-month false-positive run on
+ *  a 26-year axis) or that would clutter the frame as labelled bands.
+ *
+ *  Tracks are RESOLVED, not just declared (see `spec/rug.ts#resolveRugTracks`): every
+ *  `annotations.bands` and `shading` entry flagged `rug: true` is grouped by its `label` into a
+ *  track, then any explicit `tracks` here are appended. So the michez-rule chart's recession bands
+ *  and false-positive fills each become one track without restating a single date.
+ *
+ *  Not supported on `xAxisType: categorical` (a band scale has no position between categories) or
+ *  with `small_multiples`; both are validation errors. */
+export interface RugConfig {
+  /** Strip height in px. Default 8. The x-axis tick labels shift down to make room. */
+  height?: number;
+  /** Standalone tracks with literal intervals — for a timeline concept that has no band or fill of
+   *  its own. Appended after the tracks derived from `rug: true` flags. */
+  tracks?: RugTrack[];
 }
 
 /** Where a chart's data comes from. A bare string is sugar for `{ file }`. */
@@ -419,6 +485,11 @@ export interface ChartSpec {
 
   /** Line charts ONLY: shaded regions between a line and its baseline. See ShadeRegion. */
   shading?: ShadeRegion[];
+
+  /** The x-axis rug: a thin timeline strip of solid interval blocks under the x-axis. See RugConfig.
+   *  Present-but-empty (`rug: { height: 10 }`) is valid when every track is derived from a
+   *  `rug: true` flag on a band or shading region. */
+  rug?: RugConfig;
 
   /** Line charts: draw a marker (dot) at each data point. Default false. */
   points?: boolean;

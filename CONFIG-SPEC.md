@@ -200,7 +200,7 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 |---|---|---|
 | `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. On **horizontal bar** charts with a numeric `x`, an `xAxis` marker now renders as a vertical rule on the value axis (previously silently ignored). |
 | `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
-| `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?}`. |
+| `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?, legend?, rug?}`. |
 | `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, value_format?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
 
 Marker/label `color` is a named color or `"#hex"`; the label color matches its line. When
@@ -218,6 +218,86 @@ parse as a number). A `label` without the token is unaffected.
 equals `facet`; omit to render in every pane (unchanged default). Ignored on a non-faceted chart.
 `bands`/`points` are not facet-scoped.
 
+### Keying annotations in the legend (`legend: true`)
+
+On a busy chart there is often nowhere inside the frame for an annotation's label to sit. Set
+`legend: true` on a `bands`, `xAxis`, or `yAxis` entry (or on a [`shading`](#shading-line-charts)
+region) and its `label` renders as a **legend row** above the plot instead of as text inside it.
+
+| behavior | detail |
+|---|---|
+| needs a `label` | The label *is* the legend key. `legend: true` with no label is a validation error. |
+| **replaces** the in-chart label | A keyed band or reference line draws no text in the frame and reserves no auto-stagger row. Moving the label out is the point; asking for both would re-create the clutter. |
+| one row per **label** | Entries sharing a label collapse into a single row — three recession bands become one "US recessions" key. |
+| swatch | Fills get a rect chip in the tint you will actually see (the fill color flattened over white at its `fillOpacity`, with a hairline so a 10 %-opaque band still reads as a chip). Reference lines get a line swatch in the marker's color, dashed when the marker is. A `rug: true` entry is keyed by its **solid** rug color instead — the block, not the tint, is what the reader matches. |
+| non-interactive | These rows are chrome, not series: no hover-dim, no click-to-pin. They sort after the real series. |
+| row order | Series → `bands` → `shading` → `xAxis` → `yAxis` → explicit `rug.tracks`, each in spec order. Not author-controllable. |
+| `legend: false` | Suppresses the row (including one implied by `rug: true`). Chart-level `legend: false` suppresses the whole legend, in which case a keyed label stays in the frame rather than being lost. |
+
+A chart with **one** series and keyed annotations gets a legend built from those rows alone — which
+is the case the feature was built for. `annotations.points` cannot be keyed: a callout *is* its
+label, and moving it loses the coordinate it points at.
+
+```yaml
+annotations:
+  bands:
+    - { start: "2008-01-01", end: "2009-07-01", color: grey, label: US recessions, legend: true }
+    - { start: "2020-03-01", end: "2020-05-01", color: grey, label: US recessions, legend: true }
+  yAxis:
+    - { y: 0.29, label: "Threshold (0.29)", color: grey, legend: true }
+```
+
+### X-axis rug
+
+`rug` draws a thin strip of **solid interval blocks** between the x-axis line and its tick labels —
+a timeline for categories that are illegible as fills (a one-month false-positive run on a 26-year
+axis is a hairline) or that would clutter the frame as labelled bands.
+
+Blocks are grouped into **tracks**, one per label and color. All tracks paint into the **one** strip
+in resolution order (later over earlier), so the strip reads as a single timeline rather than a stack
+of rows. Every track is keyed in the legend.
+
+Tracks are usually **derived, not declared**: flag an `annotations.bands` or `shading` entry with
+`rug: true` and its interval joins the track named by its `label`. That keeps the dates stated once.
+
+| field | type | notes |
+|---|---|---|
+| `rug` | object | `{height?, tracks?}`. Both optional — `rug: {}` is valid and correct when every track is derived from a `rug: true` flag. |
+| `rug.height` | number | Strip height in px. **Default 8.** The tick labels shift down to make room, so the plot area shrinks by `height + 5` and nothing overlaps. |
+| `rug.tracks` | array | Standalone tracks, for a timeline concept with no band or fill of its own. Each `{label, intervals, color?, legend?}`. Appended after the derived tracks. |
+| `rug.tracks[].intervals` | array | Each `{from, to}` — closed x-value spans in the same string form as `annotations.bands.start`/`end` (**quote numbers in YAML**). Must not be empty. |
+| `rug.tracks[].color` | color | Named token or `"#hex"`, painted **solid**. Default: the dim annotation neutral. |
+| `rug.tracks[].legend` | boolean | Set `false` to draw the blocks without a legend row. Rare — you then have to key them some other way. |
+| `annotations.bands[].rug` | boolean | Add this band's `start`→`end` to the rug. Needs a `label`. |
+| `shading[].rug` | boolean | Add this region's `from`→`to` to the rug. Needs a `label` **and both bounds** — an open-ended fill has no interval to draw. |
+
+`rug: true` implies `legend: true` (a solid block with no key is unreadable); `legend: false` on the
+same entry opts the row back out.
+
+A block narrower than 2px is drawn at 2px, so a single month stays visible — that being the whole
+point. Blocks are clamped to the plot's x extent; an interval wholly outside the x-domain is dropped.
+
+**Not supported:** `xAxisType: categorical` (a band scale has no position between categories) and
+`small_multiples`. Both are validation errors, as is a `rug` that resolves to no tracks.
+
+A `rug: true` band still paints its in-chart tint. To show a concept **only** on the rug, declare it
+as an explicit `rug.tracks` entry instead of as a band.
+
+```yaml
+# The michez-rule chart: recessions from the bands, false negatives/positives from the fills.
+rug: {}
+annotations:
+  bands:
+    - { start: "2001-04-01", end: "2001-12-01", color: grey, label: US recessions, rug: true }
+    - { start: "2008-01-01", end: "2009-07-01", color: grey, label: US recessions, rug: true }
+  yAxis:
+    - { y: 0.29, label: "Threshold (0.29)", color: grey, legend: true }
+shading:
+  - { from: "2001-04-01", to: "2001-07-01", side: negative, baseline: 0.29, color: amber, label: False negatives, rug: true }
+  - { from: "2008-01-01", to: "2008-04-01", side: negative, baseline: 0.29, color: amber, label: False negatives, rug: true }
+  - { from: "2024-03-01", to: "2025-06-01", side: positive, baseline: 0.29, color: red, label: False positives, rug: true }
+```
+
 ### Confidence bands
 
 | field | type | notes |
@@ -231,13 +311,16 @@ already fills to the axis, and the other types have no line to fill under.
 
 | field | type | notes |
 |---|---|---|
-| `shading` | array | Each `{series?, side?, from?, to?, color?, fillOpacity?}`. Entries are **independent** and paint in list order, so one series may carry several regions; overlapping fills compound their opacity (that is how you deepen a tint). |
+| `shading` | array | Each `{series?, side?, from?, to?, color?, fillOpacity?, label?, legend?, rug?}`. Entries are **independent** and paint in list order, so one series may carry several regions; overlapping fills compound their opacity (that is how you deepen a tint). |
 | `shading[].series` | string | Series to fill under. **Omitted → every in-scope series** gets its own region in its own color. |
 | `shading[].baseline` | number | The level the fill runs to, and what `side` is measured against. **Default 0.** Set it to a rule's threshold to shade only the breach — the part of the line beyond that level, filled back to it. Negative thresholds work the same way (`baseline: -0.7` with `side: negative`). |
 | `shading[].side` | string | `both` (default) \| `positive` \| `negative` — which side of `baseline` to fill. Runs are split at the baseline crossing, interpolated so the fill closes flat on it rather than on a slanted edge. |
 | `shading[].from` / `.to` | string | Inclusive x bounds, same string form as `annotations.bands.start`/`end` — **quote numbers in YAML** (`from: "2026"`), exactly as `annotations` x values require. Omitted → the series' first/last point. A bound falling **between** two points is interpolated to that exact x, so the fill edge lands where you asked rather than at the nearest point. On a categorical x-axis there is no position between categories, so bounds must **name existing categories** and crop on category boundaries. |
 | `shading[].color` | color | Named palette token or `"#hex"`. Omitted → the series' own resolved color. |
 | `shading[].fillOpacity` | number | 0–1. **Default `0.5`.** Two overlapping regions compound — 0.5 over 0.5 renders as 0.75 — so drop the lower one if you are layering a base tint under an accent window. |
+| `shading[].label` | string | What the fill **means** ("False positives"). A fill has no in-chart text of its own, so this is purely a key: it names the region in the legend (with `legend: true`) and groups regions into one [rug](#x-axis-rug) track. Regions sharing a label collapse to one legend row. |
+| `shading[].legend` | boolean | Key this fill in the legend — see [Keying annotations in the legend](#keying-annotations-in-the-legend-legend-true). |
+| `shading[].rug` | boolean | Also draw this region's span as a solid block on the [x-axis rug](#x-axis-rug). Needs a `label` and **both** `from` and `to`. |
 
 **Baseline.** `baseline` (default 0) is what `side` measures against and where the fill's flat edge
 sits. The drawn edge is clamped into the resolved y-domain, so a fill never leaves the plot frame. Shading does **not** expand the domain: if you want the zero

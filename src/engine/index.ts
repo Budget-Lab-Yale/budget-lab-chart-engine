@@ -19,6 +19,7 @@ import {
   computeDrawnValueExtent,
   resolveHardDomain,
   domainBounds,
+  makeTickFormatter,
 } from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
@@ -32,6 +33,8 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { resolveValueAffixes, isTruthyFlag } from "./util";
+import { buildAnnotationLegendItems } from "./annotation-legend";
+import { rugAllowance } from "../spec/rug";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -129,6 +132,10 @@ export interface LegendItem {
   /** Dumbbell "hollow" marker: render the point swatch as a ring (page-background fill, series-
    *  color stroke) instead of a solid dot, matching the chart's hollow dots. */
   hollow?: boolean;
+  /** Draw a hairline around a `rect` swatch. Set on annotation-derived fill rows, whose tint can be
+   *  near-white (an `annotations.bands` fill is 10 % opaque) and would otherwise read as a gap.
+   *  Off for series swatches, so bar/stacked legends stay byte-identical. */
+  outlined?: boolean;
   /** True for synthetic rows (e.g. Total) that are not interactive series. */
   nonInteractive?: boolean;
   /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
@@ -209,6 +216,10 @@ export interface PaneResult {
    *  or the forced opts.yDomain). The shared-mode orchestrator probe-renders over all rows and
    *  reads this to obtain the one shared domain. */
   yDomain: [number, number];
+  /** The value-axis ticks this pane rendered. Carried so the legend builder can format a
+   *  `{value}` token in a keyed annotation label exactly as the axis does (makeTickFormatter
+   *  derives its decimal places from the tick set). */
+  yTicks: number[];
   dataInScope: PreparedRow[];
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
    *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
@@ -623,12 +634,19 @@ function assemblePaneResult(
   // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
   // tagCategoryLabels: the hover-accent hook (task 17) is bar/stacked-only — categorical-x line
   // and dot-plot charts share this same adapter path and stay byte-identical.
+  // X-axis rug: the strip occupies space between the plot frame and the tick labels, so the frame
+  // gives up `rugAllowance` px of bottom margin and the labels shift down by the same amount —
+  // keeping their distance below the axis unchanged. assemblePlot draws the strip into that gap and
+  // must NOT add the allowance again. 0 when the chart has no rug tracks.
+  const rugDy = rugAllowance(spec);
   const xOpts = adapter.buildXOpts(
     dataInScope,
     facetInfo != null,
     xLabelMode,
     chartType === "bar" || chartType === "stacked",
+    rugDy,
   );
+  if (rugDy) xOpts.marginBottom += rugDy;
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
@@ -755,6 +773,7 @@ function assemblePaneResult(
     colors,
     valueAffixes,
     yDomain,
+    yTicks,
     dataInScope,
     layers,
     tooltipXParse: xOpts.tooltipXParse,
@@ -770,6 +789,9 @@ export function buildLegendItems(
   seriesNames: string[],
   colors: Map<string, string>,
   layers: MarkLayers,
+  /** The pane's value-axis ticks + affixes, used only to format a `{value}` token in a keyed
+   *  annotation label the way the axis would. Omitted → the token falls back to a bare number. */
+  valueAxis?: { yTicks: number[]; valueAffixes: ValueAffixes },
 ): LegendItem[] | null {
   if (spec.legend === false) return null;
   const chartType = spec.chartType;
@@ -862,6 +884,15 @@ export function buildLegendItems(
     // the Total marker is never silently dropped.
     legendItems = legendItems ? [...legendItems, ...extras] : extras;
   }
+  // Annotation-derived rows (bands / shading / reference lines opted in with `legend: true`) come
+  // last. Like the extras above they may be the ONLY rows — a single-series chart whose subject is
+  // its annotations gets a legend built from these alone.
+  const annotationRows = buildAnnotationLegendItems(spec, seriesNames, colors, {
+    ...(valueAxis ? { formatValue: makeTickFormatter(valueAxis.yTicks, valueAxis.valueAffixes) } : {}),
+  });
+  if (annotationRows.length) {
+    legendItems = legendItems ? [...legendItems, ...annotationRows] : annotationRows;
+  }
   return legendItems;
 }
 
@@ -892,7 +923,10 @@ export function renderChart(
   const { svg, seriesNames, colors, valueAffixes, dataInScope, layers } = pane;
 
   const seriesLabels = spec.series_labels ?? {};
-  const legendItems = buildLegendItems(spec, seriesNames, colors, layers);
+  const legendItems = buildLegendItems(spec, seriesNames, colors, layers, {
+    yTicks: pane.yTicks,
+    valueAffixes,
+  });
   const shapeLegendItems = buildShapeLegendItems(spec, layers);
 
   return {

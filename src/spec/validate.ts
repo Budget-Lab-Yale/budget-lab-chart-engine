@@ -198,6 +198,132 @@ function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): s
     : `shading is supported on chartType "line" only (got ${JSON.stringify(spec.chartType)})`;
 }
 
+/** A band / shading / marker entry as the legend + rug flags see it. */
+interface LegendFlagged {
+  label?: string;
+  legend?: boolean;
+  rug?: boolean;
+}
+
+/**
+ * The `legend: true` / `rug: true` flags on annotations, bands and shading, plus the `rug` block.
+ *
+ * Both flags exist to move a name OUT of the plot frame, so an entry that carries one without a
+ * `label` has asked for a swatch with nothing beside it — silently dropped before this check. The
+ * rug rules are harder constraints: it needs a linear x scale to place blocks on, one plot frame to
+ * hang under, and closed intervals to draw.
+ */
+function legendAndRugErrors(spec: {
+  xAxisType?: unknown;
+  small_multiples?: unknown;
+  annotations?: { bands?: LegendFlagged[]; xAxis?: LegendFlagged[]; yAxis?: LegendFlagged[] };
+  xAxisPolicy?: { bands?: LegendFlagged[]; markers?: LegendFlagged[] };
+  yAxisPolicy?: { markers?: LegendFlagged[] };
+  shading?: Array<LegendFlagged & { from?: string; to?: string }>;
+  rug?: { tracks?: Array<{ label?: string; intervals?: Array<{ from?: string; to?: string }> }> };
+}): string[] {
+  const errors: string[] = [];
+  const bands = spec.annotations?.bands ?? spec.xAxisPolicy?.bands ?? [];
+  const xMarkers = spec.annotations?.xAxis ?? spec.xAxisPolicy?.markers ?? [];
+  const yMarkers = spec.annotations?.yAxis ?? spec.yAxisPolicy?.markers ?? [];
+  const shading = spec.shading ?? [];
+
+  const needsLabel = (entries: LegendFlagged[], where: string): void => {
+    entries.forEach((e, i) => {
+      if ((e.legend === true || e.rug === true) && !e.label) {
+        const flag = e.legend === true ? "legend: true" : "rug: true";
+        errors.push(`${where}[${i}]: ${flag} needs a \`label\` — it is the legend key`);
+      }
+    });
+  };
+  needsLabel(bands, "annotations.bands");
+  needsLabel(xMarkers, "annotations.xAxis");
+  needsLabel(yMarkers, "annotations.yAxis");
+  needsLabel(shading, "shading");
+
+  shading.forEach((s, i) => {
+    if (s.rug === true && (s.from == null || s.to == null)) {
+      errors.push(
+        `shading[${i}]: rug: true needs BOTH \`from\` and \`to\` — a rug block is a closed span, ` +
+          `and an open-ended fill has no interval to draw`,
+      );
+    }
+  });
+
+  const flagged = [...bands, ...shading].some((e) => e.rug === true);
+  const hasRug = spec.rug != null || flagged;
+  if (!hasRug) return errors;
+
+  const xAxisType = spec.xAxisType as XAxisType | undefined;
+  if (xAxisType === "categorical") {
+    errors.push(
+      'the x-axis rug needs a continuous x-axis (numeric / temporal / quarterly) — a band scale ' +
+        "has no position between categories",
+    );
+  }
+  if (spec.small_multiples != null) {
+    errors.push("the x-axis rug is not supported with small_multiples");
+  }
+
+  const tracks = spec.rug?.tracks ?? [];
+  tracks.forEach((t, i) => {
+    if (!t.intervals?.length) errors.push(`rug.tracks[${i}]: \`intervals\` must not be empty`);
+  });
+
+  // Every interval, declared or derived, parsed on this chart's axis. An unparseable bound would
+  // silently drop its block; a reversed one would draw a zero-width sliver at the floor width.
+  const allIntervals: Array<{ where: string; from?: string; to?: string }> = [
+    ...bands
+      .filter((b) => b.rug === true)
+      .map((b, i) => ({
+        where: `annotations.bands[${i}]`,
+        from: (b as { start?: string }).start,
+        to: (b as { end?: string }).end,
+      })),
+    ...shading
+      .filter((s) => s.rug === true)
+      .map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to })),
+    ...tracks.flatMap((t, ti) =>
+      (t.intervals ?? []).map((iv, ii) => ({
+        where: `rug.tracks[${ti}].intervals[${ii}]`,
+        from: iv.from,
+        to: iv.to,
+      })),
+    ),
+  ];
+  if (xAxisType && xAxisType !== "categorical") {
+    for (const iv of allIntervals) {
+      if (iv.from == null || iv.to == null) continue;
+      const fromErr = timeParseError(xAxisType, iv.from);
+      const toErr = timeParseError(xAxisType, iv.to);
+      if (fromErr) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
+      if (toErr) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
+      if (!fromErr && !toErr && rugBoundOrder(xAxisType, iv.from) > rugBoundOrder(xAxisType, iv.to)) {
+        errors.push(`${iv.where}: rug interval runs backwards (${iv.from} → ${iv.to})`);
+      }
+    }
+  }
+
+  const hasTrack =
+    bands.some((b) => b.rug === true && !!b.label) ||
+    shading.some((s) => s.rug === true && !!s.label && s.from != null && s.to != null) ||
+    tracks.some((t) => !!t.label && !!t.intervals?.length);
+  if (!hasTrack) {
+    errors.push(
+      "the x-axis rug resolves to no tracks — flag a band or shading region with `rug: true` " +
+        "(each needs a `label`), or declare `rug.tracks`",
+    );
+  }
+  return errors;
+}
+
+/** Sortable position of a rug bound. Only meaningful for bounds that already parsed. */
+function rugBoundOrder(xAxisType: XAxisType, value: string): number | string {
+  if (xAxisType === "numeric") return Number(value);
+  if (xAxisType === "temporal") return +new Date(value);
+  return value; // quarterly: the fixed YYYYQ# form sorts lexicographically
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -235,6 +361,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (histErrors.length) return { valid: false, errors: histErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
+  const rugErrors = legendAndRugErrors(spec as Parameters<typeof legendAndRugErrors>[0]);
+  if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };
 }
 

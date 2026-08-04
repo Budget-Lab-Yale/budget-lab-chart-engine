@@ -77,7 +77,7 @@ const SHAPE_LEGEND_COLOR = "#555B66";
 
 function drawLegend(
   root: SVGElement,
-  items: Array<{ label: string; color: string | undefined; dashed: boolean; markerSymbol?: string; markerShape?: string }>,
+  items: Array<{ label: string; color: string | undefined; dashed: boolean; markerSymbol?: string; markerShape?: string; outlined?: boolean }>,
   firstBaseline: number,
   leadingTitle?: string,
 ): number {
@@ -142,10 +142,19 @@ function drawLegend(
         }),
       );
     } else if (item.markerShape === "rect" || item.markerShape === "chip") {
-      // Color chip — a filled rounded square (color key), matching the live legend.
+      // Color chip — a filled rounded square (color key), matching the live legend. An annotation
+      // fill's tint can be near-white, so those rows carry a hairline (matching .is-outlined).
       const chip = 13;
       root.appendChild(
-        svgEl("rect", { x: x + (SW - chip) / 2, y: cy - chip / 2, width: chip, height: chip, rx: 4, fill: color }),
+        svgEl("rect", {
+          x: x + (SW - chip) / 2,
+          y: cy - chip / 2,
+          width: chip,
+          height: chip,
+          rx: 4,
+          fill: color,
+          ...(item.outlined ? { stroke: "rgba(0,0,0,0.18)", "stroke-width": 1 } : {}),
+        }),
       );
     } else {
       root.appendChild(

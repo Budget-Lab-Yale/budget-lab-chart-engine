@@ -400,6 +400,11 @@ body {
   height: 12px;
   border-radius: 1px;
 }
+/* Annotation-derived fill swatch: an inset hairline so a near-white tint (an annotations.bands
+   fill is 10% opaque) still reads as a swatch rather than a gap. */
+.tbl-legend-swatch.is-rect.is-outlined {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
 .tbl-legend-swatch.is-dot {
   width: 14px;
   height: 14px;
