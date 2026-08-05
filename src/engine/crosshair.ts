@@ -6,6 +6,7 @@
 // which resolves the hovered category from rendered rect geometry and shows a tooltip.
 import { d3 } from "./vendor";
 import { TBL } from "./theme";
+import { readLinearScale } from "./plot-scale";
 import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
@@ -1662,24 +1663,19 @@ export function attachSecondaryHistogramCursor(
 // but the guide/region still render (browser carries pixel correctness).
 
 /** Read a linear value→pixel mapper from Plot's y-scale, or null if unavailable. */
-function readLinearScale(svgEl: SVGSVGElement, axis: "x" | "y"): ((v: number) => number) | null {
-  const scaleFn = (svgEl as unknown as { scale?: (n: string) => unknown }).scale;
-  if (typeof scaleFn !== "function") return null;
-  try {
-    const s = scaleFn.call(svgEl, axis) as { domain?: number[]; range?: number[] } | undefined;
-    const d = s?.domain;
-    const r = s?.range;
-    if (!d || !r || d.length < 2 || r.length < 2 || d[1] === d[0]) return null;
-    const d0 = d[0]!, d1 = d[1]!, r0 = r[0]!, r1 = r[1]!;
-    return (v: number) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
-  } catch {
-    return null;
-  }
-}
 /** The VALUE→pixel scale for the value axis (y for vertical charts). */
 function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null {
   return readLinearScale(svgEl, "y");
 }
+
+/** Every transparent hover hit-rect this module appends, in one selector. Exported because a
+ *  caller that needs to bound the hover area (render-live clamps it above the x-axis rug strip)
+ *  must reach ALL of them — the per-chart-type attach functions each add their own, and a partial
+ *  list silently leaves one chart type unbounded. Keep in sync with the `hit.classList.add` calls
+ *  below. */
+export const CROSSHAIR_HIT_SELECTOR =
+  ".tbl-crosshair-hit, .tbl-facet-crosshair-hit, .tbl-band-crosshair-hit, " +
+  ".tbl-hist-hover-hit, .tbl-catline-hit";
 
 const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */

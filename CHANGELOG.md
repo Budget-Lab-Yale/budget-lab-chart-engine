@@ -4,6 +4,68 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-08-04
+
+### Added — annotation legend entries, and an x-axis rug
+
+Both come out of the recession-indicators michez-rule chart, and both are about getting names and
+thin intervals out of a crowded plot frame.
+
+- **`legend: true` on `annotations.bands` / `xAxis` / `yAxis` and on `shading`.** The engine's legend
+  was series-only, so a chart whose subject is its annotations had to label each one *inside* the
+  frame — or mint dummy CSV series to get legend rows. The flag moves the entry's `label` to a
+  legend row above the plot and drops the in-chart text. Entries sharing a label collapse into one
+  row, so three recession bands become one "US recessions" key. `shading` gains a `label` for this
+  (a fill had no text of its own, and was previously described only in the `note` line). Rows are
+  interactive in their own selection dimension and sort after the real series. A single-series chart
+  now gets a legend built from these rows alone. See CONFIG-SPEC, "Keying annotations in the legend".
+- **Reciprocal highlighting between a keyed row and the chart.** Hovering a row brightens every
+  element it names — all its bands, fills, reference line and rug blocks — and dims the rest,
+  including the data line; hovering a **rug block** does the reverse, marking its row and brightening
+  that track's other parts. Either can be clicked to pin. Annotations get their own selection
+  dimension (`data-annotation`) rather than borrowing `data-series`, which is what lets a keyed
+  `shading` fill answer to both keys: it still dims with its own line, and it also lights up with its
+  annotation row. Series and annotations share one universe for dimming, so selecting a series dims
+  the annotations too. While the pointer is on the rug strip the value crosshair stands down, so the
+  hover gives one answer instead of two. In-frame regions (band rects, fills) are deliberately not
+  hover targets — they sit where the reader sweeps the crosshair, and hovering them would flicker the
+  chart as the pointer crossed each region.
+- **`rug`: a thin strip of solid interval blocks under the x-axis.** For timeline categories that are
+  illegible as fills — the article's false-negative runs are 1–3 months on a 26-year axis, so as
+  fills they are hairlines. Flag a band or shading region with `rug: true` and its interval joins the
+  track named by its `label`, so the dates stay stated once; `rug.tracks` covers a concept with no
+  band or fill of its own. Blocks are floored at 2px so a single month stays visible, clamped to the
+  plot's x extent, and keyed in the legend by their solid color. The strip claims its space by
+  growing `marginBottom` and shifting the tick labels down by the same amount, so every consumer
+  that derives geometry from `height - marginTop - marginBottom` (the annotation stagger, callout
+  connectors, the crosshair) stays correct. Not supported on a categorical x-axis or with
+  `small_multiples` — both are validation errors. See CONFIG-SPEC, "X-axis rug".
+
+**Multi-series charts with shaded areas** (found by a 16-case pressure suite):
+
+- A `shading` region with no `series` paints one fill per series, each in that series' color, so a
+  single-color chip cannot key it honestly. Such a row's chip now shows **every** tint as equal
+  vertical bands (live legend and PNG export alike), **widening** so the bands stay legible — at the
+  fixed 14 px, seven series gave 2 px bands. Rows merge by label rather than by color, so writing one
+  region per series under a shared label collapses to that same one banded row instead of three
+  identically-worded ones.
+- A region naming a `series` is keyed by **that** series' color (it was keyed by the first series').
+- **A rug block and its own legend chip could disagree**: a rug-flagged region with no explicit color
+  keyed the series tint while the block drew the neutral, so the key pointed at a color that was
+  nowhere on the strip. Both now come from one resolution — explicit `color`, else the named series'
+  color, else the neutral — and a rug-flagged chip is always a single solid chip, because what it keys
+  is the block.
+- **`rug.rows: per-track`** gives each track its own row. The single strip is right for near-disjoint
+  tracks (the michez read), but a track spanning the axis painted the tracks under it away entirely
+  while they kept their legend rows. A track `single` would cover completely is now a validation error
+  naming this field.
+- Two keyed fills that would resolve to the **same** swatch (both derived from the series palette,
+  same scope, same opacity — the natural above/below pair) are now a validation error.
+- `shading[].label` with neither `legend: true` nor `rug: true` is now a validation error rather than
+  a silent no-op.
+
+Charts using neither feature render byte-identically (the goldens are unchanged).
+
 ## [1.8.1] - 2026-07-31
 
 ### Fixed — reversed value axis

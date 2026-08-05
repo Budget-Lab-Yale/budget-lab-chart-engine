@@ -13,6 +13,8 @@ import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
+import { resolveAnnotations } from "./annotations";
+import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 
@@ -198,6 +200,171 @@ function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): s
     : `shading is supported on chartType "line" only (got ${JSON.stringify(spec.chartType)})`;
 }
 
+/** A band / shading / marker entry as the legend + rug flags see it. */
+interface LegendFlagged {
+  label?: string;
+  legend?: boolean;
+  rug?: boolean;
+  /** Band bounds (`annotations.bands`). */
+  start?: string;
+  end?: string;
+  /** Shading bounds. */
+  from?: string;
+  to?: string;
+  /** Shading swatch inputs — an explicit color, its series scope, and its tint strength. */
+  color?: string;
+  series?: string;
+  fillOpacity?: number;
+}
+
+/**
+ * The `legend: true` / `rug: true` flags on annotations, bands and shading, plus the `rug` block.
+ *
+ * Both flags exist to move a name OUT of the plot frame, so an entry that carries one without a
+ * `label` has asked for a swatch with nothing beside it — silently dropped before this check. The
+ * rug rules are harder constraints: it needs a linear x scale to place blocks on, one plot frame to
+ * hang under, and closed intervals to draw.
+ */
+function legendAndRugErrors(spec: ChartSpec): string[] {
+  const errors: string[] = [];
+  // Through resolveAnnotations, so the unified-block-over-legacy-policy precedence is stated once —
+  // a second copy here could admit a spec the engine reads differently.
+  const resolved = resolveAnnotations(spec);
+  const bands = resolved.bands as LegendFlagged[];
+  const xMarkers = resolved.xAxis as LegendFlagged[];
+  const yMarkers = resolved.yAxis as LegendFlagged[];
+  const shading = (spec.shading ?? []) as LegendFlagged[];
+
+  const needsLabel = (entries: LegendFlagged[], where: string): void => {
+    entries.forEach((e, i) => {
+      if ((e.legend === true || e.rug === true) && !e.label) {
+        const flag = e.legend === true ? "legend: true" : "rug: true";
+        errors.push(`${where}[${i}]: ${flag} needs a \`label\` — it is the legend key`);
+      }
+    });
+  };
+  needsLabel(bands, "annotations.bands");
+  needsLabel(xMarkers, "annotations.xAxis");
+  needsLabel(yMarkers, "annotations.yAxis");
+  needsLabel(shading, "shading");
+
+  // Keyed fills whose swatch is DERIVED (no explicit color) are keyed by the series palette, so two
+  // of them over the same series scope at the same opacity render the same chip — e.g. an
+  // above-target and a below-target fill on a three-series chart both key as the same three tints.
+  const derivedChips = new Map<string, string[]>();
+  shading.forEach((s) => {
+    const keyed = s.legend === true || s.rug === true;
+    if (!keyed || !s.label || s.color) return;
+    // A rug-flagged fill keys SOLID, everything else keys by its tint — different rules, so they
+    // can't collide with each other.
+    const scope = `${s.series ?? "*"}|${s.rug === true ? "solid" : (s.fillOpacity ?? 0.5)}`;
+    const labels = derivedChips.get(scope) ?? [];
+    if (!labels.includes(s.label)) labels.push(s.label);
+    derivedChips.set(scope, labels);
+  });
+  for (const labels of derivedChips.values()) {
+    if (labels.length > 1) {
+      errors.push(
+        `shading: ${labels.map((l) => JSON.stringify(l)).join(" and ")} would key with the SAME legend ` +
+          `swatch — both take their tint from the series colors at the same opacity. Give at least one ` +
+          `an explicit \`color\` (or a different \`fillOpacity\`) so the two concepts read apart`,
+      );
+    }
+  }
+
+  shading.forEach((s, i) => {
+    if (s.label && s.legend !== true && s.rug !== true) {
+      errors.push(
+        `shading[${i}]: \`label\` on a fill has no effect without \`legend: true\` or \`rug: true\` ` +
+          `— a fill draws no text of its own, so its label exists only to key it`,
+      );
+    }
+    if (s.rug === true && (s.from == null || s.to == null)) {
+      errors.push(
+        `shading[${i}]: rug: true needs BOTH \`from\` and \`to\` — a rug block is a closed span, ` +
+          `and an open-ended fill has no interval to draw`,
+      );
+    }
+  });
+
+  const hasRug = spec.rug != null || [...bands, ...shading].some((e) => e.rug === true);
+  if (!hasRug) return errors;
+
+  const xAxisType = spec.xAxisType as XAxisType | undefined;
+  if (xAxisType === "categorical") {
+    errors.push(
+      'the x-axis rug needs a continuous x-axis (numeric / temporal / quarterly) — a band scale ' +
+        "has no position between categories",
+    );
+  }
+  if (spec.small_multiples != null) {
+    errors.push("the x-axis rug is not supported with small_multiples");
+  }
+
+  const tracks = spec.rug?.tracks ?? [];
+  tracks.forEach((t, i) => {
+    if (!t.intervals?.length) errors.push(`rug.tracks[${i}]: \`intervals\` must not be empty`);
+  });
+
+  // Every interval, declared or derived, parsed on this chart's axis. An unparseable bound would
+  // silently drop its block; a reversed one would draw a zero-width sliver at the floor width.
+  // Indexed BEFORE the rug filter, so `annotations.bands[2]` names the entry the author wrote.
+  const allIntervals: Array<{ where: string; from?: string; to?: string }> = [
+    ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b })),
+    ...shading.map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to, e: s })),
+  ]
+    .filter(({ e }) => e.rug === true)
+    .concat(
+      tracks.flatMap((t, ti) =>
+        (t.intervals ?? []).map((iv, ii) => ({
+          where: `rug.tracks[${ti}].intervals[${ii}]`,
+          from: iv.from,
+          to: iv.to,
+          e: {} as LegendFlagged,
+        })),
+      ),
+    );
+  if (xAxisType && xAxisType !== "categorical") {
+    for (const iv of allIntervals) {
+      if (iv.from == null || iv.to == null) continue;
+      const fromErr = timeParseError(xAxisType, iv.from);
+      const toErr = timeParseError(xAxisType, iv.to);
+      if (fromErr) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
+      if (toErr) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
+      if (!fromErr && !toErr && rugBoundOrder(xAxisType, iv.from) > rugBoundOrder(xAxisType, iv.to)) {
+        errors.push(`${iv.where}: rug interval runs backwards (${iv.from} → ${iv.to})`);
+      }
+    }
+  }
+
+  // A track the single strip would paint away entirely still claims a legend row, so the reader is
+  // keyed to blocks that aren't drawn. Partial cover stays legal — that is how the michez strip reads
+  // a false negative running into its recession.
+  for (const label of fullyHiddenRugTracks(spec)) {
+    errors.push(
+      `rug: the track ${JSON.stringify(label)} is completely covered by a later track, so its blocks ` +
+        `would never be visible. Set \`rug.rows: per-track\` to give each track its own row`,
+    );
+  }
+
+  // Asked of the RESOLVER, not of a re-written copy of its predicates: this error exists to predict
+  // exactly what resolveRugTracks will return, so it must not be able to disagree with it.
+  if (!resolveRugTracks(spec).length) {
+    errors.push(
+      "the x-axis rug resolves to no tracks — flag a band or shading region with `rug: true` " +
+        "(each needs a `label`), or declare `rug.tracks`",
+    );
+  }
+  return errors;
+}
+
+/** Sortable position of a rug bound. Only meaningful for bounds that already parsed. */
+function rugBoundOrder(xAxisType: XAxisType, value: string): number {
+  if (xAxisType === "numeric") return Number(value);
+  if (xAxisType === "temporal") return +new Date(value);
+  return Number(value.slice(0, 4)) * 4 + Number(value[5]); // quarterly: YYYYQ#
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -235,6 +402,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (histErrors.length) return { valid: false, errors: histErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
+  const rugErrors = legendAndRugErrors(spec as ChartSpec);
+  if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };
 }
 

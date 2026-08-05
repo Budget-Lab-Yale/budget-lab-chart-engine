@@ -18,10 +18,20 @@ import {
   X_AXIS_LABEL_CLASS,
   ANNOTATION_LINE_CLASS,
   X_ANNOTATION_LINE_CLASS,
+  X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
-import { resolveColor } from "./palette";
-import { resolveAnnotations, filterAnnotationsByFacet, substituteValueToken } from "../spec/annotations";
+import { resolveColor, resolveColorOr } from "./palette";
+import {
+  resolveAnnotations,
+  filterAnnotationsByFacet,
+  substituteValueToken,
+  xMarkerLabel,
+  yMarkerLabel,
+} from "../spec/annotations";
+import { resolveRugTracks, rugHeight, rugTrackColor } from "../spec/rug";
+import { labelMovedToLegend, annotationKey } from "./annotation-legend";
+import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
@@ -183,6 +193,21 @@ export function assemblePlot({
   // unchanged, so non-faceted output stays byte-identical.
   const ann = filterAnnotationsByFacet(resolveAnnotations(spec), paneFacetValue);
 
+  // A band / reference line opted into the legend (`legend: true`, or implied by `rug: true`) is
+  // keyed THERE, so it draws no text inside the frame and reserves no auto-stagger row. Moving the
+  // label out of a busy plot is the entire point of that flag — drawing both would re-create the
+  // clutter it exists to remove.
+  const keyedInLegend = (e: { label?: string; legend?: boolean; rug?: boolean }): boolean =>
+    labelMovedToLegend(spec, e);
+
+  // Post-render `data-annotation` tagging for keyed bands + reference lines: each entry is the
+  // deterministic className Plot stamped on that mark's <g>, paired with the annotation key its
+  // legend row carries. Tagging the GROUP (not its children) is enough — dimming applies to the
+  // whole group, and the reverse hover-lookup walks up with `closest()`. Only KEYED entries get a
+  // className at all, so a chart without the feature emits no class attribute and stays
+  // byte-identical.
+  const annotationGroups: Array<{ className: string; key: string }> = [];
+
   // Substitute a `{value}` token in yAxis/xAxis/points labels with the annotation's own
   // coordinate value (per-annotation `value_format`, else the chart's y-tick format) BEFORE
   // anything below reads `.label` — both the auto-stagger geometry (which estimates label px
@@ -192,16 +217,9 @@ export function assemblePlot({
   // charts that don't use it get byte-identical output.
   const yTickFallbackFmt = makeTickFormatter(yTicks, valueAffixes);
   const yAxisAnn = ann.yAxis.map((m) =>
-    m.label ? { ...m, label: substituteValueToken(m.label, m.y, m.value_format, yTickFallbackFmt) } : m,
+    m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
-  const xAxisAnn = ann.xAxis.map((m) => {
-    if (!m.label) return m;
-    const xNum = Number(m.x);
-    // Numerically formatted only when value_format is given AND x parses as a number;
-    // otherwise the raw x string is substituted (dates/quarters/categories, or no format).
-    const fmt = m.value_format != null && Number.isFinite(xNum) ? m.value_format : undefined;
-    return { ...m, label: substituteValueToken(m.label, xNum, fmt, () => m.x) };
-  });
+  const xAxisAnn = ann.xAxis.map((m) => (m.label ? { ...m, label: xMarkerLabel(m) } : m));
   const pointsAnn = (points ?? ann.points).map((p) =>
     Number.isFinite(p.y as number)
       ? { ...p, label: substituteValueToken(p.label, p.y as number, p.value_format, yTickFallbackFmt) }
@@ -242,7 +260,7 @@ export function assemblePlot({
     // reserves its rows correctly too — only a DEGENERATE domain has to bail out.
     if (innerHForRows != null && innerHForRows > 0 && yDomain[1] !== yDomain[0]) {
       for (const m of yAxisAnn) {
-        if (!m.label) continue;
+        if (!m.label || keyedInLegend(m)) continue;
         const py = TBL_MARGIN_TOP + ((yDomain[1] - m.y) / (yDomain[1] - yDomain[0])) * innerHForRows;
         // Applied SVG dy = labelSide base (top -7 / middle 0 / bottom +6) minus labelDy (+ = UP).
         const relSide = m.labelSide ?? "top";
@@ -265,7 +283,7 @@ export function assemblePlot({
     type L = { id: string; iv: Iv };
     const labels: L[] = [];
     ann.bands.forEach((b, i) => {
-      if (!b.label) return;
+      if (!b.label || keyedInLegend(b)) return;
       const px = toPx(xOpts.markerToX({ x: b.start }));
       if (px == null) return;
       const w = b.label.length * LABEL_CHAR_PX;
@@ -273,7 +291,7 @@ export function assemblePlot({
     });
     xAxisAnn.forEach((m, i) => {
       // Only "top" labels live in the top band and auto-stagger; middle/bottom sit elsewhere.
-      if (!m.label || (m.labelPosition ?? "top") !== "top") return;
+      if (!m.label || keyedInLegend(m) || (m.labelPosition ?? "top") !== "top") return;
       const px = toPx(xOpts.markerToX(m));
       if (px == null) return;
       const side = m.labelSide ?? "right";
@@ -296,17 +314,20 @@ export function assemblePlot({
     const x1 = xOpts.markerToX({ x: band.start });
     const x2 = xOpts.markerToX({ x: band.end });
     if (x1 == null || x2 == null) return;
+    const bandClass = keyedInLegend(band) ? `${X_BAND_CLASS}-${bandIdx}` : undefined;
+    if (bandClass) annotationGroups.push({ className: bandClass, key: annotationKey(band.label as string) });
     marks.push(
       Plot.rect([{ x1, x2, y1: yDomain[0], y2: yDomain[1] }], {
         x1: "x1",
         x2: "x2",
         y1: "y1",
         y2: "y2",
-        fill: band.color || TBL.color.annotationDim,
+        fill: resolveColorOr(band.color, TBL.color.annotationDim),
         fillOpacity: 0.1,
+        ...(bandClass ? { className: bandClass } : {}),
       }),
     );
-    if (band.label) {
+    if (band.label && !keyedInLegend(band)) {
       // Band label at the top of the region, just inside its left edge (auto-staggered). Deferred
       // to labelMarks so it paints over the axis rules that cross it.
       labelMarks.push(
@@ -444,18 +465,23 @@ export function assemblePlot({
     mx: number | Date,
     m: XAxisMarker,
     topDy: number,
-    fyOpts?: { ruleClassName: string; labelFy: string | undefined },
+    /** `ruleClassName`: a deterministic class on the rule — set for grouped horizontal bars (so the
+     *  fy chrome collapse can find it) and/or for a marker keyed in the legend (so the post-render
+     *  pass can tag it with its annotation key); the two derive the same string. `labelFy` binds the
+     *  label to one fy category so it renders once. */
+    fyOpts?: { ruleClassName?: string; labelFy?: string | undefined },
   ): void => {
-    const mColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
+    const mColor = resolveColorOr(m.color, TBL.color.annotationDim);
+    const ruleClass = fyOpts?.ruleClassName;
     marks.push(
       Plot.ruleX([mx], {
         stroke: mColor,
         strokeDasharray: (m.style || "dashed") === "dashed" ? "3 2" : null,
         strokeWidth: m.strokeWidth || 1,
-        ...(fyOpts ? { className: fyOpts.ruleClassName } : {}),
+        ...(ruleClass ? { className: ruleClass } : {}),
       }),
     );
-    if (m.label) {
+    if (m.label && !keyedInLegend(m)) {
       const labelFy = fyOpts?.labelFy;
       // labelSide = which SIDE of the vertical line the label sits (its relation to the line):
       // left → left of the line, middle → centered on it, right → right of it (default).
@@ -501,7 +527,17 @@ export function assemblePlot({
         // Vertical reference LINES stay a no-op on a categorical band scale (mx is the category
         // string there). Point callouts DO resolve a category to the band center — see 6c below.
         if (mx == null || typeof mx === "string") return;
-        drawXAxisMarker(mx, m, staggerDy.get(`m${markerIdx}`) ?? 4);
+        let keyedClass: string | undefined;
+        if (keyedInLegend(m)) {
+          keyedClass = `${X_ANNOTATION_LINE_CLASS}-${markerIdx}`;
+          annotationGroups.push({ className: keyedClass, key: annotationKey(m.label as string) });
+        }
+        drawXAxisMarker(
+          mx,
+          m,
+          staggerDy.get(`m${markerIdx}`) ?? 4,
+          keyedClass ? { ruleClassName: keyedClass } : undefined,
+        );
       });
     }
   };
@@ -565,7 +601,15 @@ export function assemblePlot({
   //     an explicit marker.color overrides. The label color always matches its line.
   const markerList = yAxisAnn;
   markerList.forEach((m, i) => {
-    const markerColor = (m.color && (resolveColor(m.color) || m.color)) || TBL.color.annotationDim;
+    const markerColor = resolveColorOr(m.color, TBL.color.annotationDim);
+    // The rule already carries a per-marker className unconditionally, so a keyed yAxis marker needs
+    // no new class — only the key→class pairing.
+    if (keyedInLegend(m)) {
+      annotationGroups.push({
+        className: `${ANNOTATION_LINE_CLASS}-${i}`,
+        key: annotationKey(m.label as string),
+      });
+    }
     marks.push(
       Plot.ruleY([m.y], {
         stroke: markerColor,
@@ -581,7 +625,7 @@ export function assemblePlot({
         className: `${ANNOTATION_LINE_CLASS}-${i}`,
       }),
     );
-    if (m.label) {
+    if (m.label && !keyedInLegend(m)) {
       // On an fx-faceted chart (grouped bars), an unfaceted mark repeats in every facet — bind
       // the label to the appropriate end fx category so a single label renders once.
       const fxDomain = faceted ? (layers.fxScaleOpts?.domain as string[] | undefined) : undefined;
@@ -636,7 +680,7 @@ export function assemblePlot({
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
-    const pColor = (p.color && (resolveColor(p.color) || p.color)) || TBL.color.heading;
+    const pColor = resolveColorOr(p.color, TBL.color.heading);
     // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
     // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28).
     const dx = p.dx != null ? p.dx : 0;
@@ -835,13 +879,39 @@ export function assemblePlot({
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
   // order its matched elements appear in (DOM order); tag by index. For lines this is the
   // flat dashed-then-solid path order, matching the old per-group loop byte-for-byte.
-  for (const { selector, seriesOrder, shapeOrder, categoryOrder } of layers.tagging) {
+  for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
       if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
       if (shapeOrder && i < shapeOrder.length) el.setAttribute("data-shape", shapeOrder[i] as string);
       if (categoryOrder && i < categoryOrder.length) el.setAttribute("data-category", categoryOrder[i] as string);
+      // Sparse: only the elements whose spec entry is keyed in the legend carry an annotation key.
+      const ann = annotationOrder?.[i];
+      if (ann) el.setAttribute("data-annotation", ann);
     });
   }
+
+  // Keyed bands + reference lines: tag the group Plot stamped with our deterministic class.
+  for (const { className, key } of annotationGroups) {
+    svg.querySelectorAll(`g.${className}`).forEach((g) => g.setAttribute("data-annotation", key));
+  }
+
+  // X-axis rug, LAST: a strip of solid interval blocks in the bottom margin, between the frame's
+  // bottom edge and the tick labels. renderPane already grew `marginBottom` (and pushed the labels
+  // down) by `rugAllowance(spec)` to open that gap — this only fills it, and must not re-add the
+  // allowance. `parseX` resolves the tracks' x strings on this chart's own axis; a categorical
+  // chart's band scale is unreadable as a linear scale, so drawRug no-ops there (validation rejects
+  // that combination anyway).
+  drawRug(svg, resolveRugTracks(spec), {
+    height: rugHeight(spec),
+    ...(spec.rug?.rows ? { rows: spec.rug.rows } : {}),
+    // A keyed track's blocks carry its annotation key, so the strip participates in legend
+    // hover-dim in both directions.
+    keyFor: (track) => (track.legend ? annotationKey(track.label) : undefined),
+    // The SAME resolution the legend chip uses, so a block and its key always match.
+    colorFor: (track) =>
+      rugTrackColor(track, (s) => colors.get(s), resolveColor, TBL.color.annotationDim),
+    parseX: (v: string) => xOpts.markerToX({ x: v }),
+  });
 
   return svg;
 }

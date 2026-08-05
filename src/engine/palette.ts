@@ -50,6 +50,13 @@ export function resolveColor(value: string | undefined): string | undefined {
   return TBL_COLORS[value] ?? value;
 }
 
+/** `resolveColor` with a default: the shape almost every caller wants, since a color ref is
+ *  optional nearly everywhere in the spec. Relies on resolveColor's contract — a raw "#hex" or an
+ *  unknown name comes back unchanged, undefined/empty comes back falsy — so this is the whole rule. */
+export function resolveColorOr(value: string | undefined, fallback: string): string {
+  return resolveColor(value) || fallback;
+}
+
 // The 7 usable tiers, darkest-first (skip tier 50 per spec).
 const MONO_TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
 

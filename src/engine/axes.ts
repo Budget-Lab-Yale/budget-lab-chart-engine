@@ -141,13 +141,16 @@ export function paneTitleMark(cells: PaneTitleCell[]): Mark[] {
 export function tblXAxis(
   { xTickFormat }: { xTickFormat?: (d: unknown) => string } = {},
   className?: string,
+  /** Extra px to push the tick labels DOWN, away from the axis. The x-axis rug uses it to open a
+   *  gap for its strip (the caller grows marginBottom by the same amount). Default 0. */
+  labelDy = 0,
 ): Mark[] {
   return [
     Plot.axisX({
       anchor: "bottom",
       textAnchor: "middle",
       tickSize: 0,
-      dy: 4,
+      dy: 4 + labelDy,
       fontSize: TBL.size.axis,
       fill: TBL.color.axis,
       fontWeight: 500,
@@ -213,6 +216,8 @@ export function tblTemporalXAxis(
   xDomain: [Date, Date],
   densityMultiplier = 1,
   className?: string,
+  /** Extra px to push the tick labels DOWN (see tblXAxis). Default 0. */
+  labelDy = 0,
 ): Mark[] {
   const ticks = temporalXTicks(xDomain, densityMultiplier);
   const yearTicks = ticks.filter((d) => d.getMonth() === 0);
@@ -225,7 +230,7 @@ export function tblTemporalXAxis(
         x: (d: Date) => d,
         text: (d: Date) => d3.timeFormat("%Y")(d),
         frameAnchor: "bottom",
-        dy: 12,
+        dy: 12 + labelDy,
         textAnchor: "middle",
         dx: 0,
         fill: TBL.color.axis,
@@ -242,7 +247,7 @@ export function tblTemporalXAxis(
       x: (d: Date) => d,
       text: (d: Date) => d3.timeFormat("%b")(d),
       frameAnchor: "bottom",
-      dy: 12,
+      dy: 12 + labelDy,
       textAnchor: "middle",
       dx: 0,
       fill: TBL.color.axis,
@@ -255,7 +260,7 @@ export function tblTemporalXAxis(
       x: (d: Date) => d,
       text: (d: Date) => d3.timeFormat("%Y")(d),
       frameAnchor: "bottom",
-      dy: 24,
+      dy: 24 + labelDy,
       textAnchor: "middle",
       dx: 0,
       fill: TBL.color.axis,

@@ -31,6 +31,25 @@ export const TBL = {
   dashArray: "5 3",
 } as const;
 
+/** Legend fill-swatch geometry. A single-tint chip is the CSS default (14px, in embed/styles.ts);
+ *  a BANDED chip — one keyed concept over several differently-colored fills — grows so each band
+ *  keeps `SWATCH_MIN_BAND` px, up to `SWATCH_MAX_WIDTH`. Beyond that the bands thin again, which is
+ *  the honest outcome for a chart with more series than a chip can key. */
+export const SWATCH_WIDTH = 14;
+export const SWATCH_MIN_BAND = 3;
+export const SWATCH_MAX_WIDTH = 30;
+
+/** The chip width that fits `bands` bands. */
+export function swatchWidthFor(bands: number): number {
+  return Math.min(Math.max(SWATCH_WIDTH, bands * SWATCH_MIN_BAND), SWATCH_MAX_WIDTH);
+}
+
+/** Hairline around an annotation-derived legend fill swatch. Such a swatch shows the fill's TINT,
+ *  which for a 10 %-opaque band is nearly white — without the outline it reads as a gap. Shared by
+ *  the live legend CSS (embed/styles.ts) and the PNG export, which must agree visually. Not a
+ *  Style-Guide token (it is chrome on chrome), so it lives here with the other layout constants. */
+export const SWATCH_OUTLINE = "rgba(0, 0, 0, 0.18)";
+
 // Per-series point-marker symbols (d3 symbol names), in a fixed, distinguishable order so a
 // series' shape is stable and series can be told apart without relying on color (accessibility).
 // Assigned by series index; wraps if there are more series than shapes.

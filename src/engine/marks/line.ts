@@ -4,8 +4,9 @@
 // buildLineChart so other chart types can register their own builder (marks/index.ts).
 import { Plot } from "../vendor";
 import { TBL, markerSymbolForIndex } from "../theme";
-import { resolveColor } from "../palette";
+import { resolveColorOr } from "../palette";
 import { buildShadeRuns } from "../shade";
+import { labelMovedToLegend, annotationKey } from "../annotation-legend";
 import type { ShadeXField } from "../shade";
 import { domainBounds } from "../scales";
 import type { ChartSpec } from "../../spec/types";
@@ -56,6 +57,10 @@ export function buildLineMarks(
   // The clamp reads the domain's NUMERIC bounds (domainBounds), not the raw pair: a reversed axis
   // runs descending, and clamping against that as [lo, hi] pinned every threshold to the far edge.
   const shadeSeriesOrder: string[] = [];
+  // Parallel to shadeSeriesOrder: the annotation key of the region each emitted path came from, for
+  // the regions keyed in the legend (undefined for the rest). A fill therefore carries BOTH keys —
+  // it dims with its own line, and lights up when its annotation row is hovered.
+  const shadeAnnotationOrder: Array<string | undefined> = [];
   if (spec.shading?.length && ctx.yDomain) {
     const [domainLo, domainHi] = domainBounds(ctx.yDomain);
     const clampToDomain = (v: number) => Math.min(Math.max(v, domainLo), domainHi);
@@ -78,10 +83,7 @@ export function buildLineMarks(
           to: parseBound(region.to),
         });
         if (!runs.length) continue;
-        const fill =
-          (region.color && (resolveColor(region.color) || region.color)) ||
-          colors.get(seriesKey) ||
-          TBL.color.blue;
+        const fill = resolveColorOr(region.color, colors.get(seriesKey) || TBL.color.blue);
         // One mark per (region, series) with z: "_seg" — Plot emits one path per run, in _seg
         // first-appearance order, which is the order pushed onto shadeSeriesOrder below.
         underlay.push(
@@ -97,7 +99,11 @@ export function buildLineMarks(
             ...clipOpt,
           }),
         );
-        for (let i = 0; i < runs.length; i++) shadeSeriesOrder.push(seriesKey);
+        const annKey = labelMovedToLegend(spec, region) ? annotationKey(region.label as string) : undefined;
+        for (let i = 0; i < runs.length; i++) {
+          shadeSeriesOrder.push(seriesKey);
+          shadeAnnotationOrder.push(annKey);
+        }
       }
     }
   }
@@ -281,7 +287,11 @@ export function buildLineMarks(
   const tagging = [{ selector: 'g[aria-label="line"] path', seriesOrder }];
   // Shade fills get data-series too, so legend hover/pin/dim covers them with no extra wiring.
   if (shadeSeriesOrder.length) {
-    tagging.push({ selector: `g.${SHADE_CLASS} path`, seriesOrder: shadeSeriesOrder });
+    tagging.push({
+      selector: `g.${SHADE_CLASS} path`,
+      seriesOrder: shadeSeriesOrder,
+      ...(shadeAnnotationOrder.some((k) => k != null) ? { annotationOrder: shadeAnnotationOrder } : {}),
+    });
   }
   // Per-series symbol scale for the markers (series → distinct shape, in MARKER_SYMBOLS order).
   let symbolScaleOpts: { domain: string[]; range: string[] } | undefined;

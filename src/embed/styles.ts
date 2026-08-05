@@ -3,7 +3,7 @@
 //   figure-card, figure-title, figure-subtitle, figure-canvas, figure-legend-slot,
 //   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix,
 //   tbl-legend / tbl-legend-item / tbl-legend-swatch (.is-dashed) / tbl-legend-reset /
-//   tbl-legend-reset-icon / .is-pinned, tbl-dimmed,
+//   tbl-legend-reset-icon / .is-pinned / .is-hovered, tbl-dimmed,
 //   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch (.is-dashed) /
 //   tbl-tooltip-label / tbl-tooltip-value,
 //   inline-select-wrap / inline-select / inline-select-caret / inline-select-popover (title
@@ -14,6 +14,7 @@
 // tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
 
 import { TOKENS_CSS } from "../theme/tokens";
+import { SWATCH_OUTLINE } from "../engine/theme";
 
 // Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated
 // verbatim from the Style-Guide palette so the HTML/CSS matches the SVG side exactly. Only
@@ -376,6 +377,13 @@ body {
   background: var(--tbl-bg-subtle);
   box-shadow: inset 0 -1px 0 var(--legend-color, var(--tbl-navy));
 }
+/* Driven from the CHART side: hovering a rug block marks its annotation row, so the reciprocity is
+   visible in the legend and not only in the plot. Matches the :hover treatment, since it is the
+   same state arrived at from the other direction. */
+.tbl-legend-item.is-hovered {
+  background: var(--tbl-bg-subtle);
+  color: var(--tbl-text-heading);
+}
 .tbl-legend-swatch {
   width: 18px;
   height: 3px;
@@ -399,6 +407,11 @@ body {
   width: 14px;
   height: 12px;
   border-radius: 1px;
+}
+/* Annotation-derived fill swatch: an inset hairline so a near-white tint (an annotations.bands
+   fill is 10% opaque) still reads as a swatch rather than a gap. */
+.tbl-legend-swatch.is-rect.is-outlined {
+  box-shadow: inset 0 0 0 1px ${SWATCH_OUTLINE};
 }
 .tbl-legend-swatch.is-dot {
   width: 14px;
