@@ -308,6 +308,22 @@ state — a region covering every series draws one neutral track ("some series i
 For per-series timelines, give each region its own `series` and `label` and set `rug.rows: per-track`:
 each series then gets its own row, in its own color, and the rows read as a small gantt.
 
+**Don't make one row key two different things.** `rug: true` on a region covering every series asks a
+single row to key both N colored fills *and* one neutral block, and it can only do one — it keys the
+block (see the table above), leaving the fills identified by the series rows instead. When you want
+both keyed, they are two concepts, so give them two rows: leave the fill un-rugged (its chip bands the
+tints) and declare the union band as its own `rug.tracks` entry with its own label.
+
+```yaml
+# The fills, keyed by their own tints…
+shading:
+  - { side: negative, label: Below balance, legend: true, fillOpacity: 0.35 }
+# …and the union band, keyed as the separate thing it is.
+rug:
+  tracks:
+    - { label: Any series below, color: grey, intervals: [{ from: "2000", to: "2030" }] }
+```
+
 ```yaml
 # The michez-rule chart: recessions from the bands, false negatives/positives from the fills.
 rug: {}
