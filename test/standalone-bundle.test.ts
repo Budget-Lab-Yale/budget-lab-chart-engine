@@ -199,7 +199,7 @@ describe("shared-asset fallback when the runtime does not arrive", () => {
     return pagePath;
   }
 
-  it("names the figure and offers a retry link", async () => {
+  it("names the figure, asks for a reload, and gives a contact address", async () => {
     const dom = await JSDOM.fromFile(pageWithNoAssets(), {
       runScripts: "dangerously",
       resources: "usable",
@@ -213,11 +213,13 @@ describe("shared-asset fallback when the runtime does not arrive", () => {
     const chart = dom.window.document.querySelector("#chart");
     expect(chart?.textContent).toContain("Bundle smoke");
     expect(chart?.textContent).toContain("Figure 1");
-    expect(chart?.textContent).toContain("could not load");
+    expect(chart?.textContent).toContain("An error occurred, please try reloading this page.");
 
+    // Reloading the HOST article is the useful action for an embedded figure, so the only link is
+    // the contact address — an "open this figure alone" link makes no sense mid-article.
     const link = chart?.querySelector("a");
-    expect(link?.getAttribute("target")).toBe("_blank");
-    expect(link?.getAttribute("rel")).toBe("noopener");
+    expect(link?.getAttribute("href")).toBe("mailto:budgetlab@yale.edu");
+    expect(chart?.querySelectorAll("a").length).toBe(1);
 
     // Styled inline, because the stylesheet may be missing too.
     expect(chart?.querySelector("[role=note]")?.getAttribute("style")).toContain("font:");
@@ -230,7 +232,7 @@ describe("shared-asset fallback when the runtime does not arrive", () => {
       liveBundleJs: "var BudgetLabChart={mountChart:function(){}};",
       css: CHART_CSS,
     });
-    expect(inline).not.toContain("could not load");
+    expect(inline).not.toContain("An error occurred");
     expect(inline).not.toContain("renderUnavailable");
 
     const shared = buildStandaloneHtml({

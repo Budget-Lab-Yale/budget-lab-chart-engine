@@ -24,8 +24,8 @@ bytes, and a reader opening an article with 7 embedded figures downloaded the en
   `/pr-preview/pr-42/`.
 - **A fallback when the shared runtime does not arrive.** A separate request can fail where an
   inlined bundle could not, so a shared-asset page checks for the runtime and, if it is absent,
-  names the figure and offers a link to open it in a new tab instead of leaving a blank rectangle
-  mid-article. Built with DOM calls and inline styles, since the stylesheet is a separate request
+  names the figure and asks the reader to reload, with a contact address, instead of leaving a blank
+  rectangle mid-article. Built with DOM calls and inline styles, since the stylesheet is a separate request
   and may be equally absent. Self-contained pages don't emit it — they cannot lose their runtime.
 
 ### Changed

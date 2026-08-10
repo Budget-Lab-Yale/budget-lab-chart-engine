@@ -168,12 +168,10 @@ function renderUnavailable(el, title, eyebrow) {
   box.appendChild(h);
   var p = document.createElement("p");
   p.style.cssText = "margin:0;color:#5a5f6b";
-  p.appendChild(document.createTextNode("This figure could not load. "));
+  p.appendChild(document.createTextNode("An error occurred, please try reloading this page. If this problem persists please contact "));
   var a = document.createElement("a");
-  a.href = location.href;
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.textContent = "Open it in a new tab";
+  a.href = "mailto:budgetlab@yale.edu";
+  a.textContent = "budgetlab@yale.edu";
   a.style.color = "inherit";
   p.appendChild(a);
   p.appendChild(document.createTextNode("."));
