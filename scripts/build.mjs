@@ -1,7 +1,9 @@
 // esbuild build: compiles the TS sources to ESM under dist/.
 // - CLI is bundled to a single Node-targeted file (dist/cli/index.js).
-// - The engine is bundled for the browser as a shared, versioned bundle later;
-//   for now we emit per-entry ESM so the package `exports` resolve.
+// - dist/embed/live.js is the browser artifact, publishable as one shared versioned asset
+//   (`tbl-chart assets`) or inlined into a self-contained page. It is the only output that
+//   reaches a browser, so it is the only one minified — library entries stay readable for
+//   consumers, and every output keeps an external sourcemap either way.
 import { build } from "esbuild";
 import { readFileSync } from "node:fs";
 
@@ -57,6 +59,7 @@ await build({
   format: "iife",
   platform: "browser",
   bundle: true,
+  minify: true,
   globalName: "BudgetLabChart",
   entryPoints: ["src/embed/standalone-entry.ts"],
   outfile: "dist/embed/live.js",

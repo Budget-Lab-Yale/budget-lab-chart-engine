@@ -1,17 +1,31 @@
-// Pure HTML builder: assembles a self-contained standalone HTML file from a
-// pre-built browser bundle, CSS, and chart spec + data. No esbuild dependency
-// at runtime — the caller passes the already-bundled JS as a string.
+// Pure HTML builder: assembles a standalone HTML file from a pre-built browser bundle, CSS, and
+// chart spec + data. No esbuild dependency at runtime — the caller passes the already-bundled JS
+// as a string. Pass `assets` instead to link one shared copy of the runtime/CSS/font rather than
+// inlining ~1.65 MB of identical bytes into every page (see shared-assets.ts).
 import type { ChartSpec, TitleSelector } from "../spec/types";
 import type { TidyRow } from "../data/index";
 import { resolveTitleText } from "../spec/title.js";
 import { FIGTREE_FONT_FACE } from "./assets.js";
+import { sharedAssetRefs } from "./shared-assets.js";
+
+/** Where a page's runtime, CSS, and font come from when they are not inlined. */
+export interface SharedAssetsInput {
+  /** Relative URL prefix the assets are published under, e.g. "../../embed/v1". */
+  base: string;
+  /** Engine version; the asset filenames carry it. */
+  version: string;
+}
 
 export interface StandaloneInput {
   spec: ChartSpec | Record<string, unknown>;
   rows: TidyRow[];
-  /** The pre-built browser IIFE bundle (dist/embed/live.js contents). */
-  liveBundleJs: string;
+  /** The pre-built browser IIFE bundle (dist/embed/live.js contents). Required unless `assets`
+   *  is set, which links the shared runtime instead of inlining it. */
+  liveBundleJs?: string;
+  /** Chart CSS. Inlined unless `assets` is set, in which case the shared stylesheet carries it. */
   css: string;
+  /** Link shared versioned assets instead of inlining the runtime, CSS, and font. */
+  assets?: SharedAssetsInput;
   /** Optional page title; falls back to spec.title. */
   title?: string;
   /** Eyebrow / figure number (e.g. "Figure 1"), supplied by the article context. When set, it
@@ -32,16 +46,19 @@ function safeJsonForScript(value: unknown): string {
 }
 
 /**
- * Build a complete self-contained HTML document string.
+ * Build a complete HTML document string.
  *
- * The document:
- * - Loads Figtree from Google Fonts.
- * - Inlines the CHART_CSS.
- * - Inlines the browser IIFE bundle (which exports BudgetLabChart.mountChart).
- * - Calls mountChart with the serialized spec and rows.
+ * Self-contained by default: inlines the base64 font, the CHART_CSS, and the browser IIFE bundle
+ * (which exports BudgetLabChart.mountChart), then calls mountChart with the serialized spec and
+ * rows. With `assets` set, the font/CSS/runtime become links to shared versioned files and only
+ * the spec + data stay inline.
  */
 export function buildStandaloneHtml(input: StandaloneInput): string {
-  const { spec, rows, liveBundleJs, css, title, eyebrow, mountFn = "mountChart" } = input;
+  const { spec, rows, liveBundleJs, css, assets, title, eyebrow, mountFn = "mountChart" } = input;
+
+  if (!assets && liveBundleJs == null) {
+    throw new Error("buildStandaloneHtml: liveBundleJs is required unless `assets` is set");
+  }
   // Page <title>: resolve any title-selector `{token}`s with the spec defaults so the browser
   // tab shows real text (e.g. "GDP by Sector"), never a raw braced token. Specs without
   // title_selectors pass through resolveTitleText untouched (tables never have them).
@@ -64,12 +81,25 @@ export function buildStandaloneHtml(input: StandaloneInput): string {
       ? `\n  eyebrow: /[?&]eyebrow=(off|0|false|none|hide)\\b/i.test(location.search) ? undefined : ${safeJsonForScript(eyebrow)},`
       : "";
 
+  const refs = assets ? sharedAssetRefs(assets.base, assets.version) : null;
+
+  // Either one shared stylesheet (which carries the base64 @font-face itself) or everything inline.
+  // Neither form makes a separate font request: Figtree is never loaded from a CDN, so a corporate
+  // firewall blocking font hosts cannot drop the chart to a system fallback.
+  const headAssets = refs
+    ? `<link rel="stylesheet" href="${escapeHtmlAttr(refs.styles)}">`
+    : `<style>\n${FIGTREE_FONT_FACE}\n${css}\n</style>`;
+
   // Neutralize any literal `</script` inside the bundle so it can't close the inline
   // <script> tag. The bundle is trusted, self-generated esbuild output (no source literal
   // contains `</script` today), but a future vendored dep could — this is a cheap guard
   // with no runtime effect: in valid JS, `</script` only ever occurs inside a string or
   // regex literal, where `<\/script` is equivalent.
-  const safeBundle = liveBundleJs.replace(/<\/script/gi, "<\\/script");
+  // A classic <script src> blocks until it executes, so the bootstrap below still sees
+  // BudgetLabChart either way; no defer/async, no load handler needed.
+  const runtimeTag = refs
+    ? `<script src="${escapeHtmlAttr(refs.runtime)}"></script>`
+    : `<script>\n${(liveBundleJs as string).replace(/<\/script/gi, "<\\/script")}\n</script>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -77,19 +107,11 @@ export function buildStandaloneHtml(input: StandaloneInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtmlAttr(pageTitle)}</title>
-<style>
-/* Figtree is inlined as a base64 @font-face (not loaded from Google Fonts) so the page renders
-   in the correct font with zero external requests — corporate firewalls that block the fonts CDN
-   would otherwise drop the chart back to a system fallback. */
-${FIGTREE_FONT_FACE}
-${css}
-</style>
+${headAssets}
 </head>
 <body>
 <div id="chart" style="max-width:760px;margin:32px auto;padding:0 16px"></div>
-<script>
-${safeBundle}
-</script>
+${runtimeTag}
 <script>
 BudgetLabChart.${mountFn}(document.getElementById("chart"), {
   spec: ${specJson},

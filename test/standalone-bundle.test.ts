@@ -8,10 +8,17 @@
 // The IIFE bundle is produced by the globalSetup (test/setup/global-build.ts); esbuild's
 // API throws inside vitest's module-runner realm, so it can't be built in-test.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { BUNDLE_PATH } from "./setup/global-build";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
+import {
+  buildSharedStylesheet,
+  runtimeAssetName,
+  stylesAssetName,
+} from "../src/embed/shared-assets";
 import { CHART_CSS } from "../src/embed/styles";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -86,5 +93,84 @@ describe("standalone HTML", () => {
     // so it cannot prematurely close the inline <script> tag.
     expect(html).toContain('var x="<\\/script>');
     expect(html).not.toContain('var x="</script>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared-asset mode
+// ---------------------------------------------------------------------------
+
+// The regression this guards: a page that links its runtime instead of inlining it must still
+// mount, and must resolve the link RELATIVE to its own location — that is what keeps output
+// working from file:// and under a /pr-preview/pr-N/ prefix. So this writes a real asset dir and
+// a page two levels below it, loads the page over file://, and lets jsdom fetch the script.
+describe("shared-asset HTML", () => {
+  const VERSION = "9.9.9-test";
+
+  /** Lay out <root>/embed/v1/<assets> + <root>/col/chart/index.html, return the page path. */
+  function layoutSite(): { root: string; pagePath: string } {
+    const root = mkdtempSync(join(tmpdir(), "tbl-shared-"));
+    const assetDir = join(root, "embed", "v1");
+    mkdirSync(assetDir, { recursive: true });
+    writeFileSync(join(assetDir, runtimeAssetName(VERSION)), readFileSync(BUNDLE_PATH, "utf8"));
+    writeFileSync(join(assetDir, stylesAssetName(VERSION)), buildSharedStylesheet(CHART_CSS));
+
+    const pageDir = join(root, "col", "chart");
+    mkdirSync(pageDir, { recursive: true });
+    const html = buildStandaloneHtml({
+      spec: SPEC,
+      rows: ROWS,
+      css: CHART_CSS,
+      assets: { base: "../../embed/v1", version: VERSION },
+      eyebrow: "Figure 1",
+    });
+    const pagePath = join(pageDir, "index.html");
+    writeFileSync(pagePath, html);
+    return { root, pagePath };
+  }
+
+  it("links the versioned assets and inlines neither the runtime nor the font", () => {
+    const html = buildStandaloneHtml({
+      spec: SPEC,
+      rows: ROWS,
+      css: CHART_CSS,
+      assets: { base: "../../embed/v1", version: VERSION },
+    });
+    expect(html).toContain(`<script src="../../embed/v1/engine-${VERSION}.js"></script>`);
+    expect(html).toContain(`<link rel="stylesheet" href="../../embed/v1/chart-${VERSION}.css">`);
+    // The payloads that made pages 1.65 MB each: the bundle and the base64 font.
+    expect(html).not.toContain("base64");
+    expect(html).not.toContain(".figure-card {");
+    // No separate font request — the shared stylesheet carries it (CORS blocks font files
+    // on file:// pages, which is how the thumbnail screenshotter loads them).
+    expect(html).not.toContain("rel=\"preload\"");
+    // Still carries the only per-page content: spec + data.
+    expect(html).toContain('"chartType":"line"');
+    expect(html.length).toBeLessThan(20_000);
+  });
+
+  it("mounts a chart when loaded over file:// with the runtime fetched relatively", async () => {
+    const { pagePath } = layoutSite();
+    const dom = await JSDOM.fromFile(pagePath, {
+      runScripts: "dangerously",
+      resources: "usable",
+      pretendToBeVisual: true,
+    });
+    await new Promise<void>((res) => {
+      if (dom.window.document.readyState === "complete") res();
+      else dom.window.addEventListener("load", () => res());
+    });
+
+    const chart = dom.window.document.querySelector("#chart");
+    expect(chart?.querySelector("svg")).toBeTruthy();
+    expect(chart?.querySelectorAll('svg g[aria-label="line"] path[data-series]').length).toBe(2);
+    expect(dom.window.document.querySelector(".figure-title")?.textContent).toBe("Bundle smoke");
+    expect(chart?.querySelector(".figure-supertitle")?.textContent).toBe("Figure 1");
+  }, 20_000);
+
+  it("refuses to build without a runtime when assets are not linked", () => {
+    expect(() => buildStandaloneHtml({ spec: SPEC, rows: ROWS, css: CHART_CSS })).toThrow(
+      /liveBundleJs is required/,
+    );
   });
 });
