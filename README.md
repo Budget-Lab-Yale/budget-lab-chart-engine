@@ -56,9 +56,40 @@ import { loadData }     from "budget-lab-chart-engine/data";      // CSV/remote 
 ```sh
 tbl-chart validate <chart.yaml>            # structural + cross-ref + CSV checks
 tbl-chart render   <chart.yaml> -o out.html # self-contained interactive chart
+tbl-chart assets   -o <dir>                 # the shared runtime + stylesheet (see below)
 tbl-chart serve    [dir] [--port 5173]      # local review gallery of every chart.yaml under dir
 tbl-chart snapshot <chart.yaml> [--update]  # headless-Chromium PNG vs baseline (visual lock)
 ```
+
+### Shared assets vs self-contained pages
+
+`render` inlines the runtime, CSS, and font, making each page a single ~1.65 MB file that works
+from disk, as an email attachment, or behind any host. For a **site** of many figures that is the
+wrong trade: every page carries an identical copy of the same ~1.65 MB, and a reader viewing an
+article with N embedded figures downloads all N.
+
+Publish one shared copy instead:
+
+```sh
+tbl-chart assets -o _site/embed/v1 --json     # {"version":"1.10.0","runtime":…,"styles":…}
+tbl-chart render chart.yaml -o _site/col/fig/index.html --assets-base ../../embed/v1
+```
+
+A page then drops from ~1.65 MB to ~29 KB (~3.9 KB gzipped), against one shared ~980 KB runtime
+(~345 KB gzipped) and ~122 KB stylesheet (~54 KB gzipped) per engine version. Rendering is
+pixel-identical either way — the modes differ only in where the bytes live.
+
+Two rules the caller must honour:
+
+- **`--assets-base` must be relative.** An absolute URL is rejected: it would break pages opened
+  from `file://` (how thumbnail screenshotters load them) and pages served under a prefix such as
+  `/pr-preview/pr-42/`.
+- **Asset filenames carry the engine version, so keep old versions published** until no page
+  references them. Changing what an asset contains requires a version bump.
+
+The font stays a base64 `@font-face` inside the shared stylesheet rather than becoming a third
+file. Fonts are fetched in CORS mode and a `file://` page has a null origin, so a separate font
+file is blocked there and the page would quietly fall back to a system face.
 
 ## Develop
 

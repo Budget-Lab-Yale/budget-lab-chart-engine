@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, unlinkSync, readFileSync } from "node:fs";
+import { existsSync, unlinkSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { runValidate, runRender } from "../src/cli/index";
+import { runValidate, runRender, runAssets } from "../src/cli/index";
 
 const EXAMPLE_SPEC = resolve(
   fileURLToPath(new URL("./fixtures/sample-chart/chart.yaml", import.meta.url)),
@@ -184,5 +184,68 @@ describe("runRender — validation failure", () => {
 
     expect(result.exitCode).toBe(1);
     expect(existsSync(outPath)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assets + render --assets-base
+// ---------------------------------------------------------------------------
+
+describe("runAssets", () => {
+  it("writes the three versioned files and reports them as a manifest", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "cli-assets-"));
+
+    const result = await runAssets({
+      outDir,
+      version: "2.0.0",
+      liveBundleJs: STUB_BUNDLE,
+      css: ".figure-card{color:red}",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.manifest).toEqual({
+      version: "2.0.0",
+      runtime: "engine-2.0.0.js",
+      styles: "chart-2.0.0.css",
+    });
+    expect(readFileSync(join(outDir, "engine-2.0.0.js"), "utf8")).toBe(STUB_BUNDLE);
+
+    // The stylesheet carries the font, so a page needs one <link> and no font request.
+    const css = readFileSync(join(outDir, "chart-2.0.0.css"), "utf8");
+    expect(css).toContain("data:font/ttf;base64,");
+    expect(css).toContain(".figure-card{color:red}");
+  });
+
+  it("fails cleanly when the output directory cannot be created", async () => {
+    // Parent is a regular file, so mkdir -p cannot succeed (ENOTDIR on every platform).
+    const blocker = join(mkdtempSync(join(tmpdir(), "cli-assets-bad-")), "not-a-dir");
+    writeFileSync(blocker, "x");
+    const result = await runAssets({
+      outDir: join(blocker, "assets"),
+      version: "2.0.0",
+      liveBundleJs: STUB_BUNDLE,
+      css: "body{}",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toMatch(/cannot write assets/);
+  });
+});
+
+describe("runRender with shared assets", () => {
+  it("links the assets and needs no live bundle at all", async () => {
+    const outPath = join(tmpdir(), `cli-test-render-shared-${Date.now()}.html`);
+    tempFiles.push(outPath);
+
+    const result = await runRender(EXAMPLE_SPEC, {
+      outPath,
+      css: "body{}",
+      assets: { base: "../../embed/v1", version: "2.0.0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const html = readFileSync(outPath, "utf8");
+    expect(html).toContain('<script src="../../embed/v1/engine-2.0.0.js"></script>');
+    expect(html).toContain('<link rel="stylesheet" href="../../embed/v1/chart-2.0.0.css">');
+    expect(html).not.toContain("body{}");
   });
 });

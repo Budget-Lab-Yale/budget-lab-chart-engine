@@ -4,6 +4,47 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-08-10
+
+### Added — publishable shared assets, so a site stops shipping the engine per figure
+
+A rendered page inlined the runtime, the CSS, and the font: ~1.65 MB, of which only the spec and
+data differed from any other page. An archive of 41 figures therefore published ~67 MB of identical
+bytes, and a reader opening an article with 7 embedded figures downloaded the engine 7 times
+(~3.3 MB, since each figure is its own iframe and shares no cache with its neighbours).
+
+- **`tbl-chart assets -o <dir>`** writes the two shared files for this engine version:
+  `engine-<version>.js` and `chart-<version>.css`. `--json` prints the manifest for a build script.
+- **`tbl-chart render --assets-base <relative-url>`** emits a page that links those instead of
+  inlining them: ~29 KB instead of ~1.65 MB (~3.9 KB vs ~464 KB gzipped). Rendering is
+  pixel-identical to the inlined form — verified by screenshot comparison, 0 differing pixels.
+  Omit the flag and the output is self-contained exactly as before.
+- **An absolute `--assets-base` is rejected.** Pages must reference assets relatively or they break
+  when opened from `file://` (how thumbnail screenshotters load them) and under a path prefix like
+  `/pr-preview/pr-42/`.
+- **A fallback when the shared runtime does not arrive.** A separate request can fail where an
+  inlined bundle could not, so a shared-asset page checks for the runtime and, if it is absent,
+  names the figure and asks the reader to reload, with a contact address, instead of leaving a blank
+  rectangle mid-article. Built with DOM calls and inline styles, since the stylesheet is a separate request
+  and may be equally absent. Self-contained pages don't emit it — they cannot lose their runtime.
+
+### Changed
+
+- **`dist/embed/live.js` is minified**: 1,523,766 → 980,426 bytes (403,852 → 344,714 gzipped). It is
+  the only output that reaches a browser; library entries stay readable, and all outputs keep their
+  external sourcemaps.
+- **The font is no longer duplicated within a page.** It was inlined twice — once in the page CSS
+  and once inside the bundle for PNG export — which was 84 KB gzipped of every page. In shared mode
+  it rides once in the stylesheet. It stays a base64 `@font-face` rather than a separate file
+  because fonts are fetched in CORS mode and a `file://` page has a null origin, so a font file is
+  blocked there and text would silently fall back to a system face.
+
+### Upgrading
+
+No action required: `render` without `--assets-base` behaves exactly as in 1.9.0. Consumers moving
+to shared assets must publish `tbl-chart assets` output alongside their pages and keep prior
+versions published until no page references them.
+
 ## [1.9.0] - 2026-08-04
 
 ### Added — annotation legend entries, and an x-axis rug

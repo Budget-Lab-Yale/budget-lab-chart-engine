@@ -3,9 +3,9 @@
 // injected bundle/css and return {exitCode, message} rather than side-effecting.
 // main() wires them to real disk I/O and process.exit.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
-import { dirname, basename, extname, resolve } from "node:path";
+import { dirname, basename, extname, resolve, join } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -13,6 +13,12 @@ import { validateSpec, validateChartData, validateChart } from "../spec/validate
 import { validateTableSpec, validateTableData } from "../spec/table-validate";
 import { loadData } from "../data/load";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
+import type { SharedAssetsInput } from "../embed/bundle-standalone";
+import {
+  buildSharedStylesheet,
+  runtimeAssetName,
+  stylesAssetName,
+} from "../embed/shared-assets";
 import { CHART_CSS } from "../embed/styles";
 import { createServer, findSpecs } from "./serve";
 import { renderChartPng } from "../snapshot/render-png";
@@ -34,13 +40,20 @@ function usageText(): string {
     "",
     "Commands:",
     "  validate <spec.yaml>             schema + cross-reference + CSV validation",
-    "  render   <spec.yaml> [-o <out.html>] [--eyebrow <text>]  render to a self-contained HTML file",
+    "  render   <spec.yaml> [-o <out.html>] [--eyebrow <text>] [--assets-base <url>]",
+    "                                   render to HTML — self-contained, or linking shared assets",
+    "  assets   -o <dir>                write the shared runtime + stylesheet",
     "  serve    [dir] [--port <n>]      local review gallery (default port 5173)",
     "  snapshot <spec.yaml> [--baseline <path>] [--update]",
     "                                   compare or update a PNG baseline snapshot",
     "",
     "Options:",
     "  -h, --help   show this help",
+    "",
+    "Shared assets: `assets -o <dir>` emits engine-<version>.js and chart-<version>.css.",
+    "Rendering with `--assets-base <url>` links those instead of inlining them, which is ~1.65 MB",
+    "smaller per page. The URL must be RELATIVE to the page (e.g. ../../embed/v1) so the output",
+    "still works from file:// and under a preview path prefix.",
   ].join("\n");
 }
 
@@ -63,6 +76,33 @@ function parseYamlSpec(text: string, sourcePath: string): unknown {
     return parseYaml(text);
   } catch (err) {
     throw new Error(`${sourcePath}: YAML parse error: ${(err as Error).message}`);
+  }
+}
+
+/** Path to a build output, resolved relative to this module (dist/cli/ at runtime). */
+function distPath(rel: string): string {
+  return fileURLToPath(new URL(`../${rel}`, import.meta.url));
+}
+
+/** This engine's own version — the value baked into shared asset filenames. */
+async function engineVersion(): Promise<string> {
+  const pkgPath = fileURLToPath(new URL("../../package.json", import.meta.url));
+  const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { version?: string };
+  if (!pkg.version) throw new Error(`no version field in ${pkgPath}`);
+  return pkg.version;
+}
+
+/** Read the pre-built browser bundle, with a build-first hint when it's absent. */
+async function readLiveBundle(cmd: string): Promise<string> {
+  const path = distPath("embed/live.js");
+  try {
+    return await readFile(path, "utf8");
+  } catch (err) {
+    throw new Error(
+      `tbl-chart ${cmd}: cannot read live bundle at ${path}.\n` +
+        `Run \`npm run build\` first.\n` +
+        `(${(err as Error).message})`,
+    );
   }
 }
 
@@ -159,13 +199,16 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
 export interface RenderOptions {
   /** Caller-supplied output path (from -o flag). If omitted, defaults to cwd/<specBasename>.html */
   outPath?: string;
-  /** Pre-built browser IIFE bundle contents. Injected so tests can pass a stub. */
-  liveBundleJs: string;
+  /** Pre-built browser IIFE bundle contents. Injected so tests can pass a stub. Not needed when
+   *  `assets` is set — the page links the shared runtime instead of inlining it. */
+  liveBundleJs?: string;
   /** CSS string. Injected so tests can pass a stub. */
   css: string;
   /** Eyebrow / figure number (from --eyebrow). An article-context property baked into the
    *  output; omitted → no eyebrow. The embedder can still hide a baked value via `?eyebrow=off`. */
   eyebrow?: string;
+  /** Link shared versioned assets (from `tbl-chart assets`) instead of inlining them. */
+  assets?: SharedAssetsInput;
 }
 
 export interface RenderResult {
@@ -223,6 +266,7 @@ export async function runRender(
       rows,
       liveBundleJs: opts.liveBundleJs,
       css: opts.css,
+      assets: opts.assets,
       eyebrow: opts.eyebrow,
       mountFn: "mountTable",
     });
@@ -269,6 +313,7 @@ export async function runRender(
     rows,
     liveBundleJs: opts.liveBundleJs,
     css: opts.css,
+    assets: opts.assets,
     eyebrow: opts.eyebrow,
   });
 
@@ -285,6 +330,61 @@ export async function runRender(
     exitCode: 0,
     message: `Wrote ${outPath}`,
     htmlPath: outPath,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// runAssets
+// ---------------------------------------------------------------------------
+
+export interface AssetsOptions {
+  /** Directory to write the shared assets into. Created if missing. */
+  outDir: string;
+  /** Engine version the filenames carry. */
+  version: string;
+  /** Pre-built browser IIFE bundle contents. */
+  liveBundleJs: string;
+  /** Chart CSS, wrapped with the base64 @font-face into the shared stylesheet. */
+  css: string;
+}
+
+export interface AssetsResult {
+  exitCode: number;
+  message: string;
+  /** Written filenames, relative to outDir — the manifest a site build consumes. */
+  manifest?: { version: string; runtime: string; styles: string };
+}
+
+/**
+ * Run `tbl-chart assets -o <dir>`: write the shared runtime, stylesheet, and font.
+ *
+ * Writing is idempotent — for a given engine version the bytes are fixed, so re-running over an
+ * existing directory is a no-op in effect. Callers publish the whole directory and keep old
+ * versions until no page references them.
+ */
+export async function runAssets(opts: AssetsOptions): Promise<AssetsResult> {
+  const { outDir, version, liveBundleJs, css } = opts;
+  const manifest = {
+    version,
+    runtime: runtimeAssetName(version),
+    styles: stylesAssetName(version),
+  };
+
+  try {
+    await mkdir(outDir, { recursive: true });
+    await writeFile(join(outDir, manifest.runtime), liveBundleJs, "utf8");
+    await writeFile(join(outDir, manifest.styles), buildSharedStylesheet(css), "utf8");
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message: `cannot write assets to ${outDir}: ${(err as NodeJS.ErrnoException).message}`,
+    };
+  }
+
+  return {
+    exitCode: 0,
+    message: `Wrote ${manifest.runtime} and ${manifest.styles} to ${outDir}`,
+    manifest,
   };
 }
 
@@ -507,6 +607,7 @@ export async function main(argv: string[]): Promise<number> {
       options: {
         output: { type: "string", short: "o" },
         eyebrow: { type: "string" },
+        "assets-base": { type: "string" },
       },
       allowPositionals: true,
     });
@@ -517,17 +618,23 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     }
 
-    // Read the pre-built live bundle from disk relative to this module.
-    const liveBundlePath = fileURLToPath(new URL("../embed/live.js", import.meta.url));
-    let liveBundleJs: string;
-    try {
-      liveBundleJs = await readFile(liveBundlePath, "utf8");
-    } catch (err) {
+    const assetsBase = values["assets-base"];
+    if (assetsBase !== undefined && /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(assetsBase)) {
       console.error(
-        `tbl-chart render: cannot read live bundle at ${liveBundlePath}.\n` +
-          `Run \`npm run build\` first.\n` +
-          `(${(err as Error).message})`,
+        `tbl-chart render: --assets-base must be a relative URL, got ${JSON.stringify(assetsBase)}.\n` +
+          `An absolute URL breaks file:// rendering and preview path prefixes.`,
       );
+      return 1;
+    }
+
+    // Shared-asset mode never inlines the bundle, so don't spend a 1.5 MB read per page on it.
+    let liveBundleJs: string | undefined;
+    let assets: SharedAssetsInput | undefined;
+    try {
+      if (assetsBase === undefined) liveBundleJs = await readLiveBundle("render");
+      else assets = { base: assetsBase, version: await engineVersion() };
+    } catch (err) {
+      console.error((err as Error).message);
       return 1;
     }
 
@@ -535,10 +642,50 @@ export async function main(argv: string[]): Promise<number> {
       outPath: values.output,
       liveBundleJs,
       css: CHART_CSS,
+      assets,
       eyebrow: values.eyebrow,
     });
     if (result.exitCode === 0) {
       console.log(result.message);
+    } else {
+      console.error(result.message);
+    }
+    return result.exitCode;
+  }
+
+  if (cmd === "assets") {
+    const { values } = parseArgs({
+      args: argv.slice(3),
+      options: {
+        output: { type: "string", short: "o" },
+        json: { type: "boolean" },
+      },
+      allowPositionals: true,
+    });
+    if (!values.output) {
+      console.error("tbl-chart assets: missing -o <dir> argument\n");
+      console.error(usageText());
+      return 1;
+    }
+
+    let liveBundleJs: string;
+    let version: string;
+    try {
+      liveBundleJs = await readLiveBundle("assets");
+      version = await engineVersion();
+    } catch (err) {
+      console.error((err as Error).message);
+      return 1;
+    }
+
+    const result = await runAssets({
+      outDir: resolve(values.output),
+      version,
+      liveBundleJs,
+      css: CHART_CSS,
+    });
+    if (result.exitCode === 0) {
+      console.log(values.json ? JSON.stringify(result.manifest) : result.message);
     } else {
       console.error(result.message);
     }
