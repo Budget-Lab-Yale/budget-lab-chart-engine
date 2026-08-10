@@ -113,13 +113,73 @@ ${headAssets}
 <div id="chart" style="max-width:760px;margin:32px auto;padding:0 16px"></div>
 ${runtimeTag}
 <script>
-BudgetLabChart.${mountFn}(document.getElementById("chart"), {
-  spec: ${specJson},
-  rows: ${rowsJson},${eyebrowMount}
-});
+${mountScript({ mountFn, specJson, rowsJson, eyebrowMount, shared: Boolean(refs), pageTitle, eyebrow })}
 </script>
 </body>
 </html>`;
+}
+
+/**
+ * The bootstrap that mounts the chart.
+ *
+ * In shared-asset mode the runtime is a separate request, so it can fail where an inlined bundle
+ * could not — a stale proxy cache, a half-published deploy. Rather than leave a blank rectangle in
+ * the middle of an article, name the figure that should be there and offer a way to retry. The
+ * fallback is built with DOM calls and inline styles on purpose: the stylesheet is a separate
+ * request too, so it may be just as absent, and nothing here may depend on it.
+ */
+function mountScript(input: {
+  mountFn: string;
+  specJson: string;
+  rowsJson: string;
+  eyebrowMount: string;
+  shared: boolean;
+  pageTitle: string;
+  eyebrow?: string;
+}): string {
+  const { mountFn, specJson, rowsJson, eyebrowMount, shared, pageTitle, eyebrow } = input;
+
+  const mountCall = `BudgetLabChart.${mountFn}(el, {
+  spec: ${specJson},
+  rows: ${rowsJson},${eyebrowMount}
+});`;
+
+  if (!shared) return `var el = document.getElementById("chart");\n${mountCall}`;
+
+  return `var el = document.getElementById("chart");
+if (typeof BudgetLabChart === "undefined") {
+  renderUnavailable(el, ${safeJsonForScript(pageTitle)}, ${safeJsonForScript(eyebrow ?? "")});
+} else {
+${mountCall}
+}
+function renderUnavailable(el, title, eyebrow) {
+  var box = document.createElement("div");
+  box.setAttribute("role", "note");
+  box.style.cssText = "font:16px/1.5 system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#1c1c1c;border:1px solid #d9dce3;border-radius:4px;padding:20px";
+  if (eyebrow) {
+    var e = document.createElement("p");
+    e.textContent = eyebrow;
+    e.style.cssText = "margin:0 0 4px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#5a5f6b";
+    box.appendChild(e);
+  }
+  var h = document.createElement("p");
+  h.textContent = title;
+  h.style.cssText = "margin:0 0 12px;font-weight:600";
+  box.appendChild(h);
+  var p = document.createElement("p");
+  p.style.cssText = "margin:0;color:#5a5f6b";
+  p.appendChild(document.createTextNode("This figure could not load. "));
+  var a = document.createElement("a");
+  a.href = location.href;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = "Open it in a new tab";
+  a.style.color = "inherit";
+  p.appendChild(a);
+  p.appendChild(document.createTextNode("."));
+  box.appendChild(p);
+  el.appendChild(box);
+}`;
 }
 
 /** Escape a value for safe use in an HTML attribute (title). */

@@ -174,3 +174,71 @@ describe("shared-asset HTML", () => {
     );
   });
 });
+
+// A shared runtime is a separate request, so it can fail where an inlined bundle could not. The
+// page must then name the figure instead of leaving a blank rectangle mid-article — and must do so
+// without the stylesheet, which is a separate request and may be equally absent.
+describe("shared-asset fallback when the runtime does not arrive", () => {
+  const VERSION = "9.9.9-test";
+
+  function pageWithNoAssets(): string {
+    const root = mkdtempSync(join(tmpdir(), "tbl-missing-"));
+    const pageDir = join(root, "col", "chart");
+    mkdirSync(pageDir, { recursive: true });
+    const pagePath = join(pageDir, "index.html");
+    writeFileSync(
+      pagePath,
+      buildStandaloneHtml({
+        spec: SPEC,
+        rows: ROWS,
+        css: CHART_CSS,
+        assets: { base: "../../embed/v1", version: VERSION },
+        eyebrow: "Figure 1",
+      }),
+    );
+    return pagePath;
+  }
+
+  it("names the figure and offers a retry link", async () => {
+    const dom = await JSDOM.fromFile(pageWithNoAssets(), {
+      runScripts: "dangerously",
+      resources: "usable",
+      pretendToBeVisual: true,
+    });
+    await new Promise<void>((res) => {
+      if (dom.window.document.readyState === "complete") res();
+      else dom.window.addEventListener("load", () => res());
+    });
+
+    const chart = dom.window.document.querySelector("#chart");
+    expect(chart?.textContent).toContain("Bundle smoke");
+    expect(chart?.textContent).toContain("Figure 1");
+    expect(chart?.textContent).toContain("could not load");
+
+    const link = chart?.querySelector("a");
+    expect(link?.getAttribute("target")).toBe("_blank");
+    expect(link?.getAttribute("rel")).toBe("noopener");
+
+    // Styled inline, because the stylesheet may be missing too.
+    expect(chart?.querySelector("[role=note]")?.getAttribute("style")).toContain("font:");
+  }, 20_000);
+
+  it("is emitted only in shared mode — an inlined page cannot lose its runtime", () => {
+    const inline = buildStandaloneHtml({
+      spec: SPEC,
+      rows: ROWS,
+      liveBundleJs: "var BudgetLabChart={mountChart:function(){}};",
+      css: CHART_CSS,
+    });
+    expect(inline).not.toContain("could not load");
+    expect(inline).not.toContain("renderUnavailable");
+
+    const shared = buildStandaloneHtml({
+      spec: SPEC,
+      rows: ROWS,
+      css: CHART_CSS,
+      assets: { base: "../../embed/v1", version: VERSION },
+    });
+    expect(shared).toContain("renderUnavailable");
+  });
+});
