@@ -57,6 +57,30 @@ export function resolveColorOr(value: string | undefined, fallback: string): str
   return resolveColor(value) || fallback;
 }
 
+// Every tonal tier, LIGHTEST-first, so a positive step along the array is a step darker.
+const TONAL_TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"] as const;
+
+/** Reverse lookup from a tonal-scale hex back onto its ramp: which hue family it belongs to, that
+ *  family's tiers lightest-first, and this hex's index within them. Lets a caller that has only a
+ *  resolved colour (the engine resolves everything to hex before it reaches the marks) step along
+ *  the same hue instead of guessing in colour space — see hatch.ts `defaultHatchStroke`.
+ *  Keyed upper-case; the generated tokens are upper-case hex. */
+export const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]; index: number }> =
+  (() => {
+    const m = new Map<string, { family: string; tiers: string[]; index: number }>();
+    for (const [family, scale] of Object.entries(
+      tokens.scales as Record<string, Record<string, string>>,
+    )) {
+      const tiers = TONAL_TIERS.map((t) => scale[t] as string).filter(Boolean);
+      tiers.forEach((hex, index) => {
+        // First writer wins: a hex shared between two ramps keeps its first family, which is
+        // arbitrary but deterministic.
+        if (!m.has(hex.toUpperCase())) m.set(hex.toUpperCase(), { family, tiers, index });
+      });
+    }
+    return m;
+  })();
+
 // The 7 usable tiers, darkest-first (skip tier 50 per spec).
 const MONO_TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
 
