@@ -5,7 +5,7 @@
 import type { LegendItem } from "./index";
 import { symbolPathD } from "./symbols";
 import { swatchWidthFor } from "./theme";
-import { hatchCss, swatchGeometry } from "./hatch";
+import { hatchGlyphGroup, HATCH_GLYPH_BOX } from "./hatch";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -81,6 +81,21 @@ function buildColorChip(doc: Document, color: string): SVGSVGElement {
   rect.setAttribute("rx", "4");
   rect.setAttribute("fill", color);
   svg.appendChild(rect);
+  return svg;
+}
+
+/** Build a hatch legend swatch (an inline SVG): the series' ground with ONE centred instance of its
+ *  texture over it. A glyph rather than a patch of the chart's tiling, because at 14px a tiling shows
+ *  a fraction of one period — an edge, with no direction to read. See hatch.ts hatchGlyphShapes. */
+function buildHatchSwatch(
+  doc: Document,
+  hatch: { char: Parameters<typeof hatchGlyphGroup>[1]; ground: string; stroke: string },
+): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", String(HATCH_GLYPH_BOX));
+  svg.setAttribute("height", String(HATCH_GLYPH_BOX));
+  svg.setAttribute("viewBox", `0 0 ${HATCH_GLYPH_BOX} ${HATCH_GLYPH_BOX}`);
+  svg.appendChild(hatchGlyphGroup(doc, hatch.char, hatch.ground, hatch.stroke));
   return svg;
 }
 
@@ -320,16 +335,11 @@ export function renderLegend(
         // Widen past the CSS default so each band stays legible (7 tints in 14px is 2px each).
         swatch.style.width = `${swatchWidthFor(swatchColors.length)}px`;
       } else if (hatch) {
-        // Textured series: the ground and the hatch go on SEPARATE longhand properties — the
-        // `background` shorthand below would reset background-image and erase the texture.
-        // hatchCss owns the angle conversion (see engine/hatch.ts INVARIANT 2), so the swatch
-        // cannot lean the opposite way from the bars. At the KEY period, not the mark's — a 14px
-        // box showed one band of a 16px tile, which reads as an edge rather than a direction.
-        const css = hatchCss(hatch.char, hatch.ground, hatch.stroke, swatchGeometry(hatch.char));
-        swatch.style.backgroundColor = css.backgroundColor;
-        swatch.style.backgroundImage = css.backgroundImage;
-        // Wider than a flat chip: more periods across the box is what makes the direction legible.
+        // Textured series: ONE centred instance of the texture as an inline SVG glyph, not a patch of
+        // the mark's tiling — a 14px chip can only hold a fraction of a period, which reads as an
+        // edge rather than a direction (see engine/hatch.ts hatchGlyphShapes).
         swatch.classList.add("is-hatched");
+        swatch.appendChild(buildHatchSwatch(doc, hatch));
       } else if (color) {
         swatch.style.background = color;
       }

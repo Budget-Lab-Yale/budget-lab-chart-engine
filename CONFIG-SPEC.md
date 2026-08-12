@@ -811,11 +811,12 @@ Notes:
   export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
 - Only a **rect** legend swatch draws the texture (`bar`, `stacked`, `histogram`). An `area` series'
   swatch is an 18×3 line, thinner than the hatch period, so it stays a flat color.
-- A textured legend/tooltip key is drawn **larger and at a smaller tile** than the mark it names
-  (22×16 at an 8px period, vs the mark's 16px). A key has to answer *which* texture, and a 14×12
-  chip at the mark's period shows a single band — an edge, not a direction. Band widths keep the
-  mark's ratios, so the key still reads at the mark's weight. `test/hatch-legend-legibility.test.ts`
-  rasterises the real legend and measures each of the six from its pixels.
+- A legend/tooltip key draws **one centred instance** of the texture in a 14px square — a *glyph*,
+  not a patch of the chart's tiling. `"/"` reads as three bands (ground, mark, ground), `"+"` as a
+  plus, `"x"` as an x. A tiled key can only show a fraction of one period at that size, which is an
+  edge with no direction in it. `test/hatch-glyph.test.ts` locks the coordinates;
+  `test/hatch-legend-legibility.test.ts` rasterises the real legend and measures all six from their
+  pixels.
 - The geometry is deliberately **coarse** — a 16px period with a 7px band, so the ground and the
   hatch read as two colors banded together rather than as pinstripes over a color. The crossed
   characters (`"+"`, `"x"`) use a thinner 4px line, because crossing two directions overlaps

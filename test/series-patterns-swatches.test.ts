@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { renderChart, buildLegendItems } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
-import { hatchCss, defaultHatchStroke } from "../src/engine/hatch";
+import { defaultHatchStroke, resolveHatch } from "../src/engine/hatch";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -30,7 +30,7 @@ const SPEC = {
 
 const OPTS = { width: 720, height: 400, document };
 const GROUND = "#58A3E7";
-const EXPECTED = hatchCss("/", GROUND, defaultHatchStroke(GROUND));
+const EXPECTED = resolveHatch("/", GROUND);
 
 describe("the legend swatch", () => {
   it("carries the texture on the textured series and nothing on the others", () => {
@@ -41,23 +41,22 @@ describe("the legend swatch", () => {
     const swatchFor = (series: string) =>
       parent.querySelector<HTMLElement>(`[data-series="${series}"] .tbl-legend-swatch`)!;
 
+    // The textured key is an inline SVG glyph; the flat one is a plain coloured box.
     const hatched = swatchFor("lostToBehavior");
-    expect(hatched.style.backgroundImage).toContain("repeating-linear-gradient");
-    expect(hatched.style.backgroundColor).toBeTruthy();
+    expect(hatched.querySelector("svg")).not.toBeNull();
+    expect(hatched.classList.contains("is-hatched")).toBe(true);
 
-    // The flat swatch keeps the `background` shorthand, which jsdom normalises to
-    // background-image: none — the point is only that it carries no gradient.
-    expect(swatchFor("collectedNew").style.backgroundImage).not.toContain("gradient");
+    expect(swatchFor("collectedNew").querySelector("svg")).toBeNull();
   });
 
-  it("leans the same way as the mark — the CSS angle is the pattern rotation minus 90", () => {
+  it("draws the key's band over the series' own ground and derived band colour", () => {
     const items = renderChart(SPEC, ROWS, OPTS).legendItems!;
     const parent = document.createElement("div");
     renderLegend(parent, items);
-    const swatch = parent.querySelector<HTMLElement>('[data-series="lostToBehavior"] .tbl-legend-swatch')!;
-    // `/` is patternTransform rotate(45), so the gradient must be at -45deg.
-    expect(swatch.style.backgroundImage).toContain("-45deg");
-    expect(EXPECTED.backgroundImage).toContain("-45deg");
+    const svg = parent.querySelector('[data-series="lostToBehavior"] .tbl-legend-swatch svg')!;
+    const shapes = [...svg.querySelectorAll("rect, line")];
+    expect(shapes[0]!.getAttribute("style")).toContain(GROUND);
+    expect(shapes[1]!.getAttribute("style")).toContain(defaultHatchStroke(GROUND));
   });
 
   it("puts the resolved hatch on the legend item, so every consumer sees the same thing", () => {
@@ -96,9 +95,9 @@ describe("the tooltip swatch", () => {
       colors: COLORS,
       hatches: new Map([["lostToBehavior", EXPECTED]]),
     });
-    expect(html).toContain("repeating-linear-gradient");
-    // Same lean as the mark: `/` is rotate(45) in SVG, so -45deg in CSS.
-    expect(html).toContain("-45deg");
+    // The same inline-SVG glyph the legend key uses.
+    expect(html).toContain("<svg");
+    expect(html).toContain(defaultHatchStroke(GROUND));
   });
 
   it("leaves an untextured series as a plain colour fill", () => {
@@ -111,7 +110,7 @@ describe("the tooltip swatch", () => {
     const collectedRow = html
       .split('<div class="tbl-tooltip-row"')
       .find((chunk) => chunk.includes("collectedNew"))!;
-    expect(collectedRow).not.toContain("repeating-linear-gradient");
+    expect(collectedRow).not.toContain("<svg");
     expect(collectedRow).toContain("#0072B2");
   });
 
@@ -121,6 +120,6 @@ describe("the tooltip swatch", () => {
       swatchShape: "rect",
       colors: COLORS,
     });
-    expect(html).not.toContain("repeating-linear-gradient");
+    expect(html).not.toContain("<svg");
   });
 });

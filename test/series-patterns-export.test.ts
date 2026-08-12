@@ -7,6 +7,7 @@
 // SVG legend chip (which is drawn here from scratch).
 import { describe, it, expect } from "vitest";
 import { buildExportSvg } from "../src/embed/export-png";
+import { defaultHatchStroke } from "../src/engine/hatch";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -34,14 +35,27 @@ describe("the PNG export", () => {
     for (const rect of hatched) expect(rect.style.fill).toMatch(/^url\("?#tblhatch-fwd-/);
   });
 
-  it("carries the texture into the exported legend chip, as a real pattern", () => {
+  it("carries the texture into the exported legend chip, as the same centred glyph", () => {
     const svg = buildExportSvg(SPEC, ROWS);
-    // The chip is filled from a pattern, not a flat colour, so the key matches the bars.
-    const chips = [...svg.querySelectorAll('rect[fill^="url(#tblhatch-fwd-"]')];
-    expect(chips.length).toBeGreaterThan(0);
+    // The chip is the glyph the live legend draws — a ground rect plus one centred band — NOT a
+    // patch of the chart body's tiling, which at chip size would show an edge and no direction.
+    const band = defaultHatchStroke("#58A3E7");
+    const glyph = [...svg.querySelectorAll("g[transform]")].find((g) => {
+      const shapes = [...g.querySelectorAll("rect, line")];
+      return (
+        shapes.length === 2 &&
+        (shapes[0]!.getAttribute("style") ?? "").includes("#58A3E7") &&
+        (shapes[1]!.getAttribute("style") ?? "").includes(band)
+      );
+    });
+    expect(glyph, "no hatch glyph found in the exported legend").toBeTruthy();
+    // `/` is a diagonal, so its band is a line — and it ascends left to right.
+    const line = glyph!.querySelector("line")!;
+    expect(+line.getAttribute("x1")!).toBeLessThan(+line.getAttribute("x2")!);
+    expect(+line.getAttribute("y1")!).toBeGreaterThan(+line.getAttribute("y2")!);
   });
 
-  it("defines every referenced pattern somewhere in the exported document", () => {
+  it("defines every pattern the chart body references", () => {
     const svg = buildExportSvg(SPEC, ROWS);
     const referenced = new Set<string>();
     svg.querySelectorAll("*").forEach((el) => {

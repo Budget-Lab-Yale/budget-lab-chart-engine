@@ -408,12 +408,14 @@ body {
   height: 12px;
   border-radius: 1px;
 }
-/* A textured swatch needs room for the repeat in BOTH axes: one band is an edge, not a direction, and
-   a crossed character has to show a grid or it reads as noise. 22x16 fits 2 tile periods vertically
-   and 2.75 across (see hatch.ts HATCH_SWATCH_PERIOD). */
+/* A textured swatch holds an inline SVG glyph — one centred instance of the texture — so it is the
+   glyph's square box and clips to the same 1px radius as a flat chip. Sized in hatch.ts
+   (HATCH_GLYPH_BOX); the rules here only need to stop the box from stretching. */
 .tbl-legend-swatch.is-rect.is-hatched {
-  width: 22px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
+  overflow: hidden;
+  line-height: 0;
 }
 /* Annotation-derived fill swatch: an inset hairline so a near-white tint (an annotations.bands
    fill is 10% opaque) still reads as a swatch rather than a gap. */
@@ -620,10 +622,13 @@ body {
   height: 11px;
   border-radius: 1px;
 }
-/* Same reason as the legend's .is-hatched — an 11px box cannot show a repeat in either axis. */
+/* The same glyph as the legend key, so the two are one drawing rather than two renderings. */
 .tbl-tooltip-swatch.is-square.is-hatched {
-  width: 20px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
+  overflow: hidden;
+  line-height: 0;
+  background: none;
 }
 /* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
 .tbl-tooltip-swatch.is-symbol {

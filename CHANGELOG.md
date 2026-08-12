@@ -21,9 +21,10 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   Measured ΔL* is 21–32 across all 70 palette colours, and a CI gate holds it there. The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
   own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
-  The texture reaches the marks, the legend key, the hover tooltip and the export. A key is drawn
-  larger and at a smaller tile than its mark, since it has to answer *which* texture in a box too
-  small for the mark's period; a rasterising test measures all six from their pixels. An unrecognised
+  The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
+  instance of the texture as a glyph rather than a patch of the tiling — at 14px a tiling shows an
+  edge with no direction in it — so `"/"` reads as three bands, `"+"` as a plus, `"x"` as an x. A
+  rasterising test measures all six from their pixels. An unrecognised
   value is rejected at load rather than rendered flat — including density repeats (`"//"`), which
   are deliberately unsupported: more ink per unit area reads as a darker shade, which the tonal
   scale already controls precisely.

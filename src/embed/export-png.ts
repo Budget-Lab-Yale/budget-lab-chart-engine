@@ -10,7 +10,7 @@ import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "
 import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
 import { SWATCH_OUTLINE, swatchWidthFor } from "../engine/theme.js";
-import { hatchSvgPattern, hatchPatternId, swatchGeometry, type SeriesHatch } from "../engine/hatch.js";
+import { hatchSvgPattern, hatchGlyphGroup, HATCH_GLYPH_BOX, type SeriesHatch } from "../engine/hatch.js";
 import {
   SVG_NS,
   W,
@@ -45,26 +45,14 @@ function svgEl(name: string, attrs: Record<string, string | number> = {}): SVGEl
   return svgElDoc(document, name, attrs);
 }
 
-/** Define a legend chip's hatch in the export root's own <defs> (created on demand) and return its
- *  id. Idempotent on the content-addressed id, so several series sharing a texture share one
- *  definition. The chart body brings its own copy inside its nested <svg>; both resolve to the
- *  same fragment id, and the definitions are identical by construction. */
-function ensureExportHatch(root: SVGElement, hatch: SeriesHatch): string {
-  // At the KEY geometry, not the mark's: the chip is a few px tall, where the mark's tile shows one
-  // band and no direction (see engine/hatch.ts HATCH_SWATCH_PERIOD). That makes it a different
-  // pattern from the chart body's, and the id carries the geometry so the two cannot collide.
-  const geom = swatchGeometry(hatch.char);
-  const id = hatchPatternId(hatch.char, hatch.ground, hatch.stroke, geom);
-  const owner = root.ownerSVGElement ?? root;
-  let defs = owner.querySelector(":scope > defs");
-  if (!defs) {
-    defs = document.createElementNS(SVG_NS, "defs");
-    owner.insertBefore(defs, owner.firstChild);
-  }
-  if (!defs.querySelector(`pattern[id="${id}"]`)) {
-    defs.appendChild(hatchSvgPattern(document, hatch.char, hatch.ground, hatch.stroke, geom));
-  }
-  return id;
+/** Draw a legend chip's texture as the same centred GLYPH the live legend uses, positioned at
+ *  (x, y). Not the chart body's tiling: at chip size a tiling shows a fraction of one period, which
+ *  reads as an edge rather than a direction. No <defs> and no pattern id, so nothing here can
+ *  collide with the chart body's patterns. */
+function drawExportHatchChip(root: SVGElement, hatch: SeriesHatch, x: number, y: number): void {
+  const g = hatchGlyphGroup(document, hatch.char, hatch.ground, hatch.stroke);
+  g.setAttribute("transform", `translate(${x},${y})`);
+  root.appendChild(g);
 }
 
 function textEl(
@@ -183,10 +171,9 @@ function drawLegend(
       // Several tints under one label → equal vertical bands, matching the live legend's chip, which
       // also widens so the bands stay legible.
       const tints = item.colors && item.colors.length > 1 ? item.colors : null;
-      // A hatched chip is wider AND taller than a flat one, for the same reason the live legend's is:
-      // a texture needs two tile periods in both axes before its direction is readable.
-      const chipH = item.hatch ? 16 : 13;
-      const chipW = tints ? swatchWidthFor(tints.length) : item.hatch ? 22 : chipH;
+      // A hatched chip is the glyph's square box, so the key matches the live legend's exactly.
+      const chipH = item.hatch ? HATCH_GLYPH_BOX : 13;
+      const chipW = tints ? swatchWidthFor(tints.length) : chipH;
       const chipX = x + (SW - chipW) / 2;
       const chipY = cy - chipH / 2;
       if (tints) {
@@ -197,21 +184,23 @@ function drawLegend(
           );
         });
       }
-      // A textured series' chip is filled from a real <pattern>, not a flat colour — the export
-      // composes its own chrome, so the live legend's CSS gradient cannot reach it and the key
-      // would otherwise contradict the bars in the downloaded image.
-      const hatchFill = item.hatch ? `url(#${ensureExportHatch(root, item.hatch)})` : null;
-      root.appendChild(
-        svgEl("rect", {
-          x: chipX,
-          y: chipY,
-          width: chipW,
-          height: chipH,
-          rx: 4,
-          ...(tints ? { fill: "none" } : { fill: hatchFill ?? color }),
-          ...(item.outlined ? { stroke: SWATCH_OUTLINE, "stroke-width": 1 } : {}),
-        }),
-      );
+      // A textured series' chip is the glyph — the export composes its own chrome, so nothing the
+      // page does reaches it, and the key would otherwise contradict the bars in the download.
+      if (item.hatch) {
+        drawExportHatchChip(root, item.hatch, chipX, chipY);
+      } else {
+        root.appendChild(
+          svgEl("rect", {
+            x: chipX,
+            y: chipY,
+            width: chipW,
+            height: chipH,
+            rx: 4,
+            ...(tints ? { fill: "none" } : { fill: color }),
+            ...(item.outlined ? { stroke: SWATCH_OUTLINE, "stroke-width": 1 } : {}),
+          }),
+        );
+      }
     } else {
       root.appendChild(
         svgEl("rect", { x, y: cy - 2, width: SW, height: 4, fill: color }),

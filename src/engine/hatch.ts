@@ -36,18 +36,7 @@ export type { HatchChar };
 // band for all six characters (the spread is antialiasing on the diagonals).
 export const HATCH_PERIOD = 16;
 
-/** Tile period for a legend/tooltip KEY. The mark's 16px period showed barely one band in a 14x12
- *  box, so the direction was unreadable and `/` could not be told from `\`.
- *
- *  A key needs TWO periods in BOTH axes: one band is an edge, not a direction, and a crossed
- *  character has to show a repeating grid or it measures as noise. That is a constraint on the box
- *  before it is one on the tile — at 12px tall no crossed tile works, whether its bands are narrow
- *  (too fine to resolve) or wide (so dense it goes solid). So the hatched swatch is 22x16 and the
- *  tile is 8, giving 2 periods vertically and 2.75 across. Band widths keep the mark's ratios, so a
- *  key carries the same weight as the mark it names. */
-export const HATCH_SWATCH_PERIOD = 8;
-
-/** `rotate` is the tile rotation; `crossed` adds a second line perpendicular to the first.
+/** `rotate` is the tile rotation; `crossed` adds a second band perpendicular to the first.
  *  See INVARIANT 1 — this pair is the only decomposition that tiles. */
 const GEOM: Record<HatchChar, { rotate: number; crossed: boolean; slug: string }> = {
   "|": { rotate: 0, crossed: false, slug: "vert" },
@@ -58,39 +47,139 @@ const GEOM: Record<HatchChar, { rotate: number; crossed: boolean; slug: string }
   x: { rotate: 45, crossed: true, slug: "cross" },
 };
 
-/** Band WIDTH for a single-direction character (`/ \ | -`), in tile units. Rendered as an explicit
+/** Band WIDTH for a single-direction character on a MARK, in tile units. Rendered as an explicit
  *  rect, so this is the width that actually appears — see hatchSvgPattern. */
 export const HATCH_STROKE = 7;
 
-/** Band width for a CROSSED character (`+ x`). Deliberately narrower: crossing two directions
- *  overlaps their ink, so total coverage is 1 − (gap/period)², not twice one direction's. At the
- *  single-direction width, `+` and `x` would come out 1.55× heavier than `/` — visibly denser for no
- *  reason, since weight carries no meaning here. 4 of 16 solves 1 − (12/16)² = 43.75%, matching the
- *  single-direction 7/16, so the six read as one family that differs only in DIRECTION. */
+/** Band width for a CROSSED character on a mark. Narrower: crossing two directions overlaps their
+ *  ink, so total coverage is 1 - (gap/period)^2, not twice one direction's. At the single-direction
+ *  width `+` and `x` would come out 1.55x heavier than `/` - visibly denser for no reason, since
+ *  weight carries no meaning here. 4 of 16 solves 1 - (12/16)^2 = 43.75%, matching 7/16. */
 export const HATCH_STROKE_CROSSED = 4;
 
-/** The band width this character is drawn at, on a MARK: narrower when crossed, so every character
- *  lands at the same coverage. */
+/** The band width this character is drawn at on a mark. */
 export function hatchStrokeWidth(char: HatchChar): number {
   return GEOM[char].crossed ? HATCH_STROKE_CROSSED : HATCH_STROKE;
 }
 
-/** A tile's two measurements. Marks and keys resolve different ones — see HATCH_SWATCH_PERIOD. */
-export interface HatchGeometry {
-  period: number;
-  band: number;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The legend/tooltip GLYPH: one centred instance of the texture, in a square box.
+ *
+ *  A tile is the wrong primitive at this size. A 14px box holds a fraction of the mark's period, so
+ *  a tiled key shows an edge rather than a direction, and it has to grow into an awkward rectangle
+ *  before a crossed character resolves at all. A glyph inverts that — draw exactly ONE instance,
+ *  centred, ground either side: `/` reads as three bands (ground, mark, ground), `+` as a plus, `x`
+ *  as an x. Recognition comes from the shape, so a small square is enough.
+ *
+ *  All six are drawn in SVG, on the marks, in the key and in the export — so unlike a CSS-gradient
+ *  key there is only one coordinate convention and no angle conversion to get wrong. */
+export const HATCH_GLYPH_BOX = 14;
+
+/** Band width for a single-direction glyph. 6 of 14 leaves 4px of ground either side: equal, integer,
+ *  pixel-crisp, and ~43% ink, which is the mark's coverage. */
+export const HATCH_GLYPH_BAND = 6;
+
+/** Band width for a crossed glyph. Narrower for the same reason the mark's is — two crossing bands
+ *  overlap their ink — and it keeps 5px of ground either side of each arm, so the cross reads as a
+ *  cross rather than a filled box. */
+export const HATCH_GLYPH_BAND_CROSSED = 4;
+
+/** One band of a glyph. A rect for the axis-aligned characters, which must land on integer
+ *  coordinates to stay crisp; a line for the diagonals, which cannot be crisp anyway and are
+ *  clipped to the box by its viewport. */
+export type HatchGlyphShape =
+  | { kind: "rect"; x: number; y: number; width: number; height: number }
+  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number };
+
+/** The bands making up a character's glyph, in a HATCH_GLYPH_BOX-square box. Every band passes
+ *  through the centre — that is what "one centred instance" means, and it is what the reader's eye
+ *  finds first. */
+export function hatchGlyphShapes(char: HatchChar): HatchGlyphShape[] {
+  const box = HATCH_GLYPH_BOX;
+  const inset = (band: number) => (box - band) / 2;
+
+  const vertical = (band: number): HatchGlyphShape =>
+    ({ kind: "rect", x: inset(band), y: 0, width: band, height: box });
+  const horizontal = (band: number): HatchGlyphShape =>
+    ({ kind: "rect", x: 0, y: inset(band), width: box, height: band });
+  /** Ascending left-to-right: SVG y grows downward, so it starts at the BOTTOM-left. */
+  const ascending = (band: number): HatchGlyphShape =>
+    ({ kind: "line", x1: 0, y1: box, x2: box, y2: 0, width: band });
+  const descending = (band: number): HatchGlyphShape =>
+    ({ kind: "line", x1: 0, y1: 0, x2: box, y2: box, width: band });
+
+  const wide = HATCH_GLYPH_BAND;
+  const thin = HATCH_GLYPH_BAND_CROSSED;
+  switch (char) {
+    case "|":
+      return [vertical(wide)];
+    case "-":
+      return [horizontal(wide)];
+    case "/":
+      return [ascending(wide)];
+    case "\\":
+      return [descending(wide)];
+    case "+":
+      return [vertical(thin), horizontal(thin)];
+    case "x":
+      return [ascending(thin), descending(thin)];
+  }
 }
 
-/** Geometry for a MARK: the full tile, coverage equalised across characters. */
-export function markGeometry(char: HatchChar): HatchGeometry {
-  return { period: HATCH_PERIOD, band: hatchStrokeWidth(char) };
+/** Render a glyph as SVG markup: a ground rect plus its bands. One emitter shared by the DOM
+ *  builders and the tooltip's HTML string, so the three surfaces cannot drift. */
+export function hatchGlyphMarkup(char: HatchChar, ground: string, stroke: string): string {
+  const box = HATCH_GLYPH_BOX;
+  const bands = hatchGlyphShapes(char)
+    .map((s) =>
+      s.kind === "rect"
+        ? `<rect x="${s.x}" y="${s.y}" width="${s.width}" height="${s.height}" style="fill:${stroke}"/>`
+        : `<line x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke-width="${s.width}" style="stroke:${stroke}"/>`,
+    )
+    .join("");
+  return (
+    `<svg width="${box}" height="${box}" viewBox="0 0 ${box} ${box}" aria-hidden="true">` +
+    `<rect width="${box}" height="${box}" style="fill:${ground}"/>${bands}</svg>`
+  );
 }
 
-/** Geometry for a legend/tooltip KEY: a smaller tile at the mark's band ratios, so the key reads at
- *  the same weight as the mark. */
-export function swatchGeometry(char: HatchChar): HatchGeometry {
-  const scale = HATCH_SWATCH_PERIOD / HATCH_PERIOD;
-  return { period: HATCH_SWATCH_PERIOD, band: hatchStrokeWidth(char) * scale };
+/** The same glyph as DOM, for the live legend and the PNG export. Returns a <g> at the origin so a
+ *  caller can position it; the box is HATCH_GLYPH_BOX square. */
+export function hatchGlyphGroup(
+  doc: Document,
+  char: HatchChar,
+  ground: string,
+  stroke: string,
+): SVGElement {
+  const box = HATCH_GLYPH_BOX;
+  const g = doc.createElementNS(SVG_NS, "g");
+  const bg = doc.createElementNS(SVG_NS, "rect");
+  bg.setAttribute("width", String(box));
+  bg.setAttribute("height", String(box));
+  bg.setAttribute("style", `fill:${ground}`);
+  g.appendChild(bg);
+  for (const s of hatchGlyphShapes(char)) {
+    if (s.kind === "rect") {
+      const el = doc.createElementNS(SVG_NS, "rect");
+      el.setAttribute("x", String(s.x));
+      el.setAttribute("y", String(s.y));
+      el.setAttribute("width", String(s.width));
+      el.setAttribute("height", String(s.height));
+      el.setAttribute("style", `fill:${stroke}`);
+      g.appendChild(el);
+    } else {
+      const el = doc.createElementNS(SVG_NS, "line");
+      el.setAttribute("x1", String(s.x1));
+      el.setAttribute("y1", String(s.y1));
+      el.setAttribute("x2", String(s.x2));
+      el.setAttribute("y2", String(s.y2));
+      el.setAttribute("stroke-width", String(s.width));
+      el.setAttribute("style", `stroke:${stroke}`);
+      g.appendChild(el);
+    }
+  }
+  return g;
 }
 
 /** Declaration order is the documented order in CONFIG-SPEC. */
@@ -107,10 +196,6 @@ export function hatchAngles(char: HatchChar): number[] {
   return crossed ? [rotate, rotate + 90] : [rotate];
 }
 
-/** The CSS gradient angles for the same texture. See INVARIANT 2. */
-export function hatchCssAngles(char: HatchChar): number[] {
-  return hatchAngles(char).map((a) => a - 90);
-}
 
 /** Content-addressed, so it is deterministic across renders (the golden-SVG gate depends on
  *  stable ids) AND collision-free between two figures on one page: two figures asking for the
@@ -120,21 +205,10 @@ export function hatchPatternId(
   char: HatchChar,
   ground: string,
   stroke: string,
-  geom: HatchGeometry = markGeometry(char),
 ): string {
   const safe = (s: string) => s.replace(/[^A-Za-z0-9]/g, "");
-  // The geometry is part of the identity — a key's small tile and a mark's large one are different
-  // definitions and must not share an id. Suffixed only off the mark geometry, so mark ids (and the
-  // golden that locks them) are unchanged.
-  const mark = markGeometry(char);
-  const scale =
-    geom.period === mark.period && geom.band === mark.band
-      ? ""
-      : `-p${String(geom.period).replace(".", "_")}b${String(geom.band).replace(".", "_")}`;
-  return `tblhatch-${GEOM[char].slug}-${safe(ground)}-${safe(stroke)}${scale}`;
+  return `tblhatch-${GEOM[char].slug}-${safe(ground)}-${safe(stroke)}`;
 }
-
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** The <pattern> for a textured series, ready to append to a plot's <defs>.
  *  Colours go on `style` rather than the `fill`/`stroke` presentation attributes so a
@@ -144,12 +218,11 @@ export function hatchSvgPattern(
   char: HatchChar,
   ground: string,
   stroke: string,
-  geom: HatchGeometry = markGeometry(char),
 ): SVGElement {
   const { rotate, crossed } = GEOM[char];
-  const { period } = geom;
+  const period = HATCH_PERIOD;
   const pattern = doc.createElementNS(SVG_NS, "pattern");
-  pattern.setAttribute("id", hatchPatternId(char, ground, stroke, geom));
+  pattern.setAttribute("id", hatchPatternId(char, ground, stroke));
   pattern.setAttribute("width", String(period));
   pattern.setAttribute("height", String(period));
   pattern.setAttribute("patternUnits", "userSpaceOnUse");
@@ -166,7 +239,7 @@ export function hatchSvgPattern(
   // Measured: a `stroke-width: 7` line on x=0 renders 17.5% coverage, where an explicit 7px rect
   // renders 43.3%. The rect also matches `hatchCss`, whose hard gradient stops were always a true
   // band, so the legend swatch and the mark now carry the same weight.
-  const w = geom.band;
+  const w = hatchStrokeWidth(char);
   const band = (width: number, height: number) => {
     const el = doc.createElementNS(SVG_NS, "rect");
     el.setAttribute("width", String(width));
@@ -196,6 +269,17 @@ export function resolveHatch(char: HatchChar, ground: string): SeriesHatch {
   return { char, ground, stroke, id: hatchPatternId(char, ground, stroke) };
 }
 
+/** Series → resolved texture, read off already-resolved legend rows. The legend is the source of
+ *  truth on purpose: it holds the colour each series is actually PAINTED, so a tooltip key built from
+ *  this can never disagree with the legend key beside it. Empty when nothing is textured. */
+export function hatchesBySeries(
+  items: ReadonlyArray<{ series: string; hatch?: SeriesHatch }> | null | undefined,
+): Map<string, SeriesHatch> {
+  const out = new Map<string, SeriesHatch>();
+  for (const item of items ?? []) if (item.hatch) out.set(item.series, item.hatch);
+  return out;
+}
+
 /** Resolve `series_patterns` for the LEGEND, whose ground is the colour the legend itself shows.
  *  The marks resolve per element instead (see assemble-plot), because `bar_color`/`category_colors`/
  *  the selector accent override the fill per mark and the legend shows only the base colour.
@@ -216,23 +300,6 @@ export function resolveSeriesHatches(
   return out;
 }
 
-/** Series → texture CSS, built from already-resolved legend rows. The legend is the source of
- *  truth on purpose: it holds the colour each series is actually PAINTED (a mono stacked bar's
- *  tonal tier, not its palette entry), so a tooltip swatch built from this can never disagree with
- *  the key beside it. Returns an empty map when nothing is textured. */
-export function hatchCssBySeries(
-  items: ReadonlyArray<{ series: string; hatch?: SeriesHatch }> | null | undefined,
-): Map<string, { backgroundColor: string; backgroundImage: string }> {
-  const out = new Map<string, { backgroundColor: string; backgroundImage: string }>();
-  for (const item of items ?? []) {
-    if (item.hatch)
-      out.set(
-        item.series,
-        hatchCss(item.hatch.char, item.hatch.ground, item.hatch.stroke, swatchGeometry(item.hatch.char)),
-      );
-  }
-  return out;
-}
 
 /** How far the hatch band sits from its ground, in TIERS of the ground's own hue ramp.
  *
@@ -271,23 +338,4 @@ export function defaultHatchStroke(ground: string): string {
   return shiftLightness(ground, canDarken ? -HATCH_FALLBACK_DL : HATCH_FALLBACK_DL);
 }
 
-/** The same texture as CSS, for the HTML legend and tooltip swatches. Gradient gaps are
- *  `transparent` and the ground comes from `background-color` alone, so a crossed character's two
- *  layers show through each other instead of the upper one painting the lower one out. */
-export function hatchCss(
-  char: HatchChar,
-  ground: string,
-  stroke: string,
-  geom: HatchGeometry = markGeometry(char),
-): { backgroundColor: string; backgroundImage: string } {
-  const { period, band: w } = geom;
-  const backgroundImage = hatchCssAngles(char)
-    .map(
-      (a) =>
-        `repeating-linear-gradient(${a}deg, ${stroke} 0 ${w}px, ` +
-        `transparent ${w}px ${period}px)`,
-    )
-    .join(", ");
-  return { backgroundColor: ground, backgroundImage };
-}
 

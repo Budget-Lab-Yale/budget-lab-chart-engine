@@ -1,25 +1,17 @@
 // @vitest-environment jsdom
 //
-// Hatch geometry. Two things here are easy to get wrong and invisible in unit-free code.
+// Hatch geometry for the MARKS. The one thing worth pinning hardest:
 //
-// 1. THE TILE MUST STAY SEAMLESS. A 7×7 tile containing a vertical line tiles perfectly. Rotating
-//    that LINE inside the fixed tile does not — the line swings out of the cell and the tiling
-//    breaks up. So the rotation belongs on the tile (`patternTransform`), which rotates the whole
-//    infinite tiling and stays seamless. That constrains the decomposition: every character is
-//    one-or-two PERPENDICULAR lines drawn in the cell, plus one tile rotation. `x` is therefore
-//    `+` rotated 45°, not two independently rotated diagonals.
+// THE TILE CLIPS, AND IT MUST TILE. A <pattern> establishes its own viewport, so anything crossing
+// the cell edge is cut, not wrapped: a stroked line centred on x=0 loses its outer half and renders
+// at HALF its nominal width (measured 17.5% coverage for stroke-width 7, where an explicit 7px rect
+// gives 43.3%). Hence bands are RECTS, sized exactly. The same clipping is why rotation goes on
+// `patternTransform` — rotating a shape inside a fixed cell swings it out of the cell — which forces
+// the decomposition: one-or-two PERPENDICULAR bands in the cell, plus one tile rotation. `x` is `+`
+// rotated 45°, NOT two separately rotated diagonals.
 //
-// 2. THE SVG↔CSS ANGLE RELATIONSHIP. Chart marks are real <pattern> elements; legend and tooltip
-//    swatches are CSS gradients. If they disagree the key leans the opposite way from the bars and
-//    nothing else catches it. With band direction `d` measured clockwise from vertical:
-//      SVG — the primitive is a VERTICAL line, so rotate(θ) gives d = θ.
-//      CSS — angle φ names the GRADIENT line (clockwise from up) and lays bands PERPENDICULAR to
-//            it, so d = φ + 90.
-//    Equating: φ = θ − 90.
-//    Issue #26 says the CSS angle is the NEGATION of the SVG angle. That holds only for the two
-//    diagonals, where −θ and θ−90 coincide modulo 180° (a symmetric repeating gradient is
-//    unchanged by a 180° flip). For `|` and `-` negation is off by 90°, which would silently swap
-//    vertical and horizontal between chart and legend.
+// The legend/tooltip KEY is a different drawing entirely — one centred glyph, not a patch of this
+// tiling. See test/hatch-glyph.test.ts and test/hatch-legend-legibility.test.ts.
 import { describe, it, expect } from "vitest";
 import { tokens } from "../src/theme/tokens";
 import { d3 } from "../src/engine/vendor";
@@ -28,10 +20,8 @@ import {
   defaultHatchStroke,
   isHatchChar,
   hatchAngles,
-  hatchCssAngles,
   hatchPatternId,
   hatchSvgPattern,
-  hatchCss,
   HATCH_PERIOD,
   HATCH_STROKE,
   HATCH_STROKE_CROSSED,
@@ -93,19 +83,6 @@ describe("hatchAngles — each character is a picture of its own result", () => 
     const [crossA, crossB] = hatchAngles("x") as [number, number];
     expect(sameDirection(crossA, hatchAngles("/")[0]!)).toBe(true);
     expect(sameDirection(crossB, hatchAngles("\\")[0]!)).toBe(true);
-  });
-});
-
-describe("hatchCssAngles — the mirror trap", () => {
-  it("is the SVG rotation minus 90 degrees, for every character", () => {
-    for (const c of HATCH_CHARS) {
-      expect(hatchCssAngles(c)).toEqual(hatchAngles(c).map((a) => a - 90));
-    }
-  });
-
-  it("keeps vertical vertical and horizontal horizontal, where plain negation fails", () => {
-    expect(hatchCssAngles("|")).toEqual([-90]);
-    expect(hatchCssAngles("-")).toEqual([0]);
   });
 });
 
@@ -289,36 +266,6 @@ describe("hatch contrast holds across the whole palette", () => {
   });
 });
 
-describe("hatchCss", () => {
-  it("carries the ground as the background colour", () => {
-    expect(hatchCss("/", GROUND, STROKE).backgroundColor).toBe(GROUND);
-  });
-
-  it("lays one repeating gradient per direction, at the CSS angle", () => {
-    expect(hatchCss("/", GROUND, STROKE).backgroundImage).toBe(
-      `repeating-linear-gradient(-45deg, ${STROKE} 0 ${HATCH_STROKE}px, transparent ${HATCH_STROKE}px ${HATCH_PERIOD}px)`,
-    );
-  });
-
-  it("uses the crossed character's thinner stroke, so its ink does not double up", () => {
-    expect(hatchCss("+", GROUND, STROKE).backgroundImage).toContain(`0 ${HATCH_STROKE_CROSSED}px`);
-    expect(hatchCss("+", GROUND, STROKE).backgroundImage).not.toContain(`0 ${HATCH_STROKE}px`);
-  });
-
-  it("layers both gradients for a crossed character, gaps transparent so the lower shows through", () => {
-    const { backgroundImage } = hatchCss("+", GROUND, STROKE);
-    expect(backgroundImage.split("repeating-linear-gradient").length - 1).toBe(2);
-    expect(backgroundImage).toContain("-90deg");
-    expect(backgroundImage).toContain("0deg");
-    // The ground never appears in a gradient stop: it comes from background-color alone, so a
-    // layered pair cannot paint over the layer beneath it.
-    expect(backgroundImage).not.toContain(GROUND);
-  });
-});
-
-// The geometry is deliberately coarse: broad bands of colour reading as an alternating two-tone,
-// rather than fine pinstripes. Two properties are worth locking, because both are invisible in the
-// numbers alone and both were wrong in the first cut.
 describe("hatch weight", () => {
   /** Fraction of the tile covered by ink. One direction lays a band; two crossed directions overlap,
    *  so their combined coverage is 1 − (gap fraction)², NOT twice one direction's. */

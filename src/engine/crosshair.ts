@@ -11,6 +11,7 @@ import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
+import { hatchGlyphMarkup, type SeriesHatch } from "./hatch";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 
 type Row = Record<string, unknown>;
@@ -657,8 +658,8 @@ export interface BandCrosshairOptions {
   categoryLabels?: Record<string, string>;
   /** Series swatch shape in the tooltip — "rect" for bars (matches the legend), else line. */
   swatchShape?: "line" | "rect";
-  /** Series → `series_patterns` texture CSS; see buildBandTooltipHtml. */
-  hatches?: Map<string, { backgroundColor: string; backgroundImage: string }>;
+  /** Series → resolved `series_patterns` texture; see buildBandTooltipHtml. */
+  hatches?: Map<string, SeriesHatch>;
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -816,10 +817,9 @@ export function buildBandTooltipHtml(
      *  over the series' base `colors` for the swatch so the tooltip marker matches the drawn bar
      *  — the same fill-first rule the 1.3.x value pill uses. Absent → fall back to `colors`. */
     renderedFills?: Map<string, string>;
-    /** Series → the CSS for its `series_patterns` texture (from `hatchCss`), so the tooltip swatch
-     *  carries the same texture, at the same lean, as the mark and the legend key. Absent series
-     *  render a flat fill exactly as before. */
-    hatches?: Map<string, { backgroundColor: string; backgroundImage: string }>;
+    /** Series → its resolved `series_patterns` texture, so the tooltip key carries the same centred
+     *  glyph as the legend key. Absent series render a flat fill exactly as before. */
+    hatches?: Map<string, SeriesHatch>;
   },
 ): string {
   const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills, hatches } = opts;
@@ -860,16 +860,16 @@ export function buildBandTooltipHtml(
       swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
     } else {
       const hatch = hatches?.get(series);
-      const swCls =
-        swatchShape === "rect"
-          ? `tbl-tooltip-swatch is-square${hatch ? " is-hatched" : ""}`
-          : "tbl-tooltip-swatch";
-      // Longhand background-color + background-image, never the `background` shorthand, or the
-      // shorthand resets background-image and the texture disappears.
-      const style = hatch
-        ? `background-color: ${hatch.backgroundColor}; background-image: ${hatch.backgroundImage}`
-        : `background: ${dot}`;
-      swatch = `<span class="${swCls}" style="${style}"></span>`;
+      if (hatch) {
+        // The same centred glyph the legend key uses, as inline SVG — so the two keys are the same
+        // drawing, not two renderings of one idea.
+        swatch =
+          `<span class="tbl-tooltip-swatch is-square is-hatched">` +
+          `${hatchGlyphMarkup(hatch.char, hatch.ground, hatch.stroke)}</span>`;
+      } else {
+        const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
+        swatch = `<span class="${swCls}" style="background: ${dot}"></span>`;
+      }
     }
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
