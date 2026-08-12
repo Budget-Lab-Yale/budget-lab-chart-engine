@@ -214,3 +214,52 @@ describe("two figures on one page", () => {
     );
   });
 });
+
+// The ground has to be the colour the mark is ACTUALLY painted, which is not always the series
+// colour: bar_color, category_colors and the title-selector accent all override the fill per mark.
+// Reading the series map instead produced a hatch tile whose ground painted OVER the override — an
+// amber bar came out blue.
+describe("series_patterns over a per-mark fill override", () => {
+  const ROWS_1S = [
+    { time: "A", value: "3" },
+    { time: "B", value: "5" },
+    { time: "Total", value: "8" },
+  ] as unknown as TidyRow[];
+
+  const singleBar = (extra: Record<string, unknown>) =>
+    ({
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      columns: { x: "time", value: "value" },
+      series_patterns: { "": "/" },
+      ...extra,
+    }) as unknown as ChartSpec;
+
+  const grounds = (svg: SVGSVGElement) =>
+    [...svg.querySelectorAll("pattern")].map((p) =>
+      (p.querySelector("rect")!.getAttribute("style") ?? "").replace("fill:", "").toUpperCase(),
+    );
+
+  it("grounds the hatch in bar_color, not the default series colour", () => {
+    const { svg } = renderChart(singleBar({ bar_color: "amber" }), ROWS_1S, OPTS);
+    expect(grounds(svg)).toContain("#E69F00");
+    expect(grounds(svg)).not.toContain("#0072B2");
+  });
+
+  it("gives a category_colors bar its own hatch, grounded in its own colour", () => {
+    const { svg } = renderChart(
+      singleBar({ bar_color: "blue", category_colors: { Total: "navy" } }),
+      ROWS_1S,
+      OPTS,
+    );
+    // Two distinct grounds in play, so two patterns — one per colour actually painted.
+    expect(grounds(svg).sort()).toEqual(["#0072B2", "#101F5B"]);
+
+    const fillOf = (i: number) =>
+      [...svg.querySelectorAll<SVGElement>('rect[data-series=""]')][i]!.style.fill;
+    // The overridden bar must reference the navy-ground pattern, not the blue one.
+    expect(fillOf(2)).toContain("101F5B");
+    expect(fillOf(0)).toContain("0072B2");
+  });
+});

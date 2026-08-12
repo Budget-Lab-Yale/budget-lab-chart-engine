@@ -144,11 +144,18 @@ export interface SeriesHatch {
   id: string;
 }
 
-/** Resolve `series_patterns` against the colours actually being painted. `seriesColors` must be the
- *  map the marks and legend agree on — for a mono stacked bar that is the tonal tier, not the
- *  categorical palette entry, or the pattern's ground would not match its segment. Returns an empty
- *  map when the spec declares no textures, which is what keeps an untextured figure
- *  byte-identical. */
+/** Resolve one texture: the character plus the ground it is drawn over. The band colour and the id
+ *  both follow from the ground, so this is the only place a hatch is constructed. */
+export function resolveHatch(char: HatchChar, ground: string): SeriesHatch {
+  const stroke = defaultHatchStroke(ground);
+  return { char, ground, stroke, id: hatchPatternId(char, ground, stroke) };
+}
+
+/** Resolve `series_patterns` for the LEGEND, whose ground is the colour the legend itself shows.
+ *  The marks resolve per element instead (see assemble-plot), because `bar_color`/`category_colors`/
+ *  the selector accent override the fill per mark and the legend shows only the base colour.
+ *  Returns an empty map when the spec declares no textures, which is what keeps an untextured
+ *  figure byte-identical. */
 export function resolveSeriesHatches(
   spec: Pick<ChartSpec, "series_patterns">,
   seriesColors: Map<string, string>,
@@ -159,9 +166,7 @@ export function resolveSeriesHatches(
   for (const [series, char] of Object.entries(cfg)) {
     if (!isHatchChar(char)) continue; // validation rejects these; belt-and-braces at render time
     const ground = seriesColors.get(series);
-    if (!ground) continue;
-    const stroke = defaultHatchStroke(ground);
-    out.set(series, { char, ground, stroke, id: hatchPatternId(char, ground, stroke) });
+    if (ground) out.set(series, resolveHatch(char, ground));
   }
   return out;
 }
