@@ -390,6 +390,40 @@ describe("validateSpec (structural)", () => {
   });
 });
 
+describe("tooltip_x_format", () => {
+  it("accepts a d3 timeFormat pattern on a temporal axis", () => {
+    const r = validateSpec({ ...VALID, tooltip_x_format: "%b %-d, %Y" });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("accepts it on a quarterly axis", () => {
+    const r = validateSpec({ ...VALID, xAxisType: "quarterly", tooltip_x_format: "%b %Y" });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects it on a numeric axis, where a time pattern is meaningless", () => {
+    const r = validateSpec({ ...VALID, xAxisType: "numeric", tooltip_x_format: "%b %Y" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/tooltip_x_format/);
+  });
+
+  it("rejects it on a categorical axis rather than silently ignoring it", () => {
+    const r = validateSpec({
+      ...VALID,
+      chartType: "bar",
+      xAxisType: "categorical",
+      tooltip_x_format: "%b %Y",
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/tooltip_x_format/);
+  });
+
+  it("rejects an empty pattern", () => {
+    const r = validateSpec({ ...VALID, tooltip_x_format: "" });
+    expect(r.valid).toBe(false);
+  });
+});
+
 describe("title_selectors", () => {
   const withSelector = (overrides: Record<string, unknown> = {}) => ({
     ...VALID,

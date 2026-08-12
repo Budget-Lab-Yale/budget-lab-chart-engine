@@ -102,6 +102,48 @@ describe("makeXAdapter('numeric') anchorAtZero", () => {
   });
 });
 
+describe("makeXAdapter tooltip x-format override", () => {
+  // A daily span: every point in July shares one "%b %Y" label, which is the bug.
+  const dailyData = [{ _xd: new Date(2026, 0, 1) }, { _xd: new Date(2026, 11, 31) }];
+  const quarterlyData = [{ _xd: new Date(2025, 0, 1) }, { _xd: new Date(2026, 9, 1) }];
+
+  it("temporal: formats month-and-year when no pattern is given", () => {
+    const opts = makeXAdapter("temporal").buildXOpts(dailyData);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2026-07-23"))).toBe("Jul 2026");
+  });
+
+  it("temporal: a pattern names the day, so a daily series is no longer month-only", () => {
+    const opts = makeXAdapter("temporal", undefined, undefined, "%b %-d, %Y").buildXOpts(dailyData);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2026-07-23"))).toBe("Jul 23, 2026");
+  });
+
+  it("temporal: a day-precision pattern round-trips the exact date it was given", () => {
+    // NB: the harness pins TZ=UTC (vitest.config.ts), where parseDate and `new Date(string)`
+    // agree — so this locks the round-trip, NOT the negative-offset day shift parseDate exists
+    // to prevent. That one is only observable outside UTC.
+    const opts = makeXAdapter("temporal", undefined, undefined, "%Y-%m-%d").buildXOpts(dailyData);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2022-01-01"))).toBe("2022-01-01");
+  });
+
+  it("quarterly: formats as YYYYQ# when no pattern is given", () => {
+    const opts = makeXAdapter("quarterly").buildXOpts(quarterlyData);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2026Q3"))).toBe("2026Q3");
+  });
+
+  it("quarterly: honors the same pattern key", () => {
+    const opts = makeXAdapter("quarterly", undefined, undefined, "%b %Y").buildXOpts(quarterlyData);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2026Q3"))).toBe("Jul 2026");
+  });
+
+  it("numeric: unaffected by the pattern (a time pattern is meaningless on a number)", () => {
+    const opts = makeXAdapter("numeric", undefined, undefined, "%b %-d, %Y").buildXOpts([
+      { _xn: 2020 },
+      { _xn: 2022 },
+    ]);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2021"))).toBe("2021");
+  });
+});
+
 describe("tblBandXAxis", () => {
   it("returns a non-empty Mark[] for a list of categories", () => {
     const marks = tblBandXAxis(["A", "B", "C"]);

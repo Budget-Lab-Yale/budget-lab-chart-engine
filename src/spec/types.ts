@@ -418,6 +418,13 @@ export interface ChartSpec {
    *  (which round for legibility), so a tooltip can be more precise than the axis — e.g. set 4
    *  for small magnitudes that round to 0.00 on a 2-decimal axis. Default 2. */
   tooltip_decimals?: number;
+  /** d3 `timeFormat` pattern for the crosshair tooltip's X value, on a `temporal` or `quarterly`
+   *  axis only. Absent ⇒ `"%b %Y"` (temporal) / `YYYYQ#` (quarterly), which match the axis ticks —
+   *  right for month- or quarter-spaced data, wrong for a DAILY series, where every point in a
+   *  month shares one tooltip label and hovering can't tell you which day you're on. Opt-in
+   *  rather than a granularity auto-detect deliberately: a repin re-renders the whole archive, so
+   *  changing the default would move the tooltips of every published temporal figure at once. */
+  tooltip_x_format?: string;
 
   /** Text placed BEFORE every rendered value — axis ticks, value labels, tooltips. Concatenated
    *  literally, so include any space you want (`"$"` vs `"USD "`); on a negative value it sits after

@@ -284,7 +284,7 @@ export function renderPane(
     return renderHistogramPane(spec, rows, opts, classNameSuffix, facetInfo, cols, xType);
   }
 
-  const adapter = makeXAdapter(xType, spec.xAxisPolicy);
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
 
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
@@ -422,7 +422,7 @@ function renderHistogramPane(
 
   if (!binned.length) throw new Error("No data.");
 
-  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned));
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned), spec.tooltip_x_format);
   return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
 }
 

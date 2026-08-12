@@ -341,6 +341,9 @@ export const CHART_SPEC_SCHEMA = {
     x_axis_ticks: { type: "string", enum: ["bottom", "top", "both"] },
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
+    // A d3 timeFormat pattern. Only the emptiness is structural; "is this axis date-based?" is a
+    // cross-field question, so it lives in validate.ts.
+    tooltip_x_format: { type: "string", minLength: 1 },
 
     // Axes
     xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },

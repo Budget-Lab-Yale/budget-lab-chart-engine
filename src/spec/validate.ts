@@ -193,6 +193,18 @@ function histogramSpecError(spec: {
 
 /** `shading` fills between a line and its baseline, so it only means anything on a line chart:
  *  `area` already fills to the axis, and the rest have no line to fill under. */
+/** `tooltip_x_format` is a d3 `timeFormat` pattern, so it only means something on an axis whose x
+ *  values ARE dates. On numeric/categorical it would be silently dropped — reject instead, so an
+ *  author who reaches for it on the wrong axis finds out at load rather than by hovering. */
+function tooltipXFormatError(spec: { xAxisType?: unknown; tooltip_x_format?: unknown }): string | null {
+  if (spec.tooltip_x_format == null) return null;
+  if (spec.xAxisType === "temporal" || spec.xAxisType === "quarterly") return null;
+  return (
+    "`tooltip_x_format` is a d3 timeFormat pattern and applies only to xAxisType " +
+    `"temporal" or "quarterly" (got ${JSON.stringify(spec.xAxisType)})`
+  );
+}
+
 function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): string | null {
   if (!spec.shading?.length) return null;
   return spec.chartType === "line"
@@ -402,6 +414,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (histErrors.length) return { valid: false, errors: histErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
+  const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
+  if (txfErr) return { valid: false, errors: [txfErr] };
   const rugErrors = legendAndRugErrors(spec as ChartSpec);
   if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };

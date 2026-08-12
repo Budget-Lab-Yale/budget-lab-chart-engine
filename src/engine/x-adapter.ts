@@ -65,6 +65,7 @@ export function makeXAdapter(
   xType: XAxisType,
   xAxisPolicy?: XAxisPolicy,
   histogramDomain?: [number, number],
+  tooltipXFormatPattern?: string,
 ): XAdapter {
   if (xType === "numeric") {
     return {
@@ -139,9 +140,11 @@ export function makeXAdapter(
           // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
           // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
           // formats in local time, shifting "2022-01-01" to "Dec 2021" in negative-offset zones
-          // (and mis-snapping the guide). Format a single-line "%b %Y" to match the axis.
+          // (and mis-snapping the guide). Default to a single-line "%b %Y" to match the axis —
+          // which is wrong only when the data is finer than the ticks (a daily series has every
+          // point in a month sharing one label), hence spec.tooltip_x_format.
           tooltipXParse: (v) => +parseDate(v),
-          tooltipXFormat: (v) => d3.timeFormat("%b %Y")(new Date(v)),
+          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? "%b %Y")(new Date(v)),
         };
       },
     };
@@ -159,7 +162,9 @@ export function makeXAdapter(
           axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter),
           markerToX: (m) => parseQuarter(m.x),
           tooltipXParse: (v) => +(parseQuarter(v) as Date),
-          tooltipXFormat: (v) => formatQuarter(new Date(v)),
+          tooltipXFormat: tooltipXFormatPattern
+            ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
+            : (v) => formatQuarter(new Date(v)),
         };
       },
     };

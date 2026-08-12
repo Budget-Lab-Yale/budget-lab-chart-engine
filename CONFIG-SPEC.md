@@ -62,6 +62,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `x_axis_title` | string | Caption below the x-axis. |
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
 | `tooltip_decimals` | integer | Decimal places for values in hover tooltips (independent of axis ticks). Default 2. |
+| `tooltip_x_format` | string | d3 `timeFormat` pattern for the tooltip's **x** value. `xAxisType: temporal` or `quarterly` only — rejected on `numeric`/`categorical`. Default (absent): `"%b %Y"` on temporal, `YYYYQ#` on quarterly, matching the axis ticks. Set it when the data is finer than the ticks: on a **daily** series every point in a month otherwise shares one tooltip label, so hovering cannot tell you which day you are on. `"%b %-d, %Y"` → `Jul 23, 2026`. |
 
 ### Value units
 
