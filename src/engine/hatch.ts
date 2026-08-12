@@ -8,7 +8,7 @@
 // and the PNG export, and as CSS gradients for the HTML legend/tooltip swatches. Both read the
 // table below.
 //
-// INVARIANT 1 — the tile must tile. A 7×7 cell holding a vertical line repeats seamlessly;
+// INVARIANT 1 — the tile must tile. A square cell holding a vertical line repeats seamlessly;
 // rotating that LINE inside the fixed cell does not, because the line swings out of the cell.
 // So rotation goes on `patternTransform`, which rotates the whole infinite tiling. That is what
 // forces the decomposition below: one-or-two PERPENDICULAR lines drawn in the cell, plus one tile
@@ -27,13 +27,13 @@ import type { ChartSpec, HatchChar } from "../spec/types";
 
 export type { HatchChar };
 
-/** Tile size and line weight, in user units (≈ px at chart scale). 3px of ink per 7px period
- *  reads cleanly at the bar widths the engine produces, on screen and at the export's 2× scale. */
-export const HATCH_PERIOD = 7;
-export const HATCH_STROKE_WIDTH = 3;
-
-/** Declaration order is the documented order in CONFIG-SPEC. */
-export const HATCH_CHARS: readonly HatchChar[] = ["/", "\\", "|", "-", "+", "x"];
+// Tile size and line weight, in user units (≈ px at chart scale).
+//
+// The geometry is deliberately COARSE — broad bands of colour reading as an alternating two-tone,
+// not fine pinstripes. A 7px period with a 3px line (the first cut) reads as texture-on-a-colour at
+// bar widths; at 16/7 the ground and the hatch read as two colours banded together, which is what
+// makes the distinction survive a projector and grayscale.
+export const HATCH_PERIOD = 16;
 
 /** `rotate` is the tile rotation; `crossed` adds a second line perpendicular to the first.
  *  See INVARIANT 1 — this pair is the only decomposition that tiles. */
@@ -45,6 +45,24 @@ const GEOM: Record<HatchChar, { rotate: number; crossed: boolean; slug: string }
   "+": { rotate: 0, crossed: true, slug: "plus" },
   x: { rotate: 45, crossed: true, slug: "cross" },
 };
+
+/** Line weight for a single-direction character (`/ \ | -`). */
+export const HATCH_STROKE = 7;
+
+/** Line weight for a CROSSED character (`+ x`). Deliberately thinner: crossing two directions
+ *  overlaps their ink, so total coverage is 1 − (gap/period)², not twice one direction's. At the
+ *  single-direction weight, `+` and `x` came out 1.55× heavier than `/` — visibly denser for no
+ *  reason, since weight carries no meaning here. 4px puts every character at ~44% coverage, so the
+ *  six read as one family that differs only in DIRECTION. */
+export const HATCH_STROKE_CROSSED = 4;
+
+/** The line weight this character is drawn at. */
+export function hatchStrokeWidth(char: HatchChar): number {
+  return GEOM[char].crossed ? HATCH_STROKE_CROSSED : HATCH_STROKE;
+}
+
+/** Declaration order is the documented order in CONFIG-SPEC. */
+export const HATCH_CHARS: readonly HatchChar[] = ["/", "\\", "|", "-", "+", "x"];
 
 export function isHatchChar(v: unknown): v is HatchChar {
   return typeof v === "string" && Object.prototype.hasOwnProperty.call(GEOM, v);
@@ -102,7 +120,7 @@ export function hatchSvgPattern(
     el.setAttribute("y1", "0");
     el.setAttribute("x2", String(x2));
     el.setAttribute("y2", String(y2));
-    el.setAttribute("stroke-width", String(HATCH_STROKE_WIDTH));
+    el.setAttribute("stroke-width", String(hatchStrokeWidth(char)));
     el.setAttribute("style", `stroke:${stroke}`);
     return el;
   };
@@ -183,11 +201,12 @@ export function hatchCss(
   ground: string,
   stroke: string,
 ): { backgroundColor: string; backgroundImage: string } {
+  const w = hatchStrokeWidth(char);
   const backgroundImage = hatchCssAngles(char)
     .map(
       (a) =>
-        `repeating-linear-gradient(${a}deg, ${stroke} 0 ${HATCH_STROKE_WIDTH}px, ` +
-        `transparent ${HATCH_STROKE_WIDTH}px ${HATCH_PERIOD}px)`,
+        `repeating-linear-gradient(${a}deg, ${stroke} 0 ${w}px, ` +
+        `transparent ${w}px ${HATCH_PERIOD}px)`,
     )
     .join(", ");
   return { backgroundColor: ground, backgroundImage };

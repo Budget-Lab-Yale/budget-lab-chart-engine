@@ -814,8 +814,15 @@ Notes:
   export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
 - Only a **rect** legend swatch draws the texture (`bar`, `stacked`, `histogram`). An `area` series'
   swatch is an 18×3 line, thinner than the hatch period, so it stays a flat color.
-- A hatch puts roughly 43% of the fill at the stroke color, which slightly darkens the segment's
-  apparent lightness. Where that matters, set `series_pattern_colors` explicitly.
+- The geometry is deliberately **coarse** — a 16px period with a 7px band, so the ground and the
+  hatch read as two colors banded together rather than as pinstripes over a color. The crossed
+  characters (`"+"`, `"x"`) use a thinner 4px line, because crossing two directions overlaps
+  their ink; that puts all six characters at the same ~44% coverage, so they differ only in
+  **direction**, never in weight.
+- Because a band covers ~44% of the fill, a texture nudges the segment's apparent lightness.
+  Where that matters, set `series_pattern_colors` explicitly.
+- Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
+  two full periods and reads as a partial band rather than a texture.
 
 ---
 

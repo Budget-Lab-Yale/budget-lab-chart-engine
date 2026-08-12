@@ -32,7 +32,9 @@ import {
   hatchSvgPattern,
   hatchCss,
   HATCH_PERIOD,
-  HATCH_STROKE_WIDTH,
+  HATCH_STROKE,
+  HATCH_STROKE_CROSSED,
+  hatchStrokeWidth,
 } from "../src/engine/hatch";
 
 const GROUND = "#58A3E7";
@@ -158,7 +160,7 @@ describe("hatchSvgPattern", () => {
     for (const c of ["|", "-", "/", "\\"] as const) {
       const lines = [...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("line")];
       expect(lines).toHaveLength(1);
-      expect(lines[0]!.getAttribute("stroke-width")).toBe(String(HATCH_STROKE_WIDTH));
+      expect(lines[0]!.getAttribute("stroke-width")).toBe(String(HATCH_STROKE));
       expect(lines[0]!.getAttribute("style")).toContain(STROKE);
     }
   });
@@ -221,8 +223,13 @@ describe("hatchCss", () => {
 
   it("lays one repeating gradient per direction, at the CSS angle", () => {
     expect(hatchCss("/", GROUND, STROKE).backgroundImage).toBe(
-      `repeating-linear-gradient(-45deg, ${STROKE} 0 ${HATCH_STROKE_WIDTH}px, transparent ${HATCH_STROKE_WIDTH}px ${HATCH_PERIOD}px)`,
+      `repeating-linear-gradient(-45deg, ${STROKE} 0 ${HATCH_STROKE}px, transparent ${HATCH_STROKE}px ${HATCH_PERIOD}px)`,
     );
+  });
+
+  it("uses the crossed character's thinner stroke, so its ink does not double up", () => {
+    expect(hatchCss("+", GROUND, STROKE).backgroundImage).toContain(`0 ${HATCH_STROKE_CROSSED}px`);
+    expect(hatchCss("+", GROUND, STROKE).backgroundImage).not.toContain(`0 ${HATCH_STROKE}px`);
   });
 
   it("layers both gradients for a crossed character, gaps transparent so the lower shows through", () => {
@@ -233,5 +240,41 @@ describe("hatchCss", () => {
     // The ground never appears in a gradient stop: it comes from background-color alone, so a
     // layered pair cannot paint over the layer beneath it.
     expect(backgroundImage).not.toContain(GROUND);
+  });
+});
+
+// The geometry is deliberately coarse: broad bands of colour reading as an alternating two-tone,
+// rather than fine pinstripes. Two properties are worth locking, because both are invisible in the
+// numbers alone and both were wrong in the first cut.
+describe("hatch weight", () => {
+  /** Fraction of the tile covered by ink. One direction lays a band; two crossed directions overlap,
+   *  so their combined coverage is 1 − (gap fraction)², NOT twice one direction's. */
+  const coverage = (char: Parameters<typeof hatchStrokeWidth>[0]) => {
+    const s = hatchStrokeWidth(char);
+    const gap = (HATCH_PERIOD - s) / HATCH_PERIOD;
+    return hatchAngles(char).length === 2 ? 1 - gap * gap : s / HATCH_PERIOD;
+  };
+
+  it("reads as broad alternating bands, not pinstripes", () => {
+    // Ink and ground within a factor of ~1.5 of each other is what makes it read as two-tone.
+    expect(coverage("/")).toBeGreaterThan(0.35);
+    expect(coverage("/")).toBeLessThan(0.5);
+    // And the band itself is broad in absolute terms, not a hairline.
+    expect(HATCH_STROKE).toBeGreaterThanOrEqual(6);
+  });
+
+  it("weighs every character the same, so `x` is not heavier than `/`", () => {
+    const weights = HATCH_CHARS.map(coverage);
+    const min = Math.min(...weights);
+    const max = Math.max(...weights);
+    // Crossing two 43%-ink directions would give 67% coverage; the crossed characters use a
+    // thinner stroke to land back on the same weight.
+    expect(max - min).toBeLessThan(0.04);
+  });
+
+  it("gives a crossed character a thinner stroke than a single-direction one", () => {
+    expect(hatchStrokeWidth("+")).toBeLessThan(hatchStrokeWidth("/"));
+    expect(hatchStrokeWidth("x")).toBe(hatchStrokeWidth("+"));
+    expect(hatchStrokeWidth("|")).toBe(hatchStrokeWidth("/"));
   });
 });
