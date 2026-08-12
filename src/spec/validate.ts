@@ -648,7 +648,6 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   checkSeries(spec.series_order, "series_order");
   checkSeries(spec.series_colors, "series_colors");
   checkSeries(spec.series_patterns, "series_patterns");
-  checkSeries(spec.series_pattern_colors, "series_pattern_colors");
   checkSeries(spec.series_styles, "series_styles");
   checkSeries(spec.series_labels, "series_labels");
 

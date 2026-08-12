@@ -15,9 +15,13 @@ could not reach the PNG export, which re-renders from the spec rather than seria
 - **`series_patterns`** gives a series a hatch texture alongside its colour, on the chart types with
   filled marks (`bar`, `stacked`, `area`, `histogram`, `waterfall`). The six values are
   matplotlib's hatch characters (`"/"` `"\\"` `"|"` `"-"` `"+"` `"x"`), so the character is a
-  picture of the result. The declared colour stays the pattern's ground; `series_pattern_colors`
-  overrides the hatch line, which otherwise defaults to a darker step of the ground's own hue. The
-  texture reaches the marks, the legend key, the hover tooltip and the export. An unrecognised
+  picture of the result. The declared colour stays the pattern's ground, and the hatch BAND colour
+  is derived rather than authored — three tonal tiers along the ground's own hue ramp (lighter
+  instead when the ground is too dark to darken), so a pair can never leave the Style-Guide ramp.
+  Measured ΔL* is 21–32 across all 70 palette colours, and a CI gate holds it there. The geometry is
+  deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
+  own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
+  The texture reaches the marks, the legend key, the hover tooltip and the export. An unrecognised
   value is rejected at load rather than rendered flat — including density repeats (`"//"`), which
   are deliberately unsupported: more ink per unit area reads as a darker shade, which the tonal
   scale already controls precisely.

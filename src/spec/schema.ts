@@ -360,7 +360,6 @@ export const CHART_SPEC_SCHEMA = {
       type: "object",
       additionalProperties: { enum: ["/", "\\", "|", "-", "+", "x"] },
     },
-    series_pattern_colors: { type: "object", additionalProperties: { type: "string" } },
     bar_color: { type: "string" },
     category_colors: { type: "object", additionalProperties: { type: "string" } },
     series_styles: {

@@ -426,27 +426,26 @@ describe("series_patterns", () => {
     }
   });
 
-  it("accepts series_pattern_colors alongside it", () => {
+  it("rejects series_pattern_colors — the band colour is derived, not authored", () => {
     const r = validateSpec({
       ...BAR,
       series_patterns: { a: "/" },
       series_pattern_colors: { a: "navy" },
     });
-    expect(r.valid).toBe(true);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_pattern_colors/);
   });
 
-  it("cross-references both keys against the data's series", () => {
+  it("cross-references the key against the data's series", () => {
     const spec = {
       ...VALID,
       chartType: "bar",
       xAxisType: "categorical",
       series_patterns: { nope: "/" },
-      series_pattern_colors: { alsoNope: "navy" },
     } as unknown as ChartSpec;
     const r = validateChartData(spec, ROWS);
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/series_patterns/);
-    expect(r.errors.join("\n")).toMatch(/series_pattern_colors/);
   });
 });
 

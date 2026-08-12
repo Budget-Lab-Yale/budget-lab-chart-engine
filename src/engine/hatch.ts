@@ -8,11 +8,13 @@
 // and the PNG export, and as CSS gradients for the HTML legend/tooltip swatches. Both read the
 // table below.
 //
-// INVARIANT 1 — the tile must tile. A square cell holding a vertical line repeats seamlessly;
-// rotating that LINE inside the fixed cell does not, because the line swings out of the cell.
-// So rotation goes on `patternTransform`, which rotates the whole infinite tiling. That is what
-// forces the decomposition below: one-or-two PERPENDICULAR lines drawn in the cell, plus one tile
-// rotation. `x` is `+` rotated 45°, NOT two separately rotated diagonals.
+// INVARIANT 1 — the tile CLIPS, and it must tile. A <pattern> establishes its own viewport, so
+// anything crossing the cell edge is cut, not wrapped: a stroked line centred on x=0 loses its outer
+// half and renders at HALF its nominal width (measured 17.5% coverage for stroke-width 7, where an
+// explicit 7px rect gives 43.3%). Hence bands are RECTS, sized exactly. The same clipping is why
+// rotation goes on `patternTransform` — rotating a shape inside a fixed cell swings it out of the
+// cell — which forces the decomposition below: one-or-two PERPENDICULAR bands in the cell, plus one
+// tile rotation. `x` is `+` rotated 45°, NOT two separately rotated diagonals.
 //
 // INVARIANT 2 — the CSS angle is the SVG rotation MINUS 90°, not its negation. With band
 // direction `d` measured clockwise from vertical: the SVG primitive is a vertical line, so
@@ -21,18 +23,17 @@
 // for the two diagonals (−θ and θ−90 agree modulo 180°, and a symmetric repeating gradient is
 // unchanged by a 180° flip) but is off by 90° for `|` and `-`, which silently swaps vertical and
 // horizontal between the chart and its legend.
-import { d3 } from "./vendor";
-import { TONAL_BY_HEX, resolveColor } from "./palette";
+import { locateOnRamp, lightness, shiftLightness } from "./palette";
 import type { ChartSpec, HatchChar } from "../spec/types";
 
 export type { HatchChar };
 
-// Tile size and line weight, in user units (≈ px at chart scale).
+// Tile size, in user units (≈ px at chart scale).
 //
 // The geometry is deliberately COARSE — broad bands of colour reading as an alternating two-tone,
-// not fine pinstripes. A 7px period with a 3px line (the first cut) reads as texture-on-a-colour at
-// bar widths; at 16/7 the ground and the hatch read as two colours banded together, which is what
-// makes the distinction survive a projector and grayscale.
+// not pinstripes. At 16/7 the ground and the band read as two colours banded together, which is what
+// makes the distinction survive a projector and grayscale. Rasterised and pixel-counted at 42–47%
+// band for all six characters (the spread is antialiasing on the diagonals).
 export const HATCH_PERIOD = 16;
 
 /** `rotate` is the tile rotation; `crossed` adds a second line perpendicular to the first.
@@ -46,17 +47,18 @@ const GEOM: Record<HatchChar, { rotate: number; crossed: boolean; slug: string }
   x: { rotate: 45, crossed: true, slug: "cross" },
 };
 
-/** Line weight for a single-direction character (`/ \ | -`). */
+/** Band WIDTH for a single-direction character (`/ \ | -`), in tile units. Rendered as an explicit
+ *  rect, so this is the width that actually appears — see hatchSvgPattern. */
 export const HATCH_STROKE = 7;
 
-/** Line weight for a CROSSED character (`+ x`). Deliberately thinner: crossing two directions
+/** Band width for a CROSSED character (`+ x`). Deliberately narrower: crossing two directions
  *  overlaps their ink, so total coverage is 1 − (gap/period)², not twice one direction's. At the
- *  single-direction weight, `+` and `x` came out 1.55× heavier than `/` — visibly denser for no
- *  reason, since weight carries no meaning here. 4px puts every character at ~44% coverage, so the
- *  six read as one family that differs only in DIRECTION. */
+ *  single-direction width, `+` and `x` would come out 1.55× heavier than `/` — visibly denser for no
+ *  reason, since weight carries no meaning here. 4 of 16 solves 1 − (12/16)² = 43.75%, matching the
+ *  single-direction 7/16, so the six read as one family that differs only in DIRECTION. */
 export const HATCH_STROKE_CROSSED = 4;
 
-/** The line weight this character is drawn at. */
+/** The band width this character is drawn at. */
 export function hatchStrokeWidth(char: HatchChar): number {
   return GEOM[char].crossed ? HATCH_STROKE_CROSSED : HATCH_STROKE;
 }
@@ -114,19 +116,54 @@ export function hatchSvgPattern(
   bg.setAttribute("style", `fill:${ground}`);
   pattern.appendChild(bg);
 
-  const line = (x2: number, y2: number) => {
-    const el = doc.createElementNS(SVG_NS, "line");
-    el.setAttribute("x1", "0");
-    el.setAttribute("y1", "0");
-    el.setAttribute("x2", String(x2));
-    el.setAttribute("y2", String(y2));
-    el.setAttribute("stroke-width", String(hatchStrokeWidth(char)));
-    el.setAttribute("style", `stroke:${stroke}`);
+  // A BAND RECT, not a stroked line. A <pattern> tile clips to its own bounds, so a line centred on
+  // the tile edge loses the half that falls outside — it does not wrap into the neighbouring tile.
+  // Measured: a `stroke-width: 7` line on x=0 renders 17.5% coverage, where an explicit 7px rect
+  // renders 43.3%. The rect also matches `hatchCss`, whose hard gradient stops were always a true
+  // band, so the legend swatch and the mark now carry the same weight.
+  const w = hatchStrokeWidth(char);
+  const band = (width: number, height: number) => {
+    const el = doc.createElementNS(SVG_NS, "rect");
+    el.setAttribute("width", String(width));
+    el.setAttribute("height", String(height));
+    el.setAttribute("style", `fill:${stroke}`);
     return el;
   };
-  pattern.appendChild(line(0, HATCH_PERIOD));
-  if (crossed) pattern.appendChild(line(HATCH_PERIOD, 0));
+  pattern.appendChild(band(w, HATCH_PERIOD));
+  if (crossed) pattern.appendChild(band(HATCH_PERIOD, w));
   return pattern;
+}
+
+/** A series' resolved texture: the character plus the two colours it is drawn from. The band colour
+ *  is DERIVED from the ground (see `defaultHatchStroke`), never authored — an author supplies the
+ *  colour and the character, and the pair is the engine's to resolve. */
+export interface SeriesHatch {
+  char: HatchChar;
+  ground: string;
+  stroke: string;
+  id: string;
+}
+
+/** Resolve `series_patterns` against the colours actually being painted. `seriesColors` must be the
+ *  map the marks and legend agree on — for a mono stacked bar that is the tonal tier, not the
+ *  categorical palette entry, or the pattern's ground would not match its segment. Returns an empty
+ *  map when the spec declares no textures, which is what keeps an untextured figure
+ *  byte-identical. */
+export function resolveSeriesHatches(
+  spec: Pick<ChartSpec, "series_patterns">,
+  seriesColors: Map<string, string>,
+): Map<string, SeriesHatch> {
+  const out = new Map<string, SeriesHatch>();
+  const cfg = spec.series_patterns;
+  if (!cfg) return out;
+  for (const [series, char] of Object.entries(cfg)) {
+    if (!isHatchChar(char)) continue; // validation rejects these; belt-and-braces at render time
+    const ground = seriesColors.get(series);
+    if (!ground) continue;
+    const stroke = defaultHatchStroke(ground);
+    out.set(series, { char, ground, stroke, id: hatchPatternId(char, ground, stroke) });
+  }
+  return out;
 }
 
 /** Series → texture CSS, built from already-resolved legend rows. The legend is the source of
@@ -143,54 +180,41 @@ export function hatchCssBySeries(
   return out;
 }
 
-/** How many tonal tiers darker the default hatch stroke sits than its ground. Two steps is
- *  visible at a 3px line weight without reading as black. */
-const STROKE_TIER_STEP = 2;
+/** How far the hatch band sits from its ground, in TIERS of the ground's own hue ramp.
+ *
+ *  Three, not two, because of the band geometry: at a 7px band the ground and the hatch read as two
+ *  colours side by side rather than lines over a colour, so the pair wants the separation of a
+ *  legible tonal pair. Two tiers (~19 L*) at that width reads as a printing artifact.
+ *
+ *  Three tiers is the same perceptual distance in every hue family, because the tonal tiers are
+ *  iso-lightness across hues (tier 200 is ~L*65 in all seven). That is the property the whole rule
+ *  rests on, and it is gated in test/hatch.test.ts rather than trusted. */
+const HATCH_TIER_STEP = 3;
 
-/** The default hatch stroke for a ground: a darker step of the SAME hue. When the ground is one of
- *  the Style-Guide tonal tiers this walks that ramp, so the pair stays in palette; a categorical
- *  hue or a raw `#hex` has no ramp to walk, so it darkens in colour space instead. */
+/** The equivalent step for a colour on no ramp, in L*. Sized to match HATCH_TIER_STEP's measured
+ *  ~29 L* so an off-palette colour behaves like a palette one instead of following its own logic. */
+const HATCH_FALLBACK_DL = 28;
+
+/**
+ * The hatch band colour for a given ground: a step of the SAME hue, derived rather than authored.
+ *
+ * An author supplies the colour and the character; the pair is the engine's to resolve, so a hatch
+ * can never be given a band colour that breaks the Style-Guide ramp or vanishes against its ground.
+ *
+ * Darker by default; LIGHTER when the ground is too dark to darken, which keeps the contrast
+ * constant instead of clamping to an invisible pair. (The inverted branch cannot underflow: needing
+ * it means index > 4, so index − 3 ≥ 2.)
+ */
 export function defaultHatchStroke(ground: string): string {
-  const tonal = TONAL_BY_HEX.get(ground.toUpperCase());
-  if (tonal) {
-    const stepped = tonal.tiers[Math.min(tonal.index + STROKE_TIER_STEP, tonal.tiers.length - 1)];
-    // Falls through when the ground already IS the darkest tier: stepping would return the ground
-    // itself, and a stroke matching its ground is an invisible hatch.
-    if (stepped && stepped.toUpperCase() !== ground.toUpperCase()) return stepped;
+  const loc = locateOnRamp(ground);
+  if (loc) {
+    const darker = loc.index + HATCH_TIER_STEP;
+    const index = darker < loc.tiers.length ? darker : loc.index - HATCH_TIER_STEP;
+    return loc.tiers[index] as string;
   }
-  const darker = d3.color(ground)?.darker(1.2);
-  return darker ? String(darker.formatHex()) : ground;
-}
-
-/** A series' resolved texture: the character plus the two colours it is drawn from. */
-export interface SeriesHatch {
-  char: HatchChar;
-  ground: string;
-  stroke: string;
-  id: string;
-}
-
-/** Resolve `series_patterns` against the colours actually being painted, for every series that
- *  declares a texture. `seriesColors` must be the map the marks and legend agree on — for a mono
- *  stacked bar that is the tonal tier, not the categorical palette entry, or the pattern's ground
- *  would not match its segment. Returns an empty map when the spec declares no textures, which is
- *  what keeps an untextured figure byte-identical. */
-export function resolveSeriesHatches(
-  spec: Pick<ChartSpec, "series_patterns" | "series_pattern_colors">,
-  seriesColors: Map<string, string>,
-): Map<string, SeriesHatch> {
-  const out = new Map<string, SeriesHatch>();
-  const cfg = spec.series_patterns;
-  if (!cfg) return out;
-  for (const [series, char] of Object.entries(cfg)) {
-    if (!isHatchChar(char)) continue; // validation rejects these; belt-and-braces at render time
-    const ground = seriesColors.get(series);
-    if (!ground) continue;
-    const override = resolveColor(spec.series_pattern_colors?.[series]);
-    const stroke = override || defaultHatchStroke(ground);
-    out.set(series, { char, ground, stroke, id: hatchPatternId(char, ground, stroke) });
-  }
-  return out;
+  const l = lightness(ground);
+  const canDarken = l != null && l - HATCH_FALLBACK_DL >= 0;
+  return shiftLightness(ground, canDarken ? -HATCH_FALLBACK_DL : HATCH_FALLBACK_DL);
 }
 
 /** The same texture as CSS, for the HTML legend and tooltip swatches. Gradient gaps are

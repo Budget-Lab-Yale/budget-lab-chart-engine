@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { hatchPatternId, defaultHatchStroke } from "../src/engine/hatch";
+import { validateSpec } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -60,22 +61,23 @@ describe("series_patterns on a stacked bar", () => {
     expect(patterns[0]!.querySelector("rect")!.getAttribute("style")).toContain("#58A3E7");
   });
 
-  it("strokes the hatch a darker step of the ground unless told otherwise", () => {
+  it("derives the band colour from the ground rather than taking it from the spec", () => {
     const spec = { ...STACKED, series_patterns: { lostToBehavior: "/" } } as unknown as ChartSpec;
     const { svg } = renderChart(spec, ROWS, OPTS);
-    const line = svg.querySelector("pattern line")!;
-    expect(line.getAttribute("style")).toContain(defaultHatchStroke("#58A3E7"));
+    // The band is the pattern's SECOND rect; the first is the ground.
+    const band = [...svg.querySelectorAll("pattern rect")][1]!;
+    expect(band.getAttribute("style")).toContain(defaultHatchStroke("#58A3E7"));
   });
 
-  it("honours an explicit series_pattern_colors override for the stroke", () => {
+  it("rejects an attempt to author the band colour — it is not configurable", () => {
     const spec = {
       ...STACKED,
       series_patterns: { lostToBehavior: "/" },
       series_pattern_colors: { lostToBehavior: "navy" },
-    } as unknown as ChartSpec;
-    const { svg } = renderChart(spec, ROWS, OPTS);
-    // "navy" resolves through the palette like any other colour ref.
-    expect(svg.querySelector("pattern line")!.getAttribute("style")).toContain("#101F5B");
+    };
+    const r = validateSpec(spec);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_pattern_colors/);
   });
 
   it("renders every character, each as its own pattern", () => {

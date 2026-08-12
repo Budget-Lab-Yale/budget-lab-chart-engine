@@ -22,6 +22,7 @@
 //    vertical and horizontal between chart and legend.
 import { describe, it, expect } from "vitest";
 import { tokens } from "../src/theme/tokens";
+import { d3 } from "../src/engine/vendor";
 import {
   HATCH_CHARS,
   defaultHatchStroke,
@@ -144,10 +145,19 @@ describe("hatchSvgPattern", () => {
     expect(rect.getAttribute("style")).toContain(GROUND);
   });
 
-  it("rotates the TILE, not the lines, so the tiling stays seamless", () => {
+  it("rotates the TILE, not the bands, so the tiling stays seamless", () => {
     const p = hatchSvgPattern(document, "/", GROUND, STROKE);
     expect(p.getAttribute("patternTransform")).toBe("rotate(45)");
-    expect(p.querySelector("line")!.hasAttribute("transform")).toBe(false);
+    for (const r of p.querySelectorAll("rect")) expect(r.hasAttribute("transform")).toBe(false);
+  });
+
+  it("draws the band as a RECT, never a centred stroke", () => {
+    // A <pattern> clips to its tile, so a stroke centred on the tile edge loses the half outside it:
+    // measured, a stroke-width 7 line renders 17.5% coverage where a 7px rect renders 43.3%. It also
+    // silently disagreed with the CSS swatch, whose hard gradient stops are a true band.
+    const p = hatchSvgPattern(document, "/", GROUND, STROKE);
+    expect(p.querySelector("line")).toBeNull();
+    expect(p.querySelector("[stroke-width]")).toBeNull();
   });
 
   it("omits the tile rotation entirely for the two unrotated characters", () => {
@@ -156,22 +166,26 @@ describe("hatchSvgPattern", () => {
     }
   });
 
-  it("draws one stroked line for a single-direction character", () => {
+  it("draws one band the full height of the cell for a single-direction character", () => {
     for (const c of ["|", "-", "/", "\\"] as const) {
-      const lines = [...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("line")];
-      expect(lines).toHaveLength(1);
-      expect(lines[0]!.getAttribute("stroke-width")).toBe(String(HATCH_STROKE));
-      expect(lines[0]!.getAttribute("style")).toContain(STROKE);
+      const rects = [...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("rect")];
+      expect(rects).toHaveLength(2); // ground + one band
+      const band = rects[1]!;
+      expect(band.getAttribute("width")).toBe(String(HATCH_STROKE));
+      expect(band.getAttribute("height")).toBe(String(HATCH_PERIOD));
+      expect(band.getAttribute("style")).toContain(STROKE);
     }
   });
 
-  it("crosses a perpendicular pair inside the cell for `+` and `x`", () => {
+  it("crosses a perpendicular pair of bands inside the cell for `+` and `x`", () => {
     for (const c of ["+", "x"] as const) {
-      const lines = [...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("line")];
-      expect(lines).toHaveLength(2);
-      // One spans the cell vertically, the other horizontally — perpendicular, both seamless.
-      expect(lines[0]!.getAttribute("y2")).toBe(String(HATCH_PERIOD));
-      expect(lines[1]!.getAttribute("x2")).toBe(String(HATCH_PERIOD));
+      const rects = [...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("rect")];
+      expect(rects).toHaveLength(3); // ground + two crossed bands
+      // One band spans the cell vertically, the other horizontally.
+      expect(rects[1]!.getAttribute("height")).toBe(String(HATCH_PERIOD));
+      expect(rects[1]!.getAttribute("width")).toBe(String(HATCH_STROKE_CROSSED));
+      expect(rects[2]!.getAttribute("width")).toBe(String(HATCH_PERIOD));
+      expect(rects[2]!.getAttribute("height")).toBe(String(HATCH_STROKE_CROSSED));
     }
   });
 
@@ -182,37 +196,96 @@ describe("hatchSvgPattern", () => {
   });
 });
 
-describe("defaultHatchStroke", () => {
-  const blue = tokens.scales.blue as Record<string, string>;
+describe("defaultHatchStroke — the palette rule", () => {
+  const TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"] as const;
+  const scales = tokens.scales as Record<string, Record<string, string>>;
+  const L = (hex: string) => d3.lab(d3.color(hex)!).l;
 
-  it("steps down the SAME tonal ramp when the ground is one of its tiers", () => {
-    // blue-200 → blue-400: still in palette, and visibly darker at a 3px line weight.
-    expect(defaultHatchStroke(blue["200"]!)).toBe(blue["400"]);
+  it("steps THREE tiers darker along the ground's own hue ramp", () => {
+    expect(defaultHatchStroke(scales.blue!["200"]!)).toBe(scales.blue!["500"]);
+    expect(defaultHatchStroke(scales.violet!["100"]!)).toBe(scales.violet!["400"]);
+    expect(defaultHatchStroke(scales.green!["400"]!)).toBe(scales.green!["700"]);
   });
 
-  it("does not care about the case the ground was written in", () => {
-    expect(defaultHatchStroke(blue["200"]!.toLowerCase())).toBe(blue["400"]);
+  it("locates a CANONICAL base on its ramp by lightness, not by exact hex", () => {
+    // The canonical hues are near-misses for their own tiers (blue is #0072B2, blue-400 is
+    // #0070AF), so an exact-hex lookup finds nothing and falls off the palette entirely.
+    const blue = tokens.categorical.find((c) => c.key === "blue")!;
+    expect(TIERS.some((tier) => scales.blue![tier]!.toUpperCase() === blue.base.toUpperCase())).toBe(false);
+    expect(defaultHatchStroke(blue.base)).toBe(scales.blue!["700"]);
   });
 
-  it("never returns the ground itself, even at the darkest tier", () => {
-    const darkest = blue["700"]!;
-    expect(defaultHatchStroke(darkest).toUpperCase()).not.toBe(darkest.toUpperCase());
+  it("goes LIGHTER instead when the ground is too dark to darken", () => {
+    // russet's base sits at tier 500, so +3 would overrun 700; it inverts to a light band.
+    const russet = tokens.categorical.find((c) => c.key === "russet")!;
+    expect(defaultHatchStroke(russet.base)).toBe(scales.russet!["200"]);
+    expect(defaultHatchStroke(scales.blue!["700"]!)).toBe(scales.blue!["400"]);
   });
 
-  it("darkens in colour space for a colour that is on no ramp", () => {
-    const stroke = defaultHatchStroke("#808080");
-    expect(stroke).toMatch(/^#[0-9a-f]{6}$/i);
-    expect(stroke.toUpperCase()).not.toBe("#808080");
-    // Darker, not lighter: compare summed channels.
-    const lum = (h: string) =>
-      parseInt(h.slice(1, 3), 16) + parseInt(h.slice(3, 5), 16) + parseInt(h.slice(5, 7), 16);
-    expect(lum(stroke)).toBeLessThan(lum("#808080"));
+  it("puts navy and sky on the blue ramp — blue-family brand colours with an obvious home", () => {
+    expect(defaultHatchStroke(tokens.brand.navy)).toBe(scales.blue!["400"]);
+    expect(defaultHatchStroke(tokens.brand.sky)).toBe(scales.blue!["500"]);
   });
 
-  it("returns something usable for a categorical base hue", () => {
-    const stroke = defaultHatchStroke(tokens.categorical[0]!.base);
-    expect(stroke).toMatch(/^#[0-9a-f]{6}$/i);
-    expect(stroke.toUpperCase()).not.toBe(tokens.categorical[0]!.base.toUpperCase());
+  it("falls back to a perceptual step for a colour on no ramp", () => {
+    const grey = defaultHatchStroke(tokens.structural.text_muted);
+    expect(grey).toMatch(/^#[0-9a-f]{6}$/i);
+    // Sized to match the on-ramp rule, so an off-palette colour behaves like a palette one.
+    expect(Math.abs(L(tokens.structural.text_muted) - L(grey))).toBeGreaterThan(20);
+    expect(Math.abs(L(tokens.structural.text_muted) - L(grey))).toBeLessThan(33);
+  });
+
+  it("lightens rather than darkens when an off-ramp ground has no room below", () => {
+    expect(L(defaultHatchStroke("#000000"))).toBeGreaterThan(0);
+  });
+
+  it("never returns the ground itself", () => {
+    for (const fam of Object.keys(scales))
+      for (const tier of TIERS)
+        expect(defaultHatchStroke(scales[fam]![tier]!).toUpperCase()).not.toBe(scales[fam]![tier]!.toUpperCase());
+  });
+});
+
+// A CI gate, not a unit test. The rule only works because the tonal tiers are iso-lightness across
+// hues (tier 200 is ~L*65 in every family), which makes "three tiers" the same perceptual distance
+// everywhere. A future token retune could quietly break that and flatten every hatch pair in the
+// archive at once, with nothing else to catch it.
+describe("hatch contrast holds across the whole palette", () => {
+  const TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"];
+  const scales = tokens.scales as Record<string, Record<string, string>>;
+  const L = (hex: string) => d3.lab(d3.color(hex)!).l;
+
+  /** Every colour an author can name that belongs to a hue family. */
+  const palette: Array<[string, string]> = [
+    ...Object.entries(scales).flatMap(([fam, s]) =>
+      TIERS.map((tier) => [`${fam}-${tier}`, s[tier]!] as [string, string]),
+    ),
+    ...tokens.categorical.flatMap((c) => [
+      [`${c.key} base`, c.base] as [string, string],
+      [`${c.key} light`, c.light] as [string, string],
+    ]),
+    ["navy", tokens.brand.navy],
+    ["sky", tokens.brand.sky],
+  ];
+
+  it("covers every hue-family colour in the palette", () => {
+    expect(palette.length).toBe(7 * 8 + 7 * 2 + 2);
+  });
+
+  it("keeps every hatch pair inside one hue family", () => {
+    for (const [name, hex] of palette) {
+      const stroke = defaultHatchStroke(hex);
+      const family = Object.entries(scales).find(([, s]) => Object.values(s).includes(stroke));
+      expect(family, `${name} (${hex}) -> ${stroke} is not a palette token`).toBeTruthy();
+    }
+  });
+
+  it("keeps every hatch pair between 20 and 33 L* apart", () => {
+    for (const [name, hex] of palette) {
+      const dL = Math.abs(L(hex) - L(defaultHatchStroke(hex)));
+      expect(dL, `${name} (${hex}) ΔL*=${dL.toFixed(1)}`).toBeGreaterThan(20);
+      expect(dL, `${name} (${hex}) ΔL*=${dL.toFixed(1)}`).toBeLessThan(33);
+    }
   });
 });
 

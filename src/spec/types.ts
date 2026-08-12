@@ -459,13 +459,11 @@ export interface ChartSpec {
    *  The declared colour stays the pattern's GROUND, so omitting this key renders exactly as
    *  before, and an unrecognised value is rejected rather than silently rendered flat.
    *  Density repeats (`"//"`) are deliberately NOT supported: more ink per unit area reads as a
-   *  darker shade, which is the tonal ramp's job and is controlled precisely by `series_colors`. */
+   *  darker shade, which is the tonal ramp's job and is controlled precisely by `series_colors`.
+   *  The hatch's BAND colour is not configurable — the author supplies the base colour and the
+   *  character, and the engine derives the band as a step of the same hue (see
+   *  `engine/hatch.ts#defaultHatchStroke`), so a pair can never leave the Style-Guide ramp. */
   series_patterns?: Record<string, HatchChar>;
-  /** `{ <seriesKey>: color }` — the hatch LINE colour for a textured series. Default: a darker step
-   *  of the ground's own hue (down its tonal ramp where the ground sits on one, else darkened in
-   *  colour space). Override when the default reads too heavy — a hatch puts roughly 43% of the
-   *  segment's area at the stroke colour, so it nudges the segment's apparent lightness. */
-  series_pattern_colors?: Record<string, ColorRef>;
   /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
    *  palette (named token or raw "#hex"). A first-class replacement for the
    *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are

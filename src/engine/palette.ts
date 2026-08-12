@@ -5,6 +5,7 @@
 // lighter blue, a 10th a lighter amber, etc. The light tier is computed in
 // sync-theme.mjs from each hue's tonal scale — see theme/tokens.ts.
 import { tokens } from "../theme/tokens";
+import { d3 } from "./vendor";
 
 const BASE = tokens.categorical.map((c) => c.base);
 const LIGHT = tokens.categorical.map((c) => c.light);
@@ -80,6 +81,65 @@ export const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]
     }
     return m;
   })();
+
+/** Which hue ramp a non-tier colour belongs to. The canonical categorical hues and their `-light`
+ *  variants are NEAR-MISSES for their own tiers (`blue` is #0072B2; `blue-400` is #0070AF), so an
+ *  exact-hex lookup finds nothing for exactly the colours authors name most often. `navy` and `sky`
+ *  are brand blues with no ramp of their own, so they borrow blue's. */
+const FAMILY_BY_HEX: ReadonlyMap<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const c of tokens.categorical) {
+    m.set(c.base.toUpperCase(), c.key);
+    m.set(c.light.toUpperCase(), c.key);
+  }
+  m.set(tokens.brand.navy.toUpperCase(), "blue");
+  m.set(tokens.brand.sky.toUpperCase(), "blue");
+  return m;
+})();
+
+/** A colour's position on a tonal ramp: the hue family, that family's tiers lightest-first, and the
+ *  index of the tier this colour sits AT or nearest to in L*.
+ *
+ *  Locating by lightness rather than by exact hex is the point: it covers the tiers, the canonical
+ *  hues, their `-light` variants, and the brand blues with one rule. Returns null for a colour on no
+ *  ramp (a neutral, or a raw `#hex`), which callers handle perceptually instead. */
+export function locateOnRamp(
+  hex: string,
+): { family: string; tiers: string[]; index: number } | null {
+  const key = hex.toUpperCase();
+  const exact = TONAL_BY_HEX.get(key);
+  if (exact) return exact;
+  const family = FAMILY_BY_HEX.get(key);
+  if (!family) return null;
+  const scale = (tokens.scales as Record<string, Record<string, string>>)[family];
+  if (!scale) return null;
+  const tiers = TONAL_TIERS.map((t) => scale[t] as string).filter(Boolean);
+  const target = lightness(hex);
+  if (target == null) return null;
+  let index = 0;
+  for (let i = 1; i < tiers.length; i++) {
+    const best = lightness(tiers[index] as string) ?? 0;
+    const here = lightness(tiers[i] as string) ?? 0;
+    if (Math.abs(here - target) < Math.abs(best - target)) index = i;
+  }
+  return { family, tiers, index };
+}
+
+/** CIE L* of a colour, or null if it doesn't parse. */
+export function lightness(hex: string): number | null {
+  const c = d3.color(hex);
+  return c ? d3.lab(c).l : null;
+}
+
+/** Shift a colour's L* by `delta`, keeping its hue and chroma. For colours off every ramp, where
+ *  there is no palette step to take. */
+export function shiftLightness(hex: string, delta: number): string {
+  const c = d3.color(hex);
+  if (!c) return hex;
+  const lab = d3.lab(c);
+  const shifted = d3.lab(Math.max(0, Math.min(100, lab.l + delta)), lab.a, lab.b);
+  return d3.rgb(shifted).formatHex();
+}
 
 // The 7 usable tiers, darkest-first (skip tier 50 per spec).
 const MONO_TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;

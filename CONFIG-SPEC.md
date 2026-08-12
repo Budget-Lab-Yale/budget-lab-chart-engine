@@ -186,7 +186,6 @@ The series **column** is set via `columns.series`. These options reference the s
 | `series_order` | array | Render order. **Also an inclusion filter** — when set, only listed series render. For stacked charts (bar/area) it is also the bottom→top stack order. |
 | `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). |
 | `series_patterns` | object | `{ <seriesKey>: hatch }` — a **texture** for the series' fill, alongside its color. Filled chart types only (`bar`, `stacked`, `area`, `histogram`, `waterfall`); rejected elsewhere. See [Series textures](#series-textures). |
-| `series_pattern_colors` | object | `{ <seriesKey>: color }` — the hatch **line** color. Default: a darker step of the ground's own hue. See [Series textures](#series-textures). |
 | `series_styles` | object | `{ <seriesKey>: { dashed: true } }`. `dashed` is currently the only flag. |
 | `series_labels` | object | `{ <seriesKey>: "Display name" }`. Lets the CSV use short keys while the legend/tooltip show full names. |
 | `bar_color` | color | **Single-series bar charts only.** The one series' bar fill, resolved through the palette. A first-class replacement for the `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are set. Ignored on multi-series (grouped) bar charts. With `highlightSeries`, `bar_color` replaces the base color only — a non-highlighted series still dims. |
@@ -798,8 +797,6 @@ series_colors:
   lostToBehavior: "#58A3E7"
 series_patterns:
   lostToBehavior: "/"
-series_pattern_colors:      # optional; defaults to a darker step of the ground
-  lostToBehavior: navy
 ```
 
 **Always quote the value.** Bare `-` is a YAML sequence indicator and bare `|` a block-scalar
@@ -819,8 +816,12 @@ Notes:
   characters (`"+"`, `"x"`) use a thinner 4px line, because crossing two directions overlaps
   their ink; that puts all six characters at the same ~44% coverage, so they differ only in
   **direction**, never in weight.
-- Because a band covers ~44% of the fill, a texture nudges the segment's apparent lightness.
-  Where that matters, set `series_pattern_colors` explicitly.
+- **The band color is derived, not authored.** You supply the base color and the character; the
+  engine resolves the band as **three tonal tiers** along that color's own hue ramp — darker
+  normally, lighter when the ground is too dark to darken. That keeps every pair inside one hue
+  family and on the Style-Guide ramp, at a consistent ΔL\* of 21–32 across the whole palette (the
+  tiers are iso-lightness across hues, which is gated in CI). `navy` and `sky` borrow blue's ramp;
+  a raw `"#hex"` off every ramp gets an equivalent 28 L\* step instead.
 - Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
   two full periods and reads as a partial band rather than a texture.
 
