@@ -841,8 +841,13 @@ value is either a **named color** or a raw `"#hex"`:
 
 - **Categorical hues:** `blue`, `amber`, `violet`, `green`, `red`, `rose`, `russet` — and a
   `-light` variant of each (e.g. `blue-light`).
-- **Aliases:** `purple`→violet, `pink`→rose, `yellow`→amber, `brown`→russet (each with `-light`).
-- **Neutrals:** `black`, `grey` (`gray`), `navy`.
+- **Tonal tiers:** `<hue>-<tier>` for tiers `50 100 200 300 400 500 600 700`, lightest to darkest
+  (e.g. `blue-200`, `violet-700`). The tiers sit at fixed lightness across hues, so `blue-200` and
+  `amber-200` are equally light — which is what makes a tier the right way to relate two series in
+  one hue family.
+- **Aliases:** `purple`→violet, `pink`→rose, `yellow`→amber, `brown`→russet — each with `-light`
+  and each with the full tier set (`purple-600` = `violet-600`).
+- **Neutrals and brand:** `black`, `grey` (`gray`), `navy`, `sky`.
 
 Unrecognized names pass through unchanged, so a raw `"#1A1A2E"` works too. `barStack.mono.base`
 accepts only the 7 categorical hues (or an alias) — it pulls that hue's tonal scale.

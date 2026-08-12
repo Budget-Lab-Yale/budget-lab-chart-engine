@@ -91,3 +91,43 @@ describe("monoScale", () => {
     expect(() => monoScale("blue", NaN)).toThrow(RangeError);
   });
 });
+
+describe("tonal tier names", () => {
+  const TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"];
+  const scales = tokens.scales as Record<string, Record<string, string>>;
+
+  it("resolves every tier of every hue", () => {
+    for (const [family, scale] of Object.entries(scales)) {
+      for (const tier of TIERS) {
+        expect(resolveColor(`${family}-${tier}`), `${family}-${tier}`).toBe(scale[tier]);
+      }
+    }
+  });
+
+  it("resolves the Style-Guide aliases' tiers too", () => {
+    expect(resolveColor("purple-600")).toBe(scales.violet!["600"]);
+    expect(resolveColor("yellow-100")).toBe(scales.amber!["100"]);
+    expect(resolveColor("pink-300")).toBe(scales.rose!["300"]);
+    expect(resolveColor("brown-500")).toBe(scales.russet!["500"]);
+  });
+
+  it("resolves `sky`, the brand blue that had no name", () => {
+    expect(resolveColor("sky")).toBe(tokens.brand.sky);
+  });
+
+  it("leaves the existing names exactly as they were", () => {
+    expect(resolveColor("blue")).toBe(tokens.categorical[0]!.base);
+    expect(resolveColor("blue-light")).toBe(tokens.categorical[0]!.light);
+    expect(resolveColor("navy")).toBe(tokens.brand.navy);
+    expect(resolveColor("black")).toBe(tokens.structural.mark_black);
+    expect(resolveColor("grey")).toBe(tokens.structural.text_muted);
+    expect(resolveColor("gray")).toBe(tokens.structural.text_muted);
+  });
+
+  it("still passes a non-tier through unchanged, so a raw hex keeps working", () => {
+    // 250 is not a tier, and 'teal' is not a hue — both must fall through, not resolve to something.
+    expect(resolveColor("blue-250")).toBe("blue-250");
+    expect(resolveColor("teal-200")).toBe("teal-200");
+    expect(resolveColor("#1A1A2E")).toBe("#1A1A2E");
+  });
+});

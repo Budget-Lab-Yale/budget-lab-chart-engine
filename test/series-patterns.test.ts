@@ -167,6 +167,54 @@ describe("series_patterns across chart types", () => {
     expect(filled.length).toBeGreaterThan(0);
   });
 
+  it("applies to a histogram's bins", () => {
+    const spec = {
+      chartType: "histogram",
+      title: "t",
+      xAxisType: "numeric",
+      columns: { x: "time", value: "value" },
+      histogram: { bins: 6 },
+      bar_color: "blue-300",
+      series_patterns: { "": "/" },
+    } as unknown as ChartSpec;
+    const rows = Array.from({ length: 40 }, (_, i) => ({
+      time: String(i),
+      value: String((i * 7) % 13),
+    })) as unknown as TidyRow[];
+    const { svg } = renderChart(spec, rows, OPTS);
+    const bins = [...svg.querySelectorAll<SVGElement>('g[aria-label="rect"] rect[data-series]')];
+    expect(bins.length).toBeGreaterThan(0);
+    for (const b of bins) expect(b.style.fill).toMatch(patternRef("fwd"));
+    // Grounded in the declared bar colour, not the default.
+    expect(svg.querySelector("pattern rect")!.getAttribute("style")).toContain("#3689CB");
+  });
+
+  it("gives each of a waterfall's semantic colours its own pattern", () => {
+    // increase / decrease / total are three different fills on ONE series, so grounding in the
+    // series colour would have painted all three the same — see the effective-fill rule.
+    const spec = {
+      chartType: "waterfall",
+      title: "t",
+      xAxisType: "categorical",
+      columns: { x: "time", value: "value", kind: "kind" },
+      series_patterns: { "": "x" },
+    } as unknown as ChartSpec;
+    const rows = [
+      { time: "Start", value: "100", kind: "total" },
+      { time: "Up", value: "20", kind: "" },
+      { time: "Down", value: "-35", kind: "" },
+    ] as unknown as TidyRow[];
+    const { svg } = renderChart(spec, rows, OPTS);
+    const grounds = [...svg.querySelectorAll("pattern")].map((p) =>
+      (p.querySelector("rect")!.getAttribute("style") ?? "").replace("fill:", "").toUpperCase(),
+    );
+    // navy total, blue increase, red decrease — three distinct grounds, three distinct patterns.
+    expect(new Set(grounds).size).toBe(3);
+    for (const bar of svg.querySelectorAll<SVGElement>('g[aria-label="bar"] rect[data-series]')) {
+      expect(bar.style.fill).toMatch(patternRef("cross"));
+    }
+  });
+
   it("leaves a line chart's stroked path alone — a 7px hatch on a 2px line is noise", () => {
     const spec = {
       chartType: "line",

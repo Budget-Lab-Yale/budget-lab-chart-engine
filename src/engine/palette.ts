@@ -37,10 +37,25 @@ for (const [alias, canonical] of Object.entries(tokens.aliases)) {
   if (base) NAMED[alias] = base;
   if (light) NAMED[`${alias}-light`] = light;
 }
+// Every TONAL TIER by name (`blue-200`, `violet-700`, …), for each hue and each of its aliases.
+// The tiers are what a same-hue pair is built from — two steps apart on one ramp is the Style-Guide
+// way to relate two related series — and without names an author had to paste the hex, which says
+// nothing about which ramp or which step it is.
+for (const [family, scale] of Object.entries(tokens.scales as Record<string, Record<string, string>>)) {
+  const aliases = Object.entries(tokens.aliases)
+    .filter(([, canonical]) => canonical === family)
+    .map(([alias]) => alias);
+  for (const [tier, hex] of Object.entries(scale)) {
+    NAMED[`${family}-${tier}`] = hex;
+    for (const alias of aliases) NAMED[`${alias}-${tier}`] = hex;
+  }
+}
+
 NAMED.black = tokens.structural.mark_black;
 NAMED.grey = tokens.structural.text_muted;
 NAMED.gray = tokens.structural.text_muted;
 NAMED.navy = tokens.brand.navy;
+NAMED.sky = tokens.brand.sky;
 
 export const TBL_COLORS: Readonly<Record<string, string>> = NAMED;
 

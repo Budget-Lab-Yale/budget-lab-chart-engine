@@ -33,6 +33,16 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   background-coloured stroke: a segment thinner than the gap is floored to a hairline instead of
   being painted over, no gap appears at the bar's outer ends, and the net marker stays at the true
   net. Honoured in both orientations, on normalized stacks, in panes, and in the export.
+- **Tonal tiers and `sky` are now named colours.** `blue-200`, `violet-700`, `purple-600` and the
+  rest of the 8-tier ramps resolve anywhere a colour is accepted, as do the aliases' tiers and the
+  brand `sky`. Previously only the 7 hues, their `-light` variants and three neutrals had names, so
+  relating two series within one hue family — the case a texture is usually paired with — meant
+  pasting a hex that said nothing about which ramp or which step it was. An unrecognised name still
+  passes through unchanged, so a raw `"#hex"` is unaffected.
+- **A chart with no series column can now be named.** Its one implicit series is keyed `""`, which
+  no data cell spells out, so the cross-reference check rejected every key naming it — including the
+  `series_colors: {"": color}` idiom this file documents as working, and any hatch on a
+  single-series bar, histogram or waterfall.
 - **`tooltip_x_format`** overrides the crosshair tooltip's x label on a `temporal` or `quarterly`
   axis (a d3 `timeFormat` pattern). The default matches the axis ticks, which is right for
   month-spaced data and wrong for a daily series, where every point in a month otherwise shares one
