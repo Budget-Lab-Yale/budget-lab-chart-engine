@@ -817,6 +817,13 @@ export function buildLegendItems(
   const legendColorFor = (name: string): string | undefined =>
     layers.seriesColors?.get(name) ?? colors.get(name);
 
+  // `series_patterns`, resolved against the colours the swatches use. Needed BEFORE the per-series
+  // rows are built, because a textured series is keyed by a CHIP whatever its chart type — an area
+  // series' 18×3 line swatch is thinner than the glyph, so left as a line its texture never appears.
+  const legendHatches = resolveSeriesHatches(spec, new Map(
+    seriesNames.map((name) => [name, legendColorFor(name) ?? ""]),
+  ));
+
   // Point charts (scatter / dotplot): the COLOR (series) legend. Swatch is a filled colored
   // marker — the per-series symbol when shape encodes the same field (redundant → combined
   // legend), otherwise a plain circle (shape is carried by the separate shape legend). A single
@@ -865,11 +872,14 @@ export function buildLegendItems(
             ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
           }));
   } else {
-    const markerShape: "line" | "rect" =
+    const baseShape: "line" | "rect" =
       chartType === "bar" || chartType === "stacked" || chartType === "histogram" ? "rect" : "line";
+    // A textured series is keyed by a chip regardless: the glyph needs a box, not a 3px line.
+    const shapeFor = (name: string): "line" | "rect" =>
+      legendHatches.has(name) ? "rect" : baseShape;
     // Line charts with point markers: each series carries its marker shape so the legend swatch
     // shows the same symbol as the chart (assigned by series index, matching the symbol scale).
-    const withSymbols = markerShape === "line" && spec.points === true;
+    const withSymbols = baseShape === "line" && spec.points === true;
     baseItems =
       seriesNames.length > 1 || hasDashOverrides
         ? seriesNames.map((name, i) => ({
@@ -877,20 +887,13 @@ export function buildLegendItems(
             label: labelFor(name),
             color: legendColorFor(name),
             dashed: spec.series_styles?.[name]?.dashed === true,
-            markerShape,
-            ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
+            markerShape: shapeFor(name),
+            ...(withSymbols && !legendHatches.has(name) ? { markerSymbol: markerSymbolForIndex(i) } : {}),
           }))
         : null;
   }
 
-  // `series_patterns` textures, attached on EVERY chart-type path (one place, so a new chart type
-  // cannot forget them) and resolved against the same colours the swatches use. Only a `rect`
-  // swatch actually draws one — an 18×3 line swatch is thinner than the hatch period — but the
-  // resolved hatch travels on the item either way, so the PNG export and the tooltip read it from
-  // the same source as the legend.
-  const legendHatches = resolveSeriesHatches(spec, new Map(
-    seriesNames.map((name) => [name, legendColorFor(name) ?? ""]),
-  ));
+  // Attach the resolved textures, on EVERY chart-type path so a new chart type cannot forget them.
   if (baseItems && legendHatches.size) {
     baseItems = baseItems.map((item) => {
       const hatch = legendHatches.get(item.series);

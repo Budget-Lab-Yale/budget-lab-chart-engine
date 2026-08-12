@@ -15,11 +15,11 @@
 import { describe, it, expect } from "vitest";
 import { tokens } from "../src/theme/tokens";
 import { d3 } from "../src/engine/vendor";
+import type { HatchChar } from "../src/spec/types";
 import {
   HATCH_CHARS,
   defaultHatchStroke,
   isHatchChar,
-  hatchAngles,
   hatchPatternId,
   hatchSvgPattern,
   HATCH_PERIOD,
@@ -57,32 +57,34 @@ describe("the hatch character set", () => {
   });
 });
 
-describe("hatchAngles — each character is a picture of its own result", () => {
-  it("leans the single-direction characters the way the glyph does", () => {
-    expect(hatchAngles("|")).toEqual([0]);
-    expect(hatchAngles("/")).toEqual([45]);
-    expect(hatchAngles("\\")).toEqual([-45]);
-    expect(hatchAngles("-")).toEqual([90]);
+describe("each character is a picture of its own result", () => {
+  // Asserted on the emitted <pattern>, not on an intermediate angle helper: the tile rotation IS
+  // the direction, so testing the output leaves nothing between the claim and the pixels.
+  const rotationOf = (char: HatchChar) =>
+    hatchSvgPattern(document, char, GROUND, STROKE).getAttribute("patternTransform");
+
+  it("leans each single-direction character the way its glyph does", () => {
+    expect(rotationOf("|")).toBeNull(); // no rotation — the primitive is already vertical
+    expect(rotationOf("-")).toBe("rotate(90)");
+    expect(rotationOf("/")).toBe("rotate(45)");
+    expect(rotationOf("\\")).toBe("rotate(-45)");
   });
 
-  it("gives a crossed character two perpendicular directions", () => {
-    for (const c of ["+", "x"] as const) {
-      const [a, b] = hatchAngles(c) as [number, number];
-      expect(hatchAngles(c)).toHaveLength(2);
-      expect(sameDirection(a + 90, b)).toBe(true);
+  it("builds each crossed character from the pair its glyph depicts", () => {
+    // `+` is `|` and `-` — the unrotated pair, so the tile is unrotated and holds two bands.
+    expect(rotationOf("+")).toBeNull();
+    // `x` is that same crossed pair turned 45°, which is `/` and `\`.
+    expect(rotationOf("x")).toBe(rotationOf("/"));
+  });
+
+  it("gives a crossed character two bands and a single-direction character one", () => {
+    for (const c of ["|", "-", "/", "\\"] as const) {
+      // ground + one band
+      expect([...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("rect")]).toHaveLength(2);
     }
-  });
-
-  it("builds each crossed character out of the pair its glyph depicts", () => {
-    // `+` is `|` and `-`; `x` is `/` and `\` — compared as line directions, since the
-    // implementation is free to name `\` as either −45° or 135°.
-    const [plusA, plusB] = hatchAngles("+") as [number, number];
-    expect(sameDirection(plusA, hatchAngles("|")[0]!)).toBe(true);
-    expect(sameDirection(plusB, hatchAngles("-")[0]!)).toBe(true);
-
-    const [crossA, crossB] = hatchAngles("x") as [number, number];
-    expect(sameDirection(crossA, hatchAngles("/")[0]!)).toBe(true);
-    expect(sameDirection(crossB, hatchAngles("\\")[0]!)).toBe(true);
+    for (const c of ["+", "x"] as const) {
+      expect([...hatchSvgPattern(document, c, GROUND, STROKE).querySelectorAll("rect")]).toHaveLength(3);
+    }
   });
 });
 
@@ -269,10 +271,12 @@ describe("hatch contrast holds across the whole palette", () => {
 describe("hatch weight", () => {
   /** Fraction of the tile covered by ink. One direction lays a band; two crossed directions overlap,
    *  so their combined coverage is 1 − (gap fraction)², NOT twice one direction's. */
-  const coverage = (char: Parameters<typeof hatchStrokeWidth>[0]) => {
+  const coverage = (char: HatchChar) => {
     const s = hatchStrokeWidth(char);
     const gap = (HATCH_PERIOD - s) / HATCH_PERIOD;
-    return hatchAngles(char).length === 2 ? 1 - gap * gap : s / HATCH_PERIOD;
+    // Two bands overlap their ink, so their union is 1 - gap², not twice one band's.
+    const bands = hatchSvgPattern(document, char, GROUND, STROKE).querySelectorAll("rect").length - 1;
+    return bands === 2 ? 1 - gap * gap : s / HATCH_PERIOD;
   };
 
   it("reads as broad alternating bands, not pinstripes", () => {

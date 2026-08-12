@@ -809,8 +809,9 @@ Notes:
   scale already controls precisely through `series_colors`.
 - The texture reaches the chart, the legend key, the hover tooltip, and the **PNG export** — the
   export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
-- Only a **rect** legend swatch draws the texture (`bar`, `stacked`, `histogram`). An `area` series'
-  swatch is an 18×3 line, thinner than the hatch period, so it stays a flat color.
+- A textured series is keyed by a **chip** whatever its chart type. An `area` or line-swatch series
+  would otherwise get an 18×3 line, thinner than the glyph, and its texture would never appear in
+  the key; untextured series on the same chart keep the line swatch they always had.
 - A legend/tooltip key draws **one centred instance** of the texture in a 14px square — a *glyph*,
   not a patch of the chart's tiling. `"/"` reads as three bands (ground, mark, ground), `"+"` as a
   plus, `"x"` as an x. A tiled key can only show a fraction of one period at that size, which is an

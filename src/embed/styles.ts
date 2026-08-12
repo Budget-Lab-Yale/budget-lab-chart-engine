@@ -403,9 +403,11 @@ body {
   border: 0;
   height: 2px;
 }
+/* Square, so a textured chip's glyph carries equal weight vertically and horizontally, and so flat
+   and textured keys share one box and line up in a mixed legend. */
 .tbl-legend-swatch.is-rect {
   width: 14px;
-  height: 12px;
+  height: 14px;
   border-radius: 1px;
 }
 /* A textured swatch holds an inline SVG glyph — one centred instance of the texture — so it is the

@@ -189,12 +189,6 @@ export function isHatchChar(v: unknown): v is HatchChar {
   return typeof v === "string" && Object.prototype.hasOwnProperty.call(GEOM, v);
 }
 
-/** The hatch line direction(s), in degrees clockwise from vertical. A crossed character returns
- *  the pair. Directions are equal as LINES modulo 180°. */
-export function hatchAngles(char: HatchChar): number[] {
-  const { rotate, crossed } = GEOM[char];
-  return crossed ? [rotate, rotate + 90] : [rotate];
-}
 
 
 /** Content-addressed, so it is deterministic across renders (the golden-SVG gate depends on
