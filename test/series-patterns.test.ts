@@ -100,6 +100,28 @@ describe("series_patterns on a stacked bar", () => {
   });
 });
 
+describe("series_patterns on a mono stack", () => {
+  // barStack.mono replaces series_colors with tonal tiers, so the ground has to come from the map
+  // the MARKS used, not the palette entry — otherwise the hatch sits on a colour that is not the
+  // colour of the segment it fills.
+  it("grounds the pattern in the tonal tier actually painted, not the palette entry", () => {
+    const spec = {
+      ...STACKED,
+      series_colors: undefined,
+      series_patterns: { lostToBehavior: "+" },
+      barStack: { mono: { base: "blue" }, netDisplay: "none" },
+    } as unknown as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, ROWS, OPTS);
+
+    const groundStyle = svg.querySelector("pattern rect")!.getAttribute("style")!;
+    const tier = legendItems!.find((i) => i.series === "lostToBehavior")!.color!;
+    expect(groundStyle).toContain(tier);
+
+    // And the tier is a mono ramp step, not the categorical blue the palette would have handed out.
+    expect(tier.toUpperCase()).not.toBe("#0072B2");
+  });
+});
+
 describe("series_patterns across chart types", () => {
   const BAR_ROWS: TidyRow[] = [
     { time: "A", series: "one", value: "3" },
