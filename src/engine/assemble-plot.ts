@@ -56,6 +56,62 @@ const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } a
 // base) still nudges from there.
 const HORIZONTAL_MARKER_TOP_DY = -6;
 
+/** A gapped segment never shrinks below this, so a slice thinner than the gap stays a visible
+ *  hairline rather than disappearing. Matches the hand-built stack's `max(0.5, extent - gap)`. */
+const SEGMENT_GAP_FLOOR = 0.5;
+
+/**
+ * Open `gap` px of whitespace BETWEEN adjacent stacked segments.
+ *
+ * SHRINK-ONLY, and it never moves a rect — that is the whole reason the invariants hold. Segments
+ * are grouped by band position within their own facet `<g>` and ordered along the value axis IN
+ * PIXELS (so a reversed value axis needs no special case); every segment except the last in that
+ * order has its TRAILING edge pulled in by `gap`. Because no leading edge moves, the first
+ * segment still starts at the baseline and the last still ends at the total, so no gap appears at
+ * the bar's outer ends. On a diverging stack the zero crossing is a boundary between two segments
+ * and correctly receives a gap like any other.
+ *
+ * A zero-extent rect (a genuine 0 value) is left alone — flooring it would invent a hairline where
+ * there is no data.
+ */
+function applySegmentGap(
+  svg: SVGSVGElement,
+  selector: string,
+  gap: number,
+  horizontal: boolean,
+): void {
+  // Band position groups the segments of one bar; the value axis orders them within it.
+  const bandAttr = horizontal ? "y" : "x";
+  const valueAttr = horizontal ? "x" : "y";
+  const extentAttr = horizontal ? "width" : "height";
+
+  const byBar = new Map<string, SVGElement[]>();
+  svg.querySelectorAll<SVGElement>(selector).forEach((el) => {
+    // Facet-scoped: two panes can share a band position, and their segments must not be
+    // interleaved into one stack.
+    const facet = el.closest("g[aria-label^='facet']") ?? el.parentElement;
+    const band = Math.round(Number(el.getAttribute(bandAttr) ?? "0") * 100) / 100;
+    const key = `${facet ? [...(facet.parentElement?.children ?? [])].indexOf(facet) : -1}:${band}`;
+    if (!byBar.has(key)) byBar.set(key, []);
+    byBar.get(key)!.push(el);
+  });
+
+  for (const segments of byBar.values()) {
+    if (segments.length < 2) continue;
+    segments.sort(
+      (a, b) => Number(a.getAttribute(valueAttr) ?? "0") - Number(b.getAttribute(valueAttr) ?? "0"),
+    );
+    // Every segment but the last: pull its trailing edge in. The last one's trailing edge is the
+    // bar's outer end.
+    for (let i = 0; i < segments.length - 1; i++) {
+      const el = segments[i]!;
+      const extent = Number(el.getAttribute(extentAttr) ?? "0");
+      if (!(extent > 0)) continue;
+      el.setAttribute(extentAttr, String(Math.max(SEGMENT_GAP_FLOOR, extent - gap)));
+    }
+  }
+}
+
 export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
@@ -920,6 +976,10 @@ export function assemblePlot({
         defs.appendChild(hatchSvgPattern(doc, hatch.char, hatch.ground, hatch.stroke));
       }
     }
+  }
+
+  if (layers.segmentGap && layers.segmentGapSelector) {
+    applySegmentGap(svg, layers.segmentGapSelector, layers.segmentGap, layers.yScaleOpts != null);
   }
 
   // Keyed bands + reference lines: tag the group Plot stamped with our deterministic class.

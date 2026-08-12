@@ -4,6 +4,34 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] - 2026-08-12
+
+### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
+
+Three keys, all opt-in and all with zero effect on an existing figure, so a repin does not move
+published output. Each closes a gap where a consumer could style the on-page chart with CSS but
+could not reach the PNG export, which re-renders from the spec rather than serialising the DOM.
+
+- **`series_patterns`** gives a series a hatch texture alongside its colour, on the chart types with
+  filled marks (`bar`, `stacked`, `area`, `histogram`, `waterfall`). The six values are
+  matplotlib's hatch characters (`"/"` `"\\"` `"|"` `"-"` `"+"` `"x"`), so the character is a
+  picture of the result. The declared colour stays the pattern's ground; `series_pattern_colors`
+  overrides the hatch line, which otherwise defaults to a darker step of the ground's own hue. The
+  texture reaches the marks, the legend key, the hover tooltip and the export. An unrecognised
+  value is rejected at load rather than rendered flat — including density repeats (`"//"`), which
+  are deliberately unsupported: more ink per unit area reads as a darker shade, which the tonal
+  scale already controls precisely.
+- **`barStack.segmentGap`** opens whitespace between adjacent stacked segments, so two slices from
+  one hue family stop reading as a single block. Subtractive geometry rather than a
+  background-coloured stroke: a segment thinner than the gap is floored to a hairline instead of
+  being painted over, no gap appears at the bar's outer ends, and the net marker stays at the true
+  net. Honoured in both orientations, on normalized stacks, in panes, and in the export.
+- **`tooltip_x_format`** overrides the crosshair tooltip's x label on a `temporal` or `quarterly`
+  axis (a d3 `timeFormat` pattern). The default matches the axis ticks, which is right for
+  month-spaced data and wrong for a daily series, where every point in a month otherwise shares one
+  tooltip label. Opt-in rather than a granularity auto-detect, so no published temporal figure
+  changes.
+
 ## [1.10.0] - 2026-08-10
 
 ### Added — publishable shared assets, so a site stops shipping the engine per figure

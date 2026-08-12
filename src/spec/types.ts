@@ -569,6 +569,13 @@ export interface ChartSpec {
      *  can sit at the bottom of the stack while keeping its legend position/color. Series omitted
      *  here keep their relative `series_order` position after the listed ones. */
     stackOrder?: string[];
+    /** Whitespace BETWEEN adjacent stacked segments, in px. Default 0 (segments abut, as before).
+     *  A thin gap separates two slices from the same hue family without spending another colour.
+     *  Subtractive geometry, not paint: each segment's trailing edge is pulled in, floored so a
+     *  slice thinner than the gap survives as a hairline instead of being swallowed. No gap is
+     *  added at the bar's outer ends — the baseline and the total do not move — and the net marker
+     *  stays at the true net. */
+    segmentGap?: number;
   };
   /** Waterfall-chart display options. A waterfall is a vertical, single-series categorical chart
    *  whose bars float on a running cumulative (see `columns.kind`). Ignored by other chart types. */

@@ -1,0 +1,13 @@
+time,series,value
+Bottom 50%,afterTaxIncome,62
+Bottom 50%,currentLawTax,14
+Bottom 50%,collectedNew,6
+Bottom 50%,lostToBehavior,2
+Middle 40%,afterTaxIncome,58
+Middle 40%,currentLawTax,19
+Middle 40%,collectedNew,9
+Middle 40%,lostToBehavior,3
+Top 1%,afterTaxIncome,44
+Top 1%,currentLawTax,26
+Top 1%,collectedNew,18
+Top 1%,lostToBehavior,7

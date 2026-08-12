@@ -216,6 +216,14 @@ export interface MarkLayers {
    *  [negatives in declaration order]; the non-interactive Total row is appended by the
    *  renderer. Non-stacked / top-legend charts leave it undefined. */
   legendVisualOrder?: string[];
+  /** Stacked bars: `barStack.segmentGap` — px of whitespace to open BETWEEN adjacent segments.
+   *  Carried here rather than applied as a Plot option because Plot's bar insets are scalars, not
+   *  channels (the vendored 0.6.16 coerces `insetTop=+T`), so one inset cannot separate the
+   *  interior boundaries while leaving the bar's outer ends alone. assemblePlot applies it as a
+   *  shrink-only geometric pass over `segmentGapSelector`. Absent/0 ⇒ no pass ⇒ byte-identical. */
+  segmentGap?: number;
+  /** The selector matching the segments `segmentGap` applies to. Set alongside it. */
+  segmentGapSelector?: string;
   /** Controls how the band-crosshair tooltip renders the Total row for stacked charts.
    *  - true  (netMode==="dot"):  show Total with a circle (is-dot) swatch — the net-dot
    *    marker exists on the chart and matches this styling.

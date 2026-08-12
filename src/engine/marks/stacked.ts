@@ -137,6 +137,14 @@ export function buildStackedMarks(
   // Net display mode (bar-stacked.md §6): "auto" → dot when any negative, else text.
   // Normalized stacks always top at 100% so a net callout is meaningless — suppress.
   // "none" explicitly suppresses all net markers and the Total legend entry.
+  // Whitespace between segments. assemblePlot applies it post-render as geometry (see MarkLayers
+  // .segmentGap for why it cannot be a Plot inset); the builder only declares the intent + target.
+  const segmentGap = spec.barStack?.segmentGap ?? 0;
+  const segmentGapLayer =
+    segmentGap > 0
+      ? { segmentGap, segmentGapSelector: 'g[aria-label="bar"] rect' }
+      : {};
+
   const netDisplayCfg = spec.barStack?.netDisplay ?? "auto";
   const netMode: "dot" | "text" | "none" = normalize
     ? "none"
@@ -396,6 +404,7 @@ export function buildStackedMarks(
       seriesColors,
       legendVisualOrder,
       showTotalDot,
+      ...segmentGapLayer,
       ...(legendExtras ? { legendExtras } : {}),
     };
   }
@@ -417,6 +426,7 @@ export function buildStackedMarks(
     seriesColors,
     legendVisualOrder,
     showTotalDot,
+    ...segmentGapLayer,
     ...(legendExtras ? { legendExtras } : {}),
   };
 }

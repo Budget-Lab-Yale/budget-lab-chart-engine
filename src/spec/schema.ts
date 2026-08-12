@@ -425,6 +425,9 @@ export const CHART_SPEC_SCHEMA = {
         netLabelColor: { type: "string", enum: ["white", "black"] },
         normalize: { type: "boolean" },
         stackOrder: { type: "array", items: { type: "string" } },
+        // px. Capped well below any sane bar width — a larger value would consume the bar rather
+        // than separate its parts.
+        segmentGap: { type: "number", minimum: 0, maximum: 12 },
       },
     },
     waterfall: {

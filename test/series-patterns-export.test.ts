@@ -56,6 +56,30 @@ describe("the PNG export", () => {
     }
   });
 
+  // A regression guard, not a driver: segmentGap runs inside assemblePlot, which the export already
+  // goes through. It is asserted here because "reaches the PNG export" is the half of #27 a
+  // consumer's CSS cannot do, so it should fail loudly if the export ever stops re-rendering.
+  it("carries barStack.segmentGap into the exported chart body", () => {
+    const gapped = { ...SPEC, barStack: { segmentGap: 2 } } as unknown as ChartSpec;
+    const stacks = (s: ChartSpec) => {
+      const byBand = new Map<number, Array<{ y: number; h: number }>>();
+      buildExportSvg(s, ROWS)
+        .querySelectorAll('g[aria-label="bar"] rect')
+        .forEach((r) => {
+          const x = Math.round(+r.getAttribute("x")!);
+          if (!byBand.has(x)) byBand.set(x, []);
+          byBand.get(x)!.push({ y: +r.getAttribute("y")!, h: +r.getAttribute("height")! });
+        });
+      return [...byBand.values()].map((g) => g.sort((a, b) => a.y - b.y));
+    };
+    for (const stack of stacks(gapped)) {
+      expect(stack.length).toBeGreaterThan(1);
+      for (let i = 0; i < stack.length - 1; i++) {
+        expect(stack[i + 1]!.y - (stack[i]!.y + stack[i]!.h)).toBeCloseTo(2, 5);
+      }
+    }
+  });
+
   it("exports byte-identically to before when no texture is declared", () => {
     const { series_patterns, ...plain } = SPEC as unknown as Record<string, unknown>;
     const svg = buildExportSvg(plain as unknown as ChartSpec, ROWS);
