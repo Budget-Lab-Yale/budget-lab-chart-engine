@@ -196,7 +196,7 @@ function histogramSpecError(spec: {
 /** Chart types whose marks are filled AREAS, and so can carry a `series_patterns` texture. A line's
  *  2px stroke and a dot's 8px disc are smaller than the 7px hatch period, so a texture there is
  *  noise rather than a channel — reject instead of rendering something illegible. */
-const FILLED_CHART_TYPES = new Set(["bar", "stacked", "area", "histogram", "waterfall"]);
+export const FILLED_CHART_TYPES = new Set(["bar", "stacked", "area", "histogram", "waterfall"]);
 
 function seriesPatternsError(spec: { chartType?: unknown; series_patterns?: unknown }): string | null {
   if (spec.series_patterns == null) return null;

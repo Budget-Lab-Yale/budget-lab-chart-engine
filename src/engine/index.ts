@@ -872,14 +872,22 @@ export function buildLegendItems(
             ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
           }));
   } else {
-    const baseShape: "line" | "rect" =
-      chartType === "bar" || chartType === "stacked" || chartType === "histogram" ? "rect" : "line";
-    // A textured series is keyed by a chip regardless: the glyph needs a box, not a 3px line.
-    const shapeFor = (name: string): "line" | "rect" =>
-      legendHatches.has(name) ? "rect" : baseShape;
+    // Every chart type whose marks are FILLED keys with a chip; only stroked marks get a line
+    // swatch. An area is a filled region, so a line swatch always misrepresented it — and a 3px line
+    // cannot hold a texture, so a hatched area series had no way to show its glyph. Pinned against
+    // validate.ts FILLED_CHART_TYPES by test, since a new filled type that forgot this would lose
+    // its texture in the key silently.
+    const markerShape: "line" | "rect" =
+      chartType === "bar" ||
+      chartType === "stacked" ||
+      chartType === "histogram" ||
+      chartType === "area" ||
+      chartType === "waterfall"
+        ? "rect"
+        : "line";
     // Line charts with point markers: each series carries its marker shape so the legend swatch
     // shows the same symbol as the chart (assigned by series index, matching the symbol scale).
-    const withSymbols = baseShape === "line" && spec.points === true;
+    const withSymbols = markerShape === "line" && spec.points === true;
     baseItems =
       seriesNames.length > 1 || hasDashOverrides
         ? seriesNames.map((name, i) => ({
@@ -887,8 +895,8 @@ export function buildLegendItems(
             label: labelFor(name),
             color: legendColorFor(name),
             dashed: spec.series_styles?.[name]?.dashed === true,
-            markerShape: shapeFor(name),
-            ...(withSymbols && !legendHatches.has(name) ? { markerSymbol: markerSymbolForIndex(i) } : {}),
+            markerShape,
+            ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
           }))
         : null;
   }

@@ -809,9 +809,14 @@ Notes:
   scale already controls precisely through `series_colors`.
 - The texture reaches the chart, the legend key, the hover tooltip, and the **PNG export** — the
   export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
-- A textured series is keyed by a **chip** whatever its chart type. An `area` or line-swatch series
-  would otherwise get an 18×3 line, thinner than the glyph, and its texture would never appear in
-  the key; untextured series on the same chart keep the line swatch they always had.
+- **Every filled chart type keys with a square chip**, textured or not — `bar`, `stacked`, `area`,
+  `histogram`, `waterfall`. Only stroked marks (line, point) get a line swatch. `area` moved to a
+  chip in 1.11.0: an area is a filled region, so a line swatch misrepresented it, and a 3px line
+  cannot hold the glyph.
+- On a **multi-series histogram**, layers draw at `fill-opacity: 0.5` so overlaps blend, and a
+  texture inherits that — ground and band are both muted, exactly as a flat fill is. The texture
+  still separates the series where they overlap, which is the point, but judge it on your own data:
+  a texture cannot rescue a mark whose colour is already translucent.
 - A legend/tooltip key draws **one centred instance** of the texture in a 14px square — a *glyph*,
   not a patch of the chart's tiling. `"/"` reads as three bands (ground, mark, ground), `"+"` as a
   plus, `"x"` as an x. A tiled key can only show a fraction of one period at that size, which is an

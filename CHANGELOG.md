@@ -33,6 +33,10 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   background-coloured stroke: a segment thinner than the gap is floored to a hairline instead of
   being painted over, no gap appears at the bar's outer ends, and the net marker stays at the true
   net. Honoured in both orientations, on normalized stacks, in panes, and in the export.
+- **An `area` series is keyed by a square chip, not a line swatch.** An area mark is a filled
+  region, so the line swatch misrepresented it, and at 3px tall it could not hold a hatch glyph —
+  a textured area series had no way to show its texture in the key. Every filled chart type now
+  keys with a chip; only stroked marks keep the line swatch, and a test ties the two sets together.
 - **Tonal tiers and `sky` are now named colours.** `blue-200`, `violet-700`, `purple-600` and the
   rest of the 8-tier ramps resolve anywhere a colour is accepted, as do the aliases' tiers and the
   brand `sky`. Previously only the 7 hues, their `-light` variants and three neutrals had names, so

@@ -10,6 +10,7 @@ import { renderLegend } from "../src/engine/legend";
 import { defaultHatchStroke, resolveHatch } from "../src/engine/hatch";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";
 import { CHART_CSS } from "../src/embed/styles";
+import { FILLED_CHART_TYPES } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -143,13 +144,14 @@ describe("a textured series is keyed by a chip on any chart type", () => {
     series_patterns: { textured: "/" },
   } as unknown as ChartSpec;
 
-  it("keys a hatched AREA series with a chip, not a line — a 3px line cannot show a texture", () => {
-    // An area series' key is normally an 18x3 line, which is thinner than the glyph. Left as a line
-    // the texture simply never appeared: the hatch reached the mark and the key stayed flat.
+  it("keys EVERY area series with a chip, so one legend is not half lines and half squares", () => {
+    // An area mark is a filled region, so a line swatch always misrepresented it — and a 3px line
+    // cannot hold the glyph, so a hatched area series had no way to show its texture in the key.
+    // Keying only the textured ones as chips would have split a single legend between two shapes.
     const { legendItems } = renderChart(AREA, AREA_ROWS, OPTS);
-    expect(legendItems!.find((i) => i.series === "textured")!.markerShape).toBe("rect");
-    // An untextured series on the same chart keeps the line key it always had.
-    expect(legendItems!.find((i) => i.series === "plain")!.markerShape).toBe("line");
+    for (const item of legendItems!) {
+      expect(item.markerShape, `series ${item.series}`).toBe("rect");
+    }
   });
 
   it("draws the glyph in that chip", () => {
@@ -172,5 +174,51 @@ describe("a textured series is keyed by a chip on any chart type", () => {
     expect(size(chip)).toEqual(size(hatched));
     // And square, so `|` and `-` carry equal weight in the glyph.
     expect(size(chip).width).toBe(size(chip).height);
+  });
+});
+
+describe("every filled chart type keys with a chip", () => {
+  // The tie that stops a texture disappearing from a key: a chart type that ACCEPTS series_patterns
+  // must key with a chip, because a line swatch is 3px tall and cannot hold the glyph. Asserted
+  // against the very set validate.ts uses to decide what may be textured, so adding a filled chart
+  // type to one and not the other fails here rather than shipping a blank key.
+  const LEGEND_BEARING: Array<{ chartType: string; xAxisType: string }> = [
+    { chartType: "bar", xAxisType: "categorical" },
+    { chartType: "stacked", xAxisType: "categorical" },
+    { chartType: "area", xAxisType: "numeric" },
+    { chartType: "histogram", xAxisType: "numeric" },
+  ];
+
+  it("covers every filled type that can produce a multi-series legend", () => {
+    const covered = new Set(LEGEND_BEARING.map((c) => c.chartType));
+    for (const t of FILLED_CHART_TYPES) {
+      // waterfall is single-series by construction, so it has no series legend to check.
+      if (t === "waterfall") continue;
+      expect(covered.has(t), `${t} is filled but untested here`).toBe(true);
+    }
+  });
+
+  it("uses a rect swatch on each of them, textured or not", () => {
+    for (const { chartType, xAxisType } of LEGEND_BEARING) {
+      const spec = {
+        chartType,
+        title: "t",
+        xAxisType,
+        columns: { x: "time", value: "value", series: "series" },
+        series_colors: { a: "blue", b: "amber" },
+        ...(chartType === "histogram" ? { histogram: { bins: 4 } } : {}),
+      } as unknown as ChartSpec;
+      const rows = [
+        { time: "1", series: "a", value: "3" },
+        { time: "2", series: "a", value: "4" },
+        { time: "3", series: "b", value: "2" },
+        { time: "4", series: "b", value: "5" },
+      ] as unknown as TidyRow[];
+      const { legendItems } = renderChart(spec, rows, OPTS);
+      expect(legendItems, `${chartType} produced no legend`).toBeTruthy();
+      for (const item of legendItems!.filter((i) => !i.annotation)) {
+        expect(item.markerShape, `${chartType} / ${item.series}`).toBe("rect");
+      }
+    }
   });
 });
