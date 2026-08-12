@@ -5,7 +5,7 @@
 import type { LegendItem } from "./index";
 import { symbolPathD } from "./symbols";
 import { swatchWidthFor } from "./theme";
-import { hatchCss } from "./hatch";
+import { hatchCss, swatchGeometry } from "./hatch";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -323,10 +323,13 @@ export function renderLegend(
         // Textured series: the ground and the hatch go on SEPARATE longhand properties — the
         // `background` shorthand below would reset background-image and erase the texture.
         // hatchCss owns the angle conversion (see engine/hatch.ts INVARIANT 2), so the swatch
-        // cannot lean the opposite way from the bars.
-        const css = hatchCss(hatch.char, hatch.ground, hatch.stroke);
+        // cannot lean the opposite way from the bars. At the KEY period, not the mark's — a 14px
+        // box showed one band of a 16px tile, which reads as an edge rather than a direction.
+        const css = hatchCss(hatch.char, hatch.ground, hatch.stroke, swatchGeometry(hatch.char));
         swatch.style.backgroundColor = css.backgroundColor;
         swatch.style.backgroundImage = css.backgroundImage;
+        // Wider than a flat chip: more periods across the box is what makes the direction legible.
+        swatch.classList.add("is-hatched");
       } else if (color) {
         swatch.style.background = color;
       }

@@ -859,8 +859,11 @@ export function buildBandTooltipHtml(
           : `${base};background:${dot}`;
       swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
     } else {
-      const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
       const hatch = hatches?.get(series);
+      const swCls =
+        swatchShape === "rect"
+          ? `tbl-tooltip-swatch is-square${hatch ? " is-hatched" : ""}`
+          : "tbl-tooltip-swatch";
       // Longhand background-color + background-image, never the `background` shorthand, or the
       // shorthand resets background-image and the texture disappears.
       const style = hatch

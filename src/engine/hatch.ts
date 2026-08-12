@@ -36,6 +36,17 @@ export type { HatchChar };
 // band for all six characters (the spread is antialiasing on the diagonals).
 export const HATCH_PERIOD = 16;
 
+/** Tile period for a legend/tooltip KEY. The mark's 16px period showed barely one band in a 14x12
+ *  box, so the direction was unreadable and `/` could not be told from `\`.
+ *
+ *  A key needs TWO periods in BOTH axes: one band is an edge, not a direction, and a crossed
+ *  character has to show a repeating grid or it measures as noise. That is a constraint on the box
+ *  before it is one on the tile — at 12px tall no crossed tile works, whether its bands are narrow
+ *  (too fine to resolve) or wide (so dense it goes solid). So the hatched swatch is 22x16 and the
+ *  tile is 8, giving 2 periods vertically and 2.75 across. Band widths keep the mark's ratios, so a
+ *  key carries the same weight as the mark it names. */
+export const HATCH_SWATCH_PERIOD = 8;
+
 /** `rotate` is the tile rotation; `crossed` adds a second line perpendicular to the first.
  *  See INVARIANT 1 — this pair is the only decomposition that tiles. */
 const GEOM: Record<HatchChar, { rotate: number; crossed: boolean; slug: string }> = {
@@ -58,9 +69,28 @@ export const HATCH_STROKE = 7;
  *  single-direction 7/16, so the six read as one family that differs only in DIRECTION. */
 export const HATCH_STROKE_CROSSED = 4;
 
-/** The band width this character is drawn at. */
+/** The band width this character is drawn at, on a MARK: narrower when crossed, so every character
+ *  lands at the same coverage. */
 export function hatchStrokeWidth(char: HatchChar): number {
   return GEOM[char].crossed ? HATCH_STROKE_CROSSED : HATCH_STROKE;
+}
+
+/** A tile's two measurements. Marks and keys resolve different ones — see HATCH_SWATCH_PERIOD. */
+export interface HatchGeometry {
+  period: number;
+  band: number;
+}
+
+/** Geometry for a MARK: the full tile, coverage equalised across characters. */
+export function markGeometry(char: HatchChar): HatchGeometry {
+  return { period: HATCH_PERIOD, band: hatchStrokeWidth(char) };
+}
+
+/** Geometry for a legend/tooltip KEY: a smaller tile at the mark's band ratios, so the key reads at
+ *  the same weight as the mark. */
+export function swatchGeometry(char: HatchChar): HatchGeometry {
+  const scale = HATCH_SWATCH_PERIOD / HATCH_PERIOD;
+  return { period: HATCH_SWATCH_PERIOD, band: hatchStrokeWidth(char) * scale };
 }
 
 /** Declaration order is the documented order in CONFIG-SPEC. */
@@ -86,9 +116,22 @@ export function hatchCssAngles(char: HatchChar): number[] {
  *  stable ids) AND collision-free between two figures on one page: two figures asking for the
  *  same texture over the same colours share an id whose definitions are identical, which is not a
  *  collision. Different textures or colours always get different ids. */
-export function hatchPatternId(char: HatchChar, ground: string, stroke: string): string {
+export function hatchPatternId(
+  char: HatchChar,
+  ground: string,
+  stroke: string,
+  geom: HatchGeometry = markGeometry(char),
+): string {
   const safe = (s: string) => s.replace(/[^A-Za-z0-9]/g, "");
-  return `tblhatch-${GEOM[char].slug}-${safe(ground)}-${safe(stroke)}`;
+  // The geometry is part of the identity — a key's small tile and a mark's large one are different
+  // definitions and must not share an id. Suffixed only off the mark geometry, so mark ids (and the
+  // golden that locks them) are unchanged.
+  const mark = markGeometry(char);
+  const scale =
+    geom.period === mark.period && geom.band === mark.band
+      ? ""
+      : `-p${String(geom.period).replace(".", "_")}b${String(geom.band).replace(".", "_")}`;
+  return `tblhatch-${GEOM[char].slug}-${safe(ground)}-${safe(stroke)}${scale}`;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -101,18 +144,20 @@ export function hatchSvgPattern(
   char: HatchChar,
   ground: string,
   stroke: string,
+  geom: HatchGeometry = markGeometry(char),
 ): SVGElement {
   const { rotate, crossed } = GEOM[char];
+  const { period } = geom;
   const pattern = doc.createElementNS(SVG_NS, "pattern");
-  pattern.setAttribute("id", hatchPatternId(char, ground, stroke));
-  pattern.setAttribute("width", String(HATCH_PERIOD));
-  pattern.setAttribute("height", String(HATCH_PERIOD));
+  pattern.setAttribute("id", hatchPatternId(char, ground, stroke, geom));
+  pattern.setAttribute("width", String(period));
+  pattern.setAttribute("height", String(period));
   pattern.setAttribute("patternUnits", "userSpaceOnUse");
   if (rotate !== 0) pattern.setAttribute("patternTransform", `rotate(${rotate})`);
 
   const bg = doc.createElementNS(SVG_NS, "rect");
-  bg.setAttribute("width", String(HATCH_PERIOD));
-  bg.setAttribute("height", String(HATCH_PERIOD));
+  bg.setAttribute("width", String(period));
+  bg.setAttribute("height", String(period));
   bg.setAttribute("style", `fill:${ground}`);
   pattern.appendChild(bg);
 
@@ -121,7 +166,7 @@ export function hatchSvgPattern(
   // Measured: a `stroke-width: 7` line on x=0 renders 17.5% coverage, where an explicit 7px rect
   // renders 43.3%. The rect also matches `hatchCss`, whose hard gradient stops were always a true
   // band, so the legend swatch and the mark now carry the same weight.
-  const w = hatchStrokeWidth(char);
+  const w = geom.band;
   const band = (width: number, height: number) => {
     const el = doc.createElementNS(SVG_NS, "rect");
     el.setAttribute("width", String(width));
@@ -129,8 +174,8 @@ export function hatchSvgPattern(
     el.setAttribute("style", `fill:${stroke}`);
     return el;
   };
-  pattern.appendChild(band(w, HATCH_PERIOD));
-  if (crossed) pattern.appendChild(band(HATCH_PERIOD, w));
+  pattern.appendChild(band(w, period));
+  if (crossed) pattern.appendChild(band(period, w));
   return pattern;
 }
 
@@ -180,7 +225,11 @@ export function hatchCssBySeries(
 ): Map<string, { backgroundColor: string; backgroundImage: string }> {
   const out = new Map<string, { backgroundColor: string; backgroundImage: string }>();
   for (const item of items ?? []) {
-    if (item.hatch) out.set(item.series, hatchCss(item.hatch.char, item.hatch.ground, item.hatch.stroke));
+    if (item.hatch)
+      out.set(
+        item.series,
+        hatchCss(item.hatch.char, item.hatch.ground, item.hatch.stroke, swatchGeometry(item.hatch.char)),
+      );
   }
   return out;
 }
@@ -229,13 +278,14 @@ export function hatchCss(
   char: HatchChar,
   ground: string,
   stroke: string,
+  geom: HatchGeometry = markGeometry(char),
 ): { backgroundColor: string; backgroundImage: string } {
-  const w = hatchStrokeWidth(char);
+  const { period, band: w } = geom;
   const backgroundImage = hatchCssAngles(char)
     .map(
       (a) =>
         `repeating-linear-gradient(${a}deg, ${stroke} 0 ${w}px, ` +
-        `transparent ${w}px ${HATCH_PERIOD}px)`,
+        `transparent ${w}px ${period}px)`,
     )
     .join(", ");
   return { backgroundColor: ground, backgroundImage };
