@@ -27,6 +27,7 @@ import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
 import { resolveColor } from "./palette.js";
+import { hatchCssBySeries } from "./hatch.js";
 import {
   attachCrosshair,
   attachBandCrosshair,
@@ -1073,6 +1074,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: bandYFormat,
         categoryLabels: spec.x_labels,
         swatchShape: "rect",
+        // Textures come from the resolved legend rows, so the tooltip swatch and the key can
+        // never disagree about a series' hatch or its ground.
+        hatches: hatchCssBySeries(legendItems),
         orientation: horizontalBar ? "horizontal" : "vertical",
         ...(useTooltip
           ? {}
@@ -1653,6 +1657,9 @@ function wireFigureSvg(
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
     showTotalDot?: boolean;
+    /** Series → `series_patterns` texture CSS, from the figure's resolved legend rows, so a pane's
+     *  tooltip swatch matches both its bars and the shared key. */
+    hatches?: Map<string, { backgroundColor: string; backgroundImage: string }>;
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
      *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
     onResolve?: (key: unknown) => void;
@@ -1852,6 +1859,7 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
       swatchShape: "rect",
+      ...(ctx.hatches ? { hatches: ctx.hatches } : {}),
       orientation: horizontal ? "horizontal" : "vertical",
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
@@ -2252,6 +2260,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
+        // One shared key for the whole figure, so every pane's tooltip agrees with it.
+        hatches: hatchCssBySeries(fig.legendItems),
         onPillDriver: (d) => pillDrivers.push(d),
         // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
         // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.

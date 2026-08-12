@@ -10,6 +10,7 @@ import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "
 import { resolveColor } from "../engine/palette.js";
 import { symbolPathD } from "../engine/symbols.js";
 import { SWATCH_OUTLINE, swatchWidthFor } from "../engine/theme.js";
+import { hatchSvgPattern, type SeriesHatch } from "../engine/hatch.js";
 import {
   SVG_NS,
   W,
@@ -42,6 +43,23 @@ import {
 
 function svgEl(name: string, attrs: Record<string, string | number> = {}): SVGElement {
   return svgElDoc(document, name, attrs);
+}
+
+/** Define a legend chip's hatch in the export root's own <defs> (created on demand) and return its
+ *  id. Idempotent on the content-addressed id, so several series sharing a texture share one
+ *  definition. The chart body brings its own copy inside its nested <svg>; both resolve to the
+ *  same fragment id, and the definitions are identical by construction. */
+function ensureExportHatch(root: SVGElement, hatch: SeriesHatch): string {
+  const owner = root.ownerSVGElement ?? root;
+  let defs = owner.querySelector(":scope > defs");
+  if (!defs) {
+    defs = document.createElementNS(SVG_NS, "defs");
+    owner.insertBefore(defs, owner.firstChild);
+  }
+  if (!defs.querySelector(`pattern[id="${hatch.id}"]`)) {
+    defs.appendChild(hatchSvgPattern(document, hatch.char, hatch.ground, hatch.stroke));
+  }
+  return hatch.id;
 }
 
 function textEl(
@@ -84,6 +102,8 @@ function drawLegend(
     dashed: boolean;
     markerSymbol?: string;
     markerShape?: string;
+    /** `series_patterns` texture, resolved upstream by the engine's legend builder. */
+    hatch?: SeriesHatch;
     outlined?: boolean;
     colors?: string[];
   }>,
@@ -170,6 +190,10 @@ function drawLegend(
           );
         });
       }
+      // A textured series' chip is filled from a real <pattern>, not a flat colour — the export
+      // composes its own chrome, so the live legend's CSS gradient cannot reach it and the key
+      // would otherwise contradict the bars in the downloaded image.
+      const hatchFill = item.hatch ? `url(#${ensureExportHatch(root, item.hatch)})` : null;
       root.appendChild(
         svgEl("rect", {
           x: chipX,
@@ -177,7 +201,7 @@ function drawLegend(
           width: chipW,
           height: chipH,
           rx: 4,
-          ...(tints ? { fill: "none" } : { fill: color }),
+          ...(tints ? { fill: "none" } : { fill: hatchFill ?? color }),
           ...(item.outlined ? { stroke: SWATCH_OUTLINE, "stroke-width": 1 } : {}),
         }),
       );

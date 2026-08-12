@@ -58,7 +58,7 @@ export function buildHistogramMarks(data: PreparedRow[], spec: ChartSpec, ctx: M
   return {
     underlay: [],
     overlay,
-    tagging: [{ selector: 'g[aria-label="rect"] rect', seriesOrder }],
+    tagging: [{ selector: 'g[aria-label="rect"] rect', seriesOrder, fill: true }],
     dashedNames: new Set<string>(),
   };
 }

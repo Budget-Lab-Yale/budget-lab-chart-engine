@@ -22,9 +22,10 @@
 // unchanged by a 180° flip) but is off by 90° for `|` and `-`, which silently swaps vertical and
 // horizontal between the chart and its legend.
 import { d3 } from "./vendor";
-import { TONAL_BY_HEX } from "./palette";
+import { TONAL_BY_HEX, resolveColor } from "./palette";
+import type { ChartSpec, HatchChar } from "../spec/types";
 
-export type HatchChar = "/" | "\\" | "|" | "-" | "+" | "x";
+export type { HatchChar };
 
 /** Tile size and line weight, in user units (≈ px at chart scale). 3px of ink per 7px period
  *  reads cleanly at the bar widths the engine produces, on screen and at the export's 2× scale. */
@@ -110,6 +111,20 @@ export function hatchSvgPattern(
   return pattern;
 }
 
+/** Series → texture CSS, built from already-resolved legend rows. The legend is the source of
+ *  truth on purpose: it holds the colour each series is actually PAINTED (a mono stacked bar's
+ *  tonal tier, not its palette entry), so a tooltip swatch built from this can never disagree with
+ *  the key beside it. Returns an empty map when nothing is textured. */
+export function hatchCssBySeries(
+  items: ReadonlyArray<{ series: string; hatch?: SeriesHatch }> | null | undefined,
+): Map<string, { backgroundColor: string; backgroundImage: string }> {
+  const out = new Map<string, { backgroundColor: string; backgroundImage: string }>();
+  for (const item of items ?? []) {
+    if (item.hatch) out.set(item.series, hatchCss(item.hatch.char, item.hatch.ground, item.hatch.stroke));
+  }
+  return out;
+}
+
 /** How many tonal tiers darker the default hatch stroke sits than its ground. Two steps is
  *  visible at a 3px line weight without reading as black. */
 const STROKE_TIER_STEP = 2;
@@ -127,6 +142,37 @@ export function defaultHatchStroke(ground: string): string {
   }
   const darker = d3.color(ground)?.darker(1.2);
   return darker ? String(darker.formatHex()) : ground;
+}
+
+/** A series' resolved texture: the character plus the two colours it is drawn from. */
+export interface SeriesHatch {
+  char: HatchChar;
+  ground: string;
+  stroke: string;
+  id: string;
+}
+
+/** Resolve `series_patterns` against the colours actually being painted, for every series that
+ *  declares a texture. `seriesColors` must be the map the marks and legend agree on — for a mono
+ *  stacked bar that is the tonal tier, not the categorical palette entry, or the pattern's ground
+ *  would not match its segment. Returns an empty map when the spec declares no textures, which is
+ *  what keeps an untextured figure byte-identical. */
+export function resolveSeriesHatches(
+  spec: Pick<ChartSpec, "series_patterns" | "series_pattern_colors">,
+  seriesColors: Map<string, string>,
+): Map<string, SeriesHatch> {
+  const out = new Map<string, SeriesHatch>();
+  const cfg = spec.series_patterns;
+  if (!cfg) return out;
+  for (const [series, char] of Object.entries(cfg)) {
+    if (!isHatchChar(char)) continue; // validation rejects these; belt-and-braces at render time
+    const ground = seriesColors.get(series);
+    if (!ground) continue;
+    const override = resolveColor(spec.series_pattern_colors?.[series]);
+    const stroke = override || defaultHatchStroke(ground);
+    out.set(series, { char, ground, stroke, id: hatchPatternId(char, ground, stroke) });
+  }
+  return out;
 }
 
 /** The same texture as CSS, for the HTML legend and tooltip swatches. Gradient gaps are

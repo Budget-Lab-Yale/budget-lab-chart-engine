@@ -657,6 +657,8 @@ export interface BandCrosshairOptions {
   categoryLabels?: Record<string, string>;
   /** Series swatch shape in the tooltip — "rect" for bars (matches the legend), else line. */
   swatchShape?: "line" | "rect";
+  /** Series → `series_patterns` texture CSS; see buildBandTooltipHtml. */
+  hatches?: Map<string, { backgroundColor: string; backgroundImage: string }>;
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -814,9 +816,13 @@ export function buildBandTooltipHtml(
      *  over the series' base `colors` for the swatch so the tooltip marker matches the drawn bar
      *  — the same fill-first rule the 1.3.x value pill uses. Absent → fall back to `colors`. */
     renderedFills?: Map<string, string>;
+    /** Series → the CSS for its `series_patterns` texture (from `hatchCss`), so the tooltip swatch
+     *  carries the same texture, at the same lean, as the mark and the legend key. Absent series
+     *  render a flat fill exactly as before. */
+    hatches?: Map<string, { backgroundColor: string; backgroundImage: string }>;
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills } = opts;
+  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills, hatches } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -854,7 +860,13 @@ export function buildBandTooltipHtml(
       swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
     } else {
       const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
-      swatch = `<span class="${swCls}" style="background: ${dot}"></span>`;
+      const hatch = hatches?.get(series);
+      // Longhand background-color + background-image, never the `background` shorthand, or the
+      // shorthand resets background-image and the texture disappears.
+      const style = hatch
+        ? `background-color: ${hatch.backgroundColor}; background-image: ${hatch.backgroundImage}`
+        : `background: ${dot}`;
+      swatch = `<span class="${swCls}" style="${style}"></span>`;
     }
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
@@ -1222,6 +1234,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       categoryLabels: opts.categoryLabels,
       swatchShape: opts.swatchShape,
       renderedFills,
+      ...(opts.hatches ? { hatches: opts.hatches } : {}),
     });
     tip!.innerHTML = html;
 

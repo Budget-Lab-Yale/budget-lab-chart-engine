@@ -34,6 +34,7 @@ import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
+import { resolveSeriesHatches, type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
@@ -152,6 +153,11 @@ export interface LegendItem {
   /** True for appended pseudo-series rows (e.g. the diverging Total) that are interactive
    *  but should sort AFTER the real series in the right-legend column. */
   isExtra?: boolean;
+  /** `series_patterns` texture for this series, resolved against the colour actually painted.
+   *  Present only for a textured series on a filled chart type — the swatch renders it as CSS
+   *  gradients, and the PNG export re-emits it as a real `<pattern>`. Absent ⇒ flat fill,
+   *  byte-identical to before the field existed. */
+  hatch?: SeriesHatch;
 }
 
 /** One row of the SHAPE legend (point charts, dual color/shape encoding): a neutral-colored
@@ -875,6 +881,21 @@ export function buildLegendItems(
             ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
           }))
         : null;
+  }
+
+  // `series_patterns` textures, attached on EVERY chart-type path (one place, so a new chart type
+  // cannot forget them) and resolved against the same colours the swatches use. Only a `rect`
+  // swatch actually draws one — an 18×3 line swatch is thinner than the hatch period — but the
+  // resolved hatch travels on the item either way, so the PNG export and the tooltip read it from
+  // the same source as the legend.
+  const legendHatches = resolveSeriesHatches(spec, new Map(
+    seriesNames.map((name) => [name, legendColorFor(name) ?? ""]),
+  ));
+  if (baseItems && legendHatches.size) {
+    baseItems = baseItems.map((item) => {
+      const hatch = legendHatches.get(item.series);
+      return hatch ? { ...item, hatch } : item;
+    });
   }
 
   // Append legendExtras (e.g. diverging stacked Total row) after the series rows.

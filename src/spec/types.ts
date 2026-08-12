@@ -12,6 +12,10 @@ export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
 
+/** A series fill texture: matplotlib's hatch characters, where the character is a picture of the
+ *  result. See `series_patterns`, and `engine/hatch.ts` for the geometry. */
+export type HatchChar = "/" | "\\" | "|" | "-" | "+" | "x";
+
 /** Per-annotation number formatting for a `{value}` token substituted into an annotation's
  *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
  *  chart's value-axis tick format (yAxis markers, points) or the raw x string (xAxis markers). */
@@ -447,6 +451,21 @@ export interface ChartSpec {
   /** Render order; also an inclusion filter when set. */
   series_order?: string[];
   series_colors?: Record<string, ColorRef>;
+  /** `{ <seriesKey>: hatch }` — a TEXTURE for the series' fill, alongside its colour, on the chart
+   *  types whose marks are filled areas (bar, stacked, area, histogram, waterfall). The six values
+   *  are matplotlib's hatch characters, and each is a picture of its own result: `"/"` `"\\"`
+   *  (diagonals), `"|"` `"-"` (vertical / horizontal), `"+"` `"x"` (the crossed pairs). Quote them
+   *  in YAML — bare `-` is a sequence indicator and bare `|` a block scalar.
+   *  The declared colour stays the pattern's GROUND, so omitting this key renders exactly as
+   *  before, and an unrecognised value is rejected rather than silently rendered flat.
+   *  Density repeats (`"//"`) are deliberately NOT supported: more ink per unit area reads as a
+   *  darker shade, which is the tonal ramp's job and is controlled precisely by `series_colors`. */
+  series_patterns?: Record<string, HatchChar>;
+  /** `{ <seriesKey>: color }` — the hatch LINE colour for a textured series. Default: a darker step
+   *  of the ground's own hue (down its tonal ramp where the ground sits on one, else darkened in
+   *  colour space). Override when the default reads too heavy — a hatch puts roughly 43% of the
+   *  segment's area at the stroke colour, so it nudges the segment's apparent lightness. */
+  series_pattern_colors?: Record<string, ColorRef>;
   /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
    *  palette (named token or raw "#hex"). A first-class replacement for the
    *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are

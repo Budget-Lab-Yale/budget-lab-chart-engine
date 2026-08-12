@@ -383,7 +383,7 @@ export function buildStackedMarks(
       underlay: [],
       overlay,
       tagging: [
-        { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+        { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
         ...netTagging,
         // Hover-accent hook (task 17): no sections/faceting for stacked bars, so render order is
         // always plain encounter order.
@@ -404,7 +404,7 @@ export function buildStackedMarks(
     underlay: [],
     overlay,
     tagging: [
-      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
       ...netTagging,
       // Vertical: the adapter (x-adapter.ts) supplies the category label marks (xAxisMarks left
       // undefined below), tagged with CAT_LABEL_CLASS there — encounter order, matching `categories`.

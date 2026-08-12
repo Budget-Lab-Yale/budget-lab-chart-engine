@@ -5,6 +5,7 @@
 import type { LegendItem } from "./index";
 import { symbolPathD } from "./symbols";
 import { swatchWidthFor } from "./theme";
+import { hatchCss } from "./hatch";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -286,7 +287,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, colors: swatchColors, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false } of safeItems) {
+  for (const { series, label: displayLabel, color, colors: swatchColors, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false, hatch } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -318,6 +319,14 @@ export function renderLegend(
         swatch.style.background = bandedGradient(swatchColors);
         // Widen past the CSS default so each band stays legible (7 tints in 14px is 2px each).
         swatch.style.width = `${swatchWidthFor(swatchColors.length)}px`;
+      } else if (hatch) {
+        // Textured series: the ground and the hatch go on SEPARATE longhand properties — the
+        // `background` shorthand below would reset background-image and erase the texture.
+        // hatchCss owns the angle conversion (see engine/hatch.ts INVARIANT 2), so the swatch
+        // cannot lean the opposite way from the bars.
+        const css = hatchCss(hatch.char, hatch.ground, hatch.stroke);
+        swatch.style.backgroundColor = css.backgroundColor;
+        swatch.style.backgroundImage = css.backgroundImage;
       } else if (color) {
         swatch.style.background = color;
       }

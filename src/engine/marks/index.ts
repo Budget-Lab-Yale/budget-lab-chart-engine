@@ -150,6 +150,11 @@ export interface MarkLayers {
     shapeOrder?: string[];
     categoryOrder?: string[];
     annotationOrder?: Array<string | undefined>;
+    /** These elements are area FILLS (bar rects, area paths) rather than strokes or markers, so a
+     *  `series_patterns` texture applies to them. Set it on every filled-mark tagging entry; a
+     *  builder that omits it silently renders flat. Deliberately NOT set on lines, dots and
+     *  category labels — a 7px hatch inside a 2px stroke or an 8px dot is noise, not a channel. */
+    fill?: true;
   }[];
   /** Series rendered dashed (drives legend swatches + tooltip styling). */
   dashedNames: Set<string>;

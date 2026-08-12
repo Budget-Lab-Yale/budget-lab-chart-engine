@@ -185,6 +185,8 @@ The series **column** is set via `columns.series`. These options reference the s
 |---|---|---|
 | `series_order` | array | Render order. **Also an inclusion filter** — when set, only listed series render. For stacked charts (bar/area) it is also the bottom→top stack order. |
 | `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). |
+| `series_patterns` | object | `{ <seriesKey>: hatch }` — a **texture** for the series' fill, alongside its color. Filled chart types only (`bar`, `stacked`, `area`, `histogram`, `waterfall`); rejected elsewhere. See [Series textures](#series-textures). |
+| `series_pattern_colors` | object | `{ <seriesKey>: color }` — the hatch **line** color. Default: a darker step of the ground's own hue. See [Series textures](#series-textures). |
 | `series_styles` | object | `{ <seriesKey>: { dashed: true } }`. `dashed` is currently the only flag. |
 | `series_labels` | object | `{ <seriesKey>: "Display name" }`. Lets the CSV use short keys while the legend/tooltip show full names. |
 | `bar_color` | color | **Single-series bar charts only.** The one series' bar fill, resolved through the palette. A first-class replacement for the `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are set. Ignored on multi-series (grouped) bar charts. With `highlightSeries`, `bar_color` replaces the base color only — a non-highlighted series still dims. |
@@ -769,6 +771,50 @@ Latin letters and lowercase Greek render italic (math variables); digits, upperc
 **Not supported:** two-dimensional constructs — `\frac`, `\sqrt`, matrices, `\binom`, over/under
 braces. These are **rejected at validation** with a clear message (they are never silently
 mis-rendered). For displayed equations needing them, use a real MathJax block on the page.
+
+---
+
+## Series textures
+
+`series_patterns` gives a series a hatch **in addition to** its color, so color, lightness and
+texture are three independent things a fill can say. The declared color stays the pattern's
+**ground**, so adding a texture does not change the series' color.
+
+The six values are matplotlib's hatch characters, and each is a picture of its own result:
+
+| value | renders |
+|---|---|
+| `"/"` | diagonal lines, ascending left→right |
+| `"\\"` | diagonal lines, descending left→right |
+| `"\|"` | vertical lines |
+| `"-"` | horizontal lines |
+| `"+"` | vertical and horizontal, crossed |
+| `"x"` | both diagonals, crossed |
+
+```yaml
+series_colors:
+  collectedNew: blue
+  lostToBehavior: "#58A3E7"
+series_patterns:
+  lostToBehavior: "/"
+series_pattern_colors:      # optional; defaults to a darker step of the ground
+  lostToBehavior: navy
+```
+
+**Always quote the value.** Bare `-` is a YAML sequence indicator and bare `|` a block-scalar
+indicator; `/` and `\` are safest quoted too.
+
+Notes:
+
+- **An unrecognized value is rejected at load**, never rendered flat. Density repeats (`"//"`) are
+  deliberately unsupported: more ink per unit area reads as a darker shade, which is what the tonal
+  scale already controls precisely through `series_colors`.
+- The texture reaches the chart, the legend key, the hover tooltip, and the **PNG export** — the
+  export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
+- Only a **rect** legend swatch draws the texture (`bar`, `stacked`, `histogram`). An `area` series'
+  swatch is an 18×3 line, thinner than the hatch period, so it stays a flat color.
+- A hatch puts roughly 43% of the fill at the stroke color, which slightly darkens the segment's
+  apparent lightness. Where that matters, set `series_pattern_colors` explicitly.
 
 ---
 

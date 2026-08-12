@@ -22,6 +22,7 @@ import {
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
 import { resolveColor, resolveColorOr } from "./palette";
+import { resolveSeriesHatches, hatchSvgPattern } from "./hatch";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
@@ -879,7 +880,14 @@ export function assemblePlot({
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
   // order its matched elements appear in (DOM order); tag by index. For lines this is the
   // flat dashed-then-solid path order, matching the old per-group loop byte-for-byte.
-  for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder } of layers.tagging) {
+  // `series_patterns` textures. Resolved against the colours the marks and legend agree on
+  // (layers.seriesColors when a builder owns them — a mono stack's tonal tiers — else the engine
+  // map), so a pattern's ground always matches the segment it replaces. Empty unless the spec
+  // declares textures, so untextured output stays byte-identical.
+  const hatches = resolveSeriesHatches(spec, layers.seriesColors ?? colors);
+  const hatchDefs = new Set<string>();
+
+  for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder, fill } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
       if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
       if (shapeOrder && i < shapeOrder.length) el.setAttribute("data-shape", shapeOrder[i] as string);
@@ -887,7 +895,31 @@ export function assemblePlot({
       // Sparse: only the elements whose spec entry is keyed in the legend carry an annotation key.
       const ann = annotationOrder?.[i];
       if (ann) el.setAttribute("data-annotation", ann);
+      // Texture goes on `style`, which beats Plot's own `fill` ATTRIBUTE without rewriting it — so
+      // the flat colour survives underneath for anything reading the attribute, and hover/legend
+      // dimming keeps working because it toggles an opacity class rather than repainting fill.
+      const hatch = fill ? hatches.get(seriesOrder[i] as string) : undefined;
+      if (hatch) {
+        (el as SVGElement).style.fill = `url(#${hatch.id})`;
+        hatchDefs.add(hatch.id);
+      }
     });
+  }
+
+  if (hatchDefs.size) {
+    const doc = svg.ownerDocument;
+    let defs = svg.querySelector("defs");
+    if (!defs) {
+      defs = doc.createElementNS("http://www.w3.org/2000/svg", "defs");
+      svg.insertBefore(defs, svg.firstChild);
+    }
+    // One <pattern> per distinct id, in a stable order (the resolution map's insertion order,
+    // which follows the spec's own key order) so repeat renders are byte-identical.
+    for (const hatch of hatches.values()) {
+      if (hatchDefs.has(hatch.id) && !defs.querySelector(`pattern[id="${hatch.id}"]`)) {
+        defs.appendChild(hatchSvgPattern(doc, hatch.char, hatch.ground, hatch.stroke));
+      }
+    }
   }
 
   // Keyed bands + reference lines: tag the group Plot stamped with our deterministic class.

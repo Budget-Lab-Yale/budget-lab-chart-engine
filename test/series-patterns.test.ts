@@ -1,0 +1,192 @@
+// @vitest-environment jsdom
+//
+// `series_patterns` end-to-end on the rendered chart. The point of putting this in the engine
+// rather than leaving it to a CSS override is that export-png.ts re-renders from the SPEC
+// (`renderFigure(spec, rows)`) instead of serialising the live DOM — so a consumer's stylesheet
+// can never reach the downloaded image. These tests assert on the engine's own output, which is
+// what both the on-page chart and the export are built from.
+import { describe, it, expect } from "vitest";
+import { renderChart } from "../src/engine/index";
+import { hatchPatternId, defaultHatchStroke } from "../src/engine/hatch";
+import type { ChartSpec } from "../src/spec/types";
+import type { TidyRow } from "../src/data/index";
+
+const ROWS: TidyRow[] = [
+  { time: "Bottom 50%", series: "collectedNew", value: "3" },
+  { time: "Bottom 50%", series: "lostToBehavior", value: "1" },
+  { time: "Top 1%", series: "collectedNew", value: "7" },
+  { time: "Top 1%", series: "lostToBehavior", value: "4" },
+] as unknown as TidyRow[];
+
+const STACKED = {
+  chartType: "stacked",
+  title: "Distribution",
+  xAxisType: "categorical",
+  columns: { x: "time", value: "value", series: "series" },
+  series_colors: { collectedNew: "blue", lostToBehavior: "#58A3E7" },
+} as unknown as ChartSpec;
+
+const OPTS = { width: 720, height: 400, document };
+
+const segments = (svg: SVGSVGElement) => [...svg.querySelectorAll<SVGElement>("rect[data-series]")];
+/** jsdom serialises `url(#x)` as `url("#x")`; both are valid CSS and resolve identically. */
+const patternRef = (slug: string) => new RegExp('^url\\("?#tblhatch-' + slug + '-');
+const segmentsFor = (svg: SVGSVGElement, series: string) =>
+  [...svg.querySelectorAll<SVGElement>(`rect[data-series="${series}"]`)];
+
+describe("series_patterns on a stacked bar", () => {
+  it("fills the textured series from a pattern and leaves the others flat", () => {
+    const spec = { ...STACKED, series_patterns: { lostToBehavior: "/" } } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, OPTS);
+
+    const hatched = segmentsFor(svg, "lostToBehavior");
+    expect(hatched.length).toBeGreaterThan(0);
+    for (const rect of hatched) {
+      expect(rect.style.fill).toMatch(patternRef("fwd"));
+    }
+    for (const rect of segmentsFor(svg, "collectedNew")) {
+      expect(rect.style.fill).toBe("");
+    }
+  });
+
+  it("defines the pattern once in <defs>, over the series' declared colour as the ground", () => {
+    const spec = { ...STACKED, series_patterns: { lostToBehavior: "/" } } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, OPTS);
+
+    const id = hatchPatternId("/", "#58A3E7", defaultHatchStroke("#58A3E7"));
+    const patterns = [...svg.querySelectorAll(`pattern[id="${id}"]`)];
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]!.closest("defs")).not.toBeNull();
+    expect(patterns[0]!.querySelector("rect")!.getAttribute("style")).toContain("#58A3E7");
+  });
+
+  it("strokes the hatch a darker step of the ground unless told otherwise", () => {
+    const spec = { ...STACKED, series_patterns: { lostToBehavior: "/" } } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, OPTS);
+    const line = svg.querySelector("pattern line")!;
+    expect(line.getAttribute("style")).toContain(defaultHatchStroke("#58A3E7"));
+  });
+
+  it("honours an explicit series_pattern_colors override for the stroke", () => {
+    const spec = {
+      ...STACKED,
+      series_patterns: { lostToBehavior: "/" },
+      series_pattern_colors: { lostToBehavior: "navy" },
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, OPTS);
+    // "navy" resolves through the palette like any other colour ref.
+    expect(svg.querySelector("pattern line")!.getAttribute("style")).toContain("#101F5B");
+  });
+
+  it("renders every character, each as its own pattern", () => {
+    for (const [char, slug] of [
+      ["/", "fwd"],
+      ["\\", "bwd"],
+      ["|", "vert"],
+      ["-", "horz"],
+      ["+", "plus"],
+      ["x", "cross"],
+    ] as const) {
+      const spec = { ...STACKED, series_patterns: { lostToBehavior: char } } as unknown as ChartSpec;
+      const { svg } = renderChart(spec, ROWS, OPTS);
+      expect(svg.querySelector(`pattern[id^="tblhatch-${slug}-"]`)).not.toBeNull();
+    }
+  });
+
+  it("emits no <pattern> at all when the spec declares none", () => {
+    const { svg } = renderChart(STACKED, ROWS, OPTS);
+    expect(svg.querySelector("pattern")).toBeNull();
+    for (const rect of segments(svg)) expect(rect.style.fill).toBe("");
+  });
+});
+
+describe("series_patterns across chart types", () => {
+  const BAR_ROWS: TidyRow[] = [
+    { time: "A", series: "one", value: "3" },
+    { time: "B", series: "one", value: "5" },
+  ] as unknown as TidyRow[];
+
+  it("applies to a grouped/single bar chart's rects", () => {
+    const spec = {
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      columns: { x: "time", value: "value", series: "series" },
+      series_colors: { one: "blue" },
+      series_patterns: { one: "x" },
+    } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, BAR_ROWS, OPTS);
+    expect(svg.querySelector('pattern[id^="tblhatch-cross-"]')).not.toBeNull();
+    const rects = [...svg.querySelectorAll<SVGElement>('rect[data-series="one"]')];
+    expect(rects.length).toBeGreaterThan(0);
+    for (const r of rects) expect(r.style.fill).toMatch(patternRef("cross"));
+  });
+
+  it("applies to an area chart's fill path", () => {
+    const spec = {
+      chartType: "area",
+      title: "t",
+      xAxisType: "numeric",
+      columns: { x: "time", value: "value", series: "series" },
+      series_colors: { one: "blue" },
+      series_patterns: { one: "/" },
+    } as unknown as ChartSpec;
+    const rows = [
+      { time: "2020", series: "one", value: "1" },
+      { time: "2021", series: "one", value: "2" },
+    ] as unknown as TidyRow[];
+    const { svg } = renderChart(spec, rows, OPTS);
+    expect(svg.querySelector('pattern[id^="tblhatch-fwd-"]')).not.toBeNull();
+    const filled = [...svg.querySelectorAll('path[data-series="one"]')].filter((p) =>
+      (p as SVGElement).style.fill.startsWith("url("),
+    );
+    expect(filled.length).toBeGreaterThan(0);
+  });
+
+  it("leaves a line chart's stroked path alone — a 7px hatch on a 2px line is noise", () => {
+    const spec = {
+      chartType: "line",
+      title: "t",
+      xAxisType: "numeric",
+      columns: { x: "time", value: "value", series: "series" },
+      series_colors: { one: "blue" },
+      series_patterns: { one: "/" },
+    } as unknown as ChartSpec;
+    const rows = [
+      { time: "2020", series: "one", value: "1" },
+      { time: "2021", series: "one", value: "2" },
+    ] as unknown as TidyRow[];
+    const { svg } = renderChart(spec, rows, OPTS);
+    expect(svg.querySelector("pattern")).toBeNull();
+  });
+});
+
+describe("two figures on one page", () => {
+  it("share an id only when the texture and both colours match, and then the defs are identical", () => {
+    const spec = { ...STACKED, series_patterns: { lostToBehavior: "/" } } as unknown as ChartSpec;
+    const a = renderChart(spec, ROWS, OPTS).svg;
+    const b = renderChart(spec, ROWS, OPTS).svg;
+    const idA = a.querySelector("pattern")!.getAttribute("id");
+    const idB = b.querySelector("pattern")!.getAttribute("id");
+    expect(idA).toBe(idB);
+    // Sharing is safe precisely because the definitions agree — whichever one the document
+    // resolves to paints the same texture.
+    expect(a.querySelector("pattern")!.outerHTML).toBe(b.querySelector("pattern")!.outerHTML);
+  });
+
+  it("gives a different texture over the same colour a different id", () => {
+    const one = renderChart(
+      { ...STACKED, series_patterns: { lostToBehavior: "/" } } as unknown as ChartSpec,
+      ROWS,
+      OPTS,
+    ).svg;
+    const two = renderChart(
+      { ...STACKED, series_patterns: { lostToBehavior: "\\" } } as unknown as ChartSpec,
+      ROWS,
+      OPTS,
+    ).svg;
+    expect(one.querySelector("pattern")!.getAttribute("id")).not.toBe(
+      two.querySelector("pattern")!.getAttribute("id"),
+    );
+  });
+});

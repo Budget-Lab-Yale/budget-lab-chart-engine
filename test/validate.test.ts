@@ -390,6 +390,66 @@ describe("validateSpec (structural)", () => {
   });
 });
 
+describe("series_patterns", () => {
+  const BAR = { ...VALID, chartType: "bar", xAxisType: "categorical" };
+
+  it("accepts each of matplotlib's six characters", () => {
+    for (const char of ["/", "\\", "|", "-", "+", "x"]) {
+      const r = validateSpec({ ...BAR, series_patterns: { a: char } });
+      expect(r, `char ${char}`).toEqual({ valid: true, errors: [] });
+    }
+  });
+
+  it("rejects a density repeat and lists the allowed values", () => {
+    const r = validateSpec({ ...BAR, series_patterns: { a: "//" } });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_patterns/);
+  });
+
+  it("rejects an unrecognised character rather than rendering flat", () => {
+    for (const bad of ["X", "*", "", "/x", "hatch-left"]) {
+      expect(validateSpec({ ...BAR, series_patterns: { a: bad } }).valid, `char ${bad}`).toBe(false);
+    }
+  });
+
+  it("rejects the key on a chart type with no filled marks", () => {
+    for (const chartType of ["line", "scatter", "dotplot", "dumbbell"]) {
+      const spec = {
+        ...VALID,
+        chartType,
+        xAxisType: chartType === "scatter" ? "numeric" : "categorical",
+        series_patterns: { a: "/" },
+      };
+      const r = validateSpec(spec);
+      expect(r.valid, `chartType ${chartType}`).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/series_patterns/);
+    }
+  });
+
+  it("accepts series_pattern_colors alongside it", () => {
+    const r = validateSpec({
+      ...BAR,
+      series_patterns: { a: "/" },
+      series_pattern_colors: { a: "navy" },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("cross-references both keys against the data's series", () => {
+    const spec = {
+      ...VALID,
+      chartType: "bar",
+      xAxisType: "categorical",
+      series_patterns: { nope: "/" },
+      series_pattern_colors: { alsoNope: "navy" },
+    } as unknown as ChartSpec;
+    const r = validateChartData(spec, ROWS);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_patterns/);
+    expect(r.errors.join("\n")).toMatch(/series_pattern_colors/);
+  });
+});
+
 describe("tooltip_x_format", () => {
   it("accepts a d3 timeFormat pattern on a temporal axis", () => {
     const r = validateSpec({ ...VALID, tooltip_x_format: "%b %-d, %Y" });

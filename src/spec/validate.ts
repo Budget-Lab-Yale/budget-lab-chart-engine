@@ -193,6 +193,20 @@ function histogramSpecError(spec: {
 
 /** `shading` fills between a line and its baseline, so it only means anything on a line chart:
  *  `area` already fills to the axis, and the rest have no line to fill under. */
+/** Chart types whose marks are filled AREAS, and so can carry a `series_patterns` texture. A line's
+ *  2px stroke and a dot's 8px disc are smaller than the 7px hatch period, so a texture there is
+ *  noise rather than a channel — reject instead of rendering something illegible. */
+const FILLED_CHART_TYPES = new Set(["bar", "stacked", "area", "histogram", "waterfall"]);
+
+function seriesPatternsError(spec: { chartType?: unknown; series_patterns?: unknown }): string | null {
+  if (spec.series_patterns == null) return null;
+  if (FILLED_CHART_TYPES.has(spec.chartType as string)) return null;
+  return (
+    "`series_patterns` applies only to chart types with filled marks " +
+    `(${[...FILLED_CHART_TYPES].join(", ")}) — got ${JSON.stringify(spec.chartType)}`
+  );
+}
+
 /** `tooltip_x_format` is a d3 `timeFormat` pattern, so it only means something on an axis whose x
  *  values ARE dates. On numeric/categorical it would be silently dropped — reject instead, so an
  *  author who reaches for it on the wrong axis finds out at load rather than by hovering. */
@@ -416,6 +430,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (shadeErr) return { valid: false, errors: [shadeErr] };
   const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
   if (txfErr) return { valid: false, errors: [txfErr] };
+  const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
+  if (patErr) return { valid: false, errors: [patErr] };
   const rugErrors = legendAndRugErrors(spec as ChartSpec);
   if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };
@@ -631,6 +647,8 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   };
   checkSeries(spec.series_order, "series_order");
   checkSeries(spec.series_colors, "series_colors");
+  checkSeries(spec.series_patterns, "series_patterns");
+  checkSeries(spec.series_pattern_colors, "series_pattern_colors");
   checkSeries(spec.series_styles, "series_styles");
   checkSeries(spec.series_labels, "series_labels");
 

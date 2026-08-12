@@ -328,7 +328,7 @@ export function buildBarMarks(
         return {
           underlay: [],
           overlay,
-          tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...catLabelTagging],
+          tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder, fill: true }, ...catLabelTagging],
           dashedNames: new Set<string>(),
           yScaleOpts: { type: "band", domain: [onlySeries], padding: 0, axis: null },
           ...fyCategoryBandLayer(gutter),
@@ -338,7 +338,7 @@ export function buildBarMarks(
       return {
         underlay: [],
         overlay,
-        tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder }, ...catLabelTagging],
+        tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder, fill: true }, ...catLabelTagging],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
         // This is the NON-sectioned single-series horizontal path (sectioned routes to fy above),
@@ -354,7 +354,7 @@ export function buildBarMarks(
       underlay: [],
       overlay,
       tagging: [
-        { selector: 'g[aria-label="bar"] rect', seriesOrder },
+        { selector: 'g[aria-label="bar"] rect', seriesOrder, fill: true },
         // Vertical single-series: the adapter (x-adapter.ts) supplies the category label marks
         // (xAxisMarks left undefined below), tagged with CAT_LABEL_CLASS there — encounter order
         // (non-faceted single band), matching `categories`.
@@ -400,7 +400,7 @@ export function buildBarMarks(
       underlay: [],
       overlay,
       tagging: [
-        { selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder },
+        { selector: 'g[aria-label="bar"] rect', seriesOrder: hRectSeriesOrder, fill: true },
         ...catLabelTagging,
       ],
       dashedNames: new Set<string>(),
@@ -432,7 +432,7 @@ export function buildBarMarks(
     underlay: [],
     overlay,
     tagging: [
-      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
       // Vertical grouped: this builder supplies its own fx-faceted category labels below (always
       // tagged with CAT_LABEL_CLASS, the "fx" call never conflicts with a grid-collapse class —
       // see tblBandXAxis) — fx-domain order, matching `categories`.
