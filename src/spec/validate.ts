@@ -12,7 +12,7 @@ import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
 import type { ChartSpec, XAxisType } from "./types";
-import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
+import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
 import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
@@ -634,6 +634,11 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   }
 
   // Cross-reference: every config-named series must appear in the data.
+  // A chart with NO series column has one implicit series keyed "" (SINGLE_SERIES_KEY), which no
+  // data cell spells out — so it has to be added here or every key naming that series is rejected,
+  // including the documented `series_colors: {"": color}` idiom and any hatch on a single-series bar.
+  // Only when the column is absent: with a series column present, "" names nothing and IS a mistake.
+  if (!cols.series) seriesSeen.add(SINGLE_SERIES_KEY);
   const knownSeries = JSON.stringify([...seriesSeen].sort());
   const checkSeries = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
     if (!named) return;

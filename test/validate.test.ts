@@ -449,6 +449,45 @@ describe("series_patterns", () => {
   });
 });
 
+describe("the implicit single-series key", () => {
+  // A chart with no series column has ONE implicit series, keyed "" (columns.ts SINGLE_SERIES_KEY).
+  // The cross-reference check built its known-series set from the data, which has no series column
+  // to read — so it rejected every key naming that series, including the `series_colors: {"": color}`
+  // idiom CONFIG-SPEC documents as still working. It also left a single-series bar unable to carry a
+  // hatch at all, since "" is the only name its series has.
+  const SINGLE = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    columns: { x: "time", value: "value" },
+    data: "d.csv",
+  };
+  const ONE_SERIES: TidyRow[] = [{ time: "A", value: "3" }] as unknown as TidyRow[];
+
+  it('accepts series_colors keyed "" on a chart with no series column', () => {
+    expect(validateChartData({ ...SINGLE, series_colors: { "": "blue" } } as unknown as ChartSpec, ONE_SERIES))
+      .toEqual({ valid: true, errors: [] });
+  });
+
+  it('accepts series_patterns keyed "" there too', () => {
+    expect(validateChartData({ ...SINGLE, series_patterns: { "": "/" } } as unknown as ChartSpec, ONE_SERIES))
+      .toEqual({ valid: true, errors: [] });
+  });
+
+  it('still rejects a NAMED series that is not in the data', () => {
+    const r = validateChartData({ ...SINGLE, series_patterns: { nope: "/" } } as unknown as ChartSpec, ONE_SERIES);
+    expect(r.valid).toBe(false);
+  });
+
+  it('does NOT accept "" when the chart HAS a series column', () => {
+    // There the empty key names nothing, so it is a real mistake.
+    const withSeries = { ...SINGLE, columns: { x: "time", value: "value", series: "series" } };
+    const rows = [{ time: "A", series: "a", value: "3" }] as unknown as TidyRow[];
+    const r = validateChartData({ ...withSeries, series_patterns: { "": "/" } } as unknown as ChartSpec, rows);
+    expect(r.valid).toBe(false);
+  });
+});
+
 describe("tooltip_x_format", () => {
   it("accepts a d3 timeFormat pattern on a temporal axis", () => {
     const r = validateSpec({ ...VALID, tooltip_x_format: "%b %-d, %Y" });
