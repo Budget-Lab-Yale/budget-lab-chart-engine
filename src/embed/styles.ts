@@ -2,9 +2,9 @@
 // Includes only the rules required to render the MVP classes:
 //   figure-card, figure-title, figure-subtitle, figure-canvas, figure-legend-slot,
 //   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix,
-//   tbl-legend / tbl-legend-item / tbl-legend-swatch (.is-dashed) / tbl-legend-reset /
+//   tbl-legend / tbl-legend-item / tbl-legend-swatch / tbl-legend-reset /
 //   tbl-legend-reset-icon / .is-pinned / .is-hovered, tbl-dimmed,
-//   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch (.is-dashed) /
+//   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch /
 //   tbl-tooltip-label / tbl-tooltip-value,
 //   inline-select-wrap / inline-select / inline-select-caret / inline-select-popover (title
 //   selector widget).
@@ -385,70 +385,23 @@ body {
   color: var(--tbl-text-heading);
 }
 .tbl-legend-swatch {
-  width: 18px;
-  height: 3px;
-  border-radius: 1px;
-  display: inline-block;
-  flex-shrink: 0;
-}
-.tbl-legend-swatch.is-dashed {
-  background: linear-gradient(
-    to right,
-    var(--swatch-color, currentColor) 0 25%,
-    transparent          25% 37.5%,
-    var(--swatch-color, currentColor) 37.5% 62.5%,
-    transparent          62.5% 75%,
-    var(--swatch-color, currentColor) 75% 100%
-  );
-  border: 0;
-  height: 2px;
-}
-/* Square, so a textured chip's glyph carries equal weight vertically and horizontally, and so flat
-   and textured keys share one box and line up in a mixed legend. */
-.tbl-legend-swatch.is-rect {
+  /* ONE box for every icon. The drawing inside is SVG (engine/icon.ts), so no shape geometry lives
+     here — that is what stops a chip, a dot and a line disagreeing about their size, which they did
+     in eleven different ways. Width may be overridden inline for a banded chip, the one icon that is
+     legitimately wider than the box. */
   width: 14px;
   height: 14px;
-  border-radius: 1px;
-}
-/* A textured swatch holds an inline SVG glyph — one centred instance of the texture — so it is the
-   glyph's square box and clips to the same 1px radius as a flat chip. Sized in hatch.ts
-   (HATCH_GLYPH_BOX); the rules here only need to stop the box from stretching. */
-.tbl-legend-swatch.is-rect.is-hatched {
-  width: 14px;
-  height: 14px;
-  overflow: hidden;
-  line-height: 0;
-}
-/* Annotation-derived fill swatch: an inset hairline so a near-white tint (an annotations.bands
-   fill is 10% opaque) still reads as a swatch rather than a gap. */
-.tbl-legend-swatch.is-rect.is-outlined {
-  box-shadow: inset 0 0 0 1px ${SWATCH_OUTLINE};
-}
-.tbl-legend-swatch.is-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: inset 0 0 0 1.5px #000;
-}
-/* Line + point-marker swatch: sized to the inline SVG (line with the series' symbol). */
-.tbl-legend-swatch.is-symbol {
-  width: 22px;
-  height: 12px;
-  border-radius: 0;
-  background: none;
-  display: inline-flex;
-  align-items: center;
-}
-/* Point-chart swatch: a filled colored marker (the symbol) with no connecting line. */
-.tbl-legend-swatch.is-point {
-  width: 18px;
-  height: 16px;
-  border-radius: 0;
-  background: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
+  /* Middle-align to the text, then lift 1px: a 12-13px label's optical centre sits about a pixel
+     above its line-box centre, so a box aligned purely to the middle reads as sitting low. The old
+     legend did this inside ONE of its six builders (translate(9,7)); it belongs here, once. */
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
 }
 /* Two-group (color + shape) point legend: groups STACK on separate lines (color row, then
    shape row), each group an inline cluster of swatches. */
@@ -592,54 +545,22 @@ body {
 }
 .tbl-tooltip-row:last-child { margin-bottom: 0; }
 .tbl-tooltip-swatch {
-  display: inline-block;
-  flex-shrink: 0;
-  width: 18px;
-  height: 3px;
-  border-radius: 1px;
-}
-.tbl-tooltip-swatch.is-dashed {
-  background: linear-gradient(
-    to right,
-    var(--swatch-color, currentColor) 0 25%,
-    transparent          25% 37.5%,
-    var(--swatch-color, currentColor) 37.5% 62.5%,
-    transparent          62.5% 75%,
-    var(--swatch-color, currentColor) 75% 100%
-  );
-  height: 2px;
-}
-/* Total row (diverging net dot): a CIRCLE swatch matching the net marker + legend "Total"
-   entry — white fill, black inset stroke. Mirrors .tbl-legend-swatch.is-dot. */
-.tbl-tooltip-swatch.is-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: inset 0 0 0 1.5px #000;
-}
-/* Bar tooltip swatch: a filled square matching the bar legend (vs the default thin line). */
-.tbl-tooltip-swatch.is-square {
-  width: 11px;
-  height: 11px;
-  border-radius: 1px;
-}
-/* The same glyph as the legend key, so the two are one drawing rather than two renderings. */
-.tbl-tooltip-swatch.is-square.is-hatched {
+  /* The SAME box as the legend's, for the same reason: a tooltip key and its legend key are one
+     drawing at one size. Before this a plain square was 11px beside a hatched one at 14px. */
   width: 14px;
   height: 14px;
-  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   line-height: 0;
-  background: none;
-}
-/* Scatter tooltip header: the point's actual marker symbol (colored), inline before the text. */
-.tbl-tooltip-swatch.is-symbol {
-  width: 16px;
-  height: 14px;
-  background: none;
-  border-radius: 0;
-  vertical-align: middle;
   margin-right: 5px;
+  /* Middle-align to the text, then lift 1px: a 12-13px label's optical centre sits about a pixel
+     above its line-box centre, so a box aligned purely to the middle reads as sitting low. The old
+     legend did this inside ONE of its six builders (translate(9,7)); it belongs here, once. */
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
 }
 
 /* =========================================================================

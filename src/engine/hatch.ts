@@ -333,3 +333,19 @@ export function defaultHatchStroke(ground: string): string {
 }
 
 
+
+/** The textures a TOOLTIP should key from.
+ *
+ *  Prefers the legend's resolved rows, because those carry the colour each series is actually PAINTED
+ *  (a mono stack's tonal tier, not its palette entry). Falls back to resolving from the spec when
+ *  there is no legend at all — a single-series histogram or waterfall has tooltips but no legend, so
+ *  keying off legend rows silently produced no texture there. This is why the RESOLVER has to be
+ *  shared and not just the renderer. */
+export function tooltipHatches(
+  items: ReadonlyArray<{ series: string; hatch?: SeriesHatch }> | null | undefined,
+  spec: Pick<ChartSpec, "series_patterns">,
+  seriesColors: Map<string, string>,
+): Map<string, SeriesHatch> {
+  const fromLegend = hatchesBySeries(items);
+  return fromLegend.size ? fromLegend : resolveSeriesHatches(spec, seriesColors);
+}

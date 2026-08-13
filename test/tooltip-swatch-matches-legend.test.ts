@@ -28,19 +28,19 @@ const GROUND = "#58A3E7";
 
 describe("seriesSwatchHtml — one emitter for every tooltip key", () => {
   it("draws a line swatch by default, exactly as before", () => {
-    expect(seriesSwatchHtml({ color: "#0072B2" })).toBe(
+    expect(seriesSwatchHtml({ shape: "line", color: "#0072B2" })).toBe(
       '<span class="tbl-tooltip-swatch" style="background: #0072B2"></span>',
     );
   });
 
   it("keeps the dashed line swatch's custom-property form", () => {
-    expect(seriesSwatchHtml({ color: "#0072B2", dashed: true })).toBe(
+    expect(seriesSwatchHtml({ shape: "line", color: "#0072B2", dashed: true })).toBe(
       '<span class="tbl-tooltip-swatch is-dashed" style="--swatch-color: #0072B2"></span>',
     );
   });
 
   it("draws a square for a filled mark", () => {
-    expect(seriesSwatchHtml({ color: "#0072B2", shape: "rect" })).toBe(
+    expect(seriesSwatchHtml({ shape: "rect", color: "#0072B2" })).toBe(
       '<span class="tbl-tooltip-swatch is-square" style="background: #0072B2"></span>',
     );
   });
@@ -48,7 +48,7 @@ describe("seriesSwatchHtml — one emitter for every tooltip key", () => {
   it("draws the centred glyph for a textured series, whatever shape was asked for", () => {
     const hatch = resolveHatch("/", GROUND);
     for (const shape of ["line", "rect"] as const) {
-      const html = seriesSwatchHtml({ color: GROUND, shape, hatch });
+      const html = seriesSwatchHtml({ shape, color: GROUND, hatch });
       expect(html).toContain("is-hatched");
       expect(html).toContain("<svg");
       expect(html).toContain(GROUND);
@@ -57,10 +57,10 @@ describe("seriesSwatchHtml — one emitter for every tooltip key", () => {
   });
 
   it("still honours the dumbbell's hollow ring", () => {
-    const hollow = seriesSwatchHtml({ color: "#0072B2", shape: "dot", marker: "hollow" });
+    const hollow = seriesSwatchHtml({ shape: "dot", color: "#0072B2", hollow: true });
     expect(hollow).toContain("border-radius:50%");
     expect(hollow).toContain("border:2px solid #0072B2");
-    expect(seriesSwatchHtml({ color: "#0072B2", shape: "dot" })).toContain("background:#0072B2");
+    expect(seriesSwatchHtml({ shape: "dot", color: "#0072B2" })).toContain("background:#0072B2");
   });
 });
 

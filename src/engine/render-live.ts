@@ -27,7 +27,8 @@ import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
 import { resolveColor } from "./palette.js";
-import { hatchesBySeries, type SeriesHatch } from "./hatch.js";
+import { tooltipHatches, resolveSeriesHatches, type SeriesHatch } from "./hatch.js";
+import { resolveTooltipIcons, type IconSpec } from "./icon.js";
 import { FILLED_CHART_TYPES } from "../spec/validate.js";
 import {
   attachCrosshair,
@@ -841,6 +842,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
     // pill renderer just needs to exist by the time the user interacts.
+    // ONE resolved icon per series, shared by every tooltip this chart attaches. Handing the attach
+    // functions loose channels instead is what let a legend and a tooltip disagree.
+    const seriesIcons = resolveTooltipIcons({ legendItems, series: seriesOrder });
     currentSeriesNames = seriesOrder;
     let pillDriver: ReturnType<typeof attachHighlightPills> | null = null;
     const onHighlight = (active: Set<string>): void => {
@@ -946,6 +950,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // matches the chart point.
       const symbols = new Map((shapeLegendItems ?? []).map((s) => [s.shape, s.markerSymbol] as const));
       attachPointHover(svg, {
+        icons: seriesIcons,
         points: dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
         selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
         colors,
@@ -962,6 +967,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
       // value). Reuses the categorical-line crosshair — no bars required.
       attachCategoricalLineCrosshair(svg, {
+        icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
         seriesLabels,
@@ -985,6 +991,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const dbMarkers = new Map(seriesOrder.map((s) => [s, spec.series_marker?.[s] ?? "filled"] as const));
       const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
       attachCategoricalLineCrosshair(svg, {
+        icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
         seriesLabels,
@@ -1001,6 +1008,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
       attachCategoricalLineCrosshair(svg, {
+        icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
         seriesLabels,
@@ -1077,7 +1085,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         swatchShape: "rect",
         // Textures come from the resolved legend rows, so the tooltip swatch and the key can
         // never disagree about a series' hatch or its ground.
-        hatches: hatchesBySeries(legendItems),
+        hatches: tooltipHatches(legendItems, spec, colors),
+        icons: seriesIcons,
         orientation: horizontalBar ? "horizontal" : "vertical",
         ...(useTooltip
           ? {}
@@ -1131,6 +1140,22 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         label: histogramBinLabelOpts(spec),
+        // A single-series histogram has NO legend, so there is no row to read: the icon is resolved
+        // from the spec, and its colour from the fill actually painted. Reading `colors` gave the
+        // PALETTE entry, so a `bar_color: violet` histogram keyed blue over violet bins.
+        // A single-series histogram has NO legend row, so the fallback supplies the icon and the
+        // painted fill supplies its colour: reading `colors` gave the PALETTE, so a bar_color
+        // histogram keyed blue over violet bins.
+        icons: resolveTooltipIcons({
+          legendItems,
+          series: seriesOrder,
+          painted: histogramPaintedFills(svg, seriesOrder),
+          fallback: (s) => {
+            const hatch = resolveSeriesHatches(spec, colors).get(s);
+            return { shape: "rect", color: colors.get(s) ?? "", ...(hatch ? { hatch } : {}) };
+          },
+        }),
+        hatches: tooltipHatches(legendItems, spec, colors),
       });
     } else {
       attachCrosshair(svg, {
@@ -1143,11 +1168,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         colors,
         dashedSeries: dashedNames,
-        // Match the legend: a FILLED chart type (area) keys with a square chip, and a textured
-        // series keys with its glyph. Without these the tooltip drew a flat line for a series whose
-        // legend key was a textured square.
+        // ONE resolved icon per series, from the legend's own rows — which is what carries the point
+        // MARKER a line chart's key shows. Handing over channels instead is why the marker reached the
+        // legend and not the tooltip.
+        icons: seriesIcons,
         ...(FILLED_CHART_TYPES.has(spec.chartType) ? { swatchShape: "rect" as const } : {}),
-        hatches: hatchesBySeries(legendItems),
+        hatches: tooltipHatches(legendItems, spec, colors),
         seriesLabels,
         seriesOrder,
         // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
@@ -1649,6 +1675,33 @@ export function buildFigureHeader(
  *  When `ctx.onResolve` is set (coordinated cursor), the primary crosshair emits its resolved
  *  x-key and a secondary-cursor driver is attached + returned for the figure-level bus.
  *  `dataInScope`/tooltip/bar-metadata come from the pane (or figure) metadata. */
+/** Series → the fill its marks are ACTUALLY painted, read off the rendered SVG.
+ *
+ *  `bar_color`, `category_colors` and the title-selector accent all override a series' colour at the
+ *  mark, and none of them reaches the engine's `colors` map — so a tooltip keying from that map shows
+ *  a different colour from the bars beside it. Plot puts a constant fill on the mark's <g> and a
+ *  channel fill on each element, so both places are checked. */
+function paintedFills(svg: SVGSVGElement, selector: string, series: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const s of series) {
+    // NOT CSS.escape: it does not exist in jsdom or Node, so it threw before the chart existed on
+    // every headless render. Series keys are author-supplied, so quotes and backslashes must escape.
+    const key = s.replace(/["\\]/g, "\\$&");
+    const el = svg.querySelector<SVGElement>(`${selector}[data-series="${key}"]`);
+    for (let n: Element | null = el; n && n !== svg.parentElement; n = n.parentElement) {
+      const fill = n.getAttribute("fill");
+      if (fill && fill !== "none") {
+        out.set(s, fill);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+const histogramPaintedFills = (svg: SVGSVGElement, series: readonly string[]) =>
+  paintedFills(svg, 'g[aria-label="rect"] rect', series);
+
 function wireFigureSvg(
   svg: SVGSVGElement,
   handle: LegendHandle | null,
@@ -1666,6 +1719,8 @@ function wireFigureSvg(
     /** Series → `series_patterns` texture CSS, from the figure's resolved legend rows, so a pane's
      *  tooltip swatch matches both its bars and the shared key. */
     hatches?: Map<string, SeriesHatch>;
+    /** Series → its resolved icon, from the figure's legend rows. */
+    icons?: Map<string, IconSpec>;
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
      *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
     onResolve?: (key: unknown) => void;
@@ -1708,6 +1763,7 @@ function wireFigureSvg(
     // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
     // before the emitOnly gate), so hovering one pane drives the coordinated band echo on the others.
     attachCategoricalLineCrosshair(svg, {
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
       ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
@@ -1727,6 +1783,7 @@ function wireFigureSvg(
     // offsets so they land over the actual points (panes dodge at the pane gap).
     const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
     attachCategoricalLineCrosshair(svg, {
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
@@ -1767,6 +1824,7 @@ function wireFigureSvg(
     // shape value → marker symbol (by shape_order index, matching the chart's symbol scale).
     const symbols = new Map((ctx.spec.shape_order ?? []).map((s, i) => [s, markerSymbolForIndex(i)] as const));
     attachPointHover(svg, {
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
       points: ctx.dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
       selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
       colors: ctx.colors,
@@ -1802,6 +1860,7 @@ function wireFigureSvg(
     // Categorical-x LINE pane: resolve the category from the x-axis labels (no bars). Coordinated
     // panes hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
     attachCategoricalLineCrosshair(svg, {
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
@@ -1854,6 +1913,7 @@ function wireFigureSvg(
     const useTooltip = ctx.showTotalDot === true;
     const coord = useCoord && !useTooltip;
     attachBandCrosshair(svg, {
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
       showTotalDot: ctx.showTotalDot,
@@ -1944,6 +2004,7 @@ function wireFigureSvg(
       ctx.onResolve != null && (ctx.spec.small_multiples?.mode ?? "shared") !== "per-pane";
     const histRows = ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y }));
     attachHistogramHover(svg, {
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: histRows,
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
@@ -1975,6 +2036,7 @@ function wireFigureSvg(
     yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
     colors: ctx.colors,
     dashedSeries: ctx.dashedNames,
+    ...(ctx.icons ? { icons: ctx.icons } : {}),
     ...(FILLED_CHART_TYPES.has(ctx.spec.chartType) ? { swatchShape: "rect" as const } : {}),
     ...(ctx.hatches ? { hatches: ctx.hatches } : {}),
     seriesLabels: ctx.seriesLabels,
@@ -2269,7 +2331,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXFormat: pane.tooltipXFormat,
         showTotalDot: pane.showTotalDot,
         // One shared key for the whole figure, so every pane's tooltip agrees with it.
-        hatches: hatchesBySeries(fig.legendItems),
+        hatches: tooltipHatches(fig.legendItems, spec, pane.colors ?? new Map()),
+        icons: resolveTooltipIcons({ legendItems: fig.legendItems, series: pane.seriesOrder ?? [] }),
         onPillDriver: (d) => pillDrivers.push(d),
         // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
         // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.

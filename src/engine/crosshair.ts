@@ -11,7 +11,8 @@ import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
-import { hatchGlyphMarkup, type SeriesHatch } from "./hatch";
+import { resolveHatch, type SeriesHatch } from "./hatch";
+import { iconSvgMarkup, recolourIcons, type IconSpec } from "./icon";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 
 type Row = Record<string, unknown>;
@@ -48,6 +49,8 @@ export interface CrosshairOptions {
   swatchShape?: "line" | "rect";
   /** Series → resolved `series_patterns` texture, so the key matches the legend's glyph. */
   hatches?: Map<string, SeriesHatch>;
+  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
+  icons?: Map<string, IconSpec>;
 }
 
 let activeTooltip: HTMLElement | null = null; // single shared tooltip element
@@ -204,12 +207,14 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       const dot = colors?.get(series) || "currentColor";
       const isDashed = dashedSeries?.has(series);
       const display = (seriesLabels && seriesLabels[series]) || series;
-      const swatch = seriesSwatchHtml({
-        color: dot,
-        ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
-        ...(isDashed ? { dashed: true } : {}),
-        ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
-      });
+      const swatch = seriesSwatchHtml(
+        rowIcon(series, opts.icons, {
+          color: dot,
+          ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
+          ...(isDashed ? { dashed: true } : {}),
+          ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
+        }),
+      );
       html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
@@ -407,37 +412,30 @@ export function resolveFacetCell(
  *
  *  A texture wins over the requested shape: the glyph carries its own ground, so a hatched series
  *  needs no colour fill underneath. */
-export function seriesSwatchHtml(icon: {
-  color: string;
-  /** "line" (stroked marks) | "rect" (filled marks) | "dot" (dumbbell). Default "line". */
-  shape?: "line" | "rect" | "dot";
-  dashed?: boolean;
-  hatch?: SeriesHatch;
-  /** Dumbbell dot style; ignored for the other shapes. */
-  marker?: "filled" | "hollow" | "ink";
-}): string {
-  const { color, shape = "line", dashed, hatch, marker = "filled" } = icon;
-  if (hatch) {
-    return (
-      '<span class="tbl-tooltip-swatch is-square is-hatched">' +
-      `${hatchGlyphMarkup(hatch.char, hatch.ground, hatch.stroke)}</span>`
-    );
-  }
-  if (shape === "dot") {
-    // Explicit dimensions — the base .tbl-tooltip-swatch is a thin line (18×3), so without them an
-    // inline border-radius just rounds a line. Hollow → ring (page-bg fill, coloured border).
-    const base = "display:inline-block;width:11px;height:11px;border-radius:50%;box-sizing:border-box";
-    const style =
-      marker === "hollow"
-        ? `${base};background:#ffffff;border:2px solid ${color}`
-        : `${base};background:${color}`;
-    return `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
-  }
-  if (dashed) {
-    return `<span class="tbl-tooltip-swatch is-dashed" style="--swatch-color: ${color}"></span>`;
-  }
-  const cls = shape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
-  return `<span class="${cls}" style="background: ${color}"></span>`;
+export function seriesSwatchHtml(icon: IconSpec): string {
+  return `<span class="tbl-tooltip-swatch">${iconSvgMarkup(icon)}</span>`;
+}
+
+/** The icon a tooltip row should draw for `series`.
+ *
+ *  `icons` is the resolved map (see icon.ts resolveTooltipIcons) and is the ONLY thing consulted when
+ *  present. The channel arguments behind it are the legacy path, kept so a caller that has not been
+ *  migrated still renders something — but they are why a marker could reach a legend and not a
+ *  tooltip, so nothing new should use them. */
+function rowIcon(
+  series: string,
+  icons: Map<string, IconSpec> | undefined,
+  legacy: { color: string; shape?: "line" | "rect" | "dot" | "symbol"; dashed?: boolean; hatch?: SeriesHatch; marker?: "filled" | "hollow" | "ink" },
+): IconSpec {
+  const resolved = icons?.get(series);
+  if (resolved) return resolved;
+  return {
+    shape: legacy.shape ?? "line",
+    color: legacy.color,
+    ...(legacy.dashed ? { dashed: true } : {}),
+    ...(legacy.hatch ? { hatch: legacy.hatch } : {}),
+    ...(legacy.marker === "hollow" ? { hollow: true } : {}),
+  };
 }
 
 /**
@@ -457,6 +455,8 @@ export function buildFacetTooltipHtml(
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat: (v: number) => string;
+    /** Series → its resolved icon. When present this is the ONLY source; see resolveTooltipIcons. */
+    icons?: Map<string, IconSpec>;
     /** "rect" for a FILLED chart type (area), matching its legend chip; default "line". */
     swatchShape?: "line" | "rect";
     /** Series → resolved `series_patterns` texture, so the key matches the legend's glyph. */
@@ -475,12 +475,14 @@ export function buildFacetTooltipHtml(
     const dot = colors?.get(series) || "currentColor";
     const isDashed = dashedSeries?.has(series);
     const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml({
-      color: dot,
-      ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
-      ...(isDashed ? { dashed: true } : {}),
-      ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
-    });
+    const swatch = seriesSwatchHtml(
+      rowIcon(series, opts.icons, {
+        color: dot,
+        ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
+        ...(isDashed ? { dashed: true } : {}),
+        ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
+      }),
+    );
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   }
   return html;
@@ -728,6 +730,8 @@ export interface BandCrosshairOptions {
    *  show NO tooltip (the coordinated secondary renderer draws every pane's shaded region +
    *  labels instead). */
   emitOnly?: boolean;
+  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
+  icons?: Map<string, IconSpec>;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -878,6 +882,8 @@ export function buildBandTooltipHtml(
     /** Series → its resolved `series_patterns` texture, so the tooltip key carries the same centred
      *  glyph as the legend key. Absent series render a flat fill exactly as before. */
     hatches?: Map<string, SeriesHatch>;
+    /** Series → its resolved icon. When present this is the ONLY source; see resolveTooltipIcons. */
+    icons?: Map<string, IconSpec>;
   },
 ): string {
   const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills, hatches } = opts;
@@ -904,12 +910,14 @@ export function buildBandTooltipHtml(
     const display = (seriesLabels && seriesLabels[series]) || series;
     // Swatch matches the chart's legend marker: filled square (bars), a circle/ring/ink dot
     // (dumbbell — honoring the series' marker), else the default line swatch (line charts).
-    const swatch = seriesSwatchHtml({
-      color: dot,
-      ...(swatchShape ? { shape: swatchShape } : {}),
-      ...(swatchMarkers?.get(series) ? { marker: swatchMarkers.get(series)! } : {}),
-      ...(hatches?.get(series) ? { hatch: hatches.get(series)! } : {}),
-    });
+    const swatch = seriesSwatchHtml(
+      rowIcon(series, opts.icons, {
+        color: dot,
+        ...(swatchShape ? { shape: swatchShape } : {}),
+        ...(swatchMarkers?.get(series) ? { marker: swatchMarkers.get(series)! } : {}),
+        ...(hatches?.get(series) ? { hatch: hatches.get(series)! } : {}),
+      }),
+    );
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
@@ -1277,6 +1285,9 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       swatchShape: opts.swatchShape,
       renderedFills,
       ...(opts.hatches ? { hatches: opts.hatches } : {}),
+      // Re-coloured from the drawn fills: a category_colors bar keys the hovered category, not the
+      // series. Forwarding `icons` unchanged would revert that to the palette colour.
+      ...(opts.icons ? { icons: recolourIcons(opts.icons, renderedFills, resolveHatch) } : {}),
     });
     tip!.innerHTML = html;
 
@@ -1337,6 +1348,10 @@ export interface HistogramHoverOptions {
   /** Coordinated small-multiples: hit-test + emit only (no highlight/tooltip drawn); the secondary
    *  cursor renders the echo on every pane. */
   emitOnly?: boolean;
+  /** Series → resolved `series_patterns` texture; see buildHistogramTooltipHtml. */
+  hatches?: Map<string, SeriesHatch>;
+  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
+  icons?: Map<string, IconSpec>;
 }
 
 /** A histogram bin: its edge values + per-series height. Derived from the binned rows. */
@@ -1410,6 +1425,10 @@ export function buildHistogramTooltipHtml(
     /** series → the bar's ACTUAL rendered fill, preferred over `colors` for the swatch so the
      *  tooltip marker matches the drawn bar (mirrors the band tooltip's fill-first rule). */
     renderedFills?: Map<string, string>;
+    /** Series → resolved `series_patterns` texture, so a hatched bin keys as one. */
+    hatches?: Map<string, SeriesHatch>;
+    /** Series → its resolved icon. When present this is the ONLY source; see resolveTooltipIcons. */
+    icons?: Map<string, IconSpec>;
   },
 ): string {
   const { colors, seriesLabels, seriesOrder, renderedFills } = opts;
@@ -1428,7 +1447,15 @@ export function buildHistogramTooltipHtml(
     const dot = renderedFills?.get(series) || colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
     // Filled-square swatch matches the histogram legend (bars, not lines) — same as bar tooltips.
-    html += `<div class="tbl-tooltip-row"><span class="tbl-tooltip-swatch is-square" style="background: ${dot}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    // A histogram's marks are filled bins, so its key is a square — the same one its legend draws.
+    const swatch = seriesSwatchHtml(
+      rowIcon(series, opts.icons, {
+        color: dot,
+        shape: "rect",
+        ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
+      }),
+    );
+    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   }
   return html;
 }
@@ -1580,6 +1607,8 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
       yFormat,
       label: opts.label,
       renderedFills,
+      ...(opts.hatches ? { hatches: opts.hatches } : {}),
+      ...(opts.icons ? { icons: recolourIcons(opts.icons, renderedFills, resolveHatch) } : {}),
     });
 
     const offset = 14;
@@ -2761,6 +2790,8 @@ export interface CategoricalLineOptions {
   /** "horizontal" puts categories on the Y axis (dumbbell rows): the cursor resolves a category by
    *  its screen-Y, and the band highlight is a full-width horizontal strip. Default "vertical". */
   orientation?: "vertical" | "horizontal";
+  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
+  icons?: Map<string, IconSpec>;
   /** Tooltip swatch shape (dumbbell passes "dot"); see buildBandTooltipHtml. */
   swatchShape?: "line" | "rect" | "dot";
   /** Dumbbell: series → marker style, so the tooltip dot renders hollow/ink to match the chart. */
@@ -2884,6 +2915,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       ...(opts.swatchShape ? { swatchShape: opts.swatchShape } : {}),
       ...(opts.swatchMarkers ? { swatchMarkers: opts.swatchMarkers } : {}),
       ...(opts.renderedFills ? { renderedFills: opts.renderedFills } : {}),
+      ...(opts.icons ? { icons: recolourIcons(opts.icons, opts.renderedFills, resolveHatch) } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
@@ -3319,6 +3351,8 @@ export function attachHighlightPills(
 // ---------------------------------------------------------------------------
 
 export interface PointHoverOptions {
+  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
+  icons?: Map<string, IconSpec>;
   /** One entry per rendered marker, in the SAME DOM order as `selector` matches. */
   points: Array<{ series: string; shape?: string; x: number; y: number | null }>;
   /** CSS selector for the marker elements (e.g. 'g[aria-label="dot"] path'). */
@@ -3373,10 +3407,10 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       // Header: the point's actual marker (its symbol, filled in the series color) followed by
       // "series · shape" on one line (e.g. a navy triangle + "Slow · Compressive").
       const symbolName = (p.shape && opts.symbols?.get(p.shape)) || "circle";
-      const swatch =
-        `<span class="tbl-tooltip-swatch is-symbol"><svg width="16" height="14" viewBox="0 0 16 14">` +
-        `<path d="${symbolPathD(symbolName, 95)}" transform="translate(8,6)" fill="${color}" stroke="#ffffff" stroke-width="1"/>` +
-        `</svg></span>`;
+      // The resolved icon where there is one, so the header marker is the legend's own drawing.
+      const swatch = seriesSwatchHtml(
+        opts.icons?.get(p.series) ?? { shape: "symbol", color, symbol: symbolName },
+      );
       const headText =
         opts.showShape && p.shape
           ? `${escapeHtml(sLabel)} · ${escapeHtml(opts.shapeLabels?.[p.shape] ?? p.shape)}`
