@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.11.0] - 2026-08-12
+## [1.11.0] - 2026-08-13
 
 ### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
 
@@ -33,12 +33,18 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   background-coloured stroke: a segment thinner than the gap is floored to a hairline instead of
   being painted over, no gap appears at the bar's outer ends, and the net marker stays at the true
   net. Honoured in both orientations, on normalized stacks, in panes, and in the export.
-- **Tooltip keys match their legend keys.** The line/area crosshair drew a flat line swatch for a
-  series whose legend key was a square chip with a texture in it. All three tooltip paths now render
-  through one emitter (`seriesSwatchHtml`), so a filled chart type keys with a square and a textured
-  series keys with the same centred glyph the legend draws. Known remaining gap: a `points: true`
-  line chart shows line-plus-symbol in the legend and a plain line in the tooltip; the legend and
-  the PNG export still have their own renderers.
+- **A series' key is one drawing, wherever it appears.** The legend, the three tooltip paths and the
+  PNG export each built their keys separately, from a different subset of the channels and with
+  eleven different icon boxes between them — a tooltip's plain square was 11px beside a hatched one
+  at 14px, and adding a channel meant threading it into six places. So a hatched area series showed
+  a textured chip in its legend and a plain line in its tooltip; a `bar_color` histogram keyed blue
+  over violet bins; a line chart's markers reached the legend and not the tooltip; and in a
+  downloaded PNG a diverging stack's Total came out as a navy bar rather than the net dot, a hollow
+  dumbbell end came out filled, and every bar and area key was distinctly rounder than on screen.
+  All of it is now drawn by one module: one box, one geometry, all SVG (which retires the CSS
+  gradient that had to mirror the SVG dash by hand, and its angle conversion with it). A test
+  renders eleven chart types and asserts each key carries the same ink as the mark it names, on the
+  page and in the export.
 - **An `area` series is keyed by a square chip, not a line swatch.** An area mark is a filled
   region, so the line swatch misrepresented it, and at 3px tall it could not hold a hatch glyph —
   a textured area series had no way to show its texture in the key. Every filled chart type now
