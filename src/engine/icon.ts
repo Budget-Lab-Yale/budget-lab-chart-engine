@@ -20,7 +20,7 @@
 // border-radius) with separate SVG equivalents in the export.
 import { symbolPathD } from "./symbols";
 import { tokens } from "../theme/tokens";
-import { TBL, swatchWidthFor } from "./theme";
+import { TBL, swatchWidthFor, SWATCH_OUTLINE, SHAPE_LEGEND_COLOR } from "./theme";
 import { hatchGlyphShapes, type HatchChar, type SeriesHatch } from "./hatch";
 
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
@@ -74,9 +74,9 @@ const RING_WEIGHT = 2;
 const RECT_RADIUS = 1;
 const CHIP_RADIUS = 4;
 /** Hairline around a near-white tint, so an annotation chip does not read as a gap. */
-const OUTLINE = "rgba(0, 0, 0, 0.18)";
-/** Ground behind a hollow ring. */
-const RING_GROUND = "#ffffff";
+const OUTLINE = SWATCH_OUTLINE;
+/** Ground behind a hollow ring — the page's own background, since a ring shows the page through it. */
+const RING_GROUND = tokens.structural.background;
 /** Ring colour for the stacked Total dot, matching the net marker the chart draws. */
 const TOTAL_RING = tokens.structural.mark_black;
 
@@ -299,11 +299,16 @@ export function iconSvgElement(doc: Document, icon: IconSpec): SVGElement | null
   return svg;
 }
 
+/** The class marking a legend key inside a flat exported SVG, where there is no legend element to
+ *  scope a query to — the key's shapes are siblings of the chart's own. */
+export const ICON_GROUP_CLASS = "tbl-icon";
+
 /** An icon as an SVG `<g>` at the origin, for the PNG export to position. Null for `none`. */
 export function iconSvgGroup(doc: Document, icon: IconSpec): SVGElement | null {
   const svg = iconSvgElement(doc, icon);
   if (!svg) return null;
   const g = doc.createElementNS(SVG_NS, "g");
+  g.setAttribute("class", ICON_GROUP_CLASS);
   while (svg.firstChild) g.appendChild(svg.firstChild);
   return g;
 }
@@ -327,7 +332,12 @@ export function iconFromLegendItem(item: {
   outlined?: boolean;
   hatch?: SeriesHatch;
 }): IconSpec {
-  const color = item.color;
+  // A point/chip key with no colour is a SHAPE-legend row, which is neutral by design: shape carries
+  // the value there, not colour. Here rather than in the renderers, which each had to remember it —
+  // and a colourless row is otherwise the stacked Total, which means something else entirely.
+  const color =
+    item.color ??
+    (item.markerShape === "point" || item.markerShape === "chip" ? SHAPE_LEGEND_COLOR : undefined);
   switch (item.markerShape) {
     case "rect":
       return {

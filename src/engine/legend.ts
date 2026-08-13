@@ -4,12 +4,7 @@
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
 import { ICON_BOX, iconFromLegendItem, iconSvgElement, iconWidth } from "./icon";
-
-
-
-/** Neutral gray used for the shape-legend markers (shape conveys the shape-channel value, not a
- *  color — so its swatches are uncolored). */
-const SHAPE_LEGEND_COLOR = "#555B66";
+import { SHAPE_LEGEND_COLOR } from "./theme";
 
 /** One shape-legend row (point charts, dual encoding). */
 export interface ShapeLegendEntry {
@@ -219,9 +214,7 @@ export function renderLegend(
     const swatch = doc.createElement("span");
     swatch.className = "tbl-legend-swatch";
     const icon = iconFromLegendItem({
-      // A point/chip key with no colour is a SHAPE-legend row, which is neutral by design: shape
-      // carries the value there, not colour.
-      color: color ?? (markerShape === "point" || markerShape === "chip" ? SHAPE_LEGEND_COLOR : undefined),
+      color,
       dashed,
       markerShape,
       ...(markerSymbol ? { markerSymbol } : {}),

@@ -50,6 +50,11 @@ export function swatchWidthFor(bands: number): number {
  *  Style-Guide token (it is chrome on chrome), so it lives here with the other layout constants. */
 export const SWATCH_OUTLINE = "rgba(0, 0, 0, 0.18)";
 
+/** Marker colour for a SHAPE-legend row (a point chart's second legend group). Neutral by design:
+ *  shape carries the value in that group, not colour. Here rather than in either legend renderer,
+ *  which each had their own copy of it — the live one and the export's, free to drift. */
+export const SHAPE_LEGEND_COLOR = "#555B66";
+
 // Per-series point-marker symbols (d3 symbol names), in a fixed, distinguishable order so a
 // series' shape is stable and series can be told apart without relying on color (accessibility).
 // Assigned by series index; wraps if there are more series than shapes.

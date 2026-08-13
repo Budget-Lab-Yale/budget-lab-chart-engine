@@ -19,7 +19,8 @@
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
-import { resolveTooltipIcons, iconSvgMarkup, iconShapes, type IconSpec } from "../src/engine/icon";
+import { resolveTooltipIcons, iconSvgMarkup, iconShapes, ICON_GROUP_CLASS, type IconSpec } from "../src/engine/icon";
+import { buildExportSvg } from "../src/embed/export-png";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -213,6 +214,30 @@ describe("a tooltip key is the same drawing as its legend key", () => {
       }
     }
   });
+});
+
+describe("the exported key is the same drawing as the on-screen key", () => {
+  // The export drew its own legend, nine branches deep, and disagreed with the screen in seven ways
+  // at once — a `rect` rounded like a chip, a `dot` with no branch at all (the stacked Total came out
+  // a navy bar), a hollow dumbbell end exported filled, a dashed series with points exported without
+  // its marker, every symbol at one area. A downloaded PNG is what leaves the building, so it is the
+  // copy that most needs to agree; and nothing on the live path can catch this.
+  for (const { name, spec, rows } of CHARTS) {
+    it(name, () => {
+      const resolved = specOf(spec);
+      const r = renderChart(resolved, rows, OPTS);
+      const parent = document.createElement("div");
+      renderLegend(parent, r.legendItems!);
+      const onScreen = [...parent.querySelectorAll(".tbl-legend-swatch svg")].map(drawnFingerprint);
+
+      const exported = [...buildExportSvg(resolved, rows).querySelectorAll(`g.${ICON_GROUP_CLASS}`)]
+        .map(drawnFingerprint);
+
+      expect(exported.length, `${name}: exported ${exported.length} keys, screen drew ${onScreen.length}`)
+        .toBe(onScreen.length);
+      expect(exported).toEqual(onScreen);
+    });
+  }
 });
 
 describe("a key matches the mark it names", () => {
