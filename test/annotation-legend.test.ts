@@ -221,7 +221,12 @@ describe("annotation legend interaction", () => {
     row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     expect(handle?.pinnedSeries()).toEqual([]);
     expect(row?.classList.contains("is-pinned")).toBe(true);
-    expect(parent.querySelector(".tbl-legend-swatch.is-rect.is-outlined")).not.toBeNull();
+    // The key is an OUTLINED chip: a near-white annotation tint would otherwise read as a gap in the
+    // legend rather than as a colour. (Was `.is-rect.is-outlined` over CSS shape rules; the shape and
+    // the hairline are drawn by engine/icon.ts now, so the assertion reads the drawing.)
+    const chip = parent.querySelector(".tbl-legend-swatch svg rect")!;
+    expect(chip).not.toBeNull();
+    expect(chip.getAttribute("style")).toContain("stroke:");
   });
 });
 
@@ -461,10 +466,16 @@ describe("multi-series charts with shaded areas", () => {
     const parent = document.createElement("div");
     renderLegend(parent, legendItems ?? [], { svg });
     const chip = parent.querySelector<HTMLElement>(
-      `.tbl-legend-item[data-annotation] .tbl-legend-swatch.is-rect`,
+      `.tbl-legend-item[data-annotation] .tbl-legend-swatch svg`,
     )!;
-    expect(chip.style.background).toContain("linear-gradient");
-    expect(chip.style.background.match(/33\.3333%/g)?.length).toBe(2);
+    // Three tints, three equal bands, hard-edged and in order. It was a CSS linear-gradient with
+    // hard stops at 33.3333%; the bands are rects now, but the invariant is the same one — the
+    // reader must be able to count the fills the key stands for.
+    const bands = [...chip.querySelectorAll("rect")];
+    expect(bands).toHaveLength(3);
+    const width = Number(bands[0]!.getAttribute("width"));
+    expect(bands.map((b) => Number(b.getAttribute("x")))).toEqual([0, width, width * 2]);
+    expect(new Set(bands.map((b) => b.getAttribute("style")))).toHaveProperty("size", 3);
   });
 });
 
@@ -546,9 +557,12 @@ describe("banded chip width", () => {
     const parent = document.createElement("div");
     renderLegend(parent, legendItems ?? [], { svg });
     const chip = parent.querySelector<HTMLElement>(
-      ".tbl-legend-item[data-annotation] .tbl-legend-swatch.is-rect",
+      ".tbl-legend-item[data-annotation] .tbl-legend-swatch",
     )!;
+    // The span reserves the extra width and the drawing fills it — a banded chip is the one icon
+    // allowed to be wider than the box, so both have to agree about how much wider.
     expect(chip.style.width).toBe(`${swatchWidthFor(7)}px`);
+    expect(chip.querySelector("svg")!.getAttribute("width")).toBe(String(swatchWidthFor(7)));
   });
 });
 

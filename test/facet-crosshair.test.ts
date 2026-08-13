@@ -190,8 +190,11 @@ describe("buildFacetTooltipHtml", () => {
       yFormat: (v) => String(v),
     });
     expect(html).toContain("Short term");
-    expect(html).toContain("is-dashed");
-    expect(html).toContain("--swatch-color: #123456");
+    // The dash is drawn, not classed: `is-dashed` + a `--swatch-color` custom property used to feed
+    // a hard-stop CSS gradient, which had to be kept in sync with the SVG dash by hand.
+    const line = new DOMParser().parseFromString(html, "text/html").querySelector("svg line")!;
+    expect(line.getAttribute("stroke-dasharray")).toBeTruthy();
+    expect(line.getAttribute("style")).toContain("stroke:#123456");
   });
 });
 

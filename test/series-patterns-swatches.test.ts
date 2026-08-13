@@ -9,6 +9,7 @@ import { renderChart, buildLegendItems } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { defaultHatchStroke, resolveHatch } from "../src/engine/hatch";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";
+import { ICON_BOX } from "../src/engine/icon";
 import { CHART_CSS } from "../src/embed/styles";
 import { FILLED_CHART_TYPES } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
@@ -43,12 +44,11 @@ describe("the legend swatch", () => {
     const swatchFor = (series: string) =>
       parent.querySelector<HTMLElement>(`[data-series="${series}"] .tbl-legend-swatch`)!;
 
-    // The textured key is an inline SVG glyph; the flat one is a plain coloured box.
-    const hatched = swatchFor("lostToBehavior");
-    expect(hatched.querySelector("svg")).not.toBeNull();
-    expect(hatched.classList.contains("is-hatched")).toBe(true);
-
-    expect(swatchFor("collectedNew").querySelector("svg")).toBeNull();
+    // The textured key is a ground plus the glyph's bands; the flat one is that ground alone. Both
+    // are SVG now, so the difference is the number of shapes drawn, not the presence of an <svg>.
+    const shapesIn = (series: string) => swatchFor(series).querySelector("svg")!.children.length;
+    expect(shapesIn("lostToBehavior")).toBeGreaterThan(1);
+    expect(shapesIn("collectedNew")).toBe(1);
   });
 
   it("draws the key's band over the series' own ground and derived band colour", () => {
@@ -112,17 +112,22 @@ describe("the tooltip swatch", () => {
     const collectedRow = html
       .split('<div class="tbl-tooltip-row"')
       .find((chunk) => chunk.includes("collectedNew"))!;
-    expect(collectedRow).not.toContain("<svg");
-    expect(collectedRow).toContain("#0072B2");
+    const svg = new DOMParser().parseFromString(collectedRow, "text/html").querySelector("svg")!;
+    // One shape, its own colour: a flat chip, with none of the glyph's bands over it.
+    expect(svg.children).toHaveLength(1);
+    expect(svg.firstElementChild!.getAttribute("style")).toContain("#0072B2");
   });
 
-  it("is unchanged when no textures are passed at all", () => {
+  it("draws every key flat when no textures are passed at all", () => {
     const html = buildBandTooltipHtml("Top 1%", TIP_ROWS, {
       isStacked: true,
       swatchShape: "rect",
       colors: COLORS,
     });
-    expect(html).not.toContain("<svg");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    for (const svg of doc.querySelectorAll(".tbl-tooltip-swatch svg")) {
+      expect(svg.children).toHaveLength(1);
+    }
   });
 });
 
@@ -159,21 +164,31 @@ describe("a textured series is keyed by a chip on any chart type", () => {
     const parent = document.createElement("div");
     renderLegend(parent, legendItems!);
     const swatch = parent.querySelector<HTMLElement>('[data-series="textured"] .tbl-legend-swatch')!;
-    expect(swatch.classList.contains("is-hatched")).toBe(true);
-    expect(swatch.querySelector("svg")).not.toBeNull();
+    expect(swatch.querySelector("svg")!.children.length).toBeGreaterThan(1);
   });
 
   it("gives flat and textured keys the SAME box, so a mixed legend lines up", () => {
-    // A 14x12 flat chip beside a 14x14 textured one reads as sloppy in a row of keys.
-    const chip = /\.tbl-legend-swatch\.is-rect\s*\{[^}]*\}/.exec(CHART_CSS)![0];
-    const hatched = /\.tbl-legend-swatch\.is-rect\.is-hatched\s*\{[^}]*\}/.exec(CHART_CSS)![0];
-    const size = (css: string) => ({
-      width: /width:\s*(\d+)px/.exec(css)?.[1],
-      height: /height:\s*(\d+)px/.exec(css)?.[1],
-    });
-    expect(size(chip)).toEqual(size(hatched));
-    // And square, so `|` and `-` carry equal weight in the glyph.
-    expect(size(chip).width).toBe(size(chip).height);
+    // A 14x12 flat chip beside a 14x14 textured one reads as sloppy in a row of keys. The shapes
+    // shared one box only by coincidence before — two hand-written CSS rules that happened to agree.
+    // There is one box now, and the CSS interpolates it, so this checks the two cannot drift apart:
+    // the boxes the drawings declare, and the box the stylesheet reserves for them.
+    const { legendItems } = renderChart(AREA, AREA_ROWS, OPTS);
+    const parent = document.createElement("div");
+    renderLegend(parent, legendItems!);
+    const boxes = [...parent.querySelectorAll(".tbl-legend-swatch svg")].map((s) => [
+      s.getAttribute("width"),
+      s.getAttribute("height"),
+    ]);
+    expect(boxes.length).toBeGreaterThan(1);
+    // Square, so `|` and `-` carry equal weight in the glyph — and the same square for every key.
+    for (const box of boxes) expect(box).toEqual([String(ICON_BOX), String(ICON_BOX)]);
+
+    // The CSS box is the same constant, in both the legend's rule and the tooltip's.
+    for (const cls of ["tbl-legend-swatch", "tbl-tooltip-swatch"]) {
+      const rule = new RegExp(`\\.${cls}\\s*\\{[^}]*\\}`).exec(CHART_CSS)![0];
+      expect(/width:\s*(\d+)px/.exec(rule)?.[1]).toBe(String(ICON_BOX));
+      expect(/height:\s*(\d+)px/.exec(rule)?.[1]).toBe(String(ICON_BOX));
+    }
   });
 });
 

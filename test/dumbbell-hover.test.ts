@@ -98,14 +98,20 @@ describe("dumbbell hover — plumbing", () => {
         ["collected", "#8856BF"],
       ]),
     });
-    // Every swatch is a real circle: explicit width/height + border-radius (not the 18×3 line).
-    expect(html).toContain("width:11px;height:11px;border-radius:50%");
-    expect(html).not.toContain("is-square");
-    // Hollow → a ring: white fill + series-color border.
-    expect(html).toContain("background:#ffffff;border:2px solid #E69F00");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const swatches = [...doc.querySelectorAll(".tbl-tooltip-swatch")];
+    expect(swatches).toHaveLength(3);
+    // Every swatch is a real circle, not the 18x3 line — a dumbbell end IS a dot.
+    const styleOf = (i: number) =>
+      swatches[i]!.querySelector("circle")!.getAttribute("style") ?? "";
+    // Hollow → a ring: the ground fills and the series colour becomes the stroke. This inversion is
+    // what broke when the CSS holding it was deleted — the ring exported and hovered as a filled dot.
+    expect(styleOf(1)).toContain("stroke:#E69F00");
+    expect(styleOf(1)).not.toContain("fill:#E69F00");
+    expect(Number(swatches[1]!.querySelector("circle")!.getAttribute("stroke-width"))).toBe(2);
     // Ink → filled with the ink token; filled → the series color.
-    expect(html).toContain("background:#1A1A2E");
-    expect(html).toContain("background:#8856BF");
+    expect(styleOf(0)).toContain("fill:#1A1A2E");
+    expect(styleOf(2)).toContain("fill:#8856BF");
   });
 
   it("spreadPillCentersX de-collides overlapping coordinated pills (collision avoidance)", () => {

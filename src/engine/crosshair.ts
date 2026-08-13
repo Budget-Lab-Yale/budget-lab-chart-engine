@@ -12,7 +12,7 @@ import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
 import { resolveHatch, type SeriesHatch } from "./hatch";
-import { iconSvgMarkup, recolourIcons, type IconSpec } from "./icon";
+import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 
 type Row = Record<string, unknown>;
@@ -219,7 +219,10 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
     if (opts.showTotal && totalAny) {
-      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600"><span class="tbl-tooltip-swatch" style="background:transparent"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
+      // The Total of a cumulative stack names no series, so it draws no key — but it still occupies
+      // the box, or its label hangs left of every row above it. `shape: "none"` IS that empty box.
+      const blank = seriesSwatchHtml({ shape: "none" });
+      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
     }
     tip!.innerHTML = html;
 
@@ -925,10 +928,12 @@ export function buildBandTooltipHtml(
   // undefined (undefined = netDisplay:"none"/normalized — no net marker, no Total row).
   if (isStacked && orderedSeries.length > 1 && showTotalDot !== undefined) {
     if (showTotalDot) {
-      // Diverging stack: Total row matches the net-dot marker and legend "Total" entry —
-      // a CIRCLE swatch (white fill, black inset stroke). `is-dot` carries the circle
-      // styling (see styles.ts); no inline color needed.
-      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch is-dot"></span><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      // Diverging stack: the Total row keys the net-dot marker, so it draws the SAME icon the
+      // legend's "Total" row draws — a colourless `dot`, which icon.ts resolves to the white disc
+      // with the black ring that marks/stacked.ts paints. It was a bare `is-dot` class over CSS that
+      // no longer exists, which is to say an empty box.
+      const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
+      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
       // Cumulative stack: net callout is a text-above marker, not a dot — no swatch in
       // the tooltip either. Show Total as a plain label + value row.

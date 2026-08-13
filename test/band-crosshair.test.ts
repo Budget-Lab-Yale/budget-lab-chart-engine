@@ -278,11 +278,12 @@ describe("buildBandTooltipHtml", () => {
       colors: COLORS, // series base colors #f00 / #00f
       renderedFills: new Map([["Alpha", "#123456"]]), // Alpha's ACTUAL bar fill
     });
-    // Alpha's swatch uses the rendered fill, not its base color.
-    expect(html).toContain("background: #123456");
-    expect(html).not.toContain("background: #f00");
+    // Alpha's swatch uses the rendered fill, not its base color. (The colour is the drawing's `fill`
+    // now, not the span's CSS `background` — a key over a bar has to match the bar's own paint.)
+    expect(html).toContain("fill:#123456");
+    expect(html).not.toContain("fill:#f00");
     // Beta has no rendered fill → falls back to its base color.
-    expect(html).toContain("background: #00f");
+    expect(html).toContain("fill:#00f");
   });
 
   it("uses seriesLabels for display names", () => {
@@ -317,23 +318,31 @@ describe("buildBandTooltipHtml", () => {
     expect(html).toContain("15");
   });
 
-  it("Total row swatch carries the is-dot (circle) class for diverging stacks; per-series rows do not", () => {
+  it("draws the Total row's swatch as a circle for diverging stacks; per-series rows stay squares", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
-    // The Total row's swatch is a circle matching the net dot / legend.
-    expect(html).toContain('class="tbl-tooltip-swatch is-dot"');
-    // Per-series rows keep the plain colored-square swatch (no is-dot): Cat1 has 2 series.
-    const perSeries = html.match(/class="tbl-tooltip-swatch"/g) ?? [];
-    expect(perSeries.length).toBe(2);
-    // Exactly one is-dot swatch (the Total row).
-    expect((html.match(/is-dot/g) ?? []).length).toBe(1);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    // The Total row's swatch is a circle matching the net dot / legend. It carried an `is-dot` class
+    // over CSS that has since been deleted, so the class name outlived the drawing it stood for.
+    const rows = [...doc.querySelectorAll(".tbl-tooltip-row")];
+    const total = rows.at(-1)!;
+    expect(total.textContent).toContain("Total");
+    expect(total.querySelector(".tbl-tooltip-swatch svg circle")).not.toBeNull();
+    // Cat1's 2 series keep whatever shape their mark has — the dot belongs to the Total alone.
+    const perSeries = rows.slice(0, -1);
+    expect(perSeries).toHaveLength(2);
+    for (const r of perSeries) {
+      expect(r.querySelector(".tbl-tooltip-swatch svg")).not.toBeNull();
+      expect(r.querySelector("circle")).toBeNull();
+    }
   });
 
-  it("Total row does NOT use is-dot for cumulative stacked charts (showTotalDot=false)", () => {
+  it("draws no Total swatch for cumulative stacked charts (showTotalDot=false)", () => {
     // Cumulative (all-positive) stacks show a text-above net callout, not a dot marker,
     // so the tooltip Total row must match: plain label + value, no circle swatch.
     const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, colors: COLORS });
     expect(html).toContain("Total");
-    expect(html).not.toContain("is-dot");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelectorAll("circle")).toHaveLength(0);
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
@@ -759,7 +768,7 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     const svg = hoverFirstBar(container);
     // Tooltip shown (visible band crosshair), with the dot-swatch Total row.
     expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(before + 1);
-    expect(document.body.querySelector(".tbl-tooltip-swatch.is-dot")).not.toBeNull();
+    expect(document.body.querySelector(".tbl-tooltip-row--total .tbl-tooltip-swatch svg circle")).not.toBeNull();
     // No coordinated pill cursor was attached at all.
     expect(svg.querySelector("g.tbl-coord")).toBeNull();
     document.body.removeChild(container);

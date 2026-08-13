@@ -7,10 +7,12 @@
 // series showed a chip with a glyph in its legend and a plain line in its tooltip. Two divergences
 // in one row: the shape and the texture.
 //
-// The cause is structural: five separate renderers each re-derive a swatch from raw option bags
-// instead of consuming the resolved icon, so every new channel has to be threaded into each by hand.
-// This locks the two line paths. `seriesSwatchHtml` is now the one emitter behind all three tooltip
-// paths, which is as far as the fix goes — the full single-source-of-truth refactor is its own job.
+// `seriesSwatchHtml` is now the one emitter behind every tooltip path, drawing engine/icon.ts's
+// primitives. These assertions therefore read the DRAWING — the elements and their ink — and not the
+// markup. They used to be byte-exact against HTML spans with `is-square` / `is-dashed` classes over
+// CSS shape rules; that CSS is gone, and a test comparing bytes could only ever be rewritten
+// wholesale whenever the emitter changed. `test/key-agreement.test.ts` is the structural gate that
+// a key matches its mark; this file pins what each individual shape actually draws.
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
@@ -20,47 +22,83 @@ import {
   seriesSwatchHtml,
 } from "../src/engine/crosshair";
 import { resolveHatch, defaultHatchStroke } from "../src/engine/hatch";
+import { ICON_BOX } from "../src/engine/icon";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
 const OPTS = { width: 640, height: 360, document };
 const GROUND = "#58A3E7";
 
+/** The `<svg>` a swatch draws, or null when it draws nothing. */
+function swatchSvg(html: string): SVGElement | null {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return doc.querySelector("svg");
+}
+
+/** Every drawn element as `tag:style`, in order — the drawing, independent of attribute spelling. */
+function drawing(svg: Element): string[] {
+  return [...svg.querySelectorAll("rect, line, circle, path")].map(
+    (s) => `${s.tagName.toLowerCase()}:${s.getAttribute("style")}`,
+  );
+}
+
 describe("seriesSwatchHtml — one emitter for every tooltip key", () => {
-  it("draws a line swatch by default, exactly as before", () => {
-    expect(seriesSwatchHtml({ shape: "line", color: "#0072B2" })).toBe(
-      '<span class="tbl-tooltip-swatch" style="background: #0072B2"></span>',
-    );
+  it("draws a line swatch by default", () => {
+    const svg = swatchSvg(seriesSwatchHtml({ shape: "line", color: "#0072B2" }))!;
+    const line = svg.querySelector("line")!;
+    expect(line.getAttribute("style")).toContain("stroke:#0072B2");
+    expect(line.getAttribute("stroke-dasharray")).toBeNull();
+    // Spans the box, so a line key and a square key weigh the same in a column.
+    expect(line.getAttribute("x1")).toBe("0");
+    expect(line.getAttribute("x2")).toBe(String(ICON_BOX));
+    expect(svg.querySelector("rect")).toBeNull();
   });
 
-  it("keeps the dashed line swatch's custom-property form", () => {
-    expect(seriesSwatchHtml({ shape: "line", color: "#0072B2", dashed: true })).toBe(
-      '<span class="tbl-tooltip-swatch is-dashed" style="--swatch-color: #0072B2"></span>',
-    );
+  it("dashes the line swatch with the chart's own dash pattern", () => {
+    const svg = swatchSvg(seriesSwatchHtml({ shape: "line", color: "#0072B2", dashed: true }))!;
+    const line = svg.querySelector("line")!;
+    expect(line.getAttribute("stroke-dasharray")).toBeTruthy();
+    expect(line.getAttribute("style")).toContain("stroke:#0072B2");
   });
 
   it("draws a square for a filled mark", () => {
-    expect(seriesSwatchHtml({ shape: "rect", color: "#0072B2" })).toBe(
-      '<span class="tbl-tooltip-swatch is-square" style="background: #0072B2"></span>',
-    );
+    const svg = swatchSvg(seriesSwatchHtml({ shape: "rect", color: "#0072B2" }))!;
+    const rect = svg.querySelector("rect")!;
+    expect(rect.getAttribute("style")).toContain("fill:#0072B2");
+    expect(rect.getAttribute("width")).toBe(String(ICON_BOX));
+    expect(rect.getAttribute("height")).toBe(String(ICON_BOX));
+    expect(svg.querySelector("line")).toBeNull();
   });
 
   it("draws the centred glyph for a textured series, whatever shape was asked for", () => {
     const hatch = resolveHatch("/", GROUND);
     for (const shape of ["line", "rect"] as const) {
-      const html = seriesSwatchHtml({ shape, color: GROUND, hatch });
-      expect(html).toContain("is-hatched");
-      expect(html).toContain("<svg");
-      expect(html).toContain(GROUND);
-      expect(html).toContain(defaultHatchStroke(GROUND));
+      const svg = swatchSvg(seriesSwatchHtml({ shape, color: GROUND, hatch }))!;
+      const marks = drawing(svg);
+      // The ground, then the glyph's bands in the derived stroke — never a bare line.
+      expect(marks[0]).toContain(`fill:${GROUND}`);
+      expect(marks.slice(1).join(" ")).toContain(defaultHatchStroke(GROUND));
+      expect(marks.length).toBeGreaterThan(1);
     }
   });
 
   it("still honours the dumbbell's hollow ring", () => {
-    const hollow = seriesSwatchHtml({ shape: "dot", color: "#0072B2", hollow: true });
-    expect(hollow).toContain("border-radius:50%");
-    expect(hollow).toContain("border:2px solid #0072B2");
-    expect(seriesSwatchHtml({ shape: "dot", color: "#0072B2" })).toContain("background:#0072B2");
+    const hollow = swatchSvg(seriesSwatchHtml({ shape: "dot", color: "#0072B2", hollow: true }))!;
+    const ring = hollow.querySelector("circle")!;
+    // Hollow inverts the ink: the ground fills, the series colour becomes the ring.
+    expect(ring.getAttribute("style")).toContain("stroke:#0072B2");
+    expect(ring.getAttribute("style")).not.toContain("fill:#0072B2");
+    expect(Number(ring.getAttribute("stroke-width"))).toBeGreaterThan(0);
+
+    const filled = swatchSvg(seriesSwatchHtml({ shape: "dot", color: "#0072B2" }))!;
+    expect(filled.querySelector("circle")!.getAttribute("style")).toContain("fill:#0072B2");
+  });
+
+  it("draws nothing for `none`, but keeps the box", () => {
+    // A cumulative stack's Total row names no series. The span still has to be there, or its label
+    // hangs left of every row above it.
+    const html = seriesSwatchHtml({ shape: "none" });
+    expect(html).toBe('<span class="tbl-tooltip-swatch"></span>');
   });
 });
 
@@ -93,8 +131,13 @@ describe("the line/area tooltip agrees with its legend", () => {
       yFormat: String,
       swatchShape: "rect",
     });
-    expect(html).toContain("is-square");
-    expect(html).not.toMatch(/class="tbl-tooltip-swatch"/);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const svgs = [...doc.querySelectorAll(".tbl-tooltip-swatch svg")];
+    expect(svgs).toHaveLength(2);
+    for (const svg of svgs) {
+      expect(svg.querySelector("rect")).not.toBeNull();
+      expect(svg.querySelector("line")).toBeNull();
+    }
   });
 
   it("carries the texture, so the row matches the key the reader just read", () => {
@@ -106,13 +149,14 @@ describe("the line/area tooltip agrees with its legend", () => {
       swatchShape: "rect",
       hatches: new Map([["textured", item.hatch!]]),
     });
-    // The textured row carries the glyph; the plain row does not.
+    // The textured row carries the glyph's bands; the plain row is one flat rect.
     const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
-    const textured = rows.find((r) => r.includes("textured"))!;
-    const plain = rows.find((r) => r.includes("plain"))!;
-    expect(textured).toContain("<svg");
-    expect(textured).toContain(item.hatch!.stroke);
-    expect(plain).not.toContain("<svg");
+    const marksIn = (row: string) => drawing(swatchSvg(row)!);
+    const textured = marksIn(rows.find((r) => r.includes("textured"))!);
+    const plain = marksIn(rows.find((r) => r.includes("plain"))!);
+    expect(textured.join(" ")).toContain(item.hatch!.stroke);
+    expect(textured.length).toBeGreaterThan(1);
+    expect(plain).toHaveLength(1);
   });
 
   it("renders the SAME glyph markup the legend renders — one drawing, not two", () => {
@@ -129,16 +173,13 @@ describe("the line/area tooltip agrees with its legend", () => {
       swatchShape: "rect",
       hatches: new Map([["textured", item.hatch!]]),
     });
-    const tooltipGlyph = new DOMParser().parseFromString(html, "text/html").querySelector("svg")!;
+    const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
+    const tooltipGlyph = swatchSvg(rows.find((r) => r.includes("textured"))!)!;
 
-    const shapes = (svg: Element) =>
-      [...svg.querySelectorAll("rect, line")].map(
-        (s) => `${s.tagName}:${s.getAttribute("style")}`,
-      );
-    expect(shapes(tooltipGlyph)).toEqual(shapes(legendGlyph));
+    expect(drawing(tooltipGlyph)).toEqual(drawing(legendGlyph));
   });
 
-  it("leaves a plain LINE chart's tooltip exactly as it was", () => {
+  it("leaves a plain LINE chart's tooltip a line", () => {
     const spec = {
       chartType: "line",
       title: "t",
@@ -151,9 +192,9 @@ describe("the line/area tooltip agrees with its legend", () => {
       colors,
       yFormat: String,
     });
-    expect(html).toContain('class="tbl-tooltip-swatch" style="background:');
-    expect(html).not.toContain("is-square");
-    expect(html).not.toContain("<svg");
+    const svg = swatchSvg(html)!;
+    expect(svg.querySelector("line")).not.toBeNull();
+    expect(svg.querySelector("rect")).toBeNull();
   });
 });
 
@@ -169,7 +210,8 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
 
   it("keeps the square swatch for a bar series", () => {
     const html = buildBandTooltipHtml("A", ROWS, { swatchShape: "rect", colors: COLORS });
-    expect(html).toContain('class="tbl-tooltip-swatch is-square" style="background: #0072B2"');
+    const svg = swatchSvg(html)!;
+    expect(svg.querySelector("rect")!.getAttribute("style")).toContain("fill:#0072B2");
   });
 
   it("keeps the Total row's circle for a diverging stack", () => {
@@ -179,7 +221,12 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
       swatchShape: "rect",
       colors: COLORS,
     });
-    expect(html).toContain('class="tbl-tooltip-swatch is-dot"');
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    // The Total row keys the net-dot marker, so it must actually DRAW the ring. It carried a bare
+    // `is-dot` class after the CSS behind it was deleted — a class name over an empty box.
+    const total = doc.querySelector(".tbl-tooltip-row--total .tbl-tooltip-swatch svg circle")!;
+    expect(total).not.toBeNull();
+    expect(total.getAttribute("style")).toContain("stroke:");
   });
 
   it("still carries a hatch glyph", () => {
@@ -188,7 +235,9 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
       colors: COLORS,
       hatches: new Map([["textured", resolveHatch("/", GROUND)]]),
     });
-    expect(html).toContain("is-hatched");
-    expect(html).toContain("<svg");
+    const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
+    const textured = drawing(swatchSvg(rows.find((r) => r.includes("textured"))!)!);
+    expect(textured.length).toBeGreaterThan(1);
+    expect(textured.join(" ")).toContain(defaultHatchStroke(GROUND));
   });
 });

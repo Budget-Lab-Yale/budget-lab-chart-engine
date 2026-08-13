@@ -125,7 +125,11 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
   const mid = ICON_BOX / 2;
   const color = icon.color ?? "currentColor";
 
-  switch (icon.shape) {
+  // A texture only exists on a FILLED mark, so it settles the shape: a hatched icon is the chip with
+  // the glyph in it, whatever the caller asked for. A caller that asks for `line` and passes a hatch
+  // is describing an AREA series, and drawing its request literally is exactly the divergence this
+  // module exists to prevent — a chip with a glyph in the legend, a plain line in the tooltip.
+  switch (icon.hatch && icon.shape !== "none" ? "rect" : icon.shape) {
     case "none":
       return [];
 

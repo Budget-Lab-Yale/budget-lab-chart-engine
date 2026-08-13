@@ -15,6 +15,7 @@
 
 import { TOKENS_CSS } from "../theme/tokens";
 import { SWATCH_OUTLINE } from "../engine/theme";
+import { ICON_BOX } from "../engine/icon";
 
 // Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated
 // verbatim from the Style-Guide palette so the HTML/CSS matches the SVG side exactly. Only
@@ -388,9 +389,11 @@ body {
   /* ONE box for every icon. The drawing inside is SVG (engine/icon.ts), so no shape geometry lives
      here — that is what stops a chip, a dot and a line disagreeing about their size, which they did
      in eleven different ways. Width may be overridden inline for a banded chip, the one icon that is
-     legitimately wider than the box. */
-  width: 14px;
-  height: 14px;
+     legitimately wider than the box. Interpolated from ICON_BOX, not typed here: the box was written
+     out by hand in both this rule and the tooltip's, and a hand-written copy can drift from the
+     drawing it is meant to hold. */
+  width: ${ICON_BOX}px;
+  height: ${ICON_BOX}px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -546,9 +549,10 @@ body {
 .tbl-tooltip-row:last-child { margin-bottom: 0; }
 .tbl-tooltip-swatch {
   /* The SAME box as the legend's, for the same reason: a tooltip key and its legend key are one
-     drawing at one size. Before this a plain square was 11px beside a hatched one at 14px. */
-  width: 14px;
-  height: 14px;
+     drawing at one size. Before this a plain square was 11px beside a hatched one at 14px. Both
+     rules read ICON_BOX, so the CSS cannot drift from the drawing. */
+  width: ${ICON_BOX}px;
+  height: ${ICON_BOX}px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

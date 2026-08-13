@@ -221,13 +221,15 @@ describe("buildHistogramTooltipHtml", () => {
       colors: COLORS,
       renderedFills: new Map([["A", "#123456"]]),
     });
-    expect(html).toContain("background: #123456");
-    expect(html).not.toContain("background: #f00");
+    expect(html).toContain("fill:#123456");
+    expect(html).not.toContain("fill:#f00");
   });
 
-  it("uses a filled-square swatch (is-square) matching the histogram legend", () => {
+  it("uses a filled-square swatch matching the histogram legend", () => {
     const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), { colors: COLORS });
-    expect(html).toContain("tbl-tooltip-swatch is-square");
+    const svg = new DOMParser().parseFromString(html, "text/html").querySelector("svg")!;
+    expect(svg.querySelector("rect")).not.toBeNull();
+    expect(svg.querySelector("line")).toBeNull();
   });
 
   it("HTML-escapes dangerous characters", () => {

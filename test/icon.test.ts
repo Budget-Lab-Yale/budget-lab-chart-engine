@@ -190,6 +190,17 @@ describe("each shape draws what it says", () => {
     }
   });
 
+  it("lets the texture settle the shape, because only a filled mark can carry one", () => {
+    const hatch = resolveHatch("/", "#58A3E7");
+    // An AREA series is keyed by a chip but describes itself as a line on the legacy tooltip path.
+    // Drawing that request literally is escape #1: a glyph in the legend, a plain line in the tooltip.
+    expect(iconShapes({ shape: "line", color: "#58A3E7", hatch })).toEqual(
+      iconShapes({ shape: "rect", color: "#58A3E7", hatch }),
+    );
+    // `none` still means none — an explicit no-key is not a shape to be overridden.
+    expect(iconShapes({ shape: "none", hatch })).toEqual([]);
+  });
+
   it("scales each symbol so they share an EXTENT, not an area", () => {
     const [path] = iconShapes({ shape: "symbol", color: COLOR, symbol: "triangle" });
     expect(path!.kind).toBe("path");
