@@ -127,61 +127,6 @@ export function hatchGlyphShapes(char: HatchChar): HatchGlyphShape[] {
   }
 }
 
-/** Render a glyph as SVG markup: a ground rect plus its bands. One emitter shared by the DOM
- *  builders and the tooltip's HTML string, so the three surfaces cannot drift. */
-export function hatchGlyphMarkup(char: HatchChar, ground: string, stroke: string): string {
-  const box = HATCH_GLYPH_BOX;
-  const bands = hatchGlyphShapes(char)
-    .map((s) =>
-      s.kind === "rect"
-        ? `<rect x="${s.x}" y="${s.y}" width="${s.width}" height="${s.height}" style="fill:${stroke}"/>`
-        : `<line x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke-width="${s.width}" style="stroke:${stroke}"/>`,
-    )
-    .join("");
-  return (
-    `<svg width="${box}" height="${box}" viewBox="0 0 ${box} ${box}" aria-hidden="true">` +
-    `<rect width="${box}" height="${box}" style="fill:${ground}"/>${bands}</svg>`
-  );
-}
-
-/** The same glyph as DOM, for the live legend and the PNG export. Returns a <g> at the origin so a
- *  caller can position it; the box is HATCH_GLYPH_BOX square. */
-export function hatchGlyphGroup(
-  doc: Document,
-  char: HatchChar,
-  ground: string,
-  stroke: string,
-): SVGElement {
-  const box = HATCH_GLYPH_BOX;
-  const g = doc.createElementNS(SVG_NS, "g");
-  const bg = doc.createElementNS(SVG_NS, "rect");
-  bg.setAttribute("width", String(box));
-  bg.setAttribute("height", String(box));
-  bg.setAttribute("style", `fill:${ground}`);
-  g.appendChild(bg);
-  for (const s of hatchGlyphShapes(char)) {
-    if (s.kind === "rect") {
-      const el = doc.createElementNS(SVG_NS, "rect");
-      el.setAttribute("x", String(s.x));
-      el.setAttribute("y", String(s.y));
-      el.setAttribute("width", String(s.width));
-      el.setAttribute("height", String(s.height));
-      el.setAttribute("style", `fill:${stroke}`);
-      g.appendChild(el);
-    } else {
-      const el = doc.createElementNS(SVG_NS, "line");
-      el.setAttribute("x1", String(s.x1));
-      el.setAttribute("y1", String(s.y1));
-      el.setAttribute("x2", String(s.x2));
-      el.setAttribute("y2", String(s.y2));
-      el.setAttribute("stroke-width", String(s.width));
-      el.setAttribute("style", `stroke:${stroke}`);
-      g.appendChild(el);
-    }
-  }
-  return g;
-}
-
 /** Declaration order is the documented order in CONFIG-SPEC. */
 export const HATCH_CHARS: readonly HatchChar[] = ["/", "\\", "|", "-", "+", "x"];
 

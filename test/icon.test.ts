@@ -26,7 +26,7 @@ import {
   type IconSpec,
 } from "../src/engine/icon";
 import { swatchWidthFor } from "../src/engine/theme";
-import { resolveHatch } from "../src/engine/hatch";
+import { resolveHatch, HATCH_GLYPH_BOX } from "../src/engine/hatch";
 import { tokens } from "../src/theme/tokens";
 
 const COLOR = "#0072B2";
@@ -188,6 +188,13 @@ describe("each shape draws what it says", () => {
     for (const s of shapes.slice(1)) {
       expect(s.kind === "line" ? s.stroke : s.kind === "rect" ? s.fill : "").toBe(hatch.stroke);
     }
+  });
+
+  it("draws the glyph in the SAME box it lays the icon out in", () => {
+    // iconShapes places the glyph's bands straight into the icon's box, so the two constants are one
+    // measurement kept in two modules — hatch.ts cannot import ICON_BOX without a cycle. If they
+    // drift the glyph is cut by its own chip, silently and only for textured series.
+    expect(HATCH_GLYPH_BOX).toBe(ICON_BOX);
   });
 
   it("lets the texture settle the shape, because only a filled mark can carry one", () => {
