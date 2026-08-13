@@ -44,6 +44,10 @@ export interface CrosshairOptions {
   /** Append a cumulative "Total" row (sum of the shown series at the hovered x) to the tooltip —
    *  used for stacked area, where the stack height is the meaningful aggregate. */
   showTotal?: boolean;
+  /** "rect" for a FILLED chart type (area), matching its legend chip; default "line". */
+  swatchShape?: "line" | "rect";
+  /** Series → resolved `series_patterns` texture, so the key matches the legend's glyph. */
+  hatches?: Map<string, SeriesHatch>;
 }
 
 let activeTooltip: HTMLElement | null = null; // single shared tooltip element
@@ -200,9 +204,13 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       const dot = colors?.get(series) || "currentColor";
       const isDashed = dashedSeries?.has(series);
       const display = (seriesLabels && seriesLabels[series]) || series;
-      const swatchClass = isDashed ? "tbl-tooltip-swatch is-dashed" : "tbl-tooltip-swatch";
-      const swatchStyle = isDashed ? `--swatch-color: ${dot}` : `background: ${dot}`;
-      html += `<div class="tbl-tooltip-row"><span class="${swatchClass}" style="${swatchStyle}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+      const swatch = seriesSwatchHtml({
+        color: dot,
+        ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
+        ...(isDashed ? { dashed: true } : {}),
+        ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
+      });
+      html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
     if (opts.showTotal && totalAny) {
@@ -390,6 +398,48 @@ export function resolveFacetCell(
   return best;
 }
 
+/** One tooltip key, for every tooltip path.
+ *
+ *  There were three near-copies of this, and each knew about a different subset of the channels — so
+ *  the line/area path drew a flat line for a series whose legend key was a square with a texture in
+ *  it. A shared emitter means a new channel is added once. (The legend and the PNG export still have
+ *  their own renderers; unifying all five is a separate job.)
+ *
+ *  A texture wins over the requested shape: the glyph carries its own ground, so a hatched series
+ *  needs no colour fill underneath. */
+export function seriesSwatchHtml(icon: {
+  color: string;
+  /** "line" (stroked marks) | "rect" (filled marks) | "dot" (dumbbell). Default "line". */
+  shape?: "line" | "rect" | "dot";
+  dashed?: boolean;
+  hatch?: SeriesHatch;
+  /** Dumbbell dot style; ignored for the other shapes. */
+  marker?: "filled" | "hollow" | "ink";
+}): string {
+  const { color, shape = "line", dashed, hatch, marker = "filled" } = icon;
+  if (hatch) {
+    return (
+      '<span class="tbl-tooltip-swatch is-square is-hatched">' +
+      `${hatchGlyphMarkup(hatch.char, hatch.ground, hatch.stroke)}</span>`
+    );
+  }
+  if (shape === "dot") {
+    // Explicit dimensions — the base .tbl-tooltip-swatch is a thin line (18×3), so without them an
+    // inline border-radius just rounds a line. Hollow → ring (page-bg fill, coloured border).
+    const base = "display:inline-block;width:11px;height:11px;border-radius:50%;box-sizing:border-box";
+    const style =
+      marker === "hollow"
+        ? `${base};background:#ffffff;border:2px solid ${color}`
+        : `${base};background:${color}`;
+    return `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
+  }
+  if (dashed) {
+    return `<span class="tbl-tooltip-swatch is-dashed" style="--swatch-color: ${color}"></span>`;
+  }
+  const cls = shape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
+  return `<span class="${cls}" style="background: ${color}"></span>`;
+}
+
 /**
  * PURE — build the tooltip inner HTML for ONE facet cell at the snapped x. Header is the
  * pane title + the formatted x label; then one row per series in `seriesOrder` that has a
@@ -407,6 +457,10 @@ export function buildFacetTooltipHtml(
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat: (v: number) => string;
+    /** "rect" for a FILLED chart type (area), matching its legend chip; default "line". */
+    swatchShape?: "line" | "rect";
+    /** Series → resolved `series_patterns` texture, so the key matches the legend's glyph. */
+    hatches?: Map<string, SeriesHatch>;
   },
 ): string {
   const { colors, dashedSeries, seriesLabels, seriesOrder, yFormat } = opts;
@@ -421,9 +475,13 @@ export function buildFacetTooltipHtml(
     const dot = colors?.get(series) || "currentColor";
     const isDashed = dashedSeries?.has(series);
     const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatchClass = isDashed ? "tbl-tooltip-swatch is-dashed" : "tbl-tooltip-swatch";
-    const swatchStyle = isDashed ? `--swatch-color: ${dot}` : `background: ${dot}`;
-    html += `<div class="tbl-tooltip-row"><span class="${swatchClass}" style="${swatchStyle}"></span><span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    const swatch = seriesSwatchHtml({
+      color: dot,
+      ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
+      ...(isDashed ? { dashed: true } : {}),
+      ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
+    });
+    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   }
   return html;
 }
@@ -846,31 +904,12 @@ export function buildBandTooltipHtml(
     const display = (seriesLabels && seriesLabels[series]) || series;
     // Swatch matches the chart's legend marker: filled square (bars), a circle/ring/ink dot
     // (dumbbell — honoring the series' marker), else the default line swatch (line charts).
-    let swatch: string;
-    if (swatchShape === "dot") {
-      const marker = swatchMarkers?.get(series) ?? "filled";
-      // Explicit circle dimensions — the base .tbl-tooltip-swatch is a thin line (18×3), so without
-      // width/height an inline border-radius just rounds a line. Hollow → ring (page-bg + colored
-      // border); filled/ink → solid dot in `dot` (ink already resolved to the ink token upstream).
-      const base = "display:inline-block;width:11px;height:11px;border-radius:50%;box-sizing:border-box";
-      const style =
-        marker === "hollow"
-          ? `${base};background:#ffffff;border:2px solid ${dot}`
-          : `${base};background:${dot}`;
-      swatch = `<span class="tbl-tooltip-swatch" style="${style}"></span>`;
-    } else {
-      const hatch = hatches?.get(series);
-      if (hatch) {
-        // The same centred glyph the legend key uses, as inline SVG — so the two keys are the same
-        // drawing, not two renderings of one idea.
-        swatch =
-          `<span class="tbl-tooltip-swatch is-square is-hatched">` +
-          `${hatchGlyphMarkup(hatch.char, hatch.ground, hatch.stroke)}</span>`;
-      } else {
-        const swCls = swatchShape === "rect" ? "tbl-tooltip-swatch is-square" : "tbl-tooltip-swatch";
-        swatch = `<span class="${swCls}" style="background: ${dot}"></span>`;
-      }
-    }
+    const swatch = seriesSwatchHtml({
+      color: dot,
+      ...(swatchShape ? { shape: swatchShape } : {}),
+      ...(swatchMarkers?.get(series) ? { marker: swatchMarkers.get(series)! } : {}),
+      ...(hatches?.get(series) ? { hatch: hatches.get(series)! } : {}),
+    });
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 

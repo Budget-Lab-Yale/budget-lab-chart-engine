@@ -28,6 +28,7 @@ import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
 import { resolveColor } from "./palette.js";
 import { hatchesBySeries, type SeriesHatch } from "./hatch.js";
+import { FILLED_CHART_TYPES } from "../spec/validate.js";
 import {
   attachCrosshair,
   attachBandCrosshair,
@@ -1142,6 +1143,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         colors,
         dashedSeries: dashedNames,
+        // Match the legend: a FILLED chart type (area) keys with a square chip, and a textured
+        // series keys with its glyph. Without these the tooltip drew a flat line for a series whose
+        // legend key was a textured square.
+        ...(FILLED_CHART_TYPES.has(spec.chartType) ? { swatchShape: "rect" as const } : {}),
+        hatches: hatchesBySeries(legendItems),
         seriesLabels,
         seriesOrder,
         // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
@@ -1969,6 +1975,8 @@ function wireFigureSvg(
     yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
     colors: ctx.colors,
     dashedSeries: ctx.dashedNames,
+    ...(FILLED_CHART_TYPES.has(ctx.spec.chartType) ? { swatchShape: "rect" as const } : {}),
+    ...(ctx.hatches ? { hatches: ctx.hatches } : {}),
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),

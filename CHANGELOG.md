@@ -33,6 +33,12 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   background-coloured stroke: a segment thinner than the gap is floored to a hairline instead of
   being painted over, no gap appears at the bar's outer ends, and the net marker stays at the true
   net. Honoured in both orientations, on normalized stacks, in panes, and in the export.
+- **Tooltip keys match their legend keys.** The line/area crosshair drew a flat line swatch for a
+  series whose legend key was a square chip with a texture in it. All three tooltip paths now render
+  through one emitter (`seriesSwatchHtml`), so a filled chart type keys with a square and a textured
+  series keys with the same centred glyph the legend draws. Known remaining gap: a `points: true`
+  line chart shows line-plus-symbol in the legend and a plain line in the tooltip; the legend and
+  the PNG export still have their own renderers.
 - **An `area` series is keyed by a square chip, not a line swatch.** An area mark is a filled
   region, so the line swatch misrepresented it, and at 3px tall it could not hold a hatch glyph —
   a textured area series had no way to show its texture in the key. Every filled chart type now
