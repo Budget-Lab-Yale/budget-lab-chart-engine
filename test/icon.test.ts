@@ -253,12 +253,20 @@ describe("each shape draws what it says", () => {
     expect(iconShapes({ shape: "none", hatch })).toEqual([]);
   });
 
-  it("centres every symbol on the box, whatever its shape", () => {
-    for (const symbol of ["triangle", "star", "square"]) {
+  it("shifts an asymmetric symbol so its INK centres, not its centroid", () => {
+    // Only the three asymmetric ones move. `test/icon-fits-box.test.ts` measures the RESULT from a
+    // rendered bbox; this pins that the shift is applied at all, and only where it is needed.
+    const yOf = (symbol: string) => {
       const [path] = iconShapes({ shape: "symbol", color: COLOR, symbol });
-      expect(path!.kind).toBe("path");
-      expect(path!.kind === "path" && path!.transform).toBe(`translate(${ICON_BOX / 2},${ICON_BOX / 2})`);
+      return Number(/translate\([\d.]+,([-\d.]+)\)/.exec(path!.kind === "path" ? path!.transform : "")![1]);
+    };
+    for (const symmetric of ["circle", "square", "cross", "diamond"]) {
+      expect(yOf(symmetric), symmetric).toBe(ICON_BOX / 2);
     }
+    // A triangle's apex is further from the centroid than its base, so it must move DOWN.
+    expect(yOf("triangle")).toBeGreaterThan(ICON_BOX / 2);
+    expect(yOf("star")).toBeGreaterThan(ICON_BOX / 2);
+    expect(yOf("wye")).toBeLessThan(ICON_BOX / 2);
   });
 
   it("draws nothing at all for the no-icon case", () => {

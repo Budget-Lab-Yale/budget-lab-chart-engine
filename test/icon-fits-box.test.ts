@@ -150,37 +150,69 @@ describe("no icon is cut by its box", () => {
   });
 
   it("gives every symbol the same INK, none of it outside the box", async () => {
-    // Optical sizing, and the two halves of it. d3's `size` is the painted AREA, so equal ink is one
-    // shared size — but the box CLIPS, so that size is dictated by the pointiest symbol. Equal reach
-    // was the previous rule and it read wrong: a star's points touched the box while its body carried
-    // a third of the square's ink.
+    // Sizing, and the two halves of it. d3's `size` is the painted AREA, so a shared size is equal ink
+    // — but the box CLIPS, so the spread shapes bind first. Built from iconShapes, NOT from a transform
+    // re-derived here: this test used to place its own `translate(HALF,HALF)` and so measured something
+    // the emitter does not draw, which is how a triangle sitting 1.75px high got past it.
     const HALF = ICON_BOX / 2;
-    const marker = (onLine: boolean, hollow = false) =>
-      MARKER_SYMBOLS.map(
-        (s) =>
-          `<path d="${symbolPathD(s, symbolArea(s, onLine, hollow))}" transform="translate(${HALF},${HALF})" stroke-width="${hollow ? 2 : onLine ? 1 : 0}"/>`,
-      );
+    const pathsFor = (icon: (s: string) => IconSpec) =>
+      MARKER_SYMBOLS.map((s) => {
+        const path = iconShapes(icon(s)).find((p) => p.kind === "path")!;
+        return primMarkup(path);
+      });
 
-    const alone = await spills(marker(false));
+    const alone = await spills(pathsFor((s) => ({ shape: "symbol", color: "#0072B2", symbol: s })));
     MARKER_SYMBOLS.forEach((s, i) => {
       expect(alone[i], `${s} alone spills ${alone[i]!.toFixed(3)}`).toBeLessThanOrEqual(TOL);
     });
 
-    // Exactly one symbol may sit AT the box — the pointiest. If none does, every key is needlessly
-    // small; the rest are smaller on purpose, which is what carries the equal ink.
-    const reach = await extents(marker(false));
+    // Something must sit AT the box, or every key is needlessly small. The rest are smaller on purpose.
+    const reach = await extents(pathsFor((s) => ({ shape: "symbol", color: "#0072B2", symbol: s })));
     expect(Math.max(...reach), `no symbol reaches the box`).toBeGreaterThan(HALF - TOL);
 
     // A hollow symbol's RING lands on the box too — the path stops short, the stroke makes it up.
-    const ring = await extents(marker(false, true));
+    const ring = await extents(
+      pathsFor((s) => ({ shape: "symbol", color: "#0072B2", symbol: s, marker: "hollow" })),
+    );
     MARKER_SYMBOLS.forEach((s, i) => {
-      expect(ring[i], `hollow ${s} rings at ${ring[i]!.toFixed(2)}, not ${HALF}`).toBeLessThanOrEqual(HALF + TOL);
+      expect(ring[i], `hollow ${s} rings at ${ring[i]!.toFixed(2)}`).toBeLessThanOrEqual(HALF + TOL);
     });
 
-    // On a line the marker is smaller so the rule still reads either side of it — how much smaller is
-    // a taste call (ON_LINE_REACH), so what is gated here is only that it stays inside the box.
-    const onLine = await extents(marker(true));
+    // On a line the marker is smaller, so the rule still reads either side of it.
+    const onLine = await extents(pathsFor((s) => ({ shape: "line", color: "#0072B2", symbol: s })));
     expect(Math.max(...onLine), `a marker on a line spills`).toBeLessThanOrEqual(HALF + TOL);
+  }, 120000);
+
+  it("centres every symbol's INK on the box, not its centroid", async () => {
+    // d3 places a symbol by its CENTROID, which is not the middle of its box: a triangle's apex is far
+    // from the centroid and its base is near, so a centroid-centred triangle sat 1.75px HIGH in a 14px
+    // box and read out of line with its own label. A key is read beside text, so the INK is what has to
+    // be centred. Measured from the rendered bbox, which is the only place the offset shows up.
+    const page = await browser.newPage();
+    const markup = MARKER_SYMBOLS.map((s) =>
+      primMarkup(iconShapes({ shape: "symbol", color: "#0072B2", symbol: s }).find((p) => p.kind === "path")!),
+    );
+    await page.setContent(
+      `<body style="margin:0">` + markup.map((m, i) => svgFor(`<g id="g${i}">${m}</g>`)).join("") + `</body>`,
+    );
+    const centres = await page.evaluate(
+      ({ n }) => {
+        const out: Array<[number, number]> = [];
+        for (let i = 0; i < n; i++) {
+          const b = (document.getElementById(`g${i}`) as unknown as SVGGraphicsElement).getBBox();
+          out.push([b.x + b.width / 2, b.y + b.height / 2]);
+        }
+        return out;
+      },
+      { n: markup.length },
+    );
+    await page.close();
+    const mid = ICON_BOX / 2;
+    MARKER_SYMBOLS.forEach((s, i) => {
+      const [cx, cy] = centres[i]!;
+      expect(Math.abs(cx - mid), `${s} ink centre is ${cx.toFixed(2)} across, not ${mid}`).toBeLessThan(0.1);
+      expect(Math.abs(cy - mid), `${s} ink centre is ${cy.toFixed(2)} down, not ${mid}`).toBeLessThan(0.1);
+    });
   }, 120000);
 
   it("paints as many pixels as the `size` it was given", async () => {

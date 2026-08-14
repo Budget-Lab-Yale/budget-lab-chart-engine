@@ -27,27 +27,40 @@ import { markerInk, HOLE, MARKER_KEYLINE_COLOR, type MarkerStyle } from "./marke
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
 export const ICON_BOX = 14;
 
-/** Each symbol's measured REACH FROM ITS CENTRE per √area — the shape constant an area is solved from.
+/** Each symbol's measured HALF-BOUNDING-BOX per √size — the shape constant a size is solved from.
  *
  *  d3's `size` is an AREA, and equal area is not equal visual size: for one area a square's bbox is
- *  √area across and a star's is nearly twice that. Storing the measurement and solving for the reach
- *  wanted is the only form that cannot be quietly wrong. The previous table stored areas already
- *  solved for one target, hand-fitted, and missed on three of the seven — `triangle` reached 5.58 of a
- *  7 half-box, so a triangle key read visibly smaller than the square chip beside it.
+ *  √area across and a star's is nearly twice that. Storing the measurement and solving for the size
+ *  wanted is the only form that cannot be quietly wrong — the first version of this table stored areas
+ *  already solved for one target, by hand, and three of the seven were wrong.
  *
- *  Reach from the centre, NOT half the bounding box: d3 centres a symbol on its CENTROID, so a
- *  triangle's apex sits 17.5 from the origin while its box is only 26.3 tall. Sizing by half the box
- *  put the apex a full unit outside the icon box.
+ *  Half the BOX, because `SYMBOL_CENTRE_Y` below re-centres each symbol on its bounding box: once the
+ *  ink is box-centred, half the box is exactly how far it reaches. (Sizing by half the box while
+ *  drawing from the CENTROID is what put a triangle's apex outside the icon box.)
  *
- *  Measured with `getBBox()` at area 400; `test/icon-fits-box.test.ts` re-measures the result. */
-const SYMBOL_REACH_K: Record<string, number> = {
+ *  Measured with `getBBox()` at size 400; `test/icon-fits-box.test.ts` re-measures the result. */
+const SYMBOL_HALF_BOX_K: Record<string, number> = {
   square: 0.5,
   circle: 0.56439,
   cross: 0.6708,
   wye: 0.73725,
-  triangle: 0.8774,
+  triangle: 0.75985,
+  star: 0.89765,
   diamond: 0.9306,
-  star: 0.94385,
+};
+
+/** Where each symbol's bounding-box centre sits relative to its path origin, per √size.
+ *
+ *  d3 centres a symbol on its CENTROID, which is not the middle of its box: a triangle's apex is much
+ *  further from the centroid than its base, so placing the origin at the middle of the icon box left
+ *  the triangle sitting 1.75px HIGH in a 14px box — visibly out of line with its own label. A star sits
+ *  0.67 high and a wye 0.52 low for the same reason; the other four are symmetric and measure zero.
+ *
+ *  A key is read beside text, so what has to be centred is the INK, not the shape's mass. */
+const SYMBOL_CENTRE_Y: Record<string, number> = {
+  triangle: -0.21935,
+  star: -0.09015,
+  wye: 0.05703,
 };
 
 /** The ANCHOR: the area the chart itself draws a marker at, which is the size a key has to be in the
@@ -62,7 +75,7 @@ const CHART_MARKER_AREA = Math.PI * MARK_POINT_R ** 2;
 const CHART_LINE_MARKER_AREA = Math.PI * MARK_LINE_POINT_R ** 2;
 
 /** The least compact symbol — the one whose ink is spread furthest for a given area. */
-const MAX_REACH_K = Math.max(...Object.values(SYMBOL_REACH_K));
+const MAX_HALF_BOX_K = Math.max(...Object.values(SYMBOL_HALF_BOX_K));
 
 /** SHAPE CORRECTION: how far to move from equal AREA toward equal REACH, because neither reads right.
  *
@@ -86,7 +99,7 @@ const SHAPE_CORRECTION = 0.45;
 
 /** The largest `size` that keeps `symbol`'s ink within `limit` of the centre. */
 function sizeAtReach(symbol: string, limit: number): number {
-  const k = SYMBOL_REACH_K[symbol] ?? SYMBOL_REACH_K.circle!;
+  const k = SYMBOL_HALF_BOX_K[symbol] ?? SYMBOL_HALF_BOX_K.circle!;
   return (limit / k) ** 2;
 }
 
@@ -100,9 +113,9 @@ export function symbolArea(symbol: string, onLine = false, hollow = false): numb
   // A ring's stroke straddles the path, so the path stops half a stroke short and the RING's outer
   // edge lands on the box. Without this the ring was cut at its four extremes and read flat-sided.
   const limit = hollow ? half - RING_WEIGHT / 2 : onLine ? half - MARKER_KEYLINE / 2 : half;
-  const k = SYMBOL_REACH_K[symbol] ?? SYMBOL_REACH_K.circle!;
+  const k = SYMBOL_HALF_BOX_K[symbol] ?? SYMBOL_HALF_BOX_K.circle!;
   const anchor = onLine ? CHART_LINE_MARKER_AREA : CHART_MARKER_AREA;
-  const want = anchor * (MAX_REACH_K / k) ** (2 * SHAPE_CORRECTION);
+  const want = anchor * (MAX_HALF_BOX_K / k) ** (2 * SHAPE_CORRECTION);
   return Math.round(Math.min(want, sizeAtReach(symbol, limit)));
 }
 
@@ -269,10 +282,13 @@ function symbolPrimitive(symbol: string, color: string, onLine = false, marker: 
   const mid = ICON_BOX / 2;
   const ringed = marker === "hollow" || marker === "net";
   const ink = markerInk(marker, color);
+  const size = symbolArea(symbol, onLine, ringed);
+  // Shift by the symbol's own bbox-centre offset so the INK lands centred, not its centroid.
+  const dy = (SYMBOL_CENTRE_Y[symbol] ?? 0) * Math.sqrt(size);
   return {
     kind: "path",
-    d: symbolPathD(symbol, symbolArea(symbol, onLine, ringed)),
-    transform: `translate(${mid},${mid})`,
+    d: symbolPathD(symbol, size),
+    transform: `translate(${mid},${Number((mid - dy).toFixed(3))})`,
     fill: ink.fill,
     // A ring takes the colour; otherwise a keyline only where a line runs behind the marker.
     ...(ringed
