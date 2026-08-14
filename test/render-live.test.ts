@@ -1628,6 +1628,45 @@ describe("mountChart point charts", () => {
     expect(dimmedDot).toBeGreaterThan(0); // Dot dims
   });
 
+  // SCATTER_SPEC encodes colour by `color` and shape by `shp` — DIFFERENT fields — so
+  // buildLegendItems keys the colour legend with a `chip` (a rounded rect). The tooltip header
+  // names the hovered POINT, not its series, so it must still draw that point's own symbol; taking
+  // the resolved series icon whole put a chip beside "Slow · Tri" while the marker was a triangle.
+  it("scatter tooltip header draws the hovered POINT's symbol, never the colour legend's chip", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 });
+
+    /** Hover the first marker with this shape value; return its tooltip header's swatch <svg>. */
+    const headerSwatch = (shape: string): SVGElement => {
+      const marker = container.querySelector(`g[aria-label="dot"] path[data-shape="${shape}"]`)!;
+      marker.dispatchEvent(new Event("pointerenter"));
+      const head = document.querySelector(".tbl-tooltip .tbl-tooltip-head")!;
+      return head.querySelector("svg")!;
+    };
+
+    const tri = headerSwatch("Tri");
+    // A d3 symbol draws as a <path>. A chip would be a <rect> — the regression this pins.
+    expect(tri.querySelector("path")).not.toBeNull();
+    expect(tri.querySelector("rect")).toBeNull();
+
+    // The two shape values must draw DIFFERENT glyphs. If the resolved chip won, both headers
+    // would be byte-identical, so this fails even if the <rect>/<path> check were satisfied some
+    // other way.
+    const dot = headerSwatch("Dot");
+    expect(dot.querySelector("path")).not.toBeNull();
+    expect(tri.querySelector("path")!.getAttribute("d")).not.toBe(
+      dot.querySelector("path")!.getAttribute("d"),
+    );
+
+    // Colour still comes from the resolved series icon — that half of the key must not drift.
+    const legendKey = container
+      .querySelector('.tbl-legend-item[data-series="Slow"]')!
+      .querySelector("svg [style*='fill']")!;
+    const legendFill = /fill:\s*([^;]+)/.exec(legendKey.getAttribute("style") ?? "")![1];
+    const triFill = /fill:\s*([^;]+)/.exec(tri.querySelector("path")!.getAttribute("style") ?? "")![1];
+    expect(triFill).toBe(legendFill);
+  });
+
   const DOT_SPEC: ChartSpec = {
     chartType: "dotplot",
     title: "Dots",

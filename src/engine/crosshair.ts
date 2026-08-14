@@ -3402,10 +3402,21 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       // Header: the point's actual marker (its symbol, filled in the series color) followed by
       // "series · shape" on one line (e.g. a navy triangle + "Slow · Compressive").
       const symbolName = (p.shape && opts.symbols?.get(p.shape)) || "circle";
-      // The resolved icon where there is one, so the header marker is the legend's own drawing.
-      const swatch = seriesSwatchHtml(
-        opts.icons?.get(p.series) ?? { shape: "symbol", color, symbol: symbolName },
-      );
+      // SPLIT ON PURPOSE — shape from the point, colour from the resolved icon. Everywhere else a
+      // tooltip key names a SERIES, so it defers wholly to the resolved icon and cannot drift from
+      // the legend. This header names ONE POINT, so the resolved icon is the wrong authority for its
+      // shape: when colour and shape encode different fields, buildLegendItems keys the colour
+      // legend with a `chip` (index.ts), so deferring drew a rounded square next to
+      // "Slow · Compressive" while the point under the cursor was a triangle. COLOUR is the half the
+      // resolved icon does own — legend recolouring and marker paint live there — so it still wins
+      // that. Do not "restore consistency" by taking the resolved icon whole.
+      const resolved = opts.icons?.get(p.series);
+      const swatch = seriesSwatchHtml({
+        shape: "symbol",
+        color: resolved?.color ?? color,
+        symbol: symbolName,
+        ...(resolved?.marker ? { marker: resolved.marker } : {}),
+      });
       const headText =
         opts.showShape && p.shape
           ? `${escapeHtml(sLabel)} · ${escapeHtml(opts.shapeLabels?.[p.shape] ?? p.shape)}`
