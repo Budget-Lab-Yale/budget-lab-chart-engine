@@ -520,7 +520,7 @@ reuses `category_order` (or `x_order`); faceting reuses `columns.facet` + `small
 | field | type | notes |
 |---|---|---|
 | `orientation` | enum | `horizontal` (default; categories on the y band, values on x) \| `vertical`. |
-| `series_marker` | object | Per-series dot style: `filled` (solid series color) \| `hollow` (ring — series-color outline, page-background center) \| `ink` (filled neutral ink). Unlisted series default to `filled`. Lets "static/ask" read hollow and "collected" filled. The legend swatch matches (a hollow series shows a ring). |
+| `series_marker` | object | Per-series dot style: `filled` (solid series color) \| `hollow` (ring — series-color outline, and the center is a HOLE, so the connector stem and whatever the figure sits on show through it) \| `ink` (filled neutral ink). Unlisted series default to `filled`. Lets "static/ask" read hollow and "collected" filled. The legend swatch matches (a hollow series shows a ring). |
 | `connector` | object | Stem styling: `connector.color` (a color token/hex), `connector.width` (px, default 1.5), `connector.style` (`solid` default \| `dashed` \| `dotted`). Default a subtle neutral line drawn behind the dots. A single-dot (or exactly-coincident) category draws no stem. |
 | `dot_radius` | number | Dot radius in px. Default 5. |
 | `gap_annotation` | boolean \| object | Label the numeric gap between two series on each stem. `true` uses the first two series in order; an object names them: `{ series_a, series_b, format? }`. `format` (else `value_format`) formats the number. Default off. |

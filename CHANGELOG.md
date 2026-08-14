@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.11.0] - 2026-08-13
+## [1.11.0] - 2026-08-14
 
 ### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
 
@@ -100,6 +100,17 @@ changes reach the SVG a reader sees:
 
 Nothing else in the plot frame moves: the snapshot self-test is pixel-identical, and the only golden
 diffs in the suite are the two dumbbell fixtures.
+
+Measured against the archive rather than argued: all **41 figures published at the time of release**
+were rendered with 1.10.0 and with this version and compared in a browser. All 41 validate, none fail
+to render, and **the plot markup is byte-identical on all 41** — no mark moves. 29 legends are
+redrawn. Three figures with a point-chart legend end up 2–4 px shorter, because that legend's swatch
+was its own 18×16 box and is now the shared 14×14 one; if you embed by a fixed height, those three are
+the ones to look at. (The comparison needs a control to be worth anything: two renders of the *same*
+version differ by ~1,000 px from animation and antialiasing, and two published figures —
+`tariff-model-update-july2026/update-decomposition` and `recession-indicators/yield-curve` — are not
+pixel-deterministic against themselves at all. That is pre-existing and unrelated, but it means those
+two can only be compared on their markup.)
 
 ## [1.10.0] - 2026-08-10
 
