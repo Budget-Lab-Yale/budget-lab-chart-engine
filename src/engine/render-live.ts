@@ -29,7 +29,9 @@ import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
 import { resolveColor } from "./palette.js";
 import { tooltipHatches, resolveSeriesHatches, type SeriesHatch } from "./hatch.js";
 import { resolveTooltipIcons, type IconSpec } from "./icon.js";
-import { FILLED_CHART_TYPES } from "../spec/validate.js";
+// From the leaf module, NOT from `validate.ts` — that one instantiates Ajv at module scope, and
+// this file is in the browser bundle's graph. See `../spec/filled-chart-types.ts`.
+import { FILLED_CHART_TYPES } from "../spec/filled-chart-types.js";
 import {
   attachCrosshair,
   attachBandCrosshair,

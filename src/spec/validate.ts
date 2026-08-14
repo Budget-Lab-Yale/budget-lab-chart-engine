@@ -11,6 +11,9 @@
 import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
+// Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
+// back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
+import { FILLED_CHART_TYPES } from "./filled-chart-types";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
@@ -193,11 +196,6 @@ function histogramSpecError(spec: {
 
 /** `shading` fills between a line and its baseline, so it only means anything on a line chart:
  *  `area` already fills to the axis, and the rest have no line to fill under. */
-/** Chart types whose marks are filled AREAS, and so can carry a `series_patterns` texture. A line's
- *  2px stroke and a dot's 8px disc are smaller than the 7px hatch period, so a texture there is
- *  noise rather than a channel — reject instead of rendering something illegible. */
-export const FILLED_CHART_TYPES = new Set(["bar", "stacked", "area", "histogram", "waterfall"]);
-
 function seriesPatternsError(spec: { chartType?: unknown; series_patterns?: unknown }): string | null {
   if (spec.series_patterns == null) return null;
   if (FILLED_CHART_TYPES.has(spec.chartType as string)) return null;

@@ -11,7 +11,7 @@ import { defaultHatchStroke, resolveHatch } from "../src/engine/hatch";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";
 import { ICON_BOX } from "../src/engine/icon";
 import { CHART_CSS } from "../src/embed/styles";
-import { FILLED_CHART_TYPES } from "../src/spec/validate";
+import { FILLED_CHART_TYPES } from "../src/spec/filled-chart-types";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 

@@ -875,7 +875,7 @@ export function buildLegendItems(
     // Every chart type whose marks are FILLED keys with a chip; only stroked marks get a line
     // swatch. An area is a filled region, so a line swatch always misrepresented it — and a 3px line
     // cannot hold a texture, so a hatched area series had no way to show its glyph. Pinned against
-    // validate.ts FILLED_CHART_TYPES by test, since a new filled type that forgot this would lose
+    // spec/filled-chart-types.ts by test, since a new filled type that forgot this would lose
     // its texture in the key silently.
     const markerShape: "line" | "rect" =
       chartType === "bar" ||
