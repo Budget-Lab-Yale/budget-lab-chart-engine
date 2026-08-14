@@ -244,3 +244,38 @@ describe("shared-asset fallback when the runtime does not arrive", () => {
     expect(shared).toContain("renderUnavailable");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bundle contents
+// ---------------------------------------------------------------------------
+
+// The validator is an AUTHORING/CLI concern — scripts/build.mjs says so outright at its spec/data
+// entry, and builds those for Node with ajv external. Nothing enforced it on the browser side, and
+// the leak is silent: `spec/validate.ts` instantiates Ajv at module scope, so ONE import of ANY
+// name from it, anywhere in standalone-entry.ts's graph, drags the whole schema walker in. Nothing
+// breaks when that happens — the bundle just grows, measured at +128 KB minified (+13%) on
+// dist/embed/live.js when render-live.ts imported FILLED_CHART_TYPES from validate.ts (4744d05).
+// A human reading a diff will not catch the next one, so this asserts it instead.
+//
+// BUNDLE_PATH is the SAME entry scripts/build.mjs ships as dist/embed/live.js, differing only in
+// that the test build skips minification — which is why esbuild's per-module path comments are
+// readable here. Both kinds of marker are checked anyway: the paths pin exactly which module pulled
+// it in, and the ajv source strings would survive a minified build too.
+describe("browser bundle contents", () => {
+  const FORBIDDEN: Array<[string, string]> = [
+    ["node_modules/ajv/", "ajv itself"],
+    ["src/spec/validate.ts", "the validator, which instantiates Ajv at module scope"],
+    ["src/spec/schema.ts", "the JSON schema, which only the validator reads"],
+    ["strictTypes", "an ajv option name — present even if the path comments are stripped"],
+    ["schema is invalid", "an ajv runtime message — likewise"],
+  ];
+
+  it("carries no ajv: the validator must not be reachable from the browser entry", () => {
+    const js = readFileSync(BUNDLE_PATH, "utf8");
+    // Guard the guard: a build that silently produced nothing would pass every assertion below.
+    expect(js.length).toBeGreaterThan(500_000);
+    for (const [needle, why] of FORBIDDEN) {
+      expect(js.includes(needle), `bundle contains ${JSON.stringify(needle)} — ${why}`).toBe(false);
+    }
+  });
+});
