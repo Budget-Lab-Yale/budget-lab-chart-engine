@@ -27,6 +27,7 @@ import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
 import { resolveColor } from "./palette.js";
+import { paintedFill } from "./painted-fill.js";
 import { tooltipHatches, resolveSeriesHatches, type SeriesHatch } from "./hatch.js";
 import { resolveTooltipIcons, type IconSpec } from "./icon.js";
 import { FILLED_CHART_TYPES } from "../spec/validate.js";
@@ -1679,8 +1680,9 @@ export function buildFigureHeader(
  *
  *  `bar_color`, `category_colors` and the title-selector accent all override a series' colour at the
  *  mark, and none of them reaches the engine's `colors` map — so a tooltip keying from that map shows
- *  a different colour from the bars beside it. Plot puts a constant fill on the mark's <g> and a
- *  channel fill on each element, so both places are checked. */
+ *  a different colour from the bars beside it. `paintedFill` resolves the mark's own fill against its
+ *  ancestors; a series with no fill anywhere below the root is left OUT of the map, so the caller
+ *  keeps its `colors` entry rather than being handed the root's `currentColor`. */
 function paintedFills(svg: SVGSVGElement, selector: string, series: readonly string[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const s of series) {
@@ -1688,13 +1690,8 @@ function paintedFills(svg: SVGSVGElement, selector: string, series: readonly str
     // every headless render. Series keys are author-supplied, so quotes and backslashes must escape.
     const key = s.replace(/["\\]/g, "\\$&");
     const el = svg.querySelector<SVGElement>(`${selector}[data-series="${key}"]`);
-    for (let n: Element | null = el; n && n !== svg.parentElement; n = n.parentElement) {
-      const fill = n.getAttribute("fill");
-      if (fill && fill !== "none") {
-        out.set(s, fill);
-        break;
-      }
-    }
+    const fill = paintedFill(el, svg);
+    if (fill) out.set(s, fill);
   }
   return out;
 }

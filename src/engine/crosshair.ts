@@ -11,6 +11,7 @@ import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
+import { paintedFill } from "./painted-fill";
 import { resolveHatch, type SeriesHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
 import type { MarkerStyle } from "./marker-ink";
@@ -1196,7 +1197,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
         svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect').forEach((r) => {
           const s = r.getAttribute("data-series") ?? "";
           if (m.has(s)) return;
-          const f = renderedRectFill(r, svgEl);
+          const f = paintedFill(r, svgEl);
           if (f) m.set(s, f);
         });
         return m;
@@ -1531,7 +1532,7 @@ function buildHistogramGeom(
     for (const r of rects) {
       const s = r.getAttribute("data-series") ?? "";
       if (m.has(s)) continue;
-      const f = renderedRectFill(r, svgEl);
+      const f = paintedFill(r, svgEl);
       if (f) m.set(s, f);
     }
     return m;
@@ -1681,7 +1682,7 @@ export function attachSecondaryHistogramCursor(
       series: r.getAttribute("data-series") ?? "",
       cx,
       y: parseFloat(r.getAttribute("y") ?? "0"),
-      fill: renderedRectFill(r, svgEl),
+      fill: paintedFill(r, svgEl),
     });
   }
 
@@ -2347,20 +2348,6 @@ interface CatRect {
   fill: string | null;
 }
 
-/** The rect's rendered fill: its own `fill` attribute if present, else the nearest ancestor's
- *  (Plot hoists a CONSTANT fill onto the parent `<g aria-label="bar">`, but emits a per-`<rect>`
- *  fill when the mark's fill is a function channel — e.g. category_colors, mono stacks, highlight
- *  dimming). Walks up to (not past) the SVG root; `none`/empty resolve to null. */
-function renderedRectFill(rect: SVGRectElement, svgEl: SVGSVGElement): string | null {
-  let el: Element | null = rect;
-  while (el && el !== svgEl) {
-    const f = el.getAttribute("fill");
-    if (f && f !== "none") return f;
-    el = el.parentElement;
-  }
-  return null;
-}
-
 /** Bucket the rendered bar rects by category. Vertical (default): fx-faceted → one group per
  *  category, single-band → grouped by rounded x. Horizontal: categories are on Y, so fy-faceted
  *  → group per facet (translate-y), single-band → grouped by rounded y. Returns category → its
@@ -2382,7 +2369,7 @@ function buildRectsByCategory(
       h: parseFloat(rect.getAttribute("height") ?? "0"),
       x: dx + x,
       w,
-      fill: renderedRectFill(rect, svgEl),
+      fill: paintedFill(rect, svgEl),
     };
   };
 

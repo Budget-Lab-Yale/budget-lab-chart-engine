@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { hatchPatternId, defaultHatchStroke } from "../src/engine/hatch";
+import { paintedFill } from "../src/engine/painted-fill";
 import { validateSpec } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -309,5 +310,59 @@ describe("series_patterns over a per-mark fill override", () => {
     // The overridden bar must reference the navy-ground pattern, not the blue one.
     expect(fillOf(2)).toContain("101F5B");
     expect(fillOf(0)).toContain("0072B2");
+  });
+});
+
+// The walk above used to be copied three times (assemble-plot's hatch grounding, crosshair's
+// tooltip swatches, render-live's histogram swatch map) and the copies disagreed on ONE thing:
+// whether the root `<svg>` counts. Two included it, one did not. Plot stamps `fill="currentColor"`
+// on the root unconditionally, so including it means the walk NEVER returns null — every caller's
+// "fall back to the series colour" branch became dead, and an inheriting mark would have been
+// grounded in the unparseable string "currentColor" (an invisible hatch, band == ground). These
+// pin the unified boundary; `src/engine/painted-fill.ts` records why it is where it is.
+describe("paintedFill boundary", () => {
+  const svgWithChain = (chain: readonly Record<string, string>[]) => {
+    const doc = new DOMParser().parseFromString(
+      '<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor"></svg>',
+      "image/svg+xml",
+    );
+    const svg = doc.documentElement as unknown as SVGSVGElement;
+    let parent: Element = svg;
+    let leaf: Element = svg;
+    for (const attrs of chain) {
+      const el = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      parent.appendChild(el);
+      parent = el;
+      leaf = el;
+    }
+    return { svg, leaf };
+  };
+
+  it("never inherits the root's currentColor", () => {
+    const { svg, leaf } = svgWithChain([{ "aria-label": "bar" }, {}]);
+    expect(svg.getAttribute("fill")).toBe("currentColor");
+    expect(paintedFill(leaf, svg)).toBeNull();
+  });
+
+  it("takes the element's own fill over its group's", () => {
+    const { svg, leaf } = svgWithChain([{ fill: "#0072B2" }, { fill: "#E69F00" }]);
+    expect(paintedFill(leaf, svg)).toBe("#E69F00");
+  });
+
+  it("climbs past `none` and past a fill-less element to the group's constant fill", () => {
+    const { svg, leaf } = svgWithChain([{ fill: "#0072B2" }, { fill: "none" }]);
+    expect(paintedFill(leaf, svg)).toBe("#0072B2");
+  });
+
+  it("reads the fill ATTRIBUTE, so a hatch's style.fill does not hide its own ground", () => {
+    const { svg, leaf } = svgWithChain([{ fill: "#58A3E7" }]);
+    (leaf as SVGElement).style.fill = "url(#tblhatch-fwd-58A3E7-005794)";
+    expect(paintedFill(leaf, svg)).toBe("#58A3E7");
+  });
+
+  it("returns null for a null element rather than throwing", () => {
+    const { svg } = svgWithChain([]);
+    expect(paintedFill(null, svg)).toBeNull();
   });
 });

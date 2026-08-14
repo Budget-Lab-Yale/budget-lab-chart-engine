@@ -21,6 +21,7 @@ import {
   X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
+import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
 import {
@@ -55,20 +56,6 @@ const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } a
 // the frame's top edge and clear of every bar. `labelDy` (which the caller applies on top of this
 // base) still nudges from there.
 const HORIZONTAL_MARKER_TOP_DY = -6;
-
-/** The fill a mark is ACTUALLY painted, which is the ground a hatch has to sit on.
- *
- *  Plot puts a CONSTANT fill on the mark's `<g>` and a CHANNEL fill on each element, so neither
- *  place alone is enough: `bar_color: amber` lands on the group while a per-series or
- *  per-category fill lands on the rect. Walk from the element up to the root and take the first
- *  `fill` found. Returns null when nothing on the chain declares one. */
-function effectiveFill(el: Element, root: Element): string | null {
-  for (let n: Element | null = el; n && n !== root.parentElement; n = n.parentElement) {
-    const fill = n.getAttribute("fill");
-    if (fill && fill !== "none") return fill;
-  }
-  return null;
-}
 
 /** A gapped segment never shrinks below this, so a slice thinner than the gap stays a visible
  *  hairline rather than disappearing. Matches the hand-built stack's `max(0.5, extent - gap)`. */
@@ -974,7 +961,7 @@ export function assemblePlot({
       // keeps working because it toggles an opacity class rather than repainting fill.
       const char = fill ? hatchChars[seriesOrder[i] as string] : undefined;
       if (char && isHatchChar(char)) {
-        const ground = effectiveFill(el, svg) ?? seriesColorMap.get(seriesOrder[i] as string);
+        const ground = paintedFill(el, svg) ?? seriesColorMap.get(seriesOrder[i] as string);
         if (ground) {
           const hatch = resolveHatch(char, ground);
           (el as SVGElement).style.fill = `url(#${hatch.id})`;
