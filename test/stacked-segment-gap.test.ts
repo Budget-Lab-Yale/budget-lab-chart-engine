@@ -13,7 +13,7 @@
 // The pass is shrink-only and never moves a rect, which is what guarantees the invariants below:
 // the first segment still starts at the baseline and the last still ends at the total.
 import { describe, it, expect } from "vitest";
-import { renderChart } from "../src/engine/index";
+import { renderChart, renderPane } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -194,6 +194,12 @@ describe("segmentGap with the rest of the stacked feature set", () => {
     expect(dotY(3)).toBeCloseTo(dotY(0), 5);
   });
 
+  it("is byte-identical to today at gap 0 with value labels on, too", () => {
+    const labels = { valueLabels: { show: true } };
+    const plain = renderChart(spec(labels), ROWS, OPTS).svg.outerHTML;
+    expect(renderChart(gapSpec(0, labels), ROWS, OPTS).svg.outerHTML).toBe(plain);
+  });
+
   it("puts a gap at the zero crossing of a diverging stack — that is a segment boundary too", () => {
     const divergingRows: TidyRow[] = [
       { time: "A", series: "up", value: "5" },
@@ -210,5 +216,159 @@ describe("segmentGap with the rest of the stacked feature set", () => {
       .sort((a, b) => a.y - b.y);
     expect(rects).toHaveLength(2);
     expect(rects[1]!.y - (rects[0]!.y + rects[0]!.h)).toBeCloseTo(2, 5);
+  });
+});
+
+// --- In-segment value labels ---
+//
+// The labels are placed at the segment's DATA-space midpoint, at build time, and kept or dropped on
+// the segment's pre-gap pixel extent. Neither number knows the rect is about to shrink, so with
+// `valueLabels.show` and a gap both set, every segment but the last in pixel order carried its
+// label gap/2 off the visible centre (6px at the schema max, on a 10px font) and a segment measured
+// just over the fit threshold kept a label that no longer fit. Both corrections are taken from the
+// rect the gap pass just changed, so they cannot drift from the shrink that caused them.
+
+/** Absolute position of a Plot element: its own `translate(x,y)` plus every ancestor's. A text mark
+ *  and a bar mark sit in different groups, each with its own translate, so raw coordinates are not
+ *  comparable. (Same reading the engine does — jsdom has no layout, so there is no getCTM.) */
+function abs(el: Element): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  for (let n: Element | null = el; n && n.tagName.toLowerCase() !== "svg"; n = n.parentElement) {
+    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
+    if (m) {
+      x += Number(m[1]);
+      y += Number(m[2]);
+    }
+  }
+  return { x, y };
+}
+
+/** Every rendered label paired with the segment it sits in, as ABSOLUTE geometry: the label's
+ *  position and the visible centre of the rect whose box contains it. */
+function labelledSegments(s: ChartSpec): Array<{ text: string; at: number; centre: number }> {
+  const svg = renderChart(s, ROWS, OPTS).svg;
+  const rects = [...svg.querySelectorAll('g[aria-label="bar"] rect')].map((r) => {
+    const o = abs(r);
+    return {
+      x: o.x + +r.getAttribute("x")!,
+      y: o.y + +r.getAttribute("y")!,
+      w: +r.getAttribute("width")!,
+      h: +r.getAttribute("height")!,
+    };
+  });
+  const horizontal = s.orientation === "horizontal";
+  return [...svg.querySelectorAll("g.tbl-segment-label text")].map((t) => {
+    const at = abs(t);
+    const rect = rects.find(
+      (r) => at.x >= r.x && at.x <= r.x + r.w && at.y >= r.y && at.y <= r.y + r.h,
+    );
+    expect(rect, `no segment contains the label "${t.textContent}"`).toBeDefined();
+    return {
+      text: t.textContent ?? "",
+      at: horizontal ? at.x : at.y,
+      centre: horizontal ? rect!.x + rect!.w / 2 : rect!.y + rect!.h / 2,
+    };
+  });
+}
+
+describe("segmentGap with in-segment value labels", () => {
+  const LABELS = { valueLabels: { show: true } };
+
+  it("centres each label on the segment as GAPPED, not as originally stacked", () => {
+    const labels = labelledSegments(gapSpec(6, LABELS));
+    expect(labels.length).toBeGreaterThan(1);
+    // 1px of slack for the half-pixel offset Plot puts on a text mark's group; the pre-gap
+    // placement this replaces was off by gap/2 = 3px.
+    for (const l of labels) {
+      expect(Math.abs(l.at - l.centre), `label "${l.text}"`).toBeLessThan(1);
+    }
+  });
+
+  it("centres them on a horizontal stack too — the shift follows the stacking axis", () => {
+    const labels = labelledSegments(
+      spec({ ...LABELS, orientation: "horizontal", barStack: { segmentGap: 6 } }),
+    );
+    expect(labels.length).toBeGreaterThan(1);
+    for (const l of labels) {
+      expect(Math.abs(l.at - l.centre), `label "${l.text}"`).toBeLessThan(1);
+    }
+  });
+
+  it("drops a label whose segment the gap shrinks below the fit threshold", () => {
+    // "Top 1%" series b is 1 unit ≈ 25.7px tall here — just over the 25px threshold that kept its
+    // label, and under it once 6px comes off.
+    const texts = (gap: number) => labelledSegments(gapSpec(gap, LABELS)).map((l) => l.text);
+    expect(texts(0)).toContain("1");
+    expect(texts(6)).not.toContain("1");
+    // Only that one goes: the rest of the stack still clears the threshold.
+    expect(texts(6)).toEqual(texts(0).filter((t) => t !== "1"));
+  });
+});
+
+// --- Facets ---
+//
+// The pass groups segments by band position WITHIN their own facet group, because two panes share a
+// band position and their segments must not be interleaved into one stack. Interleaved, the sort
+// along the value axis would spare only one pane's bottom segment and shrink the other's — opening
+// a gap below a baseline, which is precisely what this feature promises never to do. Plot's grid
+// faceting is reached through renderPane's `facetInfo` (dormant for live figures, still the only
+// path that produces per-facet groups — see FacetInfo in engine/index.ts).
+describe("segmentGap under Plot's facet grid", () => {
+  const FACET_ROWS = ROWS.map((r, i) => ({
+    ...(r as unknown as Record<string, string>),
+    facet: i < 3 ? "P" : "Q",
+  })) as unknown as TidyRow[];
+
+  const facetSpec = (gap: number) =>
+    ({
+      ...BASE,
+      columns: { ...BASE.columns, facet: "facet" },
+      ...(gap ? { barStack: { segmentGap: gap } } : {}),
+    }) as unknown as ChartSpec;
+
+  /** Rects grouped by facet `<g>`, then by band, ordered along the value axis. */
+  const facetStacks = (gap: number): Box[][] => {
+    const svg = renderPane(facetSpec(gap), FACET_ROWS, OPTS, "p0", {
+      facetField: "facet",
+      cellFor: new Map([
+        ["P", { col: 0, row: 0, title: "P" }],
+        ["Q", { col: 1, row: 0, title: "Q" }],
+      ]),
+      columns: 2,
+      rows: 1,
+    }).svg;
+    const byFacet = new Map<Element, Box[]>();
+    for (const r of svg.querySelectorAll('g[aria-label="bar"] rect')) {
+      const facet = r.parentElement!;
+      if (!byFacet.has(facet)) byFacet.set(facet, []);
+      byFacet.get(facet)!.push({
+        x: +r.getAttribute("x")!,
+        y: +r.getAttribute("y")!,
+        w: +r.getAttribute("width")!,
+        h: +r.getAttribute("height")!,
+      });
+    }
+    expect(byFacet.size).toBeGreaterThan(1);
+    return [...byFacet.values()].flatMap((rects) => stacks(rects, "y"));
+  };
+
+  it("gaps each facet's stacks on their own, leaving every facet's baseline and total put", () => {
+    const plain = facetStacks(0);
+    const gapped = facetStacks(3);
+    expect(gapped).toHaveLength(plain.length);
+    plain.forEach((stack, s) => {
+      const g = gapped[s]!;
+      expect(g.length).toBe(stack.length);
+      // Interleaving two facets' segments would spare only one facet's bottom rect and shrink the
+      // other's, lifting that baseline off the axis.
+      expect(g[0]!.y).toBeCloseTo(stack[0]!.y, 5);
+      const lastPlain = stack[stack.length - 1]!;
+      const lastGapped = g[g.length - 1]!;
+      expect(lastGapped.y + lastGapped.h).toBeCloseTo(lastPlain.y + lastPlain.h, 5);
+      for (let i = 0; i < g.length - 1; i++) {
+        expect(g[i + 1]!.y - (g[i]!.y + g[i]!.h), `boundary ${i}`).toBeCloseTo(3, 5);
+      }
+    });
   });
 });

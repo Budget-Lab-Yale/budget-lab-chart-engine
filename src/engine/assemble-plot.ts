@@ -61,6 +61,37 @@ const HORIZONTAL_MARKER_TOP_DY = -6;
  *  hairline rather than disappearing. Matches the hand-built stack's `max(0.5, extent - gap)`. */
 const SEGMENT_GAP_FLOOR = 0.5;
 
+/** Absolute position of a Plot-emitted element: the `translate(x,y)` on it and on every ancestor
+ *  up to the root `<svg>`, summed. jsdom has no layout engine, so `getCTM`/`getBBox` are not
+ *  available (and the golden gate runs there) — the transforms Plot writes are the only reading of
+ *  position available. Needed because a text mark and a bar mark live in DIFFERENT groups, each
+ *  with its own translate (and, when faceted, its own facet `<g>` inside it), so their raw
+ *  coordinates are not comparable. Mirrors the absX/absY helpers in test/golden.test.ts. */
+function absTranslate(el: Element): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  for (let n: Element | null = el; n && n.tagName.toLowerCase() !== "svg"; n = n.parentElement) {
+    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
+    if (m) {
+      x += Number(m[1]);
+      y += Number(m[2]);
+    }
+  }
+  return { x, y };
+}
+
+/** Nudge one label along the value axis by `delta` px, editing only the translate inside its own
+ *  transform so any other transform part survives. A label with no translate to edit is left
+ *  alone rather than repositioned from nothing. */
+function shiftLabel(el: SVGElement, horizontal: boolean, delta: number): void {
+  const tf = el.getAttribute("transform") ?? "";
+  const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
+  if (!m) return;
+  const x = Number(m[1]) + (horizontal ? delta : 0);
+  const y = Number(m[2]) + (horizontal ? 0 : delta);
+  el.setAttribute("transform", tf.replace(m[0], `translate(${x},${y})`));
+}
+
 /**
  * Open `gap` px of whitespace BETWEEN adjacent stacked segments.
  *
@@ -74,12 +105,22 @@ const SEGMENT_GAP_FLOOR = 0.5;
  *
  * A zero-extent rect (a genuine 0 value) is left alone — flooring it would invent a hairline where
  * there is no data.
+ *
+ * IN-SEGMENT VALUE LABELS MOVE HERE TOO, and for the same reason the gap itself does: they are
+ * placed pre-render at the segment's data-space midpoint, so shrinking the rect underneath one
+ * leaves it off the visible centre by half the shrink — gap/2, i.e. 6px at the schema max, on a
+ * 10px font. The correction is taken from the rect this pass just changed rather than recomputed
+ * from the gap on the label side, so there is no second copy of the arithmetic to drift, and the
+ * FLOOR case needs no special handling. Same for the fit threshold `labels.minPx`: it was applied
+ * to the pre-gap extent, so a segment measured just over it can shrink under it and keep a label
+ * that no longer fits — re-tested here against what the rect actually ends up measuring.
  */
 function applySegmentGap(
   svg: SVGSVGElement,
   selector: string,
   gap: number,
   horizontal: boolean,
+  labels?: { selector: string; minPx: number },
 ): void {
   // Band position groups the segments of one bar; the value axis orders them within it.
   const bandAttr = horizontal ? "y" : "x";
@@ -97,6 +138,15 @@ function applySegmentGap(
     byBar.get(key)!.push(el);
   });
 
+  // Label positions are read ONCE, before anything moves, so both sides of the match below are in
+  // pre-gap coordinates however far through the pass we are.
+  const labelEls = labels
+    ? [...svg.querySelectorAll<SVGElement>(labels.selector)].map((el) => ({
+        el,
+        at: absTranslate(el),
+      }))
+    : [];
+
   for (const segments of byBar.values()) {
     if (segments.length < 2) continue;
     segments.sort(
@@ -108,9 +158,44 @@ function applySegmentGap(
       const el = segments[i]!;
       const extent = Number(el.getAttribute(extentAttr) ?? "0");
       if (!(extent > 0)) continue;
-      el.setAttribute(extentAttr, String(Math.max(SEGMENT_GAP_FLOOR, extent - gap)));
+      const shrunk = Math.max(SEGMENT_GAP_FLOOR, extent - gap);
+      const inside = labels ? labelsInside(el, labelEls, horizontal, extent) : [];
+      el.setAttribute(extentAttr, String(shrunk));
+      for (const label of inside) {
+        if (shrunk < (labels?.minPx ?? 0)) label.el.remove();
+        // The leading edge never moves, so the visible centre moves by exactly half the shrink,
+        // toward it — the same two numbers written to the rect above.
+        else shiftLabel(label.el, horizontal, (shrunk - extent) / 2);
+      }
     }
   }
+}
+
+/** The labels sitting inside one segment, tested against its PRE-gap box (`extent` is the rect's
+ *  extent before the shrink, which is where a midpoint-placed label still is). Boxes tile the bar
+ *  without overlapping, and a label sits at its segment's centre, so this assigns each label to
+ *  exactly one rect. The 1px slack absorbs the half-pixel offset Plot puts on a text mark's group
+ *  for crisp glyph edges; it cannot reach a neighbouring segment, whose own label is at least
+ *  minPx/2 away from the shared boundary. */
+function labelsInside(
+  rect: SVGElement,
+  labels: ReadonlyArray<{ el: SVGElement; at: { x: number; y: number } }>,
+  horizontal: boolean,
+  extent: number,
+): Array<{ el: SVGElement; at: { x: number; y: number } }> {
+  const origin = absTranslate(rect);
+  const x = origin.x + Number(rect.getAttribute("x") ?? "0");
+  const y = origin.y + Number(rect.getAttribute("y") ?? "0");
+  const w = horizontal ? extent : Number(rect.getAttribute("width") ?? "0");
+  const h = horizontal ? Number(rect.getAttribute("height") ?? "0") : extent;
+  const slack = 1;
+  return labels.filter(
+    (l) =>
+      l.at.x >= x - slack &&
+      l.at.x <= x + w + slack &&
+      l.at.y >= y - slack &&
+      l.at.y <= y + h + slack,
+  );
 }
 
 export interface AssembleOptions {
@@ -988,7 +1073,15 @@ export function assemblePlot({
   }
 
   if (layers.segmentGap && layers.segmentGapSelector) {
-    applySegmentGap(svg, layers.segmentGapSelector, layers.segmentGap, layers.yScaleOpts != null);
+    applySegmentGap(
+      svg,
+      layers.segmentGapSelector,
+      layers.segmentGap,
+      layers.yScaleOpts != null,
+      layers.segmentLabelSelector && layers.segmentLabelMinPx != null
+        ? { selector: layers.segmentLabelSelector, minPx: layers.segmentLabelMinPx }
+        : undefined,
+    );
   }
 
   // Keyed bands + reference lines: tag the group Plot stamped with our deterministic class.

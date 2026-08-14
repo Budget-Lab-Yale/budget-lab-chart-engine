@@ -42,6 +42,11 @@ const NET_DOT_PANE_R = 5.6;
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
 const SEGMENT_LABEL_MIN_PX = 25;
+
+// Plot className on the in-segment value-label mark, so the post-render segmentGap pass can find
+// those <text> elements — and only those — to re-centre them on the segments it shrinks. Matching
+// them by position alone would also catch an annotation label that happened to land inside a bar.
+const SEGMENT_LABEL_CLASS = "tbl-segment-label";
 const MARK_BLACK = tokens.structural.mark_black;
 const WHITE = "#FFFFFF";
 
@@ -140,10 +145,20 @@ export function buildStackedMarks(
   // "none" explicitly suppresses all net markers and the Total legend entry.
   // Whitespace between segments. assemblePlot applies it post-render as geometry (see MarkLayers
   // .segmentGap for why it cannot be a Plot inset); the builder only declares the intent + target.
+  // The label selector + threshold travel WITH the gap, in one literal: an in-segment label is
+  // placed at the segment's data-space midpoint and kept on its pre-gap extent, so a gap that
+  // shrinks the rect underneath it leaves it gap/2 off the visible centre (6px at the schema max,
+  // on a 10px font) and keeps a label on a segment that no longer has room for it. The pass that
+  // moves the rect owns both corrections — see applySegmentGap.
   const segmentGap = spec.barStack?.segmentGap ?? 0;
   const segmentGapLayer =
     segmentGap > 0
-      ? { segmentGap, segmentGapSelector: 'g[aria-label="bar"] rect' }
+      ? {
+          segmentGap,
+          segmentGapSelector: 'g[aria-label="bar"] rect',
+          segmentLabelSelector: `g.${SEGMENT_LABEL_CLASS} text`,
+          segmentLabelMinPx: SEGMENT_LABEL_MIN_PX,
+        }
       : {};
 
   const netDisplayCfg = spec.barStack?.netDisplay ?? "auto";
@@ -440,7 +455,12 @@ export function buildStackedMarks(
  *  down from 0) so each label gets an explicit y (vertical) or x (horizontal) at the
  *  segment midpoint. For normalized stacks the offsets/values are share-of-total fractions
  *  (×100 to match the 0–100 axis). A segment whose pixel height/width is below the 25px
- *  threshold is suppressed. */
+ *  threshold is suppressed.
+ *
+ *  Both numbers are PRE-GAP: `barStack.segmentGap` shrinks the rects post-render, after these
+ *  positions are fixed. The gap pass re-centres the labels it moves and re-tests the threshold
+ *  against the rect it actually left behind (see applySegmentGap) — do not try to anticipate the
+ *  gap here, which would mean converting px to data units against a scale this builder cannot see. */
 function buildSegmentLabels(
   data: PreparedRow[],
   categories: string[],
@@ -530,7 +550,13 @@ function buildSegmentLabels(
   if (!rows.length) return [];
   // Text color: white on categorical/dark mono; dark on light mono tiers (per-row).
   const fill = (d: LabelRow) => (d.light ? TBL.color.heading : WHITE);
-  const common = { text: (d: LabelRow) => d.text, fill, fontSize: 10, fontWeight: 600 };
+  const common = {
+    className: SEGMENT_LABEL_CLASS,
+    text: (d: LabelRow) => d.text,
+    fill,
+    fontSize: 10,
+    fontWeight: 600,
+  };
   return [
     horizontal
       ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
