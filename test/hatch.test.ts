@@ -19,6 +19,7 @@ import type { HatchChar } from "../src/spec/types";
 import {
   HATCH_CHARS,
   defaultHatchStroke,
+  hatchBandTier,
   isHatchChar,
   hatchPatternId,
   hatchSvgPattern,
@@ -222,6 +223,46 @@ describe("defaultHatchStroke — the palette rule", () => {
     for (const fam of Object.keys(scales))
       for (const tier of TIERS)
         expect(defaultHatchStroke(scales[fam]![tier]!).toUpperCase()).not.toBe(scales[fam]![tier]!.toUpperCase());
+  });
+});
+
+// The ramp step on a SHORT ramp. Asserting only against the real tokens would prove nothing here:
+// all seven families ship eight tiers, so the underflow is unreachable through them and a test that
+// went through them would pass just as happily against the old broken code. `locateOnRamp` builds
+// its tiers by dropping the ones a family doesn't ship, so shortness is a token-file change away.
+describe("hatchBandTier — the ramp step, on a ramp that may be short", () => {
+  const ramp = (n: number) => Array.from({ length: n }, (_, i) => `#tier${i}`);
+
+  it("steps three tiers darker when the ramp has room below", () => {
+    expect(hatchBandTier(ramp(8), 1)).toBe("#tier4");
+  });
+
+  it("inverts to three tiers lighter when darkening would overrun the ramp", () => {
+    expect(hatchBandTier(ramp(8), 7)).toBe("#tier4");
+  });
+
+  it("reports NO tier rather than a hole in the array when neither step fits", () => {
+    // Five tiers, ground in the middle: darkening wants index 5 (past the end), inverting wants
+    // index -1. The old code took the inverted index unconditionally and cast `tiers[-1]` to string,
+    // so `defaultHatchStroke` returned undefined and the pattern got `fill:undefined`.
+    expect(hatchBandTier(ramp(5), 2)).toBeUndefined();
+    expect(hatchBandTier(ramp(3), 0)).toBeUndefined();
+  });
+
+  it("returns a member of the ramp or nothing, at every length and index", () => {
+    for (let n = 1; n <= 8; n++) {
+      const tiers = ramp(n);
+      for (let i = 0; i < n; i++) {
+        const band = hatchBandTier(tiers, i);
+        if (band !== undefined) expect(tiers).toContain(band);
+      }
+    }
+  });
+
+  it("hands a short ramp to the perceptual fallback, which always yields a colour", () => {
+    // The composition defaultHatchStroke relies on: no ramp step available is the same case as no
+    // ramp at all, and that path is sized to the same ΔL*.
+    expect(defaultHatchStroke("#808080")).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });
 

@@ -255,6 +255,23 @@ const HATCH_TIER_STEP = 3;
  *  ~29 L* so an off-palette colour behaves like a palette one instead of following its own logic. */
 const HATCH_FALLBACK_DL = 28;
 
+/** The band tier for a ground sitting at `index` on `tiers`: three steps DARKER, or three steps
+ *  LIGHTER when darkening would overrun the ramp. Undefined when the ramp is too SHORT to hold
+ *  either step — which is why this is a lookup returning a maybe, not arithmetic returning a tier.
+ *
+ *  This used to compute `index - HATCH_TIER_STEP` on the proof "needing the inverted branch means
+ *  index > 4, so index − 3 ≥ 2". That proof holds only at `tiers.length === 8`. `locateOnRamp`
+ *  builds tiers with a filter that DROPS any tier a hue family is missing, so a family shipping
+ *  fewer than eight yields a short ramp on which the inverted index goes negative; `tiers[-1] as
+ *  string` then laundered `undefined` past tsc and the caller wrote `fill:undefined` into a
+ *  <pattern>. Indexing without the cast makes tsc carry that case instead, so the caller has to
+ *  answer it. All seven families ship eight tiers today — this is what keeps a future five-tier
+ *  family a graceful fallback rather than a rendering bug. Exported so the short-ramp path is
+ *  testable without a fake token file; see test/hatch.test.ts. */
+export function hatchBandTier(tiers: readonly string[], index: number): string | undefined {
+  return tiers[index + HATCH_TIER_STEP] ?? tiers[index - HATCH_TIER_STEP];
+}
+
 /**
  * The hatch band colour for a given ground: a step of the SAME hue, derived rather than authored.
  *
@@ -262,16 +279,14 @@ const HATCH_FALLBACK_DL = 28;
  * can never be given a band colour that breaks the Style-Guide ramp or vanishes against its ground.
  *
  * Darker by default; LIGHTER when the ground is too dark to darken, which keeps the contrast
- * constant instead of clamping to an invisible pair. (The inverted branch cannot underflow: needing
- * it means index > 4, so index − 3 ≥ 2.)
+ * constant instead of clamping to an invisible pair. A ramp with no room for either step falls
+ * through to the perceptual rule below, which is sized to the same ΔL*, so the degradation is a
+ * slightly off-ramp band rather than a missing fill.
  */
 export function defaultHatchStroke(ground: string): string {
   const loc = locateOnRamp(ground);
-  if (loc) {
-    const darker = loc.index + HATCH_TIER_STEP;
-    const index = darker < loc.tiers.length ? darker : loc.index - HATCH_TIER_STEP;
-    return loc.tiers[index] as string;
-  }
+  const onRamp = loc && hatchBandTier(loc.tiers, loc.index);
+  if (onRamp) return onRamp;
   const l = lightness(ground);
   const canDarken = l != null && l - HATCH_FALLBACK_DL >= 0;
   return shiftLightness(ground, canDarken ? -HATCH_FALLBACK_DL : HATCH_FALLBACK_DL);

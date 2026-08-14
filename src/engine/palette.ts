@@ -87,7 +87,7 @@ export const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]
     for (const [family, scale] of Object.entries(
       tokens.scales as Record<string, Record<string, string>>,
     )) {
-      const tiers = TONAL_TIERS.map((t) => scale[t] as string).filter(Boolean);
+      const tiers = TONAL_TIERS.map((t) => scale[t]).filter((hex): hex is string => !!hex);
       tiers.forEach((hex, index) => {
         // First writer wins: a hex shared between two ramps keeps its first family, which is
         // arbitrary but deterministic.
@@ -128,7 +128,11 @@ export function locateOnRamp(
   if (!family) return null;
   const scale = (tokens.scales as Record<string, Record<string, string>>)[family];
   if (!scale) return null;
-  const tiers = TONAL_TIERS.map((t) => scale[t] as string).filter(Boolean);
+  // NOT guaranteed eight long: the filter drops any tier this family doesn't ship, so a returned
+  // index is only meaningful against `tiers.length`, never against TONAL_TIERS. A type predicate
+  // rather than the old `map(… as string).filter(Boolean)`, whose cast let that shortness reach
+  // hatch.ts as an undefined colour.
+  const tiers = TONAL_TIERS.map((t) => scale[t]).filter((hex): hex is string => !!hex);
   const target = lightness(hex);
   if (target == null) return null;
   let index = 0;
