@@ -12,8 +12,9 @@
 //
 // The legend/tooltip KEY is a different drawing entirely — one centred glyph, not a patch of this
 // tiling. See test/hatch-glyph.test.ts and test/hatch-legend-legibility.test.ts.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tokens } from "../src/theme/tokens";
+import { locateOnRamp, shiftLightness } from "../src/engine/palette";
 import { d3 } from "../src/engine/vendor";
 import type { HatchChar } from "../src/spec/types";
 import {
@@ -287,10 +288,50 @@ describe("hatchBandTier — the ramp step, on a ramp that may be short", () => {
     }
   });
 
-  it("hands a short ramp to the perceptual fallback, which always yields a colour", () => {
-    // The composition defaultHatchStroke relies on: no ramp step available is the same case as no
-    // ramp at all, and that path is sized to the same ΔL*.
+  it("hands a ground on NO ramp to the perceptual fallback, which always yields a colour", () => {
+    // A neutral: locateOnRamp returns null, so this never reaches the ramp branch at all. It pins
+    // the OTHER half of the composition — see the short-ramp case below for the half that matters.
+    expect(locateOnRamp("#808080")).toBeNull();
     expect(defaultHatchStroke("#808080")).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  // The behaviour change 2dfe9b7 actually made is at the CALLER: `hatchBandTier` returning
+  // undefined must fall THROUGH to the perceptual rule, where the pre-fix `tiers[index - 3] as
+  // string` returned undefined and put `fill:undefined` into a <pattern>. Reaching that needs a
+  // ground that is ON a ramp whose ramp is too short — `#808080` above is neither, so it enters the
+  // branch never. locateOnRamp reads tokens.scales at CALL time for a near-miss hue (the canonical
+  // `blue` is #0072B2; blue-400 is #0070AF), so shortening the family here is exactly the token-file
+  // change the fix anticipates, with no fake token module needed.
+  describe("a ground that is on a ramp too short to step along", () => {
+    const scales = tokens.scales as unknown as Record<string, Record<string, string>>;
+    const BLUE = tokens.categorical.find((c) => c.key === "blue")!.base;
+    let saved: Record<string, string>;
+
+    beforeEach(() => {
+      saved = scales.blue!;
+      // Three tiers: darkening wants index+3 (past the end) and inverting wants index−3 (negative),
+      // at every index — so hatchBandTier has no answer whichever tier the ground locates to.
+      scales.blue = { "50": "#95DAFF", "100": "#77BEFF", "200": "#58A3E7" };
+    });
+    afterEach(() => {
+      scales.blue = saved;
+    });
+
+    it("really does enter the fallthrough — on a ramp, with no tier to step to", () => {
+      const loc = locateOnRamp(BLUE);
+      expect(loc).not.toBeNull();
+      expect(loc!.tiers).toHaveLength(3);
+      expect(hatchBandTier(loc!.tiers, loc!.index)).toBeUndefined();
+    });
+
+    it("falls through to the perceptual step instead of returning undefined", () => {
+      const stroke = defaultHatchStroke(BLUE);
+      expect(stroke).toMatch(/^#[0-9a-f]{6}$/i);
+      // The ground is dark enough to darken, so the fallback takes the −28 L* step — the same
+      // distance the three-tier ramp step would have covered.
+      expect(stroke).toBe(shiftLightness(BLUE, -28));
+      expect(locateOnRamp(BLUE)!.tiers).not.toContain(stroke);
+    });
   });
 });
 
