@@ -777,8 +777,8 @@ mis-rendered). For displayed equations needing them, use a real MathJax block on
 ## Series textures
 
 `series_patterns` gives a series a hatch **in addition to** its color, so color, lightness and
-texture are three independent things a fill can say. The declared color stays the pattern's
-**ground**, so adding a texture does not change the series' color.
+texture are three independent things a fill can say. The color the mark is actually painted stays
+the pattern's **ground**, so adding a texture does not change the series' color.
 
 The six values are matplotlib's hatch characters, and each is a picture of its own result:
 
@@ -834,12 +834,24 @@ Notes:
   family and on the Style-Guide ramp, at a consistent ΔL\* of 21–32 across the whole palette (the
   tiers are iso-lightness across hues, which is gated in CI). `navy` and `sky` borrow blue's ramp;
   a raw `"#hex"` off every ramp gets an equivalent 28 L\* step instead.
+- **The ground is whatever the mark is PAINTED, not its `series_colors` entry.** `bar_color`,
+  `category_colors` and the title-selector accent each override a fill without going through the
+  series color map, and each becomes the ground of the texture laid over it — so an amber
+  `bar_color` bar hatches amber, and a `category_colors` "Total" bar gets its own pattern in its
+  own color rather than the rest of the series'. The band is then derived from that color, so the
+  pair stays on the ramp the ground sits on. The chart, the legend key, the tooltip key and the
+  PNG export all read the same painted color, so the four cannot disagree.
 - **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
   Since the band is derived from the ground's own lightness, a string the engine cannot parse as a
   color (a CSS `var(--…)`, `currentColor`, a typo) leaves the band equal to the ground, i.e. a flat
   block where a texture was asked for. That combination **errors** rather than rendering.
 - Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
   two full periods and reads as a partial band rather than a texture.
+- **With `barStack.mono`, a texture borrows a neighbour's shade.** A mono stack spends consecutive
+  tiers of one ramp on the segments themselves, and a band is three tiers from its ground — so a
+  textured segment's band is exactly the color of the segment three places along the stack. It is
+  still a legible pair, but the texture stops reading as a channel independent of the shade.
+  Texture **one** segment of a mono stack rather than several.
 
 ---
 

@@ -15,8 +15,9 @@ could not reach the PNG export, which re-renders from the spec rather than seria
 - **`series_patterns`** gives a series a hatch texture alongside its colour, on the chart types with
   filled marks (`bar`, `stacked`, `area`, `histogram`, `waterfall`). The six values are
   matplotlib's hatch characters (`"/"` `"\\"` `"|"` `"-"` `"+"` `"x"`), so the character is a
-  picture of the result. The declared colour stays the pattern's ground, and the hatch BAND colour
-  is derived rather than authored — three tonal tiers along the ground's own hue ramp (lighter
+  picture of the result. The colour the mark is actually PAINTED stays the pattern's ground — which
+  is the series colour until `bar_color`, `category_colors` or the title-selector accent overrides
+  it, and then it is that — and the hatch BAND colour is derived rather than authored — three tonal tiers along the ground's own hue ramp (lighter
   instead when the ground is too dark to darken), so a pair can never leave the Style-Guide ramp.
   Measured ΔL* is 21–32 across all 70 palette colours, and a CI gate holds it there. The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
@@ -97,6 +98,22 @@ changes reach the SVG a reader sees:
   opaque white disc, so the connector stem now shows through it. This is the only change to a mark.
   Figures on a white ground look near-identical; on any other ground the dot no longer reads as a
   white blob. Both dumbbell goldens moved, on those two attributes only.
+
+Two more changes are **hover-time only** — they live in the tooltip's HTML, not in the SVG — so no
+golden moved and the markup comparison below cannot see them. A reader can:
+
+- **A textured tooltip key is grounded in the colour the mark under the cursor is actually painted**,
+  not in the series' palette entry. The two disagree wherever the fill did not come from
+  `series_colors`: a `barStack.mono` stack, whose segments are tonal tiers of one ramp, and any bar
+  taking its fill from `bar_color` or `category_colors`. The key's ground — and therefore its derived
+  band — now moves with the segment being hovered, so the swatch matches the thing it is naming
+  instead of showing the family's base colour with a texture over it.
+- **A chart with ONE series keys its tooltip from the row the legend would have drawn.** A lone
+  series draws no legend row on any chart type, and those charts used to key from a separate set of
+  loose channels that had drifted from the legend's own rules. So a single-series **dot plot**'s
+  tooltip key changes from a line to its circular marker, and a single-series **dumbbell**'s from a
+  box-filling disc to that same marker, sized and centred the way every other key is. In both cases
+  it becomes what the multi-series version of the chart already drew.
 
 Nothing else in the plot frame moves: the snapshot self-test is pixel-identical, and the only golden
 diffs in the suite are the two dumbbell fixtures.
