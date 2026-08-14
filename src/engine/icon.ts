@@ -26,37 +26,47 @@ import { hatchGlyphShapes, type HatchChar, type SeriesHatch } from "./hatch";
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
 export const ICON_BOX = 14;
 
-/** How far from the centre any ink may reach: half the box, less the widest keyline. */
-export const ICON_INK_LIMIT = ICON_BOX / 2 - 0.5;
-
-/** d3-symbol AREA per symbol, so every marker reaches the SAME EXTENT and therefore fills the box.
+/** Each symbol's measured REACH FROM ITS CENTRE per √area — the shape constant an area is solved from.
  *
- *  One area for all seven was a mistake: d3's `size` is an AREA, and equal area is not equal visual
- *  size. Measured at area 90, extents ranged from 4.74 (square) to 8.95 (star) — so a single constant
- *  made the pointy symbols overflow the box while the blocky ones sat small inside it. These are that
- *  measurement solved for extent = ICON_INK_LIMIT, since extent scales as sqrt(area).
+ *  d3's `size` is an AREA, and equal area is not equal visual size: for one area a square's bbox is
+ *  √area across and a star's is nearly twice that. Storing the measurement and solving for the reach
+ *  wanted is the only form that cannot be quietly wrong. The previous table stored areas already
+ *  solved for one target, hand-fitted, and missed on three of the seven — `triangle` reached 5.58 of a
+ *  7 half-box, so a triangle key read visibly smaller than the square chip beside it.
  *
- *  Gated by `test/icon-fits-box.test.ts`, which measures real bounding boxes: every entry must fit,
- *  and must genuinely use the space rather than leave it. */
-const SYMBOL_AREA: Record<string, number> = {
-  square: 169,
-  circle: 133,
-  cross: 94,
-  wye: 78,
-  // The pointy three sit right on the limit, so each is trimmed a unit to stay inside it.
-  triangle: 54,
-  diamond: 47,
-  star: 46,
+ *  Reach from the centre, NOT half the bounding box: d3 centres a symbol on its CENTROID, so a
+ *  triangle's apex sits 17.5 from the origin while its box is only 26.3 tall. Sizing by half the box
+ *  put the apex a full unit outside the icon box.
+ *
+ *  Measured with `getBBox()` at area 400; `test/icon-fits-box.test.ts` re-measures the result. */
+const SYMBOL_REACH_K: Record<string, number> = {
+  square: 0.5,
+  circle: 0.56439,
+  cross: 0.6708,
+  wye: 0.73725,
+  triangle: 0.8774,
+  diamond: 0.9306,
+  star: 0.94385,
 };
 
-/** Fraction of the standalone area for a marker drawn ON a line: the line has to stay readable
- *  underneath, so the marker sits at about two thirds of its extent. */
-const ON_LINE_SCALE = 0.45;
+/** How much of its reach a marker drawn ON a line keeps: the line has to stay readable underneath. */
+const ON_LINE_SCALE = 0.67;
 
-/** The area this symbol is drawn at. `onLine` shrinks it so the line still reads. */
-export function symbolArea(symbol: string, onLine = false): number {
-  const area = SYMBOL_AREA[symbol] ?? SYMBOL_AREA.circle!;
-  return onLine ? Math.round(area * ON_LINE_SCALE) : area;
+/** How far a symbol's ink may reach from the centre. One rule — the ink stops at the box — differing
+ *  only in what else the shape has to make room for at that edge. */
+function symbolReach(onLine: boolean, hollow: boolean): number {
+  const half = ICON_BOX / 2;
+  // A ring's stroke straddles the path, so the path stops half a stroke short and the RING's outer
+  // edge lands on the box. Without this the ring was cut at its four extremes and read flat-sided.
+  if (hollow) return half - RING_WEIGHT / 2;
+  if (onLine) return (half - MARKER_KEYLINE / 2) * ON_LINE_SCALE;
+  return half;
+}
+
+/** The d3 `size` (an area) that draws `symbol` at the reach its context allows. */
+export function symbolArea(symbol: string, onLine = false, hollow = false): number {
+  const k = SYMBOL_REACH_K[symbol] ?? SYMBOL_REACH_K.circle!;
+  return Math.round((symbolReach(onLine, hollow) / k) ** 2);
 }
 
 /** Line weight for the `line` shape — thick enough to read as a rule, not a hairline. */
@@ -70,13 +80,19 @@ const LINE_DASH = TBL.dashArray;
 const DOT_DIAMETER = ICON_BOX;
 /** Ring weight for a hollow dot (dumbbell). */
 const RING_WEIGHT = 2;
+/** Keyline around a marker sitting ON a line, so the line does not run visually through it. A
+ *  standalone symbol has no keyline: it sits on a card, where the keyline only ate its size — that is
+ *  why a square marker read smaller than the square chip next to it. */
+const MARKER_KEYLINE = 1;
 /** Corner radius: a square key is barely rounded, a "chip" distinctly so. */
 const RECT_RADIUS = 1;
 const CHIP_RADIUS = 4;
 /** Hairline around a near-white tint, so an annotation chip does not read as a gap. */
 const OUTLINE = SWATCH_OUTLINE;
-/** Ground behind a hollow ring — the page's own background, since a ring shows the page through it. */
-const RING_GROUND = tokens.structural.background;
+/** A hollow shape's centre is EMPTY, not painted. It was the background token, which is only right on
+ *  one of the three grounds a key sits on: the tooltip is a translucent blur and the export composes
+ *  its own frame, so an opaque white disc read as a white blob rather than a hole. */
+const RING_HOLE = "none";
 /** Ring colour for the stacked Total dot, matching the net marker the chart draws. */
 const TOTAL_RING = tokens.structural.mark_black;
 
@@ -159,7 +175,7 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
           // The ring's stroke straddles its radius, so the radius shrinks by half the weight to keep
           // the OUTER diameter equal to the filled dot's — same size on the page, and nothing clipped.
           r: DOT_DIAMETER / 2 - (icon.hollow ? RING_WEIGHT / 2 : 0),
-          fill: icon.hollow ? RING_GROUND : color,
+          fill: icon.hollow ? RING_HOLE : color,
           ...(icon.hollow ? { stroke: color, strokeWidth: RING_WEIGHT } : {}),
         },
       ];
@@ -213,13 +229,16 @@ function symbolPrimitive(symbol: string, color: string, onLine = false, hollow =
   const mid = ICON_BOX / 2;
   return {
     kind: "path",
-    d: symbolPathD(symbol, symbolArea(symbol, onLine)),
+    d: symbolPathD(symbol, symbolArea(symbol, onLine, hollow)),
     transform: `translate(${mid},${mid})`,
-    // Hollow inverts it: the ground shows through and the COLOUR becomes the outline, matching the
-    // dumbbell's hollow chart dots. A white keyline otherwise, so a dark marker reads on a dark fill.
-    fill: hollow ? RING_GROUND : color,
-    stroke: hollow ? color : "#ffffff",
-    strokeWidth: hollow ? RING_WEIGHT : 1,
+    // Hollow inverts it: the centre is a hole and the COLOUR becomes the ring, matching the dumbbell's
+    // hollow chart dots. A keyline only where a line runs behind the marker.
+    fill: hollow ? RING_HOLE : color,
+    ...(hollow
+      ? { stroke: color, strokeWidth: RING_WEIGHT }
+      : onLine
+        ? { stroke: tokens.structural.background, strokeWidth: MARKER_KEYLINE }
+        : {}),
   };
 }
 

@@ -44,7 +44,11 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   All of it is now drawn by one module: one box, one geometry, all SVG (which retires the CSS
   gradient that had to mirror the SVG dash by hand, and its angle conversion with it). A test
   renders eleven chart types and asserts each key carries the same ink as the mark it names, on the
-  page and in the export.
+  page and in the export. Two things follow from having one drawing: a marker symbol is sized from
+  its own measured reach rather than a hand-fitted area, so it fills the same box a colour chip does
+  instead of reading a size smaller beside it; and a hollow key's centre is a HOLE rather than a
+  white disc, so it takes the ground it sits on — the tooltip is a translucent blur, where an opaque
+  centre read as a white blob.
 - **An `area` series is keyed by a square chip, not a line swatch.** An area mark is a filled
   region, so the line swatch misrepresented it, and at 3px tall it could not hold a hatch glyph —
   a textured area series had no way to show its texture in the key. Every filled chart type now

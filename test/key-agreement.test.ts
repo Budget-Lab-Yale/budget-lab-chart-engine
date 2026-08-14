@@ -26,10 +26,15 @@ import type { TidyRow } from "../src/data/index";
 
 const OPTS = { width: 720, height: 400, document };
 
+/** One spelling for "paints nothing here", so an unset fill and an explicit `none` compare equal. A
+ *  hollow icon's centre IS `none` — the hole has to take the ground it sits on, since a key sits on a
+ *  card, on a translucent tooltip and on an exported frame. */
+const paint = (v: string | undefined) => (!v || v === "none" ? "" : v);
+
 /** A shape's identity, ignoring where it sits: the primitive kinds and the colours they paint. */
 const fingerprint = (icon: IconSpec) =>
   iconShapes(icon)
-    .map((s) => `${s.kind}:${"fill" in s ? s.fill : ""}:${"stroke" in s ? (s.stroke ?? "") : ""}`)
+    .map((s) => `${s.kind}:${paint("fill" in s ? s.fill : "")}:${paint("stroke" in s ? s.stroke : "")}`)
     .join("|");
 
 /** The same, read back out of rendered SVG — so it compares what was DRAWN, not what was intended. */
@@ -37,9 +42,9 @@ function drawnFingerprint(svg: Element): string {
   return [...svg.querySelectorAll("rect, line, circle, path")]
     .map((el) => {
       const style = el.getAttribute("style") ?? "";
-      const fill = /fill:\s*([^;]+)/.exec(style)?.[1] ?? "";
-      const stroke = /stroke:\s*([^;]+)/.exec(style)?.[1] ?? "";
-      return `${el.tagName.toLowerCase()}:${fill === "none" ? "" : fill}:${stroke}`;
+      const fill = /fill:\s*([^;]+)/.exec(style)?.[1];
+      const stroke = /stroke:\s*([^;]+)/.exec(style)?.[1];
+      return `${el.tagName.toLowerCase()}:${paint(fill)}:${paint(stroke)}`;
     })
     .join("|");
 }
@@ -259,8 +264,15 @@ describe("a key matches the mark it names", () => {
     return { fill: deref(up("fill")), stroke: deref(up("stroke")) };
   }
 
-  /** White, in the forms the engine spells it — the GROUND of a ring, never its meaning. */
-  const isGround = (c: string) => c === "" || c === "#ffffff" || c === "#fff" || c === "white";
+  /** The GROUND of a shape, never its meaning: white in the forms the engine spells it, and `none`.
+   *
+   *  `none` belongs here for the same reason white does, and this is a WIDENING of the vocabulary, not
+   *  a loosening of the test: the ink role still has to match, and a hole is not ink. A MARK paints its
+   *  hole white because it must occlude the stem or the bar behind it; a KEY leaves it empty because it
+   *  has to take the card, the translucent tooltip or the exported frame it sits on. Both are ground,
+   *  so both must resolve to the same role — otherwise this gate would report a ring as a filled dot. */
+  const isGround = (c: string) =>
+    c === "" || c === "none" || c === "#ffffff" || c === "#fff" || c === "white";
 
   /** Which ROLE carries a shape's meaning: `fill` for a filled mark, `stroke` for a ring or a line.
    *

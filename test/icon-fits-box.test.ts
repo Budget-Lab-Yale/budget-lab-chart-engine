@@ -15,7 +15,6 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium, type Browser } from "playwright";
 import {
   ICON_BOX,
-  ICON_INK_LIMIT,
   symbolArea,
   iconShapes,
   type IconPrimitive,
@@ -111,6 +110,12 @@ const CASES: Array<[string, IconSpec]> = [
   ["HOLLOW ring", { shape: "dot", color: "#0072B2", hollow: true }],
   ...MARKER_SYMBOLS.map((s) => [`symbol ${s}`, { shape: "symbol", color: "#0072B2", symbol: s }] as [string, IconSpec]),
   ...MARKER_SYMBOLS.map((s) => [`line + ${s}`, { shape: "line", color: "#0072B2", symbol: s }] as [string, IconSpec]),
+  // A hollow SYMBOL — what a dumbbell actually emits — was the case this list did not carry, and it
+  // was the case that was broken: its ring straddles the path, so the symbol has to be sized half a
+  // stroke smaller or the box cuts the ring at its four extremes.
+  ...MARKER_SYMBOLS.map(
+    (s) => [`HOLLOW symbol ${s}`, { shape: "symbol", color: "#0072B2", symbol: s, hollow: true }] as [string, IconSpec],
+  ),
 ];
 
 describe("no icon is cut by its box", () => {
@@ -143,14 +148,19 @@ describe("no icon is cut by its box", () => {
     }
   });
 
-  it("sizes every symbol to fill the box, none overflowing it", async () => {
+  it("sizes every symbol to FILL the box, none overflowing it", async () => {
     // d3's `size` is an AREA, and equal area is not equal visual size — at one constant the star
-    // overflowed while the square sat small. Each symbol's area is solved for the same EXTENT, so
-    // this checks both halves of that: nothing spills, and nothing is left needlessly small.
-    const marker = (onLine: boolean) =>
+    // overflowed while the square sat small. Each area is solved from the symbol's measured extent,
+    // so this checks both halves of that: nothing spills, and nothing is left needlessly small.
+    //
+    // The threshold is the FULL half-box, not 90% of it. A standalone symbol has no keyline to make
+    // room for, so it fills the box exactly as a chip does — the earlier 0.9 slack is what let a
+    // triangle sit at 5.58 and read smaller than the square chip beside it.
+    const HALF = ICON_BOX / 2;
+    const marker = (onLine: boolean, hollow = false) =>
       MARKER_SYMBOLS.map(
         (s) =>
-          `<path d="${symbolPathD(s, symbolArea(s, onLine))}" transform="translate(${ICON_BOX / 2},${ICON_BOX / 2})" stroke-width="1"/>`,
+          `<path d="${symbolPathD(s, symbolArea(s, onLine, hollow))}" transform="translate(${HALF},${HALF})" stroke-width="${hollow ? 2 : onLine ? 1 : 0}"/>`,
       );
 
     const alone = await spills(marker(false));
@@ -158,13 +168,15 @@ describe("no icon is cut by its box", () => {
       expect(alone[i], `${s} alone spills ${alone[i]!.toFixed(3)}`).toBeLessThanOrEqual(TOL);
     });
 
-    // Filling the box means reaching most of the way to the limit — measured by how much room is
-    // left, since a symbol that fits trivially is a symbol drawn too small.
     const reach = await extents(marker(false));
     MARKER_SYMBOLS.forEach((s, i) => {
-      expect(reach[i], `${s} reaches only ${reach[i]!.toFixed(2)} of ${ICON_INK_LIMIT}`).toBeGreaterThan(
-        ICON_INK_LIMIT * 0.9,
-      );
+      expect(reach[i], `${s} reaches only ${reach[i]!.toFixed(2)} of ${HALF}`).toBeGreaterThan(HALF - TOL);
+    });
+
+    // A hollow symbol's RING must land on the box too — the path stops short, the stroke makes it up.
+    const ring = await extents(marker(false, true));
+    MARKER_SYMBOLS.forEach((s, i) => {
+      expect(ring[i], `hollow ${s} rings at ${ring[i]!.toFixed(2)}, not ${HALF}`).toBeCloseTo(HALF, 1);
     });
 
     // On a line, deliberately smaller so the line still reads underneath.

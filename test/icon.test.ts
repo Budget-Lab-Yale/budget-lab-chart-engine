@@ -171,11 +171,40 @@ describe("each shape draws what it says", () => {
     const [solid] = iconShapes({ shape: "dot", color: COLOR }) as [Extract<ReturnType<typeof iconShapes>[number], { kind: "circle" }>];
     const [ring] = iconShapes({ shape: "dot", color: COLOR, hollow: true }) as [Extract<ReturnType<typeof iconShapes>[number], { kind: "circle" }>];
     expect(solid.fill).toBe(COLOR);
-    expect(ring.fill).not.toBe(COLOR);
     expect(ring.stroke).toBe(COLOR);
     // Same OUTER diameter, not same radius: a stroke straddles its radius, so the ring's radius is
     // half a stroke smaller. Equal radii would make the ring visibly bigger AND clip it.
     expect(ring.r + (ring.strokeWidth ?? 0) / 2).toBe(solid.r);
+  });
+
+  it("leaves a hollow centre EMPTY, on every hollow shape", () => {
+    // Not white. A key sits on three different grounds — a card, the tooltip's translucent blur, and
+    // the export's own frame — and an opaque white centre is only right on the first: it read as a
+    // white blob on the other two, which is what "the ring is filled with white" meant.
+    for (const icon of [
+      { shape: "dot", color: COLOR, hollow: true },
+      { shape: "symbol", color: COLOR, symbol: "circle", hollow: true },
+      { shape: "symbol", color: COLOR, symbol: "square", hollow: true },
+    ] as IconSpec[]) {
+      const [s] = iconShapes(icon);
+      expect("fill" in s! && s.fill, `${icon.shape}/${icon.symbol ?? ""}`).toBe("none");
+      // And the emitted markup must really say so, since `fill` unset would paint BLACK.
+      expect(iconSvgMarkup(icon)).toContain("fill:none");
+    }
+    // A filled marker paints its colour and carries no keyline to eat its size.
+    const [filled] = iconShapes({ shape: "symbol", color: COLOR, symbol: "square" });
+    expect("fill" in filled! && filled.fill).toBe(COLOR);
+    expect("stroke" in filled! && filled.stroke).toBeFalsy();
+  });
+
+  it("sizes a symbol by its reach, so every context stops the ink at the box", () => {
+    // A hollow symbol makes room for its ring; a marker on a line is smaller so the line still reads;
+    // a standalone symbol has nothing to make room for and fills the box, which is why it no longer
+    // reads smaller than the chip beside it.
+    for (const sym of ["square", "triangle", "star", "circle"]) {
+      expect(symbolArea(sym, false, true), `hollow ${sym}`).toBeLessThan(symbolArea(sym));
+      expect(symbolArea(sym, true), `on-line ${sym}`).toBeLessThan(symbolArea(sym, false, true));
+    }
   });
 
   it("draws a textured square as its ground plus the hatch glyph's own bands", () => {
