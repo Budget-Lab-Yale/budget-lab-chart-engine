@@ -14,6 +14,7 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 // Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
+import { colorRefError, monoBaseError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
@@ -215,6 +216,61 @@ function tooltipXFormatError(spec: { xAxisType?: unknown; tooltip_x_format?: unk
     "`tooltip_x_format` is a d3 timeFormat pattern and applies only to xAxisType " +
     `"temporal" or "quarterly" (got ${JSON.stringify(spec.xAxisType)})`
   );
+}
+
+/**
+ * Every field that takes a color, checked against what the engine can actually PAINT (see
+ * color-ref.ts). An unresolvable name is not a cosmetic slip: it reaches Plot as a constant fill,
+ * Plot reads an unpaintable string as a column name, and the marks are dropped — a published figure
+ * with no bars in it, off a spec that validated clean.
+ *
+ * All of them are collected, not just the first: a renamed hue is usually wrong in several places at
+ * once, and one error per load is a slow way to find that out.
+ */
+function colorErrors(spec: ChartSpec): string[] {
+  const errors: string[] = [];
+  const check = (where: string, value: unknown): void => {
+    const err = colorRefError(where, value);
+    if (err) errors.push(err);
+  };
+  const checkColors = (where: string, list: ReadonlyArray<{ color?: string }> | undefined): void => {
+    (list ?? []).forEach((e, i) => check(`${where}[${i}].color`, e.color));
+  };
+
+  for (const [k, v] of Object.entries(spec.series_colors ?? {})) {
+    check(`series_colors[${JSON.stringify(k)}]`, v);
+  }
+  for (const [k, v] of Object.entries(spec.category_colors ?? {})) {
+    check(`category_colors[${JSON.stringify(k)}]`, v);
+  }
+  check("bar_color", spec.bar_color);
+
+  // Only the LIVE annotation source is checked. The unified `annotations` block wins PER FIELD over
+  // the legacy axis policy (resolveAnnotations), and whichever loses is never painted — rejecting a
+  // color there would fail a spec that renders correctly today.
+  const ann = spec.annotations;
+  checkColors(ann?.xAxis ? "annotations.xAxis" : "xAxisPolicy.markers", ann?.xAxis ?? spec.xAxisPolicy?.markers);
+  checkColors(ann?.bands ? "annotations.bands" : "xAxisPolicy.bands", ann?.bands ?? spec.xAxisPolicy?.bands);
+  checkColors(ann?.yAxis ? "annotations.yAxis" : "yAxisPolicy.markers", ann?.yAxis ?? spec.yAxisPolicy?.markers);
+  checkColors("annotations.points", ann?.points);
+  checkColors("shading", spec.shading);
+  checkColors("rug.tracks", spec.rug?.tracks);
+
+  for (const [key, selector] of Object.entries(spec.title_selectors ?? {})) {
+    (selector.options ?? []).forEach((o, i) =>
+      check(`title_selectors.${key}.options[${i}].color`, o.color),
+    );
+  }
+
+  check("waterfall.colors.increase", spec.waterfall?.colors?.increase);
+  check("waterfall.colors.decrease", spec.waterfall?.colors?.decrease);
+  check("waterfall.colors.total", spec.waterfall?.colors?.total);
+  check("waterfall.connectorColor", spec.waterfall?.connectorColor);
+  check("connector.color", spec.connector?.color);
+
+  const mono = monoBaseError("barStack.mono.base", spec.barStack?.mono?.base);
+  if (mono) errors.push(mono);
+  return errors;
 }
 
 function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): string | null {
@@ -430,6 +486,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (txfErr) return { valid: false, errors: [txfErr] };
   const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
   if (patErr) return { valid: false, errors: [patErr] };
+  const colErrors = colorErrors(spec as ChartSpec);
+  if (colErrors.length) return { valid: false, errors: colErrors };
   const rugErrors = legendAndRugErrors(spec as ChartSpec);
   if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };

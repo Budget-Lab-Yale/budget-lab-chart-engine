@@ -5,7 +5,10 @@
 // lighter blue, a 10th a lighter amber, etc. The light tier is computed in
 // sync-theme.mjs from each hue's tonal scale — see theme/tokens.ts.
 import { tokens } from "../theme/tokens";
+import { TBL_COLORS } from "../spec/color-ref";
 import { d3 } from "./vendor";
+
+export { TBL_COLORS };
 
 const BASE = tokens.categorical.map((c) => c.base);
 const LIGHT = tokens.categorical.map((c) => c.light);
@@ -23,41 +26,10 @@ export function tblColorScale(n: number): string[] {
   return out;
 }
 
-// Named colors config authors may use for `series_colors` (e.g. "blue", "amber-light",
-// "navy", "black"). Built from the categorical hues + their light variants + the
-// Style-Guide naming aliases (purple→violet, etc.) + a few structural neutrals.
-const NAMED: Record<string, string> = {};
-for (const c of tokens.categorical) {
-  NAMED[c.key] = c.base;
-  NAMED[`${c.key}-light`] = c.light;
-}
-for (const [alias, canonical] of Object.entries(tokens.aliases)) {
-  const base = NAMED[canonical];
-  const light = NAMED[`${canonical}-light`];
-  if (base) NAMED[alias] = base;
-  if (light) NAMED[`${alias}-light`] = light;
-}
-// Every TONAL TIER by name (`blue-200`, `violet-700`, …), for each hue and each of its aliases.
-// The tiers are what a same-hue pair is built from — two steps apart on one ramp is the Style-Guide
-// way to relate two related series — and without names an author had to paste the hex, which says
-// nothing about which ramp or which step it is.
-for (const [family, scale] of Object.entries(tokens.scales as Record<string, Record<string, string>>)) {
-  const aliases = Object.entries(tokens.aliases)
-    .filter(([, canonical]) => canonical === family)
-    .map(([alias]) => alias);
-  for (const [tier, hex] of Object.entries(scale)) {
-    NAMED[`${family}-${tier}`] = hex;
-    for (const alias of aliases) NAMED[`${alias}-${tier}`] = hex;
-  }
-}
-
-NAMED.black = tokens.structural.mark_black;
-NAMED.grey = tokens.structural.text_muted;
-NAMED.gray = tokens.structural.text_muted;
-NAMED.navy = tokens.brand.navy;
-NAMED.sky = tokens.brand.sky;
-
-export const TBL_COLORS: Readonly<Record<string, string>> = NAMED;
+// The name → hex table itself lives in spec/color-ref.ts, which the VALIDATOR also reads to reject an
+// unpaintable color at load. It cannot live here: this module imports the vendored d3, and pulling
+// that into the Node-only spec entry would grow it from 46 KB to ~700 KB. Re-exported so the name
+// resolution below and its table still read as one module to every consumer.
 
 /** A known color name → its hex; anything else (a raw "#hex" or unknown) is returned
  * unchanged. Undefined/empty passes through so callers can `?? fallback`. */

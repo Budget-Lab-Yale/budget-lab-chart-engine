@@ -33,7 +33,10 @@ describe("dumbbell — structural validation", () => {
     const r = validateSpec({
       ...DUMBBELL,
       series_marker: { current_law: "ink", static: "hollow", collected: "filled" },
-      connector: { color: "border", width: 1.5, style: "solid" },
+      // "border" was here, and it is not a color the engine knows: it reached Plot as a constant
+      // stroke, Plot read it as a column name, and the two connector stems were DROPPED (8 paths
+      // instead of 10, measured). validateSpec now says so — see validate.ts colorErrors.
+      connector: { color: "grey", width: 1.5, style: "solid" },
       dot_radius: 5,
       gap_annotation: { series_a: "static", series_b: "collected" },
       value_axis_title: "Effective tax rate",

@@ -870,8 +870,17 @@ value is either a **named color** or a raw `"#hex"`:
   and each with the full tier set (`purple-600` = `violet-600`).
 - **Neutrals and brand:** `black`, `grey` (`gray`), `navy`, `sky`.
 
-Unrecognized names pass through unchanged, so a raw `"#1A1A2E"` works too. `barStack.mono.base`
-accepts only the 7 categorical hues (or an alias) — it pulls that hue's tonal scale.
+Any **CSS color** passes through unchanged, so a raw `"#1A1A2E"`, an `rgb(…)`, or a CSS keyword like
+`steelblue` works too.
+
+A value that is **neither** a palette name **nor** a CSS color is **rejected at load**. It is not a
+cosmetic slip: an unresolvable string reaches Plot as a constant fill, Plot reads a string it cannot
+parse as a *column name*, and the marks it colored are dropped — so a one-character typo
+(`blue-450`, `sky-300`, `blu`) used to publish a chart frame with nothing drawn in it. The error
+names the field, the value, and the near miss.
+
+`barStack.mono.base` accepts only the 7 categorical hues (or an alias) — it pulls that hue's tonal
+scale, so a hex has no scale to pull and is rejected too.
 
 ---
 

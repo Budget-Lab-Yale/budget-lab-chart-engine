@@ -363,7 +363,10 @@ describe("validateSpec (structural)", () => {
       data: "data.csv",
       barStack: {
         netDisplay: "text",
-        mono: { base: "#003366" },
+        // A hex was here. `mono.base` names a HUE whose tonal scale the stack pulls, so a hex has no
+        // scale to pull and monoScale THROWS mid-render ("#003366" is not a known categorical hue) —
+        // this spec validated clean and could not be drawn. validateSpec now rejects it.
+        mono: { base: "blue" },
         netLabelColor: "white",
         normalize: false,
       },

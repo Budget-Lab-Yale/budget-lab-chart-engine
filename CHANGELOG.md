@@ -72,8 +72,20 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   rest of the 8-tier ramps resolve anywhere a colour is accepted, as do the aliases' tiers and the
   brand `sky`. Previously only the 7 hues, their `-light` variants and three neutrals had names, so
   relating two series within one hue family — the case a texture is usually paired with — meant
-  pasting a hex that said nothing about which ramp or which step it was. An unrecognised name still
-  passes through unchanged, so a raw `"#hex"` is unaffected.
+  pasting a hex that said nothing about which ramp or which step it was. A raw `"#hex"` (or any CSS
+  colour) is unaffected — but an unrecognised NAME is now rejected rather than passed through; see
+  the next entry, which is what the new tier names made urgent.
+- **A colour the engine cannot paint is rejected at load.** It never was cosmetic: an unresolvable
+  name reached Plot as a constant fill, Plot read a string it could not parse as a *column name*, and
+  the marks it coloured were dropped — so `bar_color: "blue-450"` published a chart frame with no
+  bars in it while `validateSpec` returned `valid: true`. The 8-tier names make that a likely typo
+  rather than an exotic one (`blue-800`, `blue-250` and `sky-300` all look like names and none
+  exist). Every colour-valued field is checked — `series_colors`, `bar_color`, `category_colors`,
+  annotation and band and callout colours, `shading`, `rug.tracks`, title-selector options, the
+  waterfall colours and connector, `connector.color` — and the error names the field, the value and
+  the near miss (`"blue" ships tiers 50 100 200 300 400 500 600 700`). `barStack.mono.base` gets its
+  own rule: it names a HUE whose tonal scale the stack pulls, so a hex there (which used to throw
+  mid-render) fails at load instead.
 - **A chart with no series column can now be named.** Its one implicit series is keyed `""`, which
   no data cell spells out, so the cross-reference check rejected every key naming it — including the
   `series_colors: {"": color}` idiom this file documents as working, and any hatch on a
@@ -86,9 +98,14 @@ could not reach the PNG export, which re-renders from the spec rather than seria
 
 ### Upgrading
 
-The three new spec keys are opt-in and change nothing that does not use them. The icon work is not
-opt-in, so **a repin re-renders every published figure's legend and tooltip keys**, and two of those
-changes reach the SVG a reader sees:
+The three new spec keys are opt-in and change nothing that does not use them. The colour check is
+not: a spec carrying a colour the engine cannot paint **stops validating**. Every such spec was
+already rendering the affected marks as nothing (or, for a `barStack.mono.base` hex, throwing), so
+this converts a silent blank into a load error — but it is a new refusal on a released schema, and
+an empty string in a colour field (`color: ""`) is refused too.
+
+The icon work is likewise not opt-in, so **a repin re-renders every published figure's legend and
+tooltip keys**, and two of those changes reach the SVG a reader sees:
 
 - **Every legend, tooltip and PNG-export key is redrawn** — one 14px box, marker symbols sized and
   centred from measurements, hollow middles genuinely empty. Nothing here changes a MARK, so the plot
