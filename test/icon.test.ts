@@ -197,14 +197,12 @@ describe("each shape draws what it says", () => {
     expect("stroke" in filled! && filled.stroke).toBeFalsy();
   });
 
-  it("sizes a symbol by its reach, so every context stops the ink at the box", () => {
-    // A hollow symbol makes room for its ring; a marker on a line is smaller so the line still reads;
-    // a standalone symbol has nothing to make room for and fills the box, which is why it no longer
-    // reads smaller than the chip beside it.
-    for (const sym of ["square", "triangle", "star", "circle"]) {
-      expect(symbolArea(sym, false, true), `hollow ${sym}`).toBeLessThan(symbolArea(sym));
-      expect(symbolArea(sym, true), `on-line ${sym}`).toBeLessThan(symbolArea(sym, false, true));
-    }
+  it("sizes every symbol alike, and each context stops the ink at the box", () => {
+    // One size for all seven IS optical sizing: d3's `size` is the painted area, so equal size is
+    // equal ink. A hollow symbol makes room for its ring; a marker on a line is smaller so the line
+    // still reads beside it.
+    expect(symbolArea(false, true), "hollow").toBeLessThan(symbolArea());
+    expect(symbolArea(true), "on a line").toBeLessThan(symbolArea());
   });
 
   it("draws a textured square as its ground plus the hatch glyph's own bands", () => {
@@ -237,15 +235,12 @@ describe("each shape draws what it says", () => {
     expect(iconShapes({ shape: "none", hatch })).toEqual([]);
   });
 
-  it("scales each symbol so they share an EXTENT, not an area", () => {
-    const [path] = iconShapes({ shape: "symbol", color: COLOR, symbol: "triangle" });
-    expect(path!.kind).toBe("path");
-    expect(path!.kind === "path" && path!.transform).toContain(`${ICON_BOX / 2}`);
-    // A square must be given far more AREA than a star to look the same size — that is the whole
-    // point, and equal areas were what made the star overflow the box.
-    expect(symbolArea("square")).toBeGreaterThan(symbolArea("star") * 3);
-    // And a marker on a line is smaller than the same marker alone.
-    expect(symbolArea("circle", true)).toBeLessThan(symbolArea("circle"));
+  it("centres every symbol on the box, whatever its shape", () => {
+    for (const symbol of ["triangle", "star", "square"]) {
+      const [path] = iconShapes({ shape: "symbol", color: COLOR, symbol });
+      expect(path!.kind).toBe("path");
+      expect(path!.kind === "path" && path!.transform).toBe(`translate(${ICON_BOX / 2},${ICON_BOX / 2})`);
+    }
   });
 
   it("draws nothing at all for the no-icon case", () => {

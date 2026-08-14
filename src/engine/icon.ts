@@ -49,24 +49,39 @@ const SYMBOL_REACH_K: Record<string, number> = {
   star: 0.94385,
 };
 
-/** How much of its reach a marker drawn ON a line keeps: the line has to stay readable underneath. */
-const ON_LINE_SCALE = 0.67;
+/** The pointiest symbol, which is what the box's clipping binds against. */
+const MAX_REACH_K = Math.max(...Object.values(SYMBOL_REACH_K));
 
-/** How far a symbol's ink may reach from the centre. One rule — the ink stops at the box — differing
- *  only in what else the shape has to make room for at that edge. */
-function symbolReach(onLine: boolean, hollow: boolean): number {
+/** How far a marker ON a line reaches. Not the full box: a star at full box spans 12 of the 14, so
+ *  the rule either side of it becomes a 1px stub and the key stops reading as a LINE with a marker.
+ *  Judged by eye against 5.5 and 7.0 — a taste call, and the only one in this module, so it is a
+ *  single constant rather than something to re-derive. */
+const ON_LINE_REACH = 6.5;
+
+/** OPTICAL sizing: ONE d3 `size` for every symbol, so all seven carry the same INK.
+ *
+ *  d3's `size` really is the painted area — measured by counting pixels, the ratio is 1.000 ± 1% for
+ *  all seven — so equal ink is equal `size`, and the only question is which one. Equal REACH was the
+ *  previous rule and it read wrong in the other direction: a star's points touched the box while its
+ *  body carried a third of the square's ink, so the pointy symbols looked lighter than the blocky
+ *  ones. Equal ink can only be reached by making the BLOCKY ones smaller, because the box clips and
+ *  the pointy ones are already against it — hence solving from the pointiest symbol.
+ *
+ *  A square key therefore sits well inside the box while a star fills it. That is the intended
+ *  reading: the shape channel and the fill channel should not look like the same weight of mark. */
+function symbolSizeFor(reachLimit: number): number {
+  return Math.round((reachLimit / MAX_REACH_K) ** 2);
+}
+
+/** The d3 `size` a marker is drawn at, per context. Symbol-independent, by construction: that IS
+ *  optical sizing. The contexts differ only in what the shape must leave room for at the box edge. */
+export function symbolArea(onLine = false, hollow = false): number {
   const half = ICON_BOX / 2;
   // A ring's stroke straddles the path, so the path stops half a stroke short and the RING's outer
   // edge lands on the box. Without this the ring was cut at its four extremes and read flat-sided.
-  if (hollow) return half - RING_WEIGHT / 2;
-  if (onLine) return (half - MARKER_KEYLINE / 2) * ON_LINE_SCALE;
-  return half;
-}
-
-/** The d3 `size` (an area) that draws `symbol` at the reach its context allows. */
-export function symbolArea(symbol: string, onLine = false, hollow = false): number {
-  const k = SYMBOL_REACH_K[symbol] ?? SYMBOL_REACH_K.circle!;
-  return Math.round((symbolReach(onLine, hollow) / k) ** 2);
+  if (hollow) return symbolSizeFor(half - RING_WEIGHT / 2);
+  if (onLine) return symbolSizeFor(ON_LINE_REACH - MARKER_KEYLINE / 2);
+  return symbolSizeFor(half);
 }
 
 /** Line weight for the `line` shape — thick enough to read as a rule, not a hairline. */
@@ -229,7 +244,7 @@ function symbolPrimitive(symbol: string, color: string, onLine = false, hollow =
   const mid = ICON_BOX / 2;
   return {
     kind: "path",
-    d: symbolPathD(symbol, symbolArea(symbol, onLine, hollow)),
+    d: symbolPathD(symbol, symbolArea(onLine, hollow)),
     transform: `translate(${mid},${mid})`,
     // Hollow inverts it: the centre is a hole and the COLOUR becomes the ring, matching the dumbbell's
     // hollow chart dots. A keyline only where a line runs behind the marker.

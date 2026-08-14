@@ -25,7 +25,11 @@ import { tokens } from "../../theme/tokens";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
-const PAGE_BG = tokens.structural.background; // hollow-dot center (stem shows through the ring)
+/** A hollow dot's centre is EMPTY, so the stem really does show through the ring and the dot takes
+ *  whatever ground it sits on. It was the page-background token — an opaque white disc, which reads as
+ *  a filled white dot rather than a hole, occludes the stem this comment always claimed showed
+ *  through, and is simply wrong anywhere the figure does not sit on white. */
+const HOLLOW_CENTER = "none";
 const INK = tokens.structural.text_heading; // filled "ink"/neutral dot
 const DEFAULT_CONNECTOR = TBL.color.annotationDim; // subtle stem behind the dots
 const DEFAULT_DOT_R = 5;
@@ -116,7 +120,7 @@ export function buildDumbbellMarks(
   const seriesColor = (s: string): string => colors.get(s) || TBL.color.blue;
   const fillFor = (s: string): string => {
     const m = markerOf(s);
-    return m === "hollow" ? PAGE_BG : m === "ink" ? INK : seriesColor(s);
+    return m === "hollow" ? HOLLOW_CENTER : m === "ink" ? INK : seriesColor(s);
   };
   const strokeFor = (s: string): string =>
     markerOf(s) === "hollow" ? seriesColor(s) : DOT_KEYLINE;

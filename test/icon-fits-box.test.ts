@@ -13,6 +13,7 @@
 // what makes the `/` glyph read as three bands.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium, type Browser } from "playwright";
+import { PNG } from "pngjs";
 import {
   ICON_BOX,
   symbolArea,
@@ -148,19 +149,16 @@ describe("no icon is cut by its box", () => {
     }
   });
 
-  it("sizes every symbol to FILL the box, none overflowing it", async () => {
-    // d3's `size` is an AREA, and equal area is not equal visual size — at one constant the star
-    // overflowed while the square sat small. Each area is solved from the symbol's measured extent,
-    // so this checks both halves of that: nothing spills, and nothing is left needlessly small.
-    //
-    // The threshold is the FULL half-box, not 90% of it. A standalone symbol has no keyline to make
-    // room for, so it fills the box exactly as a chip does — the earlier 0.9 slack is what let a
-    // triangle sit at 5.58 and read smaller than the square chip beside it.
+  it("gives every symbol the same INK, none of it outside the box", async () => {
+    // Optical sizing, and the two halves of it. d3's `size` is the painted AREA, so equal ink is one
+    // shared size — but the box CLIPS, so that size is dictated by the pointiest symbol. Equal reach
+    // was the previous rule and it read wrong: a star's points touched the box while its body carried
+    // a third of the square's ink.
     const HALF = ICON_BOX / 2;
     const marker = (onLine: boolean, hollow = false) =>
       MARKER_SYMBOLS.map(
         (s) =>
-          `<path d="${symbolPathD(s, symbolArea(s, onLine, hollow))}" transform="translate(${HALF},${HALF})" stroke-width="${hollow ? 2 : onLine ? 1 : 0}"/>`,
+          `<path d="${symbolPathD(s, symbolArea(onLine, hollow))}" transform="translate(${HALF},${HALF})" stroke-width="${hollow ? 2 : onLine ? 1 : 0}"/>`,
       );
 
     const alone = await spills(marker(false));
@@ -168,21 +166,56 @@ describe("no icon is cut by its box", () => {
       expect(alone[i], `${s} alone spills ${alone[i]!.toFixed(3)}`).toBeLessThanOrEqual(TOL);
     });
 
+    // Exactly one symbol may sit AT the box — the pointiest. If none does, every key is needlessly
+    // small; the rest are smaller on purpose, which is what carries the equal ink.
     const reach = await extents(marker(false));
-    MARKER_SYMBOLS.forEach((s, i) => {
-      expect(reach[i], `${s} reaches only ${reach[i]!.toFixed(2)} of ${HALF}`).toBeGreaterThan(HALF - TOL);
-    });
+    expect(Math.max(...reach), `no symbol reaches the box`).toBeGreaterThan(HALF - TOL);
 
-    // A hollow symbol's RING must land on the box too — the path stops short, the stroke makes it up.
+    // A hollow symbol's RING lands on the box too — the path stops short, the stroke makes it up.
     const ring = await extents(marker(false, true));
     MARKER_SYMBOLS.forEach((s, i) => {
-      expect(ring[i], `hollow ${s} rings at ${ring[i]!.toFixed(2)}, not ${HALF}`).toBeCloseTo(HALF, 1);
+      expect(ring[i], `hollow ${s} rings at ${ring[i]!.toFixed(2)}, not ${HALF}`).toBeLessThanOrEqual(HALF + TOL);
     });
 
-    // On a line, deliberately smaller so the line still reads underneath.
+    // On a line the marker is smaller so the rule still reads either side of it — how much smaller is
+    // a taste call (ON_LINE_REACH), so what is gated here is only that it stays inside the box.
     const onLine = await extents(marker(true));
+    expect(Math.max(...onLine), `a marker on a line spills`).toBeLessThanOrEqual(HALF + TOL);
+  }, 120000);
+
+  it("paints the same number of pixels for every symbol", async () => {
+    // The measurement optical sizing rests on, taken from the rendered image rather than from d3's
+    // documented semantics: one shared `size` is only equal INK if `size` really is the painted area.
+    // This is also the gate against a future hand-tuned table — the previous one was hand-fitted and
+    // three of its seven entries were wrong.
+    const SCALE = 8;
+    const page = await browser.newPage({ deviceScaleFactor: SCALE });
+    const half = ICON_BOX / 2;
+    await page.setContent(
+      `<body style="margin:0;background:#fff">` +
+        MARKER_SYMBOLS.map(
+          (s, i) =>
+            `<svg id="s${i}" width="${ICON_BOX}" height="${ICON_BOX}" style="display:block">` +
+            `<path d="${symbolPathD(s, symbolArea())}" transform="translate(${half},${half})" fill="#000"/></svg>`,
+        ).join("") +
+        `</body>`,
+    );
+    const inks: number[] = [];
+    for (let i = 0; i < MARKER_SYMBOLS.length; i++) {
+      const png = PNG.sync.read(await (await page.$(`#s${i}`))!.screenshot());
+      let ink = 0;
+      for (let p = 0; p < png.width * png.height; p++) if (png.data[p << 2]! < 128) ink++;
+      inks.push(ink / SCALE ** 2);
+    }
+    await page.close();
+    const mean = inks.reduce((a, b) => a + b, 0) / inks.length;
     MARKER_SYMBOLS.forEach((s, i) => {
-      expect(onLine[i], `${s} on a line is not smaller`).toBeLessThan(reach[i]! * 0.85);
+      // 8% covers antialiasing on shapes whose perimeter-to-area ratios differ by 3x (a wye is nearly
+      // all edge, a square nearly none). A hand-fitted table missed by 40%, so this is not slack.
+      expect(
+        Math.abs(inks[i]! - mean) / mean,
+        `${s} paints ${inks[i]!.toFixed(1)} where the mean is ${mean.toFixed(1)}`,
+      ).toBeLessThan(0.08);
     });
   }, 120000);
 });
