@@ -207,6 +207,45 @@ describe("GET / — index page", () => {
     expect(body).toContain("<!doctype html");
   });
 
+  it("offers an open-all button carrying every spec's own URL", async () => {
+    // Reviewing a suite means comparing figures side by side, so the gallery opens the whole set.
+    const dir = makeTempDir();
+    for (const name of ["alpha", "beta"]) {
+      const sub = join(dir, name);
+      mkdirSync(sub, { recursive: true });
+      writeFileSync(join(sub, "chart.yaml"), `chartType: line\ntitle: ${name}\nxAxisType: temporal\ndata: d.csv\n`);
+    }
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { body } = await fakeRequest(handler, "/");
+    expect(body).toContain("Open all 2 in tabs");
+    // The button's list must be the SAME hrefs the links use, or it opens 404s.
+    for (const name of ["alpha", "beta"]) {
+      expect(body).toContain(`"/chart/${name}/chart.yaml"`);
+    }
+  });
+
+  it("omits the open-all button when there is nothing to open", async () => {
+    const dir = makeTempDir();
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { body } = await fakeRequest(handler, "/");
+    expect(body).not.toContain('id="open-all"');
+  });
+
+  // Windows forbids `<` and `>` in a filename, so the path this guards against cannot even be
+  // created here — but CI runs on Linux, where it can.
+  it.skipIf(process.platform === "win32")("cannot let a spec path close the open-all script early", async () => {
+    // A spec path is not the author's to vet: an unescaped `</script>` in one would end the element
+    // and spill the rest of the list into the page as markup.
+    const dir = makeTempDir();
+    const sub = join(dir, "a</script><b>b");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "chart.yaml"), "chartType: line\ntitle: Odd\nxAxisType: temporal\ndata: d.csv\n");
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { body } = await fakeRequest(handler, "/");
+    const script = body.slice(body.indexOf('id="open-all"'));
+    expect(script).not.toContain("</script><b>");
+  });
+
   it("lists a table.yaml spec by its title", async () => {
     const dir = makeTempDir();
     makeTableFixture(dir);

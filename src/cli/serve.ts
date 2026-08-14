@@ -82,6 +82,7 @@ function readSpecMeta(absPath: string): { title: string; kind: "chart" | "table"
 }
 
 function buildIndexPage(specs: string[], rootDir: string): string {
+  const hrefs: string[] = [];
   const items =
     specs.length === 0
       ? `<p class="no-charts">No <code>chart.yaml</code> or <code>table.yaml</code> files found under <code>${escapeHtml(rootDir)}</code>.</p>`
@@ -92,6 +93,7 @@ function buildIndexPage(specs: string[], rootDir: string): string {
             const displayTitle = meta?.title ?? rel;
             const kindTag = meta?.kind === "table" ? `<span class="chart-kind">table</span>` : "";
             const href = `/chart/${encodeURIComponent(rel).replace(/%2F/g, "/")}`;
+            hrefs.push(href);
             return [
               `<li class="chart-item">`,
               `<a class="chart-link" href="${escapeHtml(href)}">${escapeHtml(displayTitle)}</a>${kindTag}`,
@@ -102,6 +104,15 @@ function buildIndexPage(specs: string[], rootDir: string): string {
               .join("\n      ");
           })
           .join("\n    ");
+
+  // Reviewing a suite means comparing figures, which means having them open at once. `</` is escaped
+  // so a spec path can never close this script element early.
+  const hrefsJson = JSON.stringify(hrefs).replace(/</g, "\\u003c");
+  const openAll =
+    specs.length === 0
+      ? ""
+      : `<button type="button" class="open-all" id="open-all">Open all ${specs.length} in tabs</button>
+  <span class="open-all-note" id="open-all-note" hidden></span>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -189,18 +200,73 @@ body {
   color: #666;
   padding: 24px 0;
 }
+.header-bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.open-all {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a2e;
+  background: #fff;
+  border: 1px solid #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.open-all:hover { background: #e2e5ea; }
+.open-all-note {
+  font-size: 12px;
+  color: #ffd9a0;
+  flex-basis: 100%;
+}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>tbl-chart gallery</h1>
-  <p>Serving from <code>${escapeHtml(rootDir)}</code> &mdash; ${specs.length} spec${specs.length === 1 ? "" : "s"} found</p>
+  <div class="header-bar">
+    <div>
+      <h1>tbl-chart gallery</h1>
+      <p>Serving from <code>${escapeHtml(rootDir)}</code> &mdash; ${specs.length} spec${specs.length === 1 ? "" : "s"} found</p>
+    </div>
+    ${openAll}
+  </div>
 </div>
 <div class="main">
   <ul class="chart-list">
     ${items}
   </ul>
 </div>
+<script>
+(function () {
+  var btn = document.getElementById("open-all");
+  if (!btn) return;
+  var note = document.getElementById("open-all-note");
+  btn.addEventListener("click", function () {
+    var hrefs = ${hrefsJson};
+    var blocked = 0;
+    for (var i = 0; i < hrefs.length; i++) {
+      // A window the browser refused comes back null (or closed), which is the ONLY signal that the
+      // pop-up blocker ate it: most browsers allow one window per gesture, so a suite of 16 opens one
+      // tab and looks broken. Say so instead.
+      var w = window.open(hrefs[i], "_blank");
+      if (!w || w.closed) blocked++;
+    }
+    if (blocked > 0) {
+      note.textContent = blocked + " of " + hrefs.length +
+        " tabs were blocked — allow pop-ups for this page, then click again.";
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+  });
+})();
+</script>
 </body>
 </html>`;
 }
