@@ -25,7 +25,7 @@ import {
   iconWidth,
   type IconSpec,
 } from "../src/engine/icon";
-import { swatchWidthFor, MARK_POINT_R, MARK_LINE_POINT_R } from "../src/engine/theme";
+import { swatchWidthFor, SWATCH_OUTLINE, MARK_POINT_R, MARK_LINE_POINT_R } from "../src/engine/theme";
 import { resolveHatch, HATCH_GLYPH_BOX } from "../src/engine/hatch";
 import { tokens } from "../src/theme/tokens";
 
@@ -165,6 +165,41 @@ describe("each shape draws what it says", () => {
     expect(sq!.kind === "rect" && sq!.width).toBe(ICON_BOX);
     const [chip] = iconShapes({ shape: "rect", color: COLOR, rounded: true });
     expect(chip!.kind === "rect" && (chip!.rx ?? 0)).toBeGreaterThan(1);
+  });
+
+  it("outlines a MULTI-TINT chip too, over its full banded width", () => {
+    // The tints of an annotation fill row are near-white (an `annotations.bands` fill is flattened at
+    // ~10% opacity) and such a row is always built outlined, so an unoutlined multi-tint chip reads as
+    // a gap on the card. The banded branch returned early once and dropped the outline; asserting the
+    // returned IconSpec (which still said `outlined: true`) could not see it, so this asserts the
+    // PRIMITIVES.
+    const tints = ["#a1", "#b2", "#c3", "#d4", "#e5", "#f6", "#a7"];
+    const icon: IconSpec = { shape: "rect", colors: tints, outlined: true };
+    const shapes = iconShapes(icon);
+    expect(shapes).toHaveLength(tints.length + 1);
+    const outline = shapes[shapes.length - 1]!;
+    expect(outline.kind === "rect" && outline.fill).toBe("none");
+    expect(outline.kind === "rect" && outline.stroke).toBe(SWATCH_OUTLINE);
+    // Bounds are the BANDED width, not ICON_BOX — the one icon wider than the box — and inset by half
+    // the stroke at every edge so the viewport cannot cut its outer half.
+    const half = (outline.kind === "rect" ? outline.strokeWidth ?? 0 : 0) / 2;
+    expect(half).toBeGreaterThan(0);
+    if (outline.kind === "rect") {
+      expect(outline.x).toBeCloseTo(half, 5);
+      expect(outline.y).toBeCloseTo(half, 5);
+      expect(outline.x + outline.width).toBeCloseTo(iconWidth(icon) - half, 5);
+      expect(outline.y + outline.height).toBeCloseTo(ICON_BOX - half, 5);
+      expect(iconWidth(icon)).toBeGreaterThan(ICON_BOX);
+    }
+    // Two tints fit inside the box and must be outlined just the same.
+    const narrow = iconShapes({ shape: "rect", colors: ["#a1", "#b2"], outlined: true });
+    expect(narrow).toHaveLength(3);
+    expect(narrow[2]!.kind === "rect" && narrow[2]!.stroke).toBe(SWATCH_OUTLINE);
+    // And the emitted markup must really carry it: the live legend drew this from CSS until that rule
+    // was deleted, so the stroke has to survive into the drawing both emitters render.
+    expect(iconSvgMarkup(icon)).toContain(`stroke:${SWATCH_OUTLINE}`);
+    // An unoutlined banded chip is still bands and nothing else.
+    expect(iconShapes({ shape: "rect", colors: tints })).toHaveLength(tints.length);
   });
 
   it("draws a hollow dot as a ring, not a filled circle", () => {

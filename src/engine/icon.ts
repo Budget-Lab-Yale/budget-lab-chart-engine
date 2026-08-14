@@ -238,10 +238,14 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
 
     case "rect": {
       const tints = icon.colors && icon.colors.length > 1 ? icon.colors : null;
+      // A stroke straddles its edge, so an outlined chip must be inset by half of it — otherwise the
+      // SVG viewport cuts the outer half and the chip reads as clipped along the bottom and right.
+      const inset = icon.outlined ? 0.5 : 0;
       if (tints) {
         // Equal vertical bands, left to right in the given order.
-        const width = iconWidth(icon) / tints.length;
-        return tints.map((c, i) => ({
+        const box = iconWidth(icon);
+        const width = box / tints.length;
+        const bands = tints.map((c, i) => ({
           kind: "rect" as const,
           x: i * width,
           y: 0,
@@ -249,11 +253,30 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
           height: ICON_BOX,
           fill: c,
         }));
+        if (!icon.outlined) return bands;
+        // The hairline as its OWN rect over the bands, rather than insetting them: the bands divide
+        // the width by the palette's rule (swatchWidthFor) and insetting would make every band a
+        // different width from the one the chart's own swatch draws. Annotation fill rows are always
+        // outlined and an `annotations.bands` tint is ~10% opaque, so without this a merged
+        // multi-tint row is a near-white chip with no border — a gap on a white card, which is the
+        // exact failure the outline exists to prevent. Bounds are `iconWidth`, NOT the box: a banded
+        // chip is the one icon allowed to be wider than ICON_BOX.
+        return [
+          ...bands,
+          {
+            kind: "rect" as const,
+            x: inset,
+            y: inset,
+            width: box - inset * 2,
+            height: ICON_BOX - inset * 2,
+            rx: RECT_RADIUS,
+            fill: "none",
+            stroke: OUTLINE,
+            strokeWidth: 1,
+          },
+        ];
       }
       const rx = icon.rounded ? CHIP_RADIUS : RECT_RADIUS;
-      // A stroke straddles its edge, so an outlined chip must be inset by half of it — otherwise the
-      // SVG viewport cuts the outer half and the chip reads as clipped along the bottom and right.
-      const inset = icon.outlined ? 0.5 : 0;
       const ground: IconPrimitive = {
         kind: "rect",
         x: inset,

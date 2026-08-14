@@ -471,7 +471,11 @@ describe("multi-series charts with shaded areas", () => {
     // Three tints, three equal bands, hard-edged and in order. It was a CSS linear-gradient with
     // hard stops at 33.3333%; the bands are rects now, but the invariant is the same one — the
     // reader must be able to count the fills the key stands for.
-    const bands = [...chip.querySelectorAll("rect")];
+    // The hairline outline is a rect too (fill:none over the bands), so count the FILLS, not the
+    // rects — an annotation row is always outlined and its tints are near-white without it.
+    const rects = [...chip.querySelectorAll("rect")];
+    const bands = rects.filter((r) => !(r.getAttribute("style") ?? "").includes("fill:none"));
+    expect(rects.length - bands.length).toBe(1);
     expect(bands).toHaveLength(3);
     const width = Number(bands[0]!.getAttribute("width"));
     expect(bands.map((b) => Number(b.getAttribute("x")))).toEqual([0, width, width * 2]);
