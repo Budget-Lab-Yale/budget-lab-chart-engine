@@ -40,7 +40,6 @@ export function buildWaterfallMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const catField = ctx.xField; // "_xc"
   const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
   const steps = computeWaterfallSteps(data);
   const categories = steps.map((s) => s.cat); // band domain: declaration order, INCLUDING skips

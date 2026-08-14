@@ -25,7 +25,7 @@ import {
   iconWidth,
   type IconSpec,
 } from "../src/engine/icon";
-import { swatchWidthFor, SWATCH_OUTLINE, MARK_POINT_R, MARK_LINE_POINT_R } from "../src/engine/theme";
+import { swatchWidthFor, SWATCH_OUTLINE, MARK_POINT_R } from "../src/engine/theme";
 import { resolveHatch, HATCH_GLYPH_BOX } from "../src/engine/hatch";
 import { tokens } from "../src/theme/tokens";
 

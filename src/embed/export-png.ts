@@ -9,10 +9,9 @@ import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
-import { hatchSvgPattern, type SeriesHatch } from "../engine/hatch.js";
+import type { SeriesHatch } from "../engine/hatch.js";
 import { ICON_BOX, iconFromLegendItem, iconSvgGroup, iconWidth } from "../engine/icon.js";
 import {
-  SVG_NS,
   W,
   H,
   MARGIN,
@@ -22,11 +21,9 @@ import {
   W_SEMI,
   FONT,
   NAVY,
-  MUTED,
   BODY,
   AXIS,
   HEADING,
-  svgEl as svgElDoc,
   textEl as textElDoc,
   measureText,
   wrapText,
@@ -40,10 +37,6 @@ import {
 // ---------------------------------------------------------------------------
 // Document-bound wrappers (this module always draws into the global `document`).
 // ---------------------------------------------------------------------------
-
-function svgEl(name: string, attrs: Record<string, string | number> = {}): SVGElement {
-  return svgElDoc(document, name, attrs);
-}
 
 function textEl(
   x: number,

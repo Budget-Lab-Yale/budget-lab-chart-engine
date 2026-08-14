@@ -14,7 +14,6 @@
 // tabs, sidebar, current-update cards, outer shell/header, responsive breakpoints.
 
 import { TOKENS_CSS } from "../theme/tokens";
-import { SWATCH_OUTLINE } from "../engine/theme";
 import { ICON_BOX } from "../engine/icon";
 
 // Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated

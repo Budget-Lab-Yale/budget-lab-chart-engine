@@ -5,7 +5,7 @@
 // legend swatch, the HTML tooltip swatch, and the PNG export's own SVG legend chip (the export
 // composes its chrome from scratch rather than cloning the page's).
 import { describe, it, expect } from "vitest";
-import { renderChart, buildLegendItems } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { defaultHatchStroke, resolveHatch } from "../src/engine/hatch";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";

@@ -13,7 +13,7 @@ export function buildAreaMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, colors, fxField, fyField } = ctx;
+  const { xField, fxField, fyField } = ctx;
   const facetChannels = fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
   const seriesNames = ctx.seriesNames ?? [];

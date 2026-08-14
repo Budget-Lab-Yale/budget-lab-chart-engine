@@ -26,7 +26,6 @@ import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes } from "../util";
 import type { ValueAffixes } from "../../spec/types";
-import { tokens } from "../../theme/tokens";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
@@ -47,7 +46,6 @@ const SEGMENT_LABEL_MIN_PX = 25;
 // those <text> elements — and only those — to re-centre them on the segments it shrinks. Matching
 // them by position alone would also catch an annotation label that happened to land inside a bar.
 const SEGMENT_LABEL_CLASS = "tbl-segment-label";
-const MARK_BLACK = tokens.structural.mark_black;
 const WHITE = "#FFFFFF";
 
 /** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable).

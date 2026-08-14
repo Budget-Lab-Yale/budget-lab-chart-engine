@@ -19,10 +19,9 @@
 // including the dashed line and the dot, which used to be CSS tricks (a hard-stop gradient and a
 // border-radius) with separate SVG equivalents in the export.
 import { symbolPathD } from "./symbols";
-import { tokens } from "../theme/tokens";
 import { TBL, swatchWidthFor, SWATCH_OUTLINE, SHAPE_LEGEND_COLOR, MARK_POINT_R, MARK_LINE_POINT_R } from "./theme";
 import { hatchGlyphShapes, type HatchChar, type SeriesHatch } from "./hatch";
-import { markerInk, HOLE, MARKER_KEYLINE_COLOR, type MarkerStyle } from "./marker-ink";
+import { markerInk, MARKER_KEYLINE_COLOR, type MarkerStyle } from "./marker-ink";
 
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
 export const ICON_BOX = 14;
@@ -419,8 +418,9 @@ export function iconSvgGroup(doc: Document, icon: IconSpec): SVGElement | null {
  *  legend does instead of re-deriving from raw colour maps. Typed structurally rather than importing
  *  LegendItem, which would be a cycle (engine/index imports this module).
  *
- *  A chart type with no legend at all (single-series histogram, waterfall) has no row to translate,
- *  so its tooltip builds an IconSpec directly — the shape is known from the chart type. */
+ *  A chart that DRAWS no legend row still has one to translate: `buildSeriesKeyRows` (index.ts)
+ *  resolves a row per series with no legend-presence rule applied, so a lone histogram or waterfall
+ *  keys from this same function rather than from a hand-built IconSpec that could drift from it. */
 export function iconFromLegendItem(item: {
   color?: string | undefined;
   dashed?: boolean;

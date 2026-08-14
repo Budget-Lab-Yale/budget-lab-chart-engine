@@ -33,9 +33,6 @@ import {
 const GROUND = "#58A3E7";
 const STROKE = "#0070AF";
 
-/** Two hatch directions are the same LINE if they agree modulo 180°. */
-const sameDirection = (a: number, b: number) => ((a - b) % 180 + 180) % 180 === 0;
-
 describe("the hatch character set", () => {
   it("is exactly matplotlib's six", () => {
     expect(HATCH_CHARS).toEqual(["/", "\\", "|", "-", "+", "x"]);
