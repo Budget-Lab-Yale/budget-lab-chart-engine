@@ -15,7 +15,6 @@ import {
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
   X_TICK_LABEL_TOP_CLASS,
-  X_AXIS_LABEL_CLASS,
   ANNOTATION_LINE_CLASS,
   X_ANNOTATION_LINE_CLASS,
   X_BAND_CLASS,
@@ -128,12 +127,21 @@ function applySegmentGap(
   const extentAttr = horizontal ? "width" : "height";
 
   const byBar = new Map<string, SVGElement[]>();
+  // The segment's own PARENT `<g>` is what scopes the grouping: Plot emits one mark group per facet
+  // pane, so two panes sharing a band position cannot have their segments interleaved into one
+  // stack. (Not `closest("g[aria-label^='facet']")` — vendored Plot 0.6.16 puts no `aria-label` on a
+  // facet group, so that selector matched nothing and only its `?? el.parentElement` fallback ever
+  // ran. `crosshair.ts` keeps the same selector deliberately, and says so.) Grouping only needs
+  // parents to be DISTINGUISHABLE, so each gets an id on first sight; the id used to be
+  // `indexOf(parent)`, which rebuilt the grandparent's child list once per element — O(n²) in
+  // segment count for the identical partition.
+  const groupIds = new Map<Element, number>();
   svg.querySelectorAll<SVGElement>(selector).forEach((el) => {
-    // Facet-scoped: two panes can share a band position, and their segments must not be
-    // interleaved into one stack.
-    const facet = el.closest("g[aria-label^='facet']") ?? el.parentElement;
+    const parent = el.parentElement;
+    if (parent && !groupIds.has(parent)) groupIds.set(parent, groupIds.size);
+    const group = parent ? groupIds.get(parent)! : -1;
     const band = Math.round(Number(el.getAttribute(bandAttr) ?? "0") * 100) / 100;
-    const key = `${facet ? [...(facet.parentElement?.children ?? [])].indexOf(facet) : -1}:${band}`;
+    const key = `${group}:${band}`;
     if (!byBar.has(key)) byBar.set(key, []);
     byBar.get(key)!.push(el);
   });

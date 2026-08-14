@@ -397,8 +397,9 @@ export function resolveFacetCell(
  *
  *  There were three near-copies of this, and each knew about a different subset of the channels — so
  *  the line/area path drew a flat line for a series whose legend key was a square with a texture in
- *  it. A shared emitter means a new channel is added once. (The legend and the PNG export still have
- *  their own renderers; unifying all five is a separate job.)
+ *  it. A shared emitter means a new channel is added once. The legend and the PNG export are on the
+ *  same description too — all three read `iconShapes` (icon.ts) and differ only in what they hand
+ *  back: an HTML string here, a DOM `<svg>` for the legend, a positioned `<g>` for the export.
  *
  *  A texture wins over the requested shape: the glyph carries its own ground, so a hatched series
  *  needs no colour fill underneath. */
@@ -1146,6 +1147,12 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       })()
     : undefined;
 
+  // Re-coloured ONCE, not per pointermove: a `category_colors` bar keys the hovered category rather
+  // than the series, and all three inputs — the resolved icons, the fills read above, the module's
+  // `resolveHatch` — are fixed for the life of this attachment. Forwarding `opts.icons` unchanged
+  // would revert the key to the palette colour.
+  const tooltipIcons = opts.icons ? recolourIcons(opts.icons, renderedFills, resolveHatch) : undefined;
+
   /** Show the highlight over the given band geometry, spanning the full plot axis. */
   function showHighlight(bandMin: number, bandMax: number): void {
     if (!hl) return;
@@ -1232,9 +1239,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       seriesOrder: opts.seriesOrder,
       yFormat,
       categoryLabels: opts.categoryLabels,
-      // Re-coloured from the drawn fills: a category_colors bar keys the hovered category, not the
-      // series. Forwarding `icons` unchanged would revert that to the palette colour.
-      ...(opts.icons ? { icons: recolourIcons(opts.icons, renderedFills, resolveHatch) } : {}),
+      ...(tooltipIcons ? { icons: tooltipIcons } : {}),
     });
     tip!.innerHTML = html;
 
@@ -1503,6 +1508,11 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
 
   const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
 
+  // Re-coloured ONCE, not per pointermove: `renderedFills` is read from the bars at attach time, so
+  // a `bar_color` histogram's key is settled before the first hover. (This is where that colour is
+  // settled at all — the icons arrive on the palette colour; see the `icons:` note in render-live.)
+  const tooltipIcons = opts.icons ? recolourIcons(opts.icons, renderedFills, resolveHatch) : undefined;
+
   /** Shade the hovered bin's x-span across the full plot height. */
   function showHighlight(min: number, max: number): void {
     if (!hl) return;
@@ -1537,7 +1547,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
       seriesOrder: opts.seriesOrder,
       yFormat,
       label: opts.label,
-      ...(opts.icons ? { icons: recolourIcons(opts.icons, renderedFills, resolveHatch) } : {}),
+      ...(tooltipIcons ? { icons: tooltipIcons } : {}),
     });
 
     const offset = 14;
@@ -2393,7 +2403,6 @@ export function attachSecondaryBandCursor(
   }
   const horizontal = opts.horizontal === true;
   const rectsByCat = buildRectsByCategory(svgEl, opts, horizontal);
-  const plotW = W - ml - mr;
 
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
@@ -2782,6 +2791,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
 
   const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
   let centers: Array<{ category: string; cx: number }> | null = null;
+  // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
+  // `resolveHatch` is a module function, so nothing here varies with the cursor.
+  const tooltipIcons = opts.icons ? recolourIcons(opts.icons, opts.renderedFills, resolveHatch) : undefined;
 
   function update(evt: PointerEvent): void {
     const rect = svgEl.getBoundingClientRect();
@@ -2822,7 +2834,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
-      ...(opts.icons ? { icons: recolourIcons(opts.icons, opts.renderedFills, resolveHatch) } : {}),
+      ...(tooltipIcons ? { icons: tooltipIcons } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;

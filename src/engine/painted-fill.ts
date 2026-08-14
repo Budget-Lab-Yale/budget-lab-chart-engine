@@ -1,9 +1,10 @@
 // The one walk that answers "what colour is this element ACTUALLY painted?". Kept in its own
-// module (no engine deps) so the three layers that need the answer — the hatch grounding in
-// `assemble-plot.ts`, the tooltip swatches in `crosshair.ts`, and the histogram swatch map in
-// `render-live.ts` — share a single boundary rule instead of three hand-copied loops that drifted.
-// They had already drifted: two of the three inspected the root `<svg>` and one did not, which is
-// exactly the difference between a working fallback and an invisible texture (see below).
+// module (no engine deps) so the two layers that need the answer — the hatch grounding in
+// `assemble-plot.ts` and the tooltip swatches in `crosshair.ts` — share a single boundary rule
+// instead of hand-copied loops that drifted. Three copies drifted before this module existed
+// (`render-live.ts` carried the third, feeding a colour-only tooltip recolour that has since been
+// deleted along with it): two inspected the root `<svg>` and one did not, which is exactly the
+// difference between a working fallback and an invisible texture (see below).
 
 /**
  * The fill an element is ACTUALLY painted, or null when nothing on its chain declares one.
