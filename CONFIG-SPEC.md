@@ -834,6 +834,10 @@ Notes:
   family and on the Style-Guide ramp, at a consistent ΔL\* of 21–32 across the whole palette (the
   tiers are iso-lightness across hues, which is gated in CI). `navy` and `sky` borrow blue's ramp;
   a raw `"#hex"` off every ramp gets an equivalent 28 L\* step instead.
+- **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
+  Since the band is derived from the ground's own lightness, a string the engine cannot parse as a
+  color (a CSS `var(--…)`, `currentColor`, a typo) leaves the band equal to the ground, i.e. a flat
+  block where a texture was asked for. That combination **errors** rather than rendering.
 - Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
   two full periods and reads as a partial band rather than a texture.
 

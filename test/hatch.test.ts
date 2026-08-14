@@ -27,6 +27,7 @@ import {
   HATCH_STROKE,
   HATCH_STROKE_CROSSED,
   hatchStrokeWidth,
+  resolveHatch,
 } from "../src/engine/hatch";
 
 const GROUND = "#58A3E7";
@@ -225,6 +226,36 @@ describe("defaultHatchStroke — the palette rule", () => {
         expect(defaultHatchStroke(scales[fam]![tier]!).toUpperCase()).not.toBe(scales[fam]![tier]!.toUpperCase());
   });
 });
+
+// A <pattern> whose band and ground are one colour is a FLAT BLOCK — the texture is silently not
+// there, on a chart that otherwise looks right, and it reaches the legend key and the PNG export
+// the same way. Every step defaultHatchStroke can take needs the ground's LIGHTNESS, so a ground
+// d3.color cannot read comes straight back out and lands exactly there. `series_colors` passes an
+// author's string through unchanged by design, so the string is reachable from a spec.
+describe("resolveHatch refuses a ground it cannot read", () => {
+  const UNREADABLE = [
+    "not-a-colour", // a typo, or a colour name the CSS spec does not have
+    "var(--tbl-blue)", // a CSS custom property: the browser resolves it, d3.color does not
+    "currentColor", // what the root <svg> is stamped with; see painted-fill.ts
+  ];
+
+  it("throws rather than painting a texture that is not there", () => {
+    for (const ground of UNREADABLE) {
+      expect(() => resolveHatch("/", ground), ground).toThrow(/cannot read that as a colour/);
+      // The message has to name the offending string — it is the thing the author must fix.
+      expect(() => resolveHatch("/", ground), ground).toThrow(new RegExp(escapeRe(ground)));
+    }
+  });
+
+  it("resolves every readable ground, on the ramp or off it", () => {
+    for (const ground of ["#58A3E7", tokens.brand.navy, "rebeccapurple", "rgb(1, 2, 3)"]) {
+      const hatch = resolveHatch("/", ground);
+      expect(hatch.stroke, ground).not.toBe(ground);
+    }
+  });
+});
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The ramp step on a SHORT ramp. Asserting only against the real tokens would prove nothing here:
 // all seven families ship eight tiers, so the underflow is unreachable through them and a test that

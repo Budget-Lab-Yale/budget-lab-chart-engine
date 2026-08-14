@@ -202,9 +202,29 @@ export interface SeriesHatch {
 }
 
 /** Resolve one texture: the character plus the ground it is drawn over. The band colour and the id
- *  both follow from the ground, so this is the only place a hatch is constructed. */
+ *  both follow from the ground, so this is the only place a hatch is constructed.
+ *
+ *  INVARIANT — the band is never the ground. A <pattern> painting both in one colour is a FLAT
+ *  BLOCK: the texture the author asked for is silently not there, on a chart that otherwise looks
+ *  right, and it reaches the legend key and the PNG export the same way. That is what a ground
+ *  `d3.color` cannot read produces — a CSS `var(--x)`, `currentColor`, a mistyped colour name —
+ *  because every step `defaultHatchStroke` can take needs the ground's lightness, so with none to
+ *  read it hands the ground straight back. There is nothing to fall back to (a band picked without
+ *  reading the ground can land invisible on it), and the author's own colour string is the thing to
+ *  correct, so this throws — as `monoScale` does on an unknown hue. The test is on the RESULT
+ *  rather than on parseability, so it also holds for any future band rule that could return its
+ *  input. Checking here rather than in validation covers the grounds validation cannot see: a mark's
+ *  fill can come from `bar_color`, `category_colors` or the title-selector accent, resolved per
+ *  element at render time (see assemble-plot). */
 export function resolveHatch(char: HatchChar, ground: string): SeriesHatch {
   const stroke = defaultHatchStroke(ground);
+  if (stroke === ground) {
+    throw new Error(
+      `series_patterns: cannot derive a hatch band colour for "${char}" over the fill "${ground}" — ` +
+        `the engine cannot read that as a colour (use a palette name or a "#hex"). ` +
+        `The texture would render as a flat block of "${ground}".`,
+    );
+  }
   return { char, ground, stroke, id: hatchPatternId(char, ground, stroke) };
 }
 

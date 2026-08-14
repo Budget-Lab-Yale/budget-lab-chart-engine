@@ -101,6 +101,20 @@ describe("series_patterns on a stacked bar", () => {
     expect(svg.querySelector("pattern")).toBeNull();
     for (const rect of segments(svg)) expect(rect.style.fill).toBe("");
   });
+
+  // `series_colors` passes an author's string through unchanged by design, so a colour the engine
+  // cannot read is one spec line away. No band colour can be derived from it, and a <pattern> whose
+  // band equals its ground is a flat block — the texture is not there, and nothing says so. The
+  // legend resolves its own hatches from this map (no Plot in that path), so the flat glyph would
+  // ship even where the marks fail some other way.
+  it("refuses a series colour it cannot read rather than keying a texture that is not there", () => {
+    const spec = {
+      ...STACKED,
+      series_colors: { ...STACKED.series_colors, lostToBehavior: "not-a-colour" },
+      series_patterns: { lostToBehavior: "/" },
+    } as unknown as ChartSpec;
+    expect(() => renderChart(spec, ROWS, OPTS)).toThrow(/not-a-colour/);
+  });
 });
 
 describe("series_patterns on a mono stack", () => {
