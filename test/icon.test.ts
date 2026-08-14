@@ -25,7 +25,7 @@ import {
   iconWidth,
   type IconSpec,
 } from "../src/engine/icon";
-import { swatchWidthFor } from "../src/engine/theme";
+import { swatchWidthFor, MARK_POINT_R, MARK_LINE_POINT_R } from "../src/engine/theme";
 import { resolveHatch, HATCH_GLYPH_BOX } from "../src/engine/hatch";
 import { tokens } from "../src/theme/tokens";
 
@@ -40,8 +40,8 @@ const EVERY_SHAPE: Array<{ name: string; icon: IconSpec }> = [
   { name: "outlined chip", icon: { shape: "rect", color: "#F6F7F9", outlined: true } },
   { name: "textured square", icon: { shape: "rect", color: "#58A3E7", hatch: resolveHatch("/", "#58A3E7") } },
   { name: "dot", icon: { shape: "dot", color: COLOR } },
-  { name: "hollow dot", icon: { shape: "dot", color: COLOR, hollow: true } },
-  { name: "hollow SYMBOL (what a dumbbell actually emits)", icon: { shape: "symbol", color: COLOR, symbol: "circle", hollow: true } },
+  { name: "hollow dot", icon: { shape: "dot", color: COLOR, marker: "hollow" as const } },
+  { name: "hollow SYMBOL (what a dumbbell actually emits)", icon: { shape: "symbol", color: COLOR, symbol: "circle", marker: "hollow" as const } },
   { name: "symbol", icon: { shape: "symbol", color: COLOR, symbol: "triangle" } },
   { name: "line + symbol", icon: { shape: "line", color: COLOR, symbol: "square" } },
 ];
@@ -169,7 +169,7 @@ describe("each shape draws what it says", () => {
 
   it("draws a hollow dot as a ring, not a filled circle", () => {
     const [solid] = iconShapes({ shape: "dot", color: COLOR }) as [Extract<ReturnType<typeof iconShapes>[number], { kind: "circle" }>];
-    const [ring] = iconShapes({ shape: "dot", color: COLOR, hollow: true }) as [Extract<ReturnType<typeof iconShapes>[number], { kind: "circle" }>];
+    const [ring] = iconShapes({ shape: "dot", color: COLOR, marker: "hollow" as const }) as [Extract<ReturnType<typeof iconShapes>[number], { kind: "circle" }>];
     expect(solid.fill).toBe(COLOR);
     expect(ring.stroke).toBe(COLOR);
     // Same OUTER diameter, not same radius: a stroke straddles its radius, so the ring's radius is
@@ -182,9 +182,9 @@ describe("each shape draws what it says", () => {
     // the export's own frame — and an opaque white centre is only right on the first: it read as a
     // white blob on the other two, which is what "the ring is filled with white" meant.
     for (const icon of [
-      { shape: "dot", color: COLOR, hollow: true },
-      { shape: "symbol", color: COLOR, symbol: "circle", hollow: true },
-      { shape: "symbol", color: COLOR, symbol: "square", hollow: true },
+      { shape: "dot", color: COLOR, marker: "hollow" as const },
+      { shape: "symbol", color: COLOR, symbol: "circle", marker: "hollow" as const },
+      { shape: "symbol", color: COLOR, symbol: "square", marker: "hollow" as const },
     ] as IconSpec[]) {
       const [s] = iconShapes(icon);
       expect("fill" in s! && s.fill, `${icon.shape}/${icon.symbol ?? ""}`).toBe("none");
@@ -197,12 +197,27 @@ describe("each shape draws what it says", () => {
     expect("stroke" in filled! && filled.stroke).toBeFalsy();
   });
 
-  it("sizes every symbol alike, and each context stops the ink at the box", () => {
-    // One size for all seven IS optical sizing: d3's `size` is the painted area, so equal size is
-    // equal ink. A hollow symbol makes room for its ring; a marker on a line is smaller so the line
-    // still reads beside it.
-    expect(symbolArea(false, true), "hollow").toBeLessThan(symbolArea());
-    expect(symbolArea(true), "on a line").toBeLessThan(symbolArea());
+  it("sizes a marker key from the size the CHART draws its marker", () => {
+    // The referent, not a constant of the key's own: a key that is 9% smaller than the dot beside it
+    // is wrong in a way nobody can measure by eye but everybody can see. Plot sizes a symbol by area
+    // = pi*r^2, so a chart radius converts straight into a d3 `size`.
+    const chart = Math.PI * MARK_POINT_R ** 2;
+    const chartOnLine = Math.PI * MARK_LINE_POINT_R ** 2;
+    // Blocky symbols fit the chart's size inside the box, so they get it exactly.
+    for (const sym of ["circle", "square", "cross", "wye"]) {
+      expect(symbolArea(sym), sym).toBe(Math.round(chart));
+    }
+    // The pointiest three are cut by the box first, so they clamp — mildly, and never past it.
+    for (const sym of ["triangle", "diamond", "star"]) {
+      expect(symbolArea(sym), sym).toBeLessThan(chart);
+      expect(symbolArea(sym), sym).toBeGreaterThan(chart * 0.8);
+    }
+    // On a line nothing clamps: the chart draws a smaller marker there, and every symbol fits it.
+    for (const sym of ["circle", "star", "diamond"]) {
+      expect(symbolArea(sym, true), `${sym} on a line`).toBe(Math.round(chartOnLine));
+    }
+    // A hollow symbol makes room for its ring.
+    expect(symbolArea("star", false, true)).toBeLessThan(symbolArea("star"));
   });
 
   it("draws a textured square as its ground plus the hatch glyph's own bands", () => {
@@ -261,11 +276,11 @@ describe("iconFromLegendItem — one translation from the resolved row", () => {
     ["point chart", { markerShape: "point", color: "#0072B2", markerSymbol: "triangle" }, { shape: "symbol", color: "#0072B2", symbol: "triangle" }],
     ["colour chip", { markerShape: "chip", color: "#0072B2" }, { shape: "rect", rounded: true, color: "#0072B2" }],
     // A colourless dot is the stacked Total: white disc, black ring, like the chart net marker.
-    ["total dot", { markerShape: "dot" }, { shape: "dot", color: tokens.structural.mark_black, hollow: true }],
+    ["total dot", { markerShape: "dot" }, { shape: "dot", color: tokens.structural.mark_black, marker: "net" as const }],
     // A dumbbell emits markerShape "point", NOT "dot" — this case used to say "dot" and so passed
     // while every hollow dumbbell key rendered solid.
     ["hollow dumbbell end", { markerShape: "point", color: "#0072B2", markerSymbol: "circle", hollow: true },
-      { shape: "symbol", color: "#0072B2", symbol: "circle", hollow: true }],
+      { shape: "symbol", color: "#0072B2", symbol: "circle", marker: "hollow" as const }],
     ["filled dumbbell end", { markerShape: "point", color: "#0072B2", markerSymbol: "circle" },
       { shape: "symbol", color: "#0072B2", symbol: "circle" }],
     ["annotation tints", { markerShape: "rect", colors: ["#a", "#b"], outlined: true }, { shape: "rect", colors: ["#a", "#b"], outlined: true }],

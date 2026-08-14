@@ -18,6 +18,7 @@
 // order (first-declared negative just below 0). That is exactly the Style-Guide rule, so
 // we pass NO order/reverse option and rely on data being supplied in declaration order.
 import { Plot } from "../vendor";
+import { markerInk } from "../marker-ink";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
@@ -297,13 +298,16 @@ export function buildStackedMarks(
           }),
     );
   } else if (netMode === "dot") {
-    // Black-stroked white dot at the true net y (KEPT in panes). The net value is shown on hover
-    // (the band tooltip's Total row), so no static value label is drawn. The dot shrinks in narrow
-    // panes; the net always sits between the +/− sums, so it never reaches the frame edge.
+    // Black-stroked WHITE dot at the true net y (KEPT in panes). The white is this marker's own ink,
+    // not an assumption about the ground: the dot sits ON its stack and has to occlude it. It comes
+    // from marker-ink.ts so the legend's Total key is painted from the same description — keying it as
+    // a hole instead was a real regression, and only a shared description prevents the next one.
+    // The net value is shown on hover (the band tooltip's Total row), so no static label is drawn.
     const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
+    const net = markerInk("net", "");
     const netDot = horizontal
-      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: WHITE, stroke: MARK_BLACK, strokeWidth: 2, className: NET_DOT_CLASS })
-      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: WHITE, stroke: MARK_BLACK, strokeWidth: 2, className: NET_DOT_CLASS });
+      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
+      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS });
     overlay.push(netDot);
   }
 

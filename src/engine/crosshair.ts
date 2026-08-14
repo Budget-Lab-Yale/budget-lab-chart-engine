@@ -13,6 +13,7 @@ import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
 import { resolveHatch, type SeriesHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
+import type { MarkerStyle } from "./marker-ink";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 
 type Row = Record<string, unknown>;
@@ -428,7 +429,7 @@ export function seriesSwatchHtml(icon: IconSpec): string {
 function rowIcon(
   series: string,
   icons: Map<string, IconSpec> | undefined,
-  legacy: { color: string; shape?: "line" | "rect" | "dot" | "symbol"; dashed?: boolean; hatch?: SeriesHatch; marker?: "filled" | "hollow" | "ink" },
+  legacy: { color: string; shape?: "line" | "rect" | "dot" | "symbol"; dashed?: boolean; hatch?: SeriesHatch; marker?: MarkerStyle },
 ): IconSpec {
   const resolved = icons?.get(series);
   if (resolved) return resolved;
@@ -437,7 +438,9 @@ function rowIcon(
     color: legacy.color,
     ...(legacy.dashed ? { dashed: true } : {}),
     ...(legacy.hatch ? { hatch: legacy.hatch } : {}),
-    ...(legacy.marker === "hollow" ? { hollow: true } : {}),
+    // Spread deliberately, but typed: a conditional spread is NOT excess-property checked, so when
+    // IconSpec's `hollow` became `marker` this line kept compiling and silently dropped the ring.
+    ...(legacy.marker ? { marker: legacy.marker } : {}),
   };
 }
 

@@ -322,6 +322,25 @@ describe("a key matches the mark it names", () => {
           `${name}: "${series}" is painted ${markInk.color} as its ${markInk.role} on the chart, ` +
             `but its key paints ${inks.join(", ") || "nothing"}`,
         ).toBe(true);
+
+        // AND, for an OUTLINED mark, what fills its middle.
+        //
+        // The role test above cannot see this and I proved it by shipping the bug: it counts white and
+        // `none` as one thing ("ground"), so a mark painting an opaque white disc and a key leaving a
+        // hole agree on the role and differ on the page. The stacked net marker is a white disc BY
+        // DESIGN — it has to occlude the stack it sits on — while a dumbbell's hollow end is a hole
+        // that shows the stem. Both are "a coloured ring around ground", and only the middle tells
+        // them apart, so the middle is compared on its own.
+        if (markInk.role !== "stroke") continue;
+        const middles = iconShapes(icon)
+          .filter((s) => ("stroke" in s ? paint(s.stroke) : "") === markInk.color)
+          .map((s) => ("fill" in s ? paint(s.fill).toLowerCase() : ""));
+        if (!middles.length) continue; // no outlined shape in the key; the role test covered it
+        expect(
+          middles,
+          `${name}: "${series}" is outlined on the chart with ${paint(mark.fill) || "a HOLE"} in the ` +
+            `middle, but its key has ${middles.map((m) => m || "a HOLE").join(", ")}`,
+        ).toContain(paint(mark.fill).toLowerCase());
       }
     });
   }

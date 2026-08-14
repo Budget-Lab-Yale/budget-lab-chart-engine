@@ -108,14 +108,14 @@ const CASES: Array<[string, IconSpec]> = [
   ["textured square", { shape: "rect", color: "#58A3E7", hatch: resolveHatch("x", "#58A3E7") }],
   ["banded chip", { shape: "rect", colors: ["#0072B2", "#E69F00", "#2A8B3A"] }],
   ["filled dot", { shape: "dot", color: "#0072B2" }],
-  ["HOLLOW ring", { shape: "dot", color: "#0072B2", hollow: true }],
+  ["HOLLOW ring", { shape: "dot", color: "#0072B2", marker: "hollow" as const }],
   ...MARKER_SYMBOLS.map((s) => [`symbol ${s}`, { shape: "symbol", color: "#0072B2", symbol: s }] as [string, IconSpec]),
   ...MARKER_SYMBOLS.map((s) => [`line + ${s}`, { shape: "line", color: "#0072B2", symbol: s }] as [string, IconSpec]),
   // A hollow SYMBOL — what a dumbbell actually emits — was the case this list did not carry, and it
   // was the case that was broken: its ring straddles the path, so the symbol has to be sized half a
   // stroke smaller or the box cuts the ring at its four extremes.
   ...MARKER_SYMBOLS.map(
-    (s) => [`HOLLOW symbol ${s}`, { shape: "symbol", color: "#0072B2", symbol: s, hollow: true }] as [string, IconSpec],
+    (s) => [`HOLLOW symbol ${s}`, { shape: "symbol", color: "#0072B2", symbol: s, marker: "hollow" as const }] as [string, IconSpec],
   ),
 ];
 
@@ -158,7 +158,7 @@ describe("no icon is cut by its box", () => {
     const marker = (onLine: boolean, hollow = false) =>
       MARKER_SYMBOLS.map(
         (s) =>
-          `<path d="${symbolPathD(s, symbolArea(onLine, hollow))}" transform="translate(${HALF},${HALF})" stroke-width="${hollow ? 2 : onLine ? 1 : 0}"/>`,
+          `<path d="${symbolPathD(s, symbolArea(s, onLine, hollow))}" transform="translate(${HALF},${HALF})" stroke-width="${hollow ? 2 : onLine ? 1 : 0}"/>`,
       );
 
     const alone = await spills(marker(false));
@@ -183,11 +183,12 @@ describe("no icon is cut by its box", () => {
     expect(Math.max(...onLine), `a marker on a line spills`).toBeLessThanOrEqual(HALF + TOL);
   }, 120000);
 
-  it("paints the same number of pixels for every symbol", async () => {
-    // The measurement optical sizing rests on, taken from the rendered image rather than from d3's
-    // documented semantics: one shared `size` is only equal INK if `size` really is the painted area.
-    // This is also the gate against a future hand-tuned table — the previous one was hand-fitted and
-    // three of its seven entries were wrong.
+  it("paints as many pixels as the `size` it was given", async () => {
+    // The measurement the whole sizing rule rests on: d3's `size` is documented as the painted area,
+    // and everything here converts a chart RADIUS into a size on that basis (Plot: area = pi*r^2). If
+    // it were only approximately true, two symbols at one size would carry different ink and "optical
+    // sizing" would be a story rather than a property. Counted from the rendered image, per symbol, so
+    // it also covers the three that the box clamps.
     const SCALE = 8;
     const page = await browser.newPage({ deviceScaleFactor: SCALE });
     const half = ICON_BOX / 2;
@@ -196,26 +197,23 @@ describe("no icon is cut by its box", () => {
         MARKER_SYMBOLS.map(
           (s, i) =>
             `<svg id="s${i}" width="${ICON_BOX}" height="${ICON_BOX}" style="display:block">` +
-            `<path d="${symbolPathD(s, symbolArea())}" transform="translate(${half},${half})" fill="#000"/></svg>`,
+            `<path d="${symbolPathD(s, symbolArea(s))}" transform="translate(${half},${half})" fill="#000"/></svg>`,
         ).join("") +
         `</body>`,
     );
-    const inks: number[] = [];
-    for (let i = 0; i < MARKER_SYMBOLS.length; i++) {
+    for (const [i, s] of MARKER_SYMBOLS.entries()) {
       const png = PNG.sync.read(await (await page.$(`#s${i}`))!.screenshot());
       let ink = 0;
       for (let p = 0; p < png.width * png.height; p++) if (png.data[p << 2]! < 128) ink++;
-      inks.push(ink / SCALE ** 2);
+      const painted = ink / SCALE ** 2;
+      const asked = symbolArea(s);
+      // 5% covers antialiasing on shapes whose perimeter-to-area ratios differ by 3x (a wye is nearly
+      // all edge, a square nearly none).
+      expect(
+        Math.abs(painted - asked) / asked,
+        `${s} was given size ${asked} and painted ${painted.toFixed(1)}`,
+      ).toBeLessThan(0.05);
     }
     await page.close();
-    const mean = inks.reduce((a, b) => a + b, 0) / inks.length;
-    MARKER_SYMBOLS.forEach((s, i) => {
-      // 8% covers antialiasing on shapes whose perimeter-to-area ratios differ by 3x (a wye is nearly
-      // all edge, a square nearly none). A hand-fitted table missed by 40%, so this is not slack.
-      expect(
-        Math.abs(inks[i]! - mean) / mean,
-        `${s} paints ${inks[i]!.toFixed(1)} where the mean is ${mean.toFixed(1)}`,
-      ).toBeLessThan(0.08);
-    });
   }, 120000);
 });

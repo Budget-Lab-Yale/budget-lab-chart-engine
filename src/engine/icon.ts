@@ -20,8 +20,9 @@
 // border-radius) with separate SVG equivalents in the export.
 import { symbolPathD } from "./symbols";
 import { tokens } from "../theme/tokens";
-import { TBL, swatchWidthFor, SWATCH_OUTLINE, SHAPE_LEGEND_COLOR } from "./theme";
+import { TBL, swatchWidthFor, SWATCH_OUTLINE, SHAPE_LEGEND_COLOR, MARK_POINT_R, MARK_LINE_POINT_R } from "./theme";
 import { hatchGlyphShapes, type HatchChar, type SeriesHatch } from "./hatch";
+import { markerInk, HOLE, MARKER_KEYLINE_COLOR, type MarkerStyle } from "./marker-ink";
 
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
 export const ICON_BOX = 14;
@@ -49,39 +50,39 @@ const SYMBOL_REACH_K: Record<string, number> = {
   star: 0.94385,
 };
 
-/** The pointiest symbol, which is what the box's clipping binds against. */
-const MAX_REACH_K = Math.max(...Object.values(SYMBOL_REACH_K));
-
-/** How far a marker ON a line reaches. Not the full box: a star at full box spans 12 of the 14, so
- *  the rule either side of it becomes a 1px stub and the key stops reading as a LINE with a marker.
- *  Judged by eye against 5.5 and 7.0 — a taste call, and the only one in this module, so it is a
- *  single constant rather than something to re-derive. */
-const ON_LINE_REACH = 6.5;
-
-/** OPTICAL sizing: ONE d3 `size` for every symbol, so all seven carry the same INK.
+/** OPTICAL sizing, with a referent instead of a taste knob: a marker key is drawn at THE SIZE THE
+ *  CHART DRAWS ITS MARKER, and shrunk only where the box would otherwise cut it.
  *
- *  d3's `size` really is the painted area — measured by counting pixels, the ratio is 1.000 ± 1% for
- *  all seven — so equal ink is equal `size`, and the only question is which one. Equal REACH was the
- *  previous rule and it read wrong in the other direction: a star's points touched the box while its
- *  body carried a third of the square's ink, so the pointy symbols looked lighter than the blocky
- *  ones. Equal ink can only be reached by making the BLOCKY ones smaller, because the box clips and
- *  the pointy ones are already against it — hence solving from the pointiest symbol.
+ *  Two measurements make that well defined. Plot sizes a symbol by area (πr²), and d3's `size` really
+ *  is the painted area — counted in pixels, the ratio is 1.000 ± 1% across all seven — so the chart's
+ *  radius converts straight into a `size`, and equal `size` is equal INK.
  *
- *  A square key therefore sits well inside the box while a star fills it. That is the intended
- *  reading: the shape channel and the fill channel should not look like the same weight of mark. */
-function symbolSizeFor(reachLimit: number): number {
-  return Math.round((reachLimit / MAX_REACH_K) ** 2);
+ *  Both earlier rules were wrong, in opposite directions. Equal area at a hand-picked constant let the
+ *  star overflow the box. Equal REACH made every symbol touch the box, so a star's points reached the
+ *  edge while its body carried a third of a square's ink. Equal ink at the CHART's size is the third
+ *  option, and the only one with a real answer to "how big?" — as big as the mark it names, which is
+ *  also why the key stopped reading smaller than the scatter dot beside it.
+ *
+ *  Only the three pointiest symbols clamp, and mildly (star to 83% of the chart's ink, diamond 85%,
+ *  triangle 96%); nothing clamps on a line. A bigger ICON_BOX would remove even those, and is a
+ *  one-constant change. */
+const CHART_MARKER_AREA = Math.PI * MARK_POINT_R ** 2;
+const CHART_LINE_MARKER_AREA = Math.PI * MARK_LINE_POINT_R ** 2;
+
+/** The largest `size` that keeps `symbol`'s ink within `limit` of the centre. */
+function sizeAtReach(symbol: string, limit: number): number {
+  const k = SYMBOL_REACH_K[symbol] ?? SYMBOL_REACH_K.circle!;
+  return (limit / k) ** 2;
 }
 
-/** The d3 `size` a marker is drawn at, per context. Symbol-independent, by construction: that IS
- *  optical sizing. The contexts differ only in what the shape must leave room for at the box edge. */
-export function symbolArea(onLine = false, hollow = false): number {
+/** The d3 `size` a marker key is drawn at: the chart's own, unless the box cuts it first. */
+export function symbolArea(symbol: string, onLine = false, hollow = false): number {
   const half = ICON_BOX / 2;
   // A ring's stroke straddles the path, so the path stops half a stroke short and the RING's outer
   // edge lands on the box. Without this the ring was cut at its four extremes and read flat-sided.
-  if (hollow) return symbolSizeFor(half - RING_WEIGHT / 2);
-  if (onLine) return symbolSizeFor(ON_LINE_REACH - MARKER_KEYLINE / 2);
-  return symbolSizeFor(half);
+  const limit = hollow ? half - RING_WEIGHT / 2 : onLine ? half - MARKER_KEYLINE / 2 : half;
+  const want = onLine ? CHART_LINE_MARKER_AREA : CHART_MARKER_AREA;
+  return Math.round(Math.min(want, sizeAtReach(symbol, limit)));
 }
 
 /** Line weight for the `line` shape — thick enough to read as a rule, not a hairline. */
@@ -104,12 +105,9 @@ const RECT_RADIUS = 1;
 const CHIP_RADIUS = 4;
 /** Hairline around a near-white tint, so an annotation chip does not read as a gap. */
 const OUTLINE = SWATCH_OUTLINE;
-/** A hollow shape's centre is EMPTY, not painted. It was the background token, which is only right on
- *  one of the three grounds a key sits on: the tooltip is a translucent blur and the export composes
- *  its own frame, so an opaque white disc read as a white blob rather than a hole. */
-const RING_HOLE = "none";
-/** Ring colour for the stacked Total dot, matching the net marker the chart draws. */
-const TOTAL_RING = tokens.structural.mark_black;
+/** The stacked Total's key, from the same description its MARK is painted from (marker-ink.ts): a
+ *  white disc under a black ring, not a hole. */
+const NET_INK = markerInk("net", "");
 
 /** What an icon depicts. `none` draws nothing — a cumulative stack's Total row is text with no key,
  *  and asking for `none` explicitly is safer than every caller remembering to skip the emitter. */
@@ -133,8 +131,11 @@ export interface IconSpec {
   /** `rect`: several tints under one label (an annotation fill covering several series). The only
    *  case that widens the box. */
   colors?: string[];
-  /** `dot`: a ring rather than a disc (a dumbbell's hollow end). */
-  hollow?: boolean;
+  /** `dot` / `symbol`: how the middle relates to the colour — filled with it, outlined by it around a
+   *  HOLE, the neutral ink token, or the net marker's white disc. See marker-ink.ts, which is where
+   *  the paint for each lives, shared with the marks so a key cannot drift from what it names.
+   *  Absent ⇒ `filled`. */
+  marker?: MarkerStyle;
 }
 
 /** A drawing primitive, in a box `ICON_BOX` square. */
@@ -181,22 +182,25 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
       return out;
     }
 
-    case "dot":
+    case "dot": {
+      const ringed = icon.marker === "hollow" || icon.marker === "net";
+      const ink = markerInk(icon.marker ?? "filled", color);
       return [
         {
           kind: "circle",
           cx: mid,
           cy: mid,
-          // The ring's stroke straddles its radius, so the radius shrinks by half the weight to keep
-          // the OUTER diameter equal to the filled dot's — same size on the page, and nothing clipped.
-          r: DOT_DIAMETER / 2 - (icon.hollow ? RING_WEIGHT / 2 : 0),
-          fill: icon.hollow ? RING_HOLE : color,
-          ...(icon.hollow ? { stroke: color, strokeWidth: RING_WEIGHT } : {}),
+          // A ring's stroke straddles its radius, so the radius shrinks by half the weight to keep the
+          // OUTER diameter equal to the filled dot's — same size on the page, and nothing clipped.
+          r: DOT_DIAMETER / 2 - (ringed ? RING_WEIGHT / 2 : 0),
+          fill: ink.fill,
+          ...(ringed ? { stroke: ink.stroke, strokeWidth: RING_WEIGHT } : {}),
         },
       ];
+    }
 
     case "symbol":
-      return [symbolPrimitive(icon.symbol ?? "circle", color, false, icon.hollow === true)];
+      return [symbolPrimitive(icon.symbol ?? "circle", color, false, icon.marker ?? "filled")];
 
     case "rect": {
       const tints = icon.colors && icon.colors.length > 1 ? icon.colors : null;
@@ -240,19 +244,20 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
   }
 }
 
-function symbolPrimitive(symbol: string, color: string, onLine = false, hollow = false): IconPrimitive {
+function symbolPrimitive(symbol: string, color: string, onLine = false, marker: MarkerStyle = "filled"): IconPrimitive {
   const mid = ICON_BOX / 2;
+  const ringed = marker === "hollow" || marker === "net";
+  const ink = markerInk(marker, color);
   return {
     kind: "path",
-    d: symbolPathD(symbol, symbolArea(onLine, hollow)),
+    d: symbolPathD(symbol, symbolArea(symbol, onLine, ringed)),
     transform: `translate(${mid},${mid})`,
-    // Hollow inverts it: the centre is a hole and the COLOUR becomes the ring, matching the dumbbell's
-    // hollow chart dots. A keyline only where a line runs behind the marker.
-    fill: hollow ? RING_HOLE : color,
-    ...(hollow
-      ? { stroke: color, strokeWidth: RING_WEIGHT }
+    fill: ink.fill,
+    // A ring takes the colour; otherwise a keyline only where a line runs behind the marker.
+    ...(ringed
+      ? { stroke: ink.stroke, strokeWidth: RING_WEIGHT }
       : onLine
-        ? { stroke: tokens.structural.background, strokeWidth: MARKER_KEYLINE }
+        ? { stroke: MARKER_KEYLINE_COLOR, strokeWidth: MARKER_KEYLINE }
         : {}),
   };
 }
@@ -384,17 +389,17 @@ export function iconFromLegendItem(item: {
     case "chip":
       return { shape: "rect", rounded: true, ...(color ? { color } : {}) };
     case "dot":
-      // A dot with NO colour is the stacked Total: a white disc with a black ring, matching the net
-      // marker in marks/stacked.ts. A coloured dot is a dumbbell end, filled unless hollow.
+      // A dot with NO colour is the stacked Total, whose marker is the `net` style: a white disc under
+      // a black ring, NOT a hole — it occludes the stack it sits on. A coloured dot is a dumbbell end.
       return color
-        ? { shape: "dot", color, ...(item.hollow ? { hollow: true } : {}) }
-        : { shape: "dot", color: TOTAL_RING, hollow: true };
+        ? { shape: "dot", color, ...(item.hollow ? { marker: "hollow" as const } : {}) }
+        : { shape: "dot", color: NET_INK.stroke, marker: "net" as const };
     case "point":
       return {
         shape: "symbol",
         ...(color ? { color } : {}),
         symbol: item.markerSymbol ?? "circle",
-        ...(item.hollow ? { hollow: true } : {}),
+        ...(item.hollow ? { marker: "hollow" as const } : {}),
       };
     default:
       return {

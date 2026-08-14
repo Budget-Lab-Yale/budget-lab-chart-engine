@@ -3,7 +3,7 @@
 // markers) is added by assemblePlot. Split out of the tracker's monolithic
 // buildLineChart so other chart types can register their own builder (marks/index.ts).
 import { Plot } from "../vendor";
-import { TBL, markerSymbolForIndex } from "../theme";
+import { TBL, markerSymbolForIndex, MARK_LINE_POINT_R, MARK_LINE_POINT_PANE_R } from "../theme";
 import { resolveColorOr } from "../palette";
 import { buildShadeRuns } from "../shade";
 import { labelMovedToLegend, annotationKey } from "../annotation-legend";
@@ -239,7 +239,7 @@ export function buildLineMarks(
         // Distinct symbol per series (accessibility): mapped via the symbol scale below so
         // series can be told apart without relying on color.
         symbol: "series",
-        r: ctx.pane ? 3.3 : 3.6,
+        r: ctx.pane ? MARK_LINE_POINT_PANE_R : MARK_LINE_POINT_R,
         stroke: "#ffffff",
         strokeWidth: 1,
         ...facetChannels,

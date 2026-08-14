@@ -83,7 +83,7 @@ describe("seriesSwatchHtml — one emitter for every tooltip key", () => {
   });
 
   it("still honours the dumbbell's hollow ring", () => {
-    const hollow = swatchSvg(seriesSwatchHtml({ shape: "dot", color: "#0072B2", hollow: true }))!;
+    const hollow = swatchSvg(seriesSwatchHtml({ shape: "dot", color: "#0072B2", marker: "hollow" }))!;
     const ring = hollow.querySelector("circle")!;
     // Hollow inverts the ink: the ground fills, the series colour becomes the ring.
     expect(ring.getAttribute("style")).toContain("stroke:#0072B2");
