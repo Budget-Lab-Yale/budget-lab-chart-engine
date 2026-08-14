@@ -108,6 +108,13 @@ export interface RenderOptions {
    *  once from `selections` for a static export. Absent (the common case — no title_selectors, or
    *  a multi-series chart) ⇒ byte-identical to before this field existed. */
   accentColor?: string;
+  /** Small multiples: the FIGURE's series order, resolved once over ALL panes' rows. A series takes
+   *  its palette colour from its index HERE rather than from its index in this pane's own series
+   *  list — otherwise a pane that lacks a series shifts every later series one slot down the palette
+   *  and paints it a colour the figure legend contradicts (a pane missing the first of two series
+   *  painted the second one blue while the legend said amber). Absent (single chart) → the pane's
+   *  own list, unchanged. */
+  paletteSeries?: string[];
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -210,15 +217,21 @@ function uniqueSeries(rows: PreparedRow[]): string[] {
   return out;
 }
 
-function buildColorMap(
+/** Series → colour. The palette is assigned BY POSITION, and `paletteOrder` (small multiples: the
+ *  figure's full series list) decides whose position counts — see RenderOptions.paletteSeries.
+ *  Absent, or a series it doesn't name, falls back to the position in `seriesNames`. */
+export function buildColorMap(
   seriesNames: string[],
   seriesColorsCfg?: Record<string, string>,
+  paletteOrder?: string[],
 ): Map<string, string> {
-  const palette = tblColorScale(seriesNames.length);
+  const order = paletteOrder ?? [];
+  const palette = tblColorScale(Math.max(seriesNames.length, order.length));
   const m = new Map<string, string>();
   seriesNames.forEach((s, i) => {
     const override = resolveColor(seriesColorsCfg?.[s]);
-    m.set(s, override || (palette[i] as string));
+    const at = order.indexOf(s);
+    m.set(s, override || (palette[at >= 0 ? at : i] as string));
   });
   return m;
 }
@@ -455,7 +468,7 @@ function assemblePaneResult(
       : uniqueSeries(data);
   const seriesSet = new Set(seriesNames);
   const dataInScope = data.filter((r) => seriesSet.has(r.series));
-  const colors = buildColorMap(seriesNames, spec.series_colors);
+  const colors = buildColorMap(seriesNames, spec.series_colors, opts.paletteSeries);
   // Single-series charts driven by a colored inline title selector (e.g. a by-industry picker)
   // adopt the selector's color, so the line matches the selector's tinted label. Multi-series
   // charts keep their distinct palette/series_colors untouched — see RenderOptions.accentColor.

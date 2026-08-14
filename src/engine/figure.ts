@@ -9,12 +9,12 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec, ValueAffixes } from "../spec/types";
-import { resolveColumns, isPreBinned, categoryOrderFor } from "../spec/columns";
+import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "./parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems } from "./index";
+import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
@@ -334,6 +334,37 @@ export function renderFigure(
     throw new Error("small_multiples requires a facet column (set columns.facet).");
   }
 
+  // The figure's series, resolved ONCE over ALL panes' rows — by the same rule renderPane applies to
+  // a pane's own rows (series_order is filter + order, else encounter order).
+  //
+  // A colour is assigned BY POSITION, so a pane that is MISSING a series would otherwise shift every
+  // later series one slot down the palette and paint it a colour the figure legend contradicts: a
+  // two-series figure whose second pane lacked the first series painted the second series blue
+  // (#0072B2) while the legend, and the other pane, said amber (#E69F00). Panes index into this list
+  // instead (RenderOptions.paletteSeries), and the figure-level legend is built from it rather than
+  // from pane 0, so a series the FIRST pane happens to lack still gets a key.
+  //
+  // First-encounter order over a subset preserves the parent's relative order, so a figure whose
+  // panes all carry every series resolves exactly what pane 0 resolved — nothing moves.
+  const seenSeries = new Set<string>();
+  const seriesEncountered: string[] = [];
+  for (const r of rows) {
+    const s = cols.series ? (r[cols.series] ?? "") : SINGLE_SERIES_KEY;
+    if (!seenSeries.has(s)) {
+      seenSeries.add(s);
+      seriesEncountered.push(s);
+    }
+  }
+  const figureSeries = spec.series_order?.length
+    ? spec.series_order.filter((s) => seenSeries.has(s))
+    : seriesEncountered;
+  const figureColors = buildColorMap(figureSeries, spec.series_colors);
+  // Mirrors assemblePaneResult: a figure that resolves to ONE series adopts the title selector's
+  // colour, so the figure-level legend matches the panes.
+  if (opts.accentColor && figureSeries.length === 1) {
+    figureColors.set(figureSeries[0] as string, opts.accentColor);
+  }
+
   // Histogram shared mode (default): bin every pane to ONE set of thresholds computed over ALL
   // in-scope rows, so panes share a common continuous x-domain and their bars line up. Per-pane
   // mode omits these (each pane bins its own rows). Pre-binned histograms carry their edges in the
@@ -605,6 +636,7 @@ export function renderFigure(
           height: perPaneHeights ? perPaneHeights[i] : effHeight,
           pane: true,
           paneFacetValue: value,
+          paletteSeries: figureSeries,
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
@@ -643,13 +675,14 @@ export function renderFigure(
       };
     });
 
-    // Figure-level legend: series config is shared across panes, so compute it ONCE from the
-    // first pane's series/colors + its mark layers (same source of truth as a single chart).
+    // Figure-level legend: series config is shared across panes, so compute it ONCE — from the
+    // FIGURE's series/colors (not pane 0's: a pane may be missing a series) plus the first pane's
+    // mark layers, which carry the swatch shapes and are the same for every pane.
     const first = panes[0];
     const legendItems = buildLegendItems(
       spec,
-      first?.seriesOrder ?? [],
-      first?.colors ?? new Map(),
+      figureSeries,
+      figureColors,
       firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
       firstFormatValue,
     );
@@ -667,8 +700,8 @@ export function renderFigure(
       colorLegendTitle: spec.color_legend_title,
       shapeLegendTitle: spec.shape_legend_title,
       seriesLabels,
-      colors: first?.colors ?? new Map(),
-      seriesOrder: first?.seriesOrder ?? [],
+      colors: figureColors,
+      seriesOrder: figureSeries,
       dashedNames: first?.dashedNames ?? new Set(),
       valueAffixes: first?.valueAffixes ?? resolveValueAffixes(spec),
       xAxisTitle: spec.x_axis_title ?? null,
@@ -757,6 +790,7 @@ export function renderFigure(
         height: perPaneHeights ? perPaneHeights[i] : effHeight,
         pane: true,
         paneFacetValue: value,
+        paletteSeries: figureSeries,
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
         width: colWidths[col],
@@ -795,13 +829,14 @@ export function renderFigure(
     };
   });
 
-  // 4. Figure-level legend: series config is shared across panes, so compute it ONCE from the
-  //    first pane (same source of truth as a single chart). L1/single-series → null.
+  // 4. Figure-level legend: series config is shared across panes, so compute it ONCE — from the
+  //    FIGURE's series/colors (not pane 0's: a pane may be missing a series) plus the first pane's
+  //    mark layers, which carry the swatch shapes. L1/single-series → null.
   const first = panes[0];
   const legendItems = buildLegendItems(
     spec,
-    first?.seriesOrder ?? [],
-    first?.colors ?? new Map(),
+    figureSeries,
+    figureColors,
     firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
     firstFormatValue,
   );
@@ -819,8 +854,8 @@ export function renderFigure(
     colorLegendTitle: spec.color_legend_title,
     shapeLegendTitle: spec.shape_legend_title,
     seriesLabels,
-    colors: first?.colors ?? new Map(),
-    seriesOrder: first?.seriesOrder ?? [],
+    colors: figureColors,
+    seriesOrder: figureSeries,
     dashedNames: first?.dashedNames ?? new Set(),
     valueAffixes: first?.valueAffixes ?? resolveValueAffixes(spec),
     xAxisTitle: spec.x_axis_title ?? null,

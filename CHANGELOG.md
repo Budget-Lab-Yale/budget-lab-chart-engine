@@ -90,6 +90,14 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   no data cell spells out, so the cross-reference check rejected every key naming it — including the
   `series_colors: {"": color}` idiom this file documents as working, and any hatch on a
   single-series bar, histogram or waterfall.
+- **A series keeps its colour in every pane of a small-multiples figure.** Colours are assigned by
+  POSITION, and each pane resolved its own series list from its own rows — so a pane MISSING a
+  series shifted every later series one slot down the palette and painted it a colour the figure
+  legend, and the pane beside it, contradicted (measured: a pane lacking the first of two series
+  painted the second one `#0072B2` while the legend said `#E69F00`). A pane's colour now comes from
+  the series' position in the FIGURE's series list, resolved once over every pane's rows. The same
+  list keys the legend, so a series the FIRST pane happens to lack — which previously had no legend
+  row at all — is keyed too. Both modes.
 - **`tooltip_x_format`** overrides the crosshair tooltip's x label on a `temporal` or `quarterly`
   axis (a d3 `timeFormat` pattern). The default matches the axis ticks, which is right for
   month-spaced data and wrong for a daily series, where every point in a month otherwise shares one
@@ -103,6 +111,11 @@ not: a spec carrying a colour the engine cannot paint **stops validating**. Ever
 already rendering the affected marks as nothing (or, for a `barStack.mono.base` hex, throwing), so
 this converts a silent blank into a load error — but it is a new refusal on a released schema, and
 an empty string in a colour field (`color: ""`) is refused too.
+
+The small-multiples colour fix is likewise not opt-in, but it can only move a figure whose panes do
+not all resolve the same series in the same order — a pane missing a series, or panes whose rows
+introduce the series in a different order. Every such figure was painting a series two different
+colours across its own panes, so what moves is the pane that disagreed with the legend.
 
 The icon work is likewise not opt-in, so **a repin re-renders every published figure's legend and
 tooltip keys**, and two of those changes reach the SVG a reader sees:
