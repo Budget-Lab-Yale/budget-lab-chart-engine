@@ -44,11 +44,25 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   All of it is now drawn by one module: one box, one geometry, all SVG (which retires the CSS
   gradient that had to mirror the SVG dash by hand, and its angle conversion with it). A test
   renders eleven chart types and asserts each key carries the same ink as the mark it names, on the
-  page and in the export. Two things follow from having one drawing: a marker symbol is sized from
-  its own measured reach rather than a hand-fitted area, so it fills the same box a colour chip does
-  instead of reading a size smaller beside it; and a hollow key's centre is a HOLE rather than a
-  white disc, so it takes the ground it sits on — the tooltip is a translucent blur, where an opaque
-  centre read as a white blob.
+  page and in the export.
+- **A marker symbol is sized and centred from measurements, not by hand.** Three separate faults, all
+  from geometry written out by eye. The sizes were areas already solved for one target, and three of
+  the seven were simply wrong (a triangle reached 5.58 of a 7 half-box). d3 sizes a symbol by AREA, so
+  equal size is equal ink — but equal ink makes the compact shapes read small, and equal SPAN makes
+  the spread ones read light, and there is no published cross-shape rule to take: matplotlib has
+  carried this as an open issue since 2019 and concluded the factors must be hand-tuned. So a key is
+  drawn at the size the CHART draws its marker (which is now one shared constant, not a literal in
+  each mark builder — a key was 9 % smaller than the scatter dot beside it), spread around that anchor
+  by ONE hand-judged exponent over the measured shape constants, and clamped so the box never cuts it.
+  And each symbol is shifted onto its own bounding-box centre, because d3 places a symbol by its
+  CENTROID: a triangle sat 1.75px high in a 14px box, visibly out of line with its own label.
+- **`hollow` now means hollow, in the chart as well as the key.** A dumbbell's hollow dot was an
+  opaque white disc — so it hid the connector stem its own code comment said showed through, and read
+  as a filled white dot on any ground that is not white. Its middle is empty now, and the marker INK
+  (what fills a middle, what outlines it) is described once and read by the dumbbell marks, the
+  stacked net marker and the icons alike. That distinction matters in both directions: the stacked
+  net marker's white centre is deliberate, because it sits on its stack and must occlude it, and
+  keying it as a hole was a regression this shared description exists to prevent.
 - **An `area` series is keyed by a square chip, not a line swatch.** An area mark is a filled
   region, so the line swatch misrepresented it, and at 3px tall it could not hold a hatch glyph —
   a textured area series had no way to show its texture in the key. Every filled chart type now
@@ -68,6 +82,24 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   month-spaced data and wrong for a daily series, where every point in a month otherwise shares one
   tooltip label. Opt-in rather than a granularity auto-detect, so no published temporal figure
   changes.
+
+### Upgrading
+
+The three new spec keys are opt-in and change nothing that does not use them. The icon work is not
+opt-in, so **a repin re-renders every published figure's legend and tooltip keys**, and two of those
+changes reach the SVG a reader sees:
+
+- **Every legend, tooltip and PNG-export key is redrawn** — one 14px box, marker symbols sized and
+  centred from measurements, hollow middles genuinely empty. Nothing here changes a MARK, so the plot
+  itself is untouched; but a figure's keys will not be byte-identical, and a downloaded PNG's keys
+  change more than the on-screen ones did (they were the copy that had drifted furthest).
+- **A `dumbbell` with `series_marker: hollow` changes its dots**: the middle is a hole rather than an
+  opaque white disc, so the connector stem now shows through it. This is the only change to a mark.
+  Figures on a white ground look near-identical; on any other ground the dot no longer reads as a
+  white blob. Both dumbbell goldens moved, on those two attributes only.
+
+Nothing else in the plot frame moves: the snapshot self-test is pixel-identical, and the only golden
+diffs in the suite are the two dumbbell fixtures.
 
 ## [1.10.0] - 2026-08-10
 
