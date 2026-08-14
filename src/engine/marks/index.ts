@@ -224,14 +224,13 @@ export interface MarkLayers {
   segmentGap?: number;
   /** The selector matching the segments `segmentGap` applies to. Set alongside it. */
   segmentGapSelector?: string;
-  /** The selector matching the in-segment value labels, and the pixel extent below which one is
-   *  dropped. Both are the LABEL builder's numbers, handed to the gap pass because the labels are
-   *  placed pre-render at the segment's data-space midpoint and measured against its pre-gap
-   *  extent — neither of which knows the segment is about to shrink. The pass re-centres each
-   *  label on the rect it just changed and re-tests the threshold against what that rect now
-   *  measures, so the two cannot disagree. Set in the same literal as `segmentGap`. */
+  /** The selector matching the in-segment value labels. Handed to the gap pass because the labels
+   *  are placed pre-render at the segment's data-space midpoint, which does not know the segment is
+   *  about to shrink underneath them; the pass re-centres each on the rect it just changed. Only
+   *  the selector travels — whether a label is drawn AT ALL stays the label builder's decision,
+   *  made on the segment's share of the data (see the threshold note in applySegmentGap). Set in
+   *  the same literal as `segmentGap`. */
   segmentLabelSelector?: string;
-  segmentLabelMinPx?: number;
   /** Controls how the band-crosshair tooltip renders the Total row for stacked charts.
    *  - true  (netMode==="dot"):  show Total with a circle (is-dot) swatch — the net-dot
    *    marker exists on the chart and matches this styling.

@@ -222,11 +222,12 @@ describe("segmentGap with the rest of the stacked feature set", () => {
 // --- In-segment value labels ---
 //
 // The labels are placed at the segment's DATA-space midpoint, at build time, and kept or dropped on
-// the segment's pre-gap pixel extent. Neither number knows the rect is about to shrink, so with
-// `valueLabels.show` and a gap both set, every segment but the last in pixel order carried its
-// label gap/2 off the visible centre (6px at the schema max, on a 10px font) and a segment measured
-// just over the fit threshold kept a label that no longer fit. Both corrections are taken from the
-// rect the gap pass just changed, so they cannot drift from the shrink that caused them.
+// the segment's pre-gap pixel extent. The midpoint does not know the rect is about to shrink, so
+// with `valueLabels.show` and a gap both set, every segment but the last in pixel order carried its
+// label gap/2 off the visible centre (6px at the schema max, on a 10px font). That correction is
+// taken from the rect the gap pass just changed, so it cannot drift from the shrink that caused it.
+// The KEEP/DROP decision is not corrected, and must not be: it is about the segment's share of the
+// data, and re-running its 25px threshold on the narrowed rect deletes labels that plainly fit.
 
 /** Absolute position of a Plot element: its own `translate(x,y)` plus every ancestor's. A text mark
  *  and a bar mark sit in different groups, each with its own translate, so raw coordinates are not
@@ -295,14 +296,43 @@ describe("segmentGap with in-segment value labels", () => {
     }
   });
 
-  it("drops a label whose segment the gap shrinks below the fit threshold", () => {
-    // "Top 1%" series b is 1 unit ≈ 25.7px tall here — just over the 25px threshold that kept its
-    // label, and under it once 6px comes off.
+  it("keeps exactly the labels the un-gapped chart drew — a gap is separation, not a fit test", () => {
+    // The 25px threshold is a judgement about a segment's share of the data, made once in
+    // buildSegmentLabels against the un-shrunk extent. Re-running it on the gapped rect turns it
+    // into "drop the label if segment-minus-gap is under 25", which is a different and much harsher
+    // rule; the worst case it has to survive is "Top 1%" series b, 1 unit ≈ 25.7px, which the gap
+    // narrows to ≈13.7px while its 10px glyphs still sit centred inside the drawn rect.
     const texts = (gap: number) => labelledSegments(gapSpec(gap, LABELS)).map((l) => l.text);
-    expect(texts(0)).toContain("1");
-    expect(texts(6)).not.toContain("1");
-    // Only that one goes: the rest of the stack still clears the threshold.
-    expect(texts(6)).toEqual(texts(0).filter((t) => t !== "1"));
+    const plain = texts(0);
+    expect(plain).toContain("1");
+    for (const gap of [1, 6, 12]) expect(texts(gap), `gap ${gap}`).toEqual(plain);
+  });
+
+  it("keeps all 16 labels on 36px segments at the schema-max gap, not one per bar", () => {
+    // The shape of the regression a post-shrink re-test caused: 2 categories × 8 equal series at
+    // 720×400 gives 36px segments, which hold a 10px label with or without 12px off. Re-testing 25
+    // against the shrunk 24px dropped 14 of 16 — and asymmetrically, because the shrink loop skips
+    // each bar's LAST segment, so exactly one survivor per bar was left behind.
+    const series = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"];
+    const equalRows = ["Bottom 50%", "Top 1%"].flatMap((time) =>
+      series.map((s) => ({ time, series: s, value: "1" })),
+    ) as unknown as TidyRow[];
+    const count = (gap: number) =>
+      renderChart(
+        { ...BASE, ...LABELS, barStack: { segmentGap: gap } } as unknown as ChartSpec,
+        equalRows,
+        OPTS,
+      ).svg.querySelectorAll("g.tbl-segment-label text").length;
+    const heights = [
+      ...renderChart(
+        { ...BASE, ...LABELS, barStack: { segmentGap: 12 } } as unknown as ChartSpec,
+        equalRows,
+        OPTS,
+      ).svg.querySelectorAll('g[aria-label="bar"] rect'),
+    ].map((r) => +r.getAttribute("height")!);
+    // Pin the geometry the counts below depend on: 36px pre-gap, 24px after the schema max.
+    expect(Math.min(...heights)).toBeGreaterThan(23);
+    for (const gap of [0, 6, 12]) expect(count(gap), `gap ${gap}`).toBe(16);
   });
 });
 

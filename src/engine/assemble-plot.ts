@@ -110,16 +110,27 @@ function shiftLabel(el: SVGElement, horizontal: boolean, delta: number): void {
  * leaves it off the visible centre by half the shrink — gap/2, i.e. 6px at the schema max, on a
  * 10px font. The correction is taken from the rect this pass just changed rather than recomputed
  * from the gap on the label side, so there is no second copy of the arithmetic to drift, and the
- * FLOOR case needs no special handling. Same for the fit threshold `labels.minPx`: it was applied
- * to the pre-gap extent, so a segment measured just over it can shrink under it and keep a label
- * that no longer fits — re-tested here against what the rect actually ends up measuring.
+ * FLOOR case needs no special handling.
+ *
+ * The fit threshold is NOT re-tested here, deliberately. `SEGMENT_LABEL_MIN_PX` (25) was calibrated
+ * in `buildSegmentLabels` against the UN-shrunk extent — it is the size at which a segment's share
+ * of the data stops warranting a label. The gap is whitespace between neighbours, not a reduction
+ * in the room the label has: the 10px glyphs still sit centred inside the drawn rect, and a rect
+ * that cleared 25px pre-gap is at worst 13px post-gap (schema max gap 12), which still contains
+ * them. Re-applying the same 25 to the shrunk extent silently redefines the rule as "drop the label
+ * if segment-minus-gap is under 25", which is far more aggressive: measured end to end on 2×8 equal
+ * series at 720×400 (36px segments), raising the gap from 6 to 12 took the rendered labels from 16
+ * to 2, on 24px segments that comfortably hold a 10px label. It was also asymmetric — the loop
+ * below skips the last segment of each bar, so the identical segment kept its label purely for
+ * being last, which is the "2". A drop rule that lives inside a loop that cannot see every segment
+ * can only ever be inconsistent; the threshold belongs where the data is, in the label builder.
  */
 function applySegmentGap(
   svg: SVGSVGElement,
   selector: string,
   gap: number,
   horizontal: boolean,
-  labels?: { selector: string; minPx: number },
+  labels?: { selector: string },
 ): void {
   // Band position groups the segments of one bar; the value axis orders them within it.
   const bandAttr = horizontal ? "y" : "x";
@@ -169,12 +180,9 @@ function applySegmentGap(
       const shrunk = Math.max(SEGMENT_GAP_FLOOR, extent - gap);
       const inside = labels ? labelsInside(el, labelEls, horizontal, extent) : [];
       el.setAttribute(extentAttr, String(shrunk));
-      for (const label of inside) {
-        if (shrunk < (labels?.minPx ?? 0)) label.el.remove();
-        // The leading edge never moves, so the visible centre moves by exactly half the shrink,
-        // toward it — the same two numbers written to the rect above.
-        else shiftLabel(label.el, horizontal, (shrunk - extent) / 2);
-      }
+      // The leading edge never moves, so the visible centre moves by exactly half the shrink,
+      // toward it — the same two numbers written to the rect above.
+      for (const label of inside) shiftLabel(label.el, horizontal, (shrunk - extent) / 2);
     }
   }
 }
@@ -1086,9 +1094,7 @@ export function assemblePlot({
       layers.segmentGapSelector,
       layers.segmentGap,
       layers.yScaleOpts != null,
-      layers.segmentLabelSelector && layers.segmentLabelMinPx != null
-        ? { selector: layers.segmentLabelSelector, minPx: layers.segmentLabelMinPx }
-        : undefined,
+      layers.segmentLabelSelector ? { selector: layers.segmentLabelSelector } : undefined,
     );
   }
 

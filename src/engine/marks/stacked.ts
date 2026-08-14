@@ -143,11 +143,12 @@ export function buildStackedMarks(
   // "none" explicitly suppresses all net markers and the Total legend entry.
   // Whitespace between segments. assemblePlot applies it post-render as geometry (see MarkLayers
   // .segmentGap for why it cannot be a Plot inset); the builder only declares the intent + target.
-  // The label selector + threshold travel WITH the gap, in one literal: an in-segment label is
-  // placed at the segment's data-space midpoint and kept on its pre-gap extent, so a gap that
-  // shrinks the rect underneath it leaves it gap/2 off the visible centre (6px at the schema max,
-  // on a 10px font) and keeps a label on a segment that no longer has room for it. The pass that
-  // moves the rect owns both corrections — see applySegmentGap.
+  // The label selector travels WITH the gap, in one literal: an in-segment label is placed at the
+  // segment's data-space midpoint, so a gap that shrinks the rect underneath it leaves it gap/2 off
+  // the visible centre (6px at the schema max, on a 10px font). The pass that moves the rect owns
+  // that correction — see applySegmentGap. The fit threshold does NOT travel: it is a judgement
+  // about the segment's share of the data, and applying it again to a rect the gap has narrowed
+  // reads as a different, much harsher rule (that note lives on applySegmentGap too).
   const segmentGap = spec.barStack?.segmentGap ?? 0;
   const segmentGapLayer =
     segmentGap > 0
@@ -155,7 +156,6 @@ export function buildStackedMarks(
           segmentGap,
           segmentGapSelector: 'g[aria-label="bar"] rect',
           segmentLabelSelector: `g.${SEGMENT_LABEL_CLASS} text`,
-          segmentLabelMinPx: SEGMENT_LABEL_MIN_PX,
         }
       : {};
 
@@ -456,9 +456,11 @@ export function buildStackedMarks(
  *  threshold is suppressed.
  *
  *  Both numbers are PRE-GAP: `barStack.segmentGap` shrinks the rects post-render, after these
- *  positions are fixed. The gap pass re-centres the labels it moves and re-tests the threshold
- *  against the rect it actually left behind (see applySegmentGap) — do not try to anticipate the
- *  gap here, which would mean converting px to data units against a scale this builder cannot see. */
+ *  positions are fixed. The gap pass re-centres the labels it moves (see applySegmentGap) — do not
+ *  try to anticipate the gap here, which would mean converting px to data units against a scale
+ *  this builder cannot see. The threshold is deliberately NOT re-run against the gapped rect: this
+ *  is the only place that decides whether a segment earns a label, and it decides it on the
+ *  segment's share of the data, not on a few px of separator. */
 function buildSegmentLabels(
   data: PreparedRow[],
   categories: string[],
