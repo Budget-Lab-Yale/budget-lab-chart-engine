@@ -185,8 +185,7 @@ describe("buildFacetTooltipHtml", () => {
     const html = buildFacetTooltipHtml("X", "t", bySeries, 100, {
       seriesOrder: ["<5 Weeks"],
       seriesLabels: { "<5 Weeks": "Short term" },
-      dashedSeries: new Set(["<5 Weeks"]),
-      colors: new Map([["<5 Weeks", "#123456"]]),
+      icons: new Map([["<5 Weeks", { shape: "line", color: "#123456", dashed: true }]]),
       yFormat: (v) => String(v),
     });
     expect(html).toContain("Short term");

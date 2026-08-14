@@ -22,7 +22,7 @@ import {
   seriesSwatchHtml,
 } from "../src/engine/crosshair";
 import { resolveHatch, defaultHatchStroke } from "../src/engine/hatch";
-import { ICON_BOX } from "../src/engine/icon";
+import { ICON_BOX, resolveTooltipIcons, type IconSpec } from "../src/engine/icon";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -125,29 +125,27 @@ describe("the line/area tooltip agrees with its legend", () => {
   ]);
 
   it("shows a square, not a line, on a filled chart type", () => {
-    const { colors } = renderChart(AREA, AREA_ROWS, OPTS);
+    const r = renderChart(AREA, AREA_ROWS, OPTS);
     const html = buildFacetTooltipHtml("pane", "2021", values, 1, {
-      colors,
       yFormat: String,
-      swatchShape: "rect",
+      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
     });
     const doc = new DOMParser().parseFromString(html, "text/html");
     const svgs = [...doc.querySelectorAll(".tbl-tooltip-swatch svg")];
     expect(svgs).toHaveLength(2);
-    for (const svg of svgs) {
-      expect(svg.querySelector("rect")).not.toBeNull();
-      expect(svg.querySelector("line")).toBeNull();
-    }
+    // The untextured row is a bare square. (The textured one is a square GROUND under a glyph, whose
+    // `/` band is drawn as a diagonal <line> — checked as a drawing by the next test.)
+    expect(svgs[0]!.querySelector("rect")).not.toBeNull();
+    expect(svgs[0]!.querySelector("line")).toBeNull();
+    expect(svgs[1]!.querySelector("rect")).not.toBeNull();
   });
 
   it("carries the texture, so the row matches the key the reader just read", () => {
-    const { legendItems, colors } = renderChart(AREA, AREA_ROWS, OPTS);
-    const item = legendItems!.find((i) => i.series === "textured")!;
+    const r = renderChart(AREA, AREA_ROWS, OPTS);
+    const item = r.legendItems!.find((i) => i.series === "textured")!;
     const html = buildFacetTooltipHtml("pane", "2021", values, 1, {
-      colors,
       yFormat: String,
-      swatchShape: "rect",
-      hatches: new Map([["textured", item.hatch!]]),
+      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
     });
     // The textured row carries the glyph's bands; the plain row is one flat rect.
     const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
@@ -160,18 +158,15 @@ describe("the line/area tooltip agrees with its legend", () => {
   });
 
   it("renders the SAME glyph markup the legend renders — one drawing, not two", () => {
-    const { legendItems, colors } = renderChart(AREA, AREA_ROWS, OPTS);
-    const item = legendItems!.find((i) => i.series === "textured")!;
+    const r = renderChart(AREA, AREA_ROWS, OPTS);
 
     const parent = document.createElement("div");
-    renderLegend(parent, legendItems!);
+    renderLegend(parent, r.legendItems!);
     const legendGlyph = parent.querySelector('[data-series="textured"] .tbl-legend-swatch svg')!;
 
     const html = buildFacetTooltipHtml("pane", "2021", values, 1, {
-      colors,
       yFormat: String,
-      swatchShape: "rect",
-      hatches: new Map([["textured", item.hatch!]]),
+      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
     });
     const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
     const tooltipGlyph = swatchSvg(rows.find((r) => r.includes("textured"))!)!;
@@ -187,10 +182,14 @@ describe("the line/area tooltip agrees with its legend", () => {
       columns: { x: "time", value: "value", series: "series" },
       series_colors: { plain: "blue" },
     } as unknown as ChartSpec;
-    const { colors } = renderChart(spec, AREA_ROWS, OPTS);
+    // ONE series, so this chart draws no legend at all — the key comes from `seriesKeyRows`, the
+    // row the legend WOULD have drawn. Before the consolidation this reached a separate synthesised
+    // default inside the tooltip builder, which is the path that drifted.
+    const r = renderChart(spec, AREA_ROWS.filter((row) => row.series === "plain"), OPTS);
+    expect(r.legendItems).toBeNull();
     const html = buildFacetTooltipHtml("pane", "2021", new Map([["plain", new Map([[1, 4]])]]), 1, {
-      colors,
       yFormat: String,
+      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
     });
     const svg = swatchSvg(html)!;
     expect(svg.querySelector("line")).not.toBeNull();
@@ -203,13 +202,13 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
     { _xc: "A", series: "flat", _y: 6 },
     { _xc: "A", series: "textured", _y: 4 },
   ];
-  const COLORS = new Map([
-    ["flat", "#0072B2"],
-    ["textured", GROUND],
+  const ICONS = new Map<string, IconSpec>([
+    ["flat", { shape: "rect", color: "#0072B2" }],
+    ["textured", { shape: "rect", color: GROUND }],
   ]);
 
   it("keeps the square swatch for a bar series", () => {
-    const html = buildBandTooltipHtml("A", ROWS, { swatchShape: "rect", colors: COLORS });
+    const html = buildBandTooltipHtml("A", ROWS, { icons: ICONS });
     const svg = swatchSvg(html)!;
     expect(svg.querySelector("rect")!.getAttribute("style")).toContain("fill:#0072B2");
   });
@@ -218,8 +217,7 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
     const html = buildBandTooltipHtml("A", ROWS, {
       isStacked: true,
       showTotalDot: true,
-      swatchShape: "rect",
-      colors: COLORS,
+      icons: ICONS,
     });
     const doc = new DOMParser().parseFromString(html, "text/html");
     // The Total row keys the net-dot marker, so it must actually DRAW the ring. It carried a bare
@@ -231,9 +229,10 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
 
   it("still carries a hatch glyph", () => {
     const html = buildBandTooltipHtml("A", ROWS, {
-      swatchShape: "rect",
-      colors: COLORS,
-      hatches: new Map([["textured", resolveHatch("/", GROUND)]]),
+      icons: new Map<string, IconSpec>([
+        ...ICONS,
+        ["textured", { shape: "rect", color: GROUND, hatch: resolveHatch("/", GROUND) }],
+      ]),
     });
     const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
     const textured = drawing(swatchSvg(rows.find((r) => r.includes("textured"))!)!);

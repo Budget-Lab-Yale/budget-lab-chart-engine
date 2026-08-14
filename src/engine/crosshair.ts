@@ -12,9 +12,8 @@ import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
 import { paintedFill } from "./painted-fill";
-import { resolveHatch, type SeriesHatch } from "./hatch";
+import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
-import type { MarkerStyle } from "./marker-ink";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 
 type Row = Record<string, unknown>;
@@ -27,9 +26,10 @@ export interface CrosshairOptions {
   xParse?: (v: unknown) => number;
   xFormat?: (v: number) => string;
   yFormat?: (v: number) => string;
+  /** Series → colour, for the COORDINATED cursor's echo dots and value pills
+   *  (attachSecondaryLineCursor, which shares this options type). NOT the tooltip key's colour —
+   *  that comes from `icons`, resolved once so it cannot disagree with the legend. */
   colors?: Map<string, string>;
-  /** Series rendered dashed (mirrors the legend swatch in the tooltip). */
-  dashedSeries?: Set<string>;
   /** Short data key → display label. */
   seriesLabels?: Record<string, string>;
   /** Fixed tooltip row order (matches the legend); else data-encounter order. */
@@ -47,10 +47,6 @@ export interface CrosshairOptions {
   /** Append a cumulative "Total" row (sum of the shown series at the hovered x) to the tooltip —
    *  used for stacked area, where the stack height is the meaningful aggregate. */
   showTotal?: boolean;
-  /** "rect" for a FILLED chart type (area), matching its legend chip; default "line". */
-  swatchShape?: "line" | "rect";
-  /** Series → resolved `series_patterns` texture, so the key matches the legend's glyph. */
-  hatches?: Map<string, SeriesHatch>;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
 }
@@ -72,8 +68,6 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     xField = "time",
     yField = "value",
     seriesField = "series",
-    colors,
-    dashedSeries,
     seriesLabels,
     seriesOrder,
   } = opts;
@@ -206,17 +200,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       if (v == null || Number.isNaN(v)) continue;
       total += v;
       totalAny = true;
-      const dot = colors?.get(series) || "currentColor";
-      const isDashed = dashedSeries?.has(series);
       const display = (seriesLabels && seriesLabels[series]) || series;
-      const swatch = seriesSwatchHtml(
-        rowIcon(series, opts.icons, {
-          color: dot,
-          ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
-          ...(isDashed ? { dashed: true } : {}),
-          ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
-        }),
-      );
+      const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
       html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
@@ -287,10 +272,10 @@ export interface FacetCrosshairOptions {
   xParse?: (v: unknown) => number;
   xFormat?: (v: number) => string;
   yFormat?: (v: number) => string;
-  colors?: Map<string, string>;
-  dashedSeries?: Set<string>;
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
+  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
+  icons?: Map<string, IconSpec>;
 }
 
 /** A resolved facet cell's geometry in SVG user coords. The plot area of the cell is
@@ -421,35 +406,31 @@ export function seriesSwatchHtml(icon: IconSpec): string {
   return `<span class="tbl-tooltip-swatch">${iconSvgMarkup(icon)}</span>`;
 }
 
-/** The icon a tooltip row should draw for `series`.
+/** The icon a tooltip row should draw for `series`. `icons` (see icon.ts resolveTooltipIcons) is
+ *  the ONLY source, and that is the whole point of this function existing.
  *
- *  `icons` is the resolved map (see icon.ts resolveTooltipIcons) and is the ONLY thing consulted when
- *  present. The channel arguments behind it are the legacy path, kept so a caller that has not been
- *  migrated still renders something — but they are why a marker could reach a legend and not a
- *  tooltip, so nothing new should use them. */
-function rowIcon(
-  series: string,
-  icons: Map<string, IconSpec> | undefined,
-  legacy: { color: string; shape?: "line" | "rect" | "dot" | "symbol"; dashed?: boolean; hatch?: SeriesHatch; marker?: MarkerStyle },
-): IconSpec {
-  const resolved = icons?.get(series);
-  if (resolved) return resolved;
-  return {
-    shape: legacy.shape ?? "line",
-    color: legacy.color,
-    ...(legacy.dashed ? { dashed: true } : {}),
-    ...(legacy.hatch ? { hatch: legacy.hatch } : {}),
-    // Spread deliberately, but typed: a conditional spread is NOT excess-property checked, so when
-    // IconSpec's `hollow` became `marker` this line kept compiling and silently dropped the ring.
-    ...(legacy.marker ? { marker: legacy.marker } : {}),
-  };
+ *  It used to take a second set of loose channels — colour, shape, dashed, hatch, marker — and
+ *  synthesise a key from them whenever `icons` had no entry. Two mechanisms for one job, and the
+ *  second one was a partial copy of the legend's rules that drifted from them: it reached exactly
+ *  the charts with no legend row (i.e. every SINGLE-SERIES chart, on every chart type), which is why
+ *  a lone dot plot keyed a line and a `bar_color` histogram keyed the palette. Those charts now
+ *  resolve through the same resolver as the rest, from `seriesKeyRows` — the row the legend WOULD
+ *  have drawn (see icon.ts resolveTooltipIcons and index.ts buildSeriesKeyRows).
+ *
+ *  A series with no entry draws an EMPTY box rather than a guessed one: guessing is what the second
+ *  mechanism did, and a key asserting something false about a mark is worse than no key. The box
+ *  still occupies its column or the label hangs left of every row above it. That case is a BUG, and
+ *  test/key-agreement.test.ts gates it by asserting an icon resolves for every series of every chart
+ *  type — including the ones that draw no legend. */
+function rowIcon(series: string, icons: Map<string, IconSpec> | undefined): IconSpec {
+  return icons?.get(series) ?? { shape: "none" };
 }
 
 /**
  * PURE — build the tooltip inner HTML for ONE facet cell at the snapped x. Header is the
  * pane title + the formatted x label; then one row per series in `seriesOrder` that has a
  * finite value at `snappedX` in this facet's `bySeries` lookup. Mirrors attachCrosshair's
- * row markup (swatch + label + value, dashed handling). No DOM access.
+ * row markup (swatch + label + value). No DOM access.
  */
 export function buildFacetTooltipHtml(
   title: string,
@@ -457,20 +438,14 @@ export function buildFacetTooltipHtml(
   bySeries: Map<string, Map<number, number>>,
   snappedX: number,
   opts: {
-    colors?: Map<string, string>;
-    dashedSeries?: Set<string>;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat: (v: number) => string;
-    /** Series → its resolved icon. When present this is the ONLY source; see resolveTooltipIcons. */
+    /** Series → its resolved icon. The ONLY source of a row's key; see resolveTooltipIcons. */
     icons?: Map<string, IconSpec>;
-    /** "rect" for a FILLED chart type (area), matching its legend chip; default "line". */
-    swatchShape?: "line" | "rect";
-    /** Series → resolved `series_patterns` texture, so the key matches the legend's glyph. */
-    hatches?: Map<string, SeriesHatch>;
   },
 ): string {
-  const { colors, dashedSeries, seriesLabels, seriesOrder, yFormat } = opts;
+  const { seriesLabels, seriesOrder, yFormat } = opts;
   let html = `<div class="tbl-tooltip-head">${escapeHtml(title)} · ${escapeHtml(xLabel)}</div>`;
   const tipSeries =
     seriesOrder && seriesOrder.length
@@ -479,17 +454,8 @@ export function buildFacetTooltipHtml(
   for (const series of tipSeries) {
     const v = bySeries.get(series)!.get(snappedX);
     if (v == null || Number.isNaN(v)) continue;
-    const dot = colors?.get(series) || "currentColor";
-    const isDashed = dashedSeries?.has(series);
     const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(
-      rowIcon(series, opts.icons, {
-        color: dot,
-        ...(opts.swatchShape ? { shape: opts.swatchShape } : {}),
-        ...(isDashed ? { dashed: true } : {}),
-        ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
-      }),
-    );
+    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   }
   return html;
@@ -500,6 +466,11 @@ export function buildFacetTooltipHtml(
  * SVG). Resolves the cell under the cursor from Plot's faceted scales, draws a guide confined
  * to that cell's plot y-range, snaps to the shared x-domain, and shows a per-pane tooltip.
  *
+ * DORMANT — shared mode is a per-pane composition now, so nothing in the live layer calls this
+ * (see the note on FacetInfo in engine/index.ts). A caller reviving it MUST pass `icons`:
+ * `resolveTooltipIcons({ legendItems, keyRows })`, as every other crosshair does. Without it each
+ * row draws an empty key box — deliberately, so a missed wiring is visible rather than guessed at.
+ *
  * Resilient to non-layout environments (jsdom/SSR): if `svg.scale` is unavailable or the
  * scales can't be read, it no-ops cleanly (browser verification carries correctness).
  */
@@ -509,8 +480,6 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
     xField = "time",
     yField = "value",
     seriesField = "series",
-    colors,
-    dashedSeries,
     seriesLabels,
     seriesOrder,
   } = opts;
@@ -665,11 +634,10 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
     guide.setAttribute("opacity", "1");
 
     tip.innerHTML = buildFacetTooltipHtml(cell.title, xFormat!(snap), fd.bySeries, snap, {
-      colors,
-      dashedSeries,
       seriesLabels,
       seriesOrder,
       yFormat,
+      ...(opts.icons ? { icons: opts.icons } : {}),
     });
 
     const offset = 14;
@@ -717,16 +685,11 @@ export interface BandCrosshairOptions {
   isFaceted?: boolean;
   /** Ordered list of categories (declaration order → facet index order for fx layout). */
   categories?: string[];
-  colors?: Map<string, string>;
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
   yFormat?: (v: number) => string;
   /** Raw category value → display label for the tooltip header. */
   categoryLabels?: Record<string, string>;
-  /** Series swatch shape in the tooltip — "rect" for bars (matches the legend), else line. */
-  swatchShape?: "line" | "rect";
-  /** Series → resolved `series_patterns` texture; see buildBandTooltipHtml. */
-  hatches?: Map<string, SeriesHatch>;
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -870,30 +833,18 @@ export function buildBandTooltipHtml(
   opts: {
     isStacked?: boolean;
     showTotalDot?: boolean;
-    colors?: Map<string, string>;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
-    /** Series swatch shape — "rect" (filled square, bar legend), "dot" (circle, dumbbell — honors
-     *  `swatchMarkers` for hollow rings / ink), or the default line. */
-    swatchShape?: "line" | "rect" | "dot";
-    /** Dumbbell only: series → marker style, so the "dot" swatch renders a hollow ring / ink dot to
-     *  match the chart + legend. Absent → all dots filled. */
-    swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
-    /** Series → the bar's ACTUAL rendered fill (bar_color / accent / category_colors), preferred
-     *  over the series' base `colors` for the swatch so the tooltip marker matches the drawn bar
-     *  — the same fill-first rule the 1.3.x value pill uses. Absent → fall back to `colors`. */
-    renderedFills?: Map<string, string>;
-    /** Series → its resolved `series_patterns` texture, so the tooltip key carries the same centred
-     *  glyph as the legend key. Absent series render a flat fill exactly as before. */
-    hatches?: Map<string, SeriesHatch>;
-    /** Series → its resolved icon. When present this is the ONLY source; see resolveTooltipIcons. */
+    /** Series → its resolved icon. The ONLY source of a row's key; see resolveTooltipIcons. The
+     *  caller re-colours it from the DRAWN fill first (recolourIcons), which is what keeps a
+     *  `bar_color` / `category_colors` bar's key on the colour under the cursor. */
     icons?: Map<string, IconSpec>;
   },
 ): string {
-  const { isStacked, showTotalDot, colors, seriesLabels, seriesOrder, yFormat, categoryLabels, swatchShape, swatchMarkers, renderedFills, hatches } = opts;
+  const { isStacked, showTotalDot, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -913,18 +864,8 @@ export function buildBandTooltipHtml(
     const v = valBySeries.get(series);
     if (v == null) continue;
     total += v;
-    const dot = renderedFills?.get(series) || colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
-    // Swatch matches the chart's legend marker: filled square (bars), a circle/ring/ink dot
-    // (dumbbell — honoring the series' marker), else the default line swatch (line charts).
-    const swatch = seriesSwatchHtml(
-      rowIcon(series, opts.icons, {
-        color: dot,
-        ...(swatchShape ? { shape: swatchShape } : {}),
-        ...(swatchMarkers?.get(series) ? { marker: swatchMarkers.get(series)! } : {}),
-        ...(hatches?.get(series) ? { hatch: hatches.get(series)! } : {}),
-      }),
-    );
+    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
@@ -1189,9 +1130,10 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   // Bar tooltips: color each series' swatch from the bar's ACTUAL rendered fill (bar_color /
   // accent / category_colors), not the series' base color — matching the 1.3.x value pill. Built
   // once from the rendered rects (fill is uniform per series; category_colors is single-series).
-  // Only for bar swatches (swatchShape "rect"); line tooltips keep their series-color swatch,
-  // which already equals the rendered stroke.
-  const renderedFills = !emitOnly && opts.swatchShape === "rect"
+  // Ungated on chart type on purpose: the query names bar rects, so a band figure with none yields
+  // an EMPTY map, and recolourIcons is a no-op on one. The gate used to be `swatchShape === "rect"`,
+  // a channel that no longer exists.
+  const renderedFills = !emitOnly
     ? (() => {
         const m = new Map<string, string>();
         svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect').forEach((r) => {
@@ -1286,14 +1228,10 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
       showTotalDot: opts.showTotalDot,
-      colors: opts.colors,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
       categoryLabels: opts.categoryLabels,
-      swatchShape: opts.swatchShape,
-      renderedFills,
-      ...(opts.hatches ? { hatches: opts.hatches } : {}),
       // Re-coloured from the drawn fills: a category_colors bar keys the hovered category, not the
       // series. Forwarding `icons` unchanged would revert that to the palette colour.
       ...(opts.icons ? { icons: recolourIcons(opts.icons, renderedFills, resolveHatch) } : {}),
@@ -1357,8 +1295,6 @@ export interface HistogramHoverOptions {
   /** Coordinated small-multiples: hit-test + emit only (no highlight/tooltip drawn); the secondary
    *  cursor renders the echo on every pane. */
   emitOnly?: boolean;
-  /** Series → resolved `series_patterns` texture; see buildHistogramTooltipHtml. */
-  hatches?: Map<string, SeriesHatch>;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
 }
@@ -1425,22 +1361,18 @@ export function resolveHistogramBinIndex(
 export function buildHistogramTooltipHtml(
   bin: HistogramBin,
   opts: {
-    colors?: Map<string, string>;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
     /** Drives the friendly bin-range header. Absent ⇒ a plain numeric en-dash range. */
     label?: BinLabelOpts;
-    /** series → the bar's ACTUAL rendered fill, preferred over `colors` for the swatch so the
-     *  tooltip marker matches the drawn bar (mirrors the band tooltip's fill-first rule). */
-    renderedFills?: Map<string, string>;
-    /** Series → resolved `series_patterns` texture, so a hatched bin keys as one. */
-    hatches?: Map<string, SeriesHatch>;
-    /** Series → its resolved icon. When present this is the ONLY source; see resolveTooltipIcons. */
+    /** Series → its resolved icon. The ONLY source of a row's key; see resolveTooltipIcons. The
+     *  caller re-colours it from the DRAWN bin fill first (recolourIcons), so a `bar_color`
+     *  histogram keys the colour it painted rather than its palette entry. */
     icons?: Map<string, IconSpec>;
   },
 ): string {
-  const { colors, seriesLabels, seriesOrder, renderedFills } = opts;
+  const { seriesLabels, seriesOrder } = opts;
   const yFormat = opts.yFormat ?? ((v: number) => String(v));
 
   const header = formatBinLabel(bin.x0, bin.x1, opts.label ?? { xType: "numeric", interval: null });
@@ -1453,17 +1385,8 @@ export function buildHistogramTooltipHtml(
   for (const series of ordered) {
     const v = bin.bySeries.get(series);
     if (v == null || Number.isNaN(v)) continue;
-    const dot = renderedFills?.get(series) || colors?.get(series) || "currentColor";
     const display = (seriesLabels && seriesLabels[series]) || series;
-    // Filled-square swatch matches the histogram legend (bars, not lines) — same as bar tooltips.
-    // A histogram's marks are filled bins, so its key is a square — the same one its legend draws.
-    const swatch = seriesSwatchHtml(
-      rowIcon(series, opts.icons, {
-        color: dot,
-        shape: "rect",
-        ...(opts.hatches?.get(series) ? { hatch: opts.hatches.get(series)! } : {}),
-      }),
-    );
+    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   }
   return html;
@@ -1610,13 +1533,10 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     showHighlight(spans[idx]!.min, spans[idx]!.max);
 
     tip!.innerHTML = buildHistogramTooltipHtml(bin, {
-      colors: opts.colors,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
       label: opts.label,
-      renderedFills,
-      ...(opts.hatches ? { hatches: opts.hatches } : {}),
       ...(opts.icons ? { icons: recolourIcons(opts.icons, renderedFills, resolveHatch) } : {}),
     });
 
@@ -2787,10 +2707,6 @@ export interface CategoricalLineOptions {
   orientation?: "vertical" | "horizontal";
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
-  /** Tooltip swatch shape (dumbbell passes "dot"); see buildBandTooltipHtml. */
-  swatchShape?: "line" | "rect" | "dot";
-  /** Dumbbell: series → marker style, so the tooltip dot renders hollow/ink to match the chart. */
-  swatchMarkers?: Map<string, "filled" | "hollow" | "ink">;
   /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend. */
   renderedFills?: Map<string, string>;
   /** Coordinated cursor: skip the white-fill highlight ring over each point. The dumbbell's own
@@ -2903,13 +2819,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       guide.setAttribute("opacity", "1");
     }
     tip!.innerHTML = buildBandTooltipHtml(category, opts.rows, {
-      colors: opts.colors,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
-      ...(opts.swatchShape ? { swatchShape: opts.swatchShape } : {}),
-      ...(opts.swatchMarkers ? { swatchMarkers: opts.swatchMarkers } : {}),
-      ...(opts.renderedFills ? { renderedFills: opts.renderedFills } : {}),
       ...(opts.icons ? { icons: recolourIcons(opts.icons, opts.renderedFills, resolveHatch) } : {}),
     });
     const offset = 14;

@@ -14,7 +14,7 @@ import { parseDate } from "./parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildLegendItems, buildShapeLegendItems } from "./index";
+import { renderPane, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
@@ -267,6 +267,10 @@ export interface FigurePane {
   /** Stacked panes: visual top→bottom stack order, for the band crosshair's
    *  Total/series ordering. Line/bar panes leave this undefined. */
   legendVisualOrder?: string[];
+  /** This pane's key row per series, INCLUDING the ones the figure legend suppresses — a
+   *  single-series figure draws no legend but still tooltips. Per-pane, not figure-level, because
+   *  per-pane mode resolves colours independently. See index.ts buildSeriesKeyRows. */
+  seriesKeyRows?: LegendItem[];
 }
 
 export interface FigureRenderResult {
@@ -635,6 +639,7 @@ export function renderFigure(
         tooltipXFormat: p.tooltipXFormat,
         showTotalDot: p.layers.showTotalDot,
         legendVisualOrder: p.layers.legendVisualOrder,
+        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers),
       };
     });
 
@@ -786,6 +791,7 @@ export function renderFigure(
       tooltipXFormat: p.tooltipXFormat,
       showTotalDot: p.layers.showTotalDot,
       legendVisualOrder: p.layers.legendVisualOrder,
+      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers),
     };
   });
 

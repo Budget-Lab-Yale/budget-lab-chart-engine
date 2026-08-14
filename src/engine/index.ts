@@ -176,6 +176,9 @@ export interface RenderResult {
   /** Legend rows (null for a single, unstyled series — no legend needed). For point charts this
    *  is the COLOR (series) legend; the shape legend (when distinct) is `shapeLegendItems`. */
   legendItems: LegendItem[] | null;
+  /** The key row for EVERY series, including the ones `legendItems` suppresses. Tooltips read this
+   *  where `legendItems` is null (see buildSeriesKeyRows) so a lone series still keys correctly. */
+  seriesKeyRows: LegendItem[];
   /** Point charts with two-field encoding: the SHAPE legend rows (neutral markers). Null when
    *  shape encodes the same field as color (redundant → folded into `legendItems`) or absent. */
   shapeLegendItems?: ShapeLegendItem[] | null;
@@ -795,23 +798,28 @@ function assemblePaneResult(
   };
 }
 
-/** Build the legend rows from a spec + a rendered pane's series order / colors / mark layers.
- *  Shared by renderChart (single frame) and renderFigure (figure-level legend), so both decide
- *  legend presence and ordering identically. Returns null for a single, unstyled series. */
-export function buildLegendItems(
+/** The key row EVERY series gets, whether or not a legend is drawn.
+ *
+ *  Split out of `buildLegendItems` because a tooltip needs a key for a series the legend suppressed.
+ *  A single-series chart draws NO legend on every chart type (measured — line, area, bar, stacked,
+ *  histogram, waterfall, dumbbell, dotplot and scatter all return null at one series), yet every one
+ *  of them still shows tooltips. Those tooltips used to re-derive a key from loose channels —
+ *  `swatchShape`, `hatches`, `swatchMarkers`, `dashedSeries` — a second, partial copy of the table
+ *  below that drifted from it (a dot plot keyed a LINE, a histogram keyed the palette colour rather
+ *  than the painted one). Deriving both from this one function is what makes the drift impossible:
+ *  the suppressed row and the tooltip key are now literally the same object.
+ *
+ *  So this applies NO presence rule — `buildLegendItems` owns "is a legend worth drawing", this owns
+ *  "what would this series' key look like". */
+export function buildSeriesKeyRows(
   spec: ChartSpec,
   seriesNames: string[],
   colors: Map<string, string>,
   layers: MarkLayers,
-  /** The pane's value-axis formatter (`PaneResult.formatValue`), used only for a `{value}` token in
-   *  a keyed annotation label. Omitted → the token falls back to a bare number. */
-  formatValue?: (v: number) => string,
-): LegendItem[] | null {
-  if (spec.legend === false) return null;
+): LegendItem[] {
   const chartType = spec.chartType;
   const seriesLabels = spec.series_labels ?? {};
   const labelFor = (name: string): string => seriesLabels[name] ?? name;
-  const hasDashOverrides = layers.dashedNames.size > 0;
   // When the mark layer is the source of truth for series colors (stacked: mono tiers or
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
@@ -824,53 +832,45 @@ export function buildLegendItems(
     seriesNames.map((name) => [name, legendColorFor(name) ?? ""]),
   ));
 
-  // Point charts (scatter / dotplot): the COLOR (series) legend. Swatch is a filled colored
-  // marker — the per-series symbol when shape encodes the same field (redundant → combined
-  // legend), otherwise a plain circle (shape is carried by the separate shape legend). A single
-  // color → no color legend (the shape legend, if any, stands alone).
-  let baseItems: LegendItem[] | null = null;
+  let items: LegendItem[];
   if (chartType === "scatter" || chartType === "dotplot") {
+    // Point charts (scatter / dotplot): the COLOR (series) legend. Swatch is a filled colored
+    // marker — the per-series symbol when shape encodes the same field (redundant → combined
+    // legend), otherwise a plain circle (shape is carried by the separate shape legend).
+    //
     // A SEPARATE shape legend exists when shape is its own channel (distinct values, not the
     // series). In that case the color legend must NOT use a point shape (a circle/square here
     // would be ambiguous with the shape legend's symbols) — use a color chip (rounded square)
     // instead. Redundant encoding → the combined legend shows the actual colored marker shape;
     // no shape channel → the actual (circle) marker.
     const distinctShape = !!(layers.shapeNames && layers.shapeNames.length && !layers.shapeIsSeries);
-    baseItems =
-      seriesNames.length <= 1
-        ? null
-        : seriesNames.map((name, i) => {
-            const base = {
-              series: name,
-              label: labelFor(name),
-              color: legendColorFor(name),
-              dashed: false,
-            };
-            if (layers.shapeIsSeries) {
-              return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForIndex(i) };
-            }
-            if (distinctShape) {
-              return { ...base, markerShape: "chip" as const };
-            }
-            return { ...base, markerShape: "point" as const, markerSymbol: "circle" };
-          });
+    items = seriesNames.map((name, i) => {
+      const base = {
+        series: name,
+        label: labelFor(name),
+        color: legendColorFor(name),
+        dashed: false,
+      };
+      if (layers.shapeIsSeries) {
+        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForIndex(i) };
+      }
+      if (distinctShape) {
+        return { ...base, markerShape: "chip" as const };
+      }
+      return { ...base, markerShape: "point" as const, markerSymbol: "circle" };
+    });
   } else if (chartType === "dumbbell") {
-
-  // Dumbbell: one dot per series, styled by its marker (filled/ink → solid colored dot; hollow →
-  // ring). Colors come from layers.seriesColors (ink resolves to the ink token there). A single
-  // series has nothing to distinguish, so no legend (mirrors the point-chart rule).
-    baseItems =
-      seriesNames.length <= 1
-        ? null
-        : seriesNames.map((name) => ({
-            series: name,
-            label: labelFor(name),
-            color: legendColorFor(name),
-            dashed: false,
-            markerShape: "point" as const,
-            markerSymbol: "circle",
-            ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
-          }));
+    // Dumbbell: one dot per series, styled by its marker (filled/ink → solid colored dot; hollow →
+    // ring). Colors come from layers.seriesColors (ink resolves to the ink token there).
+    items = seriesNames.map((name) => ({
+      series: name,
+      label: labelFor(name),
+      color: legendColorFor(name),
+      dashed: false,
+      markerShape: "point" as const,
+      markerSymbol: "circle",
+      ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
+    }));
   } else {
     // Every chart type whose marks are FILLED keys with a chip; only stroked marks get a line
     // swatch. An area is a filled region, so a line swatch always misrepresented it — and a 3px line
@@ -888,26 +888,50 @@ export function buildLegendItems(
     // Line charts with point markers: each series carries its marker shape so the legend swatch
     // shows the same symbol as the chart (assigned by series index, matching the symbol scale).
     const withSymbols = markerShape === "line" && spec.points === true;
-    baseItems =
-      seriesNames.length > 1 || hasDashOverrides
-        ? seriesNames.map((name, i) => ({
-            series: name,
-            label: labelFor(name),
-            color: legendColorFor(name),
-            dashed: spec.series_styles?.[name]?.dashed === true,
-            markerShape,
-            ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
-          }))
-        : null;
+    items = seriesNames.map((name, i) => ({
+      series: name,
+      label: labelFor(name),
+      color: legendColorFor(name),
+      dashed: spec.series_styles?.[name]?.dashed === true,
+      markerShape,
+      ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
+    }));
   }
 
   // Attach the resolved textures, on EVERY chart-type path so a new chart type cannot forget them.
-  if (baseItems && legendHatches.size) {
-    baseItems = baseItems.map((item) => {
-      const hatch = legendHatches.get(item.series);
-      return hatch ? { ...item, hatch } : item;
-    });
-  }
+  if (!legendHatches.size) return items;
+  return items.map((item) => {
+    const hatch = legendHatches.get(item.series);
+    return hatch ? { ...item, hatch } : item;
+  });
+}
+
+/** Whether a legend DRAWS one row per series. A lone series has nothing to distinguish, so its row
+ *  would be a restatement of the title — except when a dash override makes the style itself the
+ *  thing being named. Point/dumbbell charts have no dash channel, so they key on count alone. */
+function legendShowsSeriesRows(spec: ChartSpec, seriesNames: string[], layers: MarkLayers): boolean {
+  if (seriesNames.length > 1) return true;
+  const chartType = spec.chartType;
+  if (chartType === "scatter" || chartType === "dotplot" || chartType === "dumbbell") return false;
+  return layers.dashedNames.size > 0;
+}
+
+/** Build the legend rows from a spec + a rendered pane's series order / colors / mark layers.
+ *  Shared by renderChart (single frame) and renderFigure (figure-level legend), so both decide
+ *  legend presence and ordering identically. Returns null for a single, unstyled series. */
+export function buildLegendItems(
+  spec: ChartSpec,
+  seriesNames: string[],
+  colors: Map<string, string>,
+  layers: MarkLayers,
+  /** The pane's value-axis formatter (`PaneResult.formatValue`), used only for a `{value}` token in
+   *  a keyed annotation label. Omitted → the token falls back to a bare number. */
+  formatValue?: (v: number) => string,
+): LegendItem[] | null {
+  if (spec.legend === false) return null;
+  const baseItems = legendShowsSeriesRows(spec, seriesNames, layers)
+    ? buildSeriesKeyRows(spec, seriesNames, colors, layers)
+    : null;
 
   // Append legendExtras (e.g. diverging stacked Total row) after the series rows.
   let legendItems: LegendItem[] | null = baseItems;
@@ -930,7 +954,7 @@ export function buildLegendItems(
     legendItems = legendItems ? [...legendItems, ...extras] : extras;
   }
   // Annotation-derived rows (bands / shading / reference lines opted in with `legend: true`) come
-  // last, on EVERY chart-type path — the per-type branches above set `baseItems` rather than
+  // last, on EVERY chart-type path — a suppressed series list leaves `baseItems` null rather than
   // returning, because assemble-plot suppresses a keyed entry's in-frame label by asking the SPEC,
   // not the legend. An early return here would drop the row while the label stayed suppressed, and
   // the name would vanish from the chart entirely. Like the extras above these may be the ONLY
@@ -977,6 +1001,7 @@ export function renderChart(
   return {
     svg,
     legendItems,
+    seriesKeyRows: buildSeriesKeyRows(spec, seriesNames, colors, layers),
     shapeLegendItems,
     colorLegendTitle: spec.color_legend_title,
     shapeLegendTitle: spec.shape_legend_title,

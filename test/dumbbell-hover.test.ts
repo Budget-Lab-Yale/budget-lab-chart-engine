@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { buildBandTooltipHtml, spreadPillCentersX, uniformBand } from "../src/engine/crosshair";
+import type { IconSpec } from "../src/engine/icon";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -86,16 +87,13 @@ describe("dumbbell hover — plumbing", () => {
       seriesLabels: SPEC.series_labels,
       seriesOrder: SPEC.series_order,
       yFormat: (v) => `${v.toFixed(1)}%`,
-      swatchShape: "dot",
-      swatchMarkers: new Map([
-        ["current_law", "ink"],
-        ["static", "hollow"],
-        ["collected", "filled"],
-      ]),
-      renderedFills: new Map([
-        ["current_law", "#1A1A2E"],
-        ["static", "#E69F00"],
-        ["collected", "#8856BF"],
+      // What the resolver hands the tooltip for a dumbbell: the ink/hollow/filled marker resolved
+      // ONCE, from the same legend row the key beside it draws. It was three loose channels
+      // (`swatchShape` + `swatchMarkers` + `renderedFills`) re-derived per tooltip path.
+      icons: new Map<string, IconSpec>([
+        ["current_law", { shape: "dot", color: "#1A1A2E" }],
+        ["static", { shape: "dot", color: "#E69F00", marker: "hollow" }],
+        ["collected", { shape: "dot", color: "#8856BF" }],
       ]),
     });
     const doc = new DOMParser().parseFromString(html, "text/html");

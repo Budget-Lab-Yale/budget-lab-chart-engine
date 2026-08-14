@@ -21,6 +21,9 @@ import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { resolveTooltipIcons, iconSvgMarkup, iconShapes, ICON_GROUP_CLASS, type IconSpec } from "../src/engine/icon";
 import { buildExportSvg } from "../src/embed/export-png";
+import { mountChart } from "../src/engine/render-live";
+import { defaultHatchStroke } from "../src/engine/hatch";
+import { FILLED_CHART_TYPES } from "../src/spec/filled-chart-types";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -188,7 +191,7 @@ describe("a tooltip key is the same drawing as its legend key", () => {
       expect(r.legendItems, `${name} produced no legend`).toBeTruthy();
 
       // The map the live layer hands every tooltip on this chart.
-      const icons = resolveTooltipIcons({ legendItems: r.legendItems, series: r.seriesOrder });
+      const icons = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows });
 
       const parent = document.createElement("div");
       renderLegend(parent, r.legendItems!);
@@ -225,7 +228,7 @@ describe("a tooltip key is the same drawing as its legend key", () => {
     // tooltip silently falls back to the legacy channels and can disagree again.
     for (const { name, spec, rows } of CHARTS) {
       const r = renderChart(specOf(spec), rows, OPTS);
-      const icons = resolveTooltipIcons({ legendItems: r.legendItems, series: r.seriesOrder });
+      const icons = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows });
       for (const s of r.seriesOrder) {
         expect(icons.has(s), `${name}: series "${s}" has no resolved icon`).toBe(true);
       }
@@ -314,7 +317,7 @@ describe("a key matches the mark it names", () => {
   for (const { name, spec, rows } of CHARTS) {
     it(name, () => {
       const r = renderChart(specOf(spec), rows, OPTS);
-      const icons = resolveTooltipIcons({ legendItems: r.legendItems, series: r.seriesOrder });
+      const icons = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows });
 
       // Legend rows, NOT seriesOrder: the stacked Total is a pseudo-series that exists only in the
       // legend, so iterating seriesOrder skipped the very row whose key had regressed.
@@ -369,7 +372,7 @@ describe("a key matches the mark it names", () => {
       // triangle. On a point chart each series carries its own symbol, which makes that a real
       // possibility rather than a hypothetical, and the shape is the whole content of that channel.
       const r = renderChart(specOf(spec), rows, OPTS);
-      const icons = resolveTooltipIcons({ legendItems: r.legendItems, series: r.seriesOrder });
+      const icons = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows });
       let compared = 0;
       for (const series of r.seriesOrder) {
         // Only DOT marks: a line chart's `[data-series]` is the line itself, and comparing a rule to
@@ -392,6 +395,122 @@ describe("a key matches the mark it names", () => {
       }
       if (name.startsWith("scatter") || name.startsWith("dumbbell") || name.includes("markers")) {
         expect(compared, `${name}: no dot marks were compared, so this proved nothing`).toBeGreaterThan(0);
+      }
+    });
+  }
+});
+
+describe("a chart with NO legend still keys its tooltip", () => {
+  // The case the whole consolidation turns on. A lone series draws no legend on ANY chart type
+  // (measured: line, area, bar, stacked, histogram, waterfall, dumbbell, dotplot and scatter all
+  // return null legendItems at one series) — yet every one of them still shows tooltips. Those rows
+  // used to key from a second mechanism: loose `swatchShape` / `hatches` / `swatchMarkers` /
+  // `dashedSeries` channels synthesised inside the tooltip builder, reachable ONLY here, and a
+  // partial copy of the legend's rules that drifted from them. `seriesKeyRows` closes it: the key is
+  // the row the legend WOULD have drawn, so there is one mechanism and no second copy to drift.
+  const HATCHED_HIST = {
+    chartType: "histogram",
+    title: "t",
+    xAxisType: "numeric",
+    histogram: { bins: 4, domain: [0, 20] },
+    columns: { x: "amount", series: "group" },
+    data: "inline",
+    series_colors: { A: "#58A3E7" },
+    series_patterns: { A: "/" },
+  } as unknown as ChartSpec;
+  const HIST_ROWS = Array.from({ length: 8 }, (_, i) => ({
+    amount: String(i),
+    group: "A",
+  })) as unknown as TidyRow[];
+
+  /** jsdom has no layout, so the crosshair's `getBoundingClientRect` guard would bail out before it
+   *  ever builds a tooltip. Map client coords 1:1 onto the viewBox. */
+  function mock1to1(svg: SVGSVGElement): void {
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+  }
+
+  it("a legend-less textured histogram keys with a square and the mark's OWN texture", () => {
+    expect(renderChart(HATCHED_HIST, HIST_ROWS, OPTS).legendItems).toBeNull();
+
+    const container = document.createElement("div");
+    mountChart(container, { spec: HATCHED_HIST, rows: HIST_ROWS, width: 640, height: 360 });
+    document.body.appendChild(container);
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    mock1to1(svg);
+
+    const bin = svg.querySelector<SVGRectElement>('g[aria-label="rect"] rect')!;
+    const cx = parseFloat(bin.getAttribute("x")!) + parseFloat(bin.getAttribute("width")!) / 2;
+    svg
+      .querySelector(".tbl-hist-hover-hit")!
+      .dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 100, bubbles: true }));
+
+    const key = document.querySelector(".tbl-tooltip .tbl-tooltip-swatch svg");
+    // An EMPTY swatch span is what an unresolved series draws — the box is kept so the label does
+    // not hang left, which makes the regression silent unless it is asserted here.
+    expect(key, "the tooltip drew an empty key box: no icon resolved for this legend-less series")
+      .not.toBeNull();
+    // SHAPE: a histogram's marks are filled bins, so its key is a square ground — never the 18x3
+    // line swatch the synthesised default fell back to.
+    const ground = key!.querySelector("rect")!;
+    expect(ground.getAttribute("style")).toContain("fill:#58A3E7");
+
+    // TEXTURE: the glyph's bands, in the band colour derived from that ground.
+    const bands = [...key!.querySelectorAll("rect, line, path")].slice(1);
+    expect(bands.length).toBeGreaterThan(0);
+    expect(bands.map((b) => b.getAttribute("style")).join(" ")).toContain(defaultHatchStroke("#58A3E7"));
+
+    // AND it is the SAME texture the bin is painted with, not merely a texture — the key's resolved
+    // hatch id is the id of the <pattern> filling the mark under the cursor.
+    const icons = resolveTooltipIcons({ legendItems: null, keyRows: renderChart(HATCHED_HIST, HIST_ROWS, OPTS).seriesKeyRows });
+    expect(bin.getAttribute("style")).toContain(icons.get("A")!.hatch!.id);
+
+    document.body.removeChild(container);
+  });
+
+  /** Every chart type, rendered with ONE series so no legend is drawn. */
+  const LONE: Array<{ name: string; spec: Record<string, unknown>; rows: TidyRow[] }> = [
+    { name: "line", spec: { chartType: "line", xAxisType: "numeric" }, rows: ROWS_NUM },
+    { name: "categorical line", spec: { chartType: "line", xAxisType: "categorical" }, rows: ROWS_CAT },
+    { name: "area", spec: { chartType: "area", xAxisType: "numeric" }, rows: ROWS_NUM },
+    { name: "bar", spec: { chartType: "bar", xAxisType: "categorical" }, rows: ROWS_CAT },
+    { name: "stacked", spec: { chartType: "stacked", xAxisType: "categorical" }, rows: ROWS_CAT },
+    { name: "waterfall", spec: { chartType: "waterfall", xAxisType: "categorical" }, rows: ROWS_CAT },
+    { name: "dumbbell", spec: { chartType: "dumbbell", xAxisType: "categorical" }, rows: ROWS_CAT },
+    { name: "dotplot", spec: { chartType: "dotplot", xAxisType: "categorical" }, rows: ROWS_CAT },
+    { name: "scatter", spec: { chartType: "scatter", xAxisType: "numeric" }, rows: ROWS_NUM },
+    {
+      name: "histogram",
+      spec: { chartType: "histogram", xAxisType: "numeric", histogram: { bins: 4 } },
+      rows: Array.from({ length: 20 }, (_, i) => ({
+        time: String(i), series: "one", value: String((i * 7) % 13),
+      })) as unknown as TidyRow[],
+    },
+  ];
+
+  for (const { name, spec, rows } of LONE) {
+    it(`${name}: one series, no legend, still one resolved icon of the right shape`, () => {
+      const lone = rows.filter((r) => (r as unknown as { series: string }).series === "one");
+      const r = renderChart(specOf(spec), lone, OPTS);
+      expect(r.legendItems, `${name}: expected no legend at one series`).toBeNull();
+
+      const icons = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows });
+      const icon = icons.get("one");
+      expect(icon, `${name}: a lone series resolved no icon, so its tooltip would key an empty box`)
+        .toBeTruthy();
+
+      // Pinned against the filled-type set rather than a literal list: a new filled chart type that
+      // forgot to key with a chip would otherwise lose its square here and nowhere else.
+      if (FILLED_CHART_TYPES.has(spec.chartType as string)) {
+        expect(icon!.shape, `${name}: a filled mark must key with a square`).toBe("rect");
+      } else {
+        expect(icon!.shape, `${name}: a stroked/point mark must not key with a square`).not.toBe("rect");
       }
     });
   }

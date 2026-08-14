@@ -23,6 +23,8 @@ import {
   type CategoryBand,
   type CategoryBandH,
 } from "../src/engine/crosshair";
+import { recolourIcons, type IconSpec } from "../src/engine/icon";
+import { resolveHatch } from "../src/engine/hatch";
 import { mountChart } from "../src/engine/render-live";
 import { TOTAL_SERIES_KEY } from "../src/engine/series-keys";
 import type { ChartSpec } from "../src/spec/types";
@@ -238,24 +240,29 @@ const ROWS: BandRow[] = [
   { _xc: "Cat2", series: "Beta",  _y: 12 },
 ];
 
-const COLORS = new Map([["Alpha", "#f00"], ["Beta", "#00f"]]);
+// The tooltip's ONE key channel. Every row's drawing comes from here; the builder no longer takes
+// a colour map or a shape name, so a test that wants a square has to say so as the caller does.
+const ICONS = new Map<string, IconSpec>([
+  ["Alpha", { shape: "rect", color: "#f00" }],
+  ["Beta", { shape: "rect", color: "#00f" }],
+]);
 
 describe("buildBandTooltipHtml", () => {
   it("includes the category as the header", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     expect(html).toContain("Cat1");
     expect(html).toContain("tbl-tooltip-head");
   });
 
   it("emits one row per series present in the category", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     expect(html).toContain("Alpha");
     expect(html).toContain("Beta");
   });
 
   it("does not include series from a different category", () => {
     // Rows for Cat2 only differ in _y; we verify Cat1 rows do not leak Cat2 values.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     // Cat1 Alpha=10, Beta=5; Cat2 Alpha=8, Beta=12 → "12" should not appear
     expect(html).toContain("10");
     expect(html).toContain("5");
@@ -265,30 +272,29 @@ describe("buildBandTooltipHtml", () => {
   it("respects seriesOrder", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
       seriesOrder: ["Beta", "Alpha"],
-      colors: COLORS,
+      icons: ICONS,
     });
     const betaIdx = html.indexOf("Beta");
     const alphaIdx = html.indexOf("Alpha");
     expect(betaIdx).toBeLessThan(alphaIdx);
   });
 
-  it("prefers renderedFills over colors for the swatch (bar tooltip color-matches the drawn bar)", () => {
+  it("prefers the DRAWN fill over the series colour (bar tooltip color-matches the drawn bar)", () => {
+    // The fill-first rule lives in recolourIcons now, not in this builder: the builder is pure and
+    // the drawn fill can only be read at the hover site. Asserted THROUGH the builder so it still
+    // pins what a reader sees, not just what the resolver returns.
     const html = buildBandTooltipHtml("Cat1", ROWS, {
-      swatchShape: "rect",
-      colors: COLORS, // series base colors #f00 / #00f
-      renderedFills: new Map([["Alpha", "#123456"]]), // Alpha's ACTUAL bar fill
+      icons: recolourIcons(ICONS, new Map([["Alpha", "#123456"]]), resolveHatch),
     });
-    // Alpha's swatch uses the rendered fill, not its base color. (The colour is the drawing's `fill`
-    // now, not the span's CSS `background` — a key over a bar has to match the bar's own paint.)
     expect(html).toContain("fill:#123456");
     expect(html).not.toContain("fill:#f00");
-    // Beta has no rendered fill → falls back to its base color.
+    // Beta has no rendered fill → keeps its resolved colour.
     expect(html).toContain("fill:#00f");
   });
 
   it("uses seriesLabels for display names", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
-      colors: COLORS,
+      icons: ICONS,
       seriesLabels: { Alpha: "Greek A", Beta: "Greek B" },
     });
     expect(html).toContain("Greek A");
@@ -299,7 +305,7 @@ describe("buildBandTooltipHtml", () => {
 
   it("uses the provided yFormat for values", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
-      colors: COLORS,
+      icons: ICONS,
       yFormat: (v) => `${v.toFixed(1)}%`,
     });
     expect(html).toContain("10.0%");
@@ -307,19 +313,19 @@ describe("buildBandTooltipHtml", () => {
   });
 
   it("does NOT add a Total row for non-stacked (isStacked omitted)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     expect(html).not.toContain("Total");
   });
 
   it("adds a Total row for diverging stacked charts (isStacked=true, showTotalDot=true)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
     expect(html).toContain("Total");
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
 
   it("draws the Total row's swatch as a circle for diverging stacks; per-series rows stay squares", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
     const doc = new DOMParser().parseFromString(html, "text/html");
     // The Total row's swatch is a circle matching the net dot / legend. It carried an `is-dot` class
     // over CSS that has since been deleted, so the class name outlived the drawing it stood for.
@@ -339,7 +345,7 @@ describe("buildBandTooltipHtml", () => {
   it("draws no Total swatch for cumulative stacked charts (showTotalDot=false)", () => {
     // Cumulative (all-positive) stacks show a text-above net callout, not a dot marker,
     // so the tooltip Total row must match: plain label + value, no circle swatch.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, icons: ICONS });
     expect(html).toContain("Total");
     const doc = new DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelectorAll("circle")).toHaveLength(0);
@@ -349,7 +355,7 @@ describe("buildBandTooltipHtml", () => {
 
   it("omits Total row when showTotalDot is undefined (netDisplay:none / normalized)", () => {
     // No net marker on the chart → no Total row in the tooltip.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, icons: ICONS });
     expect(html).not.toContain("Total");
   });
 
@@ -361,7 +367,10 @@ describe("buildBandTooltipHtml", () => {
     const html = buildBandTooltipHtml("X", divergingRows, {
       isStacked: true,
       showTotalDot: true,
-      colors: new Map([["Up", "#0f0"], ["Down", "#f00"]]),
+      icons: new Map<string, IconSpec>([
+        ["Up", { shape: "rect", color: "#0f0" }],
+        ["Down", { shape: "rect", color: "#f00" }],
+      ]),
     });
     expect(html).toContain("Total");
     // Net = 8 + (-3) = 5
@@ -380,7 +389,7 @@ describe("buildBandTooltipHtml", () => {
       { _xc: "Cat1", series: "Alpha", _y: null },
       { _xc: "Cat1", series: "Beta",  _y: 7 },
     ];
-    const html = buildBandTooltipHtml("Cat1", withNull, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", withNull, { icons: ICONS });
     expect(html).toContain("Beta");
     expect(html).not.toContain("Alpha");
   });
@@ -456,7 +465,7 @@ describe("attachBandCrosshair (smoke)", () => {
   it("pointermove listener is registered (fires without throwing)", () => {
     const svg = makeSvg();
     document.body.appendChild(svg);
-    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"], colors: COLORS });
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"], icons: ICONS });
     const hit = svg.querySelector(".tbl-band-crosshair-hit") as Element;
     expect(hit).not.toBeNull();
     // Fire a synthetic pointermove — should not throw.
@@ -1051,7 +1060,7 @@ describe("attachSecondaryBandCursor (coordinated cursor)", () => {
     const drive = attachSecondaryBandCursor(svg, {
       rows: ROWS,
       categories: ["Cat1"],
-      colors: COLORS,
+      colors: new Map([["Alpha", "#f00"], ["Beta", "#00f"]]),
       seriesOrder: ["Alpha", "Beta"],
     });
     expect(typeof drive).toBe("function");

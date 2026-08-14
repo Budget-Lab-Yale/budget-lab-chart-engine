@@ -9,7 +9,7 @@ import { renderChart, buildLegendItems } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { defaultHatchStroke, resolveHatch } from "../src/engine/hatch";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";
-import { ICON_BOX } from "../src/engine/icon";
+import { ICON_BOX, type IconSpec } from "../src/engine/icon";
 import { CHART_CSS } from "../src/embed/styles";
 import { FILLED_CHART_TYPES } from "../src/spec/filled-chart-types";
 import type { ChartSpec } from "../src/spec/types";
@@ -85,17 +85,20 @@ describe("the tooltip swatch", () => {
     { _xc: "Top 1%", series: "collectedNew", _y: 7 },
     { _xc: "Top 1%", series: "lostToBehavior", _y: 4 },
   ];
-  const COLORS = new Map([
-    ["collectedNew", "#0072B2"],
-    ["lostToBehavior", GROUND],
+  // The resolved keys the live layer hands the tooltip — one textured, one flat.
+  const ICONS = new Map<string, IconSpec>([
+    ["collectedNew", { shape: "rect", color: "#0072B2" }],
+    ["lostToBehavior", { shape: "rect", color: GROUND, hatch: EXPECTED }],
+  ]);
+  const FLAT_ICONS = new Map<string, IconSpec>([
+    ["collectedNew", { shape: "rect", color: "#0072B2" }],
+    ["lostToBehavior", { shape: "rect", color: GROUND }],
   ]);
 
   it("carries the same texture as the legend and the mark", () => {
     const html = buildBandTooltipHtml("Top 1%", TIP_ROWS, {
       isStacked: true,
-      swatchShape: "rect",
-      colors: COLORS,
-      hatches: new Map([["lostToBehavior", EXPECTED]]),
+      icons: ICONS,
     });
     // The same inline-SVG glyph the legend key uses.
     expect(html).toContain("<svg");
@@ -105,9 +108,7 @@ describe("the tooltip swatch", () => {
   it("leaves an untextured series as a plain colour fill", () => {
     const html = buildBandTooltipHtml("Top 1%", TIP_ROWS, {
       isStacked: true,
-      swatchShape: "rect",
-      colors: COLORS,
-      hatches: new Map([["lostToBehavior", EXPECTED]]),
+      icons: ICONS,
     });
     const collectedRow = html
       .split('<div class="tbl-tooltip-row"')
@@ -121,8 +122,7 @@ describe("the tooltip swatch", () => {
   it("draws every key flat when no textures are passed at all", () => {
     const html = buildBandTooltipHtml("Top 1%", TIP_ROWS, {
       isStacked: true,
-      swatchShape: "rect",
-      colors: COLORS,
+      icons: FLAT_ICONS,
     });
     const doc = new DOMParser().parseFromString(html, "text/html");
     for (const svg of doc.querySelectorAll(".tbl-tooltip-swatch svg")) {

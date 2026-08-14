@@ -228,17 +228,6 @@ export function resolveHatch(char: HatchChar, ground: string): SeriesHatch {
   return { char, ground, stroke, id: hatchPatternId(char, ground, stroke) };
 }
 
-/** Series → resolved texture, read off already-resolved legend rows. The legend is the source of
- *  truth on purpose: it holds the colour each series is actually PAINTED, so a tooltip key built from
- *  this can never disagree with the legend key beside it. Empty when nothing is textured. */
-export function hatchesBySeries(
-  items: ReadonlyArray<{ series: string; hatch?: SeriesHatch }> | null | undefined,
-): Map<string, SeriesHatch> {
-  const out = new Map<string, SeriesHatch>();
-  for (const item of items ?? []) if (item.hatch) out.set(item.series, item.hatch);
-  return out;
-}
-
 /** Resolve `series_patterns` for the LEGEND, whose ground is the colour the legend itself shows.
  *  The marks resolve per element instead (see assemble-plot), because `bar_color`/`category_colors`/
  *  the selector accent override the fill per mark and the legend shows only the base colour.
@@ -310,22 +299,4 @@ export function defaultHatchStroke(ground: string): string {
   const l = lightness(ground);
   const canDarken = l != null && l - HATCH_FALLBACK_DL >= 0;
   return shiftLightness(ground, canDarken ? -HATCH_FALLBACK_DL : HATCH_FALLBACK_DL);
-}
-
-
-
-/** The textures a TOOLTIP should key from.
- *
- *  Prefers the legend's resolved rows, because those carry the colour each series is actually PAINTED
- *  (a mono stack's tonal tier, not its palette entry). Falls back to resolving from the spec when
- *  there is no legend at all — a single-series histogram or waterfall has tooltips but no legend, so
- *  keying off legend rows silently produced no texture there. This is why the RESOLVER has to be
- *  shared and not just the renderer. */
-export function tooltipHatches(
-  items: ReadonlyArray<{ series: string; hatch?: SeriesHatch }> | null | undefined,
-  spec: Pick<ChartSpec, "series_patterns">,
-  seriesColors: Map<string, string>,
-): Map<string, SeriesHatch> {
-  const fromLegend = hatchesBySeries(items);
-  return fromLegend.size ? fromLegend : resolveSeriesHatches(spec, seriesColors);
 }

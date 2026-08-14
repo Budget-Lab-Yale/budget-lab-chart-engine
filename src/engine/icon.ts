@@ -479,9 +479,12 @@ export function iconFromLegendItem(item: {
  *  tooltip, and a `bar_color` histogram keyed from the PALETTE while its bins were painted from
  *  `bar_color`: a blue key over violet bins. Resolving once, here, is what makes them agree.
  *
- *  `legendItems` is the preferred source because a legend row is already resolved — it carries the
- *  symbol, the ring, the texture AND the colour actually painted. `fallback` covers charts with
- *  tooltips but NO legend — a single-series histogram or waterfall — where there is no row to read.
+ *  BOTH sources are legend rows, which is the whole trick. `legendItems` wins where it exists,
+ *  because a drawn row is already resolved — symbol, ring, texture and the colour actually painted.
+ *  `keyRows` covers the series a legend SUPPRESSES: a lone series draws no legend on any chart type,
+ *  yet still tooltips, and those charts used to key from a separate set of loose channels that
+ *  drifted from the legend's rules (see index.ts buildSeriesKeyRows). Filling the gap from the row
+ *  the legend would have drawn is what lets those channels be deleted rather than merely bypassed.
  *
  *  It does NOT re-colour. A fill the legend cannot know (`bar_color`, `category_colors`, the
  *  title-selector accent) is applied by `recolourIcons` below, at the hover site that reads the
@@ -500,10 +503,8 @@ export function resolveTooltipIcons(opts: {
     hatch?: SeriesHatch;
     annotation?: boolean;
   }> | null;
-  /** Used for series with no legend row at all. */
-  fallback?: (series: string) => IconSpec | undefined;
-  /** Series the tooltip will show, so a fallback can cover them all. */
-  series?: readonly string[];
+  /** The key row for EVERY series, drawn or not — `RenderResult.seriesKeyRows`. Fills the gaps. */
+  keyRows?: ReadonlyArray<Parameters<typeof iconFromLegendItem>[0] & { series: string }> | null;
 }): Map<string, IconSpec> {
   const out = new Map<string, IconSpec>();
   for (const item of opts.legendItems ?? []) {
@@ -511,11 +512,8 @@ export function resolveTooltipIcons(opts: {
     if (item.annotation) continue;
     out.set(item.series, iconFromLegendItem(item));
   }
-  for (const s of opts.series ?? []) {
-    if (!out.has(s)) {
-      const icon = opts.fallback?.(s);
-      if (icon) out.set(s, icon);
-    }
+  for (const row of opts.keyRows ?? []) {
+    if (!out.has(row.series)) out.set(row.series, iconFromLegendItem(row));
   }
   return out;
 }
