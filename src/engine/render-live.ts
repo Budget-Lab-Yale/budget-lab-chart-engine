@@ -27,7 +27,6 @@ import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
 import { resolveColor } from "./palette.js";
-import { paintedFill } from "./painted-fill.js";
 import { tooltipHatches, resolveSeriesHatches, type SeriesHatch } from "./hatch.js";
 import { resolveTooltipIcons, type IconSpec } from "./icon.js";
 import { FILLED_CHART_TYPES } from "../spec/validate.js";
@@ -1141,16 +1140,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         label: histogramBinLabelOpts(spec),
-        // A single-series histogram has NO legend, so there is no row to read: the icon is resolved
-        // from the spec, and its colour from the fill actually painted. Reading `colors` gave the
-        // PALETTE entry, so a `bar_color: violet` histogram keyed blue over violet bins.
-        // A single-series histogram has NO legend row, so the fallback supplies the icon and the
-        // painted fill supplies its colour: reading `colors` gave the PALETTE, so a bar_color
-        // histogram keyed blue over violet bins.
+        // A single-series histogram has NO legend row, so the fallback supplies the icon. Its COLOUR
+        // is not settled here: `attachHistogramHover` reads the rendered bars and recolours through
+        // `recolourIcons`, which also re-grounds a texture. Reading `colors` for it gave the PALETTE,
+        // so a `bar_color: violet` histogram keyed blue over violet bins.
         icons: resolveTooltipIcons({
           legendItems,
           series: seriesOrder,
-          painted: histogramPaintedFills(svg, seriesOrder),
           fallback: (s) => {
             const hatch = resolveSeriesHatches(spec, colors).get(s);
             return { shape: "rect", color: colors.get(s) ?? "", ...(hatch ? { hatch } : {}) };
@@ -1676,29 +1672,6 @@ export function buildFigureHeader(
  *  When `ctx.onResolve` is set (coordinated cursor), the primary crosshair emits its resolved
  *  x-key and a secondary-cursor driver is attached + returned for the figure-level bus.
  *  `dataInScope`/tooltip/bar-metadata come from the pane (or figure) metadata. */
-/** Series → the fill its marks are ACTUALLY painted, read off the rendered SVG.
- *
- *  `bar_color`, `category_colors` and the title-selector accent all override a series' colour at the
- *  mark, and none of them reaches the engine's `colors` map — so a tooltip keying from that map shows
- *  a different colour from the bars beside it. `paintedFill` resolves the mark's own fill against its
- *  ancestors; a series with no fill anywhere below the root is left OUT of the map, so the caller
- *  keeps its `colors` entry rather than being handed the root's `currentColor`. */
-function paintedFills(svg: SVGSVGElement, selector: string, series: readonly string[]): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const s of series) {
-    // NOT CSS.escape: it does not exist in jsdom or Node, so it threw before the chart existed on
-    // every headless render. Series keys are author-supplied, so quotes and backslashes must escape.
-    const key = s.replace(/["\\]/g, "\\$&");
-    const el = svg.querySelector<SVGElement>(`${selector}[data-series="${key}"]`);
-    const fill = paintedFill(el, svg);
-    if (fill) out.set(s, fill);
-  }
-  return out;
-}
-
-const histogramPaintedFills = (svg: SVGSVGElement, series: readonly string[]) =>
-  paintedFills(svg, 'g[aria-label="rect"] rect', series);
-
 function wireFigureSvg(
   svg: SVGSVGElement,
   handle: LegendHandle | null,

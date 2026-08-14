@@ -480,10 +480,13 @@ export function iconFromLegendItem(item: {
  *  `bar_color`: a blue key over violet bins. Resolving once, here, is what makes them agree.
  *
  *  `legendItems` is the preferred source because a legend row is already resolved — it carries the
- *  symbol, the ring, the texture AND the colour actually painted. `painted` overrides the colour per
- *  series for the cases the legend cannot know (a `category_colors` bar keys the hovered category, not
- *  the series). `fallback` covers charts with tooltips but NO legend — a single-series histogram or
- *  waterfall — where there is no row to read. */
+ *  symbol, the ring, the texture AND the colour actually painted. `fallback` covers charts with
+ *  tooltips but NO legend — a single-series histogram or waterfall — where there is no row to read.
+ *
+ *  It does NOT re-colour. A fill the legend cannot know (`bar_color`, `category_colors`, the
+ *  title-selector accent) is applied by `recolourIcons` below, at the hover site that reads the
+ *  rendered SVG — one path, and the one that also re-resolves a texture's ground. This function
+ *  carried a second, colour-only version of that job, which left a hatched key on its old ground. */
 export function resolveTooltipIcons(opts: {
   legendItems?: ReadonlyArray<{
     series: string;
@@ -497,8 +500,6 @@ export function resolveTooltipIcons(opts: {
     hatch?: SeriesHatch;
     annotation?: boolean;
   }> | null;
-  /** Series → the colour actually painted, when it differs from the legend's. */
-  painted?: Map<string, string>;
   /** Used for series with no legend row at all. */
   fallback?: (series: string) => IconSpec | undefined;
   /** Series the tooltip will show, so a fallback can cover them all. */
@@ -514,13 +515,6 @@ export function resolveTooltipIcons(opts: {
     if (!out.has(s)) {
       const icon = opts.fallback?.(s);
       if (icon) out.set(s, icon);
-    }
-  }
-  if (opts.painted) {
-    for (const [s, color] of opts.painted) {
-      const icon = out.get(s);
-      if (icon) out.set(s, { ...icon, color });
-      else if (opts.fallback?.(s)) out.set(s, { ...opts.fallback(s)!, color });
     }
   }
   return out;
