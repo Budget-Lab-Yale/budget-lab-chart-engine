@@ -247,19 +247,29 @@ body {
   var btn = document.getElementById("open-all");
   if (!btn) return;
   var note = document.getElementById("open-all-note");
+  // One click here spends one tab per spec and there is no undo — closing 100 tabs is done by hand.
+  // A dozen is about as many as a tab strip still shows with readable titles, so up to that the
+  // click is plausibly what was meant; past it, ask, because at that size a misfire costs more than
+  // the confirm does.
+  var CONFIRM_ABOVE = 12;
   btn.addEventListener("click", function () {
     var hrefs = ${hrefsJson};
-    var blocked = 0;
+    if (hrefs.length > CONFIRM_ABOVE &&
+        !window.confirm("Open " + hrefs.length + " tabs, one per spec?")) return;
+    var refused = 0;
     for (var i = 0; i < hrefs.length; i++) {
-      // A window the browser refused comes back null (or closed), which is the ONLY signal that the
-      // pop-up blocker ate it: most browsers allow one window per gesture, so a suite of 16 opens one
-      // tab and looks broken. Say so instead.
+      // Worth reporting at all because most browsers allow one window per gesture: a suite of 16
+      // opens one tab and looks broken. But a null return is the only refusal a browser actually
+      // reports — w.closed read synchronously both over- and under-counts, since a tab that opened
+      // fine is still navigating and some blockers hand back a stub that never admits to closing.
+      // So refused is a floor, not a total, and the note below says "at least" instead of
+      // asserting a count this cannot know.
       var w = window.open(hrefs[i], "_blank");
-      if (!w || w.closed) blocked++;
+      if (w === null) refused++;
     }
-    if (blocked > 0) {
-      note.textContent = blocked + " of " + hrefs.length +
-        " tabs were blocked — allow pop-ups for this page, then click again.";
+    if (refused > 0) {
+      note.textContent = "At least " + refused + " of " + hrefs.length +
+        " tabs did not open — allow pop-ups for this page, then click again.";
       note.hidden = false;
     } else {
       note.hidden = true;

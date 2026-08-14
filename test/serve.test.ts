@@ -114,6 +114,74 @@ function fakeRequest(
 }
 
 // ---------------------------------------------------------------------------
+// Helpers: drive the index page's open-all script without a browser
+// ---------------------------------------------------------------------------
+
+/** Serve an index page for a gallery holding `count` chart specs. */
+async function galleryFor(count: number): Promise<{ body: string }> {
+  const dir = makeTempDir();
+  for (let i = 0; i < count; i++) {
+    const sub = join(dir, `spec-${i}`);
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(
+      join(sub, "chart.yaml"),
+      `chartType: line\ntitle: Spec ${i}\nxAxisType: temporal\ndata: d.csv\n`,
+    );
+  }
+  const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+  return { body: (await fakeRequest(handler, "/")).body };
+}
+
+/**
+ * Run the index page's inline script against stub window/document objects and click the button.
+ *
+ * The behaviour under test is pop-up handling, which no assertion on the emitted source text can
+ * reach: whether a returned window counts as blocked, and whether a large set is confirmed first,
+ * are decisions the script makes at click time. Executing it with a stub `window.open` is the only
+ * way to observe them, and is cheaper and less brittle than a real browser.
+ */
+function runOpenAll(
+  body: string,
+  stubs: { open?: (href: string) => unknown; confirm?: (msg: string) => boolean } = {},
+): { opened: string[]; confirmed: string[]; note: { textContent: string; hidden: boolean } } {
+  const opened: string[] = [];
+  const confirmed: string[] = [];
+  const note = { textContent: "", hidden: true };
+  let click: (() => void) | null = null;
+
+  const win = {
+    open(href: string) {
+      opened.push(href);
+      return stubs.open ? stubs.open(href) : {};
+    },
+    confirm(msg: string) {
+      confirmed.push(msg);
+      return stubs.confirm ? stubs.confirm(msg) : true;
+    },
+  };
+  const doc = {
+    getElementById(id: string) {
+      if (id === "open-all") {
+        return {
+          addEventListener(_type: string, fn: () => void) {
+            click = fn;
+          },
+        };
+      }
+      if (id === "open-all-note") return note;
+      return null;
+    },
+  };
+
+  const open = body.indexOf("<script>");
+  const src = body.slice(open + "<script>".length, body.indexOf("</script>", open));
+  new Function("window", "document", src)(win, doc);
+  if (!click) throw new Error("open-all button never registered a click handler");
+  (click as () => void)();
+  return { opened, confirmed, note };
+}
+
+// ---------------------------------------------------------------------------
 // findSpecs
 // ---------------------------------------------------------------------------
 
@@ -244,6 +312,51 @@ describe("GET / — index page", () => {
     const { body } = await fakeRequest(handler, "/");
     const script = body.slice(body.indexOf('id="open-all"'));
     expect(script).not.toContain("</script><b>");
+  });
+
+  it("asks before opening a tab count large enough to be a misfire", async () => {
+    // 13 specs is one past the threshold, so the click must be confirmed; declining opens nothing,
+    // because the whole point of the guard is that there is no undo for 100 stray tabs.
+    const { body } = await galleryFor(13);
+    const declined = runOpenAll(body, { confirm: () => false });
+    expect(declined.confirmed).toEqual(["Open 13 tabs, one per spec?"]);
+    expect(declined.opened).toEqual([]);
+
+    const accepted = runOpenAll(body, { confirm: () => true });
+    expect(accepted.opened).toHaveLength(13);
+  });
+
+  it("does not ask at or below the threshold", async () => {
+    const { body } = await galleryFor(12);
+    const run = runOpenAll(body, {
+      // A confirm at this size would be friction on the common case; if one is asked, fail loudly
+      // rather than silently answering it.
+      confirm: () => {
+        throw new Error("should not confirm at 12 specs");
+      },
+    });
+    expect(run.confirmed).toEqual([]);
+    expect(run.opened).toHaveLength(12);
+  });
+
+  it("claims no blocked tabs when the browser handed back a window", async () => {
+    // A window that opened fine may still report closed while it navigates, and some pop-up blockers
+    // return a stub that never reports closed at all. Reading .closed therefore proves nothing, so a
+    // non-null return must never be counted as blocked.
+    const { body } = await galleryFor(2);
+    const run = runOpenAll(body, { open: () => ({ closed: true }) });
+    expect(run.opened).toHaveLength(2);
+    expect(run.note.hidden).toBe(true);
+    expect(run.note.textContent).toBe("");
+  });
+
+  it("reports a refused window as a floor, not an exact count", async () => {
+    // null is the one unambiguous refusal, so the count is a lower bound and the wording must say so.
+    const { body } = await galleryFor(2);
+    const run = runOpenAll(body, { open: () => null });
+    expect(run.note.hidden).toBe(false);
+    expect(run.note.textContent).toContain("At least 2 of 2 tabs did not open");
+    expect(run.note.textContent).toContain("allow pop-ups");
   });
 
   it("lists a table.yaml spec by its title", async () => {
