@@ -50,24 +50,39 @@ const SYMBOL_REACH_K: Record<string, number> = {
   star: 0.94385,
 };
 
-/** OPTICAL sizing, with a referent instead of a taste knob: a marker key is drawn at THE SIZE THE
- *  CHART DRAWS ITS MARKER, and shrunk only where the box would otherwise cut it.
+/** The ANCHOR: the area the chart itself draws a marker at, which is the size a key has to be in the
+ *  neighbourhood of — a key that is 9% smaller than the dot beside it is wrong in a way nobody can
+ *  measure by eye but everybody can see.
  *
- *  Two measurements make that well defined. Plot sizes a symbol by area (πr²), and d3's `size` really
- *  is the painted area — counted in pixels, the ratio is 1.000 ± 1% across all seven — so the chart's
- *  radius converts straight into a `size`, and equal `size` is equal INK.
- *
- *  Both earlier rules were wrong, in opposite directions. Equal area at a hand-picked constant let the
- *  star overflow the box. Equal REACH made every symbol touch the box, so a star's points reached the
- *  edge while its body carried a third of a square's ink. Equal ink at the CHART's size is the third
- *  option, and the only one with a real answer to "how big?" — as big as the mark it names, which is
- *  also why the key stopped reading smaller than the scatter dot beside it.
- *
- *  Only the three pointiest symbols clamp, and mildly (star to 83% of the chart's ink, diamond 85%,
- *  triangle 96%); nothing clamps on a line. A bigger ICON_BOX would remove even those, and is a
- *  one-constant change. */
+ *  Well defined because of two measurements. Plot sizes a symbol by area (πr²), and d3's `size` really
+ *  is the painted area — counted in pixels, the ratio is 1.000 ± 1% across all seven — so a chart
+ *  RADIUS converts straight into a d3 `size`. `SHAPE_CORRECTION` below then spreads the set around this
+ *  anchor, and the box clamps whatever still will not fit. */
 const CHART_MARKER_AREA = Math.PI * MARK_POINT_R ** 2;
 const CHART_LINE_MARKER_AREA = Math.PI * MARK_LINE_POINT_R ** 2;
+
+/** The least compact symbol — the one whose ink is spread furthest for a given area. */
+const MAX_REACH_K = Math.max(...Object.values(SYMBOL_REACH_K));
+
+/** SHAPE CORRECTION: how far to move from equal AREA toward equal REACH, because neither reads right.
+ *
+ *  0 draws every symbol at the same area — d3's own rule, and it makes the COMPACT shapes (circle,
+ *  square) read small, because their ink sits in a smaller span. 1 gives every symbol the same span,
+ *  which is matplotlib's rule, and it makes the SPREAD shapes (star, wye, cross) read light, because
+ *  the same span holds a third of the ink. The truth is in between and it is shape-dependent.
+ *
+ *  There is no published answer to take. matplotlib has carried this as an open issue since 2019 and
+ *  its own conclusion is that "an objective geometric criterion like area" cannot do it and the
+ *  factors "need to be hand-tuned by a human". The psychophysics gives only the shape of the problem —
+ *  perceived size is a compressive power function of area, exponent ≈ 0.7 — and cartography's two
+ *  classic results are within-shape magnitude corrections (Flannery's 0.5716 exponent for circles;
+ *  Crawford finding squares scaled by area are judged accurately), not a cross-shape table.
+ *
+ *  So this is a hand-judged constant, as the state of the art says it must be. What it is NOT is seven
+ *  hand-tuned numbers: the correction is one exponent over the measured shape constants, so a
+ *  judgement about the set stays a judgement about one value. Judged by eye against a rendered strip
+ *  of 0, 0.25, 0.45, 0.7 and 1.0, beside the chart's own dots. */
+const SHAPE_CORRECTION = 0.45;
 
 /** The largest `size` that keeps `symbol`'s ink within `limit` of the centre. */
 function sizeAtReach(symbol: string, limit: number): number {
@@ -75,13 +90,19 @@ function sizeAtReach(symbol: string, limit: number): number {
   return (limit / k) ** 2;
 }
 
-/** The d3 `size` a marker key is drawn at: the chart's own, unless the box cuts it first. */
+/** The d3 `size` a marker key is drawn at.
+ *
+ *  Anchored to the size the CHART draws its marker at, corrected for shape, and clamped so the box
+ *  never cuts it. The anchor is what stopped the key reading smaller than the scatter dot beside it;
+ *  the correction is what stops the compact symbols reading small within the key's own set. */
 export function symbolArea(symbol: string, onLine = false, hollow = false): number {
   const half = ICON_BOX / 2;
   // A ring's stroke straddles the path, so the path stops half a stroke short and the RING's outer
   // edge lands on the box. Without this the ring was cut at its four extremes and read flat-sided.
   const limit = hollow ? half - RING_WEIGHT / 2 : onLine ? half - MARKER_KEYLINE / 2 : half;
-  const want = onLine ? CHART_LINE_MARKER_AREA : CHART_MARKER_AREA;
+  const k = SYMBOL_REACH_K[symbol] ?? SYMBOL_REACH_K.circle!;
+  const anchor = onLine ? CHART_LINE_MARKER_AREA : CHART_MARKER_AREA;
+  const want = anchor * (MAX_REACH_K / k) ** (2 * SHAPE_CORRECTION);
   return Math.round(Math.min(want, sizeAtReach(symbol, limit)));
 }
 

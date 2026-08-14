@@ -197,26 +197,29 @@ describe("each shape draws what it says", () => {
     expect("stroke" in filled! && filled.stroke).toBeFalsy();
   });
 
-  it("sizes a marker key from the size the CHART draws its marker", () => {
-    // The referent, not a constant of the key's own: a key that is 9% smaller than the dot beside it
-    // is wrong in a way nobody can measure by eye but everybody can see. Plot sizes a symbol by area
-    // = pi*r^2, so a chart radius converts straight into a d3 `size`.
+  it("sizes a marker key from the chart's marker, corrected for how compact the shape is", () => {
+    // Anchored to the chart (Plot sizes a symbol by area = pi*r^2, so a radius converts straight into
+    // a d3 `size`) so a key cannot read smaller than the dot beside it — it was 9% smaller. Then
+    // corrected, because equal area makes compact shapes read small and equal span makes spread ones
+    // read light; there is no published cross-shape table, so the correction is one hand-judged
+    // exponent over the measured shape constants rather than seven hand-tuned numbers.
     const chart = Math.PI * MARK_POINT_R ** 2;
-    const chartOnLine = Math.PI * MARK_LINE_POINT_R ** 2;
-    // Blocky symbols fit the chart's size inside the box, so they get it exactly.
+    // Every symbol gets AT LEAST the chart's own marker area, unless the box cuts it first.
     for (const sym of ["circle", "square", "cross", "wye"]) {
-      expect(symbolArea(sym), sym).toBe(Math.round(chart));
+      expect(symbolArea(sym), sym).toBeGreaterThan(chart);
     }
-    // The pointiest three are cut by the box first, so they clamp — mildly, and never past it.
+    // Size ascends as the shape gets more compact: a square carries its ink in the smallest span, so
+    // it needs the most of it. This ordering IS the correction — at correction 0 it would be flat.
+    const bySpan = ["square", "circle", "cross", "wye"]; // measured k ascending
+    for (let i = 1; i < bySpan.length; i++) {
+      expect(symbolArea(bySpan[i - 1]!), `${bySpan[i - 1]} vs ${bySpan[i]}`).toBeGreaterThan(symbolArea(bySpan[i]!));
+    }
+    // The three most spread shapes are cut by the box before the correction reaches them, which is
+    // what a bigger ICON_BOX would relieve.
     for (const sym of ["triangle", "diamond", "star"]) {
-      expect(symbolArea(sym), sym).toBeLessThan(chart);
-      expect(symbolArea(sym), sym).toBeGreaterThan(chart * 0.8);
+      expect(symbolArea(sym), sym).toBeLessThan(symbolArea("wye"));
     }
-    // On a line nothing clamps: the chart draws a smaller marker there, and every symbol fits it.
-    for (const sym of ["circle", "star", "diamond"]) {
-      expect(symbolArea(sym, true), `${sym} on a line`).toBe(Math.round(chartOnLine));
-    }
-    // A hollow symbol makes room for its ring.
+    // A hollow symbol still makes room for its ring.
     expect(symbolArea("star", false, true)).toBeLessThan(symbolArea("star"));
   });
 
