@@ -164,6 +164,18 @@ const CHARTS: Array<{ name: string; spec: Record<string, unknown>; rows: TidyRow
       value: String((i * 7) % 13),
     })) as unknown as TidyRow[],
   },
+  {
+    // Redundant colour+shape: each series gets its own SYMBOL, which is the case where a key can name
+    // a shape the chart does not draw. The ink tests below cannot see that — same colour, wrong shape.
+    name: "scatter, shape redundant with series",
+    spec: {
+      chartType: "scatter",
+      xAxisType: "numeric",
+      series_colors: COLORS,
+      columns: { x: "time", value: "value", series: "series", shape: "series" },
+    },
+    rows: ROWS_NUM,
+  },
 ];
 
 const specOf = (s: Record<string, unknown>) =>
@@ -341,6 +353,45 @@ describe("a key matches the mark it names", () => {
           `${name}: "${series}" is outlined on the chart with ${paint(mark.fill) || "a HOLE"} in the ` +
             `middle, but its key has ${middles.map((m) => m || "a HOLE").join(", ")}`,
         ).toContain(paint(mark.fill).toLowerCase());
+      }
+    });
+  }
+
+  /** A path's command letters, which identify a SHAPE independently of the size it is drawn at: a
+   *  circle carries arcs, a triangle three lines, a star ten. Numbers are stripped first so the
+   *  exponent in `1e-7` cannot masquerade as a command. */
+  const shapeSig = (d: string) =>
+    d.replace(/[-+]?[\d.]+(?:e[-+]?\d+)?/gi, "").replace(/[\s,]/g, "");
+
+  for (const { name, spec, rows } of CHARTS) {
+    it(`${name} — the key draws the same SHAPE as the mark`, () => {
+      // The ink tests above compare colour and role, so they pass a key that draws a square over a
+      // triangle. On a point chart each series carries its own symbol, which makes that a real
+      // possibility rather than a hypothetical, and the shape is the whole content of that channel.
+      const r = renderChart(specOf(spec), rows, OPTS);
+      const icons = resolveTooltipIcons({ legendItems: r.legendItems, series: r.seriesOrder });
+      let compared = 0;
+      for (const series of r.seriesOrder) {
+        // Only DOT marks: a line chart's `[data-series]` is the line itself, and comparing a rule to
+        // a marker would be comparing two different things.
+        const mark = r.svg.querySelector(`g[aria-label="dot"] [data-series="${series}"]`);
+        if (!mark) continue;
+        const icon = icons.get(series);
+        const keyPath = icon && iconShapes(icon).find((s) => s.kind === "path");
+        if (!keyPath || keyPath.kind !== "path") continue;
+        compared++;
+        if (mark.tagName.toLowerCase() === "circle") {
+          // Plot draws a plain dot as <circle>; the key draws a circle as an arc path.
+          expect(shapeSig(keyPath.d), `${name}: "${series}" is a round dot, key is not`).toContain("A");
+          continue;
+        }
+        expect(
+          shapeSig(keyPath.d),
+          `${name}: "${series}" is drawn as one shape on the chart and another in its key`,
+        ).toBe(shapeSig(mark.getAttribute("d") ?? ""));
+      }
+      if (name.startsWith("scatter") || name.startsWith("dumbbell") || name.includes("markers")) {
+        expect(compared, `${name}: no dot marks were compared, so this proved nothing`).toBeGreaterThan(0);
       }
     });
   }
