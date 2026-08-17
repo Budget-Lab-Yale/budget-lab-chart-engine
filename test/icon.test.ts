@@ -191,6 +191,17 @@ describe("each shape draws what it says", () => {
       expect(outline.y + outline.height).toBeCloseTo(ICON_BOX - half, 5);
       expect(iconWidth(icon)).toBeGreaterThan(ICON_BOX);
     }
+    // SQUARE CORNERS. The bands under this outline are square, so any radius on it curves the border
+    // inward at the four corners and leaves band colour showing OUTSIDE the chip. Invisible at a ~10%
+    // annotation tint, which is how it shipped — the single-colour chip has no such split, because it
+    // rounds its own ground. `rounded` cannot rescue it either and is ignored here, so ask for it and
+    // the corners must STILL be square.
+    expect(outline.kind === "rect" ? outline.rx : "not a rect").toBeUndefined();
+    const asked = iconShapes({ shape: "rect", colors: tints, outlined: true, rounded: true });
+    const askedOutline = asked[asked.length - 1]!;
+    expect(askedOutline.kind === "rect" ? askedOutline.rx : "not a rect").toBeUndefined();
+    expect(iconSvgMarkup({ shape: "rect", colors: tints, outlined: true })).not.toContain("rx=");
+
     // Two tints fit inside the box and must be outlined just the same.
     const narrow = iconShapes({ shape: "rect", colors: ["#a1", "#b2"], outlined: true });
     expect(narrow).toHaveLength(3);

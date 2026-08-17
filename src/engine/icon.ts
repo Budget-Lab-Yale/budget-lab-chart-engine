@@ -154,7 +154,9 @@ export interface IconSpec {
   dashed?: boolean;
   /** `line`: also draw this marker centred on the line (a line chart with point markers). */
   symbol?: string;
-  /** `rect`: round the corners further — the "chip" a point chart's colour legend uses. */
+  /** `rect`: round the corners further — the "chip" a point chart's colour legend uses. Has no
+   *  effect alongside `colors`, whose banded chip squares off (see the rect branch); the two never
+   *  arrive together anyway, since only `markerShape: "chip"` sets this and it carries no colours. */
   rounded?: boolean;
   /** `rect`: draw a hairline, for a tint pale enough to vanish against the card. */
   outlined?: boolean;
@@ -260,6 +262,13 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
         // multi-tint row is a near-white chip with no border — a gap on a white card, which is the
         // exact failure the outline exists to prevent. Bounds are `iconWidth`, NOT the box: a banded
         // chip is the one icon allowed to be wider than ICON_BOX.
+        //
+        // SQUARE-CORNERED, and `icon.rounded` is deliberately ignored here. A radius on an outline
+        // laid OVER square bands curves the border inward at the four corners and leaves band colour
+        // outside it; the single-colour path below has no such split (it rounds the ground itself).
+        // A banded chip has no single ground to round — rounding each band would notch the seams —
+        // so the border squares off instead. At a ~10% tint the leak is invisible, which is how it
+        // shipped; a 1px radius on a 14px chip is invisible too, and only one of the two is wrong.
         return [
           ...bands,
           {
@@ -268,7 +277,6 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
             y: inset,
             width: box - inset * 2,
             height: ICON_BOX - inset * 2,
-            rx: RECT_RADIUS,
             fill: "none",
             stroke: OUTLINE,
             strokeWidth: 1,
