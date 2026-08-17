@@ -19,7 +19,8 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   is the series colour until `bar_color`, `category_colors` or the title-selector accent overrides
   it, and then it is that — and the hatch BAND colour is derived rather than authored — three tonal tiers along the ground's own hue ramp (lighter
   instead when the ground is too dark to darken), so a pair can never leave the Style-Guide ramp.
-  Measured ΔL* is 21–32 across all 70 palette colours, and a CI gate holds it there. The geometry is
+  A CI gate holds the pair between 20 and 33 ΔL* across all 72 hue-family palette colours (measured
+  today: 21.6 at `red-50`, 32.5 at `sky`). The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
   own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
   The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
@@ -38,14 +39,17 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   PNG export each built their keys separately, from a different subset of the channels and with
   eleven different icon boxes between them — a tooltip's plain square was 11px beside a hatched one
   at 14px, and adding a channel meant threading it into six places. So a hatched area series showed
-  a textured chip in its legend and a plain line in its tooltip; a `bar_color` histogram keyed blue
-  over violet bins; a line chart's markers reached the legend and not the tooltip; and in a
-  downloaded PNG a diverging stack's Total came out as a navy bar rather than the net dot, a hollow
-  dumbbell end came out filled, and every bar and area key was distinctly rounder than on screen.
-  All of it is now drawn by one module: one box, one geometry, all SVG (which retires the CSS
-  gradient that had to mirror the SVG dash by hand, and its angle conversion with it). A test
-  renders eleven chart types and asserts each key carries the same ink as the mark it names, on the
-  page and in the export.
+  a textured chip in its legend and a plain line in its tooltip; a lone dot plot keyed a line and a
+  lone dumbbell a plain disc, neither of which is the marker the chart draws; a line chart's markers
+  reached the legend and not the tooltip; and in a downloaded PNG a diverging stack's Total came out
+  as a navy bar rather than the net dot, a hollow dumbbell end came out filled, and every bar and
+  area key was distinctly rounder than on screen. All of it is now drawn by one module: one box, one
+  geometry, all SVG (which retires the CSS gradient that had to mirror the SVG dash by hand, and its
+  angle conversion with it). A test renders twelve charts spanning seven chart types and asserts, for
+  each, that the key carries the same ink as the mark it names — in the legend, in the tooltip and in
+  the export. A second block covers the charts that draw no legend at all: a lone series on each of
+  the nine chart types, checked for the right key SHAPE, plus a mounted, hovered, textured histogram
+  whose tooltip key must carry the same `<pattern>` id as the bin under the cursor.
 - **A marker symbol is sized and centred from measurements, not by hand.** Three separate faults, all
   from geometry written out by eye. The sizes were areas already solved for one target, and three of
   the seven were simply wrong (a triangle reached 5.58 of a 7 half-box). d3 sizes a symbol by AREA, so
@@ -138,19 +142,24 @@ golden moved and the markup comparison below cannot see them. A reader can:
   taking its fill from `bar_color` or `category_colors`. The key's ground — and therefore its derived
   band — now moves with the segment being hovered, so the swatch matches the thing it is naming
   instead of showing the family's base colour with a texture over it.
-- **A chart with ONE series keys its tooltip from the row the legend would have drawn.** A lone
-  series draws no legend row on any chart type, and those charts used to key from a separate set of
-  loose channels that had drifted from the legend's own rules. So a single-series **dot plot**'s
-  tooltip key changes from a line to its circular marker, and a single-series **dumbbell**'s from a
-  box-filling disc to that same marker, sized and centred the way every other key is. In both cases
-  it becomes what the multi-series version of the chart already drew.
+- **A chart with ONE series keys its tooltip from the row the legend would have drawn.** A single
+  unstyled series draws no legend row on any chart type (a lone *dashed* line is the exception — a
+  dash is a channel worth keying, so it gets rows), and the charts with no rows used to key from a
+  separate set of loose channels that had drifted from the legend's own rules. So a single-series
+  **dot plot**'s tooltip key changes from a line to its circular marker, and a single-series
+  **dumbbell**'s from a box-filling disc to that same marker, sized and centred the way every other
+  key is. In both cases it becomes what the multi-series version of the chart already drew.
 
 Nothing else in the plot frame moves: the snapshot self-test is pixel-identical, and the only golden
-diffs in the suite are the two dumbbell fixtures.
+diffs in the suite are the two dumbbell fixtures. (A third golden file also appears in the diff,
+`stack-textured-gapped`, but it is an addition rather than a change — a new fixture covering the two
+new keys together.)
 
 Measured against the archive rather than argued: all **41 figures published at the time of release**
 were rendered with 1.10.0 and with this version and compared in a browser. All 41 validate, none fail
-to render, and **the plot markup is byte-identical on all 41** — no mark moves. 29 legends are
+to render, and **the plot markup is byte-identical on all 41** — no mark moves. That and the dumbbell
+change above are consistent because **none of the 41 is a dumbbell**; a published dumbbell would have
+moved, and will move on the repin that first carries one. 29 legends are
 redrawn. Three figures with a point-chart legend end up 1–4 px shorter, because that legend's swatch
 was its own 18×16 box and is now the shared 14×14 one; if you embed by a fixed height, those three are
 the ones to look at.
