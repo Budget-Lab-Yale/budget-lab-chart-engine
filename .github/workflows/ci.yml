@@ -1,8 +1,12 @@
 name: CI
 
 # Typecheck + test gate for the engine. `npm ci` runs the `prepare` script, which builds dist/.
-# No browser is needed: the golden suite renders under jsdom and the PNG-compare suite builds
-# buffers in-process with pngjs — Playwright is never launched.
+#
+# A browser IS needed. Four suites launch Chromium, and they are the ones measuring facts no other
+# kind of test can reach: whether an icon's ink is cut by its box, whether a hatch key reads as the
+# character it names, and whether a faceted clip confines marks to their own cell. Two of them
+# guard with `describe.skipIf(!HAS_BROWSER)`, so before this step they passed CI by not running —
+# installing the browser is what makes them mean something here rather than only on a laptop.
 
 on:
   workflow_dispatch:
@@ -24,5 +28,8 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
+      # Chromium only: none of the suites are cross-browser, and --with-deps pulls the system
+      # libraries the runner image lacks.
+      - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
