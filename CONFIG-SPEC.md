@@ -8,7 +8,8 @@ what differs**.
 
 Two figure types, one file each:
 
-- **`chart.yaml`** — a `ChartSpec`: line, area, bar, stacked-bar, scatter, and dot-plot charts.
+- **`chart.yaml`** — a `ChartSpec`: line, area, bar, stacked-bar, scatter, dot-plot, waterfall,
+  histogram, and dumbbell charts.
 - **`table.yaml`** — a `TableSpec`: a formatted, interactive data table.
 
 Validate with `tbl-chart validate <file>` (schema + data cross-reference). Consuming repos
@@ -440,7 +441,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.netLabelColor` | enum | `white` \| `black`. |
 | `barStack.normalize` | boolean | Normalize each bar to 100%. |
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
-| `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, and a segment the gap takes below the ~25px label-fit threshold drops its label. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
+| `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, but the gap never changes **whether** a label is drawn: the ~25px fit threshold is a judgement about a segment's share of the data, applied once to the un-gapped extent, and a rect that cleared it is at worst 13px after the maximum gap — still room for a 10px glyph. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
@@ -810,13 +811,17 @@ Notes:
 - The texture reaches the chart, the legend key, the hover tooltip, and the **PNG export** — the
   export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
 - **Every filled chart type keys with a square chip**, textured or not — `bar`, `stacked`, `area`,
-  `histogram`, `waterfall`. Only stroked marks (line, point) get a line swatch. `area` moved to a
-  chip in 1.11.0: an area is a filled region, so a line swatch misrepresented it, and a 3px line
-  cannot hold the glyph.
-- On a **multi-series histogram**, layers draw at `fill-opacity: 0.5` so overlaps blend, and a
-  texture inherits that — ground and band are both muted, exactly as a flat fill is. The texture
-  still separates the series where they overlap, which is the point, but judge it on your own data:
-  a texture cannot rescue a mark whose colour is already translucent.
+  `histogram`, `waterfall`. `area` moved to a chip in 1.11.0: an area is a filled region, so a line
+  swatch misrepresented it, and a 3px line cannot hold the glyph. The **line swatch** is now
+  `chartType: line` alone; the point types key with their own marks instead — `scatter` and
+  `dotplot` with the series' symbol (or a rounded colour chip when `columns.shape` is a separate
+  channel), `dumbbell` with its dot or ring.
+- **Histogram bars draw at `fill-opacity: 0.5`** — every histogram, single- and multi-series alike,
+  because a solid bin reads too heavy and the transparency is what lets overlapping series blend.
+  A texture inherits it, so ground and band are both muted, exactly as a flat fill is. On a
+  multi-series histogram the texture still separates the series where they overlap, which is the
+  point, but judge it on your own data: a texture cannot rescue a mark whose colour is already
+  translucent.
 - A legend/tooltip key draws **one centred instance** of the texture in a 14px square — a *glyph*,
   not a patch of the chart's tiling. `"/"` reads as three bands (ground, mark, ground), `"+"` as a
   plus, `"x"` as an x. A tiled key can only show a fraction of one period at that size, which is an
@@ -831,20 +836,29 @@ Notes:
 - **The band color is derived, not authored.** You supply the base color and the character; the
   engine resolves the band as **three tonal tiers** along that color's own hue ramp — darker
   normally, lighter when the ground is too dark to darken. That keeps every pair inside one hue
-  family and on the Style-Guide ramp, at a consistent ΔL\* of 21–32 across the whole palette (the
-  tiers are iso-lightness across hues, which is gated in CI). `navy` and `sky` borrow blue's ramp;
-  a raw `"#hex"` off every ramp gets an equivalent 28 L\* step instead.
+  family and on the Style-Guide ramp. `test/hatch.test.ts` gates the result across all **72**
+  hue-family colors an author can name (8 tiers × 7 families, the 7 bases and their `-light`
+  variants, plus `navy` and `sky`), holding every pair **between 20 and 33 ΔL\***; measured today
+  they run 21.6 (`red-50`) to 32.5 (`sky`). `navy` and `sky` borrow blue's ramp; a raw `"#hex"` off
+  every ramp gets an equivalent 28 L\* step instead.
 - **The ground is whatever the mark is PAINTED, not its `series_colors` entry.** `bar_color`,
   `category_colors` and the title-selector accent each override a fill without going through the
   series color map, and each becomes the ground of the texture laid over it — so an amber
   `bar_color` bar hatches amber, and a `category_colors` "Total" bar gets its own pattern in its
   own color rather than the rest of the series'. The band is then derived from that color, so the
-  pair stays on the ramp the ground sits on. The chart, the legend key, the tooltip key and the
-  PNG export all read the same painted color, so the four cannot disagree.
+  pair stays on the ramp the ground sits on. The **chart, the hover tooltip and the PNG export** all
+  ground the texture in the fill read back off the rendered mark, so those three cannot disagree.
+  The **legend** key is grounded in the resolved color *map* instead, since a legend row names a
+  series and not one mark; it agrees with the other three because `bar_color`/`category_colors` are
+  single-series-only and the title-selector accent is folded into that map — but nothing enforces
+  it, so a future per-mark fill would need to reach the legend too.
 - **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
-  Since the band is derived from the ground's own lightness, a string the engine cannot parse as a
-  color (a CSS `var(--…)`, `currentColor`, a typo) leaves the band equal to the ground, i.e. a flat
-  block where a texture was asked for. That combination **errors** rather than rendering.
+  Since the band is derived from the ground's own lightness, a string whose lightness cannot be read
+  would leave the band equal to the ground, i.e. a flat block where a texture was asked for. Neither
+  half of that reaches a published chart. A name the engine cannot paint at all (a typo like
+  `blue-450`) fails **validation**, texture or no texture. A string it can paint but cannot measure —
+  a CSS `var(--…)`, `currentColor` — passes validation and then **throws at render** when a texture
+  is laid over it, naming the character and the fill it could not read.
 - Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
   two full periods and reads as a partial band rather than a texture.
 - **With `barStack.mono`, a texture borrows a neighbour's shade.** A mono stack spends consecutive
@@ -863,9 +877,11 @@ value is either a **named color** or a raw `"#hex"`:
 - **Categorical hues:** `blue`, `amber`, `violet`, `green`, `red`, `rose`, `russet` — and a
   `-light` variant of each (e.g. `blue-light`).
 - **Tonal tiers:** `<hue>-<tier>` for tiers `50 100 200 300 400 500 600 700`, lightest to darkest
-  (e.g. `blue-200`, `violet-700`). The tiers sit at fixed lightness across hues, so `blue-200` and
-  `amber-200` are equally light — which is what makes a tier the right way to relate two series in
-  one hue family.
+  (e.g. `blue-200`, `violet-700`). Through the middle of the ramp the tiers are near-iso-lightness
+  across hues — tiers 200–500 spread only ~1 L\*, so `blue-200` and `amber-200` are equally light,
+  which is what makes a tier the right way to relate two series in one hue family. The extremes
+  drift: tier 50 spreads 7.8 L\* across the seven hues and tier 700 spreads 5.8, so two series
+  related at `-50` or `-700` will not read as equally light.
 - **Aliases:** `purple`→violet, `pink`→rose, `yellow`→amber, `brown`→russet — each with `-light`
   and each with the full tier set (`purple-600` = `violet-600`).
 - **Neutrals and brand:** `black`, `grey` (`gray`), `navy`, `sky`.
