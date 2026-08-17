@@ -822,8 +822,10 @@ function assemblePaneResult(
  *  a second, partial copy of the table below that drifted from it: a lone dot plot keyed a LINE, and
  *  a lone dumbbell keyed a plain DOT rather than the sized, box-centred symbol its legend row draws.
  *  Deriving both from this one function is what makes the drift impossible: the suppressed row and
- *  the tooltip key are built by the same code from the same inputs. (Not the same OBJECT — this runs
- *  once for the legend and once for the key rows per `renderChart`, so they are deep-equal twins.)
+ *  the tooltip key are built by the same code from the same inputs. Under `renderChart` they are the
+ *  SAME OBJECTS — it builds them once and hands them to `buildLegendItems` — so nothing may mutate a
+ *  returned row. `renderFigure` still builds twice, because a pane's rows and the FIGURE legend's are
+ *  resolved from different series and colour maps; those two are deep-equal only when they agree.
  *
  *  So this applies NO presence rule — `buildLegendItems` owns "is a legend worth drawing", this owns
  *  "what would this series' key look like". */
@@ -943,10 +945,14 @@ export function buildLegendItems(
   /** The pane's value-axis formatter (`PaneResult.formatValue`), used only for a `{value}` token in
    *  a keyed annotation label. Omitted → the token falls back to a bare number. */
   formatValue?: (v: number) => string,
+  /** The series key rows, when the caller has already built them for the same inputs — `renderChart`
+   *  does, for `RenderResult.seriesKeyRows`. Omitted → built here. Passing them is what makes the
+   *  legend row and the tooltip key one object rather than two builds of the same thing. */
+  keyRows?: LegendItem[],
 ): LegendItem[] | null {
   if (spec.legend === false) return null;
   const baseItems = legendShowsSeriesRows(spec, seriesNames, layers)
-    ? buildSeriesKeyRows(spec, seriesNames, colors, layers)
+    ? keyRows ?? buildSeriesKeyRows(spec, seriesNames, colors, layers)
     : null;
 
   // Append legendExtras (e.g. diverging stacked Total row) after the series rows.
@@ -1011,13 +1017,17 @@ export function renderChart(
   const { svg, seriesNames, colors, valueAffixes, dataInScope, layers } = pane;
 
   const seriesLabels = spec.series_labels ?? {};
-  const legendItems = buildLegendItems(spec, seriesNames, colors, layers, pane.formatValue);
+  // ONE build, shared. The legend's series rows and the tooltip's key rows are the same rows off the
+  // same inputs, so building them twice (and re-resolving every texture with them) only bought a
+  // second chance for the two to differ.
+  const seriesKeyRows = buildSeriesKeyRows(spec, seriesNames, colors, layers);
+  const legendItems = buildLegendItems(spec, seriesNames, colors, layers, pane.formatValue, seriesKeyRows);
   const shapeLegendItems = buildShapeLegendItems(spec, layers);
 
   return {
     svg,
     legendItems,
-    seriesKeyRows: buildSeriesKeyRows(spec, seriesNames, colors, layers),
+    seriesKeyRows,
     shapeLegendItems,
     colorLegendTitle: spec.color_legend_title,
     shapeLegendTitle: spec.shape_legend_title,
