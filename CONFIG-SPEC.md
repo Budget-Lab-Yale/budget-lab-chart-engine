@@ -862,9 +862,12 @@ Notes:
   Since the band is derived from the ground's own lightness, a string whose lightness cannot be read
   would leave the band equal to the ground, i.e. a flat block where a texture was asked for. Neither
   half of that reaches a published chart. A name the engine cannot paint at all (a typo like
-  `blue-450`) fails **validation**, texture or no texture. A string it can paint but cannot measure —
-  a CSS `var(--…)`, `currentColor` — passes validation and then **throws at render** when a texture
-  is laid over it, naming the character and the fill it could not read.
+  `blue-450`) fails **validation**, texture or no texture. A string it can paint but cannot measure
+  also fails validation, but only where a texture is laid over it: `currentColor`, `none`, a CSS
+  `var(--…)` or `url(…)`, the modern color functions (`oklch`, `oklab`, `lab`, `lch`, `hwb`, `color`,
+  `color-mix`), and the SPACE-separated function forms (`rgb(0 114 178)` — the comma form
+  `rgb(0,114,178)` reads fine). Paint one of those without a texture and it renders; ask for a
+  texture over it and the load fails naming the series, because the alternative was a crash at render.
 - Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
   two full periods and reads as a partial band rather than a texture.
 - **With `barStack.mono`, a texture borrows a neighbour's shade.** A mono stack spends consecutive

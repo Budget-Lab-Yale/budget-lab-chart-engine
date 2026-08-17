@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.11.0] - 2026-08-14
+## [1.11.0] - 2026-08-17
 
 ### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
 
@@ -140,10 +140,14 @@ not all resolve the same series in the same order — a pane missing a series, o
 introduce the series in a different order. Every such figure was painting a series two different
 colours across its own panes, so what moves is the pane that disagreed with the legend.
 
-The texture-ground fix moves one thing a reader sees, and only on a figure that combines
-`series_patterns` with `highlightSeries`: a dimmed textured series' legend, tooltip and export key
-now show the grey the bars are drawn in rather than the series' palette colour. Everything else keys
-exactly as before, because every other ground already reached the colour map.
+The painted-fill fixes move one thing a reader sees, on a figure using `highlightSeries`: a dimmed
+series' legend, tooltip and export key now show the grey its bars are drawn in rather than its palette
+colour — textured or not, since a chip's colour comes from the render now for the same reason its
+texture's ground does. `bar_color`, `category_colors`, a `barStack.mono` tier and the title-selector
+accent are the same class of override, and all of them now key what was painted. Everything else keys
+exactly as before, because every other fill already reached the colour map. No published figure uses
+any of those channels except `category_colors`, whose three figures are single-series and so draw no
+legend rows.
 
 The icon work is likewise not opt-in, so **a repin re-renders every published figure's legend and
 tooltip keys**, and two of those changes reach the SVG a reader sees:
