@@ -150,6 +150,11 @@ export interface MarkLayers {
     shapeOrder?: string[];
     categoryOrder?: string[];
     annotationOrder?: Array<string | undefined>;
+    /** These elements are area FILLS (bar rects, area paths) rather than strokes or markers, so a
+     *  `series_patterns` texture applies to them. Set it on every filled-mark tagging entry; a
+     *  builder that omits it silently renders flat. Deliberately NOT set on lines, dots and
+     *  category labels — a 7px hatch inside a 2px stroke or an 8px dot is noise, not a channel. */
+    fill?: true;
   }[];
   /** Series rendered dashed (drives legend swatches + tooltip styling). */
   dashedNames: Set<string>;
@@ -211,6 +216,21 @@ export interface MarkLayers {
    *  [negatives in declaration order]; the non-interactive Total row is appended by the
    *  renderer. Non-stacked / top-legend charts leave it undefined. */
   legendVisualOrder?: string[];
+  /** Stacked bars: `barStack.segmentGap` — px of whitespace to open BETWEEN adjacent segments.
+   *  Carried here rather than applied as a Plot option because Plot's bar insets are scalars, not
+   *  channels (the vendored 0.6.16 coerces `insetTop=+T`), so one inset cannot separate the
+   *  interior boundaries while leaving the bar's outer ends alone. assemblePlot applies it as a
+   *  shrink-only geometric pass over `segmentGapSelector`. Absent/0 ⇒ no pass ⇒ byte-identical. */
+  segmentGap?: number;
+  /** The selector matching the segments `segmentGap` applies to. Set alongside it. */
+  segmentGapSelector?: string;
+  /** The selector matching the in-segment value labels. Handed to the gap pass because the labels
+   *  are placed pre-render at the segment's data-space midpoint, which does not know the segment is
+   *  about to shrink underneath them; the pass re-centres each on the rect it just changed. Only
+   *  the selector travels — whether a label is drawn AT ALL stays the label builder's decision,
+   *  made on the segment's share of the data (see the threshold note in applySegmentGap). Set in
+   *  the same literal as `segmentGap`. */
+  segmentLabelSelector?: string;
   /** Controls how the band-crosshair tooltip renders the Total row for stacked charts.
    *  - true  (netMode==="dot"):  show Total with a circle (is-dot) swatch — the net-dot
    *    marker exists on the chart and matches this styling.

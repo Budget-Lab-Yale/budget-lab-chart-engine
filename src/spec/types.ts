@@ -2,8 +2,8 @@
 // both derive from this. One chart = one spec (no figure/tracker/nav wrapper).
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
-// (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
-// `chartType` is a union so adding bar/etc. later is additive.
+// (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
+// is a union so each new type is additive; it now carries nine — see below, and CONFIG-SPEC.md.
 
 export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell";
 
@@ -11,6 +11,10 @@ export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
+
+/** A series fill texture: matplotlib's hatch characters, where the character is a picture of the
+ *  result. See `series_patterns`, and `engine/hatch.ts` for the geometry. */
+export type HatchChar = "/" | "\\" | "|" | "-" | "+" | "x";
 
 /** Per-annotation number formatting for a `{value}` token substituted into an annotation's
  *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
@@ -418,6 +422,13 @@ export interface ChartSpec {
    *  (which round for legibility), so a tooltip can be more precise than the axis — e.g. set 4
    *  for small magnitudes that round to 0.00 on a 2-decimal axis. Default 2. */
   tooltip_decimals?: number;
+  /** d3 `timeFormat` pattern for the crosshair tooltip's X value, on a `temporal` or `quarterly`
+   *  axis only. Absent ⇒ `"%b %Y"` (temporal) / `YYYYQ#` (quarterly), which match the axis ticks —
+   *  right for month- or quarter-spaced data, wrong for a DAILY series, where every point in a
+   *  month shares one tooltip label and hovering can't tell you which day you're on. Opt-in
+   *  rather than a granularity auto-detect deliberately: a repin re-renders the whole archive, so
+   *  changing the default would move the tooltips of every published temporal figure at once. */
+  tooltip_x_format?: string;
 
   /** Text placed BEFORE every rendered value — axis ticks, value labels, tooltips. Concatenated
    *  literally, so include any space you want (`"$"` vs `"USD "`); on a negative value it sits after
@@ -440,6 +451,21 @@ export interface ChartSpec {
   /** Render order; also an inclusion filter when set. */
   series_order?: string[];
   series_colors?: Record<string, ColorRef>;
+  /** `{ <seriesKey>: hatch }` — a TEXTURE for the series' fill, alongside its colour, on the chart
+   *  types whose marks are filled areas (bar, stacked, area, histogram, waterfall). The six values
+   *  are matplotlib's hatch characters, and each is a picture of its own result: `"/"` `"\\"`
+   *  (diagonals), `"|"` `"-"` (vertical / horizontal), `"+"` `"x"` (the crossed pairs). Quote them
+   *  in YAML — bare `-` is a sequence indicator and bare `|` a block scalar.
+   *  The colour the mark is actually PAINTED is the pattern's GROUND — the series colour until
+   *  `bar_color`, `category_colors` or the title-selector accent overrides the fill, and then it is
+   *  that one (see `engine/painted-fill.ts`). Omitting this key renders exactly as before, and an
+   *  unrecognised value is rejected rather than silently rendered flat.
+   *  Density repeats (`"//"`) are deliberately NOT supported: more ink per unit area reads as a
+   *  darker shade, which is the tonal ramp's job and is controlled precisely by `series_colors`.
+   *  The hatch's BAND colour is not configurable — the author supplies the base colour and the
+   *  character, and the engine derives the band as a step of the same hue (see
+   *  `engine/hatch.ts#defaultHatchStroke`), so a pair can never leave the Style-Guide ramp. */
+  series_patterns?: Record<string, HatchChar>;
   /** Bar charts, SINGLE-SERIES only: the bar fill for the one series, resolved through the
    *  palette (named token or raw "#hex"). A first-class replacement for the
    *  `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are
@@ -543,6 +569,13 @@ export interface ChartSpec {
      *  can sit at the bottom of the stack while keeping its legend position/color. Series omitted
      *  here keep their relative `series_order` position after the listed ones. */
     stackOrder?: string[];
+    /** Whitespace BETWEEN adjacent stacked segments, in px. Default 0 (segments abut, as before).
+     *  A thin gap separates two slices from the same hue family without spending another colour.
+     *  Subtractive geometry, not paint: each segment's trailing edge is pulled in, floored so a
+     *  slice thinner than the gap survives as a hairline instead of being swallowed. No gap is
+     *  added at the bar's outer ends — the baseline and the total do not move — and the net marker
+     *  stays at the true net. */
+    segmentGap?: number;
   };
   /** Waterfall-chart display options. A waterfall is a vertical, single-series categorical chart
    *  whose bars float on a running cumulative (see `columns.kind`). Ignored by other chart types. */
@@ -564,12 +597,15 @@ export interface ChartSpec {
   // categorical axis is declared via `xAxisType: categorical` (like bars), NOT a separate yAxisType.
   // Series color/order/labels reuse the shared `series_*` fields; category order reuses
   // `category_order`/`x_order`; faceting reuses `columns.facet` + `small_multiples`.
-  /** Per-series dot style: solid fill, hollow ring (series-color outline, page-background center),
-   *  or filled neutral ink. Absent series default to "filled". */
+  /** Per-series dot style: solid fill, hollow ring (series-color outline around a HOLE — the middle
+   *  is `fill="none"`, so the connector stem and whatever the figure sits on show through it), or
+   *  filled neutral ink. Absent series default to "filled". See `engine/marker-ink.ts`, which is
+   *  where the hole/white-disc distinction is stated once. */
   series_marker?: Record<string, "filled" | "hollow" | "ink">;
   /** Connector "stem" styling; defaults to a light muted 1.5px solid line drawn behind the dots. */
   connector?: { color?: ColorRef; width?: number; style?: "solid" | "dashed" | "dotted" };
-  /** Dot radius (px). Default from theme; dots size consistently across a facet. */
+  /** Dot radius (px). Default 5 (`DEFAULT_DOT_R`, `engine/marks/dumbbell.ts`); dots size
+   *  consistently across a facet. */
   dot_radius?: number;
   /** Label the numeric gap between two named series on each stem. `true` uses the first two series
    *  in series order; an object names the pair explicitly. Default off. */

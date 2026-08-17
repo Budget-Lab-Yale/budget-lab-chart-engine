@@ -5,13 +5,13 @@ import type { ChartSpec } from "../spec/types.js";
 import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
-import type { FigureRenderResult } from "../engine/index.js";
+import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { resolveColor } from "../engine/palette.js";
-import { symbolPathD } from "../engine/symbols.js";
-import { SWATCH_OUTLINE, swatchWidthFor } from "../engine/theme.js";
+import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
+import type { SeriesHatch } from "../engine/hatch.js";
+import { ICON_BOX, iconFromLegendItem, iconSvgGroup, iconWidth } from "../engine/icon.js";
 import {
-  SVG_NS,
   W,
   H,
   MARGIN,
@@ -21,11 +21,9 @@ import {
   W_SEMI,
   FONT,
   NAVY,
-  MUTED,
   BODY,
   AXIS,
   HEADING,
-  svgEl as svgElDoc,
   textEl as textElDoc,
   measureText,
   wrapText,
@@ -39,10 +37,6 @@ import {
 // ---------------------------------------------------------------------------
 // Document-bound wrappers (this module always draws into the global `document`).
 // ---------------------------------------------------------------------------
-
-function svgEl(name: string, attrs: Record<string, string | number> = {}): SVGElement {
-  return svgElDoc(document, name, attrs);
-}
 
 function textEl(
   x: number,
@@ -74,8 +68,6 @@ const ROW_GAP = 18; // vertical gap between per-pane grid rows
 // Legend
 // ---------------------------------------------------------------------------
 
-const SHAPE_LEGEND_COLOR = "#555B66";
-
 function drawLegend(
   root: SVGElement,
   items: Array<{
@@ -83,16 +75,20 @@ function drawLegend(
     color: string | undefined;
     dashed: boolean;
     markerSymbol?: string;
-    markerShape?: string;
+    markerShape?: LegendItem["markerShape"];
+    /** `series_patterns` texture, resolved upstream by the engine's legend builder. */
+    hatch?: SeriesHatch;
     outlined?: boolean;
     colors?: string[];
+    /** A dumbbell's hollow end — a ring, not a disc. It was absent from this type entirely, so a
+     *  hollow series exported filled. */
+    hollow?: boolean;
   }>,
   firstBaseline: number,
   leadingTitle?: string,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
   const titleFont = `${W_SEMI} 12px ${FONT}`;
-  const SW = 22;
   const GAP = 6;
   const ITEM_GAP = 18;
   const ROW_H = 20;
@@ -106,85 +102,28 @@ function drawLegend(
   }
 
   for (const item of items) {
-    const color = item.color ?? NAVY;
-    // A banded chip can be wider than the standard swatch column, so the row must reserve it.
-    const swatchW = item.colors && item.colors.length > 1 ? Math.max(SW, swatchWidthFor(item.colors.length)) : SW;
+    // ONE drawing. This branched nine ways and got five of them wrong against the live legend — a
+    // `rect` was rounded like a chip, a `dot` had no branch at all (the stacked Total exported as a
+    // navy bar), `hollow` was missing from the type so a dumbbell ring exported filled, `dashed` was
+    // tested before `markerSymbol` so a dashed series with points exported unmarked, and every
+    // symbol was drawn at one area. None of that could be caught by reading the export alone, which
+    // is why it is no longer written here: engine/icon.ts draws it, the same call the legend makes.
+    const icon = iconFromLegendItem(item);
+    const swatchW = iconWidth(icon);
     const itemW = swatchW + GAP + measureText(item.label, legendFont);
     if (x > MARGIN && x + itemW > MARGIN + INNER_W) {
       x = MARGIN;
       y += ROW_H;
     }
     const cy = y - 4;
-    if (item.markerShape === "point") {
-      // Point chart: a filled colored marker (the symbol, default circle) with no line.
-      root.appendChild(
-        svgEl("path", {
-          d: symbolPathD(item.markerSymbol ?? "circle", 100),
-          transform: `translate(${x + SW / 2},${cy})`,
-          fill: color,
-          stroke: "#ffffff",
-          "stroke-width": 1,
-        }),
-      );
-    } else if (item.dashed) {
-      root.appendChild(
-        svgEl("line", {
-          x1: x,
-          y1: cy,
-          x2: x + SW,
-          y2: cy,
-          stroke: color,
-          "stroke-width": 2,
-          "stroke-dasharray": "5 3",
-        }),
-      );
-    } else if (item.markerSymbol) {
-      // Line + the series' marker symbol (matches the chart markers, for accessibility).
-      root.appendChild(
-        svgEl("line", { x1: x, y1: cy, x2: x + SW, y2: cy, stroke: color, "stroke-width": 2 }),
-      );
-      root.appendChild(
-        svgEl("path", {
-          d: symbolPathD(item.markerSymbol, 34),
-          transform: `translate(${x + SW / 2},${cy})`,
-          fill: color,
-          stroke: "#ffffff",
-          "stroke-width": 0.75,
-        }),
-      );
-    } else if (item.markerShape === "rect" || item.markerShape === "chip") {
-      // Color chip — a filled rounded square (color key), matching the live legend. An annotation
-      // fill's tint can be near-white, so those rows carry a hairline (matching .is-outlined).
-      // Several tints under one label → equal vertical bands, matching the live legend's chip, which
-      // also widens so the bands stay legible.
-      const tints = item.colors && item.colors.length > 1 ? item.colors : null;
-      const chipH = 13;
-      const chipW = tints ? swatchWidthFor(tints.length) : chipH;
-      const chipX = x + (SW - chipW) / 2;
-      const chipY = cy - chipH / 2;
-      if (tints) {
-        const band = chipW / tints.length;
-        tints.forEach((c, i) => {
-          root.appendChild(
-            svgEl("rect", { x: chipX + i * band, y: chipY, width: band + 0.5, height: chipH, fill: c }),
-          );
-        });
-      }
-      root.appendChild(
-        svgEl("rect", {
-          x: chipX,
-          y: chipY,
-          width: chipW,
-          height: chipH,
-          rx: 4,
-          ...(tints ? { fill: "none" } : { fill: color }),
-          ...(item.outlined ? { stroke: SWATCH_OUTLINE, "stroke-width": 1 } : {}),
-        }),
-      );
-    } else {
-      root.appendChild(
-        svgEl("rect", { x, y: cy - 2, width: SW, height: 4, fill: color }),
-      );
+    const drawing = iconSvgGroup(document, icon);
+    if (drawing) {
+      // The primitives are in a box at the origin, so the group is placed by its top-left corner.
+      drawing.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
+      // A row with no colour of its own draws in `currentColor`, which the page supplies live and
+      // the export has to supply itself — this frame carries no inherited text colour.
+      drawing.setAttribute("color", NAVY);
+      root.appendChild(drawing);
     }
     root.appendChild(
       textEl(x + swatchW + GAP, y, item.label, {
@@ -267,7 +206,7 @@ export function buildExportSvg(
       label: s.label,
       color: SHAPE_LEGEND_COLOR,
       dashed: false,
-      markerShape: "point",
+      markerShape: "point" as const,
       markerSymbol: s.markerSymbol,
     }));
     cursor = drawLegend(root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined);

@@ -11,7 +11,6 @@ import type { TidyRow } from "../src/data/index";
 import { tokens } from "../src/theme/tokens";
 
 const INK = tokens.structural.text_heading;
-const PAGE_BG = tokens.structural.background;
 
 const DUMBBELL_H: ChartSpec = {
   chartType: "dumbbell",
@@ -246,13 +245,16 @@ describe("dumbbell mark — structure", () => {
     expect(stems.length).toBe(1);
   });
 
-  it("styles markers: ink = ink fill; hollow = page-bg fill + series-color stroke; filled = series fill", () => {
+  it("styles markers: ink = ink fill; hollow = an actual HOLE + series-color stroke; filled = series fill", () => {
     const { svg, colors } = renderChart(DUMBBELL_H, ROWS, { ...opts, document });
     const inkDot = dot(svg, "Q5", "current_law"); // ink
     const hollowDot = dot(svg, "Q5", "static"); // hollow
     const filledDot = dot(svg, "Q5", "collected"); // filled
     expect(inkDot.getAttribute("fill")?.toUpperCase()).toBe(INK.toUpperCase());
-    expect(hollowDot.getAttribute("fill")?.toUpperCase()).toBe(PAGE_BG.toUpperCase());
+    // "none", not the page-background token. An opaque white disc reads as a filled white dot, hides
+    // the stem this mark's own comment always said showed through, and is wrong on any ground that is
+    // not white — which is what "the dumbbell ring is still filled" meant, three reports running.
+    expect(hollowDot.getAttribute("fill")).toBe("none");
     expect(hollowDot.getAttribute("stroke")?.toUpperCase()).toBe(colors.get("static")!.toUpperCase());
     expect(filledDot.getAttribute("fill")?.toUpperCase()).toBe(colors.get("collected")!.toUpperCase());
   });

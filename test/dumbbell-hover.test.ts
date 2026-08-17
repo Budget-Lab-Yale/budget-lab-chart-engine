@@ -7,7 +7,10 @@
 // with a coordinated grid, and the tooltip HTML the hover shows lists each series' value.
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
+import { renderChart } from "../src/engine/index";
 import { buildBandTooltipHtml, spreadPillCentersX, uniformBand } from "../src/engine/crosshair";
+import { resolveTooltipIcons } from "../src/engine/icon";
+import { TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -80,32 +83,51 @@ describe("dumbbell hover — plumbing", () => {
     expect(container.querySelectorAll(".figure-pane .tbl-catline-hit").length).toBe(2);
   });
 
-  it("tooltip swatches are dots matching the legend markers (hollow ring / filled / ink)", () => {
-    const rows = ROWS.map((r) => ({ _xc: r.group as string, series: r.measure as string, _y: Number(r.rate) }));
+  it("tooltip swatches are the markers production resolves (ink / hollow ring / filled)", () => {
+    // Icons resolved the way the live layer resolves them — `renderChart`'s own key rows through
+    // `resolveTooltipIcons` — and NOT hand-built. A hand-built `{shape: "dot", color}` pinned a
+    // shape the resolver cannot produce for a dumbbell (it emits `markerShape: "point"` → a sized,
+    // box-centred SYMBOL) and, by naming the ink token as the colour it then asserted, turned the
+    // ink assertion into an echo of the literal the test had just supplied.
+    const r = renderChart(SPEC, ROWS, { width: 720, height: 400, document });
+    const icons = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows });
+
+    const rows = ROWS.map((row) => ({ _xc: row.group as string, series: row.measure as string, _y: Number(row.rate) }));
     const html = buildBandTooltipHtml("Q5", rows, {
       seriesLabels: SPEC.series_labels,
       seriesOrder: SPEC.series_order,
       yFormat: (v) => `${v.toFixed(1)}%`,
-      swatchShape: "dot",
-      swatchMarkers: new Map([
-        ["current_law", "ink"],
-        ["static", "hollow"],
-        ["collected", "filled"],
-      ]),
-      renderedFills: new Map([
-        ["current_law", "#1A1A2E"],
-        ["static", "#E69F00"],
-        ["collected", "#8856BF"],
-      ]),
+      icons,
     });
-    // Every swatch is a real circle: explicit width/height + border-radius (not the 18×3 line).
-    expect(html).toContain("width:11px;height:11px;border-radius:50%");
-    expect(html).not.toContain("is-square");
-    // Hollow → a ring: white fill + series-color border.
-    expect(html).toContain("background:#ffffff;border:2px solid #E69F00");
-    // Ink → filled with the ink token; filled → the series color.
-    expect(html).toContain("background:#1A1A2E");
-    expect(html).toContain("background:#8856BF");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const swatches = [...doc.querySelectorAll(".tbl-tooltip-swatch")];
+    expect(swatches).toHaveLength(3);
+    // A symbol, not a bare circle: a dumbbell end keys with the same sized, box-centred marker its
+    // legend row draws — the drift `buildSeriesKeyRows` exists to prevent.
+    for (const s of swatches) {
+      expect(s.querySelector("path"), "a dumbbell key must be a symbol, not a bare dot").not.toBeNull();
+      expect(s.querySelector("circle")).toBeNull();
+    }
+    const markOf = (i: number) => swatches[i]!.querySelector("path")!;
+    const styleOf = (i: number) => markOf(i).getAttribute("style") ?? "";
+
+    // INK: `series_marker: ink` paints the mark with the neutral heading token INSTEAD of the
+    // series' colour, and the key has to follow it there. Asserted against the palette entry the
+    // series actually has, so a key that quietly fell back to the palette fails here.
+    const palette = r.colors.get("current_law")!;
+    expect(palette).toBeTruthy();
+    expect(styleOf(0)).toContain(`fill:${TBL.color.heading}`);
+    expect(styleOf(0), "the ink series keyed with its palette colour").not.toContain(`fill:${palette}`);
+
+    // Hollow → a ring: the ground fills and the series colour becomes the stroke. This inversion is
+    // what broke when the CSS holding it was deleted — the ring exported and hovered as a filled dot.
+    const hollowColor = r.colors.get("static")!;
+    expect(styleOf(1)).toContain(`stroke:${hollowColor}`);
+    expect(styleOf(1)).not.toContain(`fill:${hollowColor}`);
+    expect(Number(markOf(1).getAttribute("stroke-width"))).toBe(2);
+
+    // Filled → the series colour, plain.
+    expect(styleOf(2)).toContain(`fill:${r.colors.get("collected")}`);
   });
 
   it("spreadPillCentersX de-collides overlapping coordinated pills (collision avoidance)", () => {

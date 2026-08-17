@@ -8,7 +8,8 @@ what differs**.
 
 Two figure types, one file each:
 
-- **`chart.yaml`** — a `ChartSpec`: line, area, bar, stacked-bar, scatter, and dot-plot charts.
+- **`chart.yaml`** — a `ChartSpec`: line, area, bar, stacked-bar, scatter, dot-plot, waterfall,
+  histogram, and dumbbell charts.
 - **`table.yaml`** — a `TableSpec`: a formatted, interactive data table.
 
 Validate with `tbl-chart validate <file>` (schema + data cross-reference). Consuming repos
@@ -62,6 +63,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `x_axis_title` | string | Caption below the x-axis. |
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
 | `tooltip_decimals` | integer | Decimal places for values in hover tooltips (independent of axis ticks). Default 2. |
+| `tooltip_x_format` | string | d3 `timeFormat` pattern for the tooltip's **x** value. `xAxisType: temporal` or `quarterly` only — rejected on `numeric`/`categorical`. Default (absent): `"%b %Y"` on temporal, `YYYYQ#` on quarterly, matching the axis ticks. Set it when the data is finer than the ticks: on a **daily** series every point in a month otherwise shares one tooltip label, so hovering cannot tell you which day you are on. `"%b %-d, %Y"` → `Jul 23, 2026`. |
 
 ### Value units
 
@@ -184,6 +186,7 @@ The series **column** is set via `columns.series`. These options reference the s
 |---|---|---|
 | `series_order` | array | Render order. **Also an inclusion filter** — when set, only listed series render. For stacked charts (bar/area) it is also the bottom→top stack order. |
 | `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). |
+| `series_patterns` | object | `{ <seriesKey>: hatch }` — a **texture** for the series' fill, alongside its color. Filled chart types only (`bar`, `stacked`, `area`, `histogram`, `waterfall`); rejected elsewhere. See [Series textures](#series-textures). |
 | `series_styles` | object | `{ <seriesKey>: { dashed: true } }`. `dashed` is currently the only flag. |
 | `series_labels` | object | `{ <seriesKey>: "Display name" }`. Lets the CSV use short keys while the legend/tooltip show full names. |
 | `bar_color` | color | **Single-series bar charts only.** The one series' bar fill, resolved through the palette. A first-class replacement for the `series_colors: {"": color}` idiom — that idiom still works; `bar_color` wins when both are set. Ignored on multi-series (grouped) bar charts. With `highlightSeries`, `bar_color` replaces the base color only — a non-highlighted series still dims. |
@@ -438,6 +441,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.netLabelColor` | enum | `white` \| `black`. |
 | `barStack.normalize` | boolean | Normalize each bar to 100%. |
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
+| `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, but the gap never changes **whether** a label is drawn: the ~25px fit threshold is a judgement about a segment's share of the data, applied once to the un-gapped extent, and a rect that cleared it is at worst 13px after the maximum gap — still room for a 10px glyph. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
@@ -517,7 +521,7 @@ reuses `category_order` (or `x_order`); faceting reuses `columns.facet` + `small
 | field | type | notes |
 |---|---|---|
 | `orientation` | enum | `horizontal` (default; categories on the y band, values on x) \| `vertical`. |
-| `series_marker` | object | Per-series dot style: `filled` (solid series color) \| `hollow` (ring — series-color outline, page-background center) \| `ink` (filled neutral ink). Unlisted series default to `filled`. Lets "static/ask" read hollow and "collected" filled. The legend swatch matches (a hollow series shows a ring). |
+| `series_marker` | object | Per-series dot style: `filled` (solid series color) \| `hollow` (ring — series-color outline, and the center is a HOLE, so the connector stem and whatever the figure sits on show through it) \| `ink` (filled neutral ink). Unlisted series default to `filled`. Lets "static/ask" read hollow and "collected" filled. The legend swatch matches (a hollow series shows a ring). |
 | `connector` | object | Stem styling: `connector.color` (a color token/hex), `connector.width` (px, default 1.5), `connector.style` (`solid` default \| `dashed` \| `dotted`). Default a subtle neutral line drawn behind the dots. A single-dot (or exactly-coincident) category draws no stem. |
 | `dot_radius` | number | Dot radius in px. Default 5. |
 | `gap_annotation` | boolean \| object | Label the numeric gap between two series on each stem. `true` uses the first two series in order; an object names them: `{ series_a, series_b, format? }`. `format` (else `value_format`) formats the number. Default off. |
@@ -771,6 +775,109 @@ mis-rendered). For displayed equations needing them, use a real MathJax block on
 
 ---
 
+## Series textures
+
+`series_patterns` gives a series a hatch **in addition to** its color, so color, lightness and
+texture are three independent things a fill can say. The color the mark is actually painted stays
+the pattern's **ground**, so adding a texture does not change the series' color.
+
+The six values are matplotlib's hatch characters, and each is a picture of its own result:
+
+| value | renders |
+|---|---|
+| `"/"` | diagonal lines, ascending left→right |
+| `"\\"` | diagonal lines, descending left→right |
+| `"\|"` | vertical lines |
+| `"-"` | horizontal lines |
+| `"+"` | vertical and horizontal, crossed |
+| `"x"` | both diagonals, crossed |
+
+```yaml
+series_colors:
+  collectedNew: blue
+  lostToBehavior: "#58A3E7"
+series_patterns:
+  lostToBehavior: "/"
+```
+
+**Always quote the value.** Bare `-` is a YAML sequence indicator and bare `|` a block-scalar
+indicator; `/` and `\` are safest quoted too.
+
+Notes:
+
+- **An unrecognized value is rejected at load**, never rendered flat. Density repeats (`"//"`) are
+  deliberately unsupported: more ink per unit area reads as a darker shade, which is what the tonal
+  scale already controls precisely through `series_colors`.
+- The texture reaches the chart, the legend key, the hover tooltip, and the **PNG export** — the
+  export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
+- **Every filled chart type keys with a square chip**, textured or not — `bar`, `stacked`, `area`,
+  `histogram`, `waterfall`. `area` moved to a chip in 1.11.0: an area is a filled region, so a line
+  swatch misrepresented it, and a 3px line cannot hold the glyph. The **line swatch** is now
+  `chartType: line` alone; the point types key with their own marks instead — `scatter` and
+  `dotplot` with the series' symbol (or a rounded colour chip when `columns.shape` is a separate
+  channel), `dumbbell` with its dot or ring.
+- **Histogram bars draw at `fill-opacity: 0.5`** — every histogram, single- and multi-series alike,
+  because a solid bin reads too heavy and the transparency is what lets overlapping series blend.
+  A texture inherits it, so ground and band are both muted, exactly as a flat fill is. On a
+  multi-series histogram the texture still separates the series where they overlap, which is the
+  point, but judge it on your own data: a texture cannot rescue a mark whose colour is already
+  translucent.
+- A legend/tooltip key draws **one centred instance** of the texture in a 14px square — a *glyph*,
+  not a patch of the chart's tiling. `"/"` reads as three bands (ground, mark, ground), `"+"` as a
+  plus, `"x"` as an x. A tiled key can only show a fraction of one period at that size, which is an
+  edge with no direction in it. `test/hatch-glyph.test.ts` locks the coordinates;
+  `test/hatch-legend-legibility.test.ts` rasterises the real legend and measures all six from their
+  pixels.
+- The geometry is deliberately **coarse** — a 16px period with a 7px band, so the ground and the
+  hatch read as two colors banded together rather than as pinstripes over a color. The crossed
+  characters (`"+"`, `"x"`) use a thinner 4px line, because crossing two directions overlaps
+  their ink; that puts all six characters at the same ~44% coverage, so they differ only in
+  **direction**, never in weight.
+- **The band color is derived, not authored.** You supply the base color and the character; the
+  engine resolves the band as **three tonal tiers** along that color's own hue ramp — darker
+  normally, lighter when the ground is too dark to darken. That keeps every pair inside one hue
+  family and on the Style-Guide ramp. `test/hatch.test.ts` gates the result across all **72**
+  hue-family colors an author can name (8 tiers × 7 families, the 7 bases and their `-light`
+  variants, plus `navy` and `sky`), holding every pair **between 20 and 33 ΔL\***; measured today
+  they run 21.6 (`red-50`) to 32.5 (`sky`). `navy` and `sky` borrow blue's ramp; a raw `"#hex"` off
+  every ramp gets an equivalent 28 L\* step instead.
+- **The ground is whatever the mark is PAINTED, not its `series_colors` entry.** `bar_color`,
+  `category_colors`, `highlightSeries` dimming and the title-selector accent each override a fill
+  without going through the series color map, and each becomes the ground of the texture laid over
+  it — so an amber `bar_color` bar hatches amber, a `category_colors` "Total" bar gets its own
+  pattern in its own color rather than the rest of the series', and a dimmed series hatches grey.
+  The band is then derived from that color, so the pair stays on the ramp the ground sits on. The
+  **chart, the legend key, the hover tooltip and the PNG export** all draw the texture the chart
+  resolved while painting the mark — one resolved texture, handed to the other three, not four
+  derivations that have to match — so none of them can show a texture on a ground the chart does not
+  paint. Where a series' marks are painted over more than one ground (`category_colors`), the
+  tooltip re-grounds per hovered mark and the legend row, which names a series rather than a mark,
+  keys the first.
+- **A small-multiples figure has ONE legend over N panes**, so its key takes the texture a pane
+  actually painted (the first pane that paints the series, so a series the first pane lacks is still
+  keyed) rather than re-deriving one. A series is assigned its color once for the whole figure, so
+  every pane paints it the same ground and there is only one ground to take. Each pane's own
+  **tooltip** keys from that pane.
+- **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
+  Since the band is derived from the ground's own lightness, a string whose lightness cannot be read
+  would leave the band equal to the ground, i.e. a flat block where a texture was asked for. Neither
+  half of that reaches a published chart. A name the engine cannot paint at all (a typo like
+  `blue-450`) fails **validation**, texture or no texture. A string it can paint but cannot measure
+  also fails validation, but only where a texture is laid over it: `currentColor`, `none`, a CSS
+  `var(--…)` or `url(…)`, the modern color functions (`oklch`, `oklab`, `lab`, `lch`, `hwb`, `color`,
+  `color-mix`), and the SPACE-separated function forms (`rgb(0 114 178)` — the comma form
+  `rgb(0,114,178)` reads fine). Paint one of those without a texture and it renders; ask for a
+  texture over it and the load fails naming the series, because the alternative was a crash at render.
+- Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
+  two full periods and reads as a partial band rather than a texture.
+- **With `barStack.mono`, a texture borrows a neighbour's shade.** A mono stack spends consecutive
+  tiers of one ramp on the segments themselves, and a band is three tiers from its ground — so a
+  textured segment's band is exactly the color of the segment three places along the stack. It is
+  still a legible pair, but the texture stops reading as a channel independent of the shade.
+  Texture **one** segment of a mono stack rather than several.
+
+---
+
 ## Colors
 
 Anywhere a color is accepted (`series_colors`, annotation `color`, `barStack.mono.base`, …), the
@@ -778,11 +885,27 @@ value is either a **named color** or a raw `"#hex"`:
 
 - **Categorical hues:** `blue`, `amber`, `violet`, `green`, `red`, `rose`, `russet` — and a
   `-light` variant of each (e.g. `blue-light`).
-- **Aliases:** `purple`→violet, `pink`→rose, `yellow`→amber, `brown`→russet (each with `-light`).
-- **Neutrals:** `black`, `grey` (`gray`), `navy`.
+- **Tonal tiers:** `<hue>-<tier>` for tiers `50 100 200 300 400 500 600 700`, lightest to darkest
+  (e.g. `blue-200`, `violet-700`). Through the middle of the ramp the tiers are near-iso-lightness
+  across hues — tiers 200–500 spread only ~1 L\*, so `blue-200` and `amber-200` are equally light,
+  which is what makes a tier the right way to relate two series in one hue family. The extremes
+  drift: tier 50 spreads 7.8 L\* across the seven hues and tier 700 spreads 5.8, so two series
+  related at `-50` or `-700` will not read as equally light.
+- **Aliases:** `purple`→violet, `pink`→rose, `yellow`→amber, `brown`→russet — each with `-light`
+  and each with the full tier set (`purple-600` = `violet-600`).
+- **Neutrals and brand:** `black`, `grey` (`gray`), `navy`, `sky`.
 
-Unrecognized names pass through unchanged, so a raw `"#1A1A2E"` works too. `barStack.mono.base`
-accepts only the 7 categorical hues (or an alias) — it pulls that hue's tonal scale.
+Any **CSS color** passes through unchanged, so a raw `"#1A1A2E"`, an `rgb(…)`, or a CSS keyword like
+`steelblue` works too.
+
+A value that is **neither** a palette name **nor** a CSS color is **rejected at load**. It is not a
+cosmetic slip: an unresolvable string reaches Plot as a constant fill, Plot reads a string it cannot
+parse as a *column name*, and the marks it colored are dropped — so a one-character typo
+(`blue-450`, `sky-300`, `blu`) used to publish a chart frame with nothing drawn in it. The error
+names the field, the value, and the near miss.
+
+`barStack.mono.base` accepts only the 7 categorical hues (or an alias) — it pulls that hue's tonal
+scale, so a hex has no scale to pull and is rejected too.
 
 ---
 

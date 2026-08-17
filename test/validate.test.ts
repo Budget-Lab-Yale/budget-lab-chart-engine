@@ -363,7 +363,10 @@ describe("validateSpec (structural)", () => {
       data: "data.csv",
       barStack: {
         netDisplay: "text",
-        mono: { base: "#003366" },
+        // A hex was here. `mono.base` names a HUE whose tonal scale the stack pulls, so a hex has no
+        // scale to pull and monoScale THROWS mid-render ("#003366" is not a known categorical hue) —
+        // this spec validated clean and could not be drawn. validateSpec now rejects it.
+        mono: { base: "blue" },
         netLabelColor: "white",
         normalize: false,
       },
@@ -387,6 +390,138 @@ describe("validateSpec (structural)", () => {
     const r = validateSpec({ ...VALID, orientation: "diagonal" });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/vertical, horizontal/);
+  });
+});
+
+describe("series_patterns", () => {
+  const BAR = { ...VALID, chartType: "bar", xAxisType: "categorical" };
+
+  it("accepts each of matplotlib's six characters", () => {
+    for (const char of ["/", "\\", "|", "-", "+", "x"]) {
+      const r = validateSpec({ ...BAR, series_patterns: { a: char } });
+      expect(r, `char ${char}`).toEqual({ valid: true, errors: [] });
+    }
+  });
+
+  it("rejects a density repeat and lists the allowed values", () => {
+    const r = validateSpec({ ...BAR, series_patterns: { a: "//" } });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_patterns/);
+  });
+
+  it("rejects an unrecognised character rather than rendering flat", () => {
+    for (const bad of ["X", "*", "", "/x", "hatch-left"]) {
+      expect(validateSpec({ ...BAR, series_patterns: { a: bad } }).valid, `char ${bad}`).toBe(false);
+    }
+  });
+
+  it("rejects the key on a chart type with no filled marks", () => {
+    for (const chartType of ["line", "scatter", "dotplot", "dumbbell"]) {
+      const spec = {
+        ...VALID,
+        chartType,
+        xAxisType: chartType === "scatter" ? "numeric" : "categorical",
+        series_patterns: { a: "/" },
+      };
+      const r = validateSpec(spec);
+      expect(r.valid, `chartType ${chartType}`).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/series_patterns/);
+    }
+  });
+
+  it("rejects series_pattern_colors — the band colour is derived, not authored", () => {
+    const r = validateSpec({
+      ...BAR,
+      series_patterns: { a: "/" },
+      series_pattern_colors: { a: "navy" },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_pattern_colors/);
+  });
+
+  it("cross-references the key against the data's series", () => {
+    const spec = {
+      ...VALID,
+      chartType: "bar",
+      xAxisType: "categorical",
+      series_patterns: { nope: "/" },
+    } as unknown as ChartSpec;
+    const r = validateChartData(spec, ROWS);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/series_patterns/);
+  });
+});
+
+describe("the implicit single-series key", () => {
+  // A chart with no series column has ONE implicit series, keyed "" (columns.ts SINGLE_SERIES_KEY).
+  // The cross-reference check built its known-series set from the data, which has no series column
+  // to read — so it rejected every key naming that series, including the `series_colors: {"": color}`
+  // idiom CONFIG-SPEC documents as still working. It also left a single-series bar unable to carry a
+  // hatch at all, since "" is the only name its series has.
+  const SINGLE = {
+    chartType: "bar",
+    title: "t",
+    xAxisType: "categorical",
+    columns: { x: "time", value: "value" },
+    data: "d.csv",
+  };
+  const ONE_SERIES: TidyRow[] = [{ time: "A", value: "3" }] as unknown as TidyRow[];
+
+  it('accepts series_colors keyed "" on a chart with no series column', () => {
+    expect(validateChartData({ ...SINGLE, series_colors: { "": "blue" } } as unknown as ChartSpec, ONE_SERIES))
+      .toEqual({ valid: true, errors: [] });
+  });
+
+  it('accepts series_patterns keyed "" there too', () => {
+    expect(validateChartData({ ...SINGLE, series_patterns: { "": "/" } } as unknown as ChartSpec, ONE_SERIES))
+      .toEqual({ valid: true, errors: [] });
+  });
+
+  it('still rejects a NAMED series that is not in the data', () => {
+    const r = validateChartData({ ...SINGLE, series_patterns: { nope: "/" } } as unknown as ChartSpec, ONE_SERIES);
+    expect(r.valid).toBe(false);
+  });
+
+  it('does NOT accept "" when the chart HAS a series column', () => {
+    // There the empty key names nothing, so it is a real mistake.
+    const withSeries = { ...SINGLE, columns: { x: "time", value: "value", series: "series" } };
+    const rows = [{ time: "A", series: "a", value: "3" }] as unknown as TidyRow[];
+    const r = validateChartData({ ...withSeries, series_patterns: { "": "/" } } as unknown as ChartSpec, rows);
+    expect(r.valid).toBe(false);
+  });
+});
+
+describe("tooltip_x_format", () => {
+  it("accepts a d3 timeFormat pattern on a temporal axis", () => {
+    const r = validateSpec({ ...VALID, tooltip_x_format: "%b %-d, %Y" });
+    expect(r).toEqual({ valid: true, errors: [] });
+  });
+
+  it("accepts it on a quarterly axis", () => {
+    const r = validateSpec({ ...VALID, xAxisType: "quarterly", tooltip_x_format: "%b %Y" });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects it on a numeric axis, where a time pattern is meaningless", () => {
+    const r = validateSpec({ ...VALID, xAxisType: "numeric", tooltip_x_format: "%b %Y" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/tooltip_x_format/);
+  });
+
+  it("rejects it on a categorical axis rather than silently ignoring it", () => {
+    const r = validateSpec({
+      ...VALID,
+      chartType: "bar",
+      xAxisType: "categorical",
+      tooltip_x_format: "%b %Y",
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/tooltip_x_format/);
+  });
+
+  it("rejects an empty pattern", () => {
+    const r = validateSpec({ ...VALID, tooltip_x_format: "" });
+    expect(r.valid).toBe(false);
   });
 });
 

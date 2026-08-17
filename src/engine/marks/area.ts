@@ -13,7 +13,7 @@ export function buildAreaMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, colors, fxField, fyField } = ctx;
+  const { xField, fxField, fyField } = ctx;
   const facetChannels = fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
   const seriesNames = ctx.seriesNames ?? [];
@@ -132,7 +132,7 @@ export function buildAreaMarks(
   // Plot emits one <path> per z group in STACK order; tag each with its series so legend
   // hover/pin/dim maps correctly even after a restack.
   const present = stackSeq.filter((s) => sorted.some((r) => r.series === s));
-  const tagging = [{ selector: 'g[aria-label="area"] path', seriesOrder: present }];
+  const tagging = [{ selector: 'g[aria-label="area"] path', seriesOrder: present, fill: true as const }];
 
   // Categorical x: areas span a point scale (small edge inset) rather than the bar band scale,
   // matching the line builder so the first/last point sit near the edges.

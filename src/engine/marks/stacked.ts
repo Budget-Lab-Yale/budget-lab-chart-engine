@@ -18,6 +18,7 @@
 // order (first-declared negative just below 0). That is exactly the Style-Guide rule, so
 // we pass NO order/reverse option and rely on data being supplied in declaration order.
 import { Plot } from "../vendor";
+import { markerInk } from "../marker-ink";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
@@ -25,7 +26,6 @@ import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes } from "../util";
 import type { ValueAffixes } from "../../spec/types";
-import { tokens } from "../../theme/tokens";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
@@ -41,7 +41,11 @@ const NET_DOT_PANE_R = 5.6;
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
 const SEGMENT_LABEL_MIN_PX = 25;
-const MARK_BLACK = tokens.structural.mark_black;
+
+// Plot className on the in-segment value-label mark, so the post-render segmentGap pass can find
+// those <text> elements — and only those — to re-centre them on the segments it shrinks. Matching
+// them by position alone would also catch an annotation label that happened to land inside a bar.
+const SEGMENT_LABEL_CLASS = "tbl-segment-label";
 const WHITE = "#FFFFFF";
 
 /** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable).
@@ -137,6 +141,24 @@ export function buildStackedMarks(
   // Net display mode (bar-stacked.md §6): "auto" → dot when any negative, else text.
   // Normalized stacks always top at 100% so a net callout is meaningless — suppress.
   // "none" explicitly suppresses all net markers and the Total legend entry.
+  // Whitespace between segments. assemblePlot applies it post-render as geometry (see MarkLayers
+  // .segmentGap for why it cannot be a Plot inset); the builder only declares the intent + target.
+  // The label selector travels WITH the gap, in one literal: an in-segment label is placed at the
+  // segment's data-space midpoint, so a gap that shrinks the rect underneath it leaves it gap/2 off
+  // the visible centre (6px at the schema max, on a 10px font). The pass that moves the rect owns
+  // that correction — see applySegmentGap. The fit threshold does NOT travel: it is a judgement
+  // about the segment's share of the data, and applying it again to a rect the gap has narrowed
+  // reads as a different, much harsher rule (that note lives on applySegmentGap too).
+  const segmentGap = spec.barStack?.segmentGap ?? 0;
+  const segmentGapLayer =
+    segmentGap > 0
+      ? {
+          segmentGap,
+          segmentGapSelector: 'g[aria-label="bar"] rect',
+          segmentLabelSelector: `g.${SEGMENT_LABEL_CLASS} text`,
+        }
+      : {};
+
   const netDisplayCfg = spec.barStack?.netDisplay ?? "auto";
   const netMode: "dot" | "text" | "none" = normalize
     ? "none"
@@ -289,13 +311,16 @@ export function buildStackedMarks(
           }),
     );
   } else if (netMode === "dot") {
-    // Black-stroked white dot at the true net y (KEPT in panes). The net value is shown on hover
-    // (the band tooltip's Total row), so no static value label is drawn. The dot shrinks in narrow
-    // panes; the net always sits between the +/− sums, so it never reaches the frame edge.
+    // Black-stroked WHITE dot at the true net y (KEPT in panes). The white is this marker's own ink,
+    // not an assumption about the ground: the dot sits ON its stack and has to occlude it. It comes
+    // from marker-ink.ts so the legend's Total key is painted from the same description — keying it as
+    // a hole instead was a real regression, and only a shared description prevents the next one.
+    // The net value is shown on hover (the band tooltip's Total row), so no static label is drawn.
     const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
+    const net = markerInk("net", "");
     const netDot = horizontal
-      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: WHITE, stroke: MARK_BLACK, strokeWidth: 2, className: NET_DOT_CLASS })
-      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: WHITE, stroke: MARK_BLACK, strokeWidth: 2, className: NET_DOT_CLASS });
+      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
+      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS });
     overlay.push(netDot);
   }
 
@@ -383,7 +408,7 @@ export function buildStackedMarks(
       underlay: [],
       overlay,
       tagging: [
-        { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+        { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
         ...netTagging,
         // Hover-accent hook (task 17): no sections/faceting for stacked bars, so render order is
         // always plain encounter order.
@@ -396,6 +421,7 @@ export function buildStackedMarks(
       seriesColors,
       legendVisualOrder,
       showTotalDot,
+      ...segmentGapLayer,
       ...(legendExtras ? { legendExtras } : {}),
     };
   }
@@ -404,7 +430,7 @@ export function buildStackedMarks(
     underlay: [],
     overlay,
     tagging: [
-      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder },
+      { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
       ...netTagging,
       // Vertical: the adapter (x-adapter.ts) supplies the category label marks (xAxisMarks left
       // undefined below), tagged with CAT_LABEL_CLASS there — encounter order, matching `categories`.
@@ -417,6 +443,7 @@ export function buildStackedMarks(
     seriesColors,
     legendVisualOrder,
     showTotalDot,
+    ...segmentGapLayer,
     ...(legendExtras ? { legendExtras } : {}),
   };
 }
@@ -426,7 +453,14 @@ export function buildStackedMarks(
  *  down from 0) so each label gets an explicit y (vertical) or x (horizontal) at the
  *  segment midpoint. For normalized stacks the offsets/values are share-of-total fractions
  *  (×100 to match the 0–100 axis). A segment whose pixel height/width is below the 25px
- *  threshold is suppressed. */
+ *  threshold is suppressed.
+ *
+ *  Both numbers are PRE-GAP: `barStack.segmentGap` shrinks the rects post-render, after these
+ *  positions are fixed. The gap pass re-centres the labels it moves (see applySegmentGap) — do not
+ *  try to anticipate the gap here, which would mean converting px to data units against a scale
+ *  this builder cannot see. The threshold is deliberately NOT re-run against the gapped rect: this
+ *  is the only place that decides whether a segment earns a label, and it decides it on the
+ *  segment's share of the data, not on a few px of separator. */
 function buildSegmentLabels(
   data: PreparedRow[],
   categories: string[],
@@ -516,7 +550,13 @@ function buildSegmentLabels(
   if (!rows.length) return [];
   // Text color: white on categorical/dark mono; dark on light mono tiers (per-row).
   const fill = (d: LabelRow) => (d.light ? TBL.color.heading : WHITE);
-  const common = { text: (d: LabelRow) => d.text, fill, fontSize: 10, fontWeight: 600 };
+  const common = {
+    className: SEGMENT_LABEL_CLASS,
+    text: (d: LabelRow) => d.text,
+    fill,
+    fontSize: 10,
+    fontWeight: 600,
+  };
   return [
     horizontal
       ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })

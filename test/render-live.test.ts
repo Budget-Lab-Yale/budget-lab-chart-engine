@@ -591,7 +591,13 @@ describe("right-side legend layout", () => {
 // Legend swatch shape tests (A8)
 
 describe("legend swatch shapes", () => {
-  // --- BAR chart: swatches must carry is-rect ---
+  // A swatch's shape used to be an `is-rect` / `is-dot` class over CSS shape rules. The drawing is
+  // SVG now (engine/icon.ts), so the shape IS the element drawn — which is also the thing a reader
+  // sees, where a class name only ever was a proxy for it.
+  const shapeOf = (swatch: Element): string | undefined =>
+    swatch.querySelector("svg")?.firstElementChild?.tagName.toLowerCase();
+
+  // --- BAR chart: swatches must be filled rects, not lines ---
   const BAR_MULTI_SPEC: ChartSpec = {
     chartType: "bar",
     title: "Bar multi-series",
@@ -607,26 +613,17 @@ describe("legend swatch shapes", () => {
     { time: "Midwest",   series: "2022", value: "2.5" },
   ];
 
-  it("bar chart legend swatches carry is-rect", () => {
+  it("bar chart legend swatches are filled rects", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: BAR_MULTI_SPEC, rows: BAR_ROWS });
     const swatches = container.querySelectorAll(".tbl-legend-swatch");
     expect(swatches.length).toBeGreaterThan(0);
     swatches.forEach((s) => {
-      expect(s.classList.contains("is-rect")).toBe(true);
+      expect(shapeOf(s)).toBe("rect");
     });
   });
 
-  it("bar chart legend swatches do NOT carry is-dot", () => {
-    const container = document.createElement("div");
-    mountChart(container, { spec: BAR_MULTI_SPEC, rows: BAR_ROWS });
-    const swatches = container.querySelectorAll(".tbl-legend-swatch");
-    swatches.forEach((s) => {
-      expect(s.classList.contains("is-dot")).toBe(false);
-    });
-  });
-
-  // --- HISTOGRAM chart: multi-series swatches must carry is-rect (bars, not lines) ---
+  // --- HISTOGRAM chart: multi-series swatches must be rects (bars, not lines) ---
   const HIST_MULTI_SPEC: ChartSpec = {
     chartType: "histogram",
     title: "Histogram multi-series",
@@ -643,28 +640,28 @@ describe("legend swatch shapes", () => {
     { time: "6", series: "B", value: "" },
   ];
 
-  it("histogram chart legend swatches carry is-rect", () => {
+  it("histogram chart legend swatches are filled rects", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: HIST_MULTI_SPEC, rows: HIST_ROWS });
     const swatches = container.querySelectorAll(".tbl-legend-swatch");
     expect(swatches.length).toBeGreaterThan(0);
     swatches.forEach((s) => {
-      expect(s.classList.contains("is-rect")).toBe(true);
+      expect(shapeOf(s)).toBe("rect");
     });
   });
 
-  // --- LINE chart: swatches must stay unchanged (no is-rect) ---
-  it("line chart legend swatches are unchanged — no is-rect", () => {
+  // --- LINE chart: a stroked mark stays keyed by a line ---
+  it("line chart legend swatches stay lines", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: MULTI_SERIES_SPEC, rows: MULTI_SERIES_ROWS });
     const swatches = container.querySelectorAll(".tbl-legend-swatch");
     expect(swatches.length).toBeGreaterThan(0);
     swatches.forEach((s) => {
-      expect(s.classList.contains("is-rect")).toBe(false);
+      expect(shapeOf(s)).toBe("line");
     });
   });
 
-  // --- DIVERGING STACKED chart: trailing Total row with is-dot swatch ---
+  // --- DIVERGING STACKED chart: trailing Total row keyed by the net dot ---
   const DIVERGING_SPEC: ChartSpec = {
     chartType: "stacked",
     title: "Diverging stacked",
@@ -684,7 +681,7 @@ describe("legend swatch shapes", () => {
     { time: "B", series: "Repeal credit",     value: "-3"   },
   ];
 
-  it("diverging stacked chart legend has a trailing Total row with is-dot swatch", () => {
+  it("diverging stacked chart legend has a trailing Total row keyed by a dot", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: DIVERGING_SPEC, rows: DIVERGING_ROWS });
     const items = container.querySelectorAll(".tbl-legend-item");
@@ -692,8 +689,8 @@ describe("legend swatch shapes", () => {
     // Last item is the Total row.
     const lastItem = items[items.length - 1] as HTMLElement;
     expect(lastItem.textContent).toContain("Total");
-    const dotSwatch = lastItem.querySelector(".tbl-legend-swatch.is-dot");
-    expect(dotSwatch).not.toBeNull();
+    const dotSwatch = lastItem.querySelector(".tbl-legend-swatch")!;
+    expect(shapeOf(dotSwatch)).toBe("circle");
   });
 
   it("diverging stacked Total row is an interactive button carrying TOTAL_SERIES_KEY", () => {
@@ -877,15 +874,23 @@ describe("monochromatic stacked legend swatch colors (Fix #2)", () => {
     { time: "Q1", series: "Tier D", value: "10" },
   ];
 
-  it("legend swatch background equals the bar's tonal tier (darkest-at-bottom)", () => {
+  it("legend swatch color equals the bar's tonal tier (darkest-at-bottom)", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: MONO_SPEC, rows: MONO_ROWS, width: 720 });
     // All-positive: bottom→top tier assignment = declaration order; tiers darkest-first
     // for blue = 700,600,500,400. So Tier A=#002B61 (700), Tier D=#0070AF (400).
-    const tierA = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Tier A"] .tbl-legend-swatch')!;
-    const tierD = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Tier D"] .tbl-legend-swatch')!;
-    expect(tierA.style.background).toBe("rgb(0, 43, 97)");  // #002B61
-    expect(tierD.style.background).toBe("rgb(0, 112, 175)"); // #0070AF
+    //
+    // Read from the chip's fill, not the span's `background`: the colour moved into the SVG when the
+    // icon became a drawing, and this is the only gate proving a mono chart's derived tier reaches
+    // its key at all.
+    const tierFill = (series: string): string | null =>
+      container
+        .querySelector(`.tbl-legend-item[data-series="${series}"] .tbl-legend-swatch svg rect`)!
+        .getAttribute("style");
+    expect(tierFill("Tier A")).toContain("fill:#002B61");
+    expect(tierFill("Tier D")).toContain("fill:#0070AF");
+    // And the tiers really do differ, so a passing assertion cannot be one flat colour twice.
+    expect(tierFill("Tier A")).not.toBe(tierFill("Tier D"));
   });
 });
 
@@ -1440,7 +1445,7 @@ describe("mountChart small multiples", () => {
     // Legend uses rect swatches (bar markerShape), not line swatches.
     const swatch = container.querySelector(".tbl-legend-item .tbl-legend-swatch");
     expect(swatch).not.toBeNull();
-    expect(swatch!.classList.contains("is-rect")).toBe(true);
+    expect(swatch!.querySelector("svg")?.firstElementChild?.tagName.toLowerCase()).toBe("rect");
   });
 
   it("clicking a per-pane bar legend item dims rects across ALL panes", () => {
@@ -1621,6 +1626,45 @@ describe("mountChart point charts", () => {
       .filter((p) => p.classList.contains("tbl-dimmed")).length;
     expect(dimmedTri).toBe(0); // Tri stays bright
     expect(dimmedDot).toBeGreaterThan(0); // Dot dims
+  });
+
+  // SCATTER_SPEC encodes colour by `color` and shape by `shp` — DIFFERENT fields — so
+  // buildLegendItems keys the colour legend with a `chip` (a rounded rect). The tooltip header
+  // names the hovered POINT, not its series, so it must still draw that point's own symbol; taking
+  // the resolved series icon whole put a chip beside "Slow · Tri" while the marker was a triangle.
+  it("scatter tooltip header draws the hovered POINT's symbol, never the colour legend's chip", () => {
+    const container = document.createElement("div");
+    mountChart(container, { spec: SCATTER_SPEC, rows: SCATTER_ROWS, width: 720 });
+
+    /** Hover the first marker with this shape value; return its tooltip header's swatch <svg>. */
+    const headerSwatch = (shape: string): SVGElement => {
+      const marker = container.querySelector(`g[aria-label="dot"] path[data-shape="${shape}"]`)!;
+      marker.dispatchEvent(new Event("pointerenter"));
+      const head = document.querySelector(".tbl-tooltip .tbl-tooltip-head")!;
+      return head.querySelector("svg")!;
+    };
+
+    const tri = headerSwatch("Tri");
+    // A d3 symbol draws as a <path>. A chip would be a <rect> — the regression this pins.
+    expect(tri.querySelector("path")).not.toBeNull();
+    expect(tri.querySelector("rect")).toBeNull();
+
+    // The two shape values must draw DIFFERENT glyphs. If the resolved chip won, both headers
+    // would be byte-identical, so this fails even if the <rect>/<path> check were satisfied some
+    // other way.
+    const dot = headerSwatch("Dot");
+    expect(dot.querySelector("path")).not.toBeNull();
+    expect(tri.querySelector("path")!.getAttribute("d")).not.toBe(
+      dot.querySelector("path")!.getAttribute("d"),
+    );
+
+    // Colour still comes from the resolved series icon — that half of the key must not drift.
+    const legendKey = container
+      .querySelector('.tbl-legend-item[data-series="Slow"]')!
+      .querySelector("svg [style*='fill']")!;
+    const legendFill = /fill:\s*([^;]+)/.exec(legendKey.getAttribute("style") ?? "")![1];
+    const triFill = /fill:\s*([^;]+)/.exec(tri.querySelector("path")!.getAttribute("style") ?? "")![1];
+    expect(triFill).toBe(legendFill);
   });
 
   const DOT_SPEC: ChartSpec = {

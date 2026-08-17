@@ -114,6 +114,81 @@ function fakeRequest(
 }
 
 // ---------------------------------------------------------------------------
+// Helpers: drive the index page's open-all script without a browser
+// ---------------------------------------------------------------------------
+
+/** Serve an index page for a gallery holding `count` chart specs. */
+async function galleryFor(count: number): Promise<{ body: string }> {
+  const dir = makeTempDir();
+  for (let i = 0; i < count; i++) {
+    const sub = join(dir, `spec-${i}`);
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(
+      join(sub, "chart.yaml"),
+      `chartType: line\ntitle: Spec ${i}\nxAxisType: temporal\ndata: d.csv\n`,
+    );
+  }
+  const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+  return { body: (await fakeRequest(handler, "/")).body };
+}
+
+/**
+ * Run the index page's inline script against stub window/document objects and click the button.
+ *
+ * The behaviour under test is pop-up handling, which no assertion on the emitted source text can
+ * reach: whether a returned window counts as blocked, and whether a large set is confirmed first,
+ * are decisions the script makes at click time. Executing it with a stub `window.open` is the only
+ * way to observe them, and is cheaper and less brittle than a real browser.
+ */
+function runOpenAll(
+  body: string,
+  stubs: { open?: (href: string) => unknown; confirm?: (msg: string) => boolean } = {},
+): {
+  opened: string[];
+  confirmed: string[];
+  note: { textContent: string; hidden: boolean };
+  /** Click again, against the same note element — the only way to observe what one click leaves
+   *  behind for the next. Stubs are consulted per call, so they can answer differently. */
+  click: () => void;
+} {
+  const opened: string[] = [];
+  const confirmed: string[] = [];
+  const note = { textContent: "", hidden: true };
+  let click: (() => void) | null = null;
+
+  const win = {
+    open(href: string) {
+      opened.push(href);
+      return stubs.open ? stubs.open(href) : {};
+    },
+    confirm(msg: string) {
+      confirmed.push(msg);
+      return stubs.confirm ? stubs.confirm(msg) : true;
+    },
+  };
+  const doc = {
+    getElementById(id: string) {
+      if (id === "open-all") {
+        return {
+          addEventListener(_type: string, fn: () => void) {
+            click = fn;
+          },
+        };
+      }
+      if (id === "open-all-note") return note;
+      return null;
+    },
+  };
+
+  const open = body.indexOf("<script>");
+  const src = body.slice(open + "<script>".length, body.indexOf("</script>", open));
+  new Function("window", "document", src)(win, doc);
+  if (!click) throw new Error("open-all button never registered a click handler");
+  (click as () => void)();
+  return { opened, confirmed, note, click: click as () => void };
+}
+
+// ---------------------------------------------------------------------------
 // findSpecs
 // ---------------------------------------------------------------------------
 
@@ -205,6 +280,112 @@ describe("GET / — index page", () => {
     const { status, body } = await fakeRequest(handler, "/");
     expect(status).toBe(200);
     expect(body).toContain("<!doctype html");
+  });
+
+  it("offers an open-all button carrying every spec's own URL", async () => {
+    // Reviewing a suite means comparing figures side by side, so the gallery opens the whole set.
+    const dir = makeTempDir();
+    for (const name of ["alpha", "beta"]) {
+      const sub = join(dir, name);
+      mkdirSync(sub, { recursive: true });
+      writeFileSync(join(sub, "chart.yaml"), `chartType: line\ntitle: ${name}\nxAxisType: temporal\ndata: d.csv\n`);
+    }
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { body } = await fakeRequest(handler, "/");
+    expect(body).toContain("Open all 2 in tabs");
+    // The button's list must be the SAME hrefs the links use, or it opens 404s.
+    for (const name of ["alpha", "beta"]) {
+      expect(body).toContain(`"/chart/${name}/chart.yaml"`);
+    }
+  });
+
+  it("omits the open-all button when there is nothing to open", async () => {
+    const dir = makeTempDir();
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { body } = await fakeRequest(handler, "/");
+    expect(body).not.toContain('id="open-all"');
+  });
+
+  // Windows forbids `<` and `>` in a filename, so the path this guards against cannot even be
+  // created here — but CI runs on Linux, where it can.
+  it.skipIf(process.platform === "win32")("cannot let a spec path close the open-all script early", async () => {
+    // A spec path is not the author's to vet: an unescaped `</script>` in one would end the element
+    // and spill the rest of the list into the page as markup.
+    const dir = makeTempDir();
+    const sub = join(dir, "a</script><b>b");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "chart.yaml"), "chartType: line\ntitle: Odd\nxAxisType: temporal\ndata: d.csv\n");
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { body } = await fakeRequest(handler, "/");
+    const script = body.slice(body.indexOf('id="open-all"'));
+    expect(script).not.toContain("</script><b>");
+  });
+
+  it("asks before opening a tab count large enough to be a misfire", async () => {
+    // 13 specs is one past the threshold, so the click must be confirmed; declining opens nothing,
+    // because the whole point of the guard is that there is no undo for 100 stray tabs.
+    const { body } = await galleryFor(13);
+    const declined = runOpenAll(body, { confirm: () => false });
+    expect(declined.confirmed).toEqual(["Open 13 tabs, one per spec?"]);
+    expect(declined.opened).toEqual([]);
+
+    const accepted = runOpenAll(body, { confirm: () => true });
+    expect(accepted.opened).toHaveLength(13);
+  });
+
+  it("does not ask at or below the threshold", async () => {
+    const { body } = await galleryFor(12);
+    const run = runOpenAll(body, {
+      // A confirm at this size would be friction on the common case; if one is asked, fail loudly
+      // rather than silently answering it.
+      confirm: () => {
+        throw new Error("should not confirm at 12 specs");
+      },
+    });
+    expect(run.confirmed).toEqual([]);
+    expect(run.opened).toHaveLength(12);
+  });
+
+  it("claims no blocked tabs when the browser handed back a window", async () => {
+    // A window that opened fine may still report closed while it navigates, and some pop-up blockers
+    // return a stub that never reports closed at all. Reading .closed therefore proves nothing, so a
+    // non-null return must never be counted as blocked.
+    const { body } = await galleryFor(2);
+    const run = runOpenAll(body, { open: () => ({ closed: true }) });
+    expect(run.opened).toHaveLength(2);
+    expect(run.note.hidden).toBe(true);
+    expect(run.note.textContent).toBe("");
+  });
+
+  it("reports a refused window as a floor, not an exact count", async () => {
+    // null is the one unambiguous refusal, so the count is a lower bound and the wording must say so.
+    const { body } = await galleryFor(2);
+    const run = runOpenAll(body, { open: () => null });
+    expect(run.note.hidden).toBe(false);
+    expect(run.note.textContent).toContain("At least 2 of 2 tabs did not open");
+    expect(run.note.textContent).toContain("allow pop-ups");
+  });
+
+  it("counts a window the browser handed back as undefined, not just null", async () => {
+    // The spec says null, so this is theoretical — but it costs one character to cover, and the
+    // failure it prevents is silent: a blocked suite that reports nothing at all.
+    const { body } = await galleryFor(2);
+    const run = runOpenAll(body, { open: () => undefined });
+    expect(run.note.hidden).toBe(false);
+    expect(run.note.textContent).toContain("At least 2 of 2 tabs did not open");
+  });
+
+  it("clears the blocked-tabs note when the next click is cancelled at the confirm", async () => {
+    // Cancelling opens nothing, so an earlier click's note is left describing a click that did not
+    // happen — it reads as "your tabs were blocked" when the answer was "you said no".
+    const { body } = await galleryFor(13); // one past CONFIRM_ABOVE, so the click is confirmed
+    let accept = true;
+    const run = runOpenAll(body, { open: () => null, confirm: () => accept });
+    expect(run.note.hidden).toBe(false);
+    accept = false;
+    run.click();
+    expect(run.note.hidden).toBe(true);
+    expect(run.opened).toHaveLength(13); // the cancelled click opened nothing more
   });
 
   it("lists a table.yaml spec by its title", async () => {

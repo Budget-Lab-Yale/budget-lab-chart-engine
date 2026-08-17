@@ -40,7 +40,6 @@ export function buildWaterfallMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const catField = ctx.xField; // "_xc"
   const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
   const steps = computeWaterfallSteps(data);
   const categories = steps.map((s) => s.cat); // band domain: declaration order, INCLUDING skips
@@ -151,7 +150,7 @@ export function buildWaterfallMarks(
       // One rect per non-skip step, in barRows (= declaration) order; tag them the single-series
       // key so the live layer treats the whole chart as one series (per-bar fill is read off the
       // rendered rect). Category labels (adapter-drawn on `x`) tagged in full band-domain order.
-      { selector: 'g[aria-label="bar"] rect', seriesOrder: barRows.map(() => SINGLE_SERIES_KEY) },
+      { selector: 'g[aria-label="bar"] rect', seriesOrder: barRows.map(() => SINGLE_SERIES_KEY), fill: true },
       { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
     ],
     dashedNames: new Set<string>(),

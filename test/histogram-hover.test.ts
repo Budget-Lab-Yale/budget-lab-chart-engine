@@ -16,6 +16,8 @@ import {
   attachHistogramHover,
   type HistogramBin,
 } from "../src/engine/crosshair";
+import { recolourIcons, type IconSpec } from "../src/engine/icon";
+import { resolveHatch } from "../src/engine/hatch";
 import { formatBinLabel } from "../src/engine/histogram-label";
 import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
@@ -164,9 +166,11 @@ describe("formatBinLabel (temporal non-calendar range)", () => {
 // buildHistogramTooltipHtml — PURE helper
 // ---------------------------------------------------------------------------
 
-const COLORS = new Map([
-  ["A", "#f00"],
-  ["B", "#00f"],
+// A histogram's bins are filled, so its key is a square — resolved once, upstream, from the same
+// row the legend draws (or, for a lone series with no legend, from the row it WOULD have drawn).
+const ICONS = new Map<string, IconSpec>([
+  ["A", { shape: "rect", color: "#f00" }],
+  ["B", { shape: "rect", color: "#00f" }],
 ]);
 
 function bin(x0: number, x1: number, entries: Array<[string, number]>): HistogramBin {
@@ -175,7 +179,7 @@ function bin(x0: number, x1: number, entries: Array<[string, number]>): Histogra
 
 describe("buildHistogramTooltipHtml", () => {
   it("uses a friendly numeric en-dash range as the header", () => {
-    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), { colors: COLORS });
+    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), { icons: ICONS });
     expect(html).toContain("tbl-tooltip-head");
     expect(html).toContain("0 – 5");
     expect(html).not.toContain("[0, 5)");
@@ -184,14 +188,14 @@ describe("buildHistogramTooltipHtml", () => {
   it("passes label opts through to formatBinLabel (temporal single period)", () => {
     // 2023-07-01 .. 2023-08-01 UTC, month interval → single month name.
     const html = buildHistogramTooltipHtml(bin(Date.UTC(2023, 6, 1), Date.UTC(2023, 7, 1), [["A", 3]]), {
-      colors: COLORS,
+      icons: ICONS,
       label: { xType: "temporal", interval: "month" },
     });
     expect(html).toContain("July 2023");
   });
 
   it("emits one row per series with its height", () => {
-    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3], ["B", 1]]), { colors: COLORS });
+    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3], ["B", 1]]), { icons: ICONS });
     expect(html).toContain("A");
     expect(html).toContain("B");
     expect(html).toContain(">3<");
@@ -200,7 +204,7 @@ describe("buildHistogramTooltipHtml", () => {
 
   it("respects seriesOrder", () => {
     const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3], ["B", 1]]), {
-      colors: COLORS,
+      icons: ICONS,
       seriesOrder: ["B", "A"],
     });
     expect(html.indexOf("B")).toBeLessThan(html.indexOf("A"));
@@ -208,7 +212,7 @@ describe("buildHistogramTooltipHtml", () => {
 
   it("uses seriesLabels + yFormat", () => {
     const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), {
-      colors: COLORS,
+      icons: ICONS,
       seriesLabels: { A: "Alpha" },
       yFormat: (v) => `${v.toFixed(1)}%`,
     });
@@ -216,18 +220,21 @@ describe("buildHistogramTooltipHtml", () => {
     expect(html).toContain("3.0%");
   });
 
-  it("prefers renderedFills over colors for the swatch", () => {
+  it("prefers the DRAWN bin fill over the series colour", () => {
+    // The fill-first rule lives in recolourIcons now — the builder is pure and only a hover site can
+    // read what was painted. Asserted through the builder so it still pins what a reader sees.
     const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), {
-      colors: COLORS,
-      renderedFills: new Map([["A", "#123456"]]),
+      icons: recolourIcons(ICONS, new Map([["A", "#123456"]]), resolveHatch),
     });
-    expect(html).toContain("background: #123456");
-    expect(html).not.toContain("background: #f00");
+    expect(html).toContain("fill:#123456");
+    expect(html).not.toContain("fill:#f00");
   });
 
-  it("uses a filled-square swatch (is-square) matching the histogram legend", () => {
-    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), { colors: COLORS });
-    expect(html).toContain("tbl-tooltip-swatch is-square");
+  it("uses a filled-square swatch matching the histogram legend", () => {
+    const html = buildHistogramTooltipHtml(bin(0, 5, [["A", 3]]), { icons: ICONS });
+    const svg = new DOMParser().parseFromString(html, "text/html").querySelector("svg")!;
+    expect(svg.querySelector("rect")).not.toBeNull();
+    expect(svg.querySelector("line")).toBeNull();
   });
 
   it("HTML-escapes dangerous characters", () => {
@@ -312,7 +319,7 @@ describe("attachHistogramHover (smoke)", () => {
   it("pointer listeners fire without throwing", () => {
     const svg = makeHistSvg();
     document.body.appendChild(svg);
-    attachHistogramHover(svg, { rows: SMOKE_ROWS, colors: COLORS });
+    attachHistogramHover(svg, { rows: SMOKE_ROWS, icons: ICONS });
     const hit = svg.querySelector(".tbl-hist-hover-hit") as Element;
     expect(() => {
       hit.dispatchEvent(new PointerEvent("pointermove", { clientX: 100, clientY: 100, bubbles: true }));

@@ -82,6 +82,7 @@ function readSpecMeta(absPath: string): { title: string; kind: "chart" | "table"
 }
 
 function buildIndexPage(specs: string[], rootDir: string): string {
+  const hrefs: string[] = [];
   const items =
     specs.length === 0
       ? `<p class="no-charts">No <code>chart.yaml</code> or <code>table.yaml</code> files found under <code>${escapeHtml(rootDir)}</code>.</p>`
@@ -92,6 +93,7 @@ function buildIndexPage(specs: string[], rootDir: string): string {
             const displayTitle = meta?.title ?? rel;
             const kindTag = meta?.kind === "table" ? `<span class="chart-kind">table</span>` : "";
             const href = `/chart/${encodeURIComponent(rel).replace(/%2F/g, "/")}`;
+            hrefs.push(href);
             return [
               `<li class="chart-item">`,
               `<a class="chart-link" href="${escapeHtml(href)}">${escapeHtml(displayTitle)}</a>${kindTag}`,
@@ -102,6 +104,15 @@ function buildIndexPage(specs: string[], rootDir: string): string {
               .join("\n      ");
           })
           .join("\n    ");
+
+  // Reviewing a suite means comparing figures, which means having them open at once. `</` is escaped
+  // so a spec path can never close this script element early.
+  const hrefsJson = JSON.stringify(hrefs).replace(/</g, "\\u003c");
+  const openAll =
+    specs.length === 0
+      ? ""
+      : `<button type="button" class="open-all" id="open-all">Open all ${specs.length} in tabs</button>
+  <span class="open-all-note" id="open-all-note" hidden></span>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -189,18 +200,90 @@ body {
   color: #666;
   padding: 24px 0;
 }
+.header-bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.open-all {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a2e;
+  background: #fff;
+  border: 1px solid #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.open-all:hover { background: #e2e5ea; }
+.open-all-note {
+  font-size: 12px;
+  color: #ffd9a0;
+  flex-basis: 100%;
+}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>tbl-chart gallery</h1>
-  <p>Serving from <code>${escapeHtml(rootDir)}</code> &mdash; ${specs.length} spec${specs.length === 1 ? "" : "s"} found</p>
+  <div class="header-bar">
+    <div>
+      <h1>tbl-chart gallery</h1>
+      <p>Serving from <code>${escapeHtml(rootDir)}</code> &mdash; ${specs.length} spec${specs.length === 1 ? "" : "s"} found</p>
+    </div>
+    ${openAll}
+  </div>
 </div>
 <div class="main">
   <ul class="chart-list">
     ${items}
   </ul>
 </div>
+<script>
+(function () {
+  var btn = document.getElementById("open-all");
+  if (!btn) return;
+  var note = document.getElementById("open-all-note");
+  // One click here spends one tab per spec and there is no undo — closing 100 tabs is done by hand.
+  // A dozen is about as many as a tab strip still shows with readable titles, so up to that the
+  // click is plausibly what was meant; past it, ask, because at that size a misfire costs more than
+  // the confirm does.
+  var CONFIRM_ABOVE = 12;
+  btn.addEventListener("click", function () {
+    var hrefs = ${hrefsJson};
+    if (hrefs.length > CONFIRM_ABOVE &&
+        !window.confirm("Open " + hrefs.length + " tabs, one per spec?")) {
+      // Nothing was attempted, so an earlier click's "did not open" note no longer describes
+      // anything. Left up it reads as a report on THIS click, which opened no tabs by request.
+      note.hidden = true;
+      return;
+    }
+    var refused = 0;
+    for (var i = 0; i < hrefs.length; i++) {
+      // Worth reporting at all because most browsers allow one window per gesture: a suite of 16
+      // opens one tab and looks broken. But a FALSY return is the only refusal a browser actually
+      // reports — w.closed read synchronously both over- and under-counts, since a tab that opened
+      // fine is still navigating and some blockers hand back a stub that never admits to closing.
+      // So refused is a floor, not a total, and the note below says "at least" instead of
+      // asserting a count this cannot know. Falsy rather than a null identity test: null is what the
+      // spec says a refusing browser returns and undefined is what one may actually return, while a
+      // real window is an object — so nothing truthy can be miscounted either way.
+      var w = window.open(hrefs[i], "_blank");
+      if (!w) refused++;
+    }
+    if (refused > 0) {
+      note.textContent = "At least " + refused + " of " + hrefs.length +
+        " tabs did not open — allow pop-ups for this page, then click again.";
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+  });
+})();
+</script>
 </body>
 </html>`;
 }

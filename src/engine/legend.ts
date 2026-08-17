@@ -3,102 +3,8 @@
 // interactive legend against that SVG. Paths are matched by their `data-series` attr,
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
-import { symbolPathD } from "./symbols";
-import { swatchWidthFor } from "./theme";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-/** Build a line+symbol legend swatch (an inline SVG): a short colored line with the series'
- *  marker centered on it, so series can be identified by shape as well as color. */
-function buildSymbolSwatch(
-  doc: Document,
-  color: string | undefined,
-  dashed: boolean,
-  symbol: string,
-): SVGSVGElement {
-  const stroke = color || "currentColor";
-  const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("width", "22");
-  svg.setAttribute("height", "12");
-  svg.setAttribute("viewBox", "0 0 22 12");
-  const line = doc.createElementNS(SVG_NS, "line");
-  line.setAttribute("x1", "1");
-  line.setAttribute("x2", "21");
-  line.setAttribute("y1", "6");
-  line.setAttribute("y2", "6");
-  line.setAttribute("stroke", stroke);
-  line.setAttribute("stroke-width", "2");
-  if (dashed) line.setAttribute("stroke-dasharray", "4 2");
-  svg.appendChild(line);
-  const path = doc.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", symbolPathD(symbol, 32));
-  path.setAttribute("transform", "translate(11,6)");
-  path.setAttribute("fill", stroke);
-  path.setAttribute("stroke", "#ffffff");
-  path.setAttribute("stroke-width", "0.75");
-  svg.appendChild(path);
-  return svg;
-}
-
-/** Build a point-marker legend swatch (an inline SVG): just the filled symbol, no line. Used
- *  for point charts — colored by series in the color legend, neutral gray in the shape legend. */
-function buildPointSwatch(doc: Document, color: string, symbol: string, hollow = false): SVGSVGElement {
-  const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("width", "18");
-  svg.setAttribute("height", "16");
-  svg.setAttribute("viewBox", "0 0 18 16");
-  const path = doc.createElementNS(SVG_NS, "path");
-  // Larger marker (was ~8px → ~12px) for legibility. Centered at x=9; nudged up to y=7 (box
-  // center is 8) so it sits on the text's optical (cap-height) center rather than the line-box
-  // center, which reads as slightly low for a small marker beside 12px text.
-  path.setAttribute("d", symbolPathD(symbol, 100));
-  path.setAttribute("transform", "translate(9,7)");
-  // Hollow (dumbbell): a ring — page-background fill, series-color stroke — matching the chart's
-  // hollow dots. Solid otherwise, with the usual white keyline.
-  path.setAttribute("fill", hollow ? "#ffffff" : color);
-  path.setAttribute("stroke", hollow ? color : "#ffffff");
-  path.setAttribute("stroke-width", hollow ? "1.5" : "1");
-  svg.appendChild(path);
-  return svg;
-}
-
-/** Build a color-chip legend swatch (an inline SVG): a filled rounded square in the series color.
- *  Used for the color-only legend of a point chart, where a point SHAPE would be ambiguous with
- *  the shape legend's symbols. Same 18×16 box + 1px upward nudge as buildPointSwatch so the chip
- *  aligns with the shape-legend symbols and the text's optical center. */
-function buildColorChip(doc: Document, color: string): SVGSVGElement {
-  const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("width", "18");
-  svg.setAttribute("height", "16");
-  svg.setAttribute("viewBox", "0 0 18 16");
-  const rect = doc.createElementNS(SVG_NS, "rect");
-  const size = 13;
-  rect.setAttribute("x", String((18 - size) / 2));
-  rect.setAttribute("y", String(7 - size / 2)); // center at y=7 (box center 8, nudged up 1px)
-  rect.setAttribute("width", String(size));
-  rect.setAttribute("height", String(size));
-  rect.setAttribute("rx", "4");
-  rect.setAttribute("fill", color);
-  svg.appendChild(rect);
-  return svg;
-}
-
-/** A left-to-right gradient of hard-edged equal bands — one per color. Used for a legend chip that
- *  keys several differently-colored fills under one label. */
-export function bandedGradient(colors: string[]): string {
-  const stops = colors
-    .map((c, i) => {
-      const from = ((i / colors.length) * 100).toFixed(4);
-      const to = (((i + 1) / colors.length) * 100).toFixed(4);
-      return `${c} ${from}% ${to}%`;
-    })
-    .join(", ");
-  return `linear-gradient(to right, ${stops})`;
-}
-
-/** Neutral gray used for the shape-legend markers (shape conveys the shape-channel value, not a
- *  color — so its swatches are uncolored). */
-const SHAPE_LEGEND_COLOR = "#555B66";
+import { ICON_BOX, iconFromLegendItem, iconSvgElement, iconWidth } from "./icon";
+import { SHAPE_LEGEND_COLOR } from "./theme";
 
 /** One shape-legend row (point charts, dual encoding). */
 export interface ShapeLegendEntry {
@@ -286,7 +192,7 @@ export function renderLegend(
     applyHighlight();
   };
 
-  for (const { series, label: displayLabel, color, colors: swatchColors, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false } of safeItems) {
+  for (const { series, label: displayLabel, color, colors: swatchColors, dashed = false, markerShape, markerSymbol, hollow = false, nonInteractive, annotation = false, outlined = false, hatch } of safeItems) {
     // Non-interactive rows (e.g. Total) are plain spans — they don't participate in
     // hover-dim / click-to-pin and carry no data-series attribute.
     const btn: HTMLElement = nonInteractive
@@ -307,46 +213,20 @@ export function renderLegend(
 
     const swatch = doc.createElement("span");
     swatch.className = "tbl-legend-swatch";
-    if (markerShape === "rect") {
-      swatch.classList.add("is-rect");
-      // Annotation fills key their TINT, which for a 10 %-opaque band is nearly white — the
-      // hairline is what keeps such a swatch from reading as a gap.
-      if (outlined) swatch.classList.add("is-outlined");
-      // Several tints (one concept, differently-colored fills) → equal vertical bands, via the same
-      // hard-stop gradient the dashed swatch uses.
-      if (swatchColors && swatchColors.length > 1) {
-        swatch.style.background = bandedGradient(swatchColors);
-        // Widen past the CSS default so each band stays legible (7 tints in 14px is 2px each).
-        swatch.style.width = `${swatchWidthFor(swatchColors.length)}px`;
-      } else if (color) {
-        swatch.style.background = color;
-      }
-    } else if (markerShape === "point") {
-      // Point chart: a filled colored marker (no line). The symbol is the series' shape in the
-      // redundant (combined) case, else a plain circle (shape lives in the shape legend).
-      swatch.classList.add("is-point");
-      swatch.appendChild(buildPointSwatch(doc, color || SHAPE_LEGEND_COLOR, markerSymbol || "circle", hollow));
-    } else if (markerShape === "chip") {
-      // Point chart color-only legend: a filled rounded-square color key (in the is-point box).
-      swatch.classList.add("is-point");
-      swatch.appendChild(buildColorChip(doc, color || SHAPE_LEGEND_COLOR));
-    } else if (markerShape === "dot") {
-      swatch.classList.add("is-dot");
-      // White fill + black stroke via CSS — no inline color needed.
-    } else if (markerSymbol) {
-      // Line chart with point markers: line + the series' marker symbol (shape conveys identity
-      // alongside color). An inline SVG, sized via the .is-symbol class.
-      swatch.classList.add("is-symbol");
-      swatch.appendChild(buildSymbolSwatch(doc, color, dashed, markerSymbol));
-    } else {
-      // "line" — existing behavior preserved.
-      if (dashed) {
-        swatch.classList.add("is-dashed");
-        if (color) swatch.style.setProperty("--swatch-color", color);
-      } else if (color) {
-        swatch.style.background = color;
-      }
-    }
+    const icon = iconFromLegendItem({
+      color,
+      dashed,
+      markerShape,
+      ...(markerSymbol ? { markerSymbol } : {}),
+      hollow,
+      ...(swatchColors ? { colors: swatchColors } : {}),
+      outlined,
+      ...(hatch ? { hatch } : {}),
+    });
+    const drawing = iconSvgElement(doc, icon);
+    if (drawing) swatch.appendChild(drawing);
+    // Only a banded chip is wider than the box, and it must reserve the extra width.
+    if (iconWidth(icon) !== ICON_BOX) swatch.style.width = `${iconWidth(icon)}px`;
 
     const labelEl = doc.createElement("span");
     labelEl.textContent = displayLabel ?? series;
@@ -399,8 +279,13 @@ export function renderLegend(
       btn.dataset.shape = shape;
       btn.setAttribute("aria-pressed", "false");
       const swatch = doc.createElement("span");
-      swatch.className = "tbl-legend-swatch is-point";
-      swatch.appendChild(buildPointSwatch(doc, SHAPE_LEGEND_COLOR, markerSymbol));
+      swatch.className = "tbl-legend-swatch";
+      const shapeIcon = iconSvgElement(doc, {
+        shape: "symbol",
+        color: SHAPE_LEGEND_COLOR,
+        symbol: markerSymbol,
+      });
+      if (shapeIcon) swatch.appendChild(shapeIcon);
       const labelEl = doc.createElement("span");
       labelEl.textContent = label;
       btn.appendChild(swatch);

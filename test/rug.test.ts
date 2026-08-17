@@ -11,6 +11,7 @@ import { resolveRugTracks, rugAllowance, RUG_GAP, RUG_PAD, RUG_ROW_GAP } from ".
 import { validateSpec } from "../src/spec/validate";
 import { TBL_COLORS } from "../src/engine/palette";
 import { SWATCH_OUTLINE, TBL } from "../src/engine/theme";
+import { ICON_GROUP_CLASS } from "../src/engine/icon";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -259,8 +260,12 @@ describe("rug + annotation legend in the PNG export", () => {
     const text = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent);
     expect(text).toContain("US recessions");
     expect(text).toContain("False positives");
-    // The keyed chips carry the hairline that keeps a pale tint legible.
-    expect(svg.querySelector(`rect[stroke="${SWATCH_OUTLINE}"]`)).not.toBeNull();
+    // The keyed chips carry the hairline that keeps a pale tint legible. (It is in the drawing's
+    // `style` now, not a `stroke` attribute — engine/icon.ts draws the export's keys too.)
+    const outlined = [...svg.querySelectorAll(`g.${ICON_GROUP_CLASS} rect`)].filter((r) =>
+      (r.getAttribute("style") ?? "").includes(SWATCH_OUTLINE),
+    );
+    expect(outlined.length).toBeGreaterThan(0);
   });
 });
 

@@ -23,6 +23,8 @@ import {
   type CategoryBand,
   type CategoryBandH,
 } from "../src/engine/crosshair";
+import { recolourIcons, type IconSpec } from "../src/engine/icon";
+import { resolveHatch } from "../src/engine/hatch";
 import { mountChart } from "../src/engine/render-live";
 import { TOTAL_SERIES_KEY } from "../src/engine/series-keys";
 import type { ChartSpec } from "../src/spec/types";
@@ -238,24 +240,29 @@ const ROWS: BandRow[] = [
   { _xc: "Cat2", series: "Beta",  _y: 12 },
 ];
 
-const COLORS = new Map([["Alpha", "#f00"], ["Beta", "#00f"]]);
+// The tooltip's ONE key channel. Every row's drawing comes from here; the builder no longer takes
+// a colour map or a shape name, so a test that wants a square has to say so as the caller does.
+const ICONS = new Map<string, IconSpec>([
+  ["Alpha", { shape: "rect", color: "#f00" }],
+  ["Beta", { shape: "rect", color: "#00f" }],
+]);
 
 describe("buildBandTooltipHtml", () => {
   it("includes the category as the header", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     expect(html).toContain("Cat1");
     expect(html).toContain("tbl-tooltip-head");
   });
 
   it("emits one row per series present in the category", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     expect(html).toContain("Alpha");
     expect(html).toContain("Beta");
   });
 
   it("does not include series from a different category", () => {
     // Rows for Cat2 only differ in _y; we verify Cat1 rows do not leak Cat2 values.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     // Cat1 Alpha=10, Beta=5; Cat2 Alpha=8, Beta=12 → "12" should not appear
     expect(html).toContain("10");
     expect(html).toContain("5");
@@ -265,29 +272,29 @@ describe("buildBandTooltipHtml", () => {
   it("respects seriesOrder", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
       seriesOrder: ["Beta", "Alpha"],
-      colors: COLORS,
+      icons: ICONS,
     });
     const betaIdx = html.indexOf("Beta");
     const alphaIdx = html.indexOf("Alpha");
     expect(betaIdx).toBeLessThan(alphaIdx);
   });
 
-  it("prefers renderedFills over colors for the swatch (bar tooltip color-matches the drawn bar)", () => {
+  it("prefers the DRAWN fill over the series colour (bar tooltip color-matches the drawn bar)", () => {
+    // The fill-first rule lives in recolourIcons now, not in this builder: the builder is pure and
+    // the drawn fill can only be read at the hover site. Asserted THROUGH the builder so it still
+    // pins what a reader sees, not just what the resolver returns.
     const html = buildBandTooltipHtml("Cat1", ROWS, {
-      swatchShape: "rect",
-      colors: COLORS, // series base colors #f00 / #00f
-      renderedFills: new Map([["Alpha", "#123456"]]), // Alpha's ACTUAL bar fill
+      icons: recolourIcons(ICONS, new Map([["Alpha", "#123456"]]), resolveHatch),
     });
-    // Alpha's swatch uses the rendered fill, not its base color.
-    expect(html).toContain("background: #123456");
-    expect(html).not.toContain("background: #f00");
-    // Beta has no rendered fill → falls back to its base color.
-    expect(html).toContain("background: #00f");
+    expect(html).toContain("fill:#123456");
+    expect(html).not.toContain("fill:#f00");
+    // Beta has no rendered fill → keeps its resolved colour.
+    expect(html).toContain("fill:#00f");
   });
 
   it("uses seriesLabels for display names", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
-      colors: COLORS,
+      icons: ICONS,
       seriesLabels: { Alpha: "Greek A", Beta: "Greek B" },
     });
     expect(html).toContain("Greek A");
@@ -298,7 +305,7 @@ describe("buildBandTooltipHtml", () => {
 
   it("uses the provided yFormat for values", () => {
     const html = buildBandTooltipHtml("Cat1", ROWS, {
-      colors: COLORS,
+      icons: ICONS,
       yFormat: (v) => `${v.toFixed(1)}%`,
     });
     expect(html).toContain("10.0%");
@@ -306,41 +313,49 @@ describe("buildBandTooltipHtml", () => {
   });
 
   it("does NOT add a Total row for non-stacked (isStacked omitted)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { icons: ICONS });
     expect(html).not.toContain("Total");
   });
 
   it("adds a Total row for diverging stacked charts (isStacked=true, showTotalDot=true)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
     expect(html).toContain("Total");
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
 
-  it("Total row swatch carries the is-dot (circle) class for diverging stacks; per-series rows do not", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, colors: COLORS });
-    // The Total row's swatch is a circle matching the net dot / legend.
-    expect(html).toContain('class="tbl-tooltip-swatch is-dot"');
-    // Per-series rows keep the plain colored-square swatch (no is-dot): Cat1 has 2 series.
-    const perSeries = html.match(/class="tbl-tooltip-swatch"/g) ?? [];
-    expect(perSeries.length).toBe(2);
-    // Exactly one is-dot swatch (the Total row).
-    expect((html.match(/is-dot/g) ?? []).length).toBe(1);
+  it("draws the Total row's swatch as a circle for diverging stacks; per-series rows stay squares", () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    // The Total row's swatch is a circle matching the net dot / legend. It carried an `is-dot` class
+    // over CSS that has since been deleted, so the class name outlived the drawing it stood for.
+    const rows = [...doc.querySelectorAll(".tbl-tooltip-row")];
+    const total = rows.at(-1)!;
+    expect(total.textContent).toContain("Total");
+    expect(total.querySelector(".tbl-tooltip-swatch svg circle")).not.toBeNull();
+    // Cat1's 2 series keep whatever shape their mark has — the dot belongs to the Total alone.
+    const perSeries = rows.slice(0, -1);
+    expect(perSeries).toHaveLength(2);
+    for (const r of perSeries) {
+      expect(r.querySelector(".tbl-tooltip-swatch svg")).not.toBeNull();
+      expect(r.querySelector("circle")).toBeNull();
+    }
   });
 
-  it("Total row does NOT use is-dot for cumulative stacked charts (showTotalDot=false)", () => {
+  it("draws no Total swatch for cumulative stacked charts (showTotalDot=false)", () => {
     // Cumulative (all-positive) stacks show a text-above net callout, not a dot marker,
     // so the tooltip Total row must match: plain label + value, no circle swatch.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, icons: ICONS });
     expect(html).toContain("Total");
-    expect(html).not.toContain("is-dot");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelectorAll("circle")).toHaveLength(0);
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
 
   it("omits Total row when showTotalDot is undefined (netDisplay:none / normalized)", () => {
     // No net marker on the chart → no Total row in the tooltip.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, icons: ICONS });
     expect(html).not.toContain("Total");
   });
 
@@ -352,7 +367,10 @@ describe("buildBandTooltipHtml", () => {
     const html = buildBandTooltipHtml("X", divergingRows, {
       isStacked: true,
       showTotalDot: true,
-      colors: new Map([["Up", "#0f0"], ["Down", "#f00"]]),
+      icons: new Map<string, IconSpec>([
+        ["Up", { shape: "rect", color: "#0f0" }],
+        ["Down", { shape: "rect", color: "#f00" }],
+      ]),
     });
     expect(html).toContain("Total");
     // Net = 8 + (-3) = 5
@@ -371,7 +389,7 @@ describe("buildBandTooltipHtml", () => {
       { _xc: "Cat1", series: "Alpha", _y: null },
       { _xc: "Cat1", series: "Beta",  _y: 7 },
     ];
-    const html = buildBandTooltipHtml("Cat1", withNull, { colors: COLORS });
+    const html = buildBandTooltipHtml("Cat1", withNull, { icons: ICONS });
     expect(html).toContain("Beta");
     expect(html).not.toContain("Alpha");
   });
@@ -447,7 +465,7 @@ describe("attachBandCrosshair (smoke)", () => {
   it("pointermove listener is registered (fires without throwing)", () => {
     const svg = makeSvg();
     document.body.appendChild(svg);
-    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"], colors: COLORS });
+    attachBandCrosshair(svg, { rows: ROWS, categories: ["Cat1"], icons: ICONS });
     const hit = svg.querySelector(".tbl-band-crosshair-hit") as Element;
     expect(hit).not.toBeNull();
     // Fire a synthetic pointermove — should not throw.
@@ -759,7 +777,7 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     const svg = hoverFirstBar(container);
     // Tooltip shown (visible band crosshair), with the dot-swatch Total row.
     expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(before + 1);
-    expect(document.body.querySelector(".tbl-tooltip-swatch.is-dot")).not.toBeNull();
+    expect(document.body.querySelector(".tbl-tooltip-row--total .tbl-tooltip-swatch svg circle")).not.toBeNull();
     // No coordinated pill cursor was attached at all.
     expect(svg.querySelector("g.tbl-coord")).toBeNull();
     document.body.removeChild(container);
@@ -1042,7 +1060,7 @@ describe("attachSecondaryBandCursor (coordinated cursor)", () => {
     const drive = attachSecondaryBandCursor(svg, {
       rows: ROWS,
       categories: ["Cat1"],
-      colors: COLORS,
+      colors: new Map([["Alpha", "#f00"], ["Beta", "#00f"]]),
       seriesOrder: ["Alpha", "Beta"],
     });
     expect(typeof drive).toBe("function");
@@ -1361,5 +1379,80 @@ describe("attachHighlightPills — Total selection net pill", () => {
     handle.setActive(new Set([TOTAL_SERIES_KEY]));
     expect(svg.querySelectorAll("g.tbl-hl-pills text").length).toBe(0);
     document.body.removeChild(svg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The tooltip key follows the HOVERED CATEGORY, not the first bar drawn
+// ---------------------------------------------------------------------------
+//
+// `category_colors` (and a waterfall's per-direction palette) paint ONE series' bars a different
+// colour in every category. The key used to be resolved from a map built per `data-series` that
+// kept the first rect it saw, so every category's swatch showed the FIRST category's fill — an
+// amber chip beside a violet bar. The chart itself was always right; only the key lied, which is
+// what let it ship. See `readCategoryFills` in crosshair.ts.
+
+describe("a category_colors bar keys each category with its OWN fill", () => {
+  const SPEC = {
+    chartType: "bar",
+    title: "Category colours",
+    xAxisType: "categorical",
+    columns: { x: "cat", value: "value", facet: "pane" },
+    category_colors: { Alpha: "amber", Beta: "violet", Gamma: "blue" },
+    // The band TOOLTIP (rather than the coordinated in-place pills) is what carries a key, and
+    // `coordinated_cursor: false` is the production spec that reaches it on a plain bar figure.
+    small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+    data: "inline",
+  } as unknown as ChartSpec;
+
+  const ROWS: TidyRow[] = [
+    { pane: "P1", cat: "Alpha", value: "3" },
+    { pane: "P1", cat: "Beta", value: "5" },
+    { pane: "P1", cat: "Gamma", value: "2" },
+    { pane: "P2", cat: "Alpha", value: "4" },
+    { pane: "P2", cat: "Beta", value: "1" },
+    { pane: "P2", cat: "Gamma", value: "6" },
+  ] as unknown as TidyRow[];
+
+  it("hovering two categories draws two different swatches, each matching its own bar", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: SPEC, rows: ROWS, width: 838, height: 420 });
+    const svg = container.querySelector<SVGSVGElement>(".figure-pane svg")!;
+
+    // jsdom has no layout: map client coords 1:1 onto the viewBox so a bar's own x is hoverable.
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+
+    // The bars in render order (Alpha, Beta, Gamma), each with the fill it is actually painted.
+    const bars = Array.from(svg.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'))
+      .sort((a, b) => parseFloat(a.getAttribute("x")!) - parseFloat(b.getAttribute("x")!));
+    expect(bars.length).toBe(3);
+    const fills = bars.map((r) => r.getAttribute("fill"));
+    expect(new Set(fills).size, "category_colors did not paint three distinct bars").toBe(3);
+
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    /** The fill of the swatch the tooltip draws when the pointer sits over bar `i`. */
+    const swatchFillOver = (i: number): string => {
+      const bar = bars[i]!;
+      const cx = parseFloat(bar.getAttribute("x")!) + parseFloat(bar.getAttribute("width")!) / 2;
+      hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 60, bubbles: true }));
+      const chip = document.querySelector(".tbl-tooltip .tbl-tooltip-swatch svg rect")!;
+      return chip.getAttribute("style") ?? "";
+    };
+
+    const alpha = swatchFillOver(0);
+    const beta = swatchFillOver(1);
+    expect(alpha).toContain(`fill:${fills[0]}`);
+    expect(beta).toContain(`fill:${fills[1]}`);
+    expect(alpha, "both categories keyed with the same colour").not.toBe(beta);
+
+    container.remove();
   });
 });

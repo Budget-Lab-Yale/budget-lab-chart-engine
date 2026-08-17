@@ -90,7 +90,7 @@ describe("layoutTable", () => {
   });
 
   it("header cell rects honor colSpan (width = sum of spanned colW)", () => {
-    const { model, layout } = build();
+    const { layout } = build();
     // tier0 "Conventional" spans 2 leaves (billions, share).
     const topTier = layout.header[0]!;
     const conv = topTier.find((h) => h.cell.text === "Conventional")!;

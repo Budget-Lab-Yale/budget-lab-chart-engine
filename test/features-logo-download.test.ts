@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
+import { ICON_GROUP_CLASS } from "../src/engine/icon";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -229,10 +230,11 @@ describe("buildExportSvg — small multiples", () => {
   });
 
   it("draws per-series marker symbols in the legend when points is set", () => {
-    // The legend symbol swatches use a thin white outline (stroke-width 0.75), distinct from the
-    // pane markers (stroke-width 1), so we can detect them.
+    // Legend keys are the only `.tbl-icon` groups in the flat export SVG. (They used to be found by
+    // a stroke-width of 0.75 the export alone used — a number no longer written anywhere, since the
+    // key is drawn by engine/icon.ts now.)
     const svg = buildExportSvg({ ...SHARED_SPEC, points: true }, FACET_ROWS);
-    const legendSymbols = svg.querySelectorAll('path[stroke-width="0.75"]');
+    const legendSymbols = svg.querySelectorAll(`g.${ICON_GROUP_CLASS} path`);
     expect(legendSymbols.length).toBe(2); // one per series (A, B)
   });
 

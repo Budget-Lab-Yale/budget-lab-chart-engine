@@ -5,6 +5,10 @@
 // lighter blue, a 10th a lighter amber, etc. The light tier is computed in
 // sync-theme.mjs from each hue's tonal scale — see theme/tokens.ts.
 import { tokens } from "../theme/tokens";
+import { TBL_COLORS } from "../spec/color-ref";
+import { d3 } from "./vendor";
+
+export { TBL_COLORS };
 
 const BASE = tokens.categorical.map((c) => c.base);
 const LIGHT = tokens.categorical.map((c) => c.light);
@@ -22,26 +26,10 @@ export function tblColorScale(n: number): string[] {
   return out;
 }
 
-// Named colors config authors may use for `series_colors` (e.g. "blue", "amber-light",
-// "navy", "black"). Built from the categorical hues + their light variants + the
-// Style-Guide naming aliases (purple→violet, etc.) + a few structural neutrals.
-const NAMED: Record<string, string> = {};
-for (const c of tokens.categorical) {
-  NAMED[c.key] = c.base;
-  NAMED[`${c.key}-light`] = c.light;
-}
-for (const [alias, canonical] of Object.entries(tokens.aliases)) {
-  const base = NAMED[canonical];
-  const light = NAMED[`${canonical}-light`];
-  if (base) NAMED[alias] = base;
-  if (light) NAMED[`${alias}-light`] = light;
-}
-NAMED.black = tokens.structural.mark_black;
-NAMED.grey = tokens.structural.text_muted;
-NAMED.gray = tokens.structural.text_muted;
-NAMED.navy = tokens.brand.navy;
-
-export const TBL_COLORS: Readonly<Record<string, string>> = NAMED;
+// The name → hex table itself lives in spec/color-ref.ts, which the VALIDATOR also reads to reject an
+// unpaintable color at load. It cannot live here: this module imports the vendored d3, and pulling
+// that into the Node-only spec entry would grow it from 46 KB to ~700 KB. Re-exported so the name
+// resolution below and its table still read as one module to every consumer.
 
 /** A known color name → its hex; anything else (a raw "#hex" or unknown) is returned
  * unchanged. Undefined/empty passes through so callers can `?? fallback`. */
@@ -55,6 +43,93 @@ export function resolveColor(value: string | undefined): string | undefined {
  *  unknown name comes back unchanged, undefined/empty comes back falsy — so this is the whole rule. */
 export function resolveColorOr(value: string | undefined, fallback: string): string {
   return resolveColor(value) || fallback;
+}
+
+// Every tonal tier, LIGHTEST-first, so a positive step along the array is a step darker.
+const TONAL_TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"] as const;
+
+/** Reverse lookup from a tonal-scale hex back onto its ramp: which hue family it belongs to, that
+ *  family's tiers lightest-first, and this hex's index within them. Lets a caller that has only a
+ *  resolved colour (the engine resolves everything to hex before it reaches the marks) step along
+ *  the same hue instead of guessing in colour space — see hatch.ts `defaultHatchStroke`.
+ *  Keyed upper-case; the generated tokens are upper-case hex. */
+export const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]; index: number }> =
+  (() => {
+    const m = new Map<string, { family: string; tiers: string[]; index: number }>();
+    for (const [family, scale] of Object.entries(
+      tokens.scales as Record<string, Record<string, string>>,
+    )) {
+      const tiers = TONAL_TIERS.map((t) => scale[t]).filter((hex): hex is string => !!hex);
+      tiers.forEach((hex, index) => {
+        // First writer wins: a hex shared between two ramps keeps its first family, which is
+        // arbitrary but deterministic.
+        if (!m.has(hex.toUpperCase())) m.set(hex.toUpperCase(), { family, tiers, index });
+      });
+    }
+    return m;
+  })();
+
+/** Which hue ramp a non-tier colour belongs to. The canonical categorical hues and their `-light`
+ *  variants are NEAR-MISSES for their own tiers (`blue` is #0072B2; `blue-400` is #0070AF), so an
+ *  exact-hex lookup finds nothing for exactly the colours authors name most often. `navy` and `sky`
+ *  are brand blues with no ramp of their own, so they borrow blue's. */
+const FAMILY_BY_HEX: ReadonlyMap<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const c of tokens.categorical) {
+    m.set(c.base.toUpperCase(), c.key);
+    m.set(c.light.toUpperCase(), c.key);
+  }
+  m.set(tokens.brand.navy.toUpperCase(), "blue");
+  m.set(tokens.brand.sky.toUpperCase(), "blue");
+  return m;
+})();
+
+/** A colour's position on a tonal ramp: the hue family, that family's tiers lightest-first, and the
+ *  index of the tier this colour sits AT or nearest to in L*.
+ *
+ *  Locating by lightness rather than by exact hex is the point: it covers the tiers, the canonical
+ *  hues, their `-light` variants, and the brand blues with one rule. Returns null for a colour on no
+ *  ramp (a neutral, or a raw `#hex`), which callers handle perceptually instead. */
+export function locateOnRamp(
+  hex: string,
+): { family: string; tiers: string[]; index: number } | null {
+  const key = hex.toUpperCase();
+  const exact = TONAL_BY_HEX.get(key);
+  if (exact) return exact;
+  const family = FAMILY_BY_HEX.get(key);
+  if (!family) return null;
+  const scale = (tokens.scales as Record<string, Record<string, string>>)[family];
+  if (!scale) return null;
+  // NOT guaranteed eight long: the filter drops any tier this family doesn't ship, so a returned
+  // index is only meaningful against `tiers.length`, never against TONAL_TIERS. A type predicate
+  // rather than the old `map(… as string).filter(Boolean)`, whose cast let that shortness reach
+  // hatch.ts as an undefined colour.
+  const tiers = TONAL_TIERS.map((t) => scale[t]).filter((hex): hex is string => !!hex);
+  const target = lightness(hex);
+  if (target == null) return null;
+  let index = 0;
+  for (let i = 1; i < tiers.length; i++) {
+    const best = lightness(tiers[index] as string) ?? 0;
+    const here = lightness(tiers[i] as string) ?? 0;
+    if (Math.abs(here - target) < Math.abs(best - target)) index = i;
+  }
+  return { family, tiers, index };
+}
+
+/** CIE L* of a colour, or null if it doesn't parse. */
+export function lightness(hex: string): number | null {
+  const c = d3.color(hex);
+  return c ? d3.lab(c).l : null;
+}
+
+/** Shift a colour's L* by `delta`, keeping its hue and chroma. For colours off every ramp, where
+ *  there is no palette step to take. */
+export function shiftLightness(hex: string, delta: number): string {
+  const c = d3.color(hex);
+  if (!c) return hex;
+  const lab = d3.lab(c);
+  const shifted = d3.lab(Math.max(0, Math.min(100, lab.l + delta)), lab.a, lab.b);
+  return d3.rgb(shifted).formatHex();
 }
 
 // The 7 usable tiers, darkest-first (skip tier 50 per spec).

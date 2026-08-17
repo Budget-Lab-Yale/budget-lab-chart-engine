@@ -1762,7 +1762,7 @@ function buildFacetedPlot() {
     document,
     classNameSuffix: "facet",
     facet: { columns: 2, rows: 2, cells },
-  });
+  }).svg;
 }
 
 describe("golden SVG — shared-mode small multiples", () => {
@@ -2395,5 +2395,68 @@ describe("figure — per-pane mode with variable pane widths (independent y-axes
     expect(mb0).toBe(mb1);
     // The long-label pane forces a taller margin than a short-only single-line axis would need.
     expect(mb0).toBeGreaterThan(28);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A stack carrying BOTH new channels at once: a hatched segment over a same-hue
+// neighbour, and a 1px gap between every pair. The two interact — the gap shrinks the
+// rects the pattern fills — so locking them together is what catches a regression in
+// either that a single-feature test would miss. This is also the golden that pins the
+// pattern's <defs> emission and its content-addressed id.
+// ---------------------------------------------------------------------------
+describe("golden: textured + gapped stack", () => {
+  const SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "Where a dollar of new tax goes",
+    xAxisType: "categorical",
+    columns: { x: "time", value: "value", series: "series" },
+    series_order: ["afterTaxIncome", "currentLawTax", "collectedNew", "lostToBehavior"],
+    series_labels: {
+      afterTaxIncome: "Income kept",
+      currentLawTax: "Tax paid today",
+      collectedNew: "New tax collected",
+      lostToBehavior: "Lost to behavior",
+    },
+    // collectedNew / lostToBehavior are the same hue two tiers apart — the pair the texture and
+    // the gap both exist to separate.
+    series_colors: {
+      afterTaxIncome: "grey",
+      currentLawTax: "navy",
+      collectedNew: "blue",
+      lostToBehavior: "#58A3E7",
+    },
+    series_patterns: { lostToBehavior: "/" },
+    barStack: { segmentGap: 1, netDisplay: "none" },
+    data: "stack-textured-gapped.csv",
+  };
+
+  it("locks the combined output", async () => {
+    const rows = parseCsv("./fixtures/stack-textured-gapped.csv");
+    const { svg } = renderChart(SPEC, rows, { width: 720, height: 420, document });
+
+    // The texture reached the marks, defined exactly once.
+    expect(svg.querySelectorAll('pattern[id^="tblhatch-fwd-"]').length).toBe(1);
+    const hatched = [...svg.querySelectorAll<SVGElement>('rect[data-series="lostToBehavior"]')];
+    expect(hatched).toHaveLength(3);
+    for (const r of hatched) expect(r.style.fill).toMatch(/^url\("?#tblhatch-fwd-/);
+
+    // The gap opened between every pair, and only between pairs.
+    const byBand = new Map<number, Array<{ y: number; h: number }>>();
+    svg.querySelectorAll('g[aria-label="bar"] rect').forEach((r) => {
+      const x = Math.round(+r.getAttribute("x")!);
+      if (!byBand.has(x)) byBand.set(x, []);
+      byBand.get(x)!.push({ y: +r.getAttribute("y")!, h: +r.getAttribute("height")! });
+    });
+    expect(byBand.size).toBe(3);
+    for (const stack of byBand.values()) {
+      stack.sort((a, b) => a.y - b.y);
+      expect(stack).toHaveLength(4);
+      for (let i = 0; i < stack.length - 1; i++) {
+        expect(stack[i + 1]!.y - (stack[i]!.y + stack[i]!.h)).toBeCloseTo(1, 5);
+      }
+    }
+
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/stack-textured-gapped.golden.svg");
   });
 });

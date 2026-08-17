@@ -4,7 +4,7 @@
 // — point both at the same column for redundant color+shape encoding (the dot-plot default).
 // The generic chrome (gridlines, axes, zero baseline) is added by assemblePlot.
 import { Plot } from "../vendor";
-import { markerSymbolForIndex } from "../theme";
+import { markerSymbolForIndex, MARK_POINT_R, MARK_POINT_PANE_R } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -33,7 +33,7 @@ export function buildPointMarks(
 
   // Marker radius. Dot plots (and other faceted point panes) use a larger marker so the data
   // dots read close to the ~11px legend symbols; single-frame scatters stay a touch smaller.
-  const r = ctx.pane ? 5.4 : 4.6;
+  const r = ctx.pane ? MARK_POINT_PANE_R : MARK_POINT_R;
 
   // Categorical x (dotplot) with multiple series: dodge each series horizontally within its
   // category so markers sit side by side instead of stacking at the band center. Plot's `dx` is a

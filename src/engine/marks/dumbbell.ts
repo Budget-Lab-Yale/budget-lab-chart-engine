@@ -21,21 +21,16 @@ import {
   SECTION_SPACER_SLOTS,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
-import { tokens } from "../../theme/tokens";
+import { markerInk, type MarkerInk, type MarkerStyle } from "../marker-ink";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
-const PAGE_BG = tokens.structural.background; // hollow-dot center (stem shows through the ring)
-const INK = tokens.structural.text_heading; // filled "ink"/neutral dot
 const DEFAULT_CONNECTOR = TBL.color.annotationDim; // subtle stem behind the dots
 const DEFAULT_DOT_R = 5;
-const DOT_KEYLINE = "#ffffff"; // thin white keyline on filled/ink dots (matches point.ts)
 // classNames so a post-render pass / test can find the connector and gap-label marks precisely
 // (the connector is a rule like a gridline; the gap label is text like the axis ticks).
 const CONNECTOR_CLASS = "tbl-dumbbell-connector";
 const GAP_LABEL_CLASS = "tbl-dumbbell-gap";
-
-type MarkerStyle = "filled" | "hollow" | "ink";
 
 /** `{value}`-style number formatter for gap labels (pure — no locale, so goldens stay byte-stable). */
 function fmtValue(v: number, f: ValueFormat | undefined): string {
@@ -111,15 +106,15 @@ export function buildDumbbellMarks(
     bandDomain = domain;
   }
 
-  // --- Marker styling (filled / hollow / ink), per series ---
+  // --- Marker styling, per series. The INK comes from marker-ink.ts, which the legend/tooltip/export
+  // icons read too, so a key cannot describe a different middle from the dot it names — a hollow end
+  // is a HOLE (the stem shows through) and only the shared description says so. The WIDTH stays here:
+  // it belongs to this chart's geometry, not to the ink.
   const markerOf = (s: string): MarkerStyle => spec.series_marker?.[s] ?? "filled";
   const seriesColor = (s: string): string => colors.get(s) || TBL.color.blue;
-  const fillFor = (s: string): string => {
-    const m = markerOf(s);
-    return m === "hollow" ? PAGE_BG : m === "ink" ? INK : seriesColor(s);
-  };
-  const strokeFor = (s: string): string =>
-    markerOf(s) === "hollow" ? seriesColor(s) : DOT_KEYLINE;
+  const inkFor = (s: string): MarkerInk => markerInk(markerOf(s), seriesColor(s));
+  const fillFor = (s: string): string => inkFor(s).fill;
+  const strokeFor = (s: string): string => inkFor(s).stroke;
   const strokeWidthFor = (s: string): number => (markerOf(s) === "hollow" ? 1.5 : 1);
 
   // --- Connector stems: per category, span min→max of that category's present dots ---
@@ -249,7 +244,8 @@ export function buildDumbbellMarks(
   // Resolved series → legend swatch color (ink dots read as ink; hollow/filled read as the series
   // color — the hollow ring is rendered by the legend, task 5). Source of truth for the legend.
   const seriesColors = new Map<string, string>();
-  for (const s of seriesNames) seriesColors.set(s, markerOf(s) === "ink" ? INK : seriesColor(s));
+  // An ink dot keys as ink; a hollow one keys as its series colour, which is what its RING is painted.
+  for (const s of seriesNames) seriesColors.set(s, markerOf(s) === "ink" ? markerInk("ink", "").fill : seriesColor(s));
 
   // Tag each dot with BOTH its series (legend hover/pin) and its category (so the live hover /
   // coordinated cursor can resolve which category band the pointer is over, from the dots).

@@ -185,13 +185,15 @@ describe("buildFacetTooltipHtml", () => {
     const html = buildFacetTooltipHtml("X", "t", bySeries, 100, {
       seriesOrder: ["<5 Weeks"],
       seriesLabels: { "<5 Weeks": "Short term" },
-      dashedSeries: new Set(["<5 Weeks"]),
-      colors: new Map([["<5 Weeks", "#123456"]]),
+      icons: new Map([["<5 Weeks", { shape: "line", color: "#123456", dashed: true }]]),
       yFormat: (v) => String(v),
     });
     expect(html).toContain("Short term");
-    expect(html).toContain("is-dashed");
-    expect(html).toContain("--swatch-color: #123456");
+    // The dash is drawn, not classed: `is-dashed` + a `--swatch-color` custom property used to feed
+    // a hard-stop CSS gradient, which had to be kept in sync with the SVG dash by hand.
+    const line = new DOMParser().parseFromString(html, "text/html").querySelector("svg line")!;
+    expect(line.getAttribute("stroke-dasharray")).toBeTruthy();
+    expect(line.getAttribute("style")).toContain("stroke:#123456");
   });
 });
 

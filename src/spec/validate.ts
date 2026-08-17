@@ -11,8 +11,12 @@
 import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
+// Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
+// back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
+import { FILLED_CHART_TYPES } from "./filled-chart-types";
+import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
-import { resolveColumns, isPreBinned, categoryOrderFor } from "./columns";
+import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
 import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
@@ -191,8 +195,85 @@ function histogramSpecError(spec: {
   return errors;
 }
 
-/** `shading` fills between a line and its baseline, so it only means anything on a line chart:
- *  `area` already fills to the axis, and the rest have no line to fill under. */
+/** `series_patterns` textures a mark's FILL, so it only means anything where the mark is a filled
+ *  area (see FILLED_CHART_TYPES). A line's 2px stroke and a dot's 8px disc are both smaller than
+ *  the hatch period, so a texture there is noise — reject rather than render something illegible. */
+function seriesPatternsError(spec: { chartType?: unknown; series_patterns?: unknown }): string | null {
+  if (spec.series_patterns == null) return null;
+  if (FILLED_CHART_TYPES.has(spec.chartType as string)) return null;
+  return (
+    "`series_patterns` applies only to chart types with filled marks " +
+    `(${[...FILLED_CHART_TYPES].join(", ")}) — got ${JSON.stringify(spec.chartType)}`
+  );
+}
+
+/** `tooltip_x_format` is a d3 `timeFormat` pattern, so it only means something on an axis whose x
+ *  values ARE dates. On numeric/categorical it would be silently dropped — reject instead, so an
+ *  author who reaches for it on the wrong axis finds out at load rather than by hovering. */
+function tooltipXFormatError(spec: { xAxisType?: unknown; tooltip_x_format?: unknown }): string | null {
+  if (spec.tooltip_x_format == null) return null;
+  if (spec.xAxisType === "temporal" || spec.xAxisType === "quarterly") return null;
+  return (
+    "`tooltip_x_format` is a d3 timeFormat pattern and applies only to xAxisType " +
+    `"temporal" or "quarterly" (got ${JSON.stringify(spec.xAxisType)})`
+  );
+}
+
+/**
+ * Every field that takes a color, checked against what the engine can actually PAINT (see
+ * color-ref.ts). An unresolvable name is not a cosmetic slip: it reaches Plot as a constant fill,
+ * Plot reads an unpaintable string as a column name, and the marks are dropped — a published figure
+ * with no bars in it, off a spec that validated clean.
+ *
+ * All of them are collected, not just the first: a renamed hue is usually wrong in several places at
+ * once, and one error per load is a slow way to find that out.
+ */
+function colorErrors(spec: ChartSpec): string[] {
+  const errors: string[] = [];
+  const check = (where: string, value: unknown): void => {
+    const err = colorRefError(where, value);
+    if (err) errors.push(err);
+  };
+  const checkColors = (where: string, list: ReadonlyArray<{ color?: string }> | undefined): void => {
+    (list ?? []).forEach((e, i) => check(`${where}[${i}].color`, e.color));
+  };
+
+  for (const [k, v] of Object.entries(spec.series_colors ?? {})) {
+    check(`series_colors[${JSON.stringify(k)}]`, v);
+  }
+  for (const [k, v] of Object.entries(spec.category_colors ?? {})) {
+    check(`category_colors[${JSON.stringify(k)}]`, v);
+  }
+  check("bar_color", spec.bar_color);
+
+  // Only the LIVE annotation source is checked. The unified `annotations` block wins PER FIELD over
+  // the legacy axis policy (resolveAnnotations), and whichever loses is never painted — rejecting a
+  // color there would fail a spec that renders correctly today.
+  const ann = spec.annotations;
+  checkColors(ann?.xAxis ? "annotations.xAxis" : "xAxisPolicy.markers", ann?.xAxis ?? spec.xAxisPolicy?.markers);
+  checkColors(ann?.bands ? "annotations.bands" : "xAxisPolicy.bands", ann?.bands ?? spec.xAxisPolicy?.bands);
+  checkColors(ann?.yAxis ? "annotations.yAxis" : "yAxisPolicy.markers", ann?.yAxis ?? spec.yAxisPolicy?.markers);
+  checkColors("annotations.points", ann?.points);
+  checkColors("shading", spec.shading);
+  checkColors("rug.tracks", spec.rug?.tracks);
+
+  for (const [key, selector] of Object.entries(spec.title_selectors ?? {})) {
+    (selector.options ?? []).forEach((o, i) =>
+      check(`title_selectors.${key}.options[${i}].color`, o.color),
+    );
+  }
+
+  check("waterfall.colors.increase", spec.waterfall?.colors?.increase);
+  check("waterfall.colors.decrease", spec.waterfall?.colors?.decrease);
+  check("waterfall.colors.total", spec.waterfall?.colors?.total);
+  check("waterfall.connectorColor", spec.waterfall?.connectorColor);
+  check("connector.color", spec.connector?.color);
+
+  const mono = monoBaseError("barStack.mono.base", spec.barStack?.mono?.base);
+  if (mono) errors.push(mono);
+  return errors;
+}
+
 function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): string | null {
   if (!spec.shading?.length) return null;
   return spec.chartType === "line"
@@ -402,6 +483,27 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (histErrors.length) return { valid: false, errors: histErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
+  const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
+  if (txfErr) return { valid: false, errors: [txfErr] };
+  // A texture over a ground the band deriver cannot PARSE: paintable, so `colorErrors` passes it, and
+  // a hard throw at render. Checked against the AUTHORED colour — a palette default is always a hex.
+  const groundErrors: string[] = [];
+  for (const series of Object.keys((spec as { series_patterns?: Record<string, unknown> }).series_patterns ?? {})) {
+    const declared = (spec as { series_colors?: Record<string, unknown> }).series_colors?.[series];
+    const authored = declared ?? (series === "" ? (spec as { bar_color?: unknown }).bar_color : undefined);
+    const err = hatchGroundError(
+      declared !== undefined ? `series_colors[${JSON.stringify(series)}]` : "bar_color",
+      series,
+      authored,
+    );
+    if (err) groundErrors.push(err);
+  }
+  if (groundErrors.length) return { valid: false, errors: groundErrors };
+
+  const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
+  if (patErr) return { valid: false, errors: [patErr] };
+  const colErrors = colorErrors(spec as ChartSpec);
+  if (colErrors.length) return { valid: false, errors: colErrors };
   const rugErrors = legendAndRugErrors(spec as ChartSpec);
   if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };
@@ -604,6 +706,11 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   }
 
   // Cross-reference: every config-named series must appear in the data.
+  // A chart with NO series column has one implicit series keyed "" (SINGLE_SERIES_KEY), which no
+  // data cell spells out — so it has to be added here or every key naming that series is rejected,
+  // including the documented `series_colors: {"": color}` idiom and any hatch on a single-series bar.
+  // Only when the column is absent: with a series column present, "" names nothing and IS a mistake.
+  if (!cols.series) seriesSeen.add(SINGLE_SERIES_KEY);
   const knownSeries = JSON.stringify([...seriesSeen].sort());
   const checkSeries = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
     if (!named) return;
@@ -617,6 +724,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   };
   checkSeries(spec.series_order, "series_order");
   checkSeries(spec.series_colors, "series_colors");
+  checkSeries(spec.series_patterns, "series_patterns");
   checkSeries(spec.series_styles, "series_styles");
   checkSeries(spec.series_labels, "series_labels");
 

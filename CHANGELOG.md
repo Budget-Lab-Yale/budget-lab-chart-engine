@@ -4,6 +4,200 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] - 2026-08-17
+
+### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
+
+Three keys, all opt-in and all with zero effect on an existing figure, so a repin does not move
+published output. Each closes a gap where a consumer could style the on-page chart with CSS but
+could not reach the PNG export, which re-renders from the spec rather than serialising the DOM.
+
+- **`series_patterns`** gives a series a hatch texture alongside its colour, on the chart types with
+  filled marks (`bar`, `stacked`, `area`, `histogram`, `waterfall`). The six values are
+  matplotlib's hatch characters (`"/"` `"\\"` `"|"` `"-"` `"+"` `"x"`), so the character is a
+  picture of the result. The colour the mark is actually PAINTED stays the pattern's ground — which
+  is the series colour until `bar_color`, `category_colors` or the title-selector accent overrides
+  it, and then it is that — and the hatch BAND colour is derived rather than authored — three tonal tiers along the ground's own hue ramp (lighter
+  instead when the ground is too dark to darken), so a pair can never leave the Style-Guide ramp.
+  A CI gate holds the pair between 20 and 33 ΔL* across all 72 hue-family palette colours (measured
+  today: 21.6 at `red-50`, 32.5 at `sky`). The geometry is
+  deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
+  own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
+  The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
+  instance of the texture as a glyph rather than a patch of the tiling — at 14px a tiling shows an
+  edge with no direction in it — so `"/"` reads as three bands, `"+"` as a plus, `"x"` as an x. A
+  rasterising test measures all six from their pixels. An unrecognised
+  value is rejected at load rather than rendered flat — including density repeats (`"//"`), which
+  are deliberately unsupported: more ink per unit area reads as a darker shade, which the tonal
+  scale already controls precisely.
+- **`barStack.segmentGap`** opens whitespace between adjacent stacked segments, so two slices from
+  one hue family stop reading as a single block. Subtractive geometry rather than a
+  background-coloured stroke: a segment thinner than the gap is floored to a hairline instead of
+  being painted over, no gap appears at the bar's outer ends, and the net marker stays at the true
+  net. Honoured in both orientations, on normalized stacks, in panes, and in the export.
+- **A series' key is one drawing, wherever it appears.** The legend, the three tooltip paths and the
+  PNG export each built their keys separately, from a different subset of the channels and with
+  eleven different icon boxes between them — a tooltip's plain square was 11px beside a hatched one
+  at 14px, and adding a channel meant threading it into six places. So a hatched area series showed
+  a textured chip in its legend and a plain line in its tooltip; a lone dot plot keyed a line and a
+  lone dumbbell a plain disc, neither of which is the marker the chart draws; a line chart's markers
+  reached the legend and not the tooltip; and in a downloaded PNG a diverging stack's Total came out
+  as a navy bar rather than the net dot, a hollow dumbbell end came out filled, and every bar and
+  area key was distinctly rounder than on screen. All of it is now drawn by one module: one box, one
+  geometry, all SVG (which retires the CSS gradient that had to mirror the SVG dash by hand, and its
+  angle conversion with it). A test renders twelve charts spanning seven chart types and asserts, for
+  each, that the key carries the same ink as the mark it names — in the legend, in the tooltip and in
+  the export. A second block covers the charts that draw no legend at all: a lone series on each of
+  the nine chart types, checked for the right key SHAPE, plus a mounted, hovered, textured histogram
+  whose tooltip key must carry the same `<pattern>` id as the bin under the cursor.
+- **A marker symbol is sized and centred from measurements, not by hand.** Three separate faults, all
+  from geometry written out by eye. The sizes were areas already solved for one target, and three of
+  the seven were simply wrong (a triangle reached 5.58 of a 7 half-box). d3 sizes a symbol by AREA, so
+  equal size is equal ink — but equal ink makes the compact shapes read small, and equal SPAN makes
+  the spread ones read light, and there is no published cross-shape rule to take: matplotlib has
+  carried this as an open issue since 2019 and concluded the factors must be hand-tuned. So a key is
+  drawn at the size the CHART draws its marker (which is now one shared constant, not a literal in
+  each mark builder — a key was 9 % smaller than the scatter dot beside it), spread around that anchor
+  by ONE hand-judged exponent over the measured shape constants, and clamped so the box never cuts it.
+  And each symbol is shifted onto its own bounding-box centre, because d3 places a symbol by its
+  CENTROID: a triangle sat 1.75px high in a 14px box, visibly out of line with its own label.
+- **`hollow` now means hollow, in the chart as well as the key.** A dumbbell's hollow dot was an
+  opaque white disc — so it hid the connector stem its own code comment said showed through, and read
+  as a filled white dot on any ground that is not white. Its middle is empty now, and the marker INK
+  (what fills a middle, what outlines it) is described once and read by the dumbbell marks, the
+  stacked net marker and the icons alike. That distinction matters in both directions: the stacked
+  net marker's white centre is deliberate, because it sits on its stack and must occlude it, and
+  keying it as a hole was a regression this shared description exists to prevent.
+- **An `area` series is keyed by a square chip, not a line swatch.** An area mark is a filled
+  region, so the line swatch misrepresented it, and at 3px tall it could not hold a hatch glyph —
+  a textured area series had no way to show its texture in the key. Every filled chart type now
+  keys with a chip; only stroked marks keep the line swatch, and a test ties the two sets together.
+- **Tonal tiers and `sky` are now named colours.** `blue-200`, `violet-700`, `purple-600` and the
+  rest of the 8-tier ramps resolve anywhere a colour is accepted, as do the aliases' tiers and the
+  brand `sky`. Previously only the 7 hues, their `-light` variants and three neutrals had names, so
+  relating two series within one hue family — the case a texture is usually paired with — meant
+  pasting a hex that said nothing about which ramp or which step it was. A raw `"#hex"` (or any CSS
+  colour) is unaffected — but an unrecognised NAME is now rejected rather than passed through; see
+  the next entry, which is what the new tier names made urgent.
+- **A colour the engine cannot paint is rejected at load.** It never was cosmetic: an unresolvable
+  name reached Plot as a constant fill, Plot read a string it could not parse as a *column name*, and
+  the marks it coloured were dropped — so `bar_color: "blue-450"` published a chart frame with no
+  bars in it while `validateSpec` returned `valid: true`. The 8-tier names make that a likely typo
+  rather than an exotic one (`blue-800`, `blue-250` and `sky-300` all look like names and none
+  exist). Every colour-valued field is checked — `series_colors`, `bar_color`, `category_colors`,
+  annotation and band and callout colours, `shading`, `rug.tracks`, title-selector options, the
+  waterfall colours and connector, `connector.color` — and the error names the field, the value and
+  the near miss (`"blue" ships tiers 50 100 200 300 400 500 600 700`). `barStack.mono.base` gets its
+  own rule: it names a HUE whose tonal scale the stack pulls, so a hex there (which used to throw
+  mid-render) fails at load instead.
+- **A chart with no series column can now be named.** Its one implicit series is keyed `""`, which
+  no data cell spells out, so the cross-reference check rejected every key naming it — including the
+  `series_colors: {"": color}` idiom this file documents as working, and any hatch on a
+  single-series bar, histogram or waterfall.
+- **A series keeps its colour in every pane of a small-multiples figure.** Colours are assigned by
+  POSITION, and each pane resolved its own series list from its own rows — so a pane MISSING a
+  series shifted every later series one slot down the palette and painted it a colour the figure
+  legend, and the pane beside it, contradicted (measured: a pane lacking the first of two series
+  painted the second one `#0072B2` while the legend said `#E69F00`). A pane's colour now comes from
+  the series' position in the FIGURE's series list, resolved once over every pane's rows. The same
+  list keys the legend, so a series the FIRST pane happens to lack — which previously had no legend
+  row at all — is keyed too. Both modes.
+- **A texture's key is grounded in the fill the mark is PAINTED, in the legend too.** The chart, the
+  tooltip and the export already were; the legend resolved its own hatch from the series colour map,
+  and the four were said to agree because `bar_color`/`category_colors` are single-series (so those
+  charts draw no legend rows) and the selector accent is folded into that map. `highlightSeries` is
+  neither: on a multi-series bar or histogram it dims every non-highlighted series to `#BBBBBB`
+  through a per-mark fill the colour map never sees, so a dimmed textured series was already keyed
+  over its palette colour while its bars were drawn grey. The chart now hands the resolved texture to
+  the other three surfaces instead of each deriving one, so there is no second derivation left to
+  drift. A figure's single legend takes the texture a PANE painted (see the colour fix above, which
+  is what makes every pane's ground the same). A declared texture that reaches no mark is now a load
+  error rather than a key for a texture that is not there — which is what an unreadable colour
+  produces, since Plot drops the whole mark and draws an empty frame.
+- **`tooltip_x_format`** overrides the crosshair tooltip's x label on a `temporal` or `quarterly`
+  axis (a d3 `timeFormat` pattern). The default matches the axis ticks, which is right for
+  month-spaced data and wrong for a daily series, where every point in a month otherwise shares one
+  tooltip label. Opt-in rather than a granularity auto-detect, so no published temporal figure
+  changes.
+
+- **A colour the engine can paint but cannot READ is refused when it carries a texture.** Plot paints
+  `oklch(…)`, `lab(…)`, `color-mix(…)`, `var(…)` and `currentColor`; deriving a hatch band means parsing
+  the ground to walk its tonal ramp, which d3 cannot do for any of them, and the space-separated
+  function forms (`rgb(0 114 178)`) fail where the comma forms parse. That combination validated clean
+  and then threw at render, so it is a load-time error now. A test derives the admitted set from the
+  real pipeline rather than restating it, so upgrading d3 cannot quietly reopen the gap.
+
+### Upgrading
+
+The three new spec keys are opt-in and change nothing that does not use them. The colour check is
+not: a spec carrying a colour the engine cannot paint **stops validating**. Every such spec was
+already rendering the affected marks as nothing (or, for a `barStack.mono.base` hex, throwing), so
+this converts a silent blank into a load error — but it is a new refusal on a released schema, and
+an empty string in a colour field (`color: ""`) is refused too.
+
+The small-multiples colour fix is likewise not opt-in, but it can only move a figure whose panes do
+not all resolve the same series in the same order — a pane missing a series, or panes whose rows
+introduce the series in a different order. Every such figure was painting a series two different
+colours across its own panes, so what moves is the pane that disagreed with the legend.
+
+The painted-fill fixes move one thing a reader sees, on a figure using `highlightSeries`: a dimmed
+series' legend, tooltip and export key now show the grey its bars are drawn in rather than its palette
+colour — textured or not, since a chip's colour comes from the render now for the same reason its
+texture's ground does. `bar_color`, `category_colors`, a `barStack.mono` tier and the title-selector
+accent are the same class of override, and all of them now key what was painted. Everything else keys
+exactly as before, because every other fill already reached the colour map. No published figure uses
+any of those channels except `category_colors`, whose three figures are single-series and so draw no
+legend rows.
+
+The icon work is likewise not opt-in, so **a repin re-renders every published figure's legend and
+tooltip keys**, and two of those changes reach the SVG a reader sees:
+
+- **Every legend, tooltip and PNG-export key is redrawn** — one 14px box, marker symbols sized and
+  centred from measurements, hollow middles genuinely empty. Nothing here changes a MARK, so the plot
+  itself is untouched; but a figure's keys will not be byte-identical, and a downloaded PNG's keys
+  change more than the on-screen ones did (they were the copy that had drifted furthest).
+- **A `dumbbell` with `series_marker: hollow` changes its dots**: the middle is a hole rather than an
+  opaque white disc, so the connector stem now shows through it. This is the only change to a mark.
+  Figures on a white ground look near-identical; on any other ground the dot no longer reads as a
+  white blob. Both dumbbell goldens moved, on those two attributes only.
+
+Two more changes are **hover-time only** — they live in the tooltip's HTML, not in the SVG — so no
+golden moved and the markup comparison below cannot see them. A reader can:
+
+- **A textured tooltip key is grounded in the colour the mark under the cursor is actually painted**,
+  not in the series' palette entry. The two disagree wherever the fill did not come from
+  `series_colors`: a `barStack.mono` stack, whose segments are tonal tiers of one ramp, and any bar
+  taking its fill from `bar_color` or `category_colors`. The key's ground — and therefore its derived
+  band — now moves with the segment being hovered, so the swatch matches the thing it is naming
+  instead of showing the family's base colour with a texture over it.
+- **A chart with ONE series keys its tooltip from the row the legend would have drawn.** A single
+  unstyled series draws no legend row on any chart type (a lone *dashed* line is the exception — a
+  dash is a channel worth keying, so it gets rows), and the charts with no rows used to key from a
+  separate set of loose channels that had drifted from the legend's own rules. So a single-series
+  **dot plot**'s tooltip key changes from a line to its circular marker, and a single-series
+  **dumbbell**'s from a box-filling disc to that same marker, sized and centred the way every other
+  key is. In both cases it becomes what the multi-series version of the chart already drew.
+
+Nothing else in the plot frame moves: the snapshot self-test is pixel-identical, and the only golden
+diffs in the suite are the two dumbbell fixtures. (A third golden file also appears in the diff,
+`stack-textured-gapped`, but it is an addition rather than a change — a new fixture covering the two
+new keys together.)
+
+Measured against the archive rather than argued: all **41 figures published at the time of release**
+were rendered with 1.10.0 and with this version and compared in a browser. All 41 validate, none fail
+to render, and **the plot markup is byte-identical on all 41** — no mark moves. That and the dumbbell
+change above are consistent because **none of the 41 is a dumbbell**; a published dumbbell would have
+moved, and will move on the repin that first carries one. 29 legends are
+redrawn. Three figures with a point-chart legend end up 1–4 px shorter, because that legend's swatch
+was its own 18×16 box and is now the shared 14×14 one; if you embed by a fixed height, those three are
+the ones to look at.
+
+That comparison is on the rendered MARKUP, deliberately. Screenshot comparison is not trustworthy at
+this scale: rendering the same page twice in the same browser differs by a few hundred to a few
+thousand pixels, on a varying subset of figures, from layout and antialiasing timing alone. A control
+run — 1.10.0 against itself — is the only way to tell a real change from that noise, and it is what
+the markup comparison was checked against.
+
 ## [1.10.0] - 2026-08-10
 
 ### Added — publishable shared assets, so a site stops shipping the engine per figure

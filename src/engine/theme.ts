@@ -50,6 +50,24 @@ export function swatchWidthFor(bands: number): number {
  *  Style-Guide token (it is chrome on chrome), so it lives here with the other layout constants. */
 export const SWATCH_OUTLINE = "rgba(0, 0, 0, 0.18)";
 
+/** Marker RADII the charts draw their point markers at, in px — the size a KEY has to match, since a
+ *  key's whole job is to look like the mark it names. Read by marks/point.ts, marks/line.ts and by
+ *  engine/icon.ts, which sizes a marker key from these rather than from a constant of its own: the key
+ *  was 9% smaller than the scatter dot beside it, which is exactly the kind of gap nobody can measure
+ *  by eye but everybody can see. Plot sizes a symbol by AREA = pi*r^2, so these convert directly.
+ *
+ *  A pane's dots are LARGER than a single chart's for scatter (a small pane needs the mark to survive
+ *  being shrunk) and smaller on a line. Keys use the single-chart values: a key is drawn at one size. */
+export const MARK_POINT_R = 4.6;
+export const MARK_POINT_PANE_R = 5.4;
+export const MARK_LINE_POINT_R = 3.6;
+export const MARK_LINE_POINT_PANE_R = 3.3;
+
+/** Marker colour for a SHAPE-legend row (a point chart's second legend group). Neutral by design:
+ *  shape carries the value in that group, not colour. Here rather than in either legend renderer,
+ *  which each had their own copy of it — the live one and the export's, free to drift. */
+export const SHAPE_LEGEND_COLOR = "#555B66";
+
 // Per-series point-marker symbols (d3 symbol names), in a fixed, distinguishable order so a
 // series' shape is stable and series can be told apart without relying on color (accessibility).
 // Assigned by series index; wraps if there are more series than shapes.

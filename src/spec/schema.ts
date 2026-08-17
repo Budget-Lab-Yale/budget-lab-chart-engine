@@ -341,6 +341,9 @@ export const CHART_SPEC_SCHEMA = {
     x_axis_ticks: { type: "string", enum: ["bottom", "top", "both"] },
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
+    // A d3 timeFormat pattern. Only the emptiness is structural; "is this axis date-based?" is a
+    // cross-field question, so it lives in validate.ts.
+    tooltip_x_format: { type: "string", minLength: 1 },
 
     // Axes
     xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },
@@ -351,6 +354,12 @@ export const CHART_SPEC_SCHEMA = {
     // Series (the series COLUMN is mapped via `columns.series`)
     series_order: { type: "array", items: { type: "string" } },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
+    // A closed enum, so an unrecognised hatch (including a matplotlib density repeat like "//")
+    // fails at load rather than silently rendering a flat fill.
+    series_patterns: {
+      type: "object",
+      additionalProperties: { enum: ["/", "\\", "|", "-", "+", "x"] },
+    },
     bar_color: { type: "string" },
     category_colors: { type: "object", additionalProperties: { type: "string" } },
     series_styles: {
@@ -415,6 +424,9 @@ export const CHART_SPEC_SCHEMA = {
         netLabelColor: { type: "string", enum: ["white", "black"] },
         normalize: { type: "boolean" },
         stackOrder: { type: "array", items: { type: "string" } },
+        // px. Capped well below any sane bar width — a larger value would consume the bar rather
+        // than separate its parts.
+        segmentGap: { type: "number", minimum: 0, maximum: 12 },
       },
     },
     waterfall: {
