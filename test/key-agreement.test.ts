@@ -401,9 +401,10 @@ describe("a key matches the mark it names", () => {
 });
 
 describe("a chart with NO legend still keys its tooltip", () => {
-  // The case the whole consolidation turns on. A lone series draws no legend on ANY chart type
-  // (measured: line, area, bar, stacked, histogram, waterfall, dumbbell, dotplot and scatter all
-  // return null legendItems at one series) — yet every one of them still shows tooltips. Those rows
+  // The case the whole consolidation turns on. A lone UNSTYLED series draws no legend on any chart
+  // type (measured below: line, area, bar, stacked, histogram, waterfall, dumbbell, dotplot and
+  // scatter all return null legendItems at one series — a lone DASHED line does not, and neither
+  // does anything under `legend: false`) — yet every one of them still shows tooltips. Those rows
   // used to key from a second mechanism: loose `swatchShape` / `hatches` / `swatchMarkers` /
   // `dashedSeries` channels synthesised inside the tooltip builder, reachable ONLY here, and a
   // partial copy of the legend's rules that drifted from them. `seriesKeyRows` closes it: the key is

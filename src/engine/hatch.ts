@@ -1,28 +1,22 @@
 // Series hatch textures — matplotlib's six characters (/ \ | - + x) as a fill channel alongside
 // colour. The character is a picture of the result, so there is no left-vs-right ambiguity to
-// resolve in prose. The declared series colour stays the pattern's GROUND, so a spec that omits
-// `series_patterns` renders exactly as before.
+// resolve in prose. The colour the mark is actually PAINTED is the pattern's GROUND — the series
+// colour until `bar_color`, `category_colors` or the title-selector accent overrides the fill (see
+// `painted-fill.ts`) — so a spec that omits `series_patterns` renders exactly as before.
 //
-// This module is the single source of truth for the geometry, because the same texture has to be
-// emitted twice in two different coordinate conventions: as an SVG <pattern> for the chart marks
-// and the PNG export, and as CSS gradients for the HTML legend/tooltip swatches. Both read the
-// table below.
+// This module is the single source of truth for the geometry, and there is exactly one emitter:
+// `hatchSvgPattern` below. The chart marks, the PNG export and the legend/tooltip glyphs are all
+// SVG <pattern>s built from the table below. A second, CSS-gradient emitter for the HTML swatches
+// used to exist and had to mirror this geometry by hand; 1.11.0 retired it, which is what removed
+// the class of bug where a swatch and the mark it named disagreed about direction or band weight.
 //
-// INVARIANT 1 — the tile CLIPS, and it must tile. A <pattern> establishes its own viewport, so
+// INVARIANT — the tile CLIPS, and it must tile. A <pattern> establishes its own viewport, so
 // anything crossing the cell edge is cut, not wrapped: a stroked line centred on x=0 loses its outer
 // half and renders at HALF its nominal width (measured 17.5% coverage for stroke-width 7, where an
 // explicit 7px rect gives 43.3%). Hence bands are RECTS, sized exactly. The same clipping is why
 // rotation goes on `patternTransform` — rotating a shape inside a fixed cell swings it out of the
 // cell — which forces the decomposition below: one-or-two PERPENDICULAR bands in the cell, plus one
 // tile rotation. `x` is `+` rotated 45°, NOT two separately rotated diagonals.
-//
-// INVARIANT 2 — the CSS angle is the SVG rotation MINUS 90°, not its negation. With band
-// direction `d` measured clockwise from vertical: the SVG primitive is a vertical line, so
-// rotate(θ) gives d = θ; a CSS gradient angle φ names the GRADIENT line and lays its bands
-// PERPENDICULAR to that line, so d = φ + 90. Hence φ = θ − 90. Negating instead happens to work
-// for the two diagonals (−θ and θ−90 agree modulo 180°, and a symmetric repeating gradient is
-// unchanged by a 180° flip) but is off by 90° for `|` and `-`, which silently swaps vertical and
-// horizontal between the chart and its legend.
 import { locateOnRamp, lightness, shiftLightness } from "./palette";
 import type { ChartSpec, HatchChar } from "../spec/types";
 
@@ -37,7 +31,7 @@ export type { HatchChar };
 export const HATCH_PERIOD = 16;
 
 /** `rotate` is the tile rotation; `crossed` adds a second band perpendicular to the first.
- *  See INVARIANT 1 — this pair is the only decomposition that tiles. */
+ *  See the INVARIANT above — this pair is the only decomposition that tiles. */
 const GEOM: Record<HatchChar, { rotate: number; crossed: boolean; slug: string }> = {
   "|": { rotate: 0, crossed: false, slug: "vert" },
   "-": { rotate: 90, crossed: false, slug: "horz" },
@@ -176,8 +170,8 @@ export function hatchSvgPattern(
   // A BAND RECT, not a stroked line. A <pattern> tile clips to its own bounds, so a line centred on
   // the tile edge loses the half that falls outside — it does not wrap into the neighbouring tile.
   // Measured: a `stroke-width: 7` line on x=0 renders 17.5% coverage, where an explicit 7px rect
-  // renders 43.3%. The rect also matches `hatchCss`, whose hard gradient stops were always a true
-  // band, so the legend swatch and the mark now carry the same weight.
+  // renders 43.3%. Every consumer — the marks, the export and the legend/tooltip glyph — is built
+  // from this one emitter, so the band weight cannot differ between a swatch and the mark it names.
   const w = hatchStrokeWidth(char);
   const band = (width: number, height: number) => {
     const el = doc.createElementNS(SVG_NS, "rect");

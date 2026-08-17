@@ -195,8 +195,9 @@ function histogramSpecError(spec: {
   return errors;
 }
 
-/** `shading` fills between a line and its baseline, so it only means anything on a line chart:
- *  `area` already fills to the axis, and the rest have no line to fill under. */
+/** `series_patterns` textures a mark's FILL, so it only means anything where the mark is a filled
+ *  area (see FILLED_CHART_TYPES). A line's 2px stroke and a dot's 8px disc are both smaller than
+ *  the hatch period, so a texture there is noise — reject rather than render something illegible. */
 function seriesPatternsError(spec: { chartType?: unknown; series_patterns?: unknown }): string | null {
   if (spec.series_patterns == null) return null;
   if (FILLED_CHART_TYPES.has(spec.chartType as string)) return null;

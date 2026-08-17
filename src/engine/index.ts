@@ -137,8 +137,9 @@ export interface LegendItem {
    *  d3 symbol name for this series (shown on the swatch so series can be told apart by shape,
    *  not just color). */
   markerSymbol?: string;
-  /** Dumbbell "hollow" marker: render the point swatch as a ring (page-background fill, series-
-   *  color stroke) instead of a solid dot, matching the chart's hollow dots. */
+  /** Dumbbell "hollow" marker: render the point swatch as a ring (`fill="none"` — a genuine hole,
+   *  so the swatch takes the card or the tooltip's blur as its ground — with a series-color stroke)
+   *  instead of a solid dot, matching the chart's hollow dots. See `engine/marker-ink.ts`. */
   hollow?: boolean;
   /** A `rect` swatch showing MORE THAN ONE tint, drawn as equal vertical bands in this order.
    *  Set when one keyed concept covers several differently-colored fills — `shading` with no
@@ -814,13 +815,15 @@ function assemblePaneResult(
 /** The key row EVERY series gets, whether or not a legend is drawn.
  *
  *  Split out of `buildLegendItems` because a tooltip needs a key for a series the legend suppressed.
- *  A single-series chart draws NO legend on every chart type (measured — line, area, bar, stacked,
- *  histogram, waterfall, dumbbell, dotplot and scatter all return null at one series), yet every one
- *  of them still shows tooltips. Those tooltips used to re-derive a key from loose channels —
- *  `swatchShape`, `hatches`, `swatchMarkers`, `dashedSeries` — a second, partial copy of the table
- *  below that drifted from it (a dot plot keyed a LINE, a histogram keyed the palette colour rather
- *  than the painted one). Deriving both from this one function is what makes the drift impossible:
- *  the suppressed row and the tooltip key are now literally the same object.
+ *  A single, unstyled series draws no legend on any chart type — see `legendShowsSeriesRows`, which
+ *  is the exact rule; a lone DASHED line still gets rows, and `legend: false` suppresses them at any
+ *  series count — yet every one of those charts still shows tooltips. Those tooltips used to
+ *  re-derive a key from loose channels — `swatchShape`, `hatches`, `swatchMarkers`, `dashedSeries` —
+ *  a second, partial copy of the table below that drifted from it: a lone dot plot keyed a LINE, and
+ *  a lone dumbbell keyed a plain DOT rather than the sized, box-centred symbol its legend row draws.
+ *  Deriving both from this one function is what makes the drift impossible: the suppressed row and
+ *  the tooltip key are built by the same code from the same inputs. (Not the same OBJECT — this runs
+ *  once for the legend and once for the key rows per `renderChart`, so they are deep-equal twins.)
  *
  *  So this applies NO presence rule — `buildLegendItems` owns "is a legend worth drawing", this owns
  *  "what would this series' key look like". */

@@ -476,13 +476,14 @@ export function iconFromLegendItem(item: {
  *  This is the fix for a whole class of bug. Tooltips used to be handed six loose channels — colours,
  *  dashed set, swatch shape, dumbbell markers, rendered fills, textures — and each path re-derived an
  *  icon from whichever subset it knew about. So a line chart's markers reached its legend but not its
- *  tooltip, and a `bar_color` histogram keyed from the PALETTE while its bins were painted from
- *  `bar_color`: a blue key over violet bins. Resolving once, here, is what makes them agree.
+ *  tooltip, and a hatched area series showed a textured chip in its legend and a plain line swatch in
+ *  its tooltip. Resolving once, here, is what makes them agree.
  *
  *  BOTH sources are legend rows, which is the whole trick. `legendItems` wins where it exists,
  *  because a drawn row is already resolved — symbol, ring, texture and the colour actually painted.
- *  `keyRows` covers the series a legend SUPPRESSES: a lone series draws no legend on any chart type,
- *  yet still tooltips, and those charts used to key from a separate set of loose channels that
+ *  `keyRows` covers the series a legend SUPPRESSES — most often a single unstyled series, though
+ *  `legendShowsSeriesRows` (index.ts) is the exact rule and `legend: false` suppresses at any count.
+ *  Those charts still tooltip, and they used to key from a separate set of loose channels that
  *  drifted from the legend's rules (see index.ts buildSeriesKeyRows). Filling the gap from the row
  *  the legend would have drawn is what lets those channels be deleted rather than merely bypassed.
  *

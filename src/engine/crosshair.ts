@@ -412,11 +412,13 @@ export function seriesSwatchHtml(icon: IconSpec): string {
  *
  *  It used to take a second set of loose channels — colour, shape, dashed, hatch, marker — and
  *  synthesise a key from them whenever `icons` had no entry. Two mechanisms for one job, and the
- *  second one was a partial copy of the legend's rules that drifted from them: it reached exactly
- *  the charts with no legend row (i.e. every SINGLE-SERIES chart, on every chart type), which is why
- *  a lone dot plot keyed a line and a `bar_color` histogram keyed the palette. Those charts now
- *  resolve through the same resolver as the rest, from `seriesKeyRows` — the row the legend WOULD
- *  have drawn (see icon.ts resolveTooltipIcons and index.ts buildSeriesKeyRows).
+ *  second one was a partial copy of the legend's rules that drifted from them. It reached exactly
+ *  the charts with no legend row — a single unstyled series on any chart type, and anything under
+ *  `legend: false`; `legendShowsSeriesRows` (index.ts) is the rule — which is why a lone dot plot
+ *  keyed a line and a lone dumbbell keyed a plain disc instead of the sized, box-centred symbol the
+ *  multi-series version already drew. Those charts now resolve through the same resolver as the
+ *  rest, from `seriesKeyRows` — the row the legend WOULD have drawn (see icon.ts resolveTooltipIcons
+ *  and index.ts buildSeriesKeyRows).
  *
  *  A series with no entry draws an EMPTY box rather than a guessed one: guessing is what the second
  *  mechanism did, and a key asserting something false about a mark is worse than no key. The box
@@ -1147,10 +1149,14 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       })()
     : undefined;
 
-  // Re-coloured ONCE, not per pointermove: a `category_colors` bar keys the hovered category rather
-  // than the series, and all three inputs — the resolved icons, the fills read above, the module's
-  // `resolveHatch` — are fixed for the life of this attachment. Forwarding `opts.icons` unchanged
-  // would revert the key to the palette colour.
+  // Re-coloured ONCE, not per pointermove: all three inputs — the resolved icons, the fills read
+  // above, the module's `resolveHatch` — are fixed for the life of this attachment. Forwarding
+  // `opts.icons` unchanged would revert the key to the palette colour.
+  //
+  // The key is per SERIES, not per hovered category: `renderedFills` keeps the FIRST rect it sees
+  // for each `data-series`, and `category_colors` is single-series-only, so a chart using it keys
+  // every category with the FIRST category's fill. Pre-existing, and not what the hoist changed —
+  // moving this per-pointermove would not fix it, because the map it reads is series-keyed.
   const tooltipIcons = opts.icons ? recolourIcons(opts.icons, renderedFills, resolveHatch) : undefined;
 
   /** Show the highlight over the given band geometry, spanning the full plot axis. */

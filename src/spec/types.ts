@@ -456,8 +456,10 @@ export interface ChartSpec {
    *  are matplotlib's hatch characters, and each is a picture of its own result: `"/"` `"\\"`
    *  (diagonals), `"|"` `"-"` (vertical / horizontal), `"+"` `"x"` (the crossed pairs). Quote them
    *  in YAML — bare `-` is a sequence indicator and bare `|` a block scalar.
-   *  The declared colour stays the pattern's GROUND, so omitting this key renders exactly as
-   *  before, and an unrecognised value is rejected rather than silently rendered flat.
+   *  The colour the mark is actually PAINTED is the pattern's GROUND — the series colour until
+   *  `bar_color`, `category_colors` or the title-selector accent overrides the fill, and then it is
+   *  that one (see `engine/painted-fill.ts`). Omitting this key renders exactly as before, and an
+   *  unrecognised value is rejected rather than silently rendered flat.
    *  Density repeats (`"//"`) are deliberately NOT supported: more ink per unit area reads as a
    *  darker shade, which is the tonal ramp's job and is controlled precisely by `series_colors`.
    *  The hatch's BAND colour is not configurable — the author supplies the base colour and the
@@ -595,12 +597,15 @@ export interface ChartSpec {
   // categorical axis is declared via `xAxisType: categorical` (like bars), NOT a separate yAxisType.
   // Series color/order/labels reuse the shared `series_*` fields; category order reuses
   // `category_order`/`x_order`; faceting reuses `columns.facet` + `small_multiples`.
-  /** Per-series dot style: solid fill, hollow ring (series-color outline, page-background center),
-   *  or filled neutral ink. Absent series default to "filled". */
+  /** Per-series dot style: solid fill, hollow ring (series-color outline around a HOLE — the middle
+   *  is `fill="none"`, so the connector stem and whatever the figure sits on show through it), or
+   *  filled neutral ink. Absent series default to "filled". See `engine/marker-ink.ts`, which is
+   *  where the hole/white-disc distinction is stated once. */
   series_marker?: Record<string, "filled" | "hollow" | "ink">;
   /** Connector "stem" styling; defaults to a light muted 1.5px solid line drawn behind the dots. */
   connector?: { color?: ColorRef; width?: number; style?: "solid" | "dashed" | "dotted" };
-  /** Dot radius (px). Default from theme; dots size consistently across a facet. */
+  /** Dot radius (px). Default 5 (`DEFAULT_DOT_R`, `engine/marks/dumbbell.ts`); dots size
+   *  consistently across a facet. */
   dot_radius?: number;
   /** Label the numeric gap between two named series on each stem. `true` uses the first two series
    *  in series order; an object names the pair explicitly. Default off. */
