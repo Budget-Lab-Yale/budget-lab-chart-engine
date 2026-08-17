@@ -255,17 +255,24 @@ body {
   btn.addEventListener("click", function () {
     var hrefs = ${hrefsJson};
     if (hrefs.length > CONFIRM_ABOVE &&
-        !window.confirm("Open " + hrefs.length + " tabs, one per spec?")) return;
+        !window.confirm("Open " + hrefs.length + " tabs, one per spec?")) {
+      // Nothing was attempted, so an earlier click's "did not open" note no longer describes
+      // anything. Left up it reads as a report on THIS click, which opened no tabs by request.
+      note.hidden = true;
+      return;
+    }
     var refused = 0;
     for (var i = 0; i < hrefs.length; i++) {
       // Worth reporting at all because most browsers allow one window per gesture: a suite of 16
-      // opens one tab and looks broken. But a null return is the only refusal a browser actually
+      // opens one tab and looks broken. But a FALSY return is the only refusal a browser actually
       // reports — w.closed read synchronously both over- and under-counts, since a tab that opened
       // fine is still navigating and some blockers hand back a stub that never admits to closing.
       // So refused is a floor, not a total, and the note below says "at least" instead of
-      // asserting a count this cannot know.
+      // asserting a count this cannot know. Falsy rather than a null identity test: null is what the
+      // spec says a refusing browser returns and undefined is what one may actually return, while a
+      // real window is an object — so nothing truthy can be miscounted either way.
       var w = window.open(hrefs[i], "_blank");
-      if (w === null) refused++;
+      if (!w) refused++;
     }
     if (refused > 0) {
       note.textContent = "At least " + refused + " of " + hrefs.length +

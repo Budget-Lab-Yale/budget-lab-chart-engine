@@ -143,7 +143,14 @@ async function galleryFor(count: number): Promise<{ body: string }> {
 function runOpenAll(
   body: string,
   stubs: { open?: (href: string) => unknown; confirm?: (msg: string) => boolean } = {},
-): { opened: string[]; confirmed: string[]; note: { textContent: string; hidden: boolean } } {
+): {
+  opened: string[];
+  confirmed: string[];
+  note: { textContent: string; hidden: boolean };
+  /** Click again, against the same note element — the only way to observe what one click leaves
+   *  behind for the next. Stubs are consulted per call, so they can answer differently. */
+  click: () => void;
+} {
   const opened: string[] = [];
   const confirmed: string[] = [];
   const note = { textContent: "", hidden: true };
@@ -178,7 +185,7 @@ function runOpenAll(
   new Function("window", "document", src)(win, doc);
   if (!click) throw new Error("open-all button never registered a click handler");
   (click as () => void)();
-  return { opened, confirmed, note };
+  return { opened, confirmed, note, click: click as () => void };
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +364,28 @@ describe("GET / — index page", () => {
     expect(run.note.hidden).toBe(false);
     expect(run.note.textContent).toContain("At least 2 of 2 tabs did not open");
     expect(run.note.textContent).toContain("allow pop-ups");
+  });
+
+  it("counts a window the browser handed back as undefined, not just null", async () => {
+    // The spec says null, so this is theoretical — but it costs one character to cover, and the
+    // failure it prevents is silent: a blocked suite that reports nothing at all.
+    const { body } = await galleryFor(2);
+    const run = runOpenAll(body, { open: () => undefined });
+    expect(run.note.hidden).toBe(false);
+    expect(run.note.textContent).toContain("At least 2 of 2 tabs did not open");
+  });
+
+  it("clears the blocked-tabs note when the next click is cancelled at the confirm", async () => {
+    // Cancelling opens nothing, so an earlier click's note is left describing a click that did not
+    // happen — it reads as "your tabs were blocked" when the answer was "you said no".
+    const { body } = await galleryFor(13); // one past CONFIRM_ABOVE, so the click is confirmed
+    let accept = true;
+    const run = runOpenAll(body, { open: () => null, confirm: () => accept });
+    expect(run.note.hidden).toBe(false);
+    accept = false;
+    run.click();
+    expect(run.note.hidden).toBe(true);
+    expect(run.opened).toHaveLength(13); // the cancelled click opened nothing more
   });
 
   it("lists a table.yaml spec by its title", async () => {
