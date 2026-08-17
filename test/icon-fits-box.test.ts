@@ -16,6 +16,8 @@ import { chromium, type Browser } from "playwright";
 import { PNG } from "pngjs";
 import {
   ICON_BOX,
+  OPTICAL_CENTRING,
+  SYMBOL_CENTRE_Y,
   symbolArea,
   iconShapes,
   type IconPrimitive,
@@ -183,11 +185,19 @@ describe("no icon is cut by its box", () => {
     expect(Math.max(...onLine), `a marker on a line spills`).toBeLessThanOrEqual(HALF + TOL);
   }, 120000);
 
-  it("centres every symbol's INK on the box, not its centroid", async () => {
-    // d3 places a symbol by its CENTROID, which is not the middle of its box: a triangle's apex is far
-    // from the centroid and its base is near, so a centroid-centred triangle sat 1.75px HIGH in a 14px
-    // box and read out of line with its own label. A key is read beside text, so the INK is what has to
-    // be centred. Measured from the rendered bbox, which is the only place the offset shows up.
+  it("sits every symbol between its centroid and its box centre, at OPTICAL_CENTRING", async () => {
+    // Neither end of this range is right, which is why the rule is a fraction and not a rule.
+    //
+    // d3 places a symbol by its CENTROID: a triangle's apex is far from the centroid and its base is
+    // near, so a centroid-centred triangle sat 1.75px HIGH and read out of line with its own label.
+    // Correcting all the way to the BOX centre overshoots the other way and reads LOW — a triangle's
+    // box is not its ink, because the apex adds height while carrying almost no weight, so balancing
+    // the box tips the visible mass below the label's centre.
+    //
+    // So this does NOT assert the ink is box-centred. It asserts the ink sits exactly
+    // OPTICAL_CENTRING of the way from centroid to box centre, which is the judgement the module
+    // actually makes, and it asserts the symmetric symbols do not move at all — they have no offset,
+    // so any factor must leave them alone.
     const page = await browser.newPage();
     const markup = MARKER_SYMBOLS.map((s) =>
       primMarkup(iconShapes({ shape: "symbol", color: "#0072B2", symbol: s }).find((p) => p.kind === "path")!),
@@ -210,8 +220,26 @@ describe("no icon is cut by its box", () => {
     const mid = ICON_BOX / 2;
     MARKER_SYMBOLS.forEach((s, i) => {
       const [cx, cy] = centres[i]!;
+      // Horizontal is unconditional: every symbol is symmetric about its own vertical axis.
       expect(Math.abs(cx - mid), `${s} ink centre is ${cx.toFixed(2)} across, not ${mid}`).toBeLessThan(0.1);
-      expect(Math.abs(cy - mid), `${s} ink centre is ${cy.toFixed(2)} down, not ${mid}`).toBeLessThan(0.1);
+
+      // Vertically, the ink centre lands short of the box centre by the part of the offset NOT
+      // applied — (1 - OPTICAL_CENTRING) of it. At OPTICAL_CENTRING = 1 this collapses to "box
+      // centred"; at 0 it is the raw centroid. Asserting the relationship rather than a literal is
+      // what makes the test survive a re-judgement of the factor while still failing if the factor
+      // stops being applied.
+      const offset = SYMBOL_CENTRE_Y[s] ?? 0;
+      const residual = offset * (1 - OPTICAL_CENTRING) * Math.sqrt(symbolArea(s, false, false));
+      expect(
+        Math.abs(cy - (mid + residual)),
+        `${s} ink centre is ${cy.toFixed(2)} down; expected ${(mid + residual).toFixed(2)} ` +
+          `(box centre ${mid} plus the ${((1 - OPTICAL_CENTRING) * 100).toFixed(0)}% of its bbox offset that is deliberately not applied)`,
+      ).toBeLessThan(0.1);
+
+      // A symmetric symbol has no offset, so no factor may move it off the box centre.
+      if (!offset) {
+        expect(Math.abs(cy - mid), `${s} is symmetric and must sit on the box centre`).toBeLessThan(0.1);
+      }
     });
   }, 120000);
 

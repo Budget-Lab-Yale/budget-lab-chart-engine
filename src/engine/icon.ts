@@ -33,9 +33,12 @@ export const ICON_BOX = 14;
  *  wanted is the only form that cannot be quietly wrong — the first version of this table stored areas
  *  already solved for one target, by hand, and three of the seven were wrong.
  *
- *  Half the BOX, because `SYMBOL_CENTRE_Y` below re-centres each symbol on its bounding box: once the
- *  ink is box-centred, half the box is exactly how far it reaches. (Sizing by half the box while
- *  drawing from the CENTROID is what put a triangle's apex outside the icon box.)
+ *  Half the BOX, because `SYMBOL_CENTRE_Y` below re-centres each symbol toward its bounding box.
+ *  (Sizing by half the box while drawing from the CENTROID is what put a triangle's apex outside the
+ *  icon box.) Note the two are not exactly in step: `OPTICAL_CENTRING` applies only part of that
+ *  offset, so an asymmetric symbol sits slightly off centre and reaches marginally further on one
+ *  side than half its box. At 0.6 the tightest is the star, whose ink stops 0.05 short of the top
+ *  edge — inside, but that margin is what a larger factor would spend.
  *
  *  Measured with `getBBox()` at size 400; `test/icon-fits-box.test.ts` re-measures the result. */
 const SYMBOL_HALF_BOX_K: Record<string, number> = {
@@ -55,12 +58,29 @@ const SYMBOL_HALF_BOX_K: Record<string, number> = {
  *  the triangle sitting 1.75px HIGH in a 14px box — visibly out of line with its own label. A star sits
  *  0.67 high and a wye 0.52 low for the same reason; the other four are symmetric and measure zero.
  *
- *  A key is read beside text, so what has to be centred is the INK, not the shape's mass. */
-const SYMBOL_CENTRE_Y: Record<string, number> = {
+ *  Applied at OPTICAL_CENTRING, not in full — see below. */
+export const SYMBOL_CENTRE_Y: Record<string, number> = {
   triangle: -0.21935,
   star: -0.09015,
   wye: 0.05703,
 };
+
+/** How much of `SYMBOL_CENTRE_Y` to apply. A JUDGEMENT, like SHAPE_CORRECTION below, and for the same
+ *  reason: neither end of the range is right and there is no measurement that decides it.
+ *
+ *  0 is d3's centroid, which put the triangle 1.75px high. 1 is full bounding-box centring, which is
+ *  where this module first landed — and it reads LOW, because a triangle's box is not its ink: the
+ *  apex is a thin point that adds height while carrying almost no weight, so balancing the BOX tips
+ *  the visible mass below the label's centre. Measured with getBBox, every symbol at 1 sits at exactly
+ *  7.00 in the 14px box, so the fault is not arithmetic — the box is simply the wrong thing to centre.
+ *
+ *  0.6 judged by eye against a rendered strip of 1.0 / 0.75 / 0.6 / 0.5 / 0.35 / 0, each shown at real
+ *  size, at 6x, and beside a label, on a rule and standalone, with a circle as the symmetric control.
+ *  It moves the triangle up 0.78px standalone and 0.61px on a line, the star up 0.28/0.23, and the wye
+ *  DOWN 0.21/0.16 — the wye's offset is positive, so it is the one symbol that descends as the
+ *  correction eases. Nothing new is clipped: the only spills at 0.6 (star 0.011, diamond 0.026) are
+ *  horizontal and identical at 1.0. `test/icon-fits-box.test.ts` re-measures all of it. */
+export const OPTICAL_CENTRING = 0.6;
 
 /** The ANCHOR: the area the chart itself draws a marker at, which is the size a key has to be in the
  *  neighbourhood of — a key that is 9% smaller than the dot beside it is wrong in a way nobody can
@@ -313,8 +333,9 @@ function symbolPrimitive(symbol: string, color: string, onLine = false, marker: 
   const ringed = marker === "hollow" || marker === "net";
   const ink = markerInk(marker, color);
   const size = symbolArea(symbol, onLine, ringed);
-  // Shift by the symbol's own bbox-centre offset so the INK lands centred, not its centroid.
-  const dy = (SYMBOL_CENTRE_Y[symbol] ?? 0) * Math.sqrt(size);
+  // Shift toward the symbol's own bbox centre, but only OPTICAL_CENTRING of the way: the centroid
+  // reads high and the box reads low, and the eye wants a point between them.
+  const dy = (SYMBOL_CENTRE_Y[symbol] ?? 0) * OPTICAL_CENTRING * Math.sqrt(size);
   return {
     kind: "path",
     d: symbolPathD(symbol, size),
