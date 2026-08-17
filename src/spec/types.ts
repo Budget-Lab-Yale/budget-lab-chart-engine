@@ -2,8 +2,8 @@
 // both derive from this. One chart = one spec (no figure/tracker/nav wrapper).
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
-// (scripts/build-manifest.py + data/CONFIG-REFERENCE.md). v1 supports `line` only;
-// `chartType` is a union so adding bar/etc. later is additive.
+// (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
+// is a union so each new type is additive; it now carries nine — see below, and CONFIG-SPEC.md.
 
 export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell";
 
