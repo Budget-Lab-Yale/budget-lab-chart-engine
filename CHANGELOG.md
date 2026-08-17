@@ -102,6 +102,18 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   the series' position in the FIGURE's series list, resolved once over every pane's rows. The same
   list keys the legend, so a series the FIRST pane happens to lack — which previously had no legend
   row at all — is keyed too. Both modes.
+- **A texture's key is grounded in the fill the mark is PAINTED, in the legend too.** The chart, the
+  tooltip and the export already were; the legend resolved its own hatch from the series colour map,
+  and the four were said to agree because `bar_color`/`category_colors` are single-series (so those
+  charts draw no legend rows) and the selector accent is folded into that map. `highlightSeries` is
+  neither: on a multi-series bar or histogram it dims every non-highlighted series to `#BBBBBB`
+  through a per-mark fill the colour map never sees, so a dimmed textured series was already keyed
+  over its palette colour while its bars were drawn grey. The chart now hands the resolved texture to
+  the other three surfaces instead of each deriving one, so there is no second derivation left to
+  drift. A figure's single legend takes the texture a PANE painted (see the colour fix above, which
+  is what makes every pane's ground the same). A declared texture that reaches no mark is now a load
+  error rather than a key for a texture that is not there — which is what an unreadable colour
+  produces, since Plot drops the whole mark and draws an empty frame.
 - **`tooltip_x_format`** overrides the crosshair tooltip's x label on a `temporal` or `quarterly`
   axis (a d3 `timeFormat` pattern). The default matches the axis ticks, which is right for
   month-spaced data and wrong for a daily series, where every point in a month otherwise shares one
@@ -120,6 +132,11 @@ The small-multiples colour fix is likewise not opt-in, but it can only move a fi
 not all resolve the same series in the same order — a pane missing a series, or panes whose rows
 introduce the series in a different order. Every such figure was painting a series two different
 colours across its own panes, so what moves is the pane that disagreed with the legend.
+
+The texture-ground fix moves one thing a reader sees, and only on a figure that combines
+`series_patterns` with `highlightSeries`: a dimmed textured series' legend, tooltip and export key
+now show the grey the bars are drawn in rather than the series' palette colour. Everything else keys
+exactly as before, because every other ground already reached the colour map.
 
 The icon work is likewise not opt-in, so **a repin re-renders every published figure's legend and
 tooltip keys**, and two of those changes reach the SVG a reader sees:

@@ -17,7 +17,7 @@
 // agreeing, because both read the same resolver — they agreed on the wrong thing and the gate passed.
 // A key's job is to match the MARK, so the mark is the reference.
 import { describe, it, expect } from "vitest";
-import { renderChart } from "../src/engine/index";
+import { renderChart, renderFigure } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { resolveTooltipIcons, iconSvgMarkup, iconShapes, ICON_GROUP_CLASS, type IconSpec } from "../src/engine/icon";
 import { buildExportSvg } from "../src/embed/export-png";
@@ -515,4 +515,107 @@ describe("a chart with NO legend still keys its tooltip", () => {
       }
     });
   }
+});
+
+describe("a textured key is grounded in the fill its mark is PAINTED", () => {
+  // THE DIVERGENCE, built from a spec an author can write today. `highlightSeries` on a MULTI-series
+  // bar chart paints every non-highlighted series `annotationDim` through a per-<rect> fill channel —
+  // a fill that never reaches the series colour map, which goes on naming the palette slot. Two
+  // series means the legend DOES draw rows, so this is a real chart on which "the key's ground" and
+  // "the mark's ground" are two different colours unless the key takes what was painted.
+  //
+  // The key used to resolve its own hatch from the colour map, and the four surfaces were said to
+  // agree because `bar_color`/`category_colors` are single-series (no legend rows) and the selector
+  // accent is folded into the map. Highlight dimming is neither, so it was already keying a texture
+  // over a ground no bar is drawn in — silently, with nothing failing. Assert the ground BOTH ways:
+  // that it is the paint, and that it is NOT the colour map, so re-deriving from the map fails here.
+  const DIMMED = specOf({
+    chartType: "bar",
+    xAxisType: "categorical",
+    series_colors: COLORS,
+    highlightSeries: ["one"],
+    series_patterns: { two: "/" },
+  });
+
+  /** The flat colour under the texture: `paintedFill`'s rule — the texture goes on `style`, so the
+   *  `fill` ATTRIBUTE still carries the ground the <pattern> was built over. */
+  const barGround = (svg: SVGSVGElement) =>
+    svg.querySelector<SVGRectElement>('rect[data-series="two"]')!.getAttribute("fill")!;
+
+  it("keys the dimmed bar's own ground, not the palette colour the map still names", () => {
+    const r = renderChart(DIMMED, ROWS_CAT, OPTS);
+    const ground = barGround(r.svg);
+
+    // The divergence is real, not hypothetical: the mark is painted one colour and the map says
+    // another. If this ever stops holding, the rest of this test proves nothing — fail loudly.
+    expect(r.colors.get("two"), "the dimmed bar's fill reached the colour map — pick another override")
+      .not.toBe(ground);
+
+    const row = r.legendItems!.find((i) => i.series === "two")!;
+    expect(row.hatch, "the textured series lost its key texture").toBeTruthy();
+    expect(row.hatch!.ground, "the legend key is grounded in the colour map, not in the paint")
+      .toBe(ground);
+    expect(row.hatch!.ground).not.toBe(r.colors.get("two"));
+
+    // At the DRAWN level too: the key's pattern id is the id of the <pattern> filling the bar.
+    expect(r.svg.querySelector<SVGRectElement>('rect[data-series="two"]')!.style.fill)
+      .toContain(row.hatch!.id);
+  });
+
+  it("grounds the legend swatch, the tooltip key and the exported chip in that same fill", () => {
+    const r = renderChart(DIMMED, ROWS_CAT, OPTS);
+    const ground = barGround(r.svg).toLowerCase();
+    const palette = r.colors.get("two")!.toLowerCase();
+
+    const parent = document.createElement("div");
+    renderLegend(parent, r.legendItems!);
+    const legendSwatch = drawnFingerprint(
+      parent.querySelector('[data-series="two"] .tbl-legend-swatch svg')!,
+    ).toLowerCase();
+    expect(legendSwatch).toContain(ground);
+    expect(legendSwatch).not.toContain(palette);
+
+    const icon = resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }).get("two")!;
+    expect(icon.hatch!.ground.toLowerCase()).toBe(ground);
+
+    // The export composes its own chrome from the spec rather than cloning the page, so it is the
+    // surface that most easily drifts — and it is the copy that leaves the building.
+    const exportChip = [...buildExportSvg(DIMMED, ROWS_CAT).querySelectorAll(`g.${ICON_GROUP_CLASS}`)]
+      .map(drawnFingerprint)
+      .map((f) => f.toLowerCase())
+      .find((f) => f.includes(ground));
+    expect(exportChip, "no exported legend chip is grounded in the fill the bar is painted").toBeTruthy();
+    expect(exportChip).not.toContain(palette);
+  });
+
+  it("small multiples: every pane paints one ground, and the ONE figure legend names it", () => {
+    // A figure has one legend over N panes, so its key can only be right if the panes agree. They do
+    // by construction — a series' colour is resolved once for the whole figure and handed to every
+    // pane — and the figure legend takes the hatch a PANE painted rather than re-deriving one from
+    // the figure colour map. This pins both halves: the panes agreeing, and the legend following.
+    const rows = [
+      { time: "A", series: "one", value: "6", region: "North" },
+      { time: "A", series: "two", value: "4", region: "North" },
+      { time: "A", series: "one", value: "5", region: "South" },
+      { time: "A", series: "two", value: "9", region: "South" },
+    ] as unknown as TidyRow[];
+    const spec = {
+      ...DIMMED,
+      columns: { x: "time", value: "value", series: "series", facet: "region" },
+      small_multiples: { columns: 2 },
+    } as unknown as ChartSpec;
+
+    const fig = renderFigure(spec, rows, OPTS);
+    const grounds = fig.panes.map((p) => barGround(p.svg!));
+    expect(new Set(grounds).size, "the panes paint one series two different grounds").toBe(1);
+    expect(grounds[0]).not.toBe(fig.colors.get("two"));
+
+    const row = fig.legendItems!.find((i) => i.series === "two")!;
+    expect(row.hatch!.ground, "the figure legend is grounded in figureColors, not in what a pane painted")
+      .toBe(grounds[0]);
+    for (const p of fig.panes) {
+      expect(p.svg!.querySelector<SVGRectElement>('rect[data-series="two"]')!.style.fill)
+        .toContain(row.hatch!.id);
+    }
+  });
 });

@@ -34,7 +34,7 @@ import { assemblePlot } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
-import { resolveSeriesHatches, type SeriesHatch } from "./hatch";
+import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
@@ -258,6 +258,10 @@ export interface PaneResult {
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
    *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
   layers: MarkLayers;
+  /** Series → the `series_patterns` texture this pane's marks were ACTUALLY PAINTED. The ONLY
+   *  source a key may take a hatch from — see `AssembleResult.seriesHatches` for why re-deriving
+   *  one from the colour map was a divergence waiting to happen. */
+  seriesHatches: Map<string, SeriesHatch>;
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
 }
@@ -776,7 +780,7 @@ function assemblePaneResult(
     ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
     : undefined;
 
-  const svg = assemblePlot({
+  const { svg, seriesHatches } = assemblePlot({
     layers,
     yDomain,
     yTicks,
@@ -807,6 +811,7 @@ function assemblePaneResult(
     formatValue: makeTickFormatter(yTicks, valueAffixes),
     dataInScope,
     layers,
+    seriesHatches,
     tooltipXParse: xOpts.tooltipXParse,
     tooltipXFormat: xOpts.tooltipXFormat,
   };
@@ -827,6 +832,12 @@ function assemblePaneResult(
  *  returned row. `renderFigure` still builds twice, because a pane's rows and the FIGURE legend's are
  *  resolved from different series and colour maps; those two are deep-equal only when they agree.
  *
+ *  A row's TEXTURE is not derived here at all: `paintedHatches` is what the marks were painted, and
+ *  a row takes that object unchanged. The alternative — resolving the hatch from the colour map, as
+ *  this did — agreed with the marks only by coincidence, since `bar_color`/`category_colors`/the
+ *  selector accent override a mark's fill without reaching that map and merely happen to be
+ *  single-series (so no legend series rows) today.
+ *
  *  So this applies NO presence rule — `buildLegendItems` owns "is a legend worth drawing", this owns
  *  "what would this series' key look like". */
 export function buildSeriesKeyRows(
@@ -834,6 +845,10 @@ export function buildSeriesKeyRows(
   seriesNames: string[],
   colors: Map<string, string>,
   layers: MarkLayers,
+  /** Series → the texture the MARKS were painted (`PaneResult.seriesHatches`). REQUIRED, and there
+   *  is deliberately no colour-map fallback: a key's ground must be the ground its mark is drawn
+   *  over, and the only thing that knows that is the render. See `AssembleResult.seriesHatches`. */
+  paintedHatches: Map<string, SeriesHatch>,
 ): LegendItem[] {
   const chartType = spec.chartType;
   const seriesLabels = spec.series_labels ?? {};
@@ -843,12 +858,6 @@ export function buildSeriesKeyRows(
   const legendColorFor = (name: string): string | undefined =>
     layers.seriesColors?.get(name) ?? colors.get(name);
 
-  // `series_patterns`, resolved against the colours the swatches use. Needed BEFORE the per-series
-  // rows are built, because a textured series is keyed by a CHIP whatever its chart type — an area
-  // series' 18×3 line swatch is thinner than the glyph, so left as a line its texture never appears.
-  const legendHatches = resolveSeriesHatches(spec, new Map(
-    seriesNames.map((name) => [name, legendColorFor(name) ?? ""]),
-  ));
 
   let items: LegendItem[];
   if (chartType === "scatter" || chartType === "dotplot") {
@@ -916,10 +925,14 @@ export function buildSeriesKeyRows(
     }));
   }
 
-  // Attach the resolved textures, on EVERY chart-type path so a new chart type cannot forget them.
-  if (!legendHatches.size) return items;
+  // Attach the PAINTED textures, on EVERY chart-type path so a new chart type cannot forget them.
+  // The row carries the very object the mark was drawn from, so its ground cannot be a ground the
+  // chart does not paint — and a textured series is keyed by a CHIP whatever its chart type (see
+  // icon.ts: an area series' 18×3 line swatch is thinner than the glyph, so left as a line its
+  // texture would never appear).
+  if (!paintedHatches.size) return items;
   return items.map((item) => {
-    const hatch = legendHatches.get(item.series);
+    const hatch = paintedHatches.get(item.series);
     return hatch ? { ...item, hatch } : item;
   });
 }
@@ -942,18 +955,17 @@ export function buildLegendItems(
   seriesNames: string[],
   colors: Map<string, string>,
   layers: MarkLayers,
+  /** The series key rows, already built by the caller (`buildSeriesKeyRows`). Passed rather than
+   *  built here so the legend row and the tooltip key are ONE object, and so the only way to get a
+   *  row is to have the painted hatches a row needs — there is no second construction site that
+   *  could resolve a key's ground from anything but the render. */
+  keyRows: LegendItem[],
   /** The pane's value-axis formatter (`PaneResult.formatValue`), used only for a `{value}` token in
    *  a keyed annotation label. Omitted → the token falls back to a bare number. */
   formatValue?: (v: number) => string,
-  /** The series key rows, when the caller has already built them for the same inputs — `renderChart`
-   *  does, for `RenderResult.seriesKeyRows`. Omitted → built here. Passing them is what makes the
-   *  legend row and the tooltip key one object rather than two builds of the same thing. */
-  keyRows?: LegendItem[],
 ): LegendItem[] | null {
   if (spec.legend === false) return null;
-  const baseItems = legendShowsSeriesRows(spec, seriesNames, layers)
-    ? keyRows ?? buildSeriesKeyRows(spec, seriesNames, colors, layers)
-    : null;
+  const baseItems = legendShowsSeriesRows(spec, seriesNames, layers) ? keyRows : null;
 
   // Append legendExtras (e.g. diverging stacked Total row) after the series rows.
   let legendItems: LegendItem[] | null = baseItems;
@@ -1019,9 +1031,10 @@ export function renderChart(
   const seriesLabels = spec.series_labels ?? {};
   // ONE build, shared. The legend's series rows and the tooltip's key rows are the same rows off the
   // same inputs, so building them twice (and re-resolving every texture with them) only bought a
-  // second chance for the two to differ.
-  const seriesKeyRows = buildSeriesKeyRows(spec, seriesNames, colors, layers);
-  const legendItems = buildLegendItems(spec, seriesNames, colors, layers, pane.formatValue, seriesKeyRows);
+  // second chance for the two to differ. The textures come from the RENDER (`pane.seriesHatches`),
+  // which is what makes the mark, the tooltip, the export and the legend one drawing over one ground.
+  const seriesKeyRows = buildSeriesKeyRows(spec, seriesNames, colors, layers, pane.seriesHatches);
+  const legendItems = buildLegendItems(spec, seriesNames, colors, layers, seriesKeyRows, pane.formatValue);
   const shapeLegendItems = buildShapeLegendItems(spec, layers);
 
   return {

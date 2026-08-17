@@ -18,7 +18,7 @@
 // cell — which forces the decomposition below: one-or-two PERPENDICULAR bands in the cell, plus one
 // tile rotation. `x` is `+` rotated 45°, NOT two separately rotated diagonals.
 import { locateOnRamp, lightness, shiftLightness } from "./palette";
-import type { ChartSpec, HatchChar } from "../spec/types";
+import type { HatchChar } from "../spec/types";
 
 export type { HatchChar };
 
@@ -222,26 +222,16 @@ export function resolveHatch(char: HatchChar, ground: string): SeriesHatch {
   return { char, ground, stroke, id: hatchPatternId(char, ground, stroke) };
 }
 
-/** Resolve `series_patterns` for the LEGEND, whose ground is the colour the legend itself shows.
- *  The marks resolve per element instead (see assemble-plot), because `bar_color`/`category_colors`/
- *  the selector accent override the fill per mark and the legend shows only the base colour.
- *  Returns an empty map when the spec declares no textures, which is what keeps an untextured
- *  figure byte-identical. */
-export function resolveSeriesHatches(
-  spec: Pick<ChartSpec, "series_patterns">,
-  seriesColors: Map<string, string>,
-): Map<string, SeriesHatch> {
-  const out = new Map<string, SeriesHatch>();
-  const cfg = spec.series_patterns;
-  if (!cfg) return out;
-  for (const [series, char] of Object.entries(cfg)) {
-    if (!isHatchChar(char)) continue; // validation rejects these; belt-and-braces at render time
-    const ground = seriesColors.get(series);
-    if (ground) out.set(series, resolveHatch(char, ground));
-  }
-  return out;
-}
-
+// THERE IS NO "resolve the legend's hatches from the colour map" FUNCTION, and adding one back is
+// the bug. One lived here until 1.11.0: the marks resolved a hatch per element from the fill they
+// were PAINTED, and the legend resolved its own from the series colour map. That was called safe
+// because the fills which miss the map — `bar_color`, `category_colors` — are single-series, so
+// those charts draw no legend rows, and the selector accent is folded into the map. It was not:
+// `highlightSeries` dims every unhighlighted series through a per-mark fill on a MULTI-series chart,
+// so a dimmed textured series was keyed over its palette colour while its bars were drawn grey. The
+// legend, the tooltip and the export now take the SeriesHatch objects `assemblePlot` actually
+// painted (`AssembleResult.seriesHatches`), so a key's ground is not a second derivation that has
+// to match — it is the same object.
 
 /** How far the hatch band sits from its ground, in TIERS of the ground's own hue ramp.
  *

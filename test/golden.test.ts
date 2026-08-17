@@ -1762,7 +1762,7 @@ function buildFacetedPlot() {
     document,
     classNameSuffix: "facet",
     facet: { columns: 2, rows: 2, cells },
-  });
+  }).svg;
 }
 
 describe("golden SVG — shared-mode small multiples", () => {

@@ -20,10 +20,36 @@ import { resolveValueAffixes } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
+import type { SeriesHatch } from "./hatch";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
 // without a module cycle through figure.ts).
 export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
+
+/** The figure legend's `series_patterns` textures: for each series, the hatch the FIRST pane that
+ *  paints it was painted with.
+ *
+ *  A pane's own key rows take that pane's own painted hatches, so a pane's TOOLTIP is exact. The
+ *  figure legend cannot be: it is ONE key over N panes, so if two panes painted a series over
+ *  different grounds no single ground would match them all. It is taken from a pane rather than
+ *  re-derived from `figureColors` because a derivation is the thing this whole path exists to
+ *  remove — a ground the colour map names is not necessarily a ground any pane draws.
+ *
+ *  First-pane-wins is not arbitrary in practice: a series' colour is resolved ONCE for the whole
+ *  figure and handed to every pane as `paletteSeries` (see `figureSeries` below — before that, a
+ *  pane missing a series shifted the palette and painted a colour the legend contradicted), so
+ *  every pane paints a given series the same ground and "first" is the only one there is. Panes
+ *  are folded in ORDER and the first pane that paints a series wins, so a series the first pane
+ *  lacks is still keyed. `test/key-agreement.test.ts` pins BOTH halves — the panes agreeing, and the
+ *  figure legend following them; if a future per-pane fill breaks the first half, the figure legend
+ *  names the first pane and the panes' own tooltips stay exact. */
+function figureSeriesHatches(panePainted: Array<Map<string, SeriesHatch>>): Map<string, SeriesHatch> {
+  const out = new Map<string, SeriesHatch>();
+  for (const painted of panePainted) {
+    for (const [series, hatch] of painted) if (!out.has(series)) out.set(series, hatch);
+  }
+  return out;
+}
 
 /** Default grid-column count for `n` panes: ≈ ceil(sqrt(n)), capped at 4. */
 function defaultColumns(n: number): number {
@@ -623,6 +649,10 @@ export function renderFigure(
     // The first pane's value formatter, for a `{value}` token in a keyed annotation label (per-pane
     // mode: each pane has its own scale, so the first one keys them).
     let firstFormatValue: ((v: number) => string) | undefined;
+    // Each pane's PAINTED textures, in pane order — folded into the figure legend's (see
+    // figureSeriesHatches). Collected rather than taken from pane 0 so a series pane 0 lacks is
+    // still keyed, matching how `figureSeries` is resolved over every pane's rows.
+    const panePainted: Array<Map<string, SeriesHatch>> = [];
     const panes: FigurePane[] = paneValues.map((value, i) => {
       // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
       // renders a standalone single frame for these rows only.
@@ -658,6 +688,7 @@ export function renderFigure(
         firstLayers = p.layers;
         firstFormatValue = p.formatValue;
       }
+      panePainted.push(p.seriesHatches);
       return {
         value,
         title: titleFor(value),
@@ -671,19 +702,22 @@ export function renderFigure(
         tooltipXFormat: p.tooltipXFormat,
         showTotalDot: p.layers.showTotalDot,
         legendVisualOrder: p.layers.legendVisualOrder,
-        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers),
+        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches),
       };
     });
 
     // Figure-level legend: series config is shared across panes, so compute it ONCE — from the
     // FIGURE's series/colors (not pane 0's: a pane may be missing a series) plus the first pane's
-    // mark layers, which carry the swatch shapes and are the same for every pane.
+    // mark layers, which carry the swatch shapes and are the same for every pane. Its textures come
+    // from what the PANES painted, never from figureColors — see figureSeriesHatches.
     const first = panes[0];
+    const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
     const legendItems = buildLegendItems(
       spec,
       figureSeries,
       figureColors,
-      firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
+      figureLayers,
+      buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted)),
       firstFormatValue,
     );
 
@@ -779,6 +813,9 @@ export function renderFigure(
   let firstLayers: MarkLayers | undefined;
   // Shared mode: every pane shares one value scale, so this IS the figure's value formatter.
   let firstFormatValue: ((v: number) => string) | undefined;
+  // Each pane's PAINTED textures, in pane order — folded into the figure legend's (see
+  // figureSeriesHatches).
+  const panePainted: Array<Map<string, SeriesHatch>> = [];
   const panes: FigurePane[] = paneValues.map((value, i) => {
     const col = i % columns;
     const paneRows = rows.filter((r) => (r[facetField] as string) === value);
@@ -812,6 +849,7 @@ export function renderFigure(
       firstLayers = p.layers;
       firstFormatValue = p.formatValue;
     }
+    panePainted.push(p.seriesHatches);
     return {
       value,
       title: titleFor(value),
@@ -825,19 +863,22 @@ export function renderFigure(
       tooltipXFormat: p.tooltipXFormat,
       showTotalDot: p.layers.showTotalDot,
       legendVisualOrder: p.layers.legendVisualOrder,
-      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers),
+      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches),
     };
   });
 
   // 4. Figure-level legend: series config is shared across panes, so compute it ONCE — from the
   //    FIGURE's series/colors (not pane 0's: a pane may be missing a series) plus the first pane's
-  //    mark layers, which carry the swatch shapes. L1/single-series → null.
+  //    mark layers, which carry the swatch shapes. L1/single-series → null. Its textures come from
+  //    what the PANES painted, never from figureColors — see figureSeriesHatches.
   const first = panes[0];
+  const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
   const legendItems = buildLegendItems(
     spec,
     figureSeries,
     figureColors,
-    firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() },
+    figureLayers,
+    buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted)),
     firstFormatValue,
   );
 

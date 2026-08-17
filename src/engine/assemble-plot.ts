@@ -23,6 +23,7 @@ import { domainBounds, makeTickFormatter } from "./scales";
 import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
+import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
@@ -271,6 +272,27 @@ export interface AssembleOptions {
   paneFacetValue?: string;
 }
 
+/** What assemblePlot drew: the SVG, plus the texture facts only the RENDER knows.
+ *
+ *  `seriesHatches` exists so the legend key does not have to re-derive a ground. A hatch is drawn
+ *  over the fill its mark is ACTUALLY painted — `bar_color`, `category_colors`, `highlightSeries`
+ *  dimming and the title-selector accent all override that fill per element, and only the rendered
+ *  DOM knows the result — while the legend used to resolve its own hatch from the series COLOUR MAP.
+ *  That was called safe because the overrides which miss the map are single-series (so those charts
+ *  draw no legend rows) and the accent is folded into the map. Dimming is neither: on a MULTI-series
+ *  bar or histogram `highlightSeries` paints every unhighlighted series `annotationDim` through a
+ *  per-<rect> channel the map never sees, so a dimmed textured series was already keyed over its
+ *  palette colour while its bars were drawn grey — silently, with no test failing. Handing the
+ *  RESOLVED objects back makes the key and the mark the same `SeriesHatch` rather than two
+ *  derivations that have to match. Gated by test/key-agreement.test.ts. */
+export interface AssembleResult {
+  svg: SVGSVGElement;
+  /** Series → the texture its marks were painted, ground and band included. Empty when the spec
+   *  declares no `series_patterns`. A series is absent when nothing was painted for it, so a key
+   *  built from this map cannot claim a texture the chart does not draw. */
+  seriesHatches: Map<string, SeriesHatch>;
+}
+
 export interface FacetOptions {
   /** Grid columns. Plot `fx` domain becomes ["0".."columns-1"]. */
   columns: number;
@@ -301,7 +323,7 @@ export function assemblePlot({
   facet,
   hideYAxisLabels,
   paneFacetValue,
-}: AssembleOptions): SVGSVGElement {
+}: AssembleOptions): AssembleResult {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
   // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
   // Used for the plot defaults, the gridline insetLeft / y-label dx, and the zero-baseline.
@@ -1048,6 +1070,14 @@ export function assemblePlot({
   const hatchChars = spec.series_patterns ?? {};
   const seriesColorMap = layers.seriesColors ?? colors;
   const hatchDefs = new Map<string, SeriesHatch>();
+  // Series → the hatch its marks were painted, handed back for the legend/tooltip/export key to
+  // draw from (see AssembleResult). Keyed by series rather than by pattern id, which is what
+  // `hatchDefs` is for — two series over the same ground share one <pattern> but need one entry
+  // each. FIRST element in DOM order wins: within a pane a series' marks share a ground unless a
+  // per-element override varies it (only `category_colors` can, and it is single-series, so it
+  // draws no legend series rows), and where they do vary the tooltip re-grounds per hovered
+  // element anyway — the legend, having no element under a cursor, has to name one of them.
+  const seriesHatches = new Map<string, SeriesHatch>();
 
   for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder, fill } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
@@ -1067,9 +1097,34 @@ export function assemblePlot({
           const hatch = resolveHatch(char, ground);
           (el as SVGElement).style.fill = `url(#${hatch.id})`;
           if (!hatchDefs.has(hatch.id)) hatchDefs.set(hatch.id, hatch);
+          const series = seriesOrder[i] as string;
+          if (!seriesHatches.has(series)) seriesHatches.set(series, hatch);
         }
       }
     });
+  }
+
+  // A declared texture that reached NO mark. On a FILLED chart type — the only kind validation lets
+  // carry `series_patterns`, and the only kind whose layers tag their marks `fill: true` — a named
+  // series that is in the data has to come out textured, unless its marks were never drawn at all.
+  // (An unvalidated line spec is left alone: a 7px hatch on a 2px stroke is noise, so the engine
+  // deliberately draws none, and the key now shows none either.) A missing mark is a real and silent
+  // failure — an unreadable `series_colors` entry makes Plot drop the ENTIRE mark (measured: zero
+  // <rect>s, an empty frame) — and until the keys were grounded in the paint the LEGEND was the only
+  // surface that noticed, because it resolved its own hatch from the colour map and refused there.
+  // With keys now taking what was painted, that refusal has to live here or an empty chart would
+  // quietly key an untextured chip and say nothing. The re-resolve below exists ONLY to raise
+  // `resolveHatch`'s message, which names the offending colour; nothing drawn is derived from it.
+  for (const [series, char] of FILLED_CHART_TYPES.has(spec.chartType) ? Object.entries(hatchChars) : []) {
+    if (!isHatchChar(char) || seriesHatches.has(series) || !seriesNames.includes(series)) continue;
+    const ground = seriesColorMap.get(series);
+    if (ground) resolveHatch(char, ground);
+    throw new Error(
+      `series_patterns: "${series}" declares a "${char}" texture, but no mark was painted with it — ` +
+        `the chart drew no filled mark for that series` +
+        (ground ? ` (its colour resolved to "${ground}")` : "") +
+        `.`,
+    );
   }
 
   if (hatchDefs.size) {
@@ -1121,5 +1176,5 @@ export function assemblePlot({
     parseX: (v: string) => xOpts.markerToX({ x: v }),
   });
 
-  return svg;
+  return { svg, seriesHatches };
 }

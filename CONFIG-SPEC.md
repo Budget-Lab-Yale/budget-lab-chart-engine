@@ -842,16 +842,22 @@ Notes:
   they run 21.6 (`red-50`) to 32.5 (`sky`). `navy` and `sky` borrow blue's ramp; a raw `"#hex"` off
   every ramp gets an equivalent 28 L\* step instead.
 - **The ground is whatever the mark is PAINTED, not its `series_colors` entry.** `bar_color`,
-  `category_colors` and the title-selector accent each override a fill without going through the
-  series color map, and each becomes the ground of the texture laid over it — so an amber
-  `bar_color` bar hatches amber, and a `category_colors` "Total" bar gets its own pattern in its
-  own color rather than the rest of the series'. The band is then derived from that color, so the
-  pair stays on the ramp the ground sits on. The **chart, the hover tooltip and the PNG export** all
-  ground the texture in the fill read back off the rendered mark, so those three cannot disagree.
-  The **legend** key is grounded in the resolved color *map* instead, since a legend row names a
-  series and not one mark; it agrees with the other three because `bar_color`/`category_colors` are
-  single-series-only and the title-selector accent is folded into that map — but nothing enforces
-  it, so a future per-mark fill would need to reach the legend too.
+  `category_colors`, `highlightSeries` dimming and the title-selector accent each override a fill
+  without going through the series color map, and each becomes the ground of the texture laid over
+  it — so an amber `bar_color` bar hatches amber, a `category_colors` "Total" bar gets its own
+  pattern in its own color rather than the rest of the series', and a dimmed series hatches grey.
+  The band is then derived from that color, so the pair stays on the ramp the ground sits on. The
+  **chart, the legend key, the hover tooltip and the PNG export** all draw the texture the chart
+  resolved while painting the mark — one resolved texture, handed to the other three, not four
+  derivations that have to match — so none of them can show a texture on a ground the chart does not
+  paint. Where a series' marks are painted over more than one ground (`category_colors`), the
+  tooltip re-grounds per hovered mark and the legend row, which names a series rather than a mark,
+  keys the first.
+- **A small-multiples figure has ONE legend over N panes**, so its key takes the texture a pane
+  actually painted (the first pane that paints the series, so a series the first pane lacks is still
+  keyed) rather than re-deriving one. A series is assigned its color once for the whole figure, so
+  every pane paints it the same ground and there is only one ground to take. Each pane's own
+  **tooltip** keys from that pane.
 - **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
   Since the band is derived from the ground's own lightness, a string whose lightness cannot be read
   would leave the band equal to the ground, i.e. a flat block where a texture was asked for. Neither
