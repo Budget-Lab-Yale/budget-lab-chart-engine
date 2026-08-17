@@ -168,6 +168,19 @@ const CHARTS: Array<{ name: string; spec: Record<string, unknown>; rows: TidyRow
     })) as unknown as TidyRow[],
   },
   {
+    // `highlightSeries` dims through a LITERAL per-mark fill that never enters the colour map, so a
+    // dimmed series' chip showed its palette colour beside grey bars. The same class as the hatch
+    // ground, one field over, and the last one: the chip's colour now comes from the render too.
+    name: "bar with highlightSeries dimming",
+    spec: {
+      chartType: "bar",
+      xAxisType: "categorical",
+      series_colors: COLORS,
+      highlightSeries: ["one"],
+    },
+    rows: ROWS_CAT,
+  },
+  {
     // Redundant colour+shape: each series gets its own SYMBOL, which is the case where a key can name
     // a shape the chart does not draw. The ink tests below cannot see that — same colour, wrong shape.
     name: "scatter, shape redundant with series",

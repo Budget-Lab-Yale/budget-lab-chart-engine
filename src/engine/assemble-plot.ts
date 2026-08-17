@@ -291,6 +291,10 @@ export interface AssembleResult {
    *  declares no `series_patterns`. A series is absent when nothing was painted for it, so a key
    *  built from this map cannot claim a texture the chart does not draw. */
   seriesHatches: Map<string, SeriesHatch>;
+  /** Series → the flat colour its marks are actually painted, for FILLED marks. A series is absent
+   *  when nothing filled was painted for it (every line chart), in which case the colour map is the
+   *  right answer and the key falls back to it. */
+  seriesPainted: Map<string, string>;
 }
 
 export interface FacetOptions {
@@ -1078,6 +1082,13 @@ export function assemblePlot({
   // draws no legend series rows), and where they do vary the tooltip re-grounds per hovered
   // element anyway — the legend, having no element under a cursor, has to name one of them.
   const seriesHatches = new Map<string, SeriesHatch>();
+  // Series → the flat colour its marks are ACTUALLY painted, for the same reason `seriesHatches`
+  // exists and read in the same walk. `highlightSeries` dims through a literal per-mark fill that
+  // never enters the colour map, so a dimmed series' chip showed its palette colour beside grey bars;
+  // `bar_color`, `category_colors` and the title-selector accent override the same way. Filled layers
+  // only — a line's colour is its STROKE and its key is a line swatch, which the colour map describes
+  // correctly. FIRST element in DOM order wins, exactly as for a hatch ground.
+  const seriesPainted = new Map<string, string>();
 
   for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder, fill } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
@@ -1090,14 +1101,22 @@ export function assemblePlot({
       // Texture goes on `style`, which beats Plot's own `fill` ATTRIBUTE without rewriting it — so
       // the flat colour survives underneath as the ground we just read, and hover/legend dimming
       // keeps working because it toggles an opacity class rather than repainting fill.
-      const char = fill ? hatchChars[seriesOrder[i] as string] : undefined;
+      const series = seriesOrder[i] as string;
+      // Read once, before any texture is written over it: the walk is the expensive part, and after
+      // `style.fill` becomes a `url(#…)` the flat colour underneath is no longer what it returns.
+      const char = fill ? hatchChars[series] : undefined;
+      // Walked only when the answer is wanted: a hatch needs the ground of THIS element (a
+      // `category_colors` bar grounds per category), while `seriesPainted` only needs the first, so
+      // an untextured chart walks once per series rather than once per bar.
+      const needPainted = fill && (isHatchChar(char) || !seriesPainted.has(series));
+      const painted = needPainted ? paintedFill(el, svg) : null;
+      if (painted && !seriesPainted.has(series)) seriesPainted.set(series, painted);
       if (char && isHatchChar(char)) {
-        const ground = paintedFill(el, svg) ?? seriesColorMap.get(seriesOrder[i] as string);
+        const ground = painted ?? seriesColorMap.get(series);
         if (ground) {
           const hatch = resolveHatch(char, ground);
           (el as SVGElement).style.fill = `url(#${hatch.id})`;
           if (!hatchDefs.has(hatch.id)) hatchDefs.set(hatch.id, hatch);
-          const series = seriesOrder[i] as string;
           if (!seriesHatches.has(series)) seriesHatches.set(series, hatch);
         }
       }
@@ -1176,5 +1195,5 @@ export function assemblePlot({
     parseX: (v: string) => xOpts.markerToX({ x: v }),
   });
 
-  return { svg, seriesHatches };
+  return { svg, seriesHatches, seriesPainted };
 }

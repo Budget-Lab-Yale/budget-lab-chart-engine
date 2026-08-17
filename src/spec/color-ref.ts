@@ -104,6 +104,46 @@ export function isColorRef(value: string): boolean {
   return value in TBL_COLORS || isCssColor(value);
 }
 
+/** The subset of the above that a HATCH can be grounded over — narrower, because PAINTING a colour and
+ *  READING one are different jobs done by different code.
+ *
+ *  Plot paints `oklch(…)`, `lab(…)`, `color-mix(…)`, `var(…)`, `currentColor` and `none`, so `isColorRef`
+ *  admits them all. Deriving a hatch band means parsing the ground to walk its tonal ramp, and that is
+ *  d3's job — d3-color predates those syntaxes and returns null for every one, so a spec pairing
+ *  `series_patterns` with one validated clean and then THREW at render. Same
+ *  validate-says-yes/render-says-no gap the rest of this module closes, one field over.
+ *
+ *  Measured against the real pipeline (`resolveColor` then `resolveHatch`), not assumed — the surprises
+ *  are that the SPACE-separated function forms fail where the comma forms parse, and that `transparent`
+ *  parses fine. `test/hatch-ground-agreement.test.ts` re-derives every case, so upgrading d3 or widening
+ *  Plot's table cannot quietly reopen the gap.
+ *
+ *  Scope: only consulted for values `isColorRef` already admits. `yellowgreen` is groundable but not in
+ *  Plot's table, so it is refused earlier and never reaches here. */
+export function isHatchGroundable(value: string): boolean {
+  // A palette name resolves to a hex before any hatch is derived, so the name itself is groundable.
+  if (value in TBL_COLORS) return true;
+  const v = value.toLowerCase().trim();
+  if (CSS_HEX_RE.test(v)) return true;
+  // The LEGACY comma syntax only: d3-color reads `rgb(0,114,178)` and not `rgb(0 114 178)`.
+  if (/^(?:rgba?|hsla?)\([^/]*,[^/]*\)$/.test(v)) return true;
+  // A named colour resolves, except the two that name no colour until something else supplies one.
+  return CSS_NAMED.has(v) && v !== "currentcolor" && v !== "none";
+}
+
+/** The error for a texture over a ground the band deriver cannot read. */
+export function hatchGroundError(where: string, series: string, value: unknown): string | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  if (isHatchGroundable(value)) return null;
+  return (
+    `${where}: ${JSON.stringify(value)} cannot carry a \`series_patterns\` texture. The hatch band is ` +
+    `derived by walking the ground's own tonal ramp, which needs a colour the engine can PARSE — and ` +
+    `modern CSS syntaxes (oklch, lab, color-mix, …) and \`currentColor\` are paintable but not ` +
+    `parseable, so series ${JSON.stringify(series)} would fail at render. Use a palette name ` +
+    `(blue, blue-500), a hex, or rgb()/hsl().`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------

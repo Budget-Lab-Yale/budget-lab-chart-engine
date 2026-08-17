@@ -14,7 +14,7 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 // Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
-import { colorRefError, monoBaseError } from "./color-ref";
+import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
@@ -485,6 +485,21 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (shadeErr) return { valid: false, errors: [shadeErr] };
   const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
   if (txfErr) return { valid: false, errors: [txfErr] };
+  // A texture over a ground the band deriver cannot PARSE: paintable, so `colorErrors` passes it, and
+  // a hard throw at render. Checked against the AUTHORED colour — a palette default is always a hex.
+  const groundErrors: string[] = [];
+  for (const series of Object.keys((spec as { series_patterns?: Record<string, unknown> }).series_patterns ?? {})) {
+    const declared = (spec as { series_colors?: Record<string, unknown> }).series_colors?.[series];
+    const authored = declared ?? (series === "" ? (spec as { bar_color?: unknown }).bar_color : undefined);
+    const err = hatchGroundError(
+      declared !== undefined ? `series_colors[${JSON.stringify(series)}]` : "bar_color",
+      series,
+      authored,
+    );
+    if (err) groundErrors.push(err);
+  }
+  if (groundErrors.length) return { valid: false, errors: groundErrors };
+
   const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
   if (patErr) return { valid: false, errors: [patErr] };
   const colErrors = colorErrors(spec as ChartSpec);

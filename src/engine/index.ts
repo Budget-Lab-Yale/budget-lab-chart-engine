@@ -262,6 +262,9 @@ export interface PaneResult {
    *  source a key may take a hatch from — see `AssembleResult.seriesHatches` for why re-deriving
    *  one from the colour map was a divergence waiting to happen. */
   seriesHatches: Map<string, SeriesHatch>;
+  /** Series → the flat colour its FILLED marks were painted. Same purpose as `seriesHatches`: the
+   *  render is the only thing that knows what a per-mark override produced. */
+  seriesPainted: Map<string, string>;
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
 }
@@ -780,7 +783,7 @@ function assemblePaneResult(
     ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
     : undefined;
 
-  const { svg, seriesHatches } = assemblePlot({
+  const { svg, seriesHatches, seriesPainted } = assemblePlot({
     layers,
     yDomain,
     yTicks,
@@ -812,6 +815,7 @@ function assemblePaneResult(
     dataInScope,
     layers,
     seriesHatches,
+    seriesPainted,
     tooltipXParse: xOpts.tooltipXParse,
     tooltipXFormat: xOpts.tooltipXFormat,
   };
@@ -849,6 +853,14 @@ export function buildSeriesKeyRows(
    *  is deliberately no colour-map fallback: a key's ground must be the ground its mark is drawn
    *  over, and the only thing that knows that is the render. See `AssembleResult.seriesHatches`. */
   paintedHatches: Map<string, SeriesHatch>,
+  /** Series → the flat colour its FILLED marks were painted (`PaneResult.seriesPainted`). Preferred
+   *  over any colour map for the same reason the hatch ground is: `highlightSeries` dims through a
+   *  literal per-mark fill, so a dimmed series' chip read its palette colour beside grey bars. Absent
+   *  for a series whose marks are not filled, where the colour map is correct.
+   *
+   *  REQUIRED, like `paintedHatches` and for the same reason: a default would let a new call site
+   *  silently fall back to the colour map, which is the bug. */
+  paintedColors: Map<string, string>,
 ): LegendItem[] {
   const chartType = spec.chartType;
   const seriesLabels = spec.series_labels ?? {};
@@ -856,7 +868,7 @@ export function buildSeriesKeyRows(
   // When the mark layer is the source of truth for series colors (stacked: mono tiers or
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
-    layers.seriesColors?.get(name) ?? colors.get(name);
+    paintedColors.get(name) ?? layers.seriesColors?.get(name) ?? colors.get(name);
 
 
   let items: LegendItem[];
@@ -1033,7 +1045,7 @@ export function renderChart(
   // same inputs, so building them twice (and re-resolving every texture with them) only bought a
   // second chance for the two to differ. The textures come from the RENDER (`pane.seriesHatches`),
   // which is what makes the mark, the tooltip, the export and the legend one drawing over one ground.
-  const seriesKeyRows = buildSeriesKeyRows(spec, seriesNames, colors, layers, pane.seriesHatches);
+  const seriesKeyRows = buildSeriesKeyRows(spec, seriesNames, colors, layers, pane.seriesHatches, pane.seriesPainted);
   const legendItems = buildLegendItems(spec, seriesNames, colors, layers, seriesKeyRows, pane.formatValue);
   const shapeLegendItems = buildShapeLegendItems(spec, layers);
 

@@ -120,6 +120,13 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   tooltip label. Opt-in rather than a granularity auto-detect, so no published temporal figure
   changes.
 
+- **A colour the engine can paint but cannot READ is refused when it carries a texture.** Plot paints
+  `oklch(…)`, `lab(…)`, `color-mix(…)`, `var(…)` and `currentColor`; deriving a hatch band means parsing
+  the ground to walk its tonal ramp, which d3 cannot do for any of them, and the space-separated
+  function forms (`rgb(0 114 178)`) fail where the comma forms parse. That combination validated clean
+  and then threw at render, so it is a load-time error now. A test derives the admitted set from the
+  real pipeline rather than restating it, so upgrading d3 cannot quietly reopen the gap.
+
 ### Upgrading
 
 The three new spec keys are opt-in and change nothing that does not use them. The colour check is

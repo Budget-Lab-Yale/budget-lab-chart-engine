@@ -44,9 +44,15 @@ export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
  *  figure legend following them; if a future per-pane fill breaks the first half, the figure legend
  *  names the first pane and the panes' own tooltips stay exact. */
 function figureSeriesHatches(panePainted: Array<Map<string, SeriesHatch>>): Map<string, SeriesHatch> {
-  const out = new Map<string, SeriesHatch>();
-  for (const painted of panePainted) {
-    for (const [series, hatch] of painted) if (!out.has(series)) out.set(series, hatch);
+  return firstPainted(panePainted);
+}
+
+/** What the FIGURE's one legend key names, for a value each pane resolves for itself: the first pane
+ *  that painted the series. Panes agree on colour figure-wide, so "first" is not a coin toss. */
+function firstPainted<T>(perPane: Array<Map<string, T>>): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const painted of perPane) {
+    for (const [series, v] of painted) if (!out.has(series)) out.set(series, v);
   }
   return out;
 }
@@ -653,6 +659,7 @@ export function renderFigure(
     // figureSeriesHatches). Collected rather than taken from pane 0 so a series pane 0 lacks is
     // still keyed, matching how `figureSeries` is resolved over every pane's rows.
     const panePainted: Array<Map<string, SeriesHatch>> = [];
+  const paneFills: Array<Map<string, string>> = [];
     const panes: FigurePane[] = paneValues.map((value, i) => {
       // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
       // renders a standalone single frame for these rows only.
@@ -689,6 +696,8 @@ export function renderFigure(
         firstFormatValue = p.formatValue;
       }
       panePainted.push(p.seriesHatches);
+    paneFills.push(p.seriesPainted);
+      paneFills.push(p.seriesPainted);
       return {
         value,
         title: titleFor(value),
@@ -702,7 +711,7 @@ export function renderFigure(
         tooltipXFormat: p.tooltipXFormat,
         showTotalDot: p.layers.showTotalDot,
         legendVisualOrder: p.layers.legendVisualOrder,
-        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches),
+        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
       };
     });
 
@@ -717,7 +726,7 @@ export function renderFigure(
       figureSeries,
       figureColors,
       figureLayers,
-      buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted)),
+      buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills)),
       firstFormatValue,
     );
 
@@ -816,6 +825,7 @@ export function renderFigure(
   // Each pane's PAINTED textures, in pane order — folded into the figure legend's (see
   // figureSeriesHatches).
   const panePainted: Array<Map<string, SeriesHatch>> = [];
+  const paneFills: Array<Map<string, string>> = [];
   const panes: FigurePane[] = paneValues.map((value, i) => {
     const col = i % columns;
     const paneRows = rows.filter((r) => (r[facetField] as string) === value);
@@ -863,7 +873,7 @@ export function renderFigure(
       tooltipXFormat: p.tooltipXFormat,
       showTotalDot: p.layers.showTotalDot,
       legendVisualOrder: p.layers.legendVisualOrder,
-      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches),
+      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
     };
   });
 
@@ -878,7 +888,7 @@ export function renderFigure(
     figureSeries,
     figureColors,
     figureLayers,
-    buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted)),
+    buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills)),
     firstFormatValue,
   );
 
