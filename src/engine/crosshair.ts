@@ -841,9 +841,10 @@ export function buildBandTooltipHtml(
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
-    /** Series → its resolved icon. The ONLY source of a row's key; see resolveTooltipIcons. The
-     *  caller re-colours it from the DRAWN fill first (recolourIcons), which is what keeps a
-     *  `bar_color` / `category_colors` bar's key on the colour under the cursor. */
+    /** Series → its resolved icon FOR THE CATEGORY being built. The ONLY source of a row's key; see
+     *  resolveTooltipIcons. The caller re-colours it from the DRAWN fill first (recolourIcons, once
+     *  per category — see `readCategoryFills`), which is what keeps a `bar_color` /
+     *  `category_colors` / waterfall bar's key on the colour under the cursor. */
     icons?: Map<string, IconSpec>;
   },
 ): string {
@@ -894,6 +895,11 @@ export function buildBandTooltipHtml(
 
 // ---------------------------------------------------------------------------
 
+/** A resolved band plus the `<rect>`s it was measured from, so the fill each bar is ACTUALLY
+ *  painted can be read per CATEGORY without a second walk that could group them differently from
+ *  the band it belongs to. See `readCategoryFills`. */
+type BandRects<T> = T & { rects: SVGRectElement[] };
+
 /**
  * Read the rendered bar rect geometry from `svgEl` and return one CategoryBand
  * per distinct category (vertical orientation — categories on X axis).
@@ -906,7 +912,7 @@ export function buildBandTooltipHtml(
  *   we read the bounding box of each facet group and map them in fx-domain index
  *   order to `opts.categories`.
  */
-function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): CategoryBand[] {
+function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): BandRects<CategoryBand>[] {
   const { isFaceted, categories = [] } = opts;
 
   if (isFaceted) {
@@ -940,7 +946,7 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
       const rects = Array.from(p.g.querySelectorAll<SVGRectElement>("rect"));
       if (!rects.length) {
         const tx = p.x;
-        return { category: cat, xMin: tx, xMax: tx + 1 };
+        return { category: cat, xMin: tx, xMax: tx + 1, rects };
       }
       let xMin = Infinity;
       let xMax = -Infinity;
@@ -950,7 +956,7 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
         if (rx < xMin) xMin = rx;
         if (rx + rw > xMax) xMax = rx + rw;
       }
-      return { category: cat, xMin, xMax };
+      return { category: cat, xMin, xMax, rects };
     });
   }
 
@@ -960,17 +966,18 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
   if (!allRects.length) return [];
 
   // Group rects by their integer x (each category gets a distinct band x).
-  const xToBand = new Map<number, { xMin: number; xMax: number }>();
+  const xToBand = new Map<number, { xMin: number; xMax: number; rects: SVGRectElement[] }>();
   for (const rect of allRects) {
     const rx = parseFloat(rect.getAttribute("x") ?? "0");
     const rw = parseFloat(rect.getAttribute("width") ?? "0");
     const key = Math.round(rx);
     const existing = xToBand.get(key);
     if (!existing) {
-      xToBand.set(key, { xMin: rx, xMax: rx + rw });
+      xToBand.set(key, { xMin: rx, xMax: rx + rw, rects: [rect] });
     } else {
       existing.xMin = Math.min(existing.xMin, rx);
       existing.xMax = Math.max(existing.xMax, rx + rw);
+      existing.rects.push(rect);
     }
   }
 
@@ -979,7 +986,7 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
   return sortedKeys.map((key, i) => {
     const band = xToBand.get(key)!;
     const cat = categories[i] ?? String(i);
-    return { category: cat, xMin: band.xMin, xMax: band.xMax };
+    return { category: cat, xMin: band.xMin, xMax: band.xMax, rects: band.rects };
   });
 }
 
@@ -998,7 +1005,7 @@ function readCategoryBands(svgEl: SVGSVGElement, opts: BandCrosshairOptions): Ca
 function readCategoryBandsH(
   svgEl: SVGSVGElement,
   opts: BandCrosshairOptions,
-): { bands: CategoryBandH[]; boundaryAfter: boolean[] } {
+): { bands: BandRects<CategoryBandH>[]; boundaryAfter: boolean[] } {
   const { isFaceted, categories = [] } = opts;
 
   if (isFaceted) {
@@ -1017,7 +1024,7 @@ function readCategoryBandsH(
         parsed.push({ y: ty, g, hasRect: !!g.querySelector("rect") });
       }
       parsed.sort((a, b) => a.y - b.y);
-      const bands: CategoryBandH[] = [];
+      const bands: BandRects<CategoryBandH>[] = [];
       const boundaryAfter: boolean[] = [];
       let sawEmptySinceLastReal = false;
       let ci = 0;
@@ -1039,7 +1046,7 @@ function readCategoryBandsH(
           if (ry < yMin) yMin = ry;
           if (ry + rh > yMax) yMax = ry + rh;
         }
-        bands.push({ category: cat, yMin, yMax });
+        bands.push({ category: cat, yMin, yMax, rects });
         boundaryAfter.push(false);
       }
       return { bands, boundaryAfter };
@@ -1051,17 +1058,18 @@ function readCategoryBandsH(
   if (!allRects.length) return { bands: [], boundaryAfter: [] };
 
   // Group rects by rounded y-coordinate (each horizontal category row has a distinct y).
-  const yToBand = new Map<number, { yMin: number; yMax: number }>();
+  const yToBand = new Map<number, { yMin: number; yMax: number; rects: SVGRectElement[] }>();
   for (const rect of allRects) {
     const ry = parseFloat(rect.getAttribute("y") ?? "0");
     const rh = parseFloat(rect.getAttribute("height") ?? "0");
     const key = Math.round(ry);
     const existing = yToBand.get(key);
     if (!existing) {
-      yToBand.set(key, { yMin: ry, yMax: ry + rh });
+      yToBand.set(key, { yMin: ry, yMax: ry + rh, rects: [rect] });
     } else {
       existing.yMin = Math.min(existing.yMin, ry);
       existing.yMax = Math.max(existing.yMax, ry + rh);
+      existing.rects.push(rect);
     }
   }
 
@@ -1070,9 +1078,42 @@ function readCategoryBandsH(
   const bands = sortedKeys.map((key, i) => {
     const band = yToBand.get(key)!;
     const cat = categories[i] ?? String(i);
-    return { category: cat, yMin: band.yMin, yMax: band.yMax };
+    return { category: cat, yMin: band.yMin, yMax: band.yMax, rects: band.rects };
   });
   return { bands, boundaryAfter: bands.map(() => false) };
+}
+
+/**
+ * Category → (series → the fill that category's bar is ACTUALLY painted).
+ *
+ * Keyed by CATEGORY, and that is the whole point. `category_colors` and a waterfall's per-direction
+ * palette give ONE series' bars a different colour in every category, so a series-keyed map — which
+ * kept the FIRST rect it saw per `data-series` — handed every category the FIRST category's fill,
+ * and on a textured chart a hatch ground derived from it. The chart painted each bar correctly;
+ * only the tooltip key lied.
+ *
+ * Takes the bands rather than re-querying, so a fill is grouped under exactly the category whose
+ * band the cursor resolves to — a second walk with its own grouping rule could disagree with the
+ * first, which is the class of bug this whole file keeps hitting.
+ */
+function readCategoryFills(
+  bands: ReadonlyArray<BandRects<{ category: string }>>,
+  svgEl: SVGSVGElement,
+): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  for (const band of bands) {
+    const fills = new Map<string, string>();
+    for (const rect of band.rects) {
+      const s = rect.getAttribute("data-series") ?? "";
+      // First rect wins WITHIN a category, which is correct: a fill varies by series and by
+      // category, never twice within one cell (a stack's segments each carry their own series).
+      if (fills.has(s)) continue;
+      const f = paintedFill(rect, svgEl);
+      if (f) fills.set(s, f);
+    }
+    if (fills.size) out.set(band.category, fills);
+  }
+  return out;
 }
 
 /**
@@ -1130,34 +1171,34 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
   const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
 
-  // Bar tooltips: color each series' swatch from the bar's ACTUAL rendered fill (bar_color /
-  // accent / category_colors), not the series' base color — matching the 1.3.x value pill. Built
-  // once from the rendered rects (fill is uniform per series; category_colors is single-series).
-  // Ungated on chart type on purpose: the query names bar rects, so a band figure with none yields
-  // an EMPTY map, and recolourIcons is a no-op on one. The gate used to be `swatchShape === "rect"`,
-  // a channel that no longer exists.
-  const renderedFills = !emitOnly
-    ? (() => {
-        const m = new Map<string, string>();
-        svgEl.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect').forEach((r) => {
-          const s = r.getAttribute("data-series") ?? "";
-          if (m.has(s)) return;
-          const f = paintedFill(r, svgEl);
-          if (f) m.set(s, f);
-        });
-        return m;
-      })()
-    : undefined;
-
-  // Re-coloured ONCE, not per pointermove: all three inputs — the resolved icons, the fills read
-  // above, the module's `resolveHatch` — are fixed for the life of this attachment. Forwarding
-  // `opts.icons` unchanged would revert the key to the palette colour.
+  // Bar tooltips: colour each series' swatch from the bar's ACTUAL rendered fill (bar_color /
+  // accent / category_colors / a waterfall's per-direction palette), not the series' base colour —
+  // matching the 1.3.x value pill.
   //
-  // The key is per SERIES, not per hovered category: `renderedFills` keeps the FIRST rect it sees
-  // for each `data-series`, and `category_colors` is single-series-only, so a chart using it keys
-  // every category with the FIRST category's fill. Pre-existing, and not what the hoist changed —
-  // moving this per-pointermove would not fix it, because the map it reads is series-keyed.
-  const tooltipIcons = opts.icons ? recolourIcons(opts.icons, renderedFills, resolveHatch) : undefined;
+  // Resolved once PER CATEGORY at attach time, then merely selected on hover. Both halves matter.
+  // Per CATEGORY because a single series' bars are not one colour — `category_colors` and the
+  // waterfall palette repaint them per bar, and one series-keyed map keyed every category with the
+  // first category's fill. At ATTACH time because the alternative, re-reading on every pointermove,
+  // allocates a Map per event for an answer that cannot change: the rects, the resolved icons and
+  // the module's `resolveHatch` are all fixed for the life of this attachment.
+  //
+  // Ungated on chart type on purpose: the readers name bar rects, so a band figure with none yields
+  // an EMPTY map and every category falls back to `opts.icons` — the same no-op the old empty
+  // `recolourIcons` gave. The gate used to be `swatchShape === "rect"`, a channel that no longer
+  // exists. Skipped entirely under `emitOnly`, which draws no tooltip to key.
+  const iconsByCategory =
+    !emitOnly && opts.icons
+      ? (() => {
+          const bands = horizontal
+            ? readCategoryBandsH(svgEl, opts).bands
+            : readCategoryBands(svgEl, opts);
+          const out = new Map<string, Map<string, IconSpec>>();
+          for (const [category, fills] of readCategoryFills(bands, svgEl)) {
+            out.set(category, recolourIcons(opts.icons!, fills, resolveHatch));
+          }
+          return out;
+        })()
+      : undefined;
 
   /** Show the highlight over the given band geometry, spanning the full plot axis. */
   function showHighlight(bandMin: number, bandMax: number): void {
@@ -1238,6 +1279,10 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     showHighlight(hlMin, hlMax);
 
+    // The key set for THIS category (see iconsByCategory). Falling back to `opts.icons` keeps a
+    // category with no rect of its own on the palette colour rather than on a neighbour's.
+    const icons = opts.icons ? iconsByCategory?.get(category) ?? opts.icons : undefined;
+
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
       showTotalDot: opts.showTotalDot,
@@ -1245,7 +1290,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       seriesOrder: opts.seriesOrder,
       yFormat,
       categoryLabels: opts.categoryLabels,
-      ...(tooltipIcons ? { icons: tooltipIcons } : {}),
+      ...(icons ? { icons } : {}),
     });
     tip!.innerHTML = html;
 
@@ -1517,6 +1562,11 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   // Re-coloured ONCE, not per pointermove: `renderedFills` is read from the bars at attach time, so
   // a `bar_color` histogram's key is settled before the first hover. (This is where that colour is
   // settled at all — the icons arrive on the palette colour; see the `icons:` note in render-live.)
+  //
+  // Per SERIES is right HERE, unlike the band crosshair's per-category map: a histogram's fill comes
+  // from `bar_color` / the palette / highlight-dim, all of which are per series, and the one
+  // per-category override — `category_colors` — is validated against a CATEGORICAL x, which a
+  // histogram never has. So a series' bins are one colour and there is no hovered bin to key by.
   const tooltipIcons = opts.icons ? recolourIcons(opts.icons, renderedFills, resolveHatch) : undefined;
 
   /** Shade the hovered bin's x-span across the full plot height. */
@@ -2722,7 +2772,10 @@ export interface CategoricalLineOptions {
   orientation?: "vertical" | "horizontal";
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
-  /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend. */
+  /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend.
+   *  Series-keyed, not category-keyed as the band crosshair's is: this is handed in by the CALLER
+   *  from the series' own marker style, never read off the marks, and a line/dot mark carries no
+   *  per-category fill override to disagree with it. */
   renderedFills?: Map<string, string>;
   /** Coordinated cursor: skip the white-fill highlight ring over each point. The dumbbell's own
    *  dots (filled/hollow/ink) are already visible, and a ring would recolor them — so it draws the

@@ -1381,3 +1381,78 @@ describe("attachHighlightPills — Total selection net pill", () => {
     document.body.removeChild(svg);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The tooltip key follows the HOVERED CATEGORY, not the first bar drawn
+// ---------------------------------------------------------------------------
+//
+// `category_colors` (and a waterfall's per-direction palette) paint ONE series' bars a different
+// colour in every category. The key used to be resolved from a map built per `data-series` that
+// kept the first rect it saw, so every category's swatch showed the FIRST category's fill — an
+// amber chip beside a violet bar. The chart itself was always right; only the key lied, which is
+// what let it ship. See `readCategoryFills` in crosshair.ts.
+
+describe("a category_colors bar keys each category with its OWN fill", () => {
+  const SPEC = {
+    chartType: "bar",
+    title: "Category colours",
+    xAxisType: "categorical",
+    columns: { x: "cat", value: "value", facet: "pane" },
+    category_colors: { Alpha: "amber", Beta: "violet", Gamma: "blue" },
+    // The band TOOLTIP (rather than the coordinated in-place pills) is what carries a key, and
+    // `coordinated_cursor: false` is the production spec that reaches it on a plain bar figure.
+    small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+    data: "inline",
+  } as unknown as ChartSpec;
+
+  const ROWS: TidyRow[] = [
+    { pane: "P1", cat: "Alpha", value: "3" },
+    { pane: "P1", cat: "Beta", value: "5" },
+    { pane: "P1", cat: "Gamma", value: "2" },
+    { pane: "P2", cat: "Alpha", value: "4" },
+    { pane: "P2", cat: "Beta", value: "1" },
+    { pane: "P2", cat: "Gamma", value: "6" },
+  ] as unknown as TidyRow[];
+
+  it("hovering two categories draws two different swatches, each matching its own bar", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: SPEC, rows: ROWS, width: 838, height: 420 });
+    const svg = container.querySelector<SVGSVGElement>(".figure-pane svg")!;
+
+    // jsdom has no layout: map client coords 1:1 onto the viewBox so a bar's own x is hoverable.
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+
+    // The bars in render order (Alpha, Beta, Gamma), each with the fill it is actually painted.
+    const bars = Array.from(svg.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect'))
+      .sort((a, b) => parseFloat(a.getAttribute("x")!) - parseFloat(b.getAttribute("x")!));
+    expect(bars.length).toBe(3);
+    const fills = bars.map((r) => r.getAttribute("fill"));
+    expect(new Set(fills).size, "category_colors did not paint three distinct bars").toBe(3);
+
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    /** The fill of the swatch the tooltip draws when the pointer sits over bar `i`. */
+    const swatchFillOver = (i: number): string => {
+      const bar = bars[i]!;
+      const cx = parseFloat(bar.getAttribute("x")!) + parseFloat(bar.getAttribute("width")!) / 2;
+      hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 60, bubbles: true }));
+      const chip = document.querySelector(".tbl-tooltip .tbl-tooltip-swatch svg rect")!;
+      return chip.getAttribute("style") ?? "";
+    };
+
+    const alpha = swatchFillOver(0);
+    const beta = swatchFillOver(1);
+    expect(alpha).toContain(`fill:${fills[0]}`);
+    expect(beta).toContain(`fill:${fills[1]}`);
+    expect(alpha, "both categories keyed with the same colour").not.toBe(beta);
+
+    container.remove();
+  });
+});
