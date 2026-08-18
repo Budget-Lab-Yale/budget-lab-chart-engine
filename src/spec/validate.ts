@@ -21,6 +21,9 @@ import { resolveAnnotations } from "./annotations";
 import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
+import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
+import { overlayKind } from "./overlays";
+import type { Overlay } from "./types";
 
 export interface ValidationResult {
   valid: boolean;
@@ -281,6 +284,100 @@ function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): s
     : `shading is supported on chartType "line" only (got ${JSON.stringify(spec.chartType)})`;
 }
 
+/** Semantic checks on `overlays` — the ones ajv cannot express readably. Returns every error found,
+ *  each naming the entry index and the field, so an author fixing three mistakes sees three messages
+ *  rather than one per run. */
+function overlaySpecErrors(spec: {
+  overlays?: Overlay[];
+  xAxisType?: unknown;
+  chartType?: unknown;
+}): string[] {
+  const overlays = spec.overlays;
+  if (!overlays?.length) return [];
+  const errors: string[] = [];
+  const xAxisType = spec.xAxisType;
+  const histogram = spec.chartType === "histogram";
+
+  if (xAxisType === "categorical") {
+    return [
+      "overlays are not supported with xAxisType categorical — a band scale has no position between categories, so a fitted or drawn line has nowhere to land",
+    ];
+  }
+  const temporal = xAxisType === "temporal" || xAxisType === "quarterly";
+
+  overlays.forEach((o, i) => {
+    const at = `overlays[${i}]`;
+    const kind = overlayKind(o);
+    if (!kind) {
+      if ((o.slope == null) !== (o.intercept == null)) {
+        errors.push(`${at}: \`slope\` and \`intercept\` must be given together`);
+      } else {
+        errors.push(
+          `${at}: an overlay needs exactly one of \`method\`, \`fun\`, \`slope\`+\`intercept\`, \`column\``,
+        );
+      }
+      return;
+    }
+
+    if (o.degree != null && o.method !== "poly") {
+      errors.push(`${at}: \`degree\` applies to \`method: poly\``);
+    }
+    if (o.params != null && kind !== "fun") errors.push(`${at}: \`params\` applies to \`fun\``);
+    if (o.n != null && kind !== "fun") errors.push(`${at}: \`n\` applies to \`fun\``);
+    if (o.ci != null && kind !== "method") errors.push(`${at}: \`ci\` applies to \`method\``);
+    if (o.by != null && kind !== "method" && kind !== "column") {
+      errors.push(
+        `${at}: \`by\` applies to \`method\` and \`column\` — the other kinds do not read the data`,
+      );
+    }
+    if (o.legend === true && !o.label) {
+      errors.push(`${at}: \`legend: true\` needs a \`label\` — it is the row's text`);
+    }
+
+    // Histogram rows are BinnedRows ({_x0, _x1, _y}) built on a path that skips the row preparation
+    // where `_xn` and `_overlayCols` are set, so the two data-reading kinds would fit NaN / find no
+    // values and be dropped WITHOUT a message — while the spec validated. Reject them by name.
+    if (histogram && (kind === "method" || kind === "column")) {
+      errors.push(
+        `${at}: \`${kind}\` is not supported on chartType histogram — histogram rows carry bin edges, not a per-row x, so there is nothing to fit or read. Use \`fun\` (e.g. a \`dnorm\` density curve over \`histogram.normalize: density\`).`,
+      );
+    }
+
+    if (kind === "fun") {
+      const parsed = parseExpression(o.fun as string);
+      if (!parsed.ok) {
+        errors.push(`${at}: \`fun\` does not parse — ${parsed.error}`);
+      } else {
+        const allowed = new Set(["x", ...Object.keys(EXPR_CONSTANTS), ...Object.keys(o.params ?? {})]);
+        const unknown = exprVariables(parsed.ast).filter((v) => !allowed.has(v));
+        if (unknown.length) {
+          errors.push(
+            `${at}: \`fun\` uses ${unknown.map((v) => JSON.stringify(v)).join(", ")}, which is neither \`x\`, a constant (${Object.keys(EXPR_CONSTANTS).join(", ")}), nor a declared \`params\` key`,
+          );
+        }
+      }
+    }
+
+    if (temporal && (kind === "fun" || kind === "abline")) {
+      const field = kind === "fun" ? "`fun`" : "`slope`+`intercept`";
+      errors.push(
+        `${at}: ${field} is not supported on a temporal x-axis — x would be epoch milliseconds, so the coefficients would not mean anything. Use \`method\` or \`column\` there.`,
+      );
+    }
+    if (Array.isArray(o.domain)) {
+      if (temporal) {
+        errors.push(
+          `${at}: an explicit numeric \`domain\` is not supported on a temporal x-axis — use \`domain: axis\``,
+        );
+      } else if (!(o.domain[0]! < o.domain[1]!)) {
+        errors.push(`${at}: \`domain\` must satisfy min < max (got [${o.domain[0]}, ${o.domain[1]}])`);
+      }
+    }
+  });
+
+  return errors;
+}
+
 /** A band / shading / marker entry as the legend + rug flags see it. */
 interface LegendFlagged {
   label?: string;
@@ -481,6 +578,10 @@ export function validateSpec(spec: unknown): ValidationResult {
     },
   );
   if (histErrors.length) return { valid: false, errors: histErrors };
+  const overlayErrors = overlaySpecErrors(
+    spec as { overlays?: Overlay[]; xAxisType?: unknown; chartType?: unknown },
+  );
+  if (overlayErrors.length) return { valid: false, errors: overlayErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
   const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
@@ -677,6 +778,16 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     if (!columns.has(col)) {
       errors.push(
         `config/data mismatch: confidence_bands references a "${col}" column the data does not have`,
+      );
+    }
+  }
+
+  // A `column` overlay names a data column, so the data has to have it — the same check the
+  // confidence_bands lower/upper columns get.
+  for (const o of spec.overlays ?? []) {
+    if (o.column != null && !columns.has(o.column)) {
+      errors.push(
+        `config/data mismatch: overlays references a "${o.column}" column the data does not have`,
       );
     }
   }
