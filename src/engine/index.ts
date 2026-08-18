@@ -38,7 +38,7 @@ import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
 import { resolveOverlays, overlayColumnValues } from "./overlays";
-import { buildOverlayMarks } from "./marks/overlay";
+import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -834,12 +834,21 @@ function assemblePaneResult(
     // (engine/figure.ts) supplies `facetInfo` to `renderPane`; only a test does. Wiring this for
     // real needs `runsOf`/the band mapper in marks/overlay.ts to stamp the resolved overlay's
     // `facet` value onto each row as `_fxCol`/`_fyRow` before this reaches that point.
-    const om = buildOverlayMarks(resolvedOverlays, {
+    const om = buildOverlayMarks(resolvedOverlays, spec.overlays ?? [], {
       xField: adapter.xField as "_xn" | "_xd",
       ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     });
     layers.underlay.push(...om.underlay);
-    layers.overlay.push(...om.overlay);
+    layers.overlay.push(
+      ...om.overlay,
+      // Labels last within the overlay layer, so they paint over their own lines. They still sit
+      // BELOW assemblePlot's annotation labels (pushed at its step 8) — correct precedence: an
+      // `annotations` placement is the more deliberate one, and both are nudgeable.
+      ...buildOverlayLabelMarks(resolvedOverlays, {
+        xField: adapter.xField as "_xn" | "_xd",
+        ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
+      }),
+    );
     layers.tagging.push(...om.tagging);
   }
 

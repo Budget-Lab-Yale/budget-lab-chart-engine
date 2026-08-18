@@ -46,7 +46,7 @@ const PLOT_CLASS = "tblchart";
 
 // A subtle white halo behind annotation text (paint-order: stroke → the white stroke paints
 // behind the fill) so labels stay legible over annotation lines, bands, and dense data.
-const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
+export const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
 
 // D6: horizontal bars' category band uses `align: 0` (the outer pad goes to the BOTTOM only), so
 // the first bar sits flush at the plot frame's top edge with no gap above it. A "top"-position

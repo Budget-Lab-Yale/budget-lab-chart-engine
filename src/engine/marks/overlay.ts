@@ -16,8 +16,12 @@
 // decision recorded on MarkContext.clipMarks: a half-cut label reads worse than one past the axis.
 import { Plot } from "../vendor";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
+import { annotationKey } from "../annotation-legend";
+import { LABEL_HALO } from "../assemble-plot";
+import { TBL } from "../theme";
 import type { MarkLayers } from "./index";
 import type { ResolvedOverlay } from "../overlays";
+import type { Overlay } from "../../spec/types";
 
 export const OVERLAY_LINE_CLASS = "tbl-overlay-line";
 export const OVERLAY_BAND_CLASS = "tbl-overlay-band";
@@ -64,6 +68,7 @@ function runsOf(o: ResolvedOverlay, xField: "_xn" | "_xd", id: number): OverlayR
 
 export function buildOverlayMarks(
   resolved: ResolvedOverlay[],
+  entries: Overlay[],
   ctx: OverlayMarkContext,
 ): { underlay: unknown[]; overlay: unknown[]; tagging: MarkLayers["tagging"] } {
   const underlay: unknown[] = [];
@@ -87,9 +92,16 @@ export function buildOverlayMarks(
   // position so later overlays' indices don't shift — SINGLE_SERIES_KEY ("") is inert there: no
   // real series is ever named "", so it never mis-dims when hovering an unrelated series.
   const combinedSeriesOrder: string[] = [];
+  // Parallel to combinedSeriesOrder: the annotation key of the spec entry a keyed line came from, so
+  // the same path carries BOTH keys — it dims with its series AND lights up when its legend row is
+  // hovered. Undefined for a line whose label stayed in-frame (nothing moved to the legend for it).
+  const combinedAnnotationOrder: Array<string | undefined> = [];
   let anySeries = false;
+  let anyAnnotation = false;
 
   resolved.forEach((o, i) => {
+    const entry = entries[o.entryIndex];
+    const key = o.keyed && entry?.label ? annotationKey(entry.label) : undefined;
     if (o.band?.length) {
       underlay.push(
         Plot.areaY(
@@ -131,12 +143,83 @@ export function buildOverlayMarks(
     // means it has to be minted HERE rather than in engine/overlays.ts (see the module-graph note).
     const segCount = new Set(rows.map((r) => r._seg)).size;
     if (o.series != null) anySeries = true;
-    for (let k = 0; k < segCount; k++) combinedSeriesOrder.push(o.series ?? SINGLE_SERIES_KEY);
+    if (key != null) anyAnnotation = true;
+    for (let k = 0; k < segCount; k++) {
+      combinedSeriesOrder.push(o.series ?? SINGLE_SERIES_KEY);
+      combinedAnnotationOrder.push(key);
+    }
   });
 
-  if (anySeries) {
-    tagging.push({ selector: `g.${OVERLAY_LINE_CLASS} path`, seriesOrder: combinedSeriesOrder });
+  if (anySeries || anyAnnotation) {
+    tagging.push({
+      selector: `g.${OVERLAY_LINE_CLASS} path`,
+      seriesOrder: combinedSeriesOrder,
+      ...(anyAnnotation ? { annotationOrder: combinedAnnotationOrder } : {}),
+    });
   }
 
   return { underlay, overlay, tagging };
+}
+
+export const OVERLAY_LABEL_CLASS = "tbl-overlay-label";
+
+/** In-frame labels for the overlays that carry one.
+ *
+ *  An overlay line is SLOPED, so unlike an `annotations.yAxis` label this cannot anchor to a frame
+ *  edge — it anchors at a point ON the line, chosen by `labelPosition` (first / middle / last drawn
+ *  point). `labelSide` then places it relative to the line, with the same base offsets assemble-plot
+ *  uses for its yAxis marker labels, and the dx/dy conventions match `annotations` exactly:
+ *  +labelDx = right, +labelDy = UP. Text stays horizontal; rotating it to the line's angle reads
+ *  worse at these sizes and does not survive a resize.
+ *
+ *  NOT clipped, per the standing decision on MarkContext.clipMarks: "annotations and reference
+ *  markers are deliberately never clipped: a half-cut label reads worse than one sitting past the
+ *  axis." The line and band it labels DO clip.
+ */
+export function buildOverlayLabelMarks(
+  resolved: ResolvedOverlay[],
+  ctx: OverlayMarkContext,
+): unknown[] {
+  const marks: unknown[] = [];
+  const facetChannels = ctx.fxField && ctx.fyField ? { fx: ctx.fxField, fy: ctx.fyField } : {};
+
+  for (const o of resolved) {
+    // A keyed overlay's text moved to a legend row, so there is nothing in-frame to draw.
+    if (!o.label) continue;
+    const drawn = o.points.filter((p): p is { x: number; y: number } => p.y != null);
+    if (!drawn.length) continue;
+    const anchor =
+      o.labelPosition === "left"
+        ? drawn[0]!
+        : o.labelPosition === "middle"
+          ? drawn[Math.floor(drawn.length / 2)]!
+          : drawn[drawn.length - 1]!;
+
+    const lineAnchor =
+      o.labelSide === "middle" ? "middle" : o.labelSide === "bottom" ? "top" : undefined;
+    const baseDy = o.labelSide === "middle" ? 0 : o.labelSide === "bottom" ? 6 : -7;
+    const textAnchor =
+      o.labelPosition === "left" ? "start" : o.labelPosition === "middle" ? "middle" : "end";
+    const baseDx = o.labelPosition === "left" ? 6 : o.labelPosition === "middle" ? 0 : -6;
+
+    marks.push(
+      Plot.text([{ x: toAxisX(anchor.x, ctx.xField), y: anchor.y, t: o.label }], {
+        x: "x",
+        y: "y",
+        text: "t",
+        textAnchor,
+        ...(lineAnchor ? { lineAnchor } : {}),
+        dx: o.labelDx != null ? o.labelDx : baseDx,
+        // labelDy is + = UP → subtract it from the side's base SVG dy.
+        dy: baseDy - (o.labelDy ?? 0),
+        fill: o.color,
+        fontSize: TBL.size.annotation,
+        fontWeight: 600,
+        className: OVERLAY_LABEL_CLASS,
+        ...LABEL_HALO,
+        ...facetChannels,
+      }),
+    );
+  }
+  return marks;
 }

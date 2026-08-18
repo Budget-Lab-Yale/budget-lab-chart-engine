@@ -40,6 +40,10 @@ export interface ResolvedOverlay {
   facet?: string;
   /** Confidence ribbon, same x grid as `points`. Task 7. */
   band?: Array<{ x: number; lo: number; hi: number }>;
+  /** Index of the spec entry this line came from. One entry can resolve to several lines (a
+   *  per-series fit), and the caller needs the entry back to mint its annotation key — which this
+   *  module cannot do itself without importing annotation-legend.ts. */
+  entryIndex: number;
 }
 
 export interface ResolveOverlaysContext {
@@ -156,7 +160,7 @@ export function resolveOverlays(
 
   const out: ResolvedOverlay[] = [];
 
-  for (const o of entries) {
+  for (const [entryIndex, o] of entries.entries()) {
     const kind = overlayKind(o);
     if (!kind) continue; // validation already rejected this spec
 
@@ -187,7 +191,7 @@ export function resolveOverlays(
       const dom = overlayDomain(o, kind, groupXs, ctx.xDomain);
       if (!dom) continue;
       const color = overlayLineColor(o, ctx.colors, g.series);
-      const base = { ...shared, color, ...(g.series != null ? { series: g.series } : {}) };
+      const base = { ...shared, entryIndex, color, ...(g.series != null ? { series: g.series } : {}) };
 
       if (kind === "abline") {
         const f = (x: number): number => (o.intercept as number) + (o.slope as number) * x;
