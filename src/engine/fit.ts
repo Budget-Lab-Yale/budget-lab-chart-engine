@@ -133,3 +133,107 @@ export function evalPolyFit(fit: PolyFit, x: number): number {
   }
   return out;
 }
+
+/** Standard error of the fitted MEAN response at x: s·√(x₀ᵀ(XᵀX)⁻¹x₀), with x₀ the centred design
+ *  row. This is the interval around the FIT — R's `predict(..., interval = "confidence")` and Stata's
+ *  `lfitci` — not a prediction interval for a new observation, which is wider. NaN when the fit has no
+ *  residual df, in which case the caller draws the line without a band. */
+export function polyFitStdError(fit: PolyFit, x: number): number {
+  if (!Number.isFinite(fit.s)) return NaN;
+  const u = x - fit.xBar;
+  const row: number[] = [1];
+  for (let k = 1; k < fit.p; k++) row.push(row[k - 1]! * u);
+  let q = 0;
+  for (let a = 0; a < fit.p; a++) {
+    for (let b = 0; b < fit.p; b++) q += row[a]! * fit.xtxInv[a]![b]! * row[b]!;
+  }
+  return q <= 0 ? NaN : fit.s * Math.sqrt(q);
+}
+
+// --- Student's t, for the interval's multiplier -------------------------------------------------
+// Implemented here rather than pulled in: the engine vendors its dependencies as pinned ESM bundles
+// (src/engine/vendor.ts) and a distribution library is a poor trade for one quantile. The continued
+// fraction is the standard one for the regularized incomplete beta; test/fit-ci.test.ts checks the
+// results against published t-table values, which is the only meaningful test of this code.
+
+/** Lanczos log-gamma. */
+function lgamma(z: number): number {
+  const g = [
+    676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+    12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lgamma(1 - z);
+  const x = z - 1;
+  let a = 0.99999999999980993;
+  const t = x + 7.5;
+  for (let i = 0; i < g.length; i++) a += g[i]! / (x + i + 1);
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+/** Continued fraction for the incomplete beta (modified Lentz). */
+function betacf(a: number, b: number, x: number): number {
+  const TINY = 1e-30;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < TINY) d = TINY;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= 300; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c;
+    if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c;
+    if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 3e-16) break;
+  }
+  return h;
+}
+
+/** Regularized incomplete beta, I_x(a, b). */
+function betai(a: number, b: number, x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(
+    lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x),
+  );
+  return x < (a + 1) / (a + b + 2)
+    ? (front * betacf(a, b, x)) / a
+    : 1 - (front * betacf(b, a, 1 - x)) / b;
+}
+
+/** P(T ≤ t) for Student's t with `df` degrees of freedom. */
+function studentTCdf(t: number, df: number): number {
+  const x = df / (df + t * t);
+  const tail = 0.5 * betai(df / 2, 0.5, x);
+  return t > 0 ? 1 - tail : tail;
+}
+
+/** The p-quantile of Student's t. Bisection on the CDF: a monotone function, fast enough for the
+ *  handful of calls one chart makes and much easier to verify than a rational approximation. */
+export function studentTQuantile(p: number, df: number): number {
+  if (!(p > 0 && p < 1) || !(df > 0)) return NaN;
+  if (p === 0.5) return 0;
+  let lo = -1e4;
+  let hi = 1e4;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    if (studentTCdf(mid, df) < p) lo = mid;
+    else hi = mid;
+    if (hi - lo < 1e-10) break;
+  }
+  return (lo + hi) / 2;
+}

@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { renderChart, renderPane } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
-import { OVERLAY_LINE_CLASS } from "../src/engine/marks/overlay";
+import { OVERLAY_LINE_CLASS, OVERLAY_BAND_CLASS } from "../src/engine/marks/overlay";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
@@ -202,6 +202,30 @@ describe("overlays — a line chart with a stated rule", () => {
   it("draws a 45-degree line over a line chart", () => {
     const s = spec([{ slope: 1, intercept: 0 }], { chartType: "line" });
     expect(lines(renderChart(s, ROWS, OPTS).svg).length).toBe(1);
+  });
+});
+
+describe("overlays — confidence ribbon", () => {
+  const bands = (svg: SVGSVGElement) =>
+    Array.from(svg.querySelectorAll(`g.${OVERLAY_BAND_CLASS} path`));
+
+  it("draws no ribbon without `ci`", () => {
+    expect(bands(renderChart(spec([{ method: "lm" }]), ROWS, OPTS).svg).length).toBe(0);
+  });
+
+  it("draws a ribbon with `ci`", () => {
+    expect(bands(renderChart(spec([{ method: "lm", ci: 0.95 }]), ROWS, OPTS).svg).length).toBe(1);
+  });
+
+  it("draws the line but no ribbon when the fit has no residual df", () => {
+    const two = [ROWS[0]!, ROWS[1]!] as TidyRow[];
+    const { svg } = renderChart(spec([{ method: "lm", ci: 0.95 }]), two, OPTS);
+    expect(lines(svg).length).toBe(1);
+    expect(bands(svg).length).toBe(0);
+  });
+
+  it("reaches the export path", () => {
+    expect(bands(buildExportSvg(spec([{ method: "lm", ci: 0.95 }]), ROWS)).length).toBe(1);
   });
 });
 

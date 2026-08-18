@@ -4,7 +4,7 @@
 // Engine-side (not src/spec/) because it needs the palette, the theme and the fit. It deliberately
 // does NOT import annotation-legend.ts: it reports `keyed` and lets the caller mint the annotation
 // key, so annotation-legend.ts can import overlayLineColor from here without a cycle.
-import { fitPoly, evalPolyFit } from "./fit";
+import { fitPoly, evalPolyFit, polyFitStdError, studentTQuantile } from "./fit";
 import { resolveColor } from "./palette";
 import { TBL } from "./theme";
 import { overlayKind, overlayDashed } from "../spec/overlays";
@@ -222,9 +222,32 @@ export function resolveOverlays(
         const fit = fitPoly(pairs, degree);
         if (!fit) continue;
         // A straight line needs two points; a curve is sampled. (`n` is rejected on a fit, so the
-        // grid is always the default — plenty for degree ≤ 5 across one frame.)
-        const grid = sampleGrid(dom[0], dom[1], degree === 1 ? 2 : DEFAULT_SAMPLES);
-        out.push({ ...base, points: grid.map((x) => pt(x, evalPolyFit(fit, x))) });
+        // grid is always the default — plenty for degree ≤ 5 across one frame.) A banded fit samples
+        // like a curve even at degree 1: the ribbon's edges are hyperbolic, and a two-point grid
+        // would draw them as straight lines.
+        const ciLevel = o.ci;
+        const grid = sampleGrid(
+          dom[0],
+          dom[1],
+          degree === 1 && ciLevel == null ? 2 : DEFAULT_SAMPLES,
+        );
+        let band: Array<{ x: number; lo: number; hi: number }> | undefined;
+        if (ciLevel != null && Number.isFinite(fit.s)) {
+          const t = studentTQuantile(1 - (1 - ciLevel) / 2, fit.n - fit.p);
+          const bandRows: Array<{ x: number; lo: number; hi: number }> = [];
+          for (const x of grid) {
+            const yhat = evalPolyFit(fit, x);
+            const se = polyFitStdError(fit, x);
+            if (!Number.isFinite(yhat) || !Number.isFinite(se) || !Number.isFinite(t)) continue;
+            bandRows.push({ x, lo: yhat - t * se, hi: yhat + t * se });
+          }
+          if (bandRows.length >= 2) band = bandRows;
+        }
+        out.push({
+          ...base,
+          points: grid.map((x) => pt(x, evalPolyFit(fit, x))),
+          ...(band ? { band } : {}),
+        });
         continue;
       }
 

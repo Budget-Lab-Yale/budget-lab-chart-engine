@@ -137,6 +137,38 @@ describe("resolveOverlays — method", () => {
   });
 });
 
+describe("resolveOverlays — confidence ribbon (ci)", () => {
+  it("adds no band without `ci`", () => {
+    const [o] = resolve([{ method: "lm" }]);
+    expect(o!.band).toBeUndefined();
+  });
+
+  it("adds a band spanning the same x samples as the line, bracketing the fit", () => {
+    const [o] = resolve([{ method: "lm", ci: 0.95 }], rows([[0, 1], [1, 3], [2, 2]]));
+    expect(o!.band).toBeDefined();
+    expect(o!.band!.map((b) => b.x)).toEqual(o!.points.map((p) => p.x));
+    for (let i = 0; i < o!.band!.length; i++) {
+      const b = o!.band![i]!;
+      const y = o!.points[i]!.y;
+      expect(b.lo).toBeLessThanOrEqual(y!);
+      expect(b.hi).toBeGreaterThanOrEqual(y!);
+    }
+  });
+
+  // n === p: fitPoly still succeeds (a line through 2 points is exact) but s is NaN — no residual
+  // df to estimate it from. A NaN half-width must degrade to no band, never to NaN coordinates.
+  it("omits the band, but not the line, when the fit has no residual degrees of freedom", () => {
+    const [o] = resolve([{ method: "lm", ci: 0.95 }], rows([[1, 1], [2, 2]]));
+    expect(o!.points.length).toBeGreaterThan(0);
+    expect(o!.band).toBeUndefined();
+  });
+
+  it("does not populate a band for a `fun` overlay even if `ci` were present", () => {
+    const [o] = resolve([{ fun: "x", ci: 0.95 } as unknown as Overlay]);
+    expect(o!.band).toBeUndefined();
+  });
+});
+
 describe("resolveOverlays — column", () => {
   function withCol(pairs: Array<[number, number]>, yhats: number[], series = "A"): PreparedRow[] {
     return rows(pairs, series).map((r, i) => ({
