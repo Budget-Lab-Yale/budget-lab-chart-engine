@@ -32,6 +32,14 @@ const OPTS = { width: 720, height: 400, document };
 const lines = (svg: SVGSVGElement) =>
   Array.from(svg.querySelectorAll<SVGPathElement>(`g.${OVERLAY_LINE_CLASS} path`));
 
+// Presentation attributes (stroke, stroke-dasharray) land on the overlay's <g> wrapper, not each
+// <path> — Plot hoists constant mark styling there, and SVG presentation attributes inherit down
+// to children, so the DOM (and the PNG export, which rasterises the same DOM) render correctly
+// without copying anything onto the <path>. Read the group for style; read `lines` (above) to
+// confirm a path actually exists underneath it, so relaxing the element can't pass on an empty group.
+const groups = (svg: SVGSVGElement) =>
+  Array.from(svg.querySelectorAll<SVGGElement>(`g.${OVERLAY_LINE_CLASS}`));
+
 function spec(overlays: unknown[], patch: Record<string, unknown> = {}): ChartSpec {
   return { ...BASE, ...patch, overlays } as ChartSpec;
 }
@@ -70,22 +78,60 @@ describe("overlays — mark emission", () => {
 
 describe("overlays — stroke presentation", () => {
   it("draws a fit solid", () => {
-    const p = lines(renderChart(spec([{ method: "lm" }]), ROWS, OPTS).svg)[0]!;
-    expect(p.getAttribute("stroke-dasharray")).toBeNull();
+    const svg = renderChart(spec([{ method: "lm" }]), ROWS, OPTS).svg;
+    expect(lines(svg).length).toBeGreaterThan(0);
+    const g = groups(svg)[0]!;
+    expect(g.getAttribute("stroke-dasharray")).toBeNull();
   });
 
   it("draws an abline dashed in the dim annotation neutral", () => {
-    const p = lines(renderChart(spec([{ slope: 1, intercept: 0 }]), ROWS, OPTS).svg)[0]!;
-    expect(p.getAttribute("stroke-dasharray")).toBeTruthy();
-    expect(p.getAttribute("stroke")).toBe(TBL.color.annotationDim);
+    const svg = renderChart(spec([{ slope: 1, intercept: 0 }]), ROWS, OPTS).svg;
+    expect(lines(svg).length).toBeGreaterThan(0);
+    const g = groups(svg)[0]!;
+    expect(g.getAttribute("stroke-dasharray")).toBeTruthy();
+    expect(g.getAttribute("stroke")).toBe(TBL.color.annotationDim);
   });
 
   it("honours an explicit colour and style", () => {
-    const p = lines(
-      renderChart(spec([{ method: "lm", color: "#00ff00", style: "dashed" }]), ROWS, OPTS).svg,
-    )[0]!;
-    expect(p.getAttribute("stroke")).toBe("#00ff00");
-    expect(p.getAttribute("stroke-dasharray")).toBeTruthy();
+    const svg = renderChart(
+      spec([{ method: "lm", color: "#00ff00", style: "dashed" }]),
+      ROWS,
+      OPTS,
+    ).svg;
+    expect(lines(svg).length).toBeGreaterThan(0);
+    const g = groups(svg)[0]!;
+    expect(g.getAttribute("stroke")).toBe("#00ff00");
+    expect(g.getAttribute("stroke-dasharray")).toBeTruthy();
+  });
+});
+
+describe("overlays — series tagging", () => {
+  // Pins the combined-selector `data-series` tagging in marks/overlay.ts: a per-series fit's path
+  // carries its own series (for legend pin/dim), and a series-less overlay sharing the same class
+  // must not be mistaken for one of the real series.
+  it("tags each per-series fit's path with its own series, and the series-less overlay with neither", () => {
+    const two = [
+      ...ROWS,
+      { time: "1", value: "10", series: "B" },
+      { time: "2", value: "12", series: "B" },
+    ] as unknown as TidyRow[];
+    const { svg } = renderChart(spec([{ method: "lm" }, { slope: 1, intercept: 0 }]), two, OPTS);
+    const paths = lines(svg);
+    expect(paths.length).toBe(3);
+
+    const bySeries = new Map(paths.map((p) => [p.getAttribute("data-series"), p]));
+    expect(bySeries.has("A")).toBe(true);
+    expect(bySeries.has("B")).toBe(true);
+
+    // Exactly one path (the abline) is left over, tagged with neither real series name.
+    const untagged = paths.filter(
+      (p) => p.getAttribute("data-series") !== "A" && p.getAttribute("data-series") !== "B",
+    );
+    expect(untagged.length).toBe(1);
+
+    // Distinct series get distinct colours (read off the wrapper — see `groups` above).
+    const colorOf = (p: SVGPathElement) => p.closest(`g.${OVERLAY_LINE_CLASS}`)!.getAttribute("stroke");
+    expect(colorOf(bySeries.get("A")!)).not.toBe(colorOf(bySeries.get("B")!));
   });
 });
 

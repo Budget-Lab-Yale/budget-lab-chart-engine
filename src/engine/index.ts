@@ -38,7 +38,7 @@ import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
 import { resolveOverlays, overlayColumnValues } from "./overlays";
-import { buildOverlayMarks, OVERLAY_LINE_CLASS } from "./marks/overlay";
+import { buildOverlayMarks } from "./marks/overlay";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -827,6 +827,13 @@ function assemblePaneResult(
       legendActive: spec.legend !== false,
       ...(axisDomain ? { xDomain: axisDomain } : {}),
     }).filter((o) => o.facet == null || o.facet === opts.paneFacetValue);
+    // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
+    // fx/fy CHANNEL NAMES passed to `buildOverlayMarks`, but the `OverlayRow` objects it builds
+    // (marks/overlay.ts) carry no `_fxCol`/`_fyRow` fields — those channels would resolve to
+    // `undefined` on every row if this path ever ran. Unreachable today: no production caller
+    // (engine/figure.ts) supplies `facetInfo` to `renderPane`; only a test does. Wiring this for
+    // real needs `runsOf`/the band mapper in marks/overlay.ts to stamp the resolved overlay's
+    // `facet` value onto each row as `_fxCol`/`_fyRow` before this reaches that point.
     const om = buildOverlayMarks(resolvedOverlays, {
       xField: adapter.xField as "_xn" | "_xd",
       ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
@@ -857,23 +864,6 @@ function assemblePaneResult(
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),
     ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
   });
-
-  // Plot's vendored line mark hoists a CONSTANT stroke/stroke-dasharray onto the mark's own <g>
-  // wrapper rather than each <path> (confirmed against this build: a channel-eligible property
-  // like `stroke` can land per-path by referencing a per-row field, but `stroke-dasharray` has no
-  // channel path at all and is always hoisted). Copy both back down onto each overlay line's own
-  // <path> — scoped to `tbl-overlay-line` only, so no existing (non-overlay) mark is touched and no
-  // spec without `overlays` can be affected.
-  if (spec.overlays?.length) {
-    svg.querySelectorAll(`g.${OVERLAY_LINE_CLASS}`).forEach((g) => {
-      const stroke = g.getAttribute("stroke");
-      const dash = g.getAttribute("stroke-dasharray");
-      g.querySelectorAll("path").forEach((p) => {
-        if (stroke) p.setAttribute("stroke", stroke);
-        if (dash) p.setAttribute("stroke-dasharray", dash);
-      });
-    });
-  }
 
   return {
     svg,
