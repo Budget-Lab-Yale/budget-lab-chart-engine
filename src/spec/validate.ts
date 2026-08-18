@@ -259,6 +259,7 @@ function colorErrors(spec: ChartSpec): string[] {
   checkColors("annotations.points", ann?.points);
   checkColors("shading", spec.shading);
   checkColors("rug.tracks", spec.rug?.tracks);
+  checkColors("overlays", spec.overlays);
 
   for (const [key, selector] of Object.entries(spec.title_selectors ?? {})) {
     (selector.options ?? []).forEach((o, i) =>

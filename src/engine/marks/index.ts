@@ -52,6 +52,11 @@ export interface PreparedRow {
    *  truthy (`1`/`true`/`yes`, case-insensitive, trimmed). Absent when the field isn't
    *  configured. Drives the line dashed-run split (marks/projected.ts) and the area fade veil. */
   _projected?: boolean;
+  /** Values of any columns named by `overlays[].column`, keyed by column name. Populated only when
+   *  the spec declares such an overlay — the data loader maps a fixed set of ROLES onto canonical
+   *  fields, and an overlay column is author-named, so it cannot have one. Absent ⇒ no `column`
+   *  overlay on this chart, and the row is byte-identical to before. */
+  _overlayCols?: Record<string, number>;
 }
 
 export interface MarkContext {

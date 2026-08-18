@@ -116,6 +116,10 @@ const COLOR_FIELDS: Array<[field: string, spec: Record<string, unknown>]> = [
   ["waterfall.connectorColor", { ...BAR, chartType: "waterfall", waterfall: { connectorColor: "blu" } }],
   ["connector.color", { ...BAR, chartType: "dumbbell", connector: { color: "blu" } }],
   ["barStack.mono.base", { ...BAR, chartType: "stacked", barStack: { mono: { base: "blu" } } }],
+  [
+    "overlays",
+    { ...BAR, chartType: "line", xAxisType: "numeric", overlays: [{ slope: 1, intercept: 0, color: "blu" }] },
+  ],
 ];
 
 describe("every color-valued field is checked", () => {

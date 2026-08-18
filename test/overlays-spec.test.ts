@@ -212,6 +212,15 @@ describe("overlays — histograms take `fun` only", () => {
   });
 });
 
+describe("overlays — color checking", () => {
+  it("rejects an unresolvable overlay color, naming the entry", () => {
+    const r = check([{ slope: 1, intercept: 0, color: "blu" }]);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toContain("overlays[0]");
+    expect(r.errors.join("\n")).toContain('"blu"');
+  });
+});
+
 describe("overlays — data checks", () => {
   const rows: TidyRow[] = [
     { time: "1", value: "1", series: "A", yhat: "1.1" },
