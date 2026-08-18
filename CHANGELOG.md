@@ -6,22 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [1.12.0] - 2026-08-18
 
-### Added
+### Added — a stacked-bar hover/net-callout split, and overlay lines on scatter and line charts
 - `barStack.hover` (`tooltip` | `pills`) selects a stacked chart's hover treatment independently of
   `barStack.netDisplay`. A chart can now have the floating tooltip with no net dot and no "Total"
   legend entry, from the spec alone — so the PNG export matches the screen, which a CSS override could
   not achieve. It also pins the treatment against `netDisplay: auto`'s data-dependent flip.
 - `barStack.totalPosition` (`first` | `last`, default `last`) orders the tooltip's Total row.
+- `overlays` — lines drawn over the data marks on any numeric- or temporal-x chart. Four kinds, one per
+  entry: `method` (`lm` / `poly`, a bivariate least-squares fit of the plotted data, optionally with a
+  `ci` ribbon), `fun` (an equation in x with named `params`), `slope`+`intercept` (a stated line), and
+  `column` (a fit computed upstream). `by: series` (default) fits per colour series; `by: none` pools.
+  `domain: axis` spans the frame. Keyed in-frame with `label` or in the legend with `legend: true`.
+
+  Three conventions worth knowing. **`style` defaults by kind** — `method` and `column` solid, `fun` and
+  `slope`+`intercept` dashed — because a line computed from the data and one asserted over it are
+  different claims. **`fun`'s grammar follows R**: `^` is right-associative and binds tighter than unary
+  minus, so `-2^2` is `-4`; expressions are parsed and name-checked at validation time, so a typo fails
+  the build. And **only `column` affects the value axis** — it is real per-row data, like
+  `confidence_bands`' bounds; the constructed kinds are clipped at the frame instead.
+
+  On a **histogram**, `fun` and `slope`+`intercept` only — histogram rows carry bin edges rather than a
+  per-row x, so `method` and `column` are validation errors there rather than lines that silently fail
+  to draw. `fun: "dnorm(…)"` over `histogram.normalize: density` is the density-curve case.
+
+  Not implemented: `loess`/`lowess` (precompute one and use `column`), and multi-predictor fits (the
+  engine is bivariate by design — bring coefficients in through `fun` + `params`).
 
 ### Changed
 - `barStack.netDisplay` now chooses the net callout only. Defaults are unchanged: a spec that does not
   set `barStack.hover` renders exactly as before.
 
-### Internal
+### Changed — internal
 - `MarkLayers.showTotalDot` (a tri-state boolean read for four different purposes) is replaced by
   `MarkLayers.netMode`; the tooltip's Total row, the hover treatment and the highlight pills' net-dot
-  flag are now derived from it at their read sites (`src/spec/bar-stack.ts`). Consumers reading
-  `showTotalDot` off a `renderChart` / `renderFigure` result should read `netMode` instead.
+  flag are now derived from it by resolver functions in `src/spec/bar-stack.ts`, read at their call
+  sites in `src/engine/render-live.ts`, `src/engine/crosshair.ts` and `src/engine/marks/stacked.ts`.
+  Consumers reading `showTotalDot` off a `renderChart` / `renderFigure` result should read `netMode`
+  instead.
 
 ## [1.11.0] - 2026-08-17
 

@@ -36,6 +36,7 @@ Axis constraints: `scatter` requires `xAxisType: numeric`; `dotplot` requires
 `xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
 histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
 `xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`).
+[`overlays`](#overlay-lines) additionally requires a non-categorical x-axis, on any chart type.
 
 ### Column mapping
 
@@ -400,6 +401,117 @@ shading:
     to: "2035"
     color: gray
     fillOpacity: 0.10
+```
+
+### Overlay lines
+
+`overlays` draws lines over the data marks. Each entry declares **exactly one** of four kinds —
+`method` (a least-squares fit of the plotted data), `fun` (an equation in x), `slope`+`intercept` (a
+stated line), or `column` (a value already in the data) — plus shared styling and keying. Entries paint
+in list order.
+
+**Numeric and temporal x only.** A categorical band scale has no position between categories, so
+`overlays` is a validation error there — the same restriction the [x-axis rug](#x-axis-rug) has. On a
+temporal axis, `fun`, `slope`+`intercept` and an explicit numeric `domain` are also rejected: x would be
+epoch milliseconds and the coefficients would not mean anything. Use `method` or `column` there.
+
+**On a histogram, `fun` and `slope`+`intercept` only.** `method` and `column` are validation errors
+there: histogram rows carry bin edges rather than a per-row x, so there is nothing to fit and no column
+to read. `fun` is the path for a density curve — see the `dnorm` note below.
+
+For a **horizontal or vertical rule**, use `annotations.yAxis` / `annotations.xAxis` — not `slope: 0`.
+
+| field | type | notes |
+|---|---|---|
+| `overlays[].method` | enum | `lm` (a straight fit — Stata `lfit`, R `geom_smooth(method = "lm")`) \| `poly` (a polynomial — Stata `qfit` at degree 2). **Bivariate:** y is fitted against the plotted x and nothing else. A multi-predictor model belongs upstream; bring its coefficients in through `fun` + `params`, or its fitted values through `column`. `loess`/`lowess` is not implemented — precompute one and use `column`. Not supported on `chartType: histogram`. |
+| `overlays[].degree` | integer | `method: poly` only. 2–5, default 2. |
+| `overlays[].fun` | string | An expression in `x`, sampled over `domain` — Stata `twoway function`, R `geom_function`. See the grammar below. |
+| `overlays[].params` | object | `fun` only. `{ name: number }` constants substituted into the expression — the readable way to carry coefficients computed elsewhere instead of inlining floats. R's `stat_function(args = )`. |
+| `overlays[].n` | integer | `fun` only. Sample count across `domain`. 2–2000, default 100. |
+| `overlays[].slope` / `.intercept` | number | A line stated rather than fitted (R `geom_abline`). **Both required together.** |
+| `overlays[].column` | string | A data column holding a precomputed value per row, drawn as a line. **This is the one kind that affects the value axis** — see the note below. A blank cell is treated as absent, not as zero, so a sparse column breaks its line rather than diving to the baseline. Not supported on `chartType: histogram`. |
+| `overlays[].by` | enum | `method`/`column` only. `series` (default) fits one line per colour series; `none` pools every in-scope point into one. |
+| `overlays[].ci` | number | `method` only. Confidence level in (0, 1) (e.g. `0.95`) for a tinted ribbon around the fit — the interval on the **fitted mean** (R's `interval = "confidence"`, Stata's `lfitci`), not a prediction interval. Omitted ⇒ no ribbon. A fit with no residual degrees of freedom (n ≤ degree + 1) draws its line and no band. The ribbon paints **behind** the data marks at the same opacity as `confidence_bands`, so a dense scatter stays readable through it. |
+| `overlays[].domain` | `axis` \| `[min, max]` | The x extent the line is drawn over. **`axis`** spans the resolved x-domain — say this rather than hardcoding bounds, which silently stop spanning the frame when the data move. **`[min, max]`** states it explicitly (numeric x only, min < max). Omitted ⇒ the fitted group's data extent for `method`/`column` (matching Stata `lfit`'s own default, which stops at the data), the resolved x-domain for `fun` and `slope`+`intercept`. **An overlay never widens the x axis** — that is `xAxisPolicy`'s job, exactly as with `shading` — so a line beyond the frame is clipped. |
+| `overlays[].label` | string | What the line means. Drawn in-frame anchored at a point **on** the line, unless `legend: true` moves it to a legend row. |
+| `overlays[].legend` | boolean | Key this line in the legend instead of labelling it in-frame — see [Keying annotations in the legend](#keying-annotations-in-the-legend-legend-true). Needs a `label`. A **per-series** fit gets ONE neutral row for the concept, not one per series: the colours are already keyed by the series legend, and one row cannot key both. On a chart with `legend: false` there is nowhere to move the label to, so it stays in-frame. |
+| `overlays[].color` | color | Named token or `"#hex"`. Omitted ⇒ the series' colour for a per-series `method`/`column`, else the dim annotation neutral. |
+| `overlays[].style` | enum | `dashed` \| `solid`. **The default depends on the kind:** `method` and `column` draw **solid**, `fun` and `slope`+`intercept` draw **dashed**. A line computed *from* these data and one asserted *over* them are different claims, and the dash is what says which. |
+| `overlays[].strokeWidth` | number | Default 1.5. |
+| `overlays[].labelSide` | enum | Which side of the line the label sits: `top` (default) \| `middle` \| `bottom`. |
+| `overlays[].labelPosition` | enum | Where along the line it anchors: `left` (first point) \| `middle` \| `right` (last point, default). An overlay is sloped, so this picks a point **on** the line rather than a frame edge. |
+| `overlays[].labelDx` / `.labelDy` | number | px nudges — **`+labelDx` = right, `+labelDy` = up**, as everywhere in `annotations`. |
+| `overlays[].facet` | string | Small multiples: scope this overlay to the pane whose facet value matches. |
+
+**The value axis, and why `column` is different.** A `column` overlay's values **are** folded into the
+value-axis extent, the same way `confidence_bands`' `lower`/`upper` columns and `annotations.yAxis`
+values are: it is real per-row data the author supplied, and silently dropping it off-frame would be a
+worse failure than a slightly taller axis. The other three kinds are **constructed** lines whose extent
+is unbounded by design — `domain: axis` extrapolates as far as the frame goes — so they never widen the
+axis and are clipped at the frame instead. If you want a fit's full range visible, set
+`yAxisPolicy.min`/`.max`.
+
+**The `fun` grammar.** Arithmetic — `+ - * / ^`, parentheses, unary minus — over `x`, the constants
+`pi` and `e`, and any `params` key. **Precedence follows R:** `^` is right-associative and binds tighter
+than unary minus, so `-2^2` is `-4` and `2^3^2` is `512`.
+
+Functions, R spelling canonical with the Stata spelling accepted where the two differ: `log` (natural;
+`log(x, base)` for another base), `ln`, `log10`, `log2`, `exp`, `sqrt`, `abs`, `sin`, `cos`, `tan`,
+`floor`, `ceiling`, `ceil`, `round`, `min`, `max`, `dnorm`, `normalden`. Anything else is a validation
+error, as is a variable that is neither `x`, a constant, nor a declared `params` key — so a typo fails
+the build rather than drawing nothing in the browser.
+
+A sample point that evaluates to `NaN` or `±Inf` **breaks** the line there instead of erroring, so
+`fun: "log(x)"` over a domain crossing zero draws only the half that exists.
+
+`dnorm` is there so a density curve can go over a histogram — the one overlay kind histograms support,
+along with `slope`+`intercept`. It only reads correctly with `histogram.normalize: density`; against raw
+counts the curve's y-scale is meaningless.
+
+```yaml
+# A normal density over a histogram. `fun` is the only fitting-shaped kind available here.
+chartType: histogram
+xAxisType: numeric
+histogram: { normalize: density }
+overlays:
+  - fun: "dnorm(x, 4.2, 1.6)"
+    label: Normal density
+    legend: true
+```
+
+```yaml
+# A scatter with a fit across the whole frame, plus a line whose coefficients came from a multivariate
+# regression run upstream (the engine fits bivariate only).
+chartType: scatter
+xAxisType: numeric
+overlays:
+  - method: lm
+    by: none
+    domain: axis                    # span the frame, not just the data
+  - fun: "b0 + b1*x"
+    params: { b0: 673.4, b1: -0.0451 }
+    domain: axis
+    label: Fitted line (prelim slope)
+    legend: true                    # the fit above stays unkeyed
+```
+
+```yaml
+# A quadratic with a 95% band, per series.
+overlays:
+  - method: poly
+    degree: 2
+    ci: 0.95
+    label: Quadratic fit
+    legend: true
+```
+
+```yaml
+# A 45-degree reference line, and a fit computed elsewhere brought in as a column.
+overlays:
+  - slope: 1
+    intercept: 0
+    label: "45°"
+  - column: yhat
 ```
 
 ### Line & area options
