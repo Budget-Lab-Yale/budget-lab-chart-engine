@@ -216,7 +216,7 @@ describe("the band tooltip is unchanged by the shared emitter", () => {
   it("keeps the Total row's circle for a diverging stack", () => {
     const html = buildBandTooltipHtml("A", ROWS, {
       isStacked: true,
-      showTotalDot: true,
+      totalRow: "dot",
       icons: ICONS,
     });
     const doc = new DOMParser().parseFromString(html, "text/html");

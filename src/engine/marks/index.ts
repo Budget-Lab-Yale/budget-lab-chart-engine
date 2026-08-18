@@ -2,6 +2,7 @@
 // small-multiples later means writing a builder and registering it here — the rest of
 // the engine (data prep, axes, assemble, render) is chart-type agnostic.
 import type { ChartSpec, ChartType } from "../../spec/types";
+import type { NetMode } from "../../spec/bar-stack";
 import type { BandLabelMode } from "../axes";
 import { buildLineMarks } from "./line";
 import { buildAreaMarks } from "./area";
@@ -231,15 +232,11 @@ export interface MarkLayers {
    *  made on the segment's share of the data (see the threshold note in applySegmentGap). Set in
    *  the same literal as `segmentGap`. */
   segmentLabelSelector?: string;
-  /** Controls how the band-crosshair tooltip renders the Total row for stacked charts.
-   *  - true  (netMode==="dot"):  show Total with a circle (is-dot) swatch — the net-dot
-   *    marker exists on the chart and matches this styling.
-   *  - false (netMode==="text"): show Total as plain text with no swatch — the cumulative
-   *    stack shows a text-above callout, not a dot.
-   *  - undefined (netMode==="none"): omit the Total row entirely — netDisplay:"none" or
-   *    normalized stacks suppress all net markers, so no Total should appear.
-   *  Non-stacked mark layers leave this undefined. */
-  showTotalDot?: boolean;
+  /** Stacked bars: the net (sum) callout actually painted — see spec/bar-stack.ts. The single field
+   *  the hover path needs; the tooltip's Total row, the hover treatment and the pills' net-dot flag
+   *  are all DERIVED from this plus the spec, at the sites that read them, rather than forwarded
+   *  alongside it. Absent ⇒ not a stacked chart. */
+  netMode?: NetMode;
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;

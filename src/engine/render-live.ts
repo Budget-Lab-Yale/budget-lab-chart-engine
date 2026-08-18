@@ -5,6 +5,8 @@
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
 import type { ChartSpec, TitleSelector, ValueAffixes } from "../spec/types.js";
+import type { NetMode } from "../spec/bar-stack.js";
+import { resolveHoverMode, resolveTotalRow, hasNetDots } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
 import {
   parseTitleTokens,
@@ -834,7 +836,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     }
     const {
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
-      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, showTotalDot,
+      xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, netMode,
       shapeLegendItems, colorLegendTitle, shapeLegendTitle,
     } = built;
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
@@ -1067,12 +1069,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // NOT the per-segment value pills — the net is what matters and pills can't show it. Every
       // other bar/stacked chart keeps the coordinated-cursor pills (task 17). Legend-highlight
       // pills stay in BOTH modes (a legend gesture, independent of band hover).
-      const useTooltip = showTotalDot === true;
+      // Derived here rather than forwarded: see spec/bar-stack.ts on why only `netMode` crosses the
+      // MarkLayers → FigurePane chain. `netMode` is passed UN-DEFAULTED — undefined means "not a
+      // stacked chart", and this site also serves plain bar charts.
+      const hoverMode = resolveHoverMode(spec, netMode);
+      const useTooltip = hoverMode === "tooltip";
+      const totalRow = resolveTotalRow(spec, netMode, hoverMode);
       let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
       attachBandCrosshair(svg, {
         rows: bandRows,
         isStacked,
-        showTotalDot,
+        totalRow,
         isFaceted,
         categories: orderedCats,
         seriesLabels,
@@ -1101,7 +1108,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: bandYFormat,
         horizontal: horizontalBar,
-        showTotalDot,
+        hasNetDots: hasNetDots(netMode),
       });
       if (!useTooltip) {
         secondaryDriver = attachSecondaryBandCursor(svg, {
@@ -1647,7 +1654,7 @@ export function buildFigureHeader(
  *   - continuous (line): `attachCrosshair` + the fat line hit-paths (thin strokes are hard to
  *     hit), and `resolveSeriesAtPoint` for clicks.
  *   - categorical (bar/stacked panes): `attachBandCrosshair` (mirrors mountChart's categorical
- *     branch — `isStacked`/`isFaceted`/`showTotalDot`/`categories`/`orientation`); bar rects
+ *     branch — `isStacked`/`isFaceted`/`netMode`/`categories`/`orientation`); bar rects
  *     carry `data-series`, so clicks resolve directly with no fat hit-paths.
  *  Both modes support all chart types, so the band branch is reached for any categorical pane.
  *  When `ctx.onResolve` is set (coordinated cursor), the primary crosshair emits its resolved
@@ -1665,7 +1672,7 @@ function wireFigureSvg(
     valueAffixes: ValueAffixes;
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
-    showTotalDot?: boolean;
+    netMode?: NetMode;
     /** Series → its resolved icon, from the figure's legend rows. */
     icons?: Map<string, IconSpec>;
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
@@ -1855,13 +1862,15 @@ function wireFigureSvg(
     // Total-dot stacks hover with the tooltip (dot-swatch Total row), never per-segment pills —
     // matching the standalone rule. Coordination is dropped for these panes (they tooltip
     // independently), so pills never appear anywhere in a total-dot figure.
-    const useTooltip = ctx.showTotalDot === true;
+    const hoverMode = resolveHoverMode(ctx.spec, ctx.netMode);
+    const useTooltip = hoverMode === "tooltip";
+    const totalRow = resolveTotalRow(ctx.spec, ctx.netMode, hoverMode);
     const coord = useCoord && !useTooltip;
     attachBandCrosshair(svg, {
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
-      showTotalDot: ctx.showTotalDot,
+      totalRow,
       isFaceted,
       categories: cats,
       seriesLabels: ctx.seriesLabels,
@@ -1891,7 +1900,7 @@ function wireFigureSvg(
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         horizontal,
-        showTotalDot: ctx.showTotalDot,
+        hasNetDots: hasNetDots(ctx.netMode),
       }),
     );
     if (coord) {
@@ -2266,7 +2275,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         valueAffixes: pane.valueAffixes ?? fig.valueAffixes,
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
-        showTotalDot: pane.showTotalDot,
+        netMode: pane.netMode,
         // One shared key for the whole figure, so every pane's tooltip agrees with it. The
         // fallback is per-PANE: per-pane mode resolves each pane's colours independently, and a
         // single-series figure has no legend rows to read at all.

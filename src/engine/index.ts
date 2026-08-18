@@ -6,6 +6,7 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
@@ -206,9 +207,8 @@ export interface RenderResult {
   /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
    *  (stacked charts only). render-live uses it to order the vertical legend column. */
   legendVisualOrder?: string[];
-  /** Net-dot mode for the band crosshair's Total row (stacked charts only).
-   *  Mirrors MarkLayers.showTotalDot — see that field for the tri-state semantics. */
-  showTotalDot?: boolean;
+  /** Stacked charts only. Mirrors MarkLayers.netMode — see spec/bar-stack.ts. */
+  netMode?: NetMode;
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -256,7 +256,7 @@ export interface PaneResult {
   formatValue: (v: number) => string;
   dataInScope: PreparedRow[];
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
-   *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
+   *  seriesColors / legendExtras / legendVisualOrder / netMode off this. */
   layers: MarkLayers;
   /** Series → the `series_patterns` texture this pane's marks were ACTUALLY PAINTED. The ONLY
    *  source a key may take a hatch from — see `AssembleResult.seriesHatches` for why re-deriving
@@ -1066,7 +1066,7 @@ export function renderChart(
     tooltipXParse: pane.tooltipXParse,
     tooltipXFormat: pane.tooltipXFormat,
     legendVisualOrder: layers.legendVisualOrder,
-    showTotalDot: layers.showTotalDot,
+    netMode: layers.netMode,
   };
 }
 

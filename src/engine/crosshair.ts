@@ -15,6 +15,7 @@ import { paintedFill } from "./painted-fill";
 import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
+import type { TotalRow } from "../spec/bar-stack";
 
 type Row = Record<string, unknown>;
 
@@ -679,11 +680,11 @@ export interface BandCrosshairOptions {
   rows: Array<{ _xc?: string; series: string; _y: number | null }>;
   /** True for stacked charts — enables the Total row logic in the tooltip. */
   isStacked?: boolean;
-  /** Controls the Total row style for stacked charts (mirrors MarkLayers.showTotalDot).
-   *  - true:      diverging/net-dot stack — Total row uses a circle (is-dot) swatch.
-   *  - false:     cumulative stack — Total row shows as plain text with no swatch.
-   *  - undefined: netDisplay:"none" or normalized — Total row is omitted entirely. */
-  showTotalDot?: boolean;
+  /** The tooltip's Total row style for stacked charts — see spec/bar-stack.ts's `TotalRow`.
+   *  - "dot":  diverging/net-dot stack — Total row uses a circle (is-dot) swatch.
+   *  - "text": cumulative stack — Total row shows as plain text with no swatch.
+   *  - "none" (or omitted): netDisplay:"none" or normalized — Total row is omitted entirely. */
+  totalRow?: TotalRow;
   /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
   isFaceted?: boolean;
   /** Ordered list of categories (declaration order → facet index order for fx layout). */
@@ -825,17 +826,17 @@ export function resolveCategoryFromBandsH(
  * present for `category`, ordered by `seriesOrder`, plus an optional Total row
  * for stacked charts. PURE — no DOM access.
  *
- * The Total row rendering depends on `showTotalDot`:
- *   - true:      dot-swatch circle (is-dot) — diverging stack with a net-dot marker.
- *   - false:     plain text label only (no swatch) — cumulative stack with text callout.
- *   - undefined: Total row is omitted — netDisplay:"none" / normalized stack.
+ * The Total row rendering depends on `totalRow` (spec/bar-stack.ts's `TotalRow`):
+ *   - "dot":  dot-swatch circle (is-dot) — diverging stack with a net-dot marker.
+ *   - "text": plain text label only (no swatch) — cumulative stack with text callout.
+ *   - "none" (or omitted): Total row is omitted — netDisplay:"none" / normalized stack.
  */
 export function buildBandTooltipHtml(
   category: string,
   rows: Array<{ _xc?: string; series: string; _y: number | null }>,
   opts: {
     isStacked?: boolean;
-    showTotalDot?: boolean;
+    totalRow?: TotalRow;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
@@ -848,7 +849,7 @@ export function buildBandTooltipHtml(
     icons?: Map<string, IconSpec>;
   },
 ): string {
-  const { isStacked, showTotalDot, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
+  const { isStacked, totalRow, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
   // Collect values for this category, keyed by series.
@@ -873,19 +874,15 @@ export function buildBandTooltipHtml(
     html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
-  // Total row: only for stacked charts with 2+ series, and only when showTotalDot is not
-  // undefined (undefined = netDisplay:"none"/normalized — no net marker, no Total row).
-  if (isStacked && orderedSeries.length > 1 && showTotalDot !== undefined) {
-    if (showTotalDot) {
-      // Diverging stack: the Total row keys the net-dot marker, so it draws the SAME icon the
-      // legend's "Total" row draws — a colourless `dot`, which icon.ts resolves to the white disc
-      // with the black ring that marks/stacked.ts paints. It was a bare `is-dot` class over CSS that
-      // no longer exists, which is to say an empty box.
+  // Total row: stacked charts with 2+ series, when the caller asked for one.
+  if (isStacked && orderedSeries.length > 1 && totalRow && totalRow !== "none") {
+    if (totalRow === "dot") {
+      // Keys the net-dot marker, so it draws the SAME icon the legend's "Total" row draws — a
+      // colourless `dot`, which icon.ts resolves to the white disc with the black ring.
       const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
       html += `<div class="tbl-tooltip-row tbl-tooltip-row--total">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
-      // Cumulative stack: net callout is a text-above marker, not a dot — no swatch in
-      // the tooltip either. Show Total as a plain label + value row.
+      // No dot on the chart, so no swatch here either — a plain label + value row.
       html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     }
   }
@@ -1285,7 +1282,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
-      showTotalDot: opts.showTotalDot,
+      totalRow: opts.totalRow,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
@@ -3085,10 +3082,11 @@ export interface HighlightPillsOptions {
   dodge?: Map<string, number>;
   /** Horizontal bars (categories on Y): pills sit beside the bar tip / at the segment center. */
   horizontal?: boolean;
-  /** Diverging / net-dot stack: when true, selecting the Total pseudo-series (TOTAL_SERIES_KEY)
-   *  draws a black net-value pill at each category's net dot (below the dot, flipping above when
-   *  space is tight). Absent/false → the Total selection draws nothing (it has no rect). */
-  showTotalDot?: boolean;
+  /** Whether net-dot markers exist in the DOM (spec/bar-stack.ts's `hasNetDots`). When true,
+   *  selecting the Total pseudo-series (TOTAL_SERIES_KEY) draws a black net-value pill at each
+   *  category's net dot (below the dot, flipping above when space is tight). Absent/false → the
+   *  Total selection draws nothing (it has no rect to pin to). */
+  hasNetDots?: boolean;
 }
 
 export interface HighlightPillsHandle {
@@ -3267,7 +3265,7 @@ export function attachHighlightPills(
     // draw a black net-value pill at each category's net dot. Vertical: centered under the dot,
     // flipping above when it would fall out of the plot; horizontal: just past the dot on the side
     // with room. Additive — composes with any segment series also selected.
-    if (opts.showTotalDot && active.has(TOTAL_SERIES_KEY)) {
+    if (opts.hasNetDots && active.has(TOTAL_SERIES_KEY)) {
       const dots = readNetDotMarkers(svgEl);
       if (dots.length) {
         const loY = mt + COORD_PILL_H / 2;

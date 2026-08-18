@@ -27,6 +27,7 @@ import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import type { ChartSpec } from "../../spec/types";
+import { resolveNetMode } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
 
@@ -159,18 +160,7 @@ export function buildStackedMarks(
         }
       : {};
 
-  const netDisplayCfg = spec.barStack?.netDisplay ?? "auto";
-  const netMode: "dot" | "text" | "none" = normalize
-    ? "none"
-    : netDisplayCfg === "none"
-      ? "none"
-      : netDisplayCfg === "dot"
-        ? "dot"
-        : netDisplayCfg === "text"
-          ? "text"
-          : hasNegatives
-            ? "dot"
-            : "text";
+  const netMode = resolveNetMode(spec, hasNegatives);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data
@@ -390,12 +380,6 @@ export function buildStackedMarks(
         ]
       : [];
 
-  // showTotalDot: true = diverging (dot marker exists on chart → circle swatch in tooltip);
-  // false = cumulative (text callout only → plain text Total in tooltip, no swatch);
-  // undefined = netMode "none" or normalized (no net marker at all → omit Total row).
-  const showTotalDot: boolean | undefined =
-    netMode === "dot" ? true : netMode === "text" ? false : undefined;
-
   if (horizontal) {
     // Responsive left gutter so the longest category label is not clipped (see bar.ts); sized to
     // the (now larger, faceted-matching) catFont so the wider glyphs still fit. Faceted small
@@ -420,7 +404,7 @@ export function buildStackedMarks(
       marginLeft: gutter,
       seriesColors,
       legendVisualOrder,
-      showTotalDot,
+      netMode,
       ...segmentGapLayer,
       ...(legendExtras ? { legendExtras } : {}),
     };
@@ -442,7 +426,7 @@ export function buildStackedMarks(
     xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
     seriesColors,
     legendVisualOrder,
-    showTotalDot,
+    netMode,
     ...segmentGapLayer,
     ...(legendExtras ? { legendExtras } : {}),
   };

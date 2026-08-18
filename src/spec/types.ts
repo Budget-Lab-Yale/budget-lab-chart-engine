@@ -576,6 +576,16 @@ export interface ChartSpec {
      *  added at the bar's outer ends — the baseline and the total do not move — and the net marker
      *  stays at the true net. */
     segmentGap?: number;
+    /** Which hover treatment a stacked chart gets, INDEPENDENT of the net callout.
+     *  - "tooltip": the floating card, with a Total row.
+     *  - "pills":   per-segment value pills on the hovered band (the coordinated cursor).
+     *  Absent ⇒ the historical coupling: "tooltip" when `netDisplay` resolves to a dot, else "pills".
+     *  Two reasons to set it. A tooltip with NO dot: `netDisplay: none` + `hover: tooltip` gives the
+     *  card a plain-text Total row, draws no marker and no "Total" legend entry, and — coming from
+     *  the spec rather than a stylesheet — the PNG export agrees. And DETERMINISM: `netDisplay: auto`
+     *  resolves to a dot only when some value is negative, so a series that dips below zero at some
+     *  dial settings silently flipped the reader between a tooltip and value pills (issue #29). */
+    hover?: "tooltip" | "pills";
   };
   /** Waterfall-chart display options. A waterfall is a vertical, single-series categorical chart
    *  whose bars float on a running cumulative (see `columns.kind`). Ignored by other chart types. */

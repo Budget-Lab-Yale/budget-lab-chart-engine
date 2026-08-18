@@ -9,6 +9,7 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "./parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
@@ -293,9 +294,8 @@ export interface FigurePane {
   /** This pane's x-value parse/format for the crosshair. */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
-  /** Stacked panes: net-dot mode for the band crosshair's Total row. Mirrors
-   *  MarkLayers.showTotalDot — line/bar panes leave this undefined. */
-  showTotalDot?: boolean;
+  /** Stacked panes: mirrors MarkLayers.netMode — line/bar panes leave this undefined. */
+  netMode?: NetMode;
   /** Stacked panes: visual top→bottom stack order, for the band crosshair's
    *  Total/series ordering. Line/bar panes leave this undefined. */
   legendVisualOrder?: string[];
@@ -339,9 +339,8 @@ export interface FigureRenderResult {
   /** Visual top-to-bottom stack order of the interactive series (stacked panes only; line
    *  panes leave this undefined). Mirrors RenderResult.legendVisualOrder. */
   legendVisualOrder?: string[];
-  /** Net-dot mode for the band crosshair's Total row (stacked panes only; line panes leave
-   *  this undefined). Mirrors RenderResult.showTotalDot. */
-  showTotalDot?: boolean;
+  /** Stacked panes only; line panes leave this undefined. Mirrors RenderResult.netMode. */
+  netMode?: NetMode;
 }
 
 /**
@@ -709,7 +708,7 @@ export function renderFigure(
         valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
         tooltipXParse: p.tooltipXParse,
         tooltipXFormat: p.tooltipXFormat,
-        showTotalDot: p.layers.showTotalDot,
+        netMode: p.layers.netMode,
         legendVisualOrder: p.layers.legendVisualOrder,
         seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
       };
@@ -752,7 +751,7 @@ export function renderFigure(
       tooltipXParse: first?.tooltipXParse,
       tooltipXFormat: first?.tooltipXFormat,
       legendVisualOrder: firstLayers?.legendVisualOrder,
-      showTotalDot: firstLayers?.showTotalDot,
+      netMode: firstLayers?.netMode,
     };
   }
 
@@ -871,7 +870,7 @@ export function renderFigure(
       valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
       tooltipXParse: p.tooltipXParse,
       tooltipXFormat: p.tooltipXFormat,
-      showTotalDot: p.layers.showTotalDot,
+      netMode: p.layers.netMode,
       legendVisualOrder: p.layers.legendVisualOrder,
       seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
     };
@@ -914,6 +913,6 @@ export function renderFigure(
     tooltipXParse: first?.tooltipXParse,
     tooltipXFormat: first?.tooltipXFormat,
     legendVisualOrder: firstLayers?.legendVisualOrder,
-    showTotalDot: firstLayers?.showTotalDot,
+    netMode: firstLayers?.netMode,
   };
 }

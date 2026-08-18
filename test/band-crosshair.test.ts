@@ -317,15 +317,15 @@ describe("buildBandTooltipHtml", () => {
     expect(html).not.toContain("Total");
   });
 
-  it("adds a Total row for diverging stacked charts (isStacked=true, showTotalDot=true)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
+  it('adds a Total row for diverging stacked charts (isStacked=true, totalRow="dot")', () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, totalRow: "dot", icons: ICONS });
     expect(html).toContain("Total");
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
 
   it("draws the Total row's swatch as a circle for diverging stacks; per-series rows stay squares", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, totalRow: "dot", icons: ICONS });
     const doc = new DOMParser().parseFromString(html, "text/html");
     // The Total row's swatch is a circle matching the net dot / legend. It carried an `is-dot` class
     // over CSS that has since been deleted, so the class name outlived the drawing it stood for.
@@ -342,10 +342,10 @@ describe("buildBandTooltipHtml", () => {
     }
   });
 
-  it("draws no Total swatch for cumulative stacked charts (showTotalDot=false)", () => {
+  it('draws no Total swatch for cumulative stacked charts (totalRow="text")', () => {
     // Cumulative (all-positive) stacks show a text-above net callout, not a dot marker,
     // so the tooltip Total row must match: plain label + value, no circle swatch.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, icons: ICONS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, totalRow: "text", icons: ICONS });
     expect(html).toContain("Total");
     const doc = new DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelectorAll("circle")).toHaveLength(0);
@@ -353,7 +353,7 @@ describe("buildBandTooltipHtml", () => {
     expect(html).toContain("15");
   });
 
-  it("omits Total row when showTotalDot is undefined (netDisplay:none / normalized)", () => {
+  it("omits Total row when totalRow is omitted (netDisplay:none / normalized)", () => {
     // No net marker on the chart → no Total row in the tooltip.
     const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, icons: ICONS });
     expect(html).not.toContain("Total");
@@ -366,7 +366,7 @@ describe("buildBandTooltipHtml", () => {
     ];
     const html = buildBandTooltipHtml("X", divergingRows, {
       isStacked: true,
-      showTotalDot: true,
+      totalRow: "dot",
       icons: new Map<string, IconSpec>([
         ["Up", { shape: "rect", color: "#0f0" }],
         ["Down", { shape: "rect", color: "#f00" }],
@@ -379,8 +379,8 @@ describe("buildBandTooltipHtml", () => {
 
   it("does NOT add a Total row for a single-series stacked", () => {
     const singleRows: BandRow[] = [{ _xc: "X", series: "Only", _y: 42 }];
-    const html = buildBandTooltipHtml("X", singleRows, { isStacked: true, showTotalDot: true });
-    // Only 1 series → no Total row regardless of showTotalDot
+    const html = buildBandTooltipHtml("X", singleRows, { isStacked: true, totalRow: "dot" });
+    // Only 1 series → no Total row regardless of totalRow
     expect(html).not.toContain("Total");
   });
 
@@ -738,7 +738,7 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
-  // Total-dot rule: a diverging stacked chart (netDisplay dot → showTotalDot) hovers with the
+  // Total-dot rule: a diverging stacked chart (netDisplay dot → netMode "dot") hovers with the
   // floating band tooltip (its dot-swatch Total row), NOT the per-segment value pills.
   const DIVERGING_SPEC: ChartSpec = {
     chartType: "stacked",
@@ -1347,7 +1347,7 @@ describe("attachHighlightPills — Total selection net pill", () => {
     isStacked: true,
     categories: ["A"],
     seriesOrder: ["pos", "neg"],
-    showTotalDot: true,
+    hasNetDots: true,
   };
 
   it("draws a black net-value pill at the dot when Total is selected", () => {
@@ -1373,9 +1373,9 @@ describe("attachHighlightPills — Total selection net pill", () => {
     document.body.removeChild(svg);
   });
 
-  it("draws no Total pill when showTotalDot is not set (regression guard)", () => {
+  it("draws no Total pill when hasNetDots is not set (regression guard)", () => {
     const svg = makeVerticalStackWithNetDot(150);
-    const handle = attachHighlightPills(svg, { ...OPTS, showTotalDot: false });
+    const handle = attachHighlightPills(svg, { ...OPTS, hasNetDots: false });
     handle.setActive(new Set([TOTAL_SERIES_KEY]));
     expect(svg.querySelectorAll("g.tbl-hl-pills text").length).toBe(0);
     document.body.removeChild(svg);

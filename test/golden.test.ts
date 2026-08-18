@@ -2223,8 +2223,8 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
     // Diverging stack → figure legend carries the 4 series (rect swatches) + a Total dot row.
     expect(fig.legendItems?.some((l) => l.series === TOTAL_SERIES_KEY)).toBe(true);
     expect(fig.legendItems?.every((l) => l.markerShape === "rect" || l.series === TOTAL_SERIES_KEY)).toBe(true);
-    // The figure-level showTotalDot reflects the diverging panes.
-    expect(fig.showTotalDot).toBe(true);
+    // The figure-level netMode reflects the diverging panes.
+    expect(fig.netMode).toBe("dot");
 
     await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-stacked-perpane.golden.svg");
   });
@@ -2281,7 +2281,7 @@ describe("golden figure — faceted horizontal stacked (renderFigure)", () => {
       });
     });
 
-    expect(fig.showTotalDot).toBe(true);
+    expect(fig.netMode).toBe("dot");
     await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-hstacked-shared.golden.svg");
   });
 
