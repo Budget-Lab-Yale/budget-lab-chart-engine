@@ -427,6 +427,7 @@ export const CHART_SPEC_SCHEMA = {
         // px. Capped well below any sane bar width — a larger value would consume the bar rather
         // than separate its parts.
         segmentGap: { type: "number", minimum: 0, maximum: 12 },
+        hover: { type: "string", enum: ["tooltip", "pills"] },
       },
     },
     waterfall: {

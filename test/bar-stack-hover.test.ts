@@ -149,3 +149,36 @@ describe("buildStackedMarks — netMode reaches the mark layer", () => {
     expect(l.legendExtras).toBeUndefined();
   });
 });
+
+
+describe("barStack.hover — the decision this work adds", () => {
+  it("gives a dot-free chart the tooltip, with a text Total row and no dots", () => {
+    expect(all({ netDisplay: "none", hover: "tooltip" }, false)).toEqual({
+      netMode: "none",
+      hoverMode: "tooltip",
+      totalRow: "text",
+      netDots: false,
+    });
+  });
+
+  it("gives a dotted chart value pills, keeping the dot and its dot-swatch row", () => {
+    expect(all({ netDisplay: "dot", hover: "pills" }, false)).toEqual({
+      netMode: "dot",
+      hoverMode: "pills",
+      totalRow: "dot",
+      netDots: true,
+    });
+  });
+
+  it("pins the treatment against auto's data-dependent flip", () => {
+    const positive = all({ hover: "tooltip" }, false);
+    const negative = all({ hover: "tooltip" }, true);
+    expect(positive.hoverMode).toBe("tooltip");
+    expect(negative.hoverMode).toBe("tooltip");
+  });
+
+  it("still omits the Total row on a normalized stack asking for the tooltip", () => {
+    // The guard in resolveTotalRow: without it this reads a permanent "Total: 100".
+    expect(all({ normalize: true, netDisplay: "none", hover: "tooltip" }, false).totalRow).toBe("none");
+  });
+});

@@ -33,7 +33,7 @@ import { TOTAL_SERIES_KEY } from "../series-keys";
 
 // Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
 // pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
-const NET_DOT_CLASS = "tbl-net-marker";
+export const NET_DOT_CLASS = "tbl-net-marker";
 
 // Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.
 const NET_DOT_R = 8;
