@@ -4,6 +4,25 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] - 2026-08-18
+
+### Added
+- `barStack.hover` (`tooltip` | `pills`) selects a stacked chart's hover treatment independently of
+  `barStack.netDisplay`. A chart can now have the floating tooltip with no net dot and no "Total"
+  legend entry, from the spec alone — so the PNG export matches the screen, which a CSS override could
+  not achieve. It also pins the treatment against `netDisplay: auto`'s data-dependent flip.
+- `barStack.totalPosition` (`first` | `last`, default `last`) orders the tooltip's Total row.
+
+### Changed
+- `barStack.netDisplay` now chooses the net callout only. Defaults are unchanged: a spec that does not
+  set `barStack.hover` renders exactly as before.
+
+### Internal
+- `MarkLayers.showTotalDot` (a tri-state boolean read for four different purposes) is replaced by
+  `MarkLayers.netMode`; the tooltip's Total row, the hover treatment and the highlight pills' net-dot
+  flag are now derived from it at their read sites (`src/spec/bar-stack.ts`). Consumers reading
+  `showTotalDot` off a `renderChart` / `renderFigure` result should read `netMode` instead.
+
 ## [1.11.0] - 2026-08-17
 
 ### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format

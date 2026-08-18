@@ -436,7 +436,9 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `x_axis_ticks` | enum | **Horizontal bars only** (standalone and faceted). Where the value-axis tick row(s) render: `bottom` (default) \| `top` \| `both`. Requires `orientation: horizontal` — validation rejects it on a vertical chart (there is no top value axis there). |
 | `valueLabels.show` | boolean | **Stacked bars only.** Show per-segment value labels (in-bar value labels for plain/grouped bars were removed). Default off. |
 | `valueLabels.decimals` | integer | Fixed decimal places for the labels that remain (stacked segment + net callouts); else the minimum the data needs, capped at 2. |
-| `barStack.netDisplay` | enum | Net (sum) callout on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. When the net **dot** is shown, hovering a category shows the floating tooltip (with a dot-swatch Total row), not the per-segment value pills. |
+| `barStack.netDisplay` | enum | The net (sum) **callout** on stacked bars: `auto` (default — dot if any value is negative, else text) \| `text` \| `dot` \| `none`. This chooses the marker and nothing else; it no longer decides the hover treatment — see `barStack.hover`. `none` also suppresses the "Total" legend entry. |
+| `barStack.hover` | enum | Which hover treatment the chart gets, independent of the callout: `tooltip` (the floating card, with a Total row) \| `pills` (per-segment value pills on the hovered band). Omitted ⇒ the historical coupling — `tooltip` when `netDisplay` resolves to a dot, else `pills`. Two reasons to set it explicitly. **A tooltip with no dot:** `netDisplay: none` + `hover: tooltip` gives the card its Total row as plain text (there is no dot to key), draws no marker and no "Total" legend row, and — because both come from the spec rather than a stylesheet — the PNG export agrees. **Determinism:** `netDisplay: auto` resolves to a dot only when some value is negative, so a series that dips below zero at some dial settings silently flipped the reader between a tooltip and value pills; naming `hover` pins it. A 100 %-normalized stack never gets a Total row either way — its total is always 100. |
+| `barStack.totalPosition` | enum | Where the tooltip's Total row sits: `last` (default) \| `first`. |
 | `barStack.mono.base` | color | Monochrome stack: render all segments as shades of one base hue (a categorical hue key or alias; see [Colors](#colors)). |
 | `barStack.netLabelColor` | enum | `white` \| `black`. |
 | `barStack.normalize` | boolean | Normalize each bar to 100%. |
@@ -575,9 +577,11 @@ axis, and the category labels form a shared left gutter sized to the longest lab
 leftmost pane only, so the rows line up across panes. Works with single-series, grouped (multi-series),
 and **stacked** bars. Use `shared` mode (the default) so the value axis is comparable across panes.
 On a diverging stack, `barStack.netDisplay: dot` keeps the net dot in each pane (at a reduced radius);
-the net text callout and per-segment value labels are suppressed in panes. With `columns: 1` each
-facet occupies its own row with its own full-width category axis, so facets may carry **different**
-categories (the shared-category requirement — see below — applies only when panes share a row).
+the net text callout and per-segment value labels are suppressed in panes.
+`barStack.hover` applies per pane exactly as it does to a standalone chart, so a faceted stack can
+take the tooltip without the dot. With `columns: 1` each facet occupies its own row with its own
+full-width category axis, so facets may carry **different** categories (the shared-category
+requirement — see below — applies only when panes share a row).
 
 ### Section axis (horizontal bars)
 
