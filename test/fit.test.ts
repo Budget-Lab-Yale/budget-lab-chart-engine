@@ -110,4 +110,59 @@ describe("fitPoly — xtxInv pinned by hand", () => {
     expect(f.xtxInv[1]![0]!).toBeCloseTo(0, 10);
     expect(f.xtxInv[1]![1]!).toBeCloseTo(0.5, 10);
   });
+
+  // x = [2, 6, 7]: xBar = 5, centred u = [-3, 1, 2] — ASYMMETRIC about the mean (Σu³ = -18 ≠ 0),
+  // unlike the two degree-1 cases above (both symmetric, Σu³ = 0 there trivially). This is the
+  // smallest fixture that exercises the u·u² coupling: XᵀX = [[3,0,14],[0,14,-18],[14,-18,98]]
+  // (Σ1=3, Σu=0, Σu²=14, Σu³=-18, Σu⁴=98). By cofactor/adjugate expansion: det = 400, adjugate =
+  // [[1048,-252,-196],[-252,98,54],[-196,54,42]], so (XᵀX)⁻¹ = adjugate/400 — verified by hand by
+  // multiplying it back against XᵀX and confirming the product is the identity.
+  it("matches a hand-computed (cofactor/adjugate) inverse for an asymmetric degree-2 design", () => {
+    const f = fitPoly([[2, 1], [6, 2], [7, 3]], 2)!;
+    expect(f.xBar).toBeCloseTo(5, 10);
+    const expected = [
+      [2.62, -0.63, -0.49],
+      [-0.63, 0.245, 0.135],
+      [-0.49, 0.135, 0.105],
+    ];
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) expect(f.xtxInv[i]![j]!).toBeCloseTo(expected[i]![j]!, 10);
+    }
+  });
+});
+
+describe("fitPoly — pivot-tolerance scale (invert's singularity test)", () => {
+  // Regression: `invert`'s singularity check used to compare a pivot to a scale floored at a fixed
+  // 1, so a well-conditioned design whose real magnitudes are all under 1 (XᵀX here is essentially
+  // diag(3, 2e-16) — the 2e-16 entry is an exact sum of squares, not a cancellation artifact) was
+  // misread as singular. The check now floors at Number.EPSILON, so this must fit.
+  it("accepts a well-conditioned design whose scale is far below 1", () => {
+    const f = fitPoly([[1e-8, 1], [2e-8, 2], [3e-8, 3]], 1);
+    expect(f).not.toBeNull();
+    expect(evalPolyFit(f!, 4e-8)).toBeCloseTo(4, 6);
+    expect(evalPolyFit(f!, 0)).toBeCloseTo(0, 6);
+  });
+
+  // The mirror-image scale (x ~ 1e8) already worked before the fix; pin it so the fix can't trade
+  // the small-scale false positive for a large-scale one.
+  it("still accepts a well-conditioned design at a large x scale", () => {
+    const f = fitPoly([[1e8, 1], [2e8, 2], [3e8, 3]], 1);
+    expect(f).not.toBeNull();
+    expect(evalPolyFit(f!, 4e8)).toBeCloseTo(4, 4);
+  });
+
+  // A repeated x value leaves only 5 distinct x's for a 6-parameter (degree-5) design — genuinely
+  // rank-deficient, not just small-scaled. Pins that the scale fix above cannot be loosened into
+  // accepting real degeneracy.
+  it("still rejects a genuinely rank-deficient design", () => {
+    const pts: Array<[number, number]> = [
+      [2020, 1],
+      [2020, 2],
+      [2020.01, 3],
+      [2020.02, 4],
+      [2020.03, 5],
+      [2020.04, 6],
+    ];
+    expect(fitPoly(pts, 5)).toBeNull();
+  });
 });

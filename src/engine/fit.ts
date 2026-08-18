@@ -34,6 +34,18 @@ export interface PolyFit {
  *  is reported, rather than as silent Infinities in the coefficients. */
 function invert(m: number[][]): number[][] | null {
   const p = m.length;
+  // Per-column reference scale, read from the ORIGINAL matrix once, before any row operation. A
+  // pivot can only be judged against its own column's native magnitude: a column that starts small
+  // (e.g. a Vandermonde entry on a small-scaled design, XᵀX entries ~1e-16) is not evidence of
+  // singularity, and a large column elsewhere in the same matrix must not raise the bar for it — so
+  // this is neither a matrix-wide scale nor a fixed absolute floor. Floored at Number.EPSILON only
+  // so a column that is genuinely all-zero (truly singular from the start) still produces a nonzero
+  // tolerance a zero pivot fails, rather than the vacuous `0 < 0` an unfloored zero scale would give.
+  const colScale = Array.from({ length: p }, (_, j) => {
+    let s = 0;
+    for (let i = 0; i < p; i++) s = Math.max(s, Math.abs(m[i]![j]!));
+    return Math.max(s, Number.EPSILON);
+  });
   // Augment [m | I] and reduce the left half to the identity.
   const a = m.map((row, i) => [...row, ...Array.from({ length: p }, (_, j) => (i === j ? 1 : 0))]);
   for (let col = 0; col < p; col++) {
@@ -42,11 +54,7 @@ function invert(m: number[][]): number[][] | null {
       if (Math.abs(a[r]![col]!) > Math.abs(a[pivot]![col]!)) pivot = r;
     }
     const pv = a[pivot]![col]!;
-    // Scale-aware singularity test: an absolute epsilon would reject a legitimately small-scaled
-    // design and accept a badly-scaled singular one.
-    let scale = 1;
-    for (let j = 0; j < p; j++) scale = Math.max(scale, Math.abs(a[pivot]![j]!));
-    if (!Number.isFinite(pv) || Math.abs(pv) < 1e-12 * scale) return null;
+    if (!Number.isFinite(pv) || Math.abs(pv) < 1e-12 * colScale[col]!) return null;
     [a[col], a[pivot]] = [a[pivot]!, a[col]!];
     const prow = a[col]!;
     for (let j = 0; j < 2 * p; j++) prow[j] = prow[j]! / pv;
