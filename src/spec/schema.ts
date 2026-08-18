@@ -428,6 +428,7 @@ export const CHART_SPEC_SCHEMA = {
         // than separate its parts.
         segmentGap: { type: "number", minimum: 0, maximum: 12 },
         hover: { type: "string", enum: ["tooltip", "pills"] },
+        totalPosition: { type: "string", enum: ["first", "last"] },
       },
     },
     waterfall: {

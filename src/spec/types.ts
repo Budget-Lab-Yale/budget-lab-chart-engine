@@ -586,6 +586,10 @@ export interface ChartSpec {
      *  resolves to a dot only when some value is negative, so a series that dips below zero at some
      *  dial settings silently flipped the reader between a tooltip and value pills (issue #29). */
     hover?: "tooltip" | "pills";
+    /** Where the hover tooltip's Total row sits: "last" (default, after the series rows) or "first".
+     *  A card whose reader looks to the total first can say so in the spec instead of reordering
+     *  `.tbl-tooltip-row--total` in CSS. */
+    totalPosition?: "first" | "last";
   };
   /** Waterfall-chart display options. A waterfall is a vertical, single-series categorical chart
    *  whose bars float on a running cumulative (see `columns.kind`). Ignored by other chart types. */

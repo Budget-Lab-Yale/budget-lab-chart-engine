@@ -685,6 +685,9 @@ export interface BandCrosshairOptions {
    *  - "text": cumulative stack — Total row shows as plain text with no swatch.
    *  - "none" (or omitted): netDisplay:"none" or normalized — Total row is omitted entirely. */
   totalRow?: TotalRow;
+  /** Where the tooltip's Total row sits: "last" (default, after the series rows) or "first". See
+   *  spec/types.ts's `barStack.totalPosition`. */
+  totalPosition?: "first" | "last";
   /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
   isFaceted?: boolean;
   /** Ordered list of categories (declaration order → facet index order for fx layout). */
@@ -837,6 +840,8 @@ export function buildBandTooltipHtml(
   opts: {
     isStacked?: boolean;
     totalRow?: TotalRow;
+    /** Where the Total row sits: "last" (default, after the series rows) or "first". */
+    totalPosition?: "first" | "last";
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
@@ -864,6 +869,7 @@ export function buildBandTooltipHtml(
     : [...valBySeries.keys()];
 
   let html = `<div class="tbl-tooltip-head">${escapeHtml(categoryLabels?.[category] ?? category)}</div>`;
+  let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
     const v = valBySeries.get(series);
@@ -871,21 +877,26 @@ export function buildBandTooltipHtml(
     total += v;
     const display = (seriesLabels && seriesLabels[series]) || series;
     const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+    seriesRows += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
   }
 
-  // Total row: stacked charts with 2+ series, when the caller asked for one.
+  // Built but not yet placed — `totalPosition` decides which side of the series rows it lands on.
+  // The two branches are kept separate rather than parameterised on an empty swatch string, so the
+  // default path emits byte-identical markup to what it emitted before this field existed.
+  let totalRowHtml = "";
   if (isStacked && orderedSeries.length > 1 && totalRow && totalRow !== "none") {
     if (totalRow === "dot") {
       // Keys the net-dot marker, so it draws the SAME icon the legend's "Total" row draws — a
       // colourless `dot`, which icon.ts resolves to the white disc with the black ring.
       const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
-      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="tbl-tooltip-row tbl-tooltip-row--total">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
       // No dot on the chart, so no swatch here either — a plain label + value row.
-      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     }
   }
+
+  html += (opts.totalPosition ?? "last") === "first" ? totalRowHtml + seriesRows : seriesRows + totalRowHtml;
 
   return html;
 }
@@ -1283,6 +1294,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
       totalRow: opts.totalRow,
+      totalPosition: opts.totalPosition,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
