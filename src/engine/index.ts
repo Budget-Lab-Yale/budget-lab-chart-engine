@@ -37,6 +37,8 @@ import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
+import { resolveOverlays, overlayColumnValues } from "./overlays";
+import { buildOverlayMarks, OVERLAY_LINE_CLASS } from "./marks/overlay";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -316,6 +318,13 @@ export function renderPane(
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
 
+  // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
+  // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
+  // byte-identical rows.
+  const overlayCols = Array.from(
+    new Set((spec.overlays ?? []).map((o) => o.column).filter((c): c is string => !!c)),
+  );
+
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
   // series column ⇒ a single implicit series.
@@ -345,6 +354,20 @@ export function renderPane(
           row._lo = lo !== "" && lo != null ? +lo : undefined;
           row._hi = hi !== "" && hi != null ? +hi : undefined;
         }
+      }
+      if (overlayCols.length) {
+        const bag: Record<string, number> = {};
+        for (const c of overlayCols) {
+          const raw = r[c];
+          // Blank and null are ABSENT, not zero. `Number("")` is 0, which would draw a fitted line
+          // diving to the baseline wherever the column is sparse — and, since a `column` overlay folds
+          // into yForAxis, drag the value axis down with it. This is the same guard the
+          // confidence_bands `_lo`/`_hi` prep applies four lines below.
+          if (raw === "" || raw == null) continue;
+          const v = +raw;
+          if (Number.isFinite(v)) bag[c] = v;
+        }
+        if (Object.keys(bag).length) row._overlayCols = bag;
       }
       // Shared-mode small multiples: tag the row with its pane's facet value + grid indices.
       // Rows whose facet value isn't in the ordered pane set are dropped below.
@@ -544,6 +567,11 @@ function assemblePaneResult(
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
     ...ann.yAxis.map((m) => m.y),
     ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+    // A `column` overlay is real per-row data — the same kind of thing as the CI bounds two lines up
+    // — so it folds into the extent rather than being clipped. The CONSTRUCTED kinds (method, fun,
+    // slope+intercept) deliberately do not: `domain: axis` extrapolates as far as the frame goes, and
+    // letting a steep fit dictate the axis is what the clip exists to prevent.
+    ...overlayColumnValues(spec, dataInScope),
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
@@ -783,6 +811,31 @@ function assemblePaneResult(
     ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
     : undefined;
 
+  // Overlay lines — fits, equations, stated slopes, precomputed columns. Built HERE rather than in a
+  // mark builder because they apply to every numeric/temporal-x chart type, and this is the one site
+  // every chart type passes through. Pushing them into `layers` is also what gets them into the PNG:
+  // buildExportSvg re-renders through renderChart (or renderFigure for small multiples), so anything
+  // derived from spec + rows reaches the download with no second code path to keep in step.
+  if (spec.overlays?.length && adapter.xField !== "_xc") {
+    // `domain: "axis"` means the resolved x-scale domain when the adapter supplies one (numeric axes
+    // do), else the data extent — the widest honest answer available.
+    const axisDomain = (xOpts.xPlotOpts?.domain as [number, number] | undefined) ?? xExtent;
+    const resolvedOverlays = resolveOverlays(spec, dataInScope, {
+      xField: adapter.xField as "_xn" | "_xd",
+      colors,
+      seriesNames,
+      legendActive: spec.legend !== false,
+      ...(axisDomain ? { xDomain: axisDomain } : {}),
+    }).filter((o) => o.facet == null || o.facet === opts.paneFacetValue);
+    const om = buildOverlayMarks(resolvedOverlays, {
+      xField: adapter.xField as "_xn" | "_xd",
+      ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
+    });
+    layers.underlay.push(...om.underlay);
+    layers.overlay.push(...om.overlay);
+    layers.tagging.push(...om.tagging);
+  }
+
   const { svg, seriesHatches, seriesPainted } = assemblePlot({
     layers,
     yDomain,
@@ -804,6 +857,23 @@ function assemblePaneResult(
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),
     ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
   });
+
+  // Plot's vendored line mark hoists a CONSTANT stroke/stroke-dasharray onto the mark's own <g>
+  // wrapper rather than each <path> (confirmed against this build: a channel-eligible property
+  // like `stroke` can land per-path by referencing a per-row field, but `stroke-dasharray` has no
+  // channel path at all and is always hoisted). Copy both back down onto each overlay line's own
+  // <path> — scoped to `tbl-overlay-line` only, so no existing (non-overlay) mark is touched and no
+  // spec without `overlays` can be affected.
+  if (spec.overlays?.length) {
+    svg.querySelectorAll(`g.${OVERLAY_LINE_CLASS}`).forEach((g) => {
+      const stroke = g.getAttribute("stroke");
+      const dash = g.getAttribute("stroke-dasharray");
+      g.querySelectorAll("path").forEach((p) => {
+        if (stroke) p.setAttribute("stroke", stroke);
+        if (dash) p.setAttribute("stroke-dasharray", dash);
+      });
+    });
+  }
 
   return {
     svg,
