@@ -828,13 +828,13 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
-  it('barStack.totalPosition "first" puts the Total row first in the live tooltip', () => {
+  it('barStack.total.position "first" puts the Total row first in the live tooltip', () => {
     // Exercises the internal forward at crosshair.ts's attachBandCrosshair call (render-live.ts) all
     // the way into buildBandTooltipHtml's totalPosition branch. Deleting that forward defaults the
     // HTML builder to "last", which is what should turn this test red.
     const spec: ChartSpec = {
       ...DIVERGING_SPEC,
-      barStack: { netDisplay: "dot", totalPosition: "first" },
+      barStack: { netDisplay: "dot", total: { position: "first" } },
     };
     const container = document.createElement("div");
     mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
@@ -843,6 +843,25 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     const rowDivs = Array.from(tip.querySelectorAll(":scope > div"));
     // rowDivs[0] is the head; the Total row must be the very next one, ahead of the series rows.
     expect(rowDivs[1]?.className).toContain("tbl-tooltip-row--total");
+    document.body.removeChild(container);
+  });
+
+  it("barStack.total.bold and .divider reach the live tooltip (spec -> render-live -> crosshair forward)", () => {
+    // The pure-builder tests cannot catch a broken forward at crosshair.ts's attachBandCrosshair
+    // call, or at either render-live.ts call site — only a live spec-to-DOM path can.
+    const spec: ChartSpec = {
+      ...DIVERGING_SPEC,
+      barStack: { netDisplay: "dot", total: { bold: true, divider: true } },
+    };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    hoverFirstBar(container);
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    const totalRow = tip.querySelector(".tbl-tooltip-row--total")!;
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-bold");
+    // Default position ("last"): the divider rule reads ABOVE the row, separating it from the
+    // series rows sitting above it.
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-rule-above");
     document.body.removeChild(container);
   });
 

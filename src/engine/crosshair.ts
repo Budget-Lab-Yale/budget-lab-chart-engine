@@ -686,8 +686,13 @@ export interface BandCrosshairOptions {
    *  - "none" (or omitted): netDisplay:"none" or normalized — Total row is omitted entirely. */
   totalRow?: TotalRow;
   /** Where the tooltip's Total row sits: "last" (default, after the series rows) or "first". See
-   *  spec/types.ts's `barStack.totalPosition`. */
+   *  spec/types.ts's `barStack.total.position`. */
   totalPosition?: "first" | "last";
+  /** Bold the Total row. See spec/types.ts's `barStack.total.bold`. Default false. */
+  totalBold?: boolean;
+  /** Rule separating the Total row from the series rows; side flips with `totalPosition` — see
+   *  `buildBandTooltipHtml`. See spec/types.ts's `barStack.total.divider`. Default false. */
+  totalDivider?: boolean;
   /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
   isFaceted?: boolean;
   /** Ordered list of categories (declaration order → facet index order for fx layout). */
@@ -842,6 +847,14 @@ export function buildBandTooltipHtml(
     totalRow?: TotalRow;
     /** Where the Total row sits: "last" (default, after the series rows) or "first". */
     totalPosition?: "first" | "last";
+    /** Bold the Total row. Default false. */
+    totalBold?: boolean;
+    /** Rule separating the Total row from the series rows; side flips with `totalPosition` —
+     *  "last" (row sits below the series rows) draws the rule ABOVE it (border-top), "first" (row
+     *  sits above them) draws it BELOW (border-bottom). A fixed top-only rule would, in "first"
+     *  position, separate the category header from the Total row instead of the Total row from
+     *  the series rows — the wrong pair. Default false. */
+    totalDivider?: boolean;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
@@ -885,14 +898,27 @@ export function buildBandTooltipHtml(
   // default path emits byte-identical markup to what it emitted before this field existed.
   let totalRowHtml = "";
   if (isStacked && orderedSeries.length > 1 && totalRow && totalRow !== "none") {
+    const position = opts.totalPosition ?? "last";
+    const rowClasses = [
+      "tbl-tooltip-row",
+      "tbl-tooltip-row--total",
+      ...(opts.totalBold ? ["tbl-tooltip-row--total-bold"] : []),
+      ...(opts.totalDivider
+        ? [position === "first" ? "tbl-tooltip-row--total-rule-below" : "tbl-tooltip-row--total-rule-above"]
+        : []),
+    ].join(" ");
     if (totalRow === "dot") {
       // Keys the net-dot marker, so it draws the SAME icon the legend's "Total" row draws — a
       // colourless `dot`, which icon.ts resolves to the white disc with the black ring.
       const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
-      totalRowHtml = `<div class="tbl-tooltip-row tbl-tooltip-row--total">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="${rowClasses}">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
-      // No dot on the chart, so no swatch here either — a plain label + value row.
-      totalRowHtml = `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      // No real swatch (no dot on the chart) — but an EMPTY spacer with the SAME class as a real
+      // swatch, so the label still sits at the swatch+gap indent every series row uses. Before
+      // this the text row emitted no swatch element at all and sat flush left, one swatch-plus-gap
+      // short of every row above it.
+      const spacer = `<span class="tbl-tooltip-swatch" aria-hidden="true"></span>`;
+      totalRowHtml = `<div class="${rowClasses}">${spacer}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     }
   }
 
@@ -1295,6 +1321,8 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       isStacked: opts.isStacked,
       totalRow: opts.totalRow,
       totalPosition: opts.totalPosition,
+      totalBold: opts.totalBold,
+      totalDivider: opts.totalDivider,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,

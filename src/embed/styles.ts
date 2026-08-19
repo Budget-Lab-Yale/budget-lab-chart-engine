@@ -546,6 +546,23 @@ body {
   margin-bottom: 2px;
 }
 .tbl-tooltip-row:last-child { margin-bottom: 0; }
+/* barStack.total.bold: the VALUE is already bold (.tbl-tooltip-value below) — this overrides the
+   LABEL, which .tbl-tooltip-label otherwise pins to --tw-body, so the row reads as bold overall. */
+.tbl-tooltip-row--total-bold .tbl-tooltip-label { font-weight: var(--tw-bold); }
+/* barStack.total.divider: the rule's SIDE flips with total.position, so it always separates the
+   Total row from the series rows rather than from the category header. "last" (default) sits
+   below the series rows, so the rule reads ABOVE it; "first" sits above them, so it reads BELOW.
+   --tbl-gridline matches the divider already used for the stacked-area tooltip's Total row. */
+.tbl-tooltip-row--total-rule-above {
+  border-top: 1px solid var(--tbl-gridline);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.tbl-tooltip-row--total-rule-below {
+  border-bottom: 1px solid var(--tbl-gridline);
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+}
 .tbl-tooltip-swatch {
   /* The SAME box as the legend's, for the same reason: a tooltip key and its legend key are one
      drawing at one size. Before this a plain square was 11px beside a hatched one at 14px. Both

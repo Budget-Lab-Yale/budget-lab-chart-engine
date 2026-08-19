@@ -11,7 +11,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `barStack.netDisplay`. A chart can now have the floating tooltip with no net dot and no "Total"
   legend entry, from the spec alone — so the PNG export matches the screen, which a CSS override could
   not achieve. It also pins the treatment against `netDisplay: auto`'s data-dependent flip.
-- `barStack.totalPosition` (`first` | `last`, default `last`) orders the tooltip's Total row.
+- `barStack.total` orders and styles the tooltip's Total row: `position` (`first` | `last`, default
+  `last`), `bold` (default off), and `divider` — a rule separating the Total row from the series
+  rows, whose side flips with `position` so it never lands between the header and the Total row
+  instead. Also fixed: the Total row's plain-text form (no dot) now gets an empty swatch spacer, so
+  its label indents to match every series row's label instead of sitting flush left.
 - `overlays` — lines drawn over the data marks on any numeric- or temporal-x chart. Four kinds, one per
   entry: `method` (`lm` / `poly`, a bivariate least-squares fit of the plotted data, optionally with a
   `ci` ribbon), `fun` (an equation in x with named `params`), `slope`+`intercept` (a stated line), and
