@@ -372,4 +372,49 @@ describe("hooks.tooltip — small multiples (wireFigureSvg forward)", () => {
     const tip = document.body.querySelector<HTMLElement>(".tbl-tooltip")!;
     expect(tip.innerHTML).toBe('<div class="mine">hooked</div>');
   });
+
+  // ctx.facet: FigurePane.value (the pane's facet value) is already in scope at mountFigure's
+  // wireFigureSvg call -- wire it through rather than leaving a DECLARED ctx field permanently
+  // undefined. A single-pane assertion would pass even with the first pane's value hardcoded, so
+  // this hovers TWO different panes and requires two DIFFERENT facet values back.
+  it("ctx.facet reports which pane the hover came from -- a different value per pane, not a hardcoded one", () => {
+    const seenFacets: string[] = [];
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: FACETED_SPEC,
+      rows: FACETED_ROWS,
+      width: 838,
+      height: 420,
+      hooks: { tooltip: (ctx) => { seenFacets.push(ctx.facet ?? "<undefined>"); return null; } },
+    });
+    document.body.appendChild(container);
+    const panes = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    expect(panes.length).toBe(2);
+    for (const svg of panes) {
+      const vb = svg.viewBox.baseVal;
+      Object.defineProperty(svg, "getBoundingClientRect", {
+        value: () => ({ width: vb.width, height: vb.height, top: 0, left: 0, right: vb.width, bottom: vb.height, x: 0, y: 0 }),
+        configurable: true,
+      });
+      const rect = svg.querySelector<SVGRectElement>('g[aria-label="bar"] rect')!;
+      const cx = parseFloat(rect.getAttribute("x") ?? "0") + parseFloat(rect.getAttribute("width") ?? "0") / 2;
+      const hit = svg.querySelector(CROSSHAIR_HIT_SELECTOR)!;
+      hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 20, bubbles: true }));
+    }
+    expect(seenFacets).toEqual(["P1", "P2"]);
+  });
+
+  it("ctx.facet is undefined on the standalone (non-faceted) mountChart path", () => {
+    let seenFacet: string | undefined = "unset";
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: STACKED_SPEC,
+      rows: STACKED_ROWS,
+      width: 600,
+      height: 360,
+      hooks: { tooltip: (ctx) => { seenFacet = ctx.facet; return null; } },
+    });
+    hoverFirstBar(container);
+    expect(seenFacet).toBeUndefined();
+  });
 });

@@ -737,6 +737,11 @@ export interface BandCrosshairOptions {
    *  `attachHistogramHover` / `attachPointHover` — those build their card markup elsewhere; see
    *  spec/hooks.ts's module note and CONFIG-SPEC.md for that boundary. */
   tooltipHook?: (ctx: TooltipHookCtx) => string | null;
+  /** This pane facet value (small multiples only; FigurePane.value via wireFigureSvg -- the same
+   *  value paneFacetValue threads into MarkContext for the static hooks, e.g. Task 4 valueLabel).
+   *  Forwarded into TooltipHookCtx.facet. undefined on the standalone mountChart path -- there is
+   *  no facet there. */
+  facet?: string;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -895,6 +900,9 @@ export function buildBandTooltipHtml(
      *  keeps the engine's own `html` built below. Both callers (attachBandCrosshair,
      *  attachCategoricalLineCrosshair) forward their own `tooltipHook` option straight through. */
     tooltipHook?: (ctx: TooltipHookCtx) => string | null;
+    /** This pane facet value, threaded straight into TooltipHookCtx.facet -- see
+     *  BandCrosshairOptions.facet. undefined outside small multiples. */
+    facet?: string;
   },
 ): string {
   const { isStacked, totalRow, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
@@ -974,6 +982,7 @@ export function buildBandTooltipHtml(
       series: orderedSeries,
       values,
       ...(hasTotalRow ? { total } : {}),
+      ...(opts.facet != null ? { facet: opts.facet } : {}),
       rendered: html,
     });
     if (hooked != null) return hooked;
@@ -1385,6 +1394,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       yFormat,
       categoryLabels: opts.categoryLabels,
       tooltipHook: opts.tooltipHook,
+      facet: opts.facet,
       ...(icons ? { icons } : {}),
     });
     tip!.innerHTML = html;
@@ -2892,6 +2902,9 @@ export interface CategoricalLineOptions {
    *  line charts); missing the forward here leaves the hook working on bar charts and silently
    *  not on these. */
   tooltipHook?: (ctx: TooltipHookCtx) => string | null;
+  /** This pane facet value -- see BandCrosshairOptions.facet. undefined on the standalone
+   *  mountChart path. */
+  facet?: string;
 }
 
 /**
@@ -3008,6 +3021,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       seriesOrder: opts.seriesOrder,
       yFormat,
       tooltipHook: opts.tooltipHook,
+      facet: opts.facet,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
     });
     const offset = 14;

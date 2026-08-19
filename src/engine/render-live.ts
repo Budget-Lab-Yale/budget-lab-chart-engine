@@ -1731,6 +1731,13 @@ function wireFigureSvg(
      *  small-multiples figure's hook coverage matches a standalone chart's (see mountChart's
      *  identical `tooltipHook: opts.hooks?.tooltip` forwards). */
     hooks?: RenderHooks;
+    /** This pane facet value (FigurePane.value — the same value paneFacetValue threads into
+     *  MarkContext for the static hooks, e.g. Task 4 valueLabel). Forwarded into
+     *  TooltipHookCtx.facet at all four attach sites below (band/dumbbell/dotplot/categorical-line)
+     *  so a consumer tooltip hook can tell which pane a hover came from, on any small-multiples
+     *  chart type -- not just bar/stacked. undefined on the standalone mountChart path -- there is
+     *  no facet there. */
+    facet?: string;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
@@ -1767,6 +1774,7 @@ function wireFigureSvg(
       ...dbOpts,
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
+      facet: ctx.facet,
       ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (dbUseCoord) {
@@ -1795,6 +1803,7 @@ function wireFigureSvg(
       centersFromMarks: true,
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
+      facet: ctx.facet,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (chromePills) {
@@ -1875,6 +1884,7 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
+      facet: ctx.facet,
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -1940,6 +1950,7 @@ function wireFigureSvg(
       orientation: horizontal ? "horizontal" : "vertical",
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
+      facet: ctx.facet,
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
@@ -2354,6 +2365,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         }),
         onPillDriver: (d) => pillDrivers.push(d),
         hooks: opts.hooks,
+        facet: pane.value,
         // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
         // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
         ...(isHorizontalBarFig
