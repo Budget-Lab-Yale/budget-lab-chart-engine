@@ -6,6 +6,7 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { RenderHooks } from "../spec/hooks";
 import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
@@ -48,6 +49,9 @@ export interface RenderOptions {
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;
+  /** Programmatic render hooks (see spec/hooks.ts). Threaded to the builders; the export passes
+   *  the SAME object, which is what makes a static hook's output identical in the download. */
+  hooks?: RenderHooks;
   /** Small-multiples: this pane is one cell of a figure, so line marks render with the
    *  thinner pane stroke (TBL.strokeWidth.pane). Set by renderFigure for BOTH shared- and
    *  per-pane panes; absent → single chart → default stroke. Threaded into MarkContext.pane. */
@@ -868,6 +872,7 @@ function assemblePaneResult(
     marginRight: opts.marginRight,
     document: opts.document,
     classNameSuffix,
+    hooks: opts.hooks,
     ...(facetOpt ? { facet: facetOpt } : {}),
     ...(opts.hideYAxisLabels ? { hideYAxisLabels: true } : {}),
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),

@@ -2,6 +2,7 @@
 // Port of C:\dev\GitHub\budget-lab-interactives\tools\ai-labor-market-tracker\export-image.js
 
 import type { ChartSpec } from "../spec/types.js";
+import type { RenderHooks } from "../spec/hooks.js";
 import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
@@ -155,7 +156,7 @@ function drawLegend(
 export function buildExportSvg(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { selections?: Record<string, string> } = {},
+  opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): SVGSVGElement {
   const isFigure = spec.small_multiples != null;
   const isSingleHorizontalBar =
@@ -165,8 +166,8 @@ export function buildExportSvg(
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
   // figure-level legend), not from a single chart.
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: INNER_W })
-    : renderChart(spec, rows, { width: INNER_W });
+    ? renderFigure(spec, rows, { width: INNER_W, hooks: opts.hooks })
+    : renderChart(spec, rows, { width: INNER_W, hooks: opts.hooks });
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -238,6 +239,7 @@ export function buildExportSvg(
     const { svg: chartSvg } = renderChart(spec, rows, {
       width: INNER_W,
       height: contentHeight,
+      hooks: opts.hooks,
       ...(accentColor ? { accentColor } : {}),
     });
     chartSvg.setAttribute("x", String(MARGIN));
@@ -270,8 +272,8 @@ export function buildExportSvg(
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
     const useGridW = isShared || isHorizontalBarFig;
     const fig = useGridW
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) })
-      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, ...(accentColor ? { accentColor } : {}) })
+      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
     // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
     const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
@@ -417,9 +419,9 @@ export function triggerDownload(blob: Blob, filename: string): void {
 export async function exportChartPng(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { filename?: string; selections?: Record<string, string> } = {},
+  opts: { filename?: string; selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): Promise<void> {
-  const svgElement = buildExportSvg(spec, rows, { selections: opts.selections });
+  const svgElement = buildExportSvg(spec, rows, { selections: opts.selections, hooks: opts.hooks });
   const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
   const height = parseInt(svgElement.getAttribute("height") ?? String(H), 10);
   const blob = await rasterize(svgElement, width, height);

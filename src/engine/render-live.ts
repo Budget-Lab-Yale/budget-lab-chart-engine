@@ -5,6 +5,7 @@
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
 import type { ChartSpec, TitleSelector, ValueAffixes } from "../spec/types.js";
+import type { RenderHooks } from "../spec/hooks.js";
 import type { NetMode } from "../spec/bar-stack.js";
 import { resolveHoverMode, resolveTotalRow, hasNetDots } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
@@ -94,6 +95,10 @@ export interface MountOptions {
   /** Initial active option id per title-selector key (host re-mount state restore). Precedence:
    *  `selections[key]` > `title_selectors[key].default` > that selector's first option. */
   selections?: Record<string, string>;
+  /** Programmatic render hooks (see spec/hooks.ts). Passed to every renderChart/renderFigure call
+   *  in the mount + resize paths, and to the Image download's export — so a static hook's output
+   *  cannot diverge between the screen and the downloaded PNG. */
+  hooks?: RenderHooks;
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -504,6 +509,7 @@ function buildDownloadActions(
   rows: TidyRow[],
   slugOverride?: string,
   selections?: Record<string, string>,
+  hooks?: RenderHooks,
 ): HTMLElement {
   const base = slugOverride || downloadSlug(spec);
   const downloads = doc.createElement("div");
@@ -550,7 +556,7 @@ function buildDownloadActions(
     imgBtn.disabled = true;
     imgLabel.textContent = "…";
     try {
-      await exportChartPng(spec, rows, { filename: `${base}.png`, selections });
+      await exportChartPng(spec, rows, { filename: `${base}.png`, selections, hooks });
     } catch (err) {
       console.error("Image export failed:", err);
       imgLabel.textContent = "Failed";
@@ -762,7 +768,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections, opts.hooks),
   });
 
   container.appendChild(card);
@@ -833,6 +839,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       built = renderChart(spec, rows, {
         width: target,
         height,
+        hooks: opts.hooks,
         ...(restackOrder ? { stackOrder: restackOrder } : {}),
         ...(accentColor ? { accentColor } : {}),
       });
@@ -1260,7 +1267,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // Quick pre-render to detect series count (width doesn't matter for position resolution).
   let prelimSeriesCount = 1;
   try {
-    const prelim = renderChart(spec, rows, { width: initialCardWidth, height });
+    const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: opts.hooks });
     prelimSeriesCount = (prelim.legendItems ?? []).filter((i) => !i.nonInteractive && !i.isExtra).length;
   } catch {
     // Ignore — draw() will surface the error.
@@ -2133,7 +2140,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   renderSourceLine(card, {
     note: spec.note,
     source: spec.source,
-    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections),
+    actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections, opts.hooks),
   });
   container.appendChild(card);
 
@@ -2224,12 +2231,14 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
             gridGap: GRID_GAP,
             height: figHeight,
             columns: cols,
+            hooks: opts.hooks,
             ...(accentColor ? { accentColor } : {}),
           })
         : renderFigure(spec, rows, {
             width: paneW,
             height: figHeight,
             columns: cols,
+            hooks: opts.hooks,
             ...(accentColor ? { accentColor } : {}),
           });
     } catch (e) {

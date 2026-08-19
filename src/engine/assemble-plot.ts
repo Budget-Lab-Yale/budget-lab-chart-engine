@@ -35,6 +35,7 @@ import { resolveRugTracks, rugHeight, rugTrackColor } from "../spec/rug";
 import { labelMovedToLegend, annotationKey } from "./annotation-legend";
 import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
+import type { RenderHooks, TickLabelHookCtx } from "../spec/hooks";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
 
@@ -270,6 +271,11 @@ export interface AssembleOptions {
    *  carry a `facet` key to this pane only (see `filterAnnotationsByFacet`). Absent (single
    *  chart, or a faceted call that omits it) → every marker renders, unchanged from today. */
   paneFacetValue?: string;
+  /** Programmatic render hooks (see spec/hooks.ts). Only `tickLabel` is consumed here, at every
+   *  `makeTickFormatter` call site — wrapped rather than edited into `scales.ts`, so the hook
+   *  applies uniformly and the underlying formatter stays a pure function of ticks + affixes.
+   *  Absent/`{}` → every wrapped formatter falls through to the engine default unchanged. */
+  hooks?: RenderHooks;
 }
 
 /** What assemblePlot drew: the SVG, plus the texture facts only the RENDER knows.
@@ -307,6 +313,19 @@ export interface FacetOptions {
   cells: PaneTitleCell[];
 }
 
+/** Wrap a tick formatter with the caller's `tickLabel` hook. `null` from the hook means "engine
+ *  default", so an un-hooked axis returns the formatter's own string unchanged and the output is
+ *  byte-identical to not passing hooks at all. */
+function withTickLabelHook(
+  fmt: (d: number) => string,
+  hooks: RenderHooks | undefined,
+  ctx: TickLabelHookCtx,
+): (d: number) => string {
+  const hook = hooks?.tickLabel;
+  if (!hook) return fmt;
+  return (d) => hook(d, ctx) ?? fmt(d);
+}
+
 export function assemblePlot({
   layers,
   yDomain,
@@ -327,6 +346,7 @@ export function assemblePlot({
   facet,
   hideYAxisLabels,
   paneFacetValue,
+  hooks,
 }: AssembleOptions): AssembleResult {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
   // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
@@ -400,7 +420,11 @@ export function assemblePlot({
   // the stagger would size its collision boxes from the short literal token instead of the
   // (usually longer) rendered number. Labels without the token are returned unchanged, so
   // charts that don't use it get byte-identical output.
-  const yTickFallbackFmt = makeTickFormatter(yTicks, valueAffixes);
+  const yTickFallbackFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
+    axis: "y",
+    ticks: yTicks,
+    affixes: valueAffixes,
+  });
   const yAxisAnn = ann.yAxis.map((m) =>
     m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
@@ -539,7 +563,15 @@ export function assemblePlot({
   if (horizontal) {
     // 2h. Vertical gridlines + x value-tick labels (skip 0 from the light grid; baseline
     //     is painted darker below). Tick labels go at the bottom (default), top, or both.
-    const xTickFmt = makeTickFormatter(yTicks, valueAffixes);
+    // Horizontal orientation: this formats the VALUE axis, which runs along the screen's x
+    // direction here — same yTicks/valueAffixes as the vertical case, so ctx.axis reports the
+    // semantic value axis ("y") rather than the screen direction, letting a tickLabel hook (e.g.
+    // thousands separators) apply consistently regardless of orientation.
+    const xTickFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
+      axis: "y",
+      ticks: yTicks,
+      affixes: valueAffixes,
+    });
     const xTicksMode = spec.x_axis_ticks ?? "bottom";
     const showBottomTicks = xTicksMode !== "top";
     const showTopTicks = xTicksMode === "top" || xTicksMode === "both";
@@ -599,7 +631,11 @@ export function assemblePlot({
     //    chart edges sit flush with the canvas.)
     marks.push(
       ...gridAndYLabels(yTicks, {
-        yTickFormat: makeTickFormatter(yTicks, valueAffixes),
+        yTickFormat: withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
+          axis: "y",
+          ticks: yTicks,
+          affixes: valueAffixes,
+        }),
         marginLeft: effMarginLeft,
         marginRight: effMarginRight,
         ...(faceted ? { gridlineClassName: GRIDLINE_CLASS } : {}),
