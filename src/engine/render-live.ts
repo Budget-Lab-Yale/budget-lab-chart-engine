@@ -933,6 +933,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         legendHandle = renderLegend(rightLegendSlot!, orderedItems, {
           svg,
           onHighlight,
+          hooks: opts.hooks,
           ...shapeOpts,
         });
         // Add the vertical-layout class to the rendered legend element (use the handle's
@@ -946,6 +947,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         legendHandle = renderLegend(legendSlot, legendItems ?? [], {
           svg,
           onHighlight,
+          hooks: opts.hooks,
           ...shapeOpts,
         });
       }
@@ -2284,6 +2286,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
             for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
             for (const d of pillDrivers) d.setActive(active);
           },
+          hooks: opts.hooks,
           shapeItems: fig.shapeLegendItems ?? undefined,
           colorTitle: fig.colorLegendTitle,
           shapeTitle: fig.shapeLegendTitle,

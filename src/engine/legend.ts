@@ -3,8 +3,9 @@
 // interactive legend against that SVG. Paths are matched by their `data-series` attr,
 // which assemblePlot tags post-render.
 import type { LegendItem } from "./index";
-import { ICON_BOX, iconFromLegendItem, iconSvgElement, iconWidth } from "./icon";
+import { ICON_BOX, iconFromLegendItem, legendRowMarkup, iconSvgElement, iconWidth } from "./icon";
 import { SHAPE_LEGEND_COLOR } from "./theme";
+import type { RenderHooks } from "../spec/hooks";
 
 /** One shape-legend row (point charts, dual encoding). */
 export interface ShapeLegendEntry {
@@ -47,12 +48,17 @@ export function renderLegend(
     shapeItems,
     colorTitle,
     shapeTitle,
+    hooks,
   }: {
     svg?: Element;
     onHighlight?: (active: Set<string>) => void;
     shapeItems?: ShapeLegendEntry[] | null;
     colorTitle?: string;
     shapeTitle?: string;
+    /** Programmatic render hooks (spec/hooks.ts). Only `legendKey` is consumed here, once per
+     *  color-legend row (the neutral SHAPE-legend rows below have no `series` key and never
+     *  invoke it). */
+    hooks?: RenderHooks;
   } = {},
 ): LegendHandle | null {
   const hasColor = !!items?.length;
@@ -211,8 +217,6 @@ export function renderLegend(
     // color-match the corresponding line.
     if (color) btn.style.setProperty("--legend-color", color);
 
-    const swatch = doc.createElement("span");
-    swatch.className = "tbl-legend-swatch";
     const icon = iconFromLegendItem({
       color,
       dashed,
@@ -223,16 +227,30 @@ export function renderLegend(
       outlined,
       ...(hatch ? { hatch } : {}),
     });
-    const drawing = iconSvgElement(doc, icon);
-    if (drawing) swatch.appendChild(drawing);
-    // Only a banded chip is wider than the box, and it must reserve the extra width.
-    if (iconWidth(icon) !== ICON_BOX) swatch.style.width = `${iconWidth(icon)}px`;
+    const label = displayLabel ?? series;
+    // `rendered` is the SAME markup the default branch below builds as DOM — legendRowMarkup and
+    // iconSvgElement both draw from iconShapes(icon), so a hook is never handed a second
+    // construction of the key. `null` (or no hook) leaves this row exactly as it was before hooks
+    // existed — required for `hooks: {}` to be byte-identical to no hooks at all.
+    const custom = hooks?.legendKey
+      ? hooks.legendKey({ series, label, color, rendered: legendRowMarkup(icon, label) })
+      : null;
+    if (custom != null) {
+      btn.innerHTML = custom;
+    } else {
+      const swatch = doc.createElement("span");
+      swatch.className = "tbl-legend-swatch";
+      const drawing = iconSvgElement(doc, icon);
+      if (drawing) swatch.appendChild(drawing);
+      // Only a banded chip is wider than the box, and it must reserve the extra width.
+      if (iconWidth(icon) !== ICON_BOX) swatch.style.width = `${iconWidth(icon)}px`;
 
-    const labelEl = doc.createElement("span");
-    labelEl.textContent = displayLabel ?? series;
+      const labelEl = doc.createElement("span");
+      labelEl.textContent = label;
 
-    btn.appendChild(swatch);
-    btn.appendChild(labelEl);
+      btn.appendChild(swatch);
+      btn.appendChild(labelEl);
+    }
 
     if (!nonInteractive) {
       const enter = annotation

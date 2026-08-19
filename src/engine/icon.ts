@@ -22,6 +22,7 @@ import { symbolPathD } from "./symbols";
 import { TBL, swatchWidthFor, SWATCH_OUTLINE, SHAPE_LEGEND_COLOR, MARK_POINT_R, MARK_LINE_POINT_R } from "./theme";
 import { hatchGlyphShapes, type HatchChar, type SeriesHatch } from "./hatch";
 import { markerInk, MARKER_KEYLINE_COLOR, type MarkerStyle } from "./marker-ink";
+import { escapeHtml } from "./util";
 
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
 export const ICON_BOX = 14;
@@ -407,6 +408,14 @@ export function iconSvgMarkup(icon: IconSpec): string {
     `<svg width="${w}" height="${ICON_BOX}" viewBox="0 0 ${w} ${ICON_BOX}" aria-hidden="true">` +
     `${body}</svg>`
   );
+}
+
+/** One legend row's key markup — the icon plus its label, as a single HTML string. This is the
+ *  DEFAULT a `legendKey` hook receives as `ctx.rendered` (spec/hooks.ts): the same drawing
+ *  `iconSvgElement`/`iconSvgGroup` would build for this row, so the live legend, the PNG export,
+ *  and a hook that wraps rather than replaces all start from one description. */
+export function legendRowMarkup(icon: IconSpec, label: string): string {
+  return `<span class="tbl-legend-swatch">${iconSvgMarkup(icon)}</span><span>${escapeHtml(label)}</span>`;
 }
 
 /** An icon as a DOM `<svg>`, for the live legend. Null for `none`, so a caller appends nothing. */

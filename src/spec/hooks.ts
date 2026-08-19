@@ -28,12 +28,14 @@ export interface TooltipHookCtx {
   rendered: string;
 }
 
-/** One legend row. `rendered` is the engine's own key markup, so a hook can wrap rather than
- *  replace it. */
+/** One legend row. `rendered` is the engine's own key markup (icon + label), so a hook can wrap
+ *  rather than replace it. `color` is `undefined` for a row with no colour of its own — e.g. a
+ *  cumulative stack's Total row, whose dot draws the neutral `net` ink instead — matching
+ *  `LegendItem.color` (engine/index.ts), which the declared `string` here did not. */
 export interface LegendKeyHookCtx {
   series: string;
   label: string;
-  color: string;
+  color: string | undefined;
   rendered: string;
 }
 

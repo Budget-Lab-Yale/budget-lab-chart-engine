@@ -11,7 +11,7 @@ import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
-import { ICON_BOX, iconFromLegendItem, iconSvgGroup, iconWidth } from "../engine/icon.js";
+import { ICON_BOX, iconFromLegendItem, legendRowMarkup, iconSvgGroup, iconWidth } from "../engine/icon.js";
 import {
   W,
   H,
@@ -25,6 +25,7 @@ import {
   BODY,
   AXIS,
   HEADING,
+  SVG_NS,
   textEl as textElDoc,
   measureText,
   wrapText,
@@ -84,9 +85,14 @@ function drawLegend(
     /** A dumbbell's hollow end — a ring, not a disc. It was absent from this type entirely, so a
      *  hollow series exported filled. */
     hollow?: boolean;
+    /** Present for a genuine series/color-legend row; absent for the neutral SHAPE-legend rows
+     *  (which have no series key and never invoke `legendKey`). */
+    series?: string;
   }>,
   firstBaseline: number,
   leadingTitle?: string,
+  /** Only `legendKey` is consumed here, and only for rows carrying `series` — see above. */
+  hooks?: RenderHooks,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
   const titleFont = `${W_SEMI} 12px ${FONT}`;
@@ -117,22 +123,41 @@ function drawLegend(
       y += ROW_H;
     }
     const cy = y - 4;
-    const drawing = iconSvgGroup(document, icon);
-    if (drawing) {
-      // The primitives are in a box at the origin, so the group is placed by its top-left corner.
-      drawing.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
-      // A row with no colour of its own draws in `currentColor`, which the page supplies live and
-      // the export has to supply itself — this frame carries no inherited text colour.
-      drawing.setAttribute("color", NAVY);
-      root.appendChild(drawing);
+    // `rendered` mirrors legend.ts's default DOM exactly (legendRowMarkup draws from the same
+    // iconShapes(icon) the group below does), so a hook sees the same markup on screen and in the
+    // export. `null`/no hook falls through to the untouched default drawing.
+    const custom = item.series != null && hooks?.legendKey
+      ? hooks.legendKey({
+          series: item.series,
+          label: item.label,
+          color: item.color,
+          rendered: legendRowMarkup(icon, item.label),
+        })
+      : null;
+    if (custom != null) {
+      const g = document.createElementNS(SVG_NS, "g");
+      g.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
+      g.setAttribute("color", NAVY);
+      g.innerHTML = custom;
+      root.appendChild(g);
+    } else {
+      const drawing = iconSvgGroup(document, icon);
+      if (drawing) {
+        // The primitives are in a box at the origin, so the group is placed by its top-left corner.
+        drawing.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
+        // A row with no colour of its own draws in `currentColor`, which the page supplies live and
+        // the export has to supply itself — this frame carries no inherited text colour.
+        drawing.setAttribute("color", NAVY);
+        root.appendChild(drawing);
+      }
+      root.appendChild(
+        textEl(x + swatchW + GAP, y, item.label, {
+          size: 13,
+          weight: W_BODY,
+          fill: BODY,
+        }),
+      );
     }
-    root.appendChild(
-      textEl(x + swatchW + GAP, y, item.label, {
-        size: 13,
-        weight: W_BODY,
-        fill: BODY,
-      }),
-    );
     x += itemW + ITEM_GAP;
   }
   return y;
@@ -199,7 +224,7 @@ export function buildExportSvg(
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
   if (legendItems.length) {
-    cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined);
+    cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks);
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
   if (hasShapeLegend) {
