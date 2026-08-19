@@ -999,6 +999,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         bandHighlight: true,
         centersFromMarks: true,
         showTooltip: chromeTooltip,
+        tooltipHook: opts.hooks?.tooltip,
       });
       if (chromePills) {
         pillDriver = attachHighlightPills(svg, {
@@ -1028,6 +1029,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
         renderedFills: dbFills,
         showTooltip: chromeTooltip,
+        tooltipHook: opts.hooks?.tooltip,
       });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
@@ -1040,6 +1042,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         showTooltip: chromeTooltip,
+        tooltipHook: opts.hooks?.tooltip,
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
@@ -1118,6 +1121,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         icons: seriesIcons,
         orientation: horizontalBar ? "horizontal" : "vertical",
         showTooltip: chromeTooltip,
+        tooltipHook: opts.hooks?.tooltip,
         ...(useTooltip
           ? {}
           : {
@@ -1722,6 +1726,11 @@ function wireFigureSvg(
     /** Horizontal coordinated cursor: this pane shows the category labels (leftmost), so accent the
      *  hovered category's label on hover. */
     coordAccentLabel?: boolean;
+    /** Programmatic render hooks (mountFigure's `opts.hooks`) — only `tooltip` is read here,
+     *  forwarded into each pane's attachBandCrosshair/attachCategoricalLineCrosshair call so a
+     *  small-multiples figure's hook coverage matches a standalone chart's (see mountChart's
+     *  identical `tooltipHook: opts.hooks?.tooltip` forwards). */
+    hooks?: RenderHooks;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
@@ -1757,6 +1766,7 @@ function wireFigureSvg(
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
       showTooltip: chromeTooltip,
+      tooltipHook: ctx.hooks?.tooltip,
       ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (dbUseCoord) {
@@ -1784,6 +1794,7 @@ function wireFigureSvg(
       bandHighlight: true,
       centersFromMarks: true,
       showTooltip: chromeTooltip,
+      tooltipHook: ctx.hooks?.tooltip,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (chromePills) {
@@ -1863,6 +1874,7 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       showTooltip: chromeTooltip,
+      tooltipHook: ctx.hooks?.tooltip,
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -1927,6 +1939,7 @@ function wireFigureSvg(
       categoryLabels: ctx.spec.x_labels,
       orientation: horizontal ? "horizontal" : "vertical",
       showTooltip: chromeTooltip,
+      tooltipHook: ctx.hooks?.tooltip,
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
@@ -2340,6 +2353,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           keyRows: pane.seriesKeyRows,
         }),
         onPillDriver: (d) => pillDrivers.push(d),
+        hooks: opts.hooks,
         // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
         // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
         ...(isHorizontalBarFig

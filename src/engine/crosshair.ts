@@ -16,6 +16,7 @@ import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
 import type { TotalRow } from "../spec/bar-stack";
+import type { TooltipHookCtx } from "../spec/hooks";
 
 type Row = Record<string, unknown>;
 
@@ -591,6 +592,9 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
+  // Deliberately UN-GATED on showTooltip/chrome.tooltip: dead code on the live path today (see
+  // engine/index.ts:274's FacetInfo note — only reachable from test/facet-crosshair.test.ts). Add
+  // the gate here if this is ever wired up live.
   const tip = getSharedTooltip(svgEl.ownerDocument);
 
   /** Snap an absolute svgX to the nearest x in `xs`, given this cell's [x0,x1] plot range. */
@@ -726,6 +730,13 @@ export interface BandCrosshairOptions {
   showTooltip?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** Screen-only hook (spec/hooks.ts's `RenderHooks.tooltip`) — replaces this band tooltip's
+   *  CONTENT while the engine keeps doing the hit-testing, positioning and highlight around it.
+   *  `null` (or no hook) keeps the engine's own card. Forwarded from render-live.ts through here
+   *  into `buildBandTooltipHtml`. NOT reached by `attachCrosshair` / `attachFacetCrosshair` /
+   *  `attachHistogramHover` / `attachPointHover` — those build their card markup elsewhere; see
+   *  spec/hooks.ts's module note and CONFIG-SPEC.md for that boundary. */
+  tooltipHook?: (ctx: TooltipHookCtx) => string | null;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -880,6 +891,10 @@ export function buildBandTooltipHtml(
      *  per category — see `readCategoryFills`), which is what keeps a `bar_color` /
      *  `category_colors` / waterfall bar's key on the colour under the cursor. */
     icons?: Map<string, IconSpec>;
+    /** Screen-only (see spec/hooks.ts's `TooltipHookCtx`) — replaces the returned markup; `null`
+     *  keeps the engine's own `html` built below. Both callers (attachBandCrosshair,
+     *  attachCategoricalLineCrosshair) forward their own `tooltipHook` option straight through. */
+    tooltipHook?: (ctx: TooltipHookCtx) => string | null;
   },
 ): string {
   const { isStacked, totalRow, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
@@ -911,8 +926,9 @@ export function buildBandTooltipHtml(
   // Built but not yet placed — `totalPosition` decides which side of the series rows it lands on.
   // The two branches are kept separate rather than parameterised on an empty swatch string, so the
   // default path emits byte-identical markup to what it emitted before this field existed.
+  const hasTotalRow = !!(isStacked && orderedSeries.length > 1 && totalRow && totalRow !== "none");
   let totalRowHtml = "";
-  if (isStacked && orderedSeries.length > 1 && totalRow && totalRow !== "none") {
+  if (hasTotalRow) {
     const position = opts.totalPosition ?? "last";
     const rowClasses = [
       "tbl-tooltip-row",
@@ -941,6 +957,27 @@ export function buildBandTooltipHtml(
   }
 
   html += (opts.totalPosition ?? "last") === "first" ? totalRowHtml + seriesRows : seriesRows + totalRowHtml;
+
+  // hooks.tooltip (#30, Task 5): screen-only content replacement — the engine still does the
+  // hit-testing/positioning/highlight around this card (see the two call sites below). `total`
+  // reuses `hasTotalRow` above so it is only handed to the hook when a Total row would actually
+  // show — callers that never pass isStacked/totalRow (e.g. attachCategoricalLineCrosshair) have
+  // no stack "total" concept, and the raw series sum would mislabel one for them.
+  if (opts.tooltipHook) {
+    const values: Record<string, number> = {};
+    for (const series of orderedSeries) {
+      const v = valBySeries.get(series);
+      if (v != null) values[series] = v;
+    }
+    const hooked = opts.tooltipHook({
+      category,
+      series: orderedSeries,
+      values,
+      ...(hasTotalRow ? { total } : {}),
+      rendered: html,
+    });
+    if (hooked != null) return hooked;
+  }
 
   return html;
 }
@@ -1347,6 +1384,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       seriesOrder: opts.seriesOrder,
       yFormat,
       categoryLabels: opts.categoryLabels,
+      tooltipHook: opts.tooltipHook,
       ...(icons ? { icons } : {}),
     });
     tip!.innerHTML = html;
@@ -2849,6 +2887,11 @@ export interface CategoricalLineOptions {
    *  dots (filled/hollow/ink) are already visible, and a ring would recolor them — so it draws the
    *  band + value pills only (like bars). Dot plots keep the ring (it sits over dodged points). */
   markerless?: boolean;
+  /** Screen-only content hook — see `BandCrosshairOptions.tooltipHook`. This is the categorical
+   *  chart family's OTHER call into `buildBandTooltipHtml` (dot plots, dumbbells, categorical-x
+   *  line charts); missing the forward here leaves the hook working on bar charts and silently
+   *  not on these. */
+  tooltipHook?: (ctx: TooltipHookCtx) => string | null;
 }
 
 /**
@@ -2964,6 +3007,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
+      tooltipHook: opts.tooltipHook,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
     });
     const offset = 14;
