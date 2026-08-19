@@ -112,6 +112,40 @@ describe("hooks.legendKey", () => {
     expect(foreignNodes(svg)).toHaveLength(0);
   });
 
+  // Neither test below reaches for a hardcoded literal: the hook's own body reads
+  // `ctx.rendered`, so if the export site regressed to handing it legend.ts's HTML string
+  // (instead of legendRowMarkupSvg's SVG string) while still labelling `medium: "svg"`, these
+  // would fail on the namespace check even though every OTHER test in this file -- whose hooks
+  // return hardcoded literals and never touch `ctx.rendered` -- would keep passing.
+  it("a genuine pass-through hook (ctx => ctx.rendered) still renders as SVG in the export", () => {
+    const passThrough: RenderHooks = {
+      legendKey: (ctx) => (ctx.series === "A" ? ctx.rendered : null),
+    };
+    const svg = buildExportSvg(SPEC, ROWS, { hooks: passThrough });
+    expect(foreignNodes(svg)).toHaveLength(0);
+    // The key's own SVG-namespaced <text> (its label) is actually present, not merely absent-of-
+    // foreign-nodes by virtue of an empty/failed row.
+    const labelTexts = Array.from(svg.querySelectorAll("text")).filter(
+      (t) => t.namespaceURI === SVG_NS && t.textContent === "A",
+    );
+    expect(labelTexts.length).toBeGreaterThan(0);
+  });
+
+  it("a wrap hook (`<g>${ctx.rendered}</g>`) also renders as SVG in the export", () => {
+    const wrap: RenderHooks = {
+      legendKey: (ctx) => (ctx.series === "A" ? `<g class="mine">${ctx.rendered}</g>` : null),
+    };
+    const svg = buildExportSvg(SPEC, ROWS, { hooks: wrap });
+    expect(foreignNodes(svg)).toHaveLength(0);
+    const wrapped = svg.querySelector("g.mine");
+    expect(wrapped).not.toBeNull();
+    expect(wrapped!.namespaceURI).toBe(SVG_NS);
+    const labelTexts = Array.from(wrapped!.querySelectorAll("text")).filter(
+      (t) => t.namespaceURI === SVG_NS && t.textContent === "A",
+    );
+    expect(labelTexts.length).toBeGreaterThan(0);
+  });
+
   it("THE DEFECT this guards against: a hook that ignores ctx.medium renders on screen but not in the export", () => {
     const el = mount(mediumBlindHooks);
     expect(legendItem(el, "A").innerHTML).toContain(HTML_REPLACEMENT);
