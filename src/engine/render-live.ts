@@ -855,6 +855,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const seriesIcons = resolveTooltipIcons({ legendItems, keyRows: seriesKeyRows });
     currentSeriesNames = seriesOrder;
     let pillDriver: ReturnType<typeof attachHighlightPills> | null = null;
+    // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
+    // so a PNG export (which re-renders from the spec) agrees with the screen. Default true (today's
+    // behaviour) when `chrome` or the key is absent.
+    const chromeTooltip = spec.chrome?.tooltip ?? true;
+    const chromePills = spec.chrome?.valuePills ?? true;
     const onHighlight = (active: Set<string>): void => {
       recolorNetLabels(svg);
       pillDriver?.setActive(active);
@@ -970,6 +975,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yLabel: spec.y_axis_title ?? "Value",
         xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+        showTooltip: chromeTooltip,
       });
     } else if (spec.chartType === "dotplot") {
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
@@ -983,15 +989,18 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         bandHighlight: true,
         centersFromMarks: true,
+        showTooltip: chromeTooltip,
       });
-      pillDriver = attachHighlightPills(svg, {
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        chartType: "dotplot",
-        colors,
-        seriesOrder,
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
-      });
+      if (chromePills) {
+        pillDriver = attachHighlightPills(svg, {
+          rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+          chartType: "dotplot",
+          colors,
+          seriesOrder,
+          yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+          dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
+        });
+      }
     } else if (spec.chartType === "dumbbell") {
       // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
       // lists each series' value with a DOT swatch that matches the legend/chart marker — hollow
@@ -1009,6 +1018,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         centersFromMarks: true,
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
         renderedFills: dbFills,
+        showTooltip: chromeTooltip,
       });
     } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
@@ -1020,6 +1030,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+        showTooltip: chromeTooltip,
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
@@ -1097,6 +1108,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         categoryLabels: spec.x_labels,
         icons: seriesIcons,
         orientation: horizontalBar ? "horizontal" : "vertical",
+        showTooltip: chromeTooltip,
         ...(useTooltip
           ? {}
           : {
@@ -1107,18 +1119,20 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
               },
             }),
       });
-      pillDriver = attachHighlightPills(svg, {
-        rows: bandRows,
-        chartType: isStacked ? "stacked" : "bar",
-        isStacked,
-        isFaceted,
-        categories: orderedCats,
-        colors,
-        seriesOrder,
-        yFormat: bandYFormat,
-        horizontal: horizontalBar,
-        hasNetDots: hasNetDots(netMode),
-      });
+      if (chromePills) {
+        pillDriver = attachHighlightPills(svg, {
+          rows: bandRows,
+          chartType: isStacked ? "stacked" : "bar",
+          isStacked,
+          isFaceted,
+          categories: orderedCats,
+          colors,
+          seriesOrder,
+          yFormat: bandYFormat,
+          horizontal: horizontalBar,
+          hasNetDots: hasNetDots(netMode),
+        });
+      }
       if (!useTooltip) {
         secondaryDriver = attachSecondaryBandCursor(svg, {
           rows: bandRows,
@@ -1154,6 +1168,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // recolours through `recolourIcons`, which also re-grounds a texture. Reading the palette
         // for it gave a blue key over `bar_color: violet` bins.
         icons: seriesIcons,
+        showTooltip: chromeTooltip,
       });
     } else {
       attachCrosshair(svg, {
@@ -1172,6 +1187,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
         showTotal: spec.chartType === "area",
+        showTooltip: chromeTooltip,
       });
     }
 
@@ -1699,6 +1715,11 @@ function wireFigureSvg(
     coordAccentLabel?: boolean;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
+  // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
+  // so a PNG export (which re-renders from the spec) agrees with the screen. Default true (today's
+  // behaviour) when `chrome` or the key is absent. Mirrors mountChart's identical consts.
+  const chromeTooltip = ctx.spec.chrome?.tooltip ?? true;
+  const chromePills = ctx.spec.chrome?.valuePills ?? true;
   // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
   // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
   // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
@@ -1726,6 +1747,7 @@ function wireFigureSvg(
     attachCategoricalLineCrosshair(svg, {
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
+      showTooltip: chromeTooltip,
       ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (dbUseCoord) {
@@ -1752,18 +1774,21 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       bandHighlight: true,
       centersFromMarks: true,
+      showTooltip: chromeTooltip,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
-    ctx.onPillDriver?.(
-      attachHighlightPills(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        chartType: "dotplot",
-        colors: ctx.colors,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        dodge,
-      }),
-    );
+    if (chromePills) {
+      ctx.onPillDriver?.(
+        attachHighlightPills(svg, {
+          rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+          chartType: "dotplot",
+          colors: ctx.colors,
+          seriesOrder: ctx.seriesOrder,
+          yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+          dodge,
+        }),
+      );
+    }
     if (dotUseCoord) {
       return attachSecondaryCategoricalLineCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1797,6 +1822,7 @@ function wireFigureSvg(
       yLabel: ctx.spec.y_axis_title ?? "Value",
       xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+      showTooltip: chromeTooltip,
     });
     return undefined;
   }
@@ -1827,6 +1853,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+      showTooltip: chromeTooltip,
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -1890,6 +1917,7 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
       orientation: horizontal ? "horizontal" : "vertical",
+      showTooltip: chromeTooltip,
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
@@ -1901,20 +1929,22 @@ function wireFigureSvg(
         if (series) handle.toggle(series);
       });
     }
-    ctx.onPillDriver?.(
-      attachHighlightPills(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        chartType: isStacked ? "stacked" : "bar",
-        isStacked,
-        isFaceted,
-        categories: cats,
-        colors: ctx.colors,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        horizontal,
-        hasNetDots: hasNetDots(ctx.netMode),
-      }),
-    );
+    if (chromePills) {
+      ctx.onPillDriver?.(
+        attachHighlightPills(svg, {
+          rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+          chartType: isStacked ? "stacked" : "bar",
+          isStacked,
+          isFaceted,
+          categories: cats,
+          colors: ctx.colors,
+          seriesOrder: ctx.seriesOrder,
+          yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+          horizontal,
+          hasNetDots: hasNetDots(ctx.netMode),
+        }),
+      );
+    }
     if (coord) {
       // Waterfall (per pane): delta steps get a centered signed value pill on hover; total/skip
       // shade only. Computed from this pane's rows so a step that is a delta in one facet and a
@@ -1974,6 +2004,7 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       label: histogramBinLabelOpts(ctx.spec),
+      showTooltip: chromeTooltip,
       ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
     });
     if (histCoord) {
@@ -2000,6 +2031,7 @@ function wireFigureSvg(
     ...(ctx.icons ? { icons: ctx.icons } : {}),
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
+    showTooltip: chromeTooltip,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
   });
   if (handle) {

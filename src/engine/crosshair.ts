@@ -42,6 +42,10 @@ export interface CrosshairOptions {
    *  NO tooltip. Used by coordinated small-multiples figures, where the unified secondary-cursor
    *  renderer (driven by the figure bus) draws every pane's indicators instead. */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The guide, hit area, and
+   *  `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
+   *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
+  showTooltip?: boolean;
   /** series → marker symbol name (line charts with point markers). When set, the coordinated
    *  hover dot takes the series' shape so it matches the static marker. */
   symbols?: Map<string, string>;
@@ -155,7 +159,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
 
   function snapX(svgX: number): number | null {
     if (svgX < ml || svgX > ml + plotW) return null;
@@ -187,6 +191,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     guide!.setAttribute("x1", String(gx));
     guide!.setAttribute("x2", String(gx));
     guide!.setAttribute("opacity", "1");
+
+    if (!tip) return; // chrome.tooltip: false — guide shown, no card.
 
     let html = `<div class="tbl-tooltip-head">${escapeHtml(xFormat!(snap))}</div>`;
     const tipSeries =
@@ -714,6 +720,10 @@ export interface BandCrosshairOptions {
    *  show NO tooltip (the coordinated secondary renderer draws every pane's shaded region +
    *  labels instead). */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The highlight, hit area,
+   *  and `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
+   *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
+  showTooltip?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
 }
@@ -1211,7 +1221,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
 
   // Bar tooltips: colour each series' swatch from the bar's ACTUAL rendered fill (bar_color /
   // accent / category_colors / a waterfall's per-direction palette), not the series' base colour —
@@ -1321,6 +1331,8 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     showHighlight(hlMin, hlMax);
 
+    if (!tip) return; // chrome.tooltip: false — highlight shown, no card.
+
     // The key set for THIS category (see iconsByCategory). Falling back to `opts.icons` keeps a
     // category with no rect of its own on the palette colour rather than on a neighbour's.
     const icons = opts.icons ? iconsByCategory?.get(category) ?? opts.icons : undefined;
@@ -1396,6 +1408,10 @@ export interface HistogramHoverOptions {
   /** Coordinated small-multiples: hit-test + emit only (no highlight/tooltip drawn); the secondary
    *  cursor renders the echo on every pane. */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The highlight, hit area,
+   *  and `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
+   *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
+  showTooltip?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
 }
@@ -1602,7 +1618,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
 
   // Re-coloured ONCE, not per pointermove: `renderedFills` is read from the bars at attach time, so
   // a `bar_color` histogram's key is settled before the first hover. (This is where that colour is
@@ -1642,6 +1658,8 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     if (emitOnly) return;
 
     showHighlight(spans[idx]!.min, spans[idx]!.max);
+
+    if (!tip) return; // chrome.tooltip: false — highlight shown, no card.
 
     tip!.innerHTML = buildHistogramTooltipHtml(bin, {
       seriesLabels: opts.seriesLabels,
@@ -2798,6 +2816,11 @@ export interface CategoricalLineOptions {
   yFormat?: (v: number) => string;
   /** Hit-test + emit only (coordinated figures); no tooltip/guide. */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The guide/band highlight,
+   *  hit area, and `onResolve` emission still fire; independent of `emitOnly`, which suppresses
+   *  all of them together for a coordinated pane. `undefined` keeps today's behaviour (tooltip
+   *  shown). */
+  showTooltip?: boolean;
   onResolve?: (category: string | null) => void;
   /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
   symbols?: Map<string, string>;
@@ -2893,7 +2916,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
   // `resolveHatch` is a module function, so nothing here varies with the cursor.
@@ -2934,6 +2957,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       guide.setAttribute("x2", String(cx));
       guide.setAttribute("opacity", "1");
     }
+
+    if (!tip) return; // chrome.tooltip: false — guide/highlight shown, no card.
+
     tip!.innerHTML = buildBandTooltipHtml(category, opts.rows, {
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
@@ -3394,6 +3420,10 @@ export interface PointHoverOptions {
   yLabel?: string;
   xFormat?: (v: number) => string;
   yFormat?: (v: number) => string;
+  /** `chrome.tooltip: false` — suppress the floating tooltip card. A scatter point's ONLY hover
+   *  feedback is this card (no separate guide/highlight), so `undefined` keeps today's behaviour
+   *  (tooltip shown) and `false` makes hovering a point a no-op. */
+  showTooltip?: boolean;
 }
 
 /**
@@ -3405,12 +3435,13 @@ export interface PointHoverOptions {
 export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions): void {
   if (!svgEl || !opts.points?.length) return;
   const doc = svgEl.ownerDocument;
-  const tip = getSharedTooltip(doc);
+  const tip = opts.showTooltip === false ? null : getSharedTooltip(doc);
   const xFormat = opts.xFormat ?? ((v: number) => `${v}`);
   const yFormat = opts.yFormat ?? ((v: number) => `${v}`);
   const markers = svgEl.querySelectorAll<SVGElement>(opts.selector);
 
   const place = (evt: PointerEvent): void => {
+    if (!tip) return;
     const offset = 14;
     const win = doc.defaultView!;
     let left = evt.clientX + offset;
@@ -3426,6 +3457,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
     if (!p) return;
     el.style.cursor = "pointer";
     const show = (evt: PointerEvent): void => {
+      if (!tip) return;
       const color = opts.colors?.get(p.series) || TBL.color.navy;
       const sLabel = opts.seriesLabels?.[p.series] ?? p.series;
       // Header: the point's actual marker (its symbol, filled in the series color) followed by
@@ -3461,6 +3493,6 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
     };
     el.addEventListener("pointerenter", show as EventListener);
     el.addEventListener("pointermove", place as EventListener);
-    el.addEventListener("pointerleave", () => { tip.style.opacity = "0"; });
+    el.addEventListener("pointerleave", () => { if (tip) tip.style.opacity = "0"; });
   });
 }

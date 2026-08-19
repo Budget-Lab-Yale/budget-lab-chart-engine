@@ -312,6 +312,19 @@ const TITLE_SELECTOR = {
   },
 } as const;
 
+// Declarative switches that turn engine hover chrome OFF from the spec (see spec/types.ts
+// ChartSpec.chrome). Deliberately just these two — netMarker and legend already have an owning
+// field (barStack.netDisplay, top-level legend) and duplicating that decision here is the defect
+// class this exists to end.
+const CHROME = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    tooltip: { type: "boolean" },
+    valuePills: { type: "boolean" },
+  },
+} as const;
+
 const SMALL_MULTIPLES = {
   type: "object",
   additionalProperties: false,
@@ -551,6 +564,7 @@ export const CHART_SPEC_SCHEMA = {
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
     legend: { type: "boolean" },
+    chrome: CHROME,
 
     // Small multiples (multi-panel)
     small_multiples: SMALL_MULTIPLES,

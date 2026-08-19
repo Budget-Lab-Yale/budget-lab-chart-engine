@@ -735,6 +735,18 @@ export interface ChartSpec {
    *  unavailable, since it is driven through the legend. Default true (legend shown per the
    *  usual ≥2-series / style-override rules). */
   legend?: boolean;
+  /** Turn engine hover chrome OFF, for a consumer drawing its own. Switching a piece off rather
+   *  than hiding it in CSS is what makes the PNG export agree — the export re-renders from the
+   *  spec, so a stylesheet never reached it.
+   *  Deliberately NOT here: the net marker (use `barStack.netDisplay: none`, which also expresses
+   *  dot/text) and the legend (use the top-level `legend: false`). Each would otherwise be a
+   *  second formula for a decision that already has one. */
+  chrome?: {
+    /** The floating hover tooltip card. Default true. */
+    tooltip?: boolean;
+    /** The per-segment value pills on the hovered band. Default true. */
+    valuePills?: boolean;
+  };
 
   // Small multiples (multi-panel); per-pane base chart type stays `chartType`.
   small_multiples?: SmallMultiplesConfig;
