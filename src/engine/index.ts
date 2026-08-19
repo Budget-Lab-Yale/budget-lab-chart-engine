@@ -789,6 +789,10 @@ function assemblePaneResult(
     // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
     ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
     ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),
+    // This pane's facet identity (per-pane small multiples) — for hooks.valueLabel's ctx.facet.
+    ...(opts.paneFacetValue != null ? { facet: opts.paneFacetValue } : {}),
+    // Programmatic render hooks (spec/hooks.ts) — only `valueLabel` is consumed by mark builders.
+    ...(opts.hooks ? { hooks: opts.hooks } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.

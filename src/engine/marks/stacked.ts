@@ -24,7 +24,7 @@ import { isReversedDomain } from "../scales";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
-import { applyValueAffixes, resolveValueAffixes } from "../util";
+import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode } from "../../spec/bar-stack";
@@ -274,7 +274,15 @@ export function buildStackedMarks(
     // 700 text_heading, baseline 6px above the top.
     // Shared callout style (matches the per-bar value labels — see theme.ts TBL_VALUE_LABEL).
     const common = {
-      text: (d: { net: number }) => netFmt(d.net),
+      // The net callout's series identity is the Total pseudo-series (TOTAL_SERIES_KEY), matching
+      // the legendExtras/net-dot tagging below — it names the aggregate row, not a real series.
+      text: (d: { _xc: string; net: number }) =>
+        applyValueLabelHook(netFmt(d.net), ctx.hooks, {
+          series: TOTAL_SERIES_KEY,
+          category: d._xc,
+          value: d.net,
+          facet: ctx.facet,
+        }),
       fill: TBL.color.heading,
       fontSize: TBL_VALUE_LABEL.fontSize,
       fontWeight: TBL_VALUE_LABEL.fontWeight,
@@ -339,6 +347,8 @@ export function buildStackedMarks(
         mono: monoBase != null,
         lightSeries,
         fmt: segFmt,
+        hooks: ctx.hooks,
+        facet: ctx.facet,
       }),
     );
   }
@@ -459,11 +469,13 @@ function buildSegmentLabels(
     mono: boolean;
     lightSeries: Set<string> | null;
     fmt: (d: number) => string;
+    hooks: MarkContext["hooks"];
+    facet: string | undefined;
   },
 ): unknown[] {
   const {
     catField, rank, posSumByCat, normalize,
-    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt,
+    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet,
   } = opts;
 
   // Per-category totals (sum of |value| on each side) for normalization shares.
@@ -527,7 +539,13 @@ function buildSegmentLabels(
       if (Number.isFinite(segPx) && segPx < SEGMENT_LABEL_MIN_PX) continue;
       // Light mono tiers (100/200) get dark text; everything else white (§7).
       const light = mono && lightSeries != null && lightSeries.has(r.series);
-      rows.push({ _xc: cat, mid, text: fmt(labelNum), light });
+      const text = applyValueLabelHook(fmt(labelNum), hooks, {
+        series: r.series,
+        category: cat,
+        value: labelNum,
+        facet,
+      });
+      rows.push({ _xc: cat, mid, text, light });
     }
   }
 

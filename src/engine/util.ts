@@ -1,4 +1,5 @@
 import type { ValueAffixes } from "../spec/types";
+import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
 
 /** HTML-escape a value for safe interpolation into innerHTML (tooltip/legend). */
 export function escapeHtml(s: unknown): string {
@@ -26,6 +27,23 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
   const negative = formatted.startsWith("-");
   const magnitude = negative ? formatted.slice(1) : formatted;
   return `${negative ? "-" : ""}${affixes.prefix}${magnitude}${affixes.suffix}`;
+}
+
+/** Apply the `valueLabel` hook to one in-mark label's text. `rendered` is the engine's own
+ *  formatted text; the hook receives it (plus the label's series/category/value/facet) and may
+ *  return a replacement, or `null` for "engine default". Absent hook / `hooks: {}` / a `null`
+ *  return all take this same early-return path, so output stays byte-identical to no hooks at
+ *  all — mirroring `withTickLabelHook` (assemble-plot.ts). Returns plain text: value labels are a
+ *  Plot `text` channel rendered as an SVG `<text>` node's textContent on both the live and export
+ *  paths, so there is no HTML/SVG medium split to navigate here (contrast `legendKey`). */
+export function applyValueLabelHook(
+  rendered: string,
+  hooks: RenderHooks | undefined,
+  ctx: Omit<ValueLabelHookCtx, "rendered">,
+): string {
+  const hook = hooks?.valueLabel;
+  if (!hook) return rendered;
+  return hook({ ...ctx, rendered }) ?? rendered;
 }
 
 /** Parses a `projected_field` (or similar boolean-flag CSV column) value: `1`/`true`/`yes`

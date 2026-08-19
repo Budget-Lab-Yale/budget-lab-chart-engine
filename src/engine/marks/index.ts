@@ -4,6 +4,7 @@
 import type { ChartSpec, ChartType } from "../../spec/types";
 import type { NetMode } from "../../spec/bar-stack";
 import type { BandLabelMode } from "../axes";
+import type { RenderHooks } from "../../spec/hooks";
 import { buildLineMarks } from "./line";
 import { buildAreaMarks } from "./area";
 import { buildBarMarks } from "./bar";
@@ -128,6 +129,15 @@ export interface MarkContext {
    *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =
    *  yDomain) without recomputing the axis. Other builders may ignore it. */
   yDomain?: [number, number];
+  /** This pane's facet value, when the chart is one pane of a small-multiples figure (set by the
+   *  figure orchestrator from `RenderOptions.paneFacetValue`). Absent → single chart, or a pane
+   *  with no facet identity. Threaded so builders can populate `ValueLabelHookCtx.facet`; the
+   *  DORMANT shared-mode Plot-facet-grid path (`fxField`/`fyField` above) tags rows with `_facet`
+   *  instead, but no live caller uses that path today (see `FacetInfo` in engine/index.ts). */
+  facet?: string;
+  /** Programmatic render hooks (see spec/hooks.ts). Only `valueLabel` is consumed by mark
+   *  builders today. Absent/`{}` ⇒ every builder's own text stands unchanged. */
+  hooks?: RenderHooks;
 }
 
 export interface MarkLayers {
