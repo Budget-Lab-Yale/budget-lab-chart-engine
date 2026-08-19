@@ -697,6 +697,12 @@ export function renderFigure(
       panePainted.push(p.seriesHatches);
     paneFills.push(p.seriesPainted);
       paneFills.push(p.seriesPainted);
+      // Escape hatch, per pane: a figure has no single SVG (each pane is its own), so this fires
+      // once per pane, LAST — after renderPane's own assembly — with ctx.facet set to the SAME
+      // FigurePane.value the tooltip hook (Task 5) already uses, not a second derivation of it.
+      if (opts.hooks?.afterRender && p.svg) {
+        opts.hooks.afterRender(p.svg, { phase: opts.phase ?? "live", facet: value });
+      }
       return {
         value,
         title: titleFor(value),
@@ -859,6 +865,10 @@ export function renderFigure(
       firstFormatValue = p.formatValue;
     }
     panePainted.push(p.seriesHatches);
+    // Escape hatch, per pane — see the identical call + rationale in the per-pane-mode branch above.
+    if (opts.hooks?.afterRender && p.svg) {
+      opts.hooks.afterRender(p.svg, { phase: opts.phase ?? "live", facet: value });
+    }
     return {
       value,
       title: titleFor(value),

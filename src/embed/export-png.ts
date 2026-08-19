@@ -194,9 +194,16 @@ export function buildExportSvg(
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
   // figure-level legend), not from a single chart.
+  //
+  // `afterRender` is stripped from the hooks object for THIS call only: its SVG(s) are discarded
+  // (only the legend/title metadata is read below), so calling a mutating, potentially side-
+  // effecting hook against them would double-fire it per export — once here on throwaway output,
+  // once more below on the SVG that's actually returned. Every other hook is a pure formatter
+  // (idempotent), so passing them through unchanged here is harmless.
+  const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: INNER_W, hooks: opts.hooks })
-    : renderChart(spec, rows, { width: INNER_W, hooks: opts.hooks });
+    ? renderFigure(spec, rows, { width: INNER_W, hooks: metaHooks })
+    : renderChart(spec, rows, { width: INNER_W, hooks: metaHooks });
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -269,6 +276,7 @@ export function buildExportSvg(
       width: INNER_W,
       height: contentHeight,
       hooks: opts.hooks,
+      phase: "export",
       ...(accentColor ? { accentColor } : {}),
     });
     chartSvg.setAttribute("x", String(MARGIN));
@@ -301,8 +309,8 @@ export function buildExportSvg(
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
     const useGridW = isShared || isHorizontalBarFig;
     const fig = useGridW
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, ...(accentColor ? { accentColor } : {}) })
-      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, ...(accentColor ? { accentColor } : {}) });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
+      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
     // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
     const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;

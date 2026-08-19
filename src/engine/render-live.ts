@@ -1270,10 +1270,15 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // then resolve legendPosition from the result. Use initialWidth or a fallback for the
   // very first render (before the ResizeObserver fires).
   const initialCardWidth = card.clientWidth || initialWidth || 720;
-  // Quick pre-render to detect series count (width doesn't matter for position resolution).
+  // Quick pre-render to detect series count (width doesn't matter for position resolution). Its
+  // SVG is discarded (never mounted), so `afterRender` is stripped from the hooks passed here —
+  // else a real mount would fire a mutating, possibly side-effecting hook twice: once uselessly
+  // on this throwaway probe, once more on the real draw() below. Every other hook is a pure
+  // formatter, unaffected by running against output nobody sees.
   let prelimSeriesCount = 1;
   try {
-    const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: opts.hooks });
+    const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
+    const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: prelimHooks });
     prelimSeriesCount = (prelim.legendItems ?? []).filter((i) => !i.nonInteractive && !i.isExtra).length;
   } catch {
     // Ignore — draw() will surface the error.

@@ -129,6 +129,13 @@ export interface RenderOptions {
    *  (single chart, or per-pane mode where each pane bins independently). Ignored by non-histogram
    *  chart types and by pre-binned histograms (which read x0/x1 directly). */
   binThresholds?: number[];
+  /** hooks.afterRender's ctx.phase (spec/hooks.ts): "export" for buildExportSvg's re-render of the
+   *  PNG download; absent (⇒ "live") for every other caller — mountChart, or renderChart/renderFigure
+   *  called directly. Threaded straight through; has no other effect on rendering. NOT set on the
+   *  metadata-only pre-renders (mountChart's series-count probe, buildExportSvg's legend-metadata
+   *  probe) — those callers omit `afterRender` from the hooks object they pass instead, so the hook
+   *  never sees a discarded SVG (see the call sites in render-live.ts / export-png.ts). */
+  phase?: "live" | "export";
 }
 
 export interface LegendItem {
@@ -1126,6 +1133,15 @@ export function renderChart(
   const seriesKeyRows = buildSeriesKeyRows(spec, seriesNames, colors, layers, pane.seriesHatches, pane.seriesPainted);
   const legendItems = buildLegendItems(spec, seriesNames, colors, layers, seriesKeyRows, pane.formatValue);
   const shapeLegendItems = buildShapeLegendItems(spec, layers);
+
+  // Escape hatch: LAST thing before the SVG is handed back — every mark/axis/legend-metadata build
+  // above is done, and nothing downstream removes or replaces what's here (render-live.ts only ADDS
+  // interactive-only nodes afterward, e.g. crosshair guides). `opts.phase` distinguishes buildExportSvg's
+  // re-render ("export") from every other, live, caller. Guarded so an absent hook costs nothing —
+  // no ctx object, no call — and `hooks: {}` stays byte-identical to no hooks at all.
+  if (opts.hooks?.afterRender) {
+    opts.hooks.afterRender(svg, { phase: opts.phase ?? "live" });
+  }
 
   return {
     svg,
