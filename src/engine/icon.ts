@@ -411,11 +411,29 @@ export function iconSvgMarkup(icon: IconSpec): string {
 }
 
 /** One legend row's key markup — the icon plus its label, as a single HTML string. This is the
- *  DEFAULT a `legendKey` hook receives as `ctx.rendered` (spec/hooks.ts): the same drawing
- *  `iconSvgElement`/`iconSvgGroup` would build for this row, so the live legend, the PNG export,
- *  and a hook that wraps rather than replaces all start from one description. */
+ *  DEFAULT a `legendKey` hook receives as `ctx.rendered` when `ctx.medium === "html"` (the live
+ *  legend, spec/hooks.ts): the same drawing `iconSvgElement` builds for this row, so the live
+ *  legend and a hook that wraps rather than replaces both start from one description. Do NOT
+ *  return this HTML string when `ctx.medium === "svg"` — see `legendRowMarkupSvg` below. */
 export function legendRowMarkup(icon: IconSpec, label: string): string {
   return `<span class="tbl-legend-swatch">${iconSvgMarkup(icon)}</span><span>${escapeHtml(label)}</span>`;
+}
+
+/** The same row, as SVG markup — the DEFAULT `ctx.rendered` when `ctx.medium === "svg"` (the PNG
+ *  export's row: a flat SVG `<g>`, not an HTML container). `legendRowMarkup`'s `<span>`s would
+ *  create XHTML-namespaced nodes inside that `<g>`, which the export's rasterizer —
+ *  `XMLSerializer` -> `Image` -> `canvas.drawImage`, export-png.ts's `rasterize()` — never
+ *  paints: correct on screen, invisible in the download. This draws the same row from the same
+ *  `iconSvgMarkup`/`iconShapes(icon)` description, but in the SVG vocabulary a hook can safely
+ *  return into that `<g>`. Position matches `drawLegend`'s own default layout (icon at the
+ *  origin, label GAP=6 to its right, vertically centred in the ICON_BOX). */
+export function legendRowMarkupSvg(icon: IconSpec, label: string): string {
+  const GAP = 6;
+  const labelX = iconWidth(icon) + GAP;
+  return (
+    iconSvgMarkup(icon) +
+    `<text x="${labelX}" y="${ICON_BOX - 3}" font-family="${escapeHtml(TBL.font)}" font-size="13" font-weight="500" fill="${TBL.color.text}">${escapeHtml(label)}</text>`
+  );
 }
 
 /** An icon as a DOM `<svg>`, for the live legend. Null for `none`, so a caller appends nothing. */

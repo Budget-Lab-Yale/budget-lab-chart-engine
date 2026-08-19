@@ -233,7 +233,7 @@ export function renderLegend(
     // construction of the key. `null` (or no hook) leaves this row exactly as it was before hooks
     // existed — required for `hooks: {}` to be byte-identical to no hooks at all.
     const custom = hooks?.legendKey
-      ? hooks.legendKey({ series, label, color, rendered: legendRowMarkup(icon, label) })
+      ? hooks.legendKey({ series, label, color, medium: "html", rendered: legendRowMarkup(icon, label) })
       : null;
     if (custom != null) {
       btn.innerHTML = custom;

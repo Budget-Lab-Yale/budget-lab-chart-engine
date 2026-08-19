@@ -6,10 +6,16 @@
 // Every hook returns null for "engine default", so a caller can hook one case and leave the rest
 // alone — and so passing `hooks: {}` renders byte-identically to passing nothing.
 //
-// The STATIC hooks (legendKey, tickLabel, valueLabel, afterRender) are guaranteed to appear
-// identically in the PNG export, because the export re-renders through the same builders with the
-// same hooks object. `tooltip` is SCREEN-ONLY: a static PNG has no hover state, so there is
-// nothing for it to be identical to.
+// The STATIC hooks (legendKey, tickLabel, valueLabel, afterRender) are guaranteed to be CALLED
+// identically on screen and in the PNG export, because the export re-renders through the same
+// builders with the same hooks object. `tickLabel`/`valueLabel` return plain text, so "called
+// identically" also means "renders identically". `legendKey` returns MARKUP, and the two call
+// sites are different media (live: an HTML button; export: an SVG <g>, rasterised via
+// XMLSerializer -> Image -> canvas — see export-png.ts's rasterize()) — HTML nodes inside that
+// SVG do not paint. `ctx.medium` tells the hook which vocabulary is safe to return; a hook that
+// ignores it and always returns HTML will look right on screen and be silently missing from the
+// download, which is the exact failure #30 exists to eliminate. `tooltip` is SCREEN-ONLY: a
+// static PNG has no hover state, so there is nothing for it to be identical to.
 //
 // This file is a leaf: it imports nothing from `src/engine/*`, so `src/spec/*` stays a leaf layer
 // (`grep -rn 'from "\.\./engine' src/spec/` must stay empty). A ctx field that would otherwise
@@ -28,14 +34,24 @@ export interface TooltipHookCtx {
   rendered: string;
 }
 
-/** One legend row. `rendered` is the engine's own key markup (icon + label), so a hook can wrap
- *  rather than replace it. `color` is `undefined` for a row with no colour of its own — e.g. a
- *  cumulative stack's Total row, whose dot draws the neutral `net` ink instead — matching
- *  `LegendItem.color` (engine/index.ts), which the declared `string` here did not. */
+/** One legend row. `rendered` is the engine's own key markup for THIS row, in `medium`'s
+ *  vocabulary, so a hook can wrap rather than replace it. `color` is `undefined` for a row with
+ *  no colour of its own — e.g. a cumulative stack's Total row, whose dot draws the neutral `net`
+ *  ink instead — matching `LegendItem.color` (engine/index.ts), which the declared `string` here
+ *  did not.
+ *
+ *  A RETURNED string must be written for `medium`, not merely echo `rendered` unchanged and hope:
+ *  `"html"` (the live legend, an HTML button — `<span>`, `<b>`, etc. are fine) and `"svg"` (the
+ *  PNG export's flat SVG — HTML elements are silently invisible there; return `<text>`/`<g>`/etc.
+ *  in the SVG vocabulary, as `rendered` itself already is when `medium === "svg"`). Get this wrong
+ *  and the row is correct on screen and missing from the download — invisible to anyone who only
+ *  checks the screen, which is why this is spelled out rather than left to be discovered. */
 export interface LegendKeyHookCtx {
   series: string;
   label: string;
   color: string | undefined;
+  /** Which vocabulary `rendered` is written in, and which a RETURNED string must use too. */
+  medium: "html" | "svg";
   rendered: string;
 }
 

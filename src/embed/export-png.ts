@@ -11,7 +11,7 @@ import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
-import { ICON_BOX, iconFromLegendItem, legendRowMarkup, iconSvgGroup, iconWidth } from "../engine/icon.js";
+import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWidth } from "../engine/icon.js";
 import {
   W,
   H,
@@ -123,15 +123,19 @@ function drawLegend(
       y += ROW_H;
     }
     const cy = y - 4;
-    // `rendered` mirrors legend.ts's default DOM exactly (legendRowMarkup draws from the same
-    // iconShapes(icon) the group below does), so a hook sees the same markup on screen and in the
-    // export. `null`/no hook falls through to the untouched default drawing.
+    // `rendered` is SVG markup (legendRowMarkupSvg draws from the same iconShapes(icon) the
+    // group below does) -- NOT legend.ts's HTML string. `g` below is SVG-namespaced; setting its
+    // innerHTML to an HTML string like legend.ts's `<span>`s creates XHTML-namespaced nodes that
+    // the canvas rasterizer below (rasterize()) never paints -- correct on screen, invisible in
+    // the download. `medium: "svg"` tells the hook which vocabulary is safe to return here.
+    // `null`/no hook falls through to the untouched default drawing.
     const custom = item.series != null && hooks?.legendKey
       ? hooks.legendKey({
           series: item.series,
           label: item.label,
           color: item.color,
-          rendered: legendRowMarkup(icon, item.label),
+          medium: "svg",
+          rendered: legendRowMarkupSvg(icon, item.label),
         })
       : null;
     if (custom != null) {
