@@ -284,6 +284,10 @@ export function buildLineMarks(
   const categorical = xField === "_xc";
   const xScaleOpts = categorical ? { type: "point" as const, padding: 0.08 } : undefined;
 
+  // Shares the g[aria-label="line"] namespace with overlay marks (marks/overlay.ts): this selector
+  // also matches an overlay's path, and is safe only because overlay marks paint AFTER the data
+  // marks (so their paths sort later in DOM order) and assemble-plot.ts's tagging loop bounds by
+  // `i < seriesOrder.length`, leaving those later indices untouched by this entry.
   const tagging = [{ selector: 'g[aria-label="line"] path', seriesOrder }];
   // Shade fills get data-series too, so legend hover/pin/dim covers them with no extra wiring.
   if (shadeSeriesOrder.length) {

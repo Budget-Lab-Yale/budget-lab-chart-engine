@@ -35,6 +35,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Changed
 - `barStack.netDisplay` now chooses the net callout only. Defaults are unchanged: a spec that does not
   set `barStack.hover` renders exactly as before.
+- `RenderResult`, `FigurePane` and `FigureRenderResult` rename their `showTotalDot` field to
+  `netMode` — breaking for any consumer that reads it off a returned object (see below).
 
 ### Changed — internal
 - `MarkLayers.showTotalDot` (a tri-state boolean read for four different purposes) is replaced by

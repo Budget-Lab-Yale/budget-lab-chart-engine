@@ -253,9 +253,15 @@ function rugStripTop(svgEl: SVGSVGElement): number | null {
 function addLineHitPaths(svgEl: SVGSVGElement): void {
   const NS = "http://www.w3.org/2000/svg";
   const overlay = svgEl.querySelector(".tbl-crosshair-hit, .tbl-facet-crosshair-hit");
+  // A per-series `method`/`column` overlay on a line chart lands in this same
+  // `g[aria-label="line"]` namespace (marks/overlay.ts): Plot.line wraps it in its own
+  // `g[aria-label="line"]`, nesting the mark's `g.tbl-overlay-line` INSIDE that — so the base
+  // selector below would otherwise also pick up the overlay's path and give it a 14px invisible
+  // hit zone spanning its full `domain: axis` fit. `closest` (rather than a CSS `:not()`) is used
+  // because the class sits on that inner wrapper, not on the path or the aria-label element itself.
   const linePaths = Array.from(
     svgEl.querySelectorAll<SVGPathElement>('g[aria-label="line"] path[data-series]'),
-  );
+  ).filter((p) => !p.closest(".tbl-overlay-line"));
   for (const path of linePaths) {
     const series = path.getAttribute("data-series");
     const d = path.getAttribute("d");

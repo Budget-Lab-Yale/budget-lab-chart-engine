@@ -102,6 +102,9 @@ export function buildOverlayMarks(
   resolved.forEach((o, i) => {
     const entry = entries[o.entryIndex];
     const key = o.keyed && entry?.label ? annotationKey(entry.label) : undefined;
+    // Pushed ahead of the `rows.length < 2` return below on purpose, not by oversight: a populated
+    // `o.band` requires >= 2 finite rows to exist at all (engine/overlays.ts), so that return can
+    // never fire while a band is waiting to be pushed — there is no ordering bug to "fix" here.
     if (o.band?.length) {
       underlay.push(
         Plot.areaY(

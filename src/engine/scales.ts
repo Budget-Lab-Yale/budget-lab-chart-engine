@@ -178,6 +178,12 @@ export function computeBarYExtent(
   // Determine headroom: 1.08 when a net total is displayed as text above the stack
   // (stacked, no negatives, netDisplay resolves to "text" — either explicit "text" or
   // "auto" which defaults to "text" when all values are non-negative).
+  // A THIRD derivation of "does the net render as text", alongside src/spec/bar-stack.ts's
+  // resolveNetMode (and scales.ts's own historical shape here, predating that module). It
+  // deliberately does NOT call resolveNetMode: that function forces "none" whenever
+  // `barStack.normalize` is set, so a normalized all-positive stack would lose its 1.08 headroom —
+  // but this exact combination is already baked into published goldens. Unifying the two would move
+  // them. Left diverging on purpose; do not "fix" by swapping in resolveNetMode.
   const netDisplay = spec.barStack?.netDisplay ?? "auto";
   const netIsText =
     !hasNegatives &&

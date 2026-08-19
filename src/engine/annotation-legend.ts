@@ -11,7 +11,7 @@ import { TBL } from "./theme";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveAnnotations, xMarkerLabel, yMarkerLabel } from "../spec/annotations";
 import { resolveRugTracks } from "../spec/rug";
-import { overlayDashed } from "../spec/overlays";
+import { overlayDashed, overlayKind } from "../spec/overlays";
 import { overlayLineColor } from "./overlays";
 import type { LegendItem } from "./index";
 import type { ChartSpec, ColorRef, Overlay, ShadeRegion, XAxisBand } from "../spec/types";
@@ -190,9 +190,13 @@ export function buildAnnotationLegendItems(
   // than being re-derived here. Re-deriving is how `.is-dot` silently became a square.
   (spec.overlays ?? []).forEach((o: Overlay) => {
     if (!o.label || o.legend !== true) return;
+    const kind = overlayKind(o);
+    // A malformed two-kind (or zero-kind) entry is refused by the resolver at paint time, so it
+    // must not get a legend row for a line that is never drawn.
+    if (kind == null) return;
     // A per-series fit is already keyed by the series legend, so this row keys the CONCEPT and takes
     // the neutral — one row cannot key N colours and a concept at once.
-    const perSeries = (o.method != null || o.column != null) && (o.by ?? "series") === "series";
+    const perSeries = (kind === "method" || kind === "column") && (o.by ?? "series") === "series";
     rows.push(
       ruleRow(o, o.label, {
         dashed: overlayDashed(o),

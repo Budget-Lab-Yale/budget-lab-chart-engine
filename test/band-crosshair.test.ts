@@ -801,6 +801,51 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
+  it('barStack.hover "tooltip" attaches the floating tooltip even with no net dot (netDisplay: none)', () => {
+    // netDisplay: none means resolveNetMode is "none", so nothing about the net forces a tooltip on
+    // its own — only the explicit `hover: "tooltip"` field should. Reverting the read site at
+    // render-live.ts back to `netMode === "dot"` makes this render pills instead, and this test red.
+    const spec: ChartSpec = {
+      ...DIVERGING_SPEC,
+      barStack: { netDisplay: "none", hover: "tooltip" },
+    };
+    const rows: TidyRow[] = [
+      { time: "A", series: "Up", value: "6" },
+      { time: "A", series: "Down", value: "4" },
+      { time: "B", series: "Up", value: "5" },
+      { time: "B", series: "Down", value: "2" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows, width: 600, height: 360 });
+    const svg = hoverFirstBar(container);
+    // The shared tooltip element is a per-document singleton (getSharedTooltip) whose innerHTML is
+    // OVERWRITTEN, not appended, on every hover — so a head-div COUNT does not discriminate once a
+    // prior test has shown a tooltip at all; opacity is what "attached vs. not" turns on.
+    const tip = document.body.querySelector<HTMLElement>(".tbl-tooltip")!;
+    expect(tip.style.opacity).toBe("1");
+    expect(tip.querySelector(".tbl-tooltip-head")).not.toBeNull();
+    expect(svg.querySelector("g.tbl-coord")).toBeNull();
+    document.body.removeChild(container);
+  });
+
+  it('barStack.totalPosition "first" puts the Total row first in the live tooltip', () => {
+    // Exercises the internal forward at crosshair.ts's attachBandCrosshair call (render-live.ts) all
+    // the way into buildBandTooltipHtml's totalPosition branch. Deleting that forward defaults the
+    // HTML builder to "last", which is what should turn this test red.
+    const spec: ChartSpec = {
+      ...DIVERGING_SPEC,
+      barStack: { netDisplay: "dot", totalPosition: "first" },
+    };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    hoverFirstBar(container);
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    const rowDivs = Array.from(tip.querySelectorAll(":scope > div"));
+    // rowDivs[0] is the head; the Total row must be the very next one, ahead of the series rows.
+    expect(rowDivs[1]?.className).toContain("tbl-tooltip-row--total");
+    document.body.removeChild(container);
+  });
+
   it("uniform hover-row height across a section spacer (task 17, item 4): 'Food' (last of P) and 'Rent' (first of Q, across the spacer) get the SAME shaded-row height", () => {
     const sectionedSpec: ChartSpec = {
       chartType: "bar",

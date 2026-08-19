@@ -6,7 +6,8 @@
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
-import { OVERLAY_LABEL_CLASS } from "../src/engine/marks/overlay";
+import { OVERLAY_LABEL_CLASS, OVERLAY_LINE_CLASS } from "../src/engine/marks/overlay";
+import { annotationKey } from "../src/engine/annotation-legend";
 import { TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -106,6 +107,35 @@ describe("overlays — legend row", () => {
     const svg = buildExportSvg(spec([{ fun: "x", label: "Asserted", legend: true }]), ROWS);
     const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "");
     expect(texts).toContain("Asserted");
+  });
+});
+
+describe("overlays — annotation key on the DOM path", () => {
+  it("tags only the keyed overlay's path with data-annotation, and not its unkeyed neighbour", () => {
+    // The neighbour is the point: annotationOrder is a hand-aligned parallel array to
+    // combinedSeriesOrder (marks/overlay.ts), so an off-by-one there would tag the WRONG path — a
+    // single-overlay test can't distinguish that from tagging none or tagging the right one by luck.
+    const s = spec([
+      { slope: 2, intercept: 0, label: "Unkeyed asserted" },
+      { fun: "x", label: "Keyed asserted", legend: true },
+    ]);
+    const { svg } = renderChart(s, ROWS, OPTS);
+    const tagged = Array.from(
+      svg.querySelectorAll<SVGPathElement>(`g.${OVERLAY_LINE_CLASS} path[data-annotation]`),
+    );
+    expect(tagged.length).toBe(1);
+    expect(tagged[0]!.getAttribute("data-annotation")).toBe(annotationKey("Keyed asserted"));
+  });
+});
+
+describe("overlays — malformed entry", () => {
+  it("gets no legend row when it declares two kinds at once (the resolver drops it)", () => {
+    // overlayKind returns null for an entry declaring more than one kind — validate.ts would reject
+    // this spec, but the legend builder must not re-derive its own looser "has a label" test and key
+    // a row for a line the resolver never draws.
+    const s = spec([{ method: "lm", fun: "x", label: "Two kinds", legend: true } as never]);
+    const { legendItems } = renderChart(s, ROWS, OPTS);
+    expect((legendItems ?? []).some((i) => i.label === "Two kinds")).toBe(false);
   });
 });
 
