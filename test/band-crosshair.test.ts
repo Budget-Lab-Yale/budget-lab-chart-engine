@@ -865,6 +865,22 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
+  it("with NO barStack.total block at all, the live tooltip still gets bold + divider by default", () => {
+    // This is the case the default flip is actually about: an existing chart with no opinion on
+    // total.bold/.divider at all (not even an empty {}) gets the bold, divided row on hover.
+    // A builder-only test cannot prove the spec path reaches it -- only mountChart -> render-live
+    // -> attachBandCrosshair -> buildBandTooltipHtml, end to end, can.
+    const spec: ChartSpec = { ...DIVERGING_SPEC, barStack: { netDisplay: "dot" } };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    hoverFirstBar(container);
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    const totalRow = tip.querySelector(".tbl-tooltip-row--total")!;
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-bold");
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-rule-above");
+    document.body.removeChild(container);
+  });
+
   it("uniform hover-row height across a section spacer (task 17, item 4): 'Food' (last of P) and 'Rent' (first of Q, across the spacer) get the SAME shaded-row height", () => {
     const sectionedSpec: ChartSpec = {
       chartType: "bar",

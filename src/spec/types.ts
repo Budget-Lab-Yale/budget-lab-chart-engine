@@ -668,14 +668,16 @@ export interface ChartSpec {
      *  dial settings silently flipped the reader between a tooltip and value pills (issue #29). */
     hover?: "tooltip" | "pills";
     /** The hover tooltip's Total row. Stacked charts with 2+ series only; a 100 %-normalized stack
-     *  never gets a Total row (its total is always 100). */
+     *  never gets a Total row (its total is always 100). `bold` and `divider` default ON — every
+     *  such Total row gets a bold, divided row on hover unless a chart opts out. */
     total?: {
       /** Where the row sits: "last" (default, after the series rows) or "first". */
       position?: "first" | "last";
-      /** Bold the row, so a card whose reader looks to the total first can say so in the spec
-       *  instead of overriding `.tbl-tooltip-row--total` in CSS. Default false. */
+      /** Bold the row's label (the value is already bold). Default true — set `false` to opt out. */
       bold?: boolean;
-      /** Rule separating the Total row from the series rows. Default false. */
+      /** Rule separating the Total row from the series rows; the side flips with `position` (see
+       *  `position` above) so it always separates the Total row from the series rows, never from
+       *  the category header. Default true — set `false` to opt out. */
       divider?: boolean;
     };
   };

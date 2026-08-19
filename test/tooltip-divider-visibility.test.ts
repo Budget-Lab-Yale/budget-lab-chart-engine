@@ -7,6 +7,11 @@
 // plot area) shipped invisible over a saturated bar. This rasterizes the REAL standalone bundle
 // in headless Chromium, hovers a REAL dark bar, and reads pixels out of a REAL screenshot of the
 // live .tbl-tooltip element.
+//
+// `bold`/`divider` default ON, so the case that actually matters is a spec with NO `barStack.total`
+// block at all — every pre-existing stacked chart with a Total row. Both specs below are verified
+// through the same real-browser path; the explicit opt-in case guards against a future change that
+// makes the opt-out the only route to this markup.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
@@ -28,22 +33,33 @@ const HAS_BROWSER = (() => {
 // palette default. Both series share it, so wherever the hovered pointer/tooltip lands over the
 // single bar, the backdrop is uniformly dark.
 const DARK = "#101F5B"; // --tbl-navy
-const SPEC: ChartSpec = {
-  chartType: "stacked",
-  title: "Divider visibility",
-  xAxisType: "categorical",
-  series_order: ["A", "B"],
-  series_colors: { A: DARK, B: DARK },
-  // netDisplay: "none" + hover: "tooltip" is the only way to reach a Total row with `hover:
-  // tooltip` and no net dot (see stacked-tooltip-total-position tests) — total.bold/divider
-  // apply to either Total-row branch, this just reuses the smallest reproduction.
-  barStack: { netDisplay: "none", hover: "tooltip", total: { bold: true, divider: true } },
-  data: "inline",
-};
 const ROWS: TidyRow[] = [
   { time: "Cat", series: "A", value: "40" },
   { time: "Cat", series: "B", value: "40" },
 ];
+
+// netDisplay: "none" + hover: "tooltip" is the only way to reach a Total row with `hover:
+// tooltip` and no net dot — total.bold/divider apply to either Total-row branch, this just
+// reuses the smallest reproduction.
+const BASE = {
+  chartType: "stacked" as const,
+  title: "Divider visibility",
+  xAxisType: "categorical" as const,
+  series_order: ["A", "B"],
+  series_colors: { A: DARK, B: DARK },
+  data: "inline" as const,
+};
+
+// Explicit opt-in (belt and suspenders — proves the field still works when set).
+const SPEC_EXPLICIT: ChartSpec = {
+  ...BASE,
+  barStack: { netDisplay: "none", hover: "tooltip", total: { bold: true, divider: true } },
+};
+// The case the default flip is actually about: no `total` block at all.
+const SPEC_DEFAULT: ChartSpec = {
+  ...BASE,
+  barStack: { netDisplay: "none", hover: "tooltip" },
+};
 
 /** Average perceptual luminance (0-255) of a horizontal pixel strip, avoiding the rounded
  *  corners by sampling only the inner 60% of the width. */
@@ -73,69 +89,86 @@ afterAll(async () => {
   await browser?.close();
 });
 
-describe.skipIf(!HAS_BROWSER)("barStack.total.divider — visible against a dark bar (real browser)", () => {
-  it("renders a rule perceptibly different from the plain gap immediately above it", async () => {
-    const liveJs = readFileSync(BUNDLE_PATH, "utf8");
+/** Mount `spec` in a real page, hover the (single, dark) bar, and return the live `.tbl-tooltip`
+ *  locator plus the DPR-scaled screenshot PNG, once the tooltip is showing. */
+async function mountHoverAndShoot(
+  page: Page,
+  spec: ChartSpec,
+  dpr: number,
+): Promise<{ png: PNG; ruleCssTop: number; tipTop: number }> {
+  const liveJs = readFileSync(BUNDLE_PATH, "utf8");
+  await page.setContent(
+    `<!doctype html><html><head><style>${CHART_CSS}</style></head>` +
+      `<body style="margin:0;background:#fff">` +
+      `<div id="chart" style="width:700px;height:500px"></div>` +
+      `<script>${liveJs}</script></body></html>`,
+    { waitUntil: "load" },
+  );
+  await page.evaluate(
+    ({ spec, rows }) => {
+      const w = window as unknown as {
+        BudgetLabChart: { mountChart: (el: Element, opts: unknown) => void };
+      };
+      w.BudgetLabChart.mountChart(document.getElementById("chart")!, {
+        spec,
+        rows,
+        width: 700,
+        height: 500,
+      });
+    },
+    { spec, rows: ROWS },
+  );
+
+  const hit = page.locator(".tbl-band-crosshair-hit").first();
+  await hit.waitFor({ state: "attached" });
+  const barBox = await page.locator('g[aria-label="bar"] rect').first().boundingBox();
+  if (!barBox) throw new Error("no bar rect found");
+  // Hover comfortably inside the (single, wide, tall) dark bar so the tooltip's +14/+14 offset
+  // also lands over it, not past its edge.
+  const cx = barBox.x + barBox.width / 2;
+  const cy = barBox.y + Math.min(30, barBox.height / 2);
+  await page.mouse.move(cx, cy);
+
+  const tip = page.locator(".tbl-tooltip");
+  await expect.poll(() => tip.evaluate((el) => (el as HTMLElement).style.opacity)).toBe("1");
+
+  const geom = await page.evaluate(() => {
+    const t = document.querySelector(".tbl-tooltip")!.getBoundingClientRect();
+    const row = document.querySelector(".tbl-tooltip-row--total")!.getBoundingClientRect();
+    return { tipTop: t.top, rowTop: row.top };
+  });
+  const shot = await tip.screenshot();
+  const png = PNG.sync.read(shot);
+  return { png, ruleCssTop: geom.rowTop, tipTop: geom.tipTop };
+}
+
+/** Runs the full visible-divider assertion for one spec, sharing the geometry/pixel logic. */
+function verifyVisibleDivider(name: string, spec: ChartSpec) {
+  it(`${name}: renders a rule perceptibly different from the plain gap above it, and a bold label`, async () => {
     const DPR = 2; // magnify so a 1px CSS border is not lost to a single ambiguous device pixel
     const page: Page = await browser.newPage({
       viewport: { width: 700, height: 500 },
       deviceScaleFactor: DPR,
     });
     try {
-      await page.setContent(
-        `<!doctype html><html><head><style>${CHART_CSS}</style></head>` +
-          `<body style="margin:0;background:#fff">` +
-          `<div id="chart" style="width:700px;height:500px"></div>` +
-          `<script>${liveJs}</script></body></html>`,
-        { waitUntil: "load" },
-      );
-      await page.evaluate(
-        ({ spec, rows }) => {
-          const w = window as unknown as {
-            BudgetLabChart: { mountChart: (el: Element, opts: unknown) => void };
-          };
-          w.BudgetLabChart.mountChart(document.getElementById("chart")!, {
-            spec,
-            rows,
-            width: 700,
-            height: 500,
-          });
-        },
-        { spec: SPEC, rows: ROWS },
-      );
+      const { png, ruleCssTop, tipTop } = await mountHoverAndShoot(page, spec, DPR);
 
-      const hit = page.locator(".tbl-band-crosshair-hit").first();
-      await hit.waitFor({ state: "attached" });
-      const barBox = await page.locator('g[aria-label="bar"] rect').first().boundingBox();
-      if (!barBox) throw new Error("no bar rect found");
-      // Hover comfortably inside the (single, wide, tall) dark bar so the tooltip's +14/+14
-      // offset also lands over it, not past its edge.
-      const cx = barBox.x + barBox.width / 2;
-      const cy = barBox.y + Math.min(30, barBox.height / 2);
-      await page.mouse.move(cx, cy);
-
-      const tip = page.locator(".tbl-tooltip");
-      await expect.poll(() => tip.evaluate((el) => (el as HTMLElement).style.opacity)).toBe("1");
-      // Total row must actually be present with the divider class (the thing under test).
-      // vitest's expect has no Playwright locator matchers (toHaveCount/toHaveClass) wired in —
-      // read the plain values out via evaluate and assert on those instead.
       const totalRowClass = await page.evaluate(
         () => document.querySelector(".tbl-tooltip-row--total")?.className ?? null,
       );
       expect(totalRowClass).not.toBeNull();
       expect(totalRowClass).toContain("tbl-tooltip-row--total-rule-above");
+      expect(totalRowClass).toContain("tbl-tooltip-row--total-bold");
 
-      const geom = await page.evaluate(() => {
-        const t = document.querySelector(".tbl-tooltip")!.getBoundingClientRect();
-        const row = document.querySelector(".tbl-tooltip-row--total")!.getBoundingClientRect();
-        return { tipTop: t.top, rowTop: row.top };
+      // Bold: the label's actually-computed weight, not just the class name.
+      const labelWeight = await page.evaluate(() => {
+        const label = document.querySelector(".tbl-tooltip-row--total .tbl-tooltip-label")!;
+        return getComputedStyle(label).fontWeight;
       });
-      // border-top sits exactly at the total row's own border-box top edge (margin excluded).
-      const ruleCssY = geom.rowTop - geom.tipTop;
+      expect(Number(labelWeight)).toBeGreaterThanOrEqual(700); // --tw-bold is 800
 
-      const shot = await tip.screenshot();
-      const png = PNG.sync.read(shot);
-
+      // Divider: border-top sits exactly at the Total row's own border-box top edge.
+      const ruleCssY = ruleCssTop - tipTop;
       const ruleY = Math.round(ruleCssY * DPR);
 
       // The expected row from getBoundingClientRect is exact in CSS px, but the actual painted
@@ -167,4 +200,9 @@ describe.skipIf(!HAS_BROWSER)("barStack.total.divider — visible against a dark
       await page.close();
     }
   }, 30000);
+}
+
+describe.skipIf(!HAS_BROWSER)("barStack.total bold + divider — visible against a dark bar (real browser)", () => {
+  verifyVisibleDivider("explicit total: { bold: true, divider: true }", SPEC_EXPLICIT);
+  verifyVisibleDivider("NO barStack.total block at all (the default)", SPEC_DEFAULT);
 });

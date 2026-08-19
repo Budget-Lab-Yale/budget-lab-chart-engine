@@ -688,10 +688,12 @@ export interface BandCrosshairOptions {
   /** Where the tooltip's Total row sits: "last" (default, after the series rows) or "first". See
    *  spec/types.ts's `barStack.total.position`. */
   totalPosition?: "first" | "last";
-  /** Bold the Total row. See spec/types.ts's `barStack.total.bold`. Default false. */
+  /** Bold the Total row. See spec/types.ts's `barStack.total.bold`. Default ON — pass `false`
+   *  to opt out. */
   totalBold?: boolean;
   /** Rule separating the Total row from the series rows; side flips with `totalPosition` — see
-   *  `buildBandTooltipHtml`. See spec/types.ts's `barStack.total.divider`. Default false. */
+   *  `buildBandTooltipHtml`. See spec/types.ts's `barStack.total.divider`. Default ON — pass
+   *  `false` to opt out. */
   totalDivider?: boolean;
   /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
   isFaceted?: boolean;
@@ -847,13 +849,16 @@ export function buildBandTooltipHtml(
     totalRow?: TotalRow;
     /** Where the Total row sits: "last" (default, after the series rows) or "first". */
     totalPosition?: "first" | "last";
-    /** Bold the Total row. Default false. */
+    /** Bold the Total row. Default ON (opt-out: pass `false`) — this builder is the single
+     *  source of that default; callers (attachBandCrosshair's forward, render-live.ts's two
+     *  attachBandCrosshair call sites) pass the spec value straight through un-defaulted. */
     totalBold?: boolean;
     /** Rule separating the Total row from the series rows; side flips with `totalPosition` —
      *  "last" (row sits below the series rows) draws the rule ABOVE it (border-top), "first" (row
      *  sits above them) draws it BELOW (border-bottom). A fixed top-only rule would, in "first"
      *  position, separate the category header from the Total row instead of the Total row from
-     *  the series rows — the wrong pair. Default false. */
+     *  the series rows — the wrong pair. Default ON (opt-out: pass `false`), for the same
+     *  single-source-of-default reason as totalBold above. */
     totalDivider?: boolean;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
@@ -902,8 +907,11 @@ export function buildBandTooltipHtml(
     const rowClasses = [
       "tbl-tooltip-row",
       "tbl-tooltip-row--total",
-      ...(opts.totalBold ? ["tbl-tooltip-row--total-bold"] : []),
-      ...(opts.totalDivider
+      // Default ON (opt-out): (opts.totalBold ?? true). The builder is the single source of
+      // this default — render-live.ts passes spec.barStack?.total?.bold/.divider straight
+      // through undefined-when-unset, and an explicit `false` in the spec still wins here.
+      ...((opts.totalBold ?? true) ? ["tbl-tooltip-row--total-bold"] : []),
+      ...((opts.totalDivider ?? true)
         ? [position === "first" ? "tbl-tooltip-row--total-rule-below" : "tbl-tooltip-row--total-rule-above"]
         : []),
     ].join(" ");

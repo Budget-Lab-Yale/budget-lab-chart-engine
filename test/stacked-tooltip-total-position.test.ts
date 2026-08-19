@@ -2,11 +2,16 @@
 //
 // `barStack.total.position` orders the tooltip's Total row; `.bold` and `.divider` style it.
 // Default "last" position keeps today's markup byte-for-byte; "first" retires the consumer CSS
-// reorder (issue #29). At the crosshair layer these stay three flat options (totalPosition,
-// totalBold, totalDivider) on buildBandTooltipHtml's opts — the nesting is spec-authoring sugar
-// only; see render-live.ts for where `barStack.total.*` gets flattened into these. PURE —
-// buildBandTooltipHtml does no DOM access (the jsdom environment here is only for the alignment
-// test's child-count check).
+// reorder (issue #29). `bold` and `divider` default ON (opt-out with `false`) — every stacked
+// chart with a Total row gets a bold, divided row on hover unless it says otherwise; this is a
+// deliberate on-screen change to existing hover cards, not a regression (tooltips never appear in
+// the PNG export or in any golden fixture). At the crosshair layer these stay three flat options
+// (totalPosition, totalBold, totalDivider) on buildBandTooltipHtml's opts — the nesting is
+// spec-authoring sugar only; see render-live.ts for where `barStack.total.*` gets flattened into
+// these, UN-DEFAULTED (`spec.barStack?.total?.bold`, straight through as `undefined` when unset).
+// The builder is the SINGLE source of the `?? true` default — defaulting it again at the
+// render-live.ts call sites would be two sources for one rule. PURE — buildBandTooltipHtml does no
+// DOM access (the jsdom environment here is only for the alignment test's child-count check).
 import { describe, it, expect } from "vitest";
 import { buildBandTooltipHtml } from "../src/engine/crosshair";
 
@@ -79,11 +84,8 @@ describe("band tooltip — Total row position", () => {
 describe("band tooltip — Total row alignment (text branch)", () => {
   it("gives the text Total row an empty swatch spacer so its label indents like a series row", () => {
     const html = buildBandTooltipHtml("Q1", ROWS, OPTS);
-    // Byte-identical Total row class when bold/divider are both unset — the alignment fix is the
-    // only markup change from before this feature existed.
-    expect(totalRowClass(html)).toBe("tbl-tooltip-row tbl-tooltip-row--total");
     expect(html).toMatch(
-      /<div class="tbl-tooltip-row tbl-tooltip-row--total"><span class="tbl-tooltip-swatch" aria-hidden="true">/,
+      /<div class="[^"]*tbl-tooltip-row--total[^"]*"><span class="tbl-tooltip-swatch" aria-hidden="true">/,
     );
   });
 
@@ -102,51 +104,74 @@ describe("band tooltip — Total row alignment (text branch)", () => {
     // (pre-existing); the empty-spacer pattern is unique to the text branch's alignment fix.
     expect(html).not.toMatch(/class="tbl-tooltip-swatch" aria-hidden="true"/);
   });
+
+  it("with bold and divider explicitly off, the Total row class is exactly the pre-styling pair", () => {
+    // The one true byte-identical-to-before-this-feature case now lives here, gated on the
+    // explicit opt-out rather than on omitting the fields (which now means ON).
+    const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalBold: false, totalDivider: false });
+    expect(totalRowClass(html)).toBe("tbl-tooltip-row tbl-tooltip-row--total");
+  });
 });
 
-describe("band tooltip — Total row bold", () => {
-  it("adds no class by default", () => {
+describe("band tooltip — Total row bold (default ON)", () => {
+  it("adds tbl-tooltip-row--total-bold by DEFAULT, with no field set at all", () => {
     const html = buildBandTooltipHtml("Q1", ROWS, OPTS);
-    expect(totalRowClass(html)).not.toContain("total-bold");
+    expect(totalRowClass(html).split(" ")).toContain("tbl-tooltip-row--total-bold");
   });
 
-  it("adds tbl-tooltip-row--total-bold when totalBold is true", () => {
+  it("still adds it when totalBold is explicitly true", () => {
     const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalBold: true });
     expect(totalRowClass(html).split(" ")).toContain("tbl-tooltip-row--total-bold");
   });
 
-  it("applies to the dot branch too, not just text", () => {
-    const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalRow: "dot" as const, totalBold: true });
-    expect(totalRowClass(html).split(" ")).toContain("tbl-tooltip-row--total-bold");
+  it("an explicit false opts out", () => {
+    const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalBold: false });
+    expect(totalRowClass(html)).not.toContain("total-bold");
+  });
+
+  it("applies to the dot branch too, default ON and opt-out still wins", () => {
+    const dotDefault = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalRow: "dot" as const });
+    expect(totalRowClass(dotDefault).split(" ")).toContain("tbl-tooltip-row--total-bold");
+    const dotOptOut = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalRow: "dot" as const, totalBold: false });
+    expect(totalRowClass(dotOptOut)).not.toContain("total-bold");
   });
 });
 
-describe("band tooltip — Total row divider (side flips with position)", () => {
-  it("adds no class by default", () => {
+describe("band tooltip — Total row divider (default ON, side flips with position)", () => {
+  it('adds tbl-tooltip-row--total-rule-above by DEFAULT, with no field set at all (position "last")', () => {
     const html = buildBandTooltipHtml("Q1", ROWS, OPTS);
-    expect(totalRowClass(html)).not.toContain("total-rule");
+    const cls = totalRowClass(html).split(" ");
+    expect(cls).toContain("tbl-tooltip-row--total-rule-above");
+    expect(cls).not.toContain("tbl-tooltip-row--total-rule-below");
   });
 
-  it('position "last" (default): divider reads as a rule ABOVE the row (border-top)', () => {
+  it('flips to tbl-tooltip-row--total-rule-below by DEFAULT when totalPosition is "first"', () => {
+    const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalPosition: "first" as const });
+    const cls = totalRowClass(html).split(" ");
+    expect(cls).toContain("tbl-tooltip-row--total-rule-below");
+    expect(cls).not.toContain("tbl-tooltip-row--total-rule-above");
+  });
+
+  it("still adds the rule when totalDivider is explicitly true", () => {
     const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalDivider: true });
     const cls = totalRowClass(html).split(" ");
     expect(cls).toContain("tbl-tooltip-row--total-rule-above");
     expect(cls).not.toContain("tbl-tooltip-row--total-rule-below");
   });
 
-  it('position "first": divider flips to a rule BELOW the row (border-bottom)', () => {
+  it("an explicit false opts out, whatever the position", () => {
     const html = buildBandTooltipHtml("Q1", ROWS, {
       ...OPTS,
-      totalDivider: true,
+      totalDivider: false,
       totalPosition: "first" as const,
     });
-    const cls = totalRowClass(html).split(" ");
-    expect(cls).toContain("tbl-tooltip-row--total-rule-below");
-    expect(cls).not.toContain("tbl-tooltip-row--total-rule-above");
+    expect(totalRowClass(html)).not.toContain("total-rule");
   });
 
-  it("applies to the dot branch too, not just text", () => {
-    const html = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalRow: "dot" as const, totalDivider: true });
-    expect(totalRowClass(html).split(" ")).toContain("tbl-tooltip-row--total-rule-above");
+  it("applies to the dot branch too, default ON and opt-out still wins", () => {
+    const dotDefault = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalRow: "dot" as const });
+    expect(totalRowClass(dotDefault).split(" ")).toContain("tbl-tooltip-row--total-rule-above");
+    const dotOptOut = buildBandTooltipHtml("Q1", ROWS, { ...OPTS, totalRow: "dot" as const, totalDivider: false });
+    expect(totalRowClass(dotOptOut)).not.toContain("total-rule");
   });
 });
