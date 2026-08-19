@@ -524,7 +524,12 @@ body {
   font: var(--tw-body) 12px/1.35 var(--tbl-font-sans);
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(200, 205, 215, 0.7);
+  /* Shared by the card border and the Total-row divider (--total-rule-above/-below below): a
+     hairline that has to read against an ARBITRARY, possibly dark/saturated chart backdrop
+     through this card's translucent background — not tuned for a fixed opaque ground the way
+     --tbl-gridline is. One token so the two cannot drift apart. */
+  --tbl-tooltip-rule: rgba(200, 205, 215, 0.7);
+  border: 1px solid var(--tbl-tooltip-rule);
   white-space: nowrap;
   z-index: 9999;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
@@ -552,14 +557,20 @@ body {
 /* barStack.total.divider: the rule's SIDE flips with total.position, so it always separates the
    Total row from the series rows rather than from the category header. "last" (default) sits
    below the series rows, so the rule reads ABOVE it; "first" sits above them, so it reads BELOW.
-   --tbl-gridline matches the divider already used for the stacked-area tooltip's Total row. */
+   Reads --tbl-tooltip-rule (defined on .tbl-tooltip above), NOT --tbl-gridline: --tbl-gridline
+   (#F0F0F0) is a fixed OPAQUE colour tuned for a gridline over an opaque white plot area, so its
+   contrast against THIS card depends on how close that fixed luminance happens to land to
+   whatever bar colour shows through the card's translucent background — over one bar it read as
+   invisible (reported by screenshot, not by computed style, which can't tell you this at all).
+   --tbl-tooltip-rule is itself translucent, so it blends with the backdrop the same way the
+   card's own outer border already does, rather than landing at one fixed absolute luminance. */
 .tbl-tooltip-row--total-rule-above {
-  border-top: 1px solid var(--tbl-gridline);
+  border-top: 1px solid var(--tbl-tooltip-rule);
   margin-top: 4px;
   padding-top: 4px;
 }
 .tbl-tooltip-row--total-rule-below {
-  border-bottom: 1px solid var(--tbl-gridline);
+  border-bottom: 1px solid var(--tbl-tooltip-rule);
   margin-bottom: 4px;
   padding-bottom: 4px;
 }
