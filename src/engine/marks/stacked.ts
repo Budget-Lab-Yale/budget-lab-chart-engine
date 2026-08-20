@@ -27,7 +27,7 @@ import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import type { ChartSpec } from "../../spec/types";
-import { resolveNetMode } from "../../spec/bar-stack";
+import { resolveNetMode, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
 
@@ -323,9 +323,12 @@ export function buildStackedMarks(
   }
 
   // --- Segment labels ---
-  // Suppressed entirely when net is a dot (diverging). For cumulative (text) they are
-  // OPTIONAL, default OFF — only when spec.valueLabels.show === true.
-  if (netMode !== "dot" && !pane && spec.valueLabels?.show === true) {
+  // Suppressed entirely when net is a dot (diverging), and on a small-multiples pane. For cumulative
+  // (text) they are OPTIONAL, default OFF — only when spec.valueLabels.show === true.
+  //
+  // The rule lives in spec/bar-stack.ts because the hover value pills DEFAULT off exactly when these
+  // labels are painted, and the two must not be able to disagree about when that is.
+  if (stackedSegmentLabelsShown(spec, netMode, pane)) {
     // Mono light tiers (the two lightest, 100 & 200 per the Style-Guide) get dark text;
     // everything else white. monoScale returns darkest-first, so the light tiers are the
     // last two hexes assigned.

@@ -79,3 +79,49 @@ export function resolveTotalRow(
 export function hasNetDots(netMode: NetMode | undefined): boolean {
   return netMode === "dot";
 }
+
+/**
+ * Are a stacked chart's per-segment value labels actually PAINTED?
+ *
+ * SINGLE SOURCE for two decisions that must agree: the label mark itself (marks/stacked.ts) and the
+ * value-pill DEFAULT below. `valueLabels.show` is a REQUEST, and three cases refuse it — so a rule
+ * keyed on the request rather than on the paint would take pills away from charts that print no
+ * numbers at all. Deriving the two separately is exactly how they would drift.
+ *
+ * The refusals:
+ *  - `netMode == null` — NOT A STACKED CHART (only marks/stacked.ts sets it; see resolveHoverMode).
+ *    A **waterfall** lands here, and that is correct rather than incidental: it does paint labels
+ *    under `valueLabels.show`, but they are the running LEVEL after each step while its hover pill is
+ *    the signed DELTA. Those are different numbers, so nothing is duplicated and the pill must stay.
+ *  - `netMode === "dot"` — a diverging stack suppresses segment labels entirely.
+ *  - `pane` — small-multiples panes paint none either (there is no room).
+ */
+export function stackedSegmentLabelsShown(
+  spec: ChartSpec,
+  netMode: NetMode | undefined,
+  pane: boolean,
+): boolean {
+  if (spec.valueLabels?.show !== true) return false;
+  if (netMode == null || netMode === "dot") return false;
+  return !pane;
+}
+
+/**
+ * Are the hover value pills drawn?
+ *
+ * `valueLabels.show` moves the DEFAULT, and only that: an explicit `chrome.valuePills` — either way —
+ * still wins. Written as an override instead, `chrome.valuePills: true` would stop meaning anything
+ * on exactly the charts an author would set it on, which trades one uncoordinated behaviour for a
+ * switch that ignores what it was set to.
+ *
+ * Called at BOTH render-live.ts pill sites (the standalone `mountChart` one and `wireFigureSvg`'s
+ * per-pane one) with that site's own `pane` value. Same rule, different context — a pane really does
+ * paint no segment labels, so it really does keep its pills.
+ */
+export function resolveValuePills(
+  spec: ChartSpec,
+  netMode: NetMode | undefined,
+  pane: boolean,
+): boolean {
+  return spec.chrome?.valuePills ?? !stackedSegmentLabelsShown(spec, netMode, pane);
+}

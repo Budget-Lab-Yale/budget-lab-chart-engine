@@ -7,7 +7,7 @@
 import type { ChartSpec, TitleSelector, ValueAffixes } from "../spec/types.js";
 import type { RenderHooks } from "../spec/hooks.js";
 import type { NetMode } from "../spec/bar-stack.js";
-import { resolveHoverMode, resolveTotalRow, hasNetDots } from "../spec/bar-stack.js";
+import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
 import {
   parseTitleTokens,
@@ -938,7 +938,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // so a PNG export (which re-renders from the spec) agrees with the screen. Default true (today's
     // behaviour) when `chrome` or the key is absent.
     const chromeTooltip = spec.chrome?.tooltip ?? true;
-    const chromePills = spec.chrome?.valuePills ?? true;
+    // `valueLabels.show` moves the pill DEFAULT (the numbers are already in the bars); an explicit
+    // `chrome.valuePills` still wins. `pane: false` — this is the standalone chart. See
+    // spec/bar-stack.ts resolveValuePills; wireFigureSvg's site calls the SAME helper.
+    const chromePills = resolveValuePills(spec, netMode, false);
     const onHighlight = (active: Set<string>): void => {
       recolorNetLabels(svg);
       pillDriver?.setActive(active);
@@ -1946,7 +1949,10 @@ function wireFigureSvg(
   // so a PNG export (which re-renders from the spec) agrees with the screen. Default true (today's
   // behaviour) when `chrome` or the key is absent. Mirrors mountChart's identical consts.
   const chromeTooltip = ctx.spec.chrome?.tooltip ?? true;
-  const chromePills = ctx.spec.chrome?.valuePills ?? true;
+  // Mirrors mountChart's site through the SAME helper, with `pane: true` — a small-multiples pane
+  // paints no segment labels, so `valueLabels.show` leaves its pills alone. Two sites computing this
+  // separately is how the faceted-histogram and faceted-line pill gaps happened.
+  const chromePills = resolveValuePills(ctx.spec, ctx.netMode, true);
   // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
   // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
   // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
