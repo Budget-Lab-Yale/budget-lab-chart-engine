@@ -830,15 +830,17 @@ so a consumer stylesheet can target them without depending on presentation attri
 
 | class | element | drawn on |
 |---|---|---|
-| `tbl-coord-region` | the shaded band/column `<rect>` | every coordinated-cursor chart type |
-| `tbl-coord-pill` | a value-pill's background `<rect>` | bar, stacked-bar, waterfall, dot-plot, dumbbell, categorical-x line |
+| `tbl-coord-region` | the shaded band/column `<rect>` | every coordinated-cursor chart type except line and area (any x-axis type), which draw `tbl-coord-guide` instead |
+| `tbl-coord-pill` | a value-pill's background `<rect>` | every coordinated-cursor chart type except dumbbell (its coordinated cursor is a pure band echo — no pills); also draws the legend-hover/pin value pills on bar, stacked-bar, waterfall and dot-plot |
 | `tbl-coord-pill-text` | a value-pill's `<text>` | same as `tbl-coord-pill` |
-| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | bar/stacked (vertical) |
+| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | every coordinated-cursor chart type except dumbbell and horizontal bar/stacked/waterfall (which bold the existing axis label instead) — the actively-hovered pane only |
 | `tbl-coord-axis-label-text` | that echoed axis label's `<text>` | same as `tbl-coord-axis-label` |
-| `tbl-coord-guide` | the vertical guide `<line>` | temporal/numeric-x line charts |
-| `tbl-coord-dot` | the hovered point's highlight ring `<circle>` | temporal/numeric-x line charts |
+| `tbl-coord-guide` | the vertical guide `<line>` | line charts (any x-axis type) and area charts |
+| `tbl-coord-dot` | the hovered point's highlight ring `<circle>` | line charts (any x-axis type), area charts, and dot-plot |
 
-All seven live inside a `g.tbl-coord` wrapper. `chrome.valuePills: false` (see Bar / stacked-bar
+All seven live inside a `g.tbl-coord` wrapper, except `tbl-coord-pill`/`tbl-coord-pill-text`, which
+also draw inside a separate `g.tbl-hl-pills` wrapper for the legend-hover/pin pills (same classes,
+different group — see `attachHighlightPills`). `chrome.valuePills: false` (see Bar / stacked-bar
 options, above) removes only `tbl-coord-pill`/`tbl-coord-pill-text` on a bar/stacked-bar band and
 the legend-gesture pills — `tbl-coord-region` and the axis-label echo still render, since
 hit-testing and the band highlight are untouched by that switch, matching `chrome.tooltip`'s
