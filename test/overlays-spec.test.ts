@@ -347,6 +347,48 @@ describe("overlays — pooled `by: \"none\"` column consistency (3b)", () => {
     expect(r.errors.join(" ")).toContain('"1"'); // the offending x
   });
 
+  // The check compares NUMBERS, not spellings. The renderer converts each cell with unary `+`
+  // (engine/index.ts), so "1" and "1.0" at one x are ONE value to it and the figure draws
+  // correctly — rejecting it would break an already-published figure on the next re-pin, which is
+  // a strictly worse failure than the misdraw this check exists to catch.
+  it('accepts values that differ only in SPELLING — "1" and "1.0" are one number', () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1" },
+      { time: "1", value: "2", series: "B", yhat: "1.0" },
+      { time: "2", value: "3", series: "A", yhat: "2" },
+      { time: "2", value: "4", series: "B", yhat: "2.000" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    expect(r.errors).toEqual([]);
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts the other equal-but-differently-written forms (exponent, leading zero, plus sign)", () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1000" },
+      { time: "1", value: "2", series: "B", yhat: "1e3" },
+      { time: "2", value: "3", series: "A", yhat: "0.5" },
+      { time: "2", value: "4", series: "B", yhat: "+.50" },
+    ] as unknown as TidyRow[];
+    expect(
+      validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2).valid,
+    ).toBe(true);
+  });
+
+  // One bad cell must read as ONE problem. The numeric-or-empty check owns it; a non-numeric cell
+  // is not also a "differing values" disagreement, which would send the author looking for a
+  // second, non-existent fault.
+  it("reports a non-numeric cell ONCE — as not-numeric, not also as a pooled disagreement", () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", yhat: "oops" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    expect(r.valid).toBe(false);
+    expect(r.errors.length).toBe(1);
+    expect(r.errors[0]).toMatch(/not numeric/);
+  });
+
   it("accepts a genuinely pooled column — one value per x, replicated across every series' row", () => {
     const rows2: TidyRow[] = [
       { time: "1", value: "1", series: "A", yhat: "1.1" },

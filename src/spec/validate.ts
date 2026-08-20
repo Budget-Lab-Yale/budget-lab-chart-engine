@@ -1097,19 +1097,33 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       scopes = [rows];
     }
     for (const scopeRows of scopes) {
-      const byX = new Map<string, Set<string>>();
+      // INVARIANT: keyed by the PARSED number, never the cell's spelling. The renderer reads each
+      // cell with unary `+` (engine/index.ts), so "1" and "1.0" at one x are ONE value to it and
+      // the figure draws correctly — comparing spellings falsely rejects a spec that renders fine,
+      // and a false rejection breaks an already-published figure the next time a consumer re-pins,
+      // which is strictly worse than the misdraw this check exists to catch. The map's VALUE is the
+      // first raw spelling seen for that number, so the error still names a string the author can
+      // find in the CSV.
+      const byX = new Map<string, Map<number, string>>();
       for (const r of scopeRows) {
-        const v = (r[col] as string) ?? "";
-        if (v === "") continue;
+        const raw = (r[col] as string) ?? "";
+        // Blank ⇒ absent, exactly as the renderer treats it. Non-finite ⇒ already reported by the
+        // numeric-or-empty check above; flagging it here too would read as a second, unrelated
+        // fault for one bad cell.
+        if (raw === "") continue;
+        const v = +raw;
+        if (!Number.isFinite(v)) continue;
         const x = r[cols.x] as string;
-        const set = byX.get(x);
-        if (set) set.add(v);
-        else byX.set(x, new Set([v]));
+        const seen = byX.get(x);
+        if (seen) {
+          if (!seen.has(v)) seen.set(v, raw);
+        } else byX.set(x, new Map([[v, raw]]));
       }
       for (const [x, vals] of byX) {
         if (vals.size > 1) {
+          const spellings = [...vals.entries()].sort((a, b) => a[0] - b[0]).map(([, raw]) => raw);
           errors.push(
-            `overlays[${i}] pools column "${col}" with by: "none", but ${cols.x} ${JSON.stringify(x)} has differing values (${JSON.stringify([...vals].sort())}) across rows — a pooled overlay draws one polyline with no dedupe and this would zig-zag; use \`by: "series"\` if the value genuinely varies by series`,
+            `overlays[${i}] pools column "${col}" with by: "none", but ${cols.x} ${JSON.stringify(x)} has differing values (${JSON.stringify(spellings)}) across rows — a pooled overlay draws one polyline with no dedupe and this would zig-zag; use \`by: "series"\` if the value genuinely varies by series`,
           );
         }
       }
