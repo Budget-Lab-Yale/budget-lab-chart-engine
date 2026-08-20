@@ -73,6 +73,26 @@ const TEMPORAL_ROWS: TidyRow[] = ["2020-01-01", "2020-02-01", "2020-03-01"].flat
   ]),
 ) as unknown as TidyRow[];
 
+const SCATTER_ROWS: TidyRow[] = [1, 2, 3, 4].flatMap((x) => [
+  { pane: "P1", time: String(x), series: "A", value: String(x * 2) },
+  { pane: "P2", time: String(x), series: "B", value: String(x * 3) },
+]) as unknown as TidyRow[];
+
+const scatterSpec = (faceted: boolean): ChartSpec =>
+  spec({
+    chartType: "scatter", xAxisType: "numeric", series_order: ["A", "B"],
+    columns: { x: "time", value: "value", series: "series", ...(faceted ? { facet: "pane" } : {}) },
+    ...(faceted ? { data: "d.csv", ...sm } : {}),
+  });
+
+/** Hover a single POINT. Scatter's hover is `attachPointHover`, which listens on the marker itself
+ *  and adds no hit rect — so `hoverFirstMark` (which needs one) cannot reach it. */
+function hoverPoint(svg: SVGSVGElement): void {
+  svg.querySelector<SVGElement>(DOT_MARK)!.dispatchEvent(
+    new PointerEvent("pointerenter", { clientX: 10, clientY: 10, bubbles: true }),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // No card in ANY configuration: plain/grouped bar and waterfall.
 // ---------------------------------------------------------------------------
@@ -322,6 +342,24 @@ describe("card builders outside hooks.tooltip's two call sites", () => {
       rows,
     );
     hoverFirstMark(m.svgs[0]!, HIST);
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBe(0);
+  });
+
+  it("scatter, standalone: card at defaults but hooks.tooltip never fires", () => {
+    const m = mount(scatterSpec(false), SCATTER_ROWS);
+    hoverPoint(m.svgs[0]!);
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBe(0);
+  });
+
+  // The one row of the CONFIG-SPEC table where "never" holds on BOTH sides for the same reason:
+  // `attachPointHover` is never emitOnly, so a scatter pane keeps its card — and its builder is
+  // still not one of the two `buildBandTooltipHtml` call sites, so the hook still never fires.
+  it("scatter, 2-pane: card at defaults too, and hooks.tooltip still never fires", () => {
+    const m = mount(scatterSpec(true), SCATTER_ROWS, true);
+    expect(m.svgs.length).toBe(2);
+    hoverPoint(m.svgs[0]!);
     expect(cardShown()).toBe(true);
     expect(m.calls()).toBe(0);
   });

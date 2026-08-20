@@ -136,6 +136,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   closing either would change rendered hover text across the published archive at the next repin:
   `x_labels` renders in the band tooltip only, and `tooltip_x_format` is ignored by the coordinated
   cursor (a multi-pane *daily* line shows no x value at all).
+- **Two hover-only fixes, and the `tbl-coord-pill` claim narrowed to match.** A waterfall whose data
+  carries a `series` column (single-valued, which validates) drew **no value pill at all**: its bars
+  are stamped `SINGLE_SERIES_KEY` while its hover rows carried the column's value, so every pill
+  lookup missed. Fixed on the hover side rather than at the stamp, because `data-series` is in the
+  rendered SVG and drives series-keyed paint. And a single-series histogram's card row read
+  `": 5.00"` — a colon labelling nothing, since a chart with no series column has one implicit
+  series keyed `""`; that row now carries the value alone (`series_labels: {"": "…"}` still labels
+  it). Both are hover-only: no published image changes and no golden moved. The `tbl-coord-pill`
+  documentation said pills are drawn on every coordinated-cursor type but dumbbell, which
+  over-claimed the waterfall — they are **delta-step-only** there.
 
 ### Upgrading
 
