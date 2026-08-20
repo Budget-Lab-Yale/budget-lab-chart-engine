@@ -63,8 +63,8 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `note` | string | Note line below the chart, above the source. |
 | `x_axis_title` | string | Caption below the x-axis. |
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
-| `tooltip_decimals` | integer | Decimal places for values in hover tooltips (independent of axis ticks). Default 2. |
-| `tooltip_x_format` | string | d3 `timeFormat` pattern for the tooltip's **x** value. `xAxisType: temporal` or `quarterly` only — rejected on `numeric`/`categorical`. Default (absent): `"%b %Y"` on temporal, `YYYYQ#` on quarterly, matching the axis ticks. Set it when the data is finer than the ticks: on a **daily** series every point in a month otherwise shares one tooltip label, so hovering cannot tell you which day you are on. `"%b %-d, %Y"` → `Jul 23, 2026`. |
+| `tooltip_decimals` | integer | Decimal places for every hover **value**, independent of the axis ticks — the tooltip card where one is drawn, and the coordinated cursor's value pills where those replace it, so a multi-pane figure honours it too. Default 2. |
+| `tooltip_x_format` | string | d3 `timeFormat` pattern for the tooltip's **x** value. `xAxisType: temporal` or `quarterly` only — rejected on `numeric`/`categorical`. Default (absent): `"%b %Y"` on temporal, `YYYYQ#` on quarterly, matching the axis ticks. Set it when the data is finer than the ticks: on a **daily** series every point in a month otherwise shares one tooltip label, so hovering cannot tell you which day you are on. `"%b %-d, %Y"` → `Jul 23, 2026`. **Standalone figures only.** A multi-pane figure's coordinated cursor replaces each pane's card and draws its own x echo with a hardcoded `%b` / `%Y` (or `YYYYQ#`), ignoring this field — and on a **daily** multi-pane line the echo is absent altogether, because it can only annotate an existing x-axis tick and a span shorter than a month has none, so the reader gets value pills and no x value at all. Known gap, deliberately not closed: honouring the field there would change the rendered x label on every published multi-pane temporal figure that sets it. `test/hover-claims-defaults.test.ts` pins the current behaviour. |
 
 ### Value units
 
@@ -130,7 +130,7 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 |---|---|---|
 | `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. **Default `false`** (the axis fits its data range — anchoring at zero squishes a year axis to the right). |
 | `x_order` | array | Categorical x-axis only: render order for the x-axis categories. Listed categories come first in this order; any unlisted ones follow in data-encounter order. **Order-only** — unlike `series_order`, it does *not* filter. Ignored off a categorical x-axis. |
-| `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). |
+| `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). **Narrow reach — check it renders on your chart before relying on it.** It is honoured only in the *band* tooltip card, which at default settings is drawn on a **stacked** bar with a net dot (i.e. a stack with a negative value) or under an explicit `barStack.hover: "tooltip"`, standalone and faceted alike. It renders **nowhere else**: plain/grouped `bar` and `waterfall` hover with value pills and have no card at all; a coordinated small-multiples pane has no card; and `dumbbell`, `dotplot` and categorical-x `line` *do* draw a card but their crosshair does not carry category labels, so their header shows the raw category. The coordinated cursor's own category echo is the raw value too. Known gap, deliberately not closed: plumbing the label into the other hover surfaces would change rendered hover text on already-published figures at the next repin. `test/hover-claims-defaults.test.ts` pins the current reach. |
 | `yAxisPolicy.min` | number | Hard floor for the y-axis. |
 | `yAxisPolicy.max` | number | Hard ceiling for the y-axis. |
 | `yAxisPolicy.includeZero` | boolean | When `true` (and no hard min/max), always extend the y-domain to 0. |
@@ -529,7 +529,10 @@ overlays:
 Area charts (`chartType: area`) stack their series (a single series fills to the zero baseline);
 stack order follows `series_order`. The hover tooltip adds a cumulative **Total** row, and
 selecting series in the legend animates them to the bottom of the stack so they can be read against
-zero.
+zero. The Total row is **standalone only**: a multi-pane area figure's coordinated cursor replaces
+each pane's card with value pills that report each series' own value, so the cumulative stack height
+is not reported anywhere. Plan for that if the total is the number your reader needs — a single-pane
+area chart, or `small_multiples.coordinated_cursor: false`, keeps the card and its Total.
 
 ### Point charts (scatter / dot plot)
 
@@ -564,7 +567,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
-| `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip. Default true. Not bar-specific. |
+| `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip — which is a real restriction, not a formality: on a chart whose hover is the coordinated cursor or the value pills rather than a card (see `small_multiples.coordinated_cursor` and `barStack.hover`) there is no card to suppress and this switch is a no-op, pills included. Use `chrome.valuePills` for those. Default true. Not bar-specific. |
 | `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). On a **faceted** figure it also covers the coordinated cursor's per-series pills, on the hovered pane as well as on the echoed panes. Only the pills go: the guide line, the band/bin highlight, the per-series hover dots, the hovered pane's category echo, and hit-testing are untouched. Default true — **except where `valueLabels.show` has painted the numbers into EVERY segment** (a stacked chart that is not diverging, not a small-multiples pane, and with no segment too thin for its label), where the default flips to **off** so the hover does not repeat them. One skipped segment label keeps the default at true for the whole chart, so that segment still gets a number. That is a change of default, not an override: `true` here still wins and shows both, and `false` still suppresses them anywhere. |
 
 `chrome` is deliberately just these two switches. There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
@@ -582,10 +585,12 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `histogram.domain` | `[number, number]` | Explicit binning range `[min, max]`. Default: the data extent. |
 | `histogram.normalize` | enum | Bar-height normalization: `none` (default, raw counts/weights) \| `proportion` (each series' bins sum to 1) \| `density` (each series' area — Σ height × bin width — sums to 1). |
 | `histogram.weight` | string | Column **summed** per bin (a weighted histogram) instead of counting rows. Default: row count. Ignored (and rejected — see below) for pre-binned data. |
-| `histogram.bin_label` | object | Friendly formatting of the hover tooltip's bin-range header. See below. |
+| `histogram.bin_label` | object | Friendly formatting of the hovered bin's range label. See below. |
 
-**Bin-range tooltip labels (`histogram.bin_label`).** The hover tooltip header shows a friendly bin
-label instead of a mathematical interval. Numeric x renders an en-dash range (`47.9 – 50.7`).
+**Bin-range hover labels (`histogram.bin_label`).** The hovered bin is named by a friendly label
+rather than a mathematical interval. It reaches whichever surface the chart hovers with: the
+tooltip card's header on a standalone histogram, and the coordinated cursor's echoed bin label in a
+small-multiples pane, which is built from the same formatter with the same options so the two agree. Numeric x renders an en-dash range (`47.9 – 50.7`).
 Temporal x whose `binWidth` is a calendar interval name collapses each bin to its period name
 (`month` → `July 2023`, `quarter` → `Q3 2023`, `year` → `2023`, `week` → `Week of July 2, 2023`,
 `day` → `July 5, 2023`); any other temporal binning (a bin count, or a day-count `binWidth`) renders
@@ -689,7 +694,7 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.mode` | enum | `shared` (one y-scale, y-labels in the left column only — default) \| `per-pane` (each pane its own y-scale/units). |
 | `small_multiples.pane_order` | array | Pane render order + inclusion filter. |
 | `small_multiples.pane_titles` | object | `{ <facetValue>: "Display title" }`. Falls back to the raw facet value. |
-| `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true (a figure with a single pane has nothing to coordinate and behaves as if it were `false`). On a **line/area** pane the coordinated cursor *replaces* that pane's floating tooltip card with the in-place cursor — guide, per-series dot, value pill — so a reader gets the values from the pills rather than a card, and `overlays[].tooltip` has no card to report into. |
+| `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. A figure that resolves to a single **line/area/point** pane has nothing to coordinate and behaves as if this were `false` — but a single **bar or stacked** pane stays coordinated on purpose (the bar-end value pill is that chart type's hover treatment whether or not there are sibling panes), so there `false` is *not* equivalent to the default: it brings back the floating card. On a **line/area** pane the coordinated cursor *replaces* that pane's floating tooltip card with the in-place cursor — guide, per-series dot, value pill — so a reader gets the values from the pills rather than a card, and `overlays[].tooltip` has no card to report into. |
 | `small_multiples.pane_widths` | enum \| array | How a row's width splits among its columns (vertical bar facets; applied to every row). `equal` (default) — same data width per column. `equal-bar` — each column sized to its bar count so bars render at the same width (exact for a single row; multi-row uses the max bar count per column). An array like `[2, 1]` sets explicit per-column proportions (length must equal the column count). When set and `columns` is unset, the panes lay out in a single row. |
 
 **Faceted horizontal bars/stacks.** `orientation: horizontal` combines with `small_multiples` to
@@ -866,7 +871,7 @@ so a consumer stylesheet can target them without depending on presentation attri
 | `tbl-coord-region` | the shaded band/column `<rect>` | every coordinated-cursor chart type except line and area (any x-axis type), which draw `tbl-coord-guide` instead |
 | `tbl-coord-pill` | a value-pill's background `<rect>` | every coordinated-cursor chart type except dumbbell (its coordinated cursor is a pure band echo — no pills); also draws the legend-hover/pin value pills on bar, stacked-bar, waterfall and dot-plot |
 | `tbl-coord-pill-text` | a value-pill's `<text>` | same as `tbl-coord-pill` |
-| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | every coordinated-cursor chart type except dumbbell and horizontal bar/stacked/waterfall (which bold the existing axis label instead) — the actively-hovered pane only |
+| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | every coordinated-cursor chart type except dumbbell and horizontal bar/stacked/waterfall (which bold the existing axis label instead) — the actively-hovered pane only. On **line/area** it is additionally conditional on the pane having x-axis tick labels below the plot to echo into: a temporal axis ticks on whole months, so a pane spanning less than a month draws no ticks and therefore no echoed label either (that is the `tooltip_x_format` gap noted in the field table) |
 | `tbl-coord-axis-label-text` | that echoed axis label's `<text>` | same as `tbl-coord-axis-label` |
 | `tbl-coord-guide` | the vertical guide `<line>` | line charts (any x-axis type) and area charts |
 | `tbl-coord-dot` | the hovered point's highlight ring `<circle>` | line charts (any x-axis type), area charts, and dot-plot |
@@ -1081,8 +1086,13 @@ Notes:
 - **An unrecognized value is rejected at load**, never rendered flat. Density repeats (`"//"`) are
   deliberately unsupported: more ink per unit area reads as a darker shade, which is what the tonal
   scale already controls precisely through `series_colors`.
-- The texture reaches the chart, the legend key, the hover tooltip, and the **PNG export** — the
-  export re-renders from the spec, so a texture applied by a consumer's stylesheet would not.
+- The texture reaches the chart, the legend key, the **PNG export** — the export re-renders from the
+  spec, so a texture applied by a consumer's stylesheet would not — and the hover tooltip **on the
+  chart types that draw one**. That last clause is narrow: textures are restricted to the filled
+  types (`bar`, `stacked`, `area`, `histogram`, `waterfall`), and of those only standalone `area`,
+  standalone `histogram` and a stacked chart with a net dot hover with a card at default settings.
+  `bar` and `waterfall` never do, and no coordinated small-multiples pane does; there the texture
+  reaches the marks and the legend, and the hover shows in-place value pills with no key to texture.
 - **Every filled chart type keys with a square chip**, textured or not — `bar`, `stacked`, `area`,
   `histogram`, `waterfall`. `area` moved to a chip in 1.11.0: an area is a filled region, so a line
   swatch misrepresented it, and a 3px line cannot hold the glyph. The **line swatch** is now
@@ -1123,14 +1133,17 @@ Notes:
   **chart, the legend key, the hover tooltip and the PNG export** all draw the texture the chart
   resolved while painting the mark — one resolved texture, handed to the other three, not four
   derivations that have to match — so none of them can show a texture on a ground the chart does not
-  paint. Where a series' marks are painted over more than one ground (`category_colors`), the
+  paint. (The tooltip is in that list only where the chart type draws a tooltip at all; see the
+  note above.) Where a series' marks are painted over more than one ground (`category_colors`), the
   tooltip re-grounds per hovered mark and the legend row, which names a series rather than a mark,
   keys the first.
 - **A small-multiples figure has ONE legend over N panes**, so its key takes the texture a pane
   actually painted (the first pane that paints the series, so a series the first pane lacks is still
   keyed) rather than re-deriving one. A series is assigned its color once for the whole figure, so
-  every pane paints it the same ground and there is only one ground to take. Each pane's own
-  **tooltip** keys from that pane.
+  every pane paints it the same ground and there is only one ground to take. Where a pane draws a
+  **tooltip** of its own, it keys from that pane — which among the texturable types means a stacked
+  pane with a net dot; every other filled type's pane hovers with the coordinated cursor and has no
+  key to texture.
 - **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
   Since the band is derived from the ground's own lightness, a string whose lightness cannot be read
   would leave the band equal to the ground, i.e. a flat block where a texture was asked for. Neither

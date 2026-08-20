@@ -122,6 +122,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   sites in `src/engine/render-live.ts`, `src/engine/crosshair.ts` and `src/engine/marks/stacked.ts`.
   Consumers reading `showTotalDot` off a `renderChart` / `renderFigure` result should read `netMode`
   instead.
+- **Every CONFIG-SPEC.md claim of the form "X reaches the hover tooltip" is narrowed to what the
+  code does, and gated.** A floating hover card is rarer than the doc assumed: a coordinated
+  small-multiples pane draws none (the in-place cursor replaces it), and a plain/grouped bar or a
+  waterfall draws none in *any* configuration. Claims corrected: `hooks.tooltip`'s reach,
+  `x_labels`, `tooltip_x_format`, the stacked-area `Total` row, the three `series_patterns` texture
+  sentences, `small_multiples.coordinated_cursor`'s single-pane parenthetical, `chrome.tooltip`'s
+  scope, `tbl-coord-axis-label`'s conditions, and the `tooltip_decimals` / `histogram.bin_label`
+  wording. **No rendered output changes** — these were doc defects, not behaviour changes.
+  `test/hover-card-reach.test.ts` and `test/hover-claims-defaults.test.ts` gate them by mounting
+  every chart type at DEFAULT settings, standalone and two-pane; the earlier claims had each been
+  "verified" by a test that first turned a default off. Two gaps stay **open** by decision, because
+  closing either would change rendered hover text across the published archive at the next repin:
+  `x_labels` renders in the band tooltip only, and `tooltip_x_format` is ignored by the coordinated
+  cursor (a multi-pane *daily* line shows no x value at all).
 
 ### Upgrading
 
@@ -171,7 +185,11 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   today: 21.6 at `red-50`, 32.5 at `sky`). The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
   own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
-  The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
+  The texture reaches the marks, the legend key, the export, and the hover tooltip on the chart types
+  that draw one — which among the filled types is standalone `area`, standalone `histogram` and a
+  stacked chart with a net dot; `bar` and `waterfall` hover with value pills and have no tooltip key,
+  and neither does a coordinated small-multiples pane (corrected in 1.12.0; the original wording
+  over-claimed). A key draws ONE centred
   instance of the texture as a glyph rather than a patch of the tiling — at 14px a tiling shows an
   edge with no direction in it — so `"/"` reads as three bands, `"+"` as a plus, `"x"` as an x. A
   rasterising test measures all six from their pixels. An unrecognised
@@ -1044,7 +1062,8 @@ backward-compatible — existing chart specs render unchanged.
   `shape_order`, `shape_labels`, with separate `color_legend_title` / `shape_legend_title`),
   category dodge, per-point hover tooltips, and a coordinated cursor.
 - **Area** (`chartType: "area"`). Stacked areas, with a single series filling to the zero
-  baseline. The hover tooltip adds a cumulative **Total** row. **Click-to-restack**: selecting
+  baseline. The hover tooltip adds a cumulative **Total** row (standalone only — a coordinated
+  small-multiples pane has no card; clarified in 1.12.0). **Click-to-restack**: selecting
   series animates them to the bottom of the stack (in click order) so they can be read against
   zero; deselecting restores the default order.
 
