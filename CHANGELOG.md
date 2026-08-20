@@ -49,6 +49,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   that render correctly, and a false rejection breaks an already-published figure on the next repin,
   where a sawtooth is self-evident on the author's own screen.
 
+  **A `legend: true` overlay must be able to draw at least one line.** `method` and `column` entries
+  are dropped by the renderer when the data cannot feed them (a fit with fewer numeric values than
+  `degree + 1`, a column with fewer than two), but the legend row was built from the spec alone and
+  survived the line's absence — so a one-point `lm` keyed a line that was not on the chart. Now a
+  validation error. A per-series entry needs only ONE drawable series, since the row keys the
+  concept rather than each line.
+
   `overlays[].tooltip` (default `false`) opts a single overlay into the hover tooltip, reporting its
   value at the hovered x as a row of its own — behind a separator, so the observed series and their
   Total stay one block, and carrying a line swatch in the overlay's own colour and dash so a modelled

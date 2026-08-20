@@ -193,6 +193,14 @@ export function buildAnnotationLegendItems(
     const kind = overlayKind(o);
     // A malformed two-kind (or zero-kind) entry is refused by the resolver at paint time, so it
     // must not get a legend row for a line that is never drawn.
+    //
+    // This is the ONLY undrawable case decidable here, and deliberately so: the resolver also drops
+    // an entry whose DATA cannot feed it (a `method` fit under its degree, a `column` with fewer
+    // than two finite cells), and this function receives no rows, so it cannot see that. Do not try
+    // to add it — a half-rule here could filter on `pane_order` but could never tell
+    // `facet: "Norteast"` from `"Northeast"`, and would read as complete while missing the case
+    // that matters. `validateChartData` has the rows and owns that gate (search validate.ts for
+    // "must be able to draw SOMETHING").
     if (kind == null) return;
     // The colours this entry's lines ACTUALLY resolve to, asked of the mark's own resolver once per
     // line it draws. A row keys what one line swatch can carry: one colour, so the swatch takes it.

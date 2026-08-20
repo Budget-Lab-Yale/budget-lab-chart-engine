@@ -22,7 +22,7 @@ import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
-import { overlayKind } from "./overlays";
+import { overlayKind, overlayPerSeries } from "./overlays";
 import type { Overlay } from "./types";
 
 export interface ValidationResult {
@@ -1086,6 +1086,62 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
           facetValues.has(o.facet)
             ? `overlays[${i}].facet names pane ${JSON.stringify(o.facet)}, which small_multiples.pane_order excludes — that pane is never rendered, so the line would be drawn nowhere while still keying a legend row (rendered panes: ${JSON.stringify([...panes])})`
             : `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${facetField}" (data values: ${JSON.stringify([...facetValues].sort())})`,
+        );
+      }
+    }
+  }
+
+  // Cross-reference: a `legend: true` overlay must be able to draw SOMETHING. Sibling of the
+  // `facet` check above, and for the same reason: `buildAnnotationLegendItems` emits an entry's
+  // legend row from the spec alone, while `resolveOverlays` DROPS an entry it cannot compute from
+  // the data — a `method` fit with fewer usable points than its degree needs, a `column` with fewer
+  // than two finite cells. The two disagreed, so a one-point `lm` with `legend: true` rendered zero
+  // paths and a legend row anyway. The row is the half a reader sees. That builder gets no rows, so
+  // it cannot implement this; here is the only place that can.
+  //
+  // INVARIANT — this check is DELIBERATELY GENEROUS, and the direction is the point. It reads the
+  // raw table and ignores every filter that NARROWS what is drawn: `domain`, `series_order`,
+  // `pane_order`, `facet`, and the requirement that a line span two distinct x. Those can only
+  // REMOVE rows, so ignoring them makes this estimate too optimistic — it can miss a phantom row,
+  // and can never refuse an entry that draws. Do not "tighten" it by folding any of those in: that
+  // is exactly the re-derivation that made the pooled-column consistency guard wrong three times
+  // before it was withdrawn (test/overlays-spec.test.ts records the six ways). A missed phantom row
+  // is a cosmetic defect the author sees on screen; a false rejection breaks a published figure on
+  // the next repin.
+  //
+  // The row is EARNED BY ANY ONE GROUP: a per-series entry where one series can be fitted and
+  // another cannot still gets its single concept row (CONFIG-SPEC.md, `overlays[].legend`), so the
+  // threshold test is a MAX over groups, never an "every group" test.
+  // `legend: false` ⇒ no legend at all, so no row can be phantom (the label stays in-frame, where it
+  // is drawn from the resolved line and vanishes with it). A categorical axis draws no overlay at
+  // all and validateSpec already refuses `overlays` there — skipped so a direct validateChartData
+  // call cannot add a second, derivative complaint on top of that one.
+  if (spec.legend !== false && spec.xAxisType !== "categorical") {
+    for (const [i, o] of (spec.overlays ?? []).entries()) {
+      if (o.legend !== true || !o.label) continue;
+      const kind = overlayKind(o);
+      // `fun` and `slope`+`intercept` are constructed from the spec and read no data, so they draw
+      // wherever there is a domain — nothing here can starve them.
+      if (kind !== "method" && kind !== "column") continue;
+      const field = kind === "column" ? (o.column as string) : cols.value;
+      if (!field || !columns.has(field)) continue; // absent column: already reported above
+      // What `resolveOverlays` needs from ONE group: fitPoly wants degree + 1 finite pairs, and
+      // columnPoints wants 2 real points. Both counted over finite cells of the driving column.
+      const need = kind === "column" ? 2 : (o.method === "poly" ? (o.degree ?? 2) : 1) + 1;
+      const perSeries = overlayPerSeries(o);
+      const counts = new Map<string, number>();
+      for (const r of rows) {
+        const raw = (r[field] as string) ?? "";
+        if (raw === "" || !Number.isFinite(+raw)) continue;
+        const key = perSeries && cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const best = Math.max(0, ...counts.values());
+      if (best < need) {
+        errors.push(
+          kind === "column"
+            ? `overlays[${i}] has \`legend: true\` with label ${JSON.stringify(o.label)}, but column "${field}" ${perSeries && cols.series ? `has fewer than 2 numeric cells in any one series (most in one series: ${best})` : `has only ${best} numeric cell(s)`} — no line can be drawn, so the legend would key a line that is not on the chart. Remove \`legend: true\`, or give the column values.`
+            : `overlays[${i}] has \`legend: true\` with label ${JSON.stringify(o.label)}, but \`method: ${o.method}\` needs ${need} points and "${field}" has at most ${best} numeric cell(s)${perSeries && cols.series ? " in any one series" : ""} — the fit cannot be computed, so the legend would key a line that is not on the chart. Remove \`legend: true\`${o.method === "poly" ? ", or lower `degree`" : ""}, or give the chart more data.`,
         );
       }
     }

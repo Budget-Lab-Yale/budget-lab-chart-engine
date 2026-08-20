@@ -546,6 +546,157 @@ describe('overlays — a pooled `by: "none"` column is NOT checked for consisten
   });
 });
 
+// `legend: true` MOVES an overlay's label out of the frame into a legend row, and that row is built
+// from the SPEC alone (engine/annotation-legend.ts#buildAnnotationLegendItems, which gets no rows).
+// The LINE, by contrast, is built from the data, and `resolveOverlays` drops an entry it cannot
+// compute — a `method` fit with fewer points than its degree needs, a `column` with fewer than two
+// finite cells. The two disagreed: a one-point `lm` with `legend: true` rendered zero paths and a
+// legend row anyway, keying a line that is not on the chart. The row is the half a reader sees.
+//
+// Fixed HERE rather than in the legend builder because the builder has no rows and so cannot
+// implement the rule at all — it could read `pane_order` but could never tell `facet: "Norteast"`
+// from `"Northeast"`.
+//
+// DELIBERATELY GENEROUS, and that direction is the whole design. The check ignores every filter
+// that NARROWS what is drawn — `domain`, `series_order`, `pane_order`, `facet`, and the
+// distinct-x requirement — and asks only whether the raw table could feed a line under the most
+// permissive reading. Those filters can only remove rows, so ignoring them can make this estimate
+// too OPTIMISTIC (a phantom row slips through) and never too pessimistic (a drawable line
+// refused). That asymmetry is why re-deriving scope is safe here and was not safe for the pooled
+// consistency guard above: there, ignoring a filter invented a rejection; here it forgoes one.
+describe("overlays — `legend: true` on an entry that can draw no line at all", () => {
+  const one = (o: Record<string, unknown>, rows: unknown[], patch: Record<string, unknown> = {}) =>
+    validateChartData({ ...BASE, ...patch, overlays: [o] } as never, rows as TidyRow[]);
+
+  it("rejects a `column` entry with fewer than two finite cells in any series", () => {
+    const r = one({ column: "yhat", label: "Upstream fit", legend: true }, [
+      { time: "1", value: "1", series: "A", yhat: "5" },
+      { time: "2", value: "2", series: "A", yhat: "" },
+      { time: "3", value: "3", series: "A", yhat: "" },
+    ]);
+    expect(r.valid).toBe(false);
+    expect(r.errors.length).toBe(1);
+    expect(r.errors[0]).toMatch(/overlays\[0\]/);
+    expect(r.errors[0]).toContain("Upstream fit");
+  });
+
+  it("rejects a POOLED `column` entry with fewer than two finite cells in the whole table", () => {
+    const r = one({ column: "yhat", by: "none", label: "Pooled fit", legend: true }, [
+      { time: "1", value: "1", series: "A", yhat: "5" },
+      { time: "2", value: "2", series: "B", yhat: "" },
+    ]);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toContain("Pooled fit");
+  });
+
+  it("rejects a `method: poly` entry with fewer values than its degree needs", () => {
+    // degree 2 ⇒ fitPoly needs 3 finite pairs; two rows can never produce a curve.
+    const r = one({ method: "poly", degree: 2, label: "Quadratic", legend: true }, [
+      { time: "1", value: "1", series: "A" },
+      { time: "2", value: "2", series: "A" },
+    ]);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toContain("Quadratic");
+  });
+
+  it("rejects an `lm` entry with one usable point", () => {
+    const r = one({ method: "lm", label: "Fit", legend: true }, [
+      { time: "1", value: "1", series: "A" },
+      { time: "2", value: "", series: "A" },
+    ]);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toContain("Fit");
+  });
+
+  // The row is EARNED by any one series. A `by: "series"` entry where A can be fitted and B cannot
+  // draws A's line, and one legend row keys the concept for it — exactly as CONFIG-SPEC's
+  // `overlays[].legend` row promises ("ONE row for the concept, not one per series").
+  it("accepts a per-series entry where only SOME series can be drawn", () => {
+    expect(
+      one({ column: "yhat", label: "Upstream fit", legend: true }, [
+        { time: "1", value: "1", series: "A", yhat: "1" },
+        { time: "2", value: "2", series: "A", yhat: "2" },
+        { time: "3", value: "3", series: "B", yhat: "" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  it("accepts an entry that draws normally", () => {
+    expect(
+      one({ method: "lm", label: "Fit", legend: true }, [
+        { time: "1", value: "1", series: "A" },
+        { time: "2", value: "2", series: "A" },
+        { time: "3", value: "3", series: "A" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  // No legend row ⇒ nothing to be phantom. The label stays in-frame, and an in-frame label is drawn
+  // from the resolved line, so it disappears with it.
+  it("does not fire without `legend: true`", () => {
+    expect(
+      one({ column: "yhat", label: "Upstream fit" }, [
+        { time: "1", value: "1", series: "A", yhat: "5" },
+        { time: "2", value: "2", series: "A", yhat: "" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  it("does not fire on a chart with `legend: false` — there is no legend to key into", () => {
+    expect(
+      one(
+        { column: "yhat", label: "Upstream fit", legend: true },
+        [
+          { time: "1", value: "1", series: "A", yhat: "5" },
+          { time: "2", value: "2", series: "A", yhat: "" },
+        ],
+        { legend: false },
+      ).errors,
+    ).toEqual([]);
+  });
+
+  it("does not fire on the constructed kinds — `fun` and an abline need no data", () => {
+    const rows = [{ time: "1", value: "1", series: "A" }];
+    expect(one({ fun: "2*x", label: "Assumed", legend: true }, rows).errors).toEqual([]);
+    expect(one({ slope: 1, intercept: 0, label: "45°", legend: true }, rows).errors).toEqual([]);
+  });
+
+  // THE GENEROUS DIRECTION, pinned. In each of these the full table has enough values, and only a
+  // narrowing filter could take the count below the threshold. The check ignores the filter and
+  // ACCEPTS — forgoing a rejection rather than risking a false one.
+  it("accepts (rather than guesses) when only `series_order` could starve the entry", () => {
+    expect(
+      one(
+        { column: "yhat", label: "Upstream fit", legend: true },
+        [
+          { time: "1", value: "1", series: "A", yhat: "1" },
+          { time: "2", value: "2", series: "A", yhat: "2" },
+          { time: "3", value: "3", series: "B", yhat: "3" },
+        ],
+        { series_order: ["B"] },
+      ).errors,
+    ).toEqual([]);
+  });
+
+  it("accepts (rather than guesses) when only `domain` could starve the entry", () => {
+    expect(
+      one({ column: "yhat", label: "Upstream fit", legend: true, domain: [90, 100] }, [
+        { time: "1", value: "1", series: "A", yhat: "1" },
+        { time: "2", value: "2", series: "A", yhat: "2" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  it("accepts a single-x table — an explicit `domain` can still give it a line to draw", () => {
+    expect(
+      one({ column: "yhat", by: "none", label: "Upstream fit", legend: true, domain: [0, 2] }, [
+        { time: "1", value: "1", series: "A", yhat: "1" },
+        { time: "1", value: "2", series: "B", yhat: "1" },
+      ]).errors,
+    ).toEqual([]);
+  });
+});
+
 describe("overlayDashed — the per-kind style default, shared with the legend row", () => {
   it("defaults solid for the kinds computed FROM the data", () => {
     expect(overlayDashed({ method: "lm" })).toBe(false);

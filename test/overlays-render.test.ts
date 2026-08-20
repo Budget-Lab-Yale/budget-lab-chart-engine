@@ -566,3 +566,46 @@ describe("overlays — `domain` crops the value-axis fold too", () => {
     expect(lo).toBeGreaterThan(100);
   });
 });
+
+// The defect the `legend: true` drawability check in validate.ts exists to stop, pinned on the
+// RENDER side so the check cannot be dismissed as guarding nothing. `buildAnnotationLegendItems`
+// works from the spec, `resolveOverlays` works from the data, and when the data cannot feed a line
+// the legend row survives the line's absence. Validation is the gate; this is the reason for it.
+describe("overlays — a legend row for a line that cannot be drawn (why validation gates it)", () => {
+  const ONE_POINT: TidyRow[] = [{ time: "1", value: "1", series: "A" }] as unknown as TidyRow[];
+  const SPARSE: TidyRow[] = [
+    { time: "1", value: "1", series: "A", yhat: "5" },
+    { time: "2", value: "2", series: "A", yhat: "" },
+    { time: "3", value: "3", series: "A", yhat: "" },
+  ] as unknown as TidyRow[];
+
+  it("renders the row with no path for an lm that cannot be fitted — and validation now rejects it", () => {
+    const s = spec([{ method: "lm", label: "Fit", legend: true }]);
+    const r = renderChart(s, ONE_POINT, OPTS);
+    expect(lines(r.svg).length).toBe(0);
+    expect((r.legendItems ?? []).map((i) => i.label)).toContain("Fit");
+    expect(validateChartData(s, ONE_POINT).valid).toBe(false);
+  });
+
+  it("renders the row with no path for a column with one finite cell — and validation now rejects it", () => {
+    const s = spec([{ column: "yhat", label: "Upstream fit", legend: true }]);
+    const r = renderChart(s, SPARSE, OPTS);
+    expect(lines(r.svg).length).toBe(0);
+    expect((r.legendItems ?? []).map((i) => i.label)).toContain("Upstream fit");
+    expect(validateChartData(s, SPARSE).valid).toBe(false);
+  });
+
+  // The row this must NOT refuse: A is drawable, B is not, one concept row keys A's line.
+  it("keeps drawing (and accepting) the row when at least ONE series can be drawn", () => {
+    const rows: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1" },
+      { time: "2", value: "2", series: "A", yhat: "2" },
+      { time: "3", value: "3", series: "B", yhat: "" },
+    ] as unknown as TidyRow[];
+    const s = spec([{ column: "yhat", label: "Upstream fit", legend: true }]);
+    const r = renderChart(s, rows, OPTS);
+    expect(lines(r.svg).length).toBe(1);
+    expect((r.legendItems ?? []).map((i) => i.label)).toContain("Upstream fit");
+    expect(validateChartData(s, rows).errors).toEqual([]);
+  });
+});
