@@ -20,6 +20,12 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
+// The "mount" phase of onRender is deliberately deferred one microtask past mountChart()'s own
+// return (see render-live.ts's dispatch comment: a throwing onRender at mount would otherwise
+// make mountChart() itself throw, so the caller never gets the teardown and the ResizeObserver
+// never attaches). Tests asserting the mount-phase event must flush the microtask queue first.
+const flushMicrotasks = (): Promise<void> => new Promise((resolve) => queueMicrotask(resolve));
+
 // A plain all-positive 2-series stack resolves `hoverMode: "pills"` (spec/bar-stack.ts's
 // resolveHoverMode: netMode undefined -> "pills"), which attaches attachBandCrosshair with
 // `emitOnly: true` and shows NO floating tooltip at all — exactly the shape the consumer this task
@@ -220,7 +226,7 @@ describe("onHover — tooltip hover mode", () => {
 // ---------------------------------------------------------------------------
 
 describe("onRender", () => {
-  it("fires with phase: \"mount\" once, with the mounted svg", () => {
+  it("fires with phase: \"mount\" once, with the mounted svg (deferred one microtask past mountChart's own return)", async () => {
     const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
     const container = document.createElement("div");
     mountChart(container, {
@@ -230,12 +236,15 @@ describe("onRender", () => {
       height: 360,
       onRender: (ctx) => seen.push(ctx),
     });
+    // Not yet: the mount-phase dispatch is deferred past mountChart()'s own synchronous return.
+    expect(seen.length).toBe(0);
+    await flushMicrotasks();
     expect(seen.length).toBe(1);
     expect(seen[0]!.phase).toBe("mount");
     expect(seen[0]!.svg).toBe(container.querySelector(".figure-canvas svg"));
   });
 
-  it("a bubbling tbl-render CustomEvent (same detail) reaches an ancestor listener", () => {
+  it("a bubbling tbl-render CustomEvent (same detail) reaches an ancestor listener", async () => {
     let detail: { svg: SVGSVGElement; phase: string } | undefined;
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -243,8 +252,35 @@ describe("onRender", () => {
       detail = (e as CustomEvent<{ svg: SVGSVGElement; phase: string }>).detail;
     });
     mountChart(container, { spec: stackedSpec(), rows: STACKED_ROWS, width: 600, height: 360 });
+    await flushMicrotasks();
     expect(detail?.phase).toBe("mount");
     expect(detail?.svg).toBe(container.querySelector(".figure-canvas svg"));
+  });
+
+  it("mountChart still returns its teardown function even when onRender throws at mount, and the error still surfaces (unhandled, on its own microtask)", async () => {
+    const container = document.createElement("div");
+    let caught: unknown;
+    // queueMicrotask's callback throwing surfaces as an uncaughtException in Node (verified: it
+    // is NOT a promise rejection here, since notify() is called directly inside the microtask
+    // callback, not inside a .then()). Capture it so the test doesn't fail the whole process
+    // while still proving the throw was NOT swallowed.
+    const onUncaught = (err: unknown): void => { caught = err; };
+    process.once("uncaughtException", onUncaught);
+    let destroy: (() => void) | undefined;
+    expect(() => {
+      destroy = mountChart(container, {
+        spec: stackedSpec(),
+        rows: STACKED_ROWS,
+        width: 600,
+        height: 360,
+        onRender: () => { throw new Error("boom"); },
+      });
+    }).not.toThrow();
+    // The caller DID receive the teardown -- the whole point of deferring.
+    expect(typeof destroy).toBe("function");
+    await flushMicrotasks();
+    expect((caught as Error | undefined)?.message).toBe("boom");
+    process.removeListener("uncaughtException", onUncaught);
   });
 });
 
@@ -326,7 +362,7 @@ describe("no callbacks passed", () => {
 // concern) — gating/forwarding only the standalone pair would leave a small-multiples figure
 // silently ignoring the callback.
 
-describe("onHover / onRender — small multiples (wireFigureSvg forward)", () => {
+describe("onHover / onRender / onLegendSelect — small multiples (wireFigureSvg / mountFigure forward)", () => {
   const FACETED_ROWS: TidyRow[] = [
     { pane: "P1", time: "A", value: "6", series: "Up" },
     { pane: "P1", time: "A", value: "4", series: "Down" },
@@ -373,7 +409,7 @@ describe("onHover / onRender — small multiples (wireFigureSvg forward)", () =>
     expect(second!.values).toEqual({ Up: 9, Down: 1 });
   });
 
-  it("onRender fires once PER PANE at mount, each with that pane's own svg", () => {
+  it("onRender fires once PER PANE at mount, each with that pane's own svg (mount is deferred, same as the standalone path)", async () => {
     const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
     const container = document.createElement("div");
     mountChart(container, {
@@ -383,11 +419,46 @@ describe("onHover / onRender — small multiples (wireFigureSvg forward)", () =>
       height: 420,
       onRender: (ctx) => seen.push(ctx),
     });
+    expect(seen.length).toBe(0); // deferred past mountChart()'s own synchronous return
+    await flushMicrotasks();
     const panes = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
     expect(panes.length).toBe(2);
     expect(seen.length).toBe(2);
     expect(seen.every((c) => c.phase === "mount")).toBe(true);
     expect(seen.map((c) => c.svg)).toEqual(panes);
+  });
+
+  // onLegendSelect's dispatch site inside mountFigure (its own renderLegend onHighlight,
+  // structurally identical to mountChart's) was previously untested -- only the standalone path
+  // was exercised.
+  it("onLegendSelect fires on the faceted path too, with the active series set", () => {
+    const seen: Array<{ active: string[] }> = [];
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: FACETED_SPEC,
+      rows: FACETED_ROWS,
+      width: 838,
+      height: 420,
+      onLegendSelect: (ctx) => seen.push(ctx),
+    });
+    document.body.appendChild(container);
+    const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Up"]')!;
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[seen.length - 1]!.active).toEqual(["Up"]);
+  });
+
+  it("a bubbling tbl-legend-select CustomEvent reaches an ancestor listener on the faceted path", () => {
+    let detail: { active: string[] } | undefined;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    document.body.addEventListener("tbl-legend-select", (e) => {
+      detail = (e as CustomEvent<{ active: string[] }>).detail;
+    });
+    mountChart(container, { spec: FACETED_SPEC, rows: FACETED_ROWS, width: 838, height: 420 });
+    const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Down"]')!;
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(detail?.active).toEqual(["Down"]);
   });
 });
 
@@ -428,7 +499,8 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
       rows: AREA_ROWS,
       onRender: (ctx) => seen.push(ctx),
     });
-    // One "mount" event already fired synchronously during mountChart() above.
+    // The mount-phase event is deferred (see the onRender describe block above) so it hasn't
+    // arrived yet regardless; either way, no "restack" has happened yet.
     expect(seen.filter((c) => c.phase === "restack").length).toBe(0);
 
     legendItem(container, "C")!.click();
@@ -466,5 +538,51 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Up"]')!;
     btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(seen.filter((c) => c.phase === "restack").length).toBe(0);
+  });
+
+  // The critical case: a throwing onRender must not permanently corrupt the mount. jsdom (matching
+  // the WHATWG DOM spec) does NOT propagate a listener's throw out of dispatchEvent()/.click() to
+  // the caller -- it reports it via process's "uncaughtException" instead (verified directly: a
+  // plain `btn.addEventListener("click", () => { throw ... }); btn.click();` does not throw
+  // synchronously at the call site). So this asserts the OUTCOME state, not a thrown call.
+  it("a throwing onRender during a restack does not desync the legend's pins or permanently disable future restacks", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    let restackCount = 0;
+    mountChart(container, {
+      spec: AREA_SPEC,
+      rows: AREA_ROWS,
+      onRender: (ctx) => {
+        if (ctx.phase !== "restack") return;
+        restackCount++;
+        if (restackCount === 1) throw new Error("consumer bug in onRender");
+      },
+    });
+    const caught: unknown[] = [];
+    const onUncaught = (err: unknown): void => { caught.push(err); };
+    process.once("uncaughtException", onUncaught);
+
+    // First pin: triggers the first restack, whose onRender throws. jsdom logs the stack trace to
+    // stderr as part of its own error reporting (expected, harmless noise -- see the comment above).
+    legendItem(container, "C")!.click();
+    process.removeListener("uncaughtException", onUncaught);
+    expect(caught.length).toBe(1);
+    expect((caught[0] as Error).message).toBe("consumer bug in onRender");
+    expect(restackCount).toBe(1);
+
+    // NOT desynced: the throw happened AFTER draw() rebuilt the legend (fresh, unpinned) but the
+    // finally-guarded pin-restoration loop still re-pinned "C" on that fresh legend.
+    const cBtn = legendItem(container, "C")!;
+    expect(cBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(cBtn.classList.contains("is-pinned")).toBe(true);
+
+    // STILL restackable: suppressRestack must have been reset to false in the finally, not left
+    // stuck true by the throw -- pinning a second series must trigger a SECOND restack.
+    legendItem(container, "B")!.click();
+    expect(restackCount).toBe(2);
+    const order = [...container.querySelectorAll('g[aria-label="area"] path[data-series]')].map((p) =>
+      p.getAttribute("data-series"),
+    );
+    expect(order.slice(0, 2)).toEqual(["C", "B"]); // C first (pinned first) then B, at the bottom
   });
 });

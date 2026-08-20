@@ -942,10 +942,27 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           restackOrder = next;
           suppressRestack = true;
           lastWidth = -1; // force draw() past its same-width early return
-          draw(card.clientWidth || target, currentLegendPos ?? legendPos, "restack");
-          if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
-          suppressRestack = false;
+          // try/finally: onRender (called at the tail of draw(), inside the "restack" branch
+          // above) may throw. draw()'s OWN body — the render, the DOM swap, and reassigning
+          // currentLegendHandle to the fresh legend — has already completed successfully by the
+          // time onRender's notify() runs, so the finally below always restores the pins onto the
+          // CORRECT (fresh) legend handle. Without this, a throwing onRender would abort
+          // onHighlight before the pin-restoration loop and the suppressRestack reset ran,
+          // leaving suppressRestack stuck true forever (silently disabling every future restack on
+          // this mount) and the legend's pin markers desynced from restackOrder — a permanent,
+          // silent break, worse than the throw itself. The exception is NOT swallowed: it still
+          // propagates to whatever called onHighlight (a legend click, or this same
+          // pin-restoration loop re-entering — guarded off by suppressRestack) after this cleanup
+          // runs, matching the live path's existing rule that a throwing consumer callback should
+          // surface, not be hidden.
+          try {
+            draw(card.clientWidth || target, currentLegendPos ?? legendPos, "restack");
+          } finally {
+            if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
+            suppressRestack = false;
+          }
           // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
+          // Skipped if draw() threw above (the exception already propagated past this point).
           const newSvg = canvas.querySelector("svg");
           if (newSvg) animateAreaRestack(newSvg, oldDs);
         }
@@ -1338,10 +1355,28 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // onRender: at each of the four real re-render occasions this mount forces past draw()'s
     // same-width/same-legendPos guard above — mount/resize/reselect, and the area click-to-restack
     // redraw a few lines up ("restack"). The restack call passes its phase explicitly and is
-    // guarded by suppressRestack there, so this fires exactly once per user-visible restack, not
-    // once per pin the restoration loop re-toggles afterward (those re-entrant calls never reach
-    // a NEW draw()).
-    if (renderPhase) notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
+    // guarded by its own try/finally there, so this fires exactly once per user-visible restack,
+    // not once per pin the restoration loop re-toggles afterward (those re-entrant calls never
+    // reach a NEW draw()).
+    if (renderPhase) {
+      const renderCtx = { svg, phase: renderPhase };
+      if (renderPhase === "mount") {
+        // Deferred: this IS mountChart's own initial call, still executing inside mountChart's
+        // own body — everything after it (requestAccentRedraw wiring, the scroll listener, the
+        // ResizeObserver, and the RETURN of the teardown closure) is still to come. A function
+        // cannot both let an exception propagate to its caller AND return a value to that same
+        // caller, so a throwing onRender here — unlike resize/reselect, which have no follow-up
+        // code in the closure that called draw(), and restack, which has its own try/finally
+        // below — would otherwise make mountChart() itself throw: the caller would never receive
+        // the teardown, and the ResizeObserver would never attach (chart rendered but left
+        // un-tearable-down and non-resizable). Queuing the notify lets mountChart() finish and
+        // return normally first; the throw still surfaces (uncaught, on its own microtask) rather
+        // than being swallowed — it just arrives slightly later than the other three phases.
+        queueMicrotask(() => notify(card, "tbl-render", renderCtx, opts.onRender));
+      } else {
+        notify(card, "tbl-render", renderCtx, opts.onRender);
+      }
+    }
   };
 
   // Initial draw: we don't know the series count yet, so render first to get legendItems,
@@ -2403,10 +2438,18 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       grid.appendChild(cell);
     }
     // onRender: once PER PANE (there is no single wrapping SVG for a figure to report) at the
-    // three real re-render occasions — mirrors mountChart's dispatch, gated the same way.
+    // three real re-render occasions — mirrors mountChart's dispatch, gated the same way, INCLUDING
+    // the "mount" deferral (mountFigure's own initial draw() call has the identical ResizeObserver/
+    // teardown-construction-after-it shape mountChart's does — see that dispatch's comment).
     if (renderPhase) {
       for (const pane of fig.panes) {
-        if (pane.svg) notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
+        if (!pane.svg) continue;
+        const renderCtx = { svg: pane.svg, phase: renderPhase };
+        if (renderPhase === "mount") {
+          queueMicrotask(() => notify(card, "tbl-render", renderCtx, opts.onRender));
+        } else {
+          notify(card, "tbl-render", renderCtx, opts.onRender);
+        }
       }
     }
     legendSlot.replaceChildren();
