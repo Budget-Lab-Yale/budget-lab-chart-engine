@@ -2446,7 +2446,9 @@ function coordPillWidth(text: string): number {
  * Attach a coordinated cursor to a CONTINUOUS (line) small-multiples pane. Returns a driver:
  * `driver(xValue, active)` snaps to this pane's nearest x and renders the guide + per-series dot
  * and a compact value label (on a pill); when `active`, labels use a heavier weight and the
- * current x value is shown above the plot. `driver(null)` clears. No pointer handlers.
+ * current x value is shown above the plot — but ONLY where the pane has x-axis tick labels to
+ * annotate (`makeAxisRows` finds none on a temporal span shorter than one month, so a daily figure
+ * gets pills and no x value at all). `driver(null)` clears. No pointer handlers.
  */
 export function attachSecondaryLineCursor(
   svgEl: SVGSVGElement,
@@ -2469,8 +2471,23 @@ export function attachSecondaryLineCursor(
   const plotW = W - ml - mr;
   const plotH = H - mt - mb;
 
-  // The active pane highlights the EXISTING x-axis label(s), so only x PARSING is needed here
-  // (no x formatting — we never draw our own x text).
+  // Only x PARSING is derived here. `opts.xFormat` is deliberately NOT read, and the caller's
+  // forward of it (render-live.ts passes `xFormat: ctx.tooltipXFormat`) is therefore DEAD.
+  //
+  // That is a known gap, not a policy: this function DOES draw its own x text about fifty lines
+  // below, in the `active` branch, with hardcoded `%b` / `%Y` (or `YYYYQ#`) — so a spec's
+  // `tooltip_x_format` is silently ignored on every multi-pane temporal figure. An earlier version
+  // really did only bold the existing axis label, and the comment that used to sit here still said
+  // so long after `addCoordAxisLabel` was added; the sibling `attachSecondaryHistogramCursor` shows
+  // the intended pattern, re-using the primary's own `formatBinLabel` opts "so the coordinated
+  // label matches".
+  //
+  // Do NOT close the gap as a drive-by, and do not delete the dead forward to tidy up: honouring
+  // `xFormat` here changes the rendered x label on every published multi-pane temporal figure that
+  // sets the field, and drawing an x value where `axisRows` is empty changes every published
+  // multi-pane temporal figure, period. Both land across the archive at the next repin, which makes
+  // it a release decision. CONFIG-SPEC.md documents the field as standalone-only meanwhile, and
+  // test/hover-claims-defaults.test.ts pins today's behaviour so a fix has to be deliberate.
   if (!xParse) {
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
