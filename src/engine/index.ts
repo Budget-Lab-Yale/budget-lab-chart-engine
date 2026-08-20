@@ -38,7 +38,13 @@ import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
-import { resolveOverlays, overlayColumnValues, overlayDrawsInPane } from "./overlays";
+import {
+  resolveOverlays,
+  overlayColumnValues,
+  overlayDrawsInPane,
+  overlayTooltipLines,
+} from "./overlays";
+import type { OverlayTooltipLine } from "./overlays";
 import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
@@ -217,6 +223,9 @@ export interface RenderResult {
   dataInScope: PreparedRow[];
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** `overlays[].tooltip: true` lines drawn in this frame — one hover-tooltip row each. Empty when
+   *  no overlay opted in. See PaneResult.overlayTooltips. */
+  overlayTooltips: OverlayTooltipLine[];
   /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
    *  (stacked charts only). render-live uses it to order the vertical legend column. */
   legendVisualOrder?: string[];
@@ -280,6 +289,12 @@ export interface PaneResult {
   seriesPainted: Map<string, string>;
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** `overlays[].tooltip: true` lines that draw in THIS pane, already cropped to their `domain` and
+   *  filtered by `facet`. Carried out of the render rather than recomputed by the live layer for the
+   *  same reason `seriesHatches` is: the resolved x-domain that decides where a `domain: "axis"` line
+   *  starts and stops is settled here and nowhere else, and a tooltip row for a line that is not on
+   *  screen at that x is the defect this whole field exists to avoid. */
+  overlayTooltips: OverlayTooltipLine[];
 }
 
 /** DORMANT (Plot grid-faceting): the old SHARED-mode combined-SVG path passed this into
@@ -847,6 +862,9 @@ function assemblePaneResult(
   // every chart type passes through. Pushing them into `layers` is also what gets them into the PNG:
   // buildExportSvg re-renders through renderChart (or renderFigure for small multiples), so anything
   // derived from spec + rows reaches the download with no second code path to keep in step.
+  // `overlays[].tooltip: true` lines for the live hover card, populated inside the block below (the
+  // one place the pane-filtered, domain-cropped lines exist). Empty on every chart with no overlays.
+  let overlayTooltips: OverlayTooltipLine[] = [];
   if (spec.overlays?.length && adapter.xField !== "_xc") {
     // `domain: "axis"` means the resolved x-scale domain when the adapter supplies one (numeric axes
     // do), else the data extent — the widest honest answer available.
@@ -858,6 +876,7 @@ function assemblePaneResult(
       legendActive: spec.legend !== false,
       ...(axisDomain ? { xDomain: axisDomain } : {}),
     }).filter((o) => overlayDrawsInPane(o.facet, opts.paneFacetValue));
+    overlayTooltips = overlayTooltipLines(spec.overlays, resolvedOverlays);
     // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
     // fx/fy CHANNEL NAMES passed to `buildOverlayMarks`, but the `OverlayRow` objects it builds
     // (marks/overlay.ts) carry no `_fxCol`/`_fyRow` fields — those channels would resolve to
@@ -928,6 +947,7 @@ function assemblePaneResult(
     seriesPainted,
     tooltipXParse: xOpts.tooltipXParse,
     tooltipXFormat: xOpts.tooltipXFormat,
+    overlayTooltips,
   };
 }
 
@@ -1184,6 +1204,7 @@ export function renderChart(
     dataInScope,
     tooltipXParse: pane.tooltipXParse,
     tooltipXFormat: pane.tooltipXFormat,
+    overlayTooltips: pane.overlayTooltips,
     legendVisualOrder: layers.legendVisualOrder,
     netMode: layers.netMode,
   };

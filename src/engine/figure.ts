@@ -22,6 +22,7 @@ import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABE
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 import type { SeriesHatch } from "./hatch";
+import type { OverlayTooltipLine } from "./overlays";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
 // without a module cycle through figure.ts).
@@ -299,6 +300,9 @@ export interface FigurePane {
   /** Stacked panes: visual top→bottom stack order, for the band crosshair's
    *  Total/series ordering. Line/bar panes leave this undefined. */
   legendVisualOrder?: string[];
+  /** `overlays[].tooltip: true` lines that draw in THIS pane — see PaneResult.overlayTooltips.
+   *  Per-pane because `facet` scoping and the pane's own x-domain both decide it. */
+  overlayTooltips?: OverlayTooltipLine[];
   /** This pane's key row per series, INCLUDING the ones the figure legend suppresses — a
    *  single-series figure draws no legend but still tooltips. Per-pane, not figure-level, because
    *  per-pane mode resolves colours independently. See index.ts buildSeriesKeyRows. */
@@ -714,6 +718,7 @@ export function renderFigure(
         valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
         tooltipXParse: p.tooltipXParse,
         tooltipXFormat: p.tooltipXFormat,
+        overlayTooltips: p.overlayTooltips,
         netMode: p.layers.netMode,
         legendVisualOrder: p.layers.legendVisualOrder,
         seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
@@ -880,6 +885,7 @@ export function renderFigure(
       valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
       tooltipXParse: p.tooltipXParse,
       tooltipXFormat: p.tooltipXFormat,
+      overlayTooltips: p.overlayTooltips,
       netMode: p.layers.netMode,
       legendVisualOrder: p.layers.legendVisualOrder,
       seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),

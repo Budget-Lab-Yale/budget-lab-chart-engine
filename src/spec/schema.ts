@@ -192,6 +192,7 @@ const OVERLAY = {
     labelDx: { type: "number" },
     labelDy: { type: "number" },
     facet: { type: "string" },
+    tooltip: { type: "boolean" },
   },
 } as const;
 

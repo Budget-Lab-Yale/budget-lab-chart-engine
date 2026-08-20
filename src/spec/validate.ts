@@ -344,6 +344,9 @@ function overlaySpecErrors(spec: {
     if (o.legend === true && !o.label) {
       errors.push(`${at}: \`legend: true\` needs a \`label\` — it is the row's text`);
     }
+    if (o.tooltip === true && !o.label) {
+      errors.push(`${at}: \`tooltip: true\` needs a \`label\` — it is the row's text`);
+    }
 
     // Histogram rows are BinnedRows ({_x0, _x1, _y}) built on a path that skips the row preparation
     // where `_xn` and `_overlayCols` are set, so the two data-reading kinds would fit NaN / find no

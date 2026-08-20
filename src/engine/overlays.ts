@@ -215,6 +215,83 @@ export function overlayColumnValues(
   return out;
 }
 
+/** One `overlays[].tooltip: true` line, ready to become a hover-tooltip row. Carries the DRAWN
+ *  polyline rather than a value: the row's value depends on where the cursor is, and the polyline is
+ *  the only thing that knows what the line is at an arbitrary x. */
+export interface OverlayTooltipLine {
+  /** The row's text — `overlays[].label`, which `tooltip: true` requires. */
+  label: string;
+  color: string;
+  dashed: boolean;
+  /** The colour series a per-series fit belongs to, so two rows of one label can be told apart.
+   *  Undefined for a pooled fit, a `fun` or an abline. */
+  series?: string;
+  /** `ResolvedOverlay.points` — x-ordered, numeric x, `null` y at a break. */
+  points: Array<{ x: number; y: number | null }>;
+}
+
+/** The `tooltip: true` lines among `resolved`, in draw order.
+ *
+ *  Takes RESOLVED overlays, not spec entries, and that is the whole point: `resolveOverlays` has
+ *  already cropped each line to its `domain` and the caller has already dropped the entries that do
+ *  not draw in this pane (`overlayDrawsInPane`), so a row can only ever exist for a line that is
+ *  actually on screen. Re-deriving the crop or the pane filter for the tooltip is how a row for an
+ *  invisible line would get back in — the same defect class as the phantom legend row.
+ *
+ *  The `label` comes from the SPEC entry rather than `ResolvedOverlay.label`, which `legend: true`
+ *  deliberately strips (the label moved to a legend row). A keyed overlay still names itself in a
+ *  tooltip row. */
+export function overlayTooltipLines(
+  entries: Overlay[] | undefined,
+  resolved: ResolvedOverlay[],
+): OverlayTooltipLine[] {
+  if (!entries?.length) return [];
+  const out: OverlayTooltipLine[] = [];
+  for (const o of resolved) {
+    const entry = entries[o.entryIndex];
+    if (entry?.tooltip !== true || !entry.label) continue; // validation requires the label
+    out.push({
+      label: entry.label,
+      color: o.color,
+      dashed: o.dashed,
+      points: o.points,
+      ...(o.series != null ? { series: o.series } : {}),
+    });
+  }
+  return out;
+}
+
+/** The value the DRAWN line has at `x`, or null when nothing is drawn there.
+ *
+ *  Reads the polyline itself — no fit object, no expression, no second evaluator. `marks/overlay.ts`
+ *  hands these same points to `Plot.line` with no `curve` option, so the mark is straight segments
+ *  between consecutive vertices and a linear interpolation here IS the line's height at that pixel.
+ *  Re-evaluating the fit or the expression instead would be a second answer to the same question,
+ *  correct at the sample points and quietly different everywhere between them.
+ *
+ *  Null in three cases, each of them "the line is not there": outside the drawn extent (an
+ *  `overlays[].domain` crop is never extrapolated), on a break vertex, and inside a break's span. */
+export function overlayValueAt(points: Array<{ x: number; y: number | null }>, x: number): number | null {
+  const n = points.length;
+  if (n < 2 || !Number.isFinite(x)) return null;
+  if (x < points[0]!.x || x > points[n - 1]!.x) return null;
+  // Bisect for the last vertex at or before x. Points are x-ordered (see ResolvedOverlay.points),
+  // and a `column` overlay over a dense scatter can carry thousands of them — one per row.
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid]!.x <= x) lo = mid;
+    else hi = mid;
+  }
+  const a = points[lo]!;
+  const b = points[hi]!;
+  if (x === a.x) return a.y;
+  if (x === b.x) return b.y;
+  if (a.y == null || b.y == null) return null; // inside a break — the mark draws no segment here
+  return a.y + ((x - a.x) / (b.x - a.x)) * (b.y - a.y);
+}
+
 /** The x extent this entry draws over, per the `domain` rules. Null ⇒ nothing to draw. */
 function overlayDomain(
   o: Overlay,

@@ -44,6 +44,7 @@ import {
   attachHighlightPills,
 } from "./crosshair.js";
 import type { HighlightPillsHandle, BandHoverCtx } from "./crosshair.js";
+import type { OverlayTooltipLine } from "./overlays.js";
 import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -921,7 +922,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const {
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, netMode,
-      shapeLegendItems, colorLegendTitle, shapeLegendTitle,
+      shapeLegendItems, colorLegendTitle, shapeLegendTitle, overlayTooltips,
     } = built;
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
@@ -1101,6 +1102,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         yLabel: spec.y_axis_title ?? "Value",
         xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+        overlays: overlayTooltips,
         showTooltip: chromeTooltip,
       });
     } else if (spec.chartType === "dotplot") {
@@ -1325,6 +1327,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
         showTotal: spec.chartType === "area",
+        overlays: overlayTooltips,
         showTooltip: chromeTooltip,
       });
     }
@@ -1896,6 +1899,10 @@ function wireFigureSvg(
     valueAffixes: ValueAffixes;
     tooltipXParse?: (v: string) => number;
     tooltipXFormat?: (v: number) => string;
+    /** This pane's `overlays[].tooltip: true` lines (FigurePane.overlayTooltips) — forwarded into the
+     *  two attach sites below that resolve a single x (attachCrosshair, attachPointHover). Per-pane,
+     *  because `overlays[].facet` and the pane's own x-domain both decide what draws here. */
+    overlayTooltips?: OverlayTooltipLine[];
     netMode?: NetMode;
     /** Series → its resolved icon, from the figure's legend rows. */
     icons?: Map<string, IconSpec>;
@@ -2050,6 +2057,7 @@ function wireFigureSvg(
       yLabel: ctx.spec.y_axis_title ?? "Value",
       xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+      ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
       showTooltip: chromeTooltip,
     });
     return undefined;
@@ -2271,6 +2279,7 @@ function wireFigureSvg(
     ...(ctx.icons ? { icons: ctx.icons } : {}),
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
+    ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
     showTooltip: chromeTooltip,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
   });
@@ -2581,6 +2590,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         valueAffixes: pane.valueAffixes ?? fig.valueAffixes,
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
+        overlayTooltips: pane.overlayTooltips,
         netMode: pane.netMode,
         // One shared key for the whole figure, so every pane's tooltip agrees with it. The
         // fallback is per-PANE: per-pane mode resolves each pane's colours independently, and a

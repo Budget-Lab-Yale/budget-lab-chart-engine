@@ -569,6 +569,15 @@ body {
   margin-top: 4px;
   padding-top: 4px;
 }
+/* overlays[].tooltip rows sit below the observed series (and below their Total, where there
+   is one): a fitted or asserted line is a third kind of claim, so the block gets the same separator
+   device the Total row uses. Only the FIRST such row carries the rule -- consecutive overlay rows
+   are one block, not several. */
+.tbl-tooltip-row--overlay-first {
+  border-top: 1px solid var(--tbl-tooltip-rule);
+  margin-top: 3px;
+  padding-top: 3px;
+}
 .tbl-tooltip-row--total-rule-below {
   border-bottom: 1px solid var(--tbl-tooltip-rule);
   margin-bottom: 4px;

@@ -301,6 +301,16 @@ export interface Overlay {
   labelDy?: number;
   /** Small multiples only: scope this overlay to the pane whose facet value equals `facet`. */
   facet?: string;
+  /** Contribute a row to the HOVER TOOLTIP showing this line's value at the hovered x. Default
+   *  false: an overlay is usually chrome (a reference slope, a target) whose value at an arbitrary x
+   *  says nothing, and three lines all reporting into one card is noise. A fitted trend is the case
+   *  where it says a lot. Needs a `label` — it is the row's text.
+   *
+   *  Honoured only where the hover resolves a single x: the continuous crosshair (line/area on a
+   *  numeric/temporal/quarterly axis) and a scatter's per-point hover. A histogram's hover resolves
+   *  a BIN RANGE, not an x, so there is no one value to report and the flag is ignored there. See
+   *  CONFIG-SPEC.md's `overlays[].tooltip` row, which states the coverage. */
+  tooltip?: boolean;
 }
 
 /** One closed interval on the x-axis rug. Bounds are x-value strings in the same form as

@@ -15,6 +15,8 @@ import { paintedFill } from "./painted-fill";
 import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
+import { overlayValueAt } from "./overlays";
+import type { OverlayTooltipLine } from "./overlays";
 import type { TotalRow } from "../spec/bar-stack";
 import type { TooltipHookCtx } from "../spec/hooks";
 
@@ -59,6 +61,10 @@ export interface CrosshairOptions {
   showTotal?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `overlays[].tooltip: true` lines drawn in this frame (engine/overlays.ts
+   *  `overlayTooltipLines`), each contributing ONE row at the snapped x. Read by `attachCrosshair`
+   *  only — `attachSecondaryLineCursor` shares this options type and draws pills, not a card. */
+  overlays?: OverlayTooltipLine[];
   /** `chrome.valuePills: false` — consumed only by `attachSecondaryLineCursor` (the
    *  coordinated/echo cursor): suppress just its per-series value pills. The guide line, the
    *  per-series highlight dot, and the active-pane x-value echo are untouched — same split as
@@ -237,6 +243,9 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       const blank = seriesSwatchHtml({ shape: "none" });
       html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
     }
+    // `overlays[].tooltip: true` lines LAST — a fitted or asserted line is a third kind of claim,
+    // after the observed series and the total OF those series, and its own separator rule says so.
+    html += overlayTooltipRows(opts.overlays, snap, yFormat, seriesLabels);
     tip!.innerHTML = html;
 
     const offset = 14;
@@ -436,6 +445,60 @@ export function resolveFacetCell(
  *  needs no colour fill underneath. */
 export function seriesSwatchHtml(icon: IconSpec): string {
   return `<span class="tbl-tooltip-swatch">${iconSvgMarkup(icon)}</span>`;
+}
+
+/** The tooltip rows a set of `overlays[].tooltip: true` lines contributes at `x`.
+ *
+ *  ONE emitter, shared by the continuous crosshair and the scatter point hover, so the two cannot
+ *  drift on what a modelled row looks like — the same discipline `seriesSwatchHtml` enforces for
+ *  series keys.
+ *
+ *  A line with NO value at `x` contributes no row: `overlayValueAt` returns null outside the drawn
+ *  extent (an `overlays[].domain` crop) and across a break, and the caller has already dropped the
+ *  overlays that do not draw in this pane. A row for a line the reader cannot see at that x is the
+ *  same class of defect as a legend row for a line drawn nowhere.
+ *
+ *  Every row draws a LINE swatch in the line's own colour and dash, and the first carries a
+ *  separator rule. A modelled number set in a list of observed ones with no marker is the thing this
+ *  guards against, and the dash is the engine's own statement of which kind of claim a line is
+ *  (CONFIG-SPEC `overlays[].style`: computed FROM the data draws solid, asserted OVER it dashed).
+ *
+ *  The series name is appended only when it DISAMBIGUATES — a per-series fit resolves to one line
+ *  per series under one label, and two rows reading "Trend" would be unreadable. A single line keeps
+ *  the author's label exactly as written. */
+export function overlayTooltipRows(
+  overlays: OverlayTooltipLine[] | undefined,
+  x: number,
+  yFormat: (v: number) => string,
+  seriesLabels?: Record<string, string>,
+): string {
+  if (!overlays?.length) return "";
+  const drawn: Array<{ o: OverlayTooltipLine; v: number }> = [];
+  for (const o of overlays) {
+    const v = overlayValueAt(o.points, x);
+    if (v != null && Number.isFinite(v)) drawn.push({ o, v });
+  }
+  if (!drawn.length) return "";
+  const perLabel = new Map<string, number>();
+  for (const d of drawn) perLabel.set(d.o.label, (perLabel.get(d.o.label) ?? 0) + 1);
+  let html = "";
+  drawn.forEach(({ o, v }, i) => {
+    const name =
+      o.series != null && (perLabel.get(o.label) ?? 0) > 1
+        ? `${o.label} (${seriesLabels?.[o.series] ?? o.series})`
+        : o.label;
+    const swatch = seriesSwatchHtml({
+      shape: "line",
+      color: o.color,
+      ...(o.dashed ? { dashed: true } : {}),
+    });
+    const cls =
+      "tbl-tooltip-row tbl-tooltip-row--overlay" + (i === 0 ? " tbl-tooltip-row--overlay-first" : "");
+    html +=
+      `<div class="${cls}">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(name)}:</span> ` +
+      `<span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+  });
+  return html;
 }
 
 /** The icon a tooltip row should draw for `series`. `icons` (see icon.ts resolveTooltipIcons) is
@@ -3608,6 +3671,10 @@ export interface PointHoverOptions {
   yLabel?: string;
   xFormat?: (v: number) => string;
   yFormat?: (v: number) => string;
+  /** `overlays[].tooltip: true` lines drawn in this frame. A scatter's card names ONE point, so the
+   *  row is the overlay's value at THAT point's x — and only the lines that apply to it: a per-series
+   *  fit for another series is not this point's trend. */
+  overlays?: OverlayTooltipLine[];
   /** `chrome.tooltip: false` — suppress the floating tooltip card. A scatter point's ONLY hover
    *  feedback is this card (no separate guide/highlight), so `undefined` keeps today's behaviour
    *  (tooltip shown) and `false` makes hovering a point a no-op. */
@@ -3679,6 +3746,14 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       if (p.y != null && Number.isFinite(p.y)) {
         html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
       }
+      // Scoped to the hovered point: a pooled fit / `fun` / abline applies to every point, a
+      // per-series fit only to its own series. The header already names that series, so the rows
+      // carry the author's label unadorned (see overlayTooltipRows on when the suffix appears).
+      html += overlayTooltipRows(
+        opts.overlays?.filter((o) => o.series == null || o.series === p.series),
+        p.x,
+        yFormat,
+      );
       tip.innerHTML = html;
       tip.style.opacity = "1";
       place(evt);
