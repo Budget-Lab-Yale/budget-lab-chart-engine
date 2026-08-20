@@ -41,6 +41,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   Not implemented: `loess`/`lowess` (precompute one and use `column`), and multi-predictor fits (the
   engine is bivariate by design — bring coefficients in through `fun` + `params`).
 
+  `overlays[].tooltip` (default `false`) opts a single overlay into the hover tooltip, reporting its
+  value at the hovered x as a row of its own — behind a separator, so the observed series and their
+  Total stay one block, and carrying a line swatch in the overlay's own colour and dash so a modelled
+  value is not mistaken for an observed one. Honoured on `line` and `area` on a continuous axis
+  (standalone and in small-multiples panes) and on `scatter`; **silently ignored on `histogram`**,
+  whose hover resolves a bin range rather than a single x. A `by: series` fit adds one row per series,
+  which is uncapped — worth thinking about before setting it on a many-series chart.
+
 ### Added — customisation without forking the renderer (#30)
 - `chrome.tooltip` and `chrome.valuePills` — spec-level switches that turn hover chrome off from
   `chart.yaml` itself rather than from a stylesheet the PNG export never sees. Deliberately just
@@ -77,6 +85,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   consumer silently the way `.tbl-legend-swatch.is-dot`'s retirement did in 1.11.0.
 
 ### Changed
+- **Value pills now default to off where segment value labels are actually painted.** A stacked chart
+  with `valueLabels.show` printed its numbers in the segments and then repeated them in hover pills a
+  few pixels away. The default is keyed on the labels being *painted*, not on the flag being set —
+  `valueLabels.show` is a request that three cases refuse, and suppressing pills wherever the flag
+  appeared would have removed them from charts printing no numbers at all: a diverging net-dot stack
+  and every small-multiples pane paint no segment labels, and a waterfall's labels are the running
+  *level* while its hover pill is the signed *delta*, so nothing is duplicated there. An explicit
+  `chrome.valuePills: true` still wins, so asking for both remains possible.
+- **`valueLabels.show` is not "stacked bars only".** A waterfall paints segment labels for the same
+  flag. `CONFIG-SPEC.md` claimed otherwise; the claim was false before this release and is now
+  corrected and test-backed. No behaviour changed — only the documentation of behaviour that already
+  existed.
 - `barStack.netDisplay` now chooses the net callout only. Defaults are unchanged: a spec that does not
   set `barStack.hover` renders exactly as before.
 - `RenderResult`, `FigurePane` and `FigureRenderResult` rename their `showTotalDot` field to
@@ -112,6 +132,11 @@ A repin re-renders every published figure at once — here is what a maintainer 
   `tbl-hover` CustomEvent per pointermove regardless of whether anything listens — harmless on
   its own, but new work on a hot path, and a host page listening for an unrelated bubbling event of
   the same name will now see these.
+- **A published stacked chart with `valueLabels.show` loses its hover value pills.** The numbers are
+  already printed in the segments, so the pills were repeating them; this is the intended change, but
+  it lands on every such chart at repin with no spec change on anyone's part. Hover-only — no
+  exported/published image changes, and no golden fixture moved. Set `chrome.valuePills: true`
+  explicitly on a chart that should keep both.
 - **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
   current — re-run its vendoring step at repin.
 
