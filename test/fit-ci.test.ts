@@ -64,3 +64,76 @@ describe("polyFitStdError", () => {
     }
   });
 });
+
+describe("polyFitStdError — temporal x (epoch milliseconds)", () => {
+  // The band, not just the line. `polyFitStdError` reads `xtxInv`, so a fix that only got `fitPoly`
+  // to stop returning null would relocate the bug into the ribbon: a badly conditioned inverse gives
+  // a fitted line that looks right and a confidence band that is nonsense. These assert the band is
+  // finite, positive, symmetric, narrowest at the centre, and — the property that matters — NUMERICALLY
+  // THE SAME at every x scale, since the quadratic form x₀ᵀ(XᵀX)⁻¹x₀ is dimensionless in the
+  // span-normalised position and cannot legitimately depend on whether the span is a day or a decade.
+  const DAY = 86_400_000;
+  const T0 = Date.UTC(2020, 0, 1);
+  const COEF = [3, -2, 1.5, -0.75, 0.4, -0.2];
+  const spans: Array<[string, number]> = [
+    ["1 day", DAY],
+    ["30 days", 30 * DAY],
+    ["10 years", 3652 * DAY],
+  ];
+
+  /** A degree-`d` curve over `span`, with a deterministic ±0.05 wobble so RSS > 0 and s is real. */
+  const sample = (span: number, d: number, n = 24): Array<[number, number]> =>
+    Array.from({ length: n }, (_, i) => {
+      const t = i / (n - 1);
+      let y = 0;
+      let pow = 1;
+      for (let k = 0; k <= d; k++) {
+        y += COEF[k]! * pow;
+        pow *= t;
+      }
+      return [T0 + span * t, y + ((i % 3) - 1) * 0.05] as [number, number];
+    });
+
+  for (const [label, span] of spans) {
+    for (let d = 2; d <= 5; d++) {
+      it(`gives a sane band for a degree-${d} fit over ${label}`, () => {
+        const fit = fitPoly(sample(span, d), d);
+        expect(fit).not.toBeNull();
+        expect(fit!.s).toBeGreaterThan(0);
+        const se = (q: number) => polyFitStdError(fit!, T0 + span * q);
+        for (const q of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+          expect(Number.isFinite(se(q))).toBe(true);
+          expect(se(q)).toBeGreaterThan(0);
+          // A band wider than the whole y range would be arithmetic garbage that still passed
+          // "finite and positive"; the data spans ~2 units and s is ~0.045 here.
+          expect(se(q)).toBeLessThan(1);
+        }
+        // Narrowest at the centre of the data and wider at both edges. (At degree 2 the variance
+        // function's true minimum sits slightly off-centre, near ±¼ of the span — a real property of
+        // the design, not an error — so this compares the centre against the edges, not against
+        // every interior point.)
+        expect(se(0.5)).toBeLessThan(se(0.1));
+        expect(se(0.5)).toBeLessThan(se(0.9));
+        expect(se(0.5)).toBeLessThan(se(0));
+        expect(se(0.5)).toBeLessThan(se(1));
+        // Symmetric design → symmetric band.
+        expect(se(0)).toBeCloseTo(se(1), 8);
+        expect(se(0.25)).toBeCloseTo(se(0.75), 8);
+        // And wider still outside the data range, where `domain: axis` extrapolates.
+        expect(se(1.3)).toBeGreaterThan(se(1));
+      });
+    }
+  }
+
+  it("gives the same band at every x scale, since the quadratic form is dimensionless", () => {
+    for (let d = 2; d <= 5; d++) {
+      const fits = spans.map(([, span]) => ({ span, fit: fitPoly(sample(span, d), d)! }));
+      for (const q of [0, 0.25, 0.5, 0.75, 1]) {
+        const ref = polyFitStdError(fits[0]!.fit, T0 + fits[0]!.span * q);
+        for (const { span, fit } of fits.slice(1)) {
+          expect(polyFitStdError(fit, T0 + span * q)).toBeCloseTo(ref, 8);
+        }
+      }
+    }
+  });
+});

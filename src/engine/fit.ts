@@ -29,32 +29,49 @@ export interface PolyFit {
   xtxInv: number[][];
 }
 
-/** Gauss-Jordan inverse with partial pivoting. Null if the matrix is singular to working precision —
- *  which is how a degenerate design (every x identical, or fewer distinct x values than parameters)
- *  is reported, rather than as silent Infinities in the coefficients. */
-function invert(m: number[][]): number[][] | null {
+/** Inverse of a SYMMETRIC matrix with a non-negative diagonal — in practice XᵀX from the centred
+ *  Vandermonde, which is its only caller. Null if the matrix is singular to working precision — which
+ *  is how a degenerate design (every x identical, or fewer distinct x values than parameters) is
+ *  reported, rather than as silent Infinities in the coefficients. */
+function invertNormalMatrix(m: number[][]): number[][] | null {
   const p = m.length;
-  // Per-column reference scale, read from the ORIGINAL matrix once, before any row operation. A
-  // pivot can only be judged against its own column's native magnitude: a column that starts small
-  // (e.g. a Vandermonde entry on a small-scaled design, XᵀX entries ~1e-16) is not evidence of
-  // singularity, and a large column elsewhere in the same matrix must not raise the bar for it — so
-  // this is neither a matrix-wide scale nor a fixed absolute floor. Floored at Number.EPSILON only
-  // so a column that is genuinely all-zero (truly singular from the start) still produces a nonzero
-  // tolerance a zero pivot fails, rather than the vacuous `0 < 0` an unfloored zero scale would give.
-  const colScale = Array.from({ length: p }, (_, j) => {
-    let s = 0;
-    for (let i = 0; i < p; i++) s = Math.max(s, Math.abs(m[i]![j]!));
-    return Math.max(s, Number.EPSILON);
-  });
-  // Augment [m | I] and reduce the left half to the identity.
-  const a = m.map((row, i) => [...row, ...Array.from({ length: p }, (_, j) => (i === j ? 1 : 0))]);
+  // SYMMETRIC EQUILIBRATION, and it is load-bearing, not a tidiness pass. The columns of XᵀX are in
+  // different units: with an x-spread of `a` the u² column has magnitude ~a⁴ while the pivot reached
+  // in that column after elimination scales as ~a². Any tolerance drawn from a column's own
+  // magnitude in the ORIGINAL matrix is therefore dimensionally wrong — it grows as a⁴ while the
+  // thing it judges grows as a². On a temporal axis x is epoch milliseconds, so `a` is enormous and
+  // that mismatch declared every well-conditioned degree-≥2 fit singular once the x-spread passed
+  // about 12 minutes. Scaling by D^{-1/2}·A·D^{-1/2} with D = diag(A) puts unit entries on the
+  // diagonal and (A being positive semi-definite, by Cauchy-Schwarz) magnitudes ≤ 1 everywhere else,
+  // so the pivot test below is DIMENSIONLESS: identical for the same design at any x scale. Measured
+  // on uniform designs the smallest pivot here is ~4e-1 at degree 2 and ~9e-3 at degree 5, invariant
+  // from a 1 ms to a 10-year x-spread, while a rank-deficient design leaves 0 or rounding noise
+  // ~2e-16 — the 1e-12 threshold sits with orders of margin on both sides.
+  const d: number[] = [];
+  for (let i = 0; i < p; i++) {
+    const dii = m[i]![i]!;
+    // A zero diagonal in a positive semi-definite matrix means that whole row and column are zero:
+    // singular from the start (Σu^2k = 0, i.e. every x identical). Reject it here rather than
+    // dividing by zero and asking the pivot test to interpret the NaNs.
+    if (!Number.isFinite(dii) || dii <= 0) return null;
+    d.push(Math.sqrt(dii));
+  }
+  // Augment [D^{-1/2} m D^{-1/2} | I] and reduce the left half to the identity.
+  const a = m.map((row, i) => [
+    ...row.map((v, j) => v / (d[i]! * d[j]!)),
+    ...Array.from({ length: p }, (_, j) => (i === j ? 1 : 0)),
+  ]);
   for (let col = 0; col < p; col++) {
     let pivot = col;
     for (let r = col + 1; r < p; r++) {
       if (Math.abs(a[r]![col]!) > Math.abs(a[pivot]![col]!)) pivot = r;
     }
     const pv = a[pivot]![col]!;
-    if (!Number.isFinite(pv) || Math.abs(pv) < 1e-12 * colScale[col]!) return null;
+    // Absolute, because the equilibrated matrix has no scale left to be relative to: its diagonal is
+    // 1 by construction. Deliberately NOT max|a[r][col]| over the candidate rows r ≥ col — partial
+    // pivoting already chose the largest of those, so such a test would reduce to |pv| < 1e-12·|pv|
+    // and pass every pivot but an exact zero, turning real rank deficiency into garbage coefficients.
+    if (!Number.isFinite(pv) || Math.abs(pv) < 1e-12) return null;
     [a[col], a[pivot]] = [a[pivot]!, a[col]!];
     const prow = a[col]!;
     for (let j = 0; j < 2 * p; j++) prow[j] = prow[j]! / pv;
@@ -65,7 +82,8 @@ function invert(m: number[][]): number[][] | null {
       for (let j = 0; j < 2 * p; j++) a[r]![j] = a[r]![j]! - f * prow[j]!;
     }
   }
-  return a.map((row) => row.slice(p));
+  // Undo the scaling: A = D^{1/2} B D^{1/2}, so A⁻¹ = D^{-1/2} B⁻¹ D^{-1/2}.
+  return a.map((row, i) => row.slice(p).map((v, j) => v / (d[i]! * d[j]!)));
 }
 
 export function fitPoly(pts: Array<[number, number]>, degree: number): PolyFit | null {
@@ -104,7 +122,7 @@ export function fitPoly(pts: Array<[number, number]>, degree: number): PolyFit |
   }
   for (let a = 0; a < p; a++) for (let b = 0; b < a; b++) xtx[a]![b] = xtx[b]![a]!;
 
-  const xtxInv = invert(xtx);
+  const xtxInv = invertNormalMatrix(xtx);
   if (!xtxInv) return null;
 
   const coef = xtxInv.map((row) => row.reduce((s, v, j) => s + v * xty[j]!, 0));

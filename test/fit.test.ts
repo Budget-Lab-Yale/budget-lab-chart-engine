@@ -131,11 +131,12 @@ describe("fitPoly — xtxInv pinned by hand", () => {
   });
 });
 
-describe("fitPoly — pivot-tolerance scale (invert's singularity test)", () => {
-  // Regression: `invert`'s singularity check used to compare a pivot to a scale floored at a fixed
-  // 1, so a well-conditioned design whose real magnitudes are all under 1 (XᵀX here is essentially
+describe("fitPoly — pivot-tolerance scale (the singularity test in invertNormalMatrix)", () => {
+  // Regression: the singularity check used to compare a pivot to a scale floored at a fixed 1, so a
+  // well-conditioned design whose real magnitudes are all under 1 (XᵀX here is essentially
   // diag(3, 2e-16) — the 2e-16 entry is an exact sum of squares, not a cancellation artifact) was
-  // misread as singular. The check now floors at Number.EPSILON, so this must fit.
+  // misread as singular. XᵀX is now equilibrated to a unit diagonal before the test, which removes
+  // the design's scale from the comparison entirely, so this must fit.
   it("accepts a well-conditioned design whose scale is far below 1", () => {
     const f = fitPoly([[1e-8, 1], [2e-8, 2], [3e-8, 3]], 1);
     expect(f).not.toBeNull();
@@ -164,5 +165,104 @@ describe("fitPoly — pivot-tolerance scale (invert's singularity test)", () => 
       [2020.04, 6],
     ];
     expect(fitPoly(pts, 5)).toBeNull();
+  });
+});
+
+describe("fitPoly — temporal x (epoch milliseconds)", () => {
+  // A temporal x-axis hands the fit epoch milliseconds, so a 1-day span is an x-spread of 8.64e7 and
+  // the u⁴ column of XᵀX reaches 5e31. `invert`'s singularity test used to judge each pivot against
+  // that ORIGINAL column magnitude while the pivot actually reached in the column scales as u², so
+  // the tolerance outgrew the thing it measured and every degree-≥2 fit was reported singular past an
+  // x-spread of roughly 707,000 ms — about TWELVE MINUTES. `poly` therefore drew nothing at all for
+  // any real date data, which is exactly the path validate.ts recommends on a temporal axis
+  // ("`fun` … is not supported on a temporal x-axis … Use `method` or `column` there").
+  //
+  // These fits are on data lying EXACTLY on a known polynomial, so non-null is not the assertion —
+  // reproducing the known curve is. `t` below is the position within the span (0 at the start, 1 at
+  // the end), which keeps y O(1) at every span while the polynomial in x itself stays exact.
+  const DAY = 86_400_000;
+  const T0 = Date.UTC(2020, 0, 1);
+  const COEF = [3, -2, 1.5, -0.75, 0.4, -0.2];
+  const spans: Array<[string, number]> = [
+    ["1 day", DAY],
+    ["30 days", 30 * DAY],
+    ["10 years", 3652 * DAY],
+  ];
+
+  /** The true curve: a degree-`d` polynomial in the span-normalised position of x. */
+  const truth = (span: number, d: number) => (x: number) => {
+    const t = (x - T0) / span;
+    let y = 0;
+    let pow = 1;
+    for (let k = 0; k <= d; k++) {
+      y += COEF[k]! * pow;
+      pow *= t;
+    }
+    return y;
+  };
+
+  const sample = (span: number, d: number, n = 12): Array<[number, number]> => {
+    const f = truth(span, d);
+    return Array.from({ length: n }, (_, i) => {
+      const x = T0 + (span * i) / (n - 1);
+      return [x, f(x)] as [number, number];
+    });
+  };
+
+  for (const [label, span] of spans) {
+    for (let d = 2; d <= 5; d++) {
+      it(`recovers a degree-${d} curve over ${label} of epoch milliseconds`, () => {
+        const f = truth(span, d);
+        const fit = fitPoly(sample(span, d), d);
+        expect(fit).not.toBeNull();
+        // Interior, both endpoints, and outside the data range (what `domain: axis` extrapolates to).
+        for (const q of [-0.25, 0, 0.17, 0.5, 0.83, 1, 1.25]) {
+          const x = T0 + span * q;
+          const want = f(x);
+          expect(evalPolyFit(fit!, x)).toBeCloseTo(want, 6);
+          // Relative form too: `toBeCloseTo(·, 6)` is absolute, and these y values are O(1) by
+          // construction, so pin the relative error where the absolute check is weakest.
+          expect(Math.abs(evalPolyFit(fit!, x) - want) / Math.max(1, Math.abs(want))).toBeLessThan(
+            1e-9,
+          );
+        }
+      });
+    }
+  }
+
+  it("fits a degree-1 line on a temporal axis (the case that already worked)", () => {
+    const pts: Array<[number, number]> = [0, 1, 2, 3].map(
+      (i) => [T0 + i * DAY, 10 + 2 * i] as [number, number],
+    );
+    const fit = fitPoly(pts, 1)!;
+    expect(evalPolyFit(fit, T0 + 4 * DAY)).toBeCloseTo(18, 6);
+  });
+
+  // The fix works by equilibrating XᵀX, which makes the pivot test dimensionless — so the SAME design
+  // at three wildly different x scales must produce the same fitted values at the same relative
+  // positions. This is the property whose absence was the bug; a scale-dependent test could not have
+  // it.
+  it("is invariant to the x scale: identical fitted values at identical relative positions", () => {
+    for (let d = 2; d <= 5; d++) {
+      const fits = spans.map(([, span]) => ({ span, fit: fitPoly(sample(span, d), d)! }));
+      for (const q of [0, 0.3, 0.5, 0.7, 1]) {
+        const ref = evalPolyFit(fits[0]!.fit, T0 + fits[0]!.span * q);
+        for (const { span, fit } of fits.slice(1)) {
+          expect(evalPolyFit(fit, T0 + span * q)).toBeCloseTo(ref, 8);
+        }
+      }
+    }
+  });
+
+  // The equilibrated test must not have bought temporal fits by going permissive: a temporal design
+  // with fewer distinct x values than parameters is still rank-deficient and must still be null,
+  // rather than coefficients full of garbage that the caller would happily draw.
+  it("still rejects a rank-deficient temporal design", () => {
+    const dup: Array<[number, number]> = [0, 0, 1, 2, 3, 4].map(
+      (i, k) => [T0 + i * DAY, k] as [number, number],
+    );
+    expect(fitPoly(dup, 5)).toBeNull();
+    const oneDate: Array<[number, number]> = [1, 2, 3, 4].map((y) => [T0, y] as [number, number]);
+    expect(fitPoly(oneDate, 2)).toBeNull();
   });
 });
