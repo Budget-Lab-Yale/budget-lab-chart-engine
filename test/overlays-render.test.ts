@@ -382,3 +382,101 @@ describe("overlays — validation accepts the specs this file renders", () => {
     }
   });
 });
+
+describe("overlays — facet scoping reaches the VALUE axis, not just the drawing", () => {
+  // The pane that never DRAWS the overlay must not have its value axis widened by it either. The
+  // fold (index.ts's yForAxis -> overlayColumnValues) runs long before the draw-time facet filter,
+  // so scoping the drawing alone left every pane's axis stretched to the overlay's range — and in
+  // `mode: "shared"` the UNIONED domain then flattened every pane, including the one that
+  // legitimately draws the line. Asserted on the resolved domain (renderPane's yDomain), the same
+  // way the value-axis block above is: a mark-count assertion cannot see an axis.
+  const facetColumnSpec = (mode: "shared" | "per-pane"): ChartSpec =>
+    ({
+      chartType: "line",
+      title: "faceted column overlay",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "time", value: "value", series: "series", facet: "facet" },
+      small_multiples: { columns: 2, mode },
+      overlays: [{ column: "yhat", facet: "A" }],
+    }) as unknown as ChartSpec;
+
+  // BOTH panes carry a `yhat` value of ~600 — the overlay is scoped to pane A, but pane B's own
+  // rows have the column too, which is exactly how the unscoped fold reached pane B.
+  const paneRows = (facet: string): TidyRow[] =>
+    [1, 2, 3].map((n) => ({
+      time: String(n),
+      value: String(n),
+      series: "S",
+      facet,
+      yhat: String(600 - n),
+    })) as unknown as TidyRow[];
+
+  const yDomainOfPane = (s: ChartSpec, facet: string) =>
+    renderPane(s, paneRows(facet), { ...OPTS, pane: true, paneFacetValue: facet }).yDomain;
+
+  it("does NOT widen the value axis of a pane the overlay is filtered out of", () => {
+    const [, hi] = yDomainOfPane(facetColumnSpec("per-pane"), "B");
+    expect(hi).toBeLessThan(100); // pane B's own data tops out at 3
+  });
+
+  it("DOES widen the value axis of the pane that actually draws it", () => {
+    const [, hi] = yDomainOfPane(facetColumnSpec("per-pane"), "A");
+    expect(hi).toBeGreaterThanOrEqual(599);
+  });
+
+  it("keeps the SHARED union wide enough for the pane that draws it", () => {
+    // The other direction of the same fix: `shared` mode unions the per-pane probes, so an overlay
+    // drawn in pane A must still reach the shared axis both panes are drawn against. Read the tick
+    // values off the leftmost pane (shared mode hides the tick LABELS on non-leftmost columns).
+    const fig = renderFigure(facetColumnSpec("shared"), [...paneRows("A"), ...paneRows("B")], OPTS);
+    const maxTick = Math.max(
+      ...Array.from((fig.panes[0]!.svg as SVGSVGElement).querySelectorAll("text"))
+        .map((t) => parseFloat(t.textContent ?? ""))
+        .filter((v) => Number.isFinite(v)),
+    );
+    expect(maxTick).toBeGreaterThanOrEqual(500);
+  });
+});
+
+describe("overlays — `domain` crops the value-axis fold too", () => {
+  /** x = 1..4; `yhat` is small at x = 1, 2 and enormous at x = 3, 4. */
+  const ROWS_STEEP: TidyRow[] = [1, 2, 3, 4].map((n) => ({
+    time: String(n),
+    value: String(n),
+    series: "A",
+    yhat: n <= 2 ? String(n) : String(n * 1000),
+  })) as unknown as TidyRow[];
+
+  const hiOf = (s: ChartSpec, rows: TidyRow[] = ROWS_STEEP) => renderPane(s, rows, OPTS).yDomain[1];
+
+  it("folds in only the part of the column the line is actually drawn over", () => {
+    // `domain: [1, 2]` draws the line over x = 1..2 only, so the 3000/4000 cells at x = 3, 4 are
+    // outside the drawn extent — clipped, exactly as the doc's "an overlay never widens the axis"
+    // rule says of a constructed line beyond the frame.
+    expect(hiOf(spec([{ column: "yhat", domain: [1, 2] }]))).toBeLessThan(100);
+  });
+
+  it("(companion) folds the whole column in with no `domain`, proving the crop, not a dropped fold", () => {
+    expect(hiOf(spec([{ column: "yhat" }]))).toBeGreaterThanOrEqual(4000);
+  });
+
+  it("folds in nothing when the crop leaves too few points to draw a line", () => {
+    // One in-domain row is not a line (resolveOverlays needs two REAL points), and a line that is
+    // never drawn cannot justify axis headroom for its values.
+    expect(hiOf(spec([{ column: "yhat", domain: [3.5, 4.5] }]))).toBeLessThan(100);
+  });
+
+  it("never lets a BLANK column cell fold in as a zero", () => {
+    // Since the break fix, a blank cell resolves to `{y: null}` rather than being skipped. A null
+    // read as a number would drag the floor to 0 and flatten a high-and-narrow series.
+    const high: TidyRow[] = [1, 2, 3, 4].map((n, i) => ({
+      time: String(n),
+      value: String(500 + n),
+      series: "A",
+      yhat: i === 1 ? "" : String(500 + n),
+    })) as unknown as TidyRow[];
+    const [lo] = renderPane(spec([{ column: "yhat" }]), high, OPTS).yDomain;
+    expect(lo).toBeGreaterThan(100);
+  });
+});

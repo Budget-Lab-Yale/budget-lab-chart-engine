@@ -38,7 +38,7 @@ import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
-import { resolveOverlays, overlayColumnValues } from "./overlays";
+import { resolveOverlays, overlayColumnValues, overlayDrawsInPane } from "./overlays";
 import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
@@ -569,6 +569,20 @@ function assemblePaneResult(
     return y != null ? { ...p, y } : p;
   });
 
+  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
+  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
+  // Computed HERE, above the y-extent block, because the `column` overlay fold a few lines down
+  // needs it to crop by the entry's `domain` (see below) — xOpts, which the draw-time overlay
+  // resolution prefers, is not built until much later.
+  const xExtentVals = dataInScope
+    .map((r) =>
+      adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
+    )
+    .filter((v): v is number => Number.isFinite(v as number));
+  const xExtent: [number, number] | undefined = xExtentVals.length
+    ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
+    : undefined;
+
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxis markers) values + point-callout y values so an annotation at/beyond the
   // data extent gets a little headroom instead of sitting flush against the axis edge.
@@ -582,7 +596,20 @@ function assemblePaneResult(
     // — so it folds into the extent rather than being clipped. The CONSTRUCTED kinds (method, fun,
     // slope+intercept) deliberately do not: `domain: axis` extrapolates as far as the frame goes, and
     // letting a steep fit dictate the axis is what the clip exists to prevent.
-    ...overlayColumnValues(spec, dataInScope),
+    //
+    // Scoped to what THIS pane draws — `facet` and `domain` both, via the same code the geometry
+    // uses (overlays.ts#overlayColumnValues). An unscoped fold widened every pane's axis to the
+    // overlay's range, and in `mode: "shared"` the unioned domain then flattened the lot.
+    // `xDomain` is the DATA extent, not xOpts' resolved axis domain (unavailable this early): they
+    // differ only in that the axis domain is the WIDER of the two (x-adapter fits the data, or
+    // anchors at zero), and every value this reads sits at the x of a row — inside the data extent
+    // either way — so `domain: "axis"` crops identically.
+    ...overlayColumnValues(spec, dataInScope, {
+      xField: adapter.xField,
+      seriesNames,
+      ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
+      ...(xExtent ? { xDomain: xExtent } : {}),
+    }),
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
@@ -815,17 +842,6 @@ function assemblePaneResult(
       }
     : undefined;
 
-  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
-  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
-  const xExtentVals = dataInScope
-    .map((r) =>
-      adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
-    )
-    .filter((v): v is number => Number.isFinite(v as number));
-  const xExtent: [number, number] | undefined = xExtentVals.length
-    ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
-    : undefined;
-
   // Overlay lines — fits, equations, stated slopes, precomputed columns. Built HERE rather than in a
   // mark builder because they apply to every numeric/temporal-x chart type, and this is the one site
   // every chart type passes through. Pushing them into `layers` is also what gets them into the PNG:
@@ -841,7 +857,7 @@ function assemblePaneResult(
       seriesNames,
       legendActive: spec.legend !== false,
       ...(axisDomain ? { xDomain: axisDomain } : {}),
-    }).filter((o) => o.facet == null || o.facet === opts.paneFacetValue);
+    }).filter((o) => overlayDrawsInPane(o.facet, opts.paneFacetValue));
     // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
     // fx/fy CHANNEL NAMES passed to `buildOverlayMarks`, but the `OverlayRow` objects it builds
     // (marks/overlay.ts) carry no `_fxCol`/`_fyRow` fields — those channels would resolve to

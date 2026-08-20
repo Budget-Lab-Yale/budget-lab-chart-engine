@@ -93,19 +93,123 @@ export function overlayLineColor(
   return TBL.color.annotationDim;
 }
 
-/** Every `overlays[].column` value present in the rows. `column` is real per-row data, so unlike the
- *  constructed kinds it folds into the value-axis extent (see index.ts's yForAxis) — otherwise a
- *  fitted series that runs above the raw data would silently sit off-frame. */
-export function overlayColumnValues(spec: ChartSpec, rows: PreparedRow[]): number[] {
-  const cols = (spec.overlays ?? []).map((o) => o.column).filter((c): c is string => !!c);
-  if (!cols.length) return [];
-  const out: number[] = [];
+/** Does this entry draw in the pane being rendered? SINGLE SOURCE for the draw-time filter and the
+ *  value-axis fold (both in index.ts): an overlay that is filtered OUT of a pane must not widen that
+ *  pane's value axis either — and in `small_multiples.mode: "shared"` the unioned domain then
+ *  flattens every pane, including the one that legitimately draws the line. Deriving the two
+ *  separately is exactly how they drifted apart.
+ *
+ *  An entry with a `facet` on a NON-faceted chart (paneFacetValue undefined) draws nowhere, so it
+ *  contributes nothing — the drawing and the axis agree on that too. */
+export function overlayDrawsInPane(facet?: string, paneFacetValue?: string): boolean {
+  return facet == null || facet === paneFacetValue;
+}
+
+/** Rows grouped by colour series. Built ONCE per call: a per-entry `rows.filter` per series is
+ *  O(S·N) per overlay, and the target chart type is a scatter with many points and several
+ *  overlays. */
+function groupBySeries(rows: PreparedRow[]): Map<string, PreparedRow[]> {
+  const bySeries = new Map<string, PreparedRow[]>();
   for (const r of rows) {
-    const bag = r._overlayCols;
-    if (!bag) continue;
-    for (const c of cols) {
-      const v = bag[c];
-      if (v != null && Number.isFinite(v)) out.push(v);
+    const list = bySeries.get(r.series);
+    if (list) list.push(r);
+    else bySeries.set(r.series, [r]);
+  }
+  return bySeries;
+}
+
+/** The groups one entry resolves to: one per colour series for a per-series `method`/`column`, else
+ *  a single pooled group with no series identity (the constructed kinds do not read the data). */
+function overlayGroups(
+  o: Overlay,
+  rows: PreparedRow[],
+  seriesNames: string[],
+  bySeries: Map<string, PreparedRow[]>,
+): Array<{ series?: string; rows: PreparedRow[] }> {
+  return overlayPerSeries(o)
+    ? seriesNames.map((s) => ({ series: s, rows: bySeries.get(s) ?? [] }))
+    : [{ rows }];
+}
+
+/** The `column` kind's polyline for ONE group: x-ordered, cropped to the entry's `domain`, blank
+ *  cells as breaks. Null ⇒ nothing is drawn at all.
+ *
+ *  A row that IS in scope but carries no value for this column emits a BREAK (`y: null`), not
+ *  nothing: CONFIG-SPEC.md's `overlays[].column` row promises "a sparse column breaks its line
+ *  rather than diving to the baseline", and skipping the row outright joined its neighbours instead
+ *  — rerouting the line through a segment the data never claimed, which reads as a plausible wrong
+ *  line rather than a gap. (Non-numeric cells never get here: validate.ts rejects them, for the same
+ *  reason. "Absent" is the only non-number this can see.)
+ *
+ *  A row cropped OUT by the domain, or with no usable x, emits NOTHING — outside the drawn extent
+ *  the line simply stops, which is not the same claim as a hole inside it.
+ *
+ *  SHARED with the value-axis fold (overlayColumnValues) so the axis can only ever be widened by
+ *  values the line actually draws: same crop, same "too sparse to be a line" rule, one code path. */
+function columnPoints(
+  o: Overlay,
+  rows: PreparedRow[],
+  xField: "_xn" | "_xd",
+  xDomain?: [number, number],
+): Array<{ x: number; y: number | null }> | null {
+  const dom = overlayDomain(
+    o,
+    "column",
+    rows.map((r) => xOf(r, xField)),
+    xDomain,
+  );
+  if (!dom) return null;
+  const col = o.column as string;
+  const pts: Array<{ x: number; y: number | null }> = [];
+  for (const r of rows) {
+    const x = xOf(r, xField);
+    if (!Number.isFinite(x)) continue;
+    if (x < dom[0] || x > dom[1]) continue;
+    const y = r._overlayCols?.[col];
+    pts.push(y != null && Number.isFinite(y) ? pt(x, y) : { x, y: null });
+  }
+  // Sorted by x with the breaks in place, so each one lands between the neighbours it separates
+  // — that position is what the mark builder's run-splitting reads (marks/overlay.ts#runsOf).
+  pts.sort((a, b) => a.x - b.x);
+  // REAL points only: a break is not a vertex, and two blanks around one value is not a line.
+  if (pts.reduce((n, p) => n + (p.y == null ? 0 : 1), 0) < 2) return null;
+  return pts;
+}
+
+/** Every `overlays[].column` value the overlay lines of THIS pane actually draw. `column` is real
+ *  per-row data, so unlike the constructed kinds it folds into the value-axis extent (see index.ts's
+ *  yForAxis) — otherwise a fitted series that runs above the raw data would silently sit off-frame.
+ *
+ *  Scoped to what is drawn, via the same `columnPoints`/`overlayDrawsInPane` the geometry uses: a
+ *  pane the overlay is facet-filtered out of, an x range the `domain` crops away, and a group too
+ *  sparse to be a line contribute nothing. A BREAK (`y: null`, a blank cell) is not a value and
+ *  must never reach the extent as a zero. */
+export function overlayColumnValues(
+  spec: ChartSpec,
+  rows: PreparedRow[],
+  ctx: {
+    /** The adapter's raw `xField`. Anything but "_xn"/"_xd" — i.e. "_xc", a categorical axis —
+     *  renders no overlays at all, matching index.ts's own draw-side guard, so it folds nothing.
+     *  Narrowed here rather than cast at the call site: a cast would silently make a categorical
+     *  axis read `_xn` off every row as NaN. */
+    xField: string;
+    seriesNames: string[];
+    paneFacetValue?: string;
+    xDomain?: [number, number];
+  },
+): number[] {
+  const entries = spec.overlays;
+  const xField = ctx.xField;
+  if (!entries?.length || (xField !== "_xn" && xField !== "_xd")) return [];
+  const bySeries = groupBySeries(rows);
+  const out: number[] = [];
+  for (const o of entries) {
+    if (overlayKind(o) !== "column") continue; // wrong kind, or an invalid spec validation rejects
+    if (!overlayDrawsInPane(o.facet, ctx.paneFacetValue)) continue;
+    for (const g of overlayGroups(o, rows, ctx.seriesNames, bySeries)) {
+      const pts = columnPoints(o, g.rows, xField, ctx.xDomain);
+      if (!pts) continue;
+      for (const p of pts) if (p.y != null) out.push(p.y);
     }
   }
   return out;
@@ -149,14 +253,8 @@ export function resolveOverlays(
   const entries = spec.overlays;
   if (!entries?.length) return [];
 
-  // Grouped ONCE, outside the entries loop: a per-entry `rows.filter` per series is O(S·N) per
-  // overlay, and the target chart type is a scatter with many points and several overlays.
-  const rowsBySeries = new Map<string, PreparedRow[]>();
-  for (const r of rows) {
-    const list = rowsBySeries.get(r.series);
-    if (list) list.push(r);
-    else rowsBySeries.set(r.series, [r]);
-  }
+  // Grouped ONCE, outside the entries loop — see groupBySeries.
+  const rowsBySeries = groupBySeries(rows);
 
   const out: ResolvedOverlay[] = [];
 
@@ -181,10 +279,7 @@ export function resolveOverlays(
 
     // Which groups to draw. `method`/`column` split by series unless pooled; the other kinds do not
     // read the data at all, so they are one group with no series identity.
-    const perSeries = overlayPerSeries(o);
-    const groups: Array<{ series?: string; rows: PreparedRow[] }> = perSeries
-      ? ctx.seriesNames.map((s) => ({ series: s, rows: rowsBySeries.get(s) ?? [] }))
-      : [{ rows }];
+    const groups = overlayGroups(o, rows, ctx.seriesNames, rowsBySeries);
 
     for (const g of groups) {
       const groupXs = g.rows.map((r) => xOf(r, ctx.xField));
@@ -251,31 +346,10 @@ export function resolveOverlays(
         continue;
       }
 
-      // kind === "column": the values are already in the data — order by x and crop to the domain.
-      //
-      // A row that IS in scope but carries no value for this column emits a BREAK (`y: null`), not
-      // nothing: CONFIG-SPEC.md's `overlays[].column` row promises "a sparse column breaks its line
-      // rather than diving to the baseline", and skipping the row outright joined its neighbours
-      // instead — rerouting the line through a segment the data never claimed, which reads as a
-      // plausible wrong line rather than a gap. (Non-numeric cells never get here: validate.ts
-      // rejects them, for the same reason. "Absent" is the only non-number this can see.)
-      //
-      // A row cropped OUT by the domain, or with no usable x, emits NOTHING — outside the drawn
-      // extent the line simply stops, which is not the same claim as a hole inside it.
-      const col = o.column as string;
-      const pts: Array<{ x: number; y: number | null }> = [];
-      for (const r of g.rows) {
-        const x = xOf(r, ctx.xField);
-        if (!Number.isFinite(x)) continue;
-        if (x < dom[0] || x > dom[1]) continue;
-        const y = r._overlayCols?.[col];
-        pts.push(y != null && Number.isFinite(y) ? pt(x, y) : { x, y: null });
-      }
-      // Sorted by x with the breaks in place, so each one lands between the neighbours it separates
-      // — that position is what the mark builder's run-splitting reads (marks/overlay.ts#runsOf).
-      pts.sort((a, b) => a.x - b.x);
-      // REAL points only: a break is not a vertex, and two blanks around one value is not a line.
-      if (pts.reduce((n, p) => n + (p.y == null ? 0 : 1), 0) < 2) continue;
+      // kind === "column": the values are already in the data — order by x, crop to the domain,
+      // blanks as breaks. Shared with the value-axis fold; see columnPoints.
+      const pts = columnPoints(o, g.rows, ctx.xField, ctx.xDomain);
+      if (!pts) continue;
       out.push({ ...base, points: pts });
     }
   }

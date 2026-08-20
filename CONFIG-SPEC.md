@@ -441,12 +441,14 @@ For a **horizontal or vertical rule**, use `annotations.yAxis` / `annotations.xA
 | `overlays[].labelSide` | enum | Which side of the line the label sits: `top` (default) \| `middle` \| `bottom`. |
 | `overlays[].labelPosition` | enum | Where along the line it anchors: `left` (first point) \| `middle` \| `right` (last point, default). An overlay is sloped, so this picks a point **on** the line rather than a frame edge. |
 | `overlays[].labelDx` / `.labelDy` | number | px nudges — **`+labelDx` = right, `+labelDy` = up**, as everywhere in `annotations`. |
-| `overlays[].facet` | string | Small multiples: scope this overlay to the pane whose facet value matches. The pane must be one the figure actually renders — a value `pane_order` excludes is a validation error, since the line would be drawn nowhere while still keying its legend row. |
+| `overlays[].facet` | string | Small multiples: scope this overlay to the pane whose facet value matches. The scoping covers the **value axis** as well as the drawing — a `column` overlay folds into the extent only in the pane that draws it, since in `mode: shared` a widened pane would otherwise drag every other pane's axis with it. The pane must be one the figure actually renders — a value `pane_order` excludes is a validation error, since the line would be drawn nowhere while still keying its legend row. |
 
 **The value axis, and why `column` is different.** A `column` overlay's values **are** folded into the
 value-axis extent, the same way `confidence_bands`' `lower`/`upper` columns and `annotations.yAxis`
 values are: it is real per-row data the author supplied, and silently dropping it off-frame would be a
-worse failure than a slightly taller axis. The other three kinds are **constructed** lines whose extent
+worse failure than a slightly taller axis. Only the part of the column the line actually **draws**
+folds in — `domain` and `facet` crop the extent exactly as they crop the geometry, and a group left
+with fewer than two values in range draws no line and widens nothing. The other three kinds are **constructed** lines whose extent
 is unbounded by design — `domain: axis` extrapolates as far as the frame goes — so they never widen the
 axis and are clipped at the frame instead. If you want a fit's full range visible, set
 `yAxisPolicy.min`/`.max`.
