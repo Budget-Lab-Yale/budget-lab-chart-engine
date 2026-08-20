@@ -252,6 +252,14 @@ export interface MarkLayers {
    *  are all DERIVED from this plus the spec, at the sites that read them, rather than forwarded
    *  alongside it. Absent ⇒ not a stacked chart. */
   netMode?: NetMode;
+  /** Stacked bars: did the label builder refuse at least one segment's in-bar value label for being
+   *  thinner than the fit threshold? The pill DEFAULT reads it (spec/bar-stack.ts resolveValuePills):
+   *  a chart whose labels do not cover every segment must keep its hover pills, or the refused
+   *  segments carry no number anywhere — the crosshair behind painted labels is `emitOnly`, so there
+   *  is no tooltip either. This is a REPORT of what was painted, not a second derivation of the rule;
+   *  the threshold lives in exactly one place and only the builder can see the frame geometry it
+   *  needs. Absent ⇒ no segment labels were attempted (not a stacked chart, or they were gated off). */
+  segmentLabelsDropped?: boolean;
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;

@@ -64,6 +64,28 @@ function hoverFirstBand(svg: SVGSVGElement): void {
     .dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 20, bubbles: true }));
 }
 
+/** Hover the band at `i` (categories left-to-right), stubbing jsdom's all-zero rect as above.
+ *  Band centres are read off the bar rects' own x, deduped — a stacked band has one rect per
+ *  segment, all sharing the band's x. */
+function hoverBand(svg: SVGSVGElement, i: number): void {
+  const vb = svg.viewBox.baseVal;
+  Object.defineProperty(svg, "getBoundingClientRect", {
+    value: () => ({
+      width: vb.width, height: vb.height, top: 0, left: 0,
+      right: vb.width, bottom: vb.height, x: 0, y: 0,
+    }),
+    configurable: true,
+  });
+  const xs = new Set<number>();
+  svg.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect').forEach((r) => {
+    xs.add(parseFloat(r.getAttribute("x") ?? "0") + parseFloat(r.getAttribute("width") ?? "0") / 2);
+  });
+  const cx = [...xs].sort((a, b) => a - b)[i]!;
+  svg
+    .querySelector(".tbl-band-crosshair-hit")!
+    .dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 20, bubbles: true }));
+}
+
 function chartSvg(el: HTMLElement): SVGSVGElement {
   return el.querySelector<SVGSVGElement>(".figure-canvas svg")!;
 }
@@ -237,5 +259,97 @@ describe("the same rule on a small-multiples figure", () => {
   it("chrome.valuePills: false still suppresses them", () => {
     const el = mount(facetSpec({ valueLabels: { show: true }, chrome: { valuePills: false } }), FACETED);
     expect(el.querySelectorAll(".tbl-hl-pills").length).toBe(0);
+  });
+});
+
+// The pill DEFAULT must not be able to leave a segment with no number anywhere.
+//
+// `valueLabels.show` is a request that marks/stacked.ts refuses PER SEGMENT as well as per chart: a
+// segment thinner than SEGMENT_LABEL_MIN_PX (25px) gets no in-bar label. The pill default was keyed
+// on the per-CHART half only, so a chart whose labels were requested-and-painted-in-general could
+// still have segments carrying no number at all — and because painted labels also mean
+// `netMode: "text"` -> `hoverMode: "pills"` -> a band crosshair attached `emitOnly`, there is no
+// floating tooltip behind it either. The reader got nothing.
+//
+// The rule is COARSE on purpose: the default flips off only when EVERY segment's label is painted.
+// See spec/bar-stack.ts resolveValuePills for why the finer per-segment rule was rejected.
+describe("a dropped in-bar label must not also cost the segment its pill", () => {
+  // Four rows, the smallest trigger: "Small"'s segments are 6.9 of a 100-tall tallest bar, ~6.9% of
+  // the plot height at 720x400 -> under the 25px threshold, so their labels are refused while
+  // "Big"'s are painted.
+  const MIXED: TidyRow[] = [
+    { cat: "Big", series: "one", value: "50" },
+    { cat: "Big", series: "two", value: "50" },
+    { cat: "Small", series: "one", value: "6.9" },
+    { cat: "Small", series: "two", value: "6.9" },
+  ] as unknown as TidyRow[];
+
+  function mount400(s: ChartSpec, rows: TidyRow[]): HTMLElement {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    mountChart(el, { spec: s, rows, width: 720, height: 400 });
+    return el;
+  }
+
+  it("a segment whose label was dropped still gets a number on hover", () => {
+    const el = mount400(stacked({ valueLabels: { show: true } }), MIXED);
+    const svg = chartSvg(el);
+    // The premise: only "Big"'s two labels are painted; "Small"'s two are refused.
+    expect([...svg.querySelectorAll("g.tbl-segment-label text")].map((t) => t.textContent)).toEqual([
+      "50.0",
+      "50.0",
+    ]);
+    // Band 1 is "Small". Its value must appear SOMEWHERE after hovering it -- it is in no bar.
+    expect(textMarkCount(svg, "6.90")).toBe(0);
+    hoverBand(svg, 1);
+    expect(textMarkCount(svg, "6.90")).toBe(2);
+  });
+
+  it("every label dropped (15 equal series) keeps the pills", () => {
+    const many: TidyRow[] = Array.from({ length: 15 }, (_, i) => ({
+      cat: "A",
+      series: `s${i}`,
+      value: "1",
+    })) as unknown as TidyRow[];
+    const el = mount400(stacked({ valueLabels: { show: true } }), many);
+    const svg = chartSvg(el);
+    expect(svg.querySelectorAll("g.tbl-segment-label text").length).toBe(0);
+    hoverBand(svg, 0);
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBeGreaterThan(0);
+  });
+
+  it("all-zero data paints no label and so keeps the pills", () => {
+    const zeros: TidyRow[] = [
+      { cat: "A", series: "one", value: "0" },
+      { cat: "B", series: "one", value: "0" },
+      { cat: "C", series: "one", value: "0" },
+    ] as unknown as TidyRow[];
+    const el = mount400(stacked({ valueLabels: { show: true } }), zeros);
+    const svg = chartSvg(el);
+    expect(svg.querySelectorAll("g.tbl-segment-label text").length).toBe(0);
+    hoverBand(svg, 0);
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBeGreaterThan(0);
+  });
+
+  it("chrome.valuePills: false still wins over the dropped-label rescue", () => {
+    const el = mount400(
+      stacked({ valueLabels: { show: true }, chrome: { valuePills: false } }),
+      MIXED,
+    );
+    const svg = chartSvg(el);
+    hoverBand(svg, 1);
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(0);
+  });
+
+  it("when every label IS painted the pills still default off -- afc61bf's behaviour is kept", () => {
+    // Same fixture, twice the frame height: 6.9% of a taller plot clears 25px, so all four labels
+    // paint and there is nothing left for a pill to rescue.
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    mountChart(el, { spec: stacked({ valueLabels: { show: true } }), rows: MIXED, width: 720, height: 900 });
+    const svg = chartSvg(el);
+    expect(svg.querySelectorAll("g.tbl-segment-label text").length).toBe(4);
+    hoverBand(svg, 1);
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(0);
   });
 });

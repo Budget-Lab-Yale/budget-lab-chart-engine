@@ -327,7 +327,12 @@ export function buildStackedMarks(
   // (text) they are OPTIONAL, default OFF — only when spec.valueLabels.show === true.
   //
   // The rule lives in spec/bar-stack.ts because the hover value pills DEFAULT off exactly when these
-  // labels are painted, and the two must not be able to disagree about when that is.
+  // labels are painted, and the two must not be able to disagree about when that is. That agreement
+  // has TWO halves: this per-chart gate, which both sides read from the shared helper, and the
+  // per-SEGMENT fit threshold inside buildSegmentLabels, which only this builder can evaluate (it
+  // needs the frame geometry). The builder therefore REPORTS the second half out as
+  // `segmentLabelsDropped` rather than letting the pill side re-derive it.
+  let segmentLabelsDropped = false;
   if (stackedSegmentLabelsShown(spec, netMode, pane)) {
     // Mono light tiers (the two lightest, 100 & 200 per the Style-Guide) get dark text;
     // everything else white. monoScale returns darkest-first, so the light tiers are the
@@ -338,22 +343,22 @@ export function buildStackedMarks(
       lightSeries = new Set<string>();
       for (const [s, hex] of monoTierForSeries) if (lightHexes.has(hex)) lightSeries.add(s);
     }
-    overlay.push(
-      ...buildSegmentLabels(data, categories, {
-        catField,
-        rank,
-        posSumByCat,
-        normalize,
-        horizontal,
-        plotHeight: ctx.plotHeight ?? 0,
-        plotWidth: ctx.plotWidth ?? 0,
-        mono: monoBase != null,
-        lightSeries,
-        fmt: segFmt,
-        hooks: ctx.hooks,
-        facet: ctx.facet,
-      }),
-    );
+    const segLabels = buildSegmentLabels(data, categories, {
+      catField,
+      rank,
+      posSumByCat,
+      normalize,
+      horizontal,
+      plotHeight: ctx.plotHeight ?? 0,
+      plotWidth: ctx.plotWidth ?? 0,
+      mono: monoBase != null,
+      lightSeries,
+      fmt: segFmt,
+      hooks: ctx.hooks,
+      facet: ctx.facet,
+    });
+    overlay.push(...segLabels.marks);
+    segmentLabelsDropped = segLabels.dropped;
   }
 
   // --- Rect tagging order ---
@@ -418,6 +423,7 @@ export function buildStackedMarks(
       seriesColors,
       legendVisualOrder,
       netMode,
+      segmentLabelsDropped,
       ...segmentGapLayer,
       ...(legendExtras ? { legendExtras } : {}),
     };
@@ -440,6 +446,7 @@ export function buildStackedMarks(
     seriesColors,
     legendVisualOrder,
     netMode,
+    segmentLabelsDropped,
     ...segmentGapLayer,
     ...(legendExtras ? { legendExtras } : {}),
   };
@@ -475,7 +482,7 @@ function buildSegmentLabels(
     hooks: MarkContext["hooks"];
     facet: string | undefined;
   },
-): unknown[] {
+): { marks: unknown[]; dropped: boolean } {
   const {
     catField, rank, posSumByCat, normalize,
     horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet,
@@ -506,6 +513,8 @@ function buildSegmentLabels(
   // in declaration order, tracking cumulative offsets.
   type LabelRow = { _xc: string; mid: number; text: string; light: boolean };
   const rows: LabelRow[] = [];
+  // Did any segment that HAS a label-worthy value get its label refused below?
+  let dropped = false;
   for (const cat of categories) {
     const catRows = data.filter(
       (r) =>
@@ -538,8 +547,18 @@ function buildSegmentLabels(
         labelNum = normalize ? segValue : y;
       }
       // Suppress when the segment's pixel size is below the threshold.
+      //
+      // Every refusal is COUNTED, because the hover value pills default off only when the labels
+      // cover the whole chart (spec/bar-stack.ts resolveValuePills). This loop is the sole authority
+      // on which segments earn a label, so it REPORTS what it did rather than letting the pill side
+      // re-derive it against a copy of this arithmetic -- the drift that would reintroduce the very
+      // gap the pill default opened. Do not move the threshold itself: it predates 1.12.0 and every
+      // published figure's labels are placed by it.
       const segPx = valueAxisPx > 0 ? (segValue / valueSpan) * valueAxisPx : Infinity;
-      if (Number.isFinite(segPx) && segPx < SEGMENT_LABEL_MIN_PX) continue;
+      if (Number.isFinite(segPx) && segPx < SEGMENT_LABEL_MIN_PX) {
+        dropped = true;
+        continue;
+      }
       // Light mono tiers (100/200) get dark text; everything else white (§7).
       const light = mono && lightSeries != null && lightSeries.has(r.series);
       const text = applyValueLabelHook(fmt(labelNum), hooks, {
@@ -552,7 +571,7 @@ function buildSegmentLabels(
     }
   }
 
-  if (!rows.length) return [];
+  if (!rows.length) return { marks: [], dropped };
   // Text color: white on categorical/dark mono; dark on light mono tiers (per-row).
   const fill = (d: LabelRow) => (d.light ? TBL.color.heading : WHITE);
   const common = {
@@ -562,9 +581,12 @@ function buildSegmentLabels(
     fontSize: 10,
     fontWeight: 600,
   };
-  return [
-    horizontal
-      ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
-      : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
-  ];
+  return {
+    marks: [
+      horizontal
+        ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
+        : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
+    ],
+    dropped,
+  };
 }

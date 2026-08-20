@@ -117,11 +117,39 @@ export function stackedSegmentLabelsShown(
  * Called at BOTH render-live.ts pill sites (the standalone `mountChart` one and `wireFigureSvg`'s
  * per-pane one) with that site's own `pane` value. Same rule, different context — a pane really does
  * paint no segment labels, so it really does keep its pills.
+ *
+ * INVARIANT: a reader must never be left with no number for a segment.
+ *
+ * `stackedSegmentLabelsShown` answers only the per-CHART half of "are the labels painted". The other
+ * half is the per-SEGMENT fit threshold in marks/stacked.ts: a segment thinner than
+ * SEGMENT_LABEL_MIN_PX gets no label even on a chart that paints them everywhere else. Keying the
+ * default on the per-chart half alone left those segments with nothing — painted labels imply
+ * `netMode: "text"` → `hoverMode: "pills"` → a band crosshair attached `emitOnly`, so there is no
+ * floating tooltip standing behind them. `segmentLabelsDropped` closes that: it is the label
+ * builder's REPORT of what it actually painted, not a second copy of the threshold, so the two
+ * cannot drift.
+ *
+ * The rule is COARSE — the default flips off only when EVERY segment's label is painted; if any was
+ * refused, the whole band keeps its pills, including the segments that did get a label. The finer
+ * alternative (a pill for the refused segments only) is more precise about duplication and was
+ * rejected on three counts:
+ *  - the pills are a HIGHLIGHT affordance (`attachHighlightPills`): they say "this is what you are
+ *    pointing at". Drawing them on a subset of the hovered band's segments misreads as those
+ *    segments being singled out, rather than as a fallback for a number that would not fit.
+ *  - the cost it avoids is a transient, hover-only duplicate of a number the reader can already see.
+ *    The cost it adds is a band state nobody has published or reviewed.
+ *  - it needs the SET of refused segments to reach the pill driver plus a second gate inside it —
+ *    two more places for the paint and the pill to disagree, against this one boolean.
+ * Where all the labels do fit, the coarse rule keeps afc61bf's behaviour exactly; where they do not,
+ * it falls back to the pre-afc61bf behaviour (pills on), which is what the published archive shipped.
  */
 export function resolveValuePills(
   spec: ChartSpec,
   netMode: NetMode | undefined,
   pane: boolean,
+  segmentLabelsDropped: boolean,
 ): boolean {
-  return spec.chrome?.valuePills ?? !stackedSegmentLabelsShown(spec, netMode, pane);
+  const labelsCoverEverySegment =
+    stackedSegmentLabelsShown(spec, netMode, pane) && !segmentLabelsDropped;
+  return spec.chrome?.valuePills ?? !labelsCoverEverySegment;
 }

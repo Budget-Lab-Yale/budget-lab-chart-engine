@@ -231,6 +231,10 @@ export interface RenderResult {
   legendVisualOrder?: string[];
   /** Stacked charts only. Mirrors MarkLayers.netMode — see spec/bar-stack.ts. */
   netMode?: NetMode;
+  /** Stacked charts only. Mirrors MarkLayers.segmentLabelsDropped — the label builder's report that
+   *  at least one segment was too thin for its in-bar number. render-live feeds it to
+   *  resolveValuePills so the pill default cannot leave those segments with no number at all. */
+  segmentLabelsDropped?: boolean;
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -1207,6 +1211,7 @@ export function renderChart(
     overlayTooltips: pane.overlayTooltips,
     legendVisualOrder: layers.legendVisualOrder,
     netMode: layers.netMode,
+    segmentLabelsDropped: layers.segmentLabelsDropped,
   };
 }
 

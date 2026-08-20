@@ -87,14 +87,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   consumer silently the way `.tbl-legend-swatch.is-dot`'s retirement did in 1.11.0.
 
 ### Changed
-- **Value pills now default to off where segment value labels are actually painted.** A stacked chart
-  with `valueLabels.show` printed its numbers in the segments and then repeated them in hover pills a
-  few pixels away. The default is keyed on the labels being *painted*, not on the flag being set —
-  `valueLabels.show` is a request that three cases refuse, and suppressing pills wherever the flag
-  appeared would have removed them from charts printing no numbers at all: a diverging net-dot stack
-  and every small-multiples pane paint no segment labels, and a waterfall's labels are the running
-  *level* while its hover pill is the signed *delta*, so nothing is duplicated there. An explicit
-  `chrome.valuePills: true` still wins, so asking for both remains possible.
+- **Value pills now default to off where segment value labels are painted for every segment.** A
+  stacked chart with `valueLabels.show` printed its numbers in the segments and then repeated them in
+  hover pills a few pixels away. The default is keyed on the labels being *painted*, not on the flag
+  being set — `valueLabels.show` is a request that four cases refuse, and suppressing pills wherever
+  the flag appeared would have removed them from charts printing no numbers at all: a diverging
+  net-dot stack and every small-multiples pane paint no segment labels; a waterfall's labels are the
+  running *level* while its hover pill is the signed *delta*, so nothing is duplicated there; and a
+  segment thinner than the 25px fit threshold is skipped individually, so a chart whose labels do not
+  cover **every** segment keeps its pills for the whole chart. That last refusal is per-segment and
+  frame-size dependent, and the label builder reports which it skipped rather than the pill rule
+  re-deriving the threshold. An explicit `chrome.valuePills: true` still wins, so asking for both
+  remains possible.
 - **`valueLabels.show` is not "stacked bars only".** A waterfall paints segment labels for the same
   flag. `CONFIG-SPEC.md` claimed otherwise; the claim was false before this release and is now
   corrected and test-backed. No behaviour changed — only the documentation of behaviour that already
@@ -134,11 +138,13 @@ A repin re-renders every published figure at once — here is what a maintainer 
   `tbl-hover` CustomEvent per pointermove regardless of whether anything listens — harmless on
   its own, but new work on a hot path, and a host page listening for an unrelated bubbling event of
   the same name will now see these.
-- **A published stacked chart with `valueLabels.show` loses its hover value pills.** The numbers are
-  already printed in the segments, so the pills were repeating them; this is the intended change, but
-  it lands on every such chart at repin with no spec change on anyone's part. Hover-only — no
-  exported/published image changes, and no golden fixture moved. Set `chrome.valuePills: true`
-  explicitly on a chart that should keep both.
+- **A published stacked chart with `valueLabels.show` loses its hover value pills — unless some
+  segment is too thin to print its number.** The numbers are already in the segments, so the pills
+  were repeating them; this is the intended change, but it lands on every such chart at repin with no
+  spec change on anyone's part. A chart with any segment under the 25px fit threshold keeps its pills
+  instead, since those segments have no printed number to repeat. Hover-only — no exported/published
+  image changes, and no golden fixture moved. Set `chrome.valuePills: true` explicitly on a chart
+  that should keep both.
 - **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
   current — re-run its vendoring step at repin.
 

@@ -922,7 +922,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const {
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, netMode,
-      shapeLegendItems, colorLegendTitle, shapeLegendTitle, overlayTooltips,
+      shapeLegendItems, colorLegendTitle, shapeLegendTitle, overlayTooltips, segmentLabelsDropped,
     } = built;
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
@@ -941,7 +941,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // `valueLabels.show` moves the pill DEFAULT (the numbers are already in the bars); an explicit
     // `chrome.valuePills` still wins. `pane: false` — this is the standalone chart. See
     // spec/bar-stack.ts resolveValuePills; wireFigureSvg's site calls the SAME helper.
-    const chromePills = resolveValuePills(spec, netMode, false);
+    //
+    // `segmentLabelsDropped` is the label builder's report that some segment was too thin for its
+    // in-bar number, so the pills must stay to carry it (the crosshair here is `emitOnly` — there is
+    // no tooltip behind them). It rides on `built`, i.e. THIS draw's geometry: a resize that shrinks
+    // the frame past the fit threshold re-decides it, because draw() re-runs this whole block.
+    const chromePills = resolveValuePills(spec, netMode, false, segmentLabelsDropped ?? false);
     const onHighlight = (active: Set<string>): void => {
       recolorNetLabels(svg);
       pillDriver?.setActive(active);
@@ -1952,7 +1957,12 @@ function wireFigureSvg(
   // Mirrors mountChart's site through the SAME helper, with `pane: true` — a small-multiples pane
   // paints no segment labels, so `valueLabels.show` leaves its pills alone. Two sites computing this
   // separately is how the faceted-histogram and faceted-line pill gaps happened.
-  const chromePills = resolveValuePills(ctx.spec, ctx.netMode, true);
+  //
+  // `segmentLabelsDropped: false` because a pane's label builder never runs, so it refused nothing.
+  // `pane: true` already forces the pills on by itself; this argument is not what decides it here,
+  // and it is passed explicitly (rather than defaulted) so a future pane that DID paint labels would
+  // have to come back and answer the question instead of silently inheriting "nothing was dropped".
+  const chromePills = resolveValuePills(ctx.spec, ctx.netMode, true, false);
   // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
   // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
   // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
