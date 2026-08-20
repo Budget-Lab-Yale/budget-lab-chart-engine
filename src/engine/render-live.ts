@@ -2460,22 +2460,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
     }
-    // onRender: once PER PANE (there is no single wrapping SVG for a figure to report) at the
-    // three real re-render occasions — mirrors mountChart's dispatch, gated the same way, INCLUDING
-    // the "mount" deferral (mountFigure's own initial draw() call has the identical ResizeObserver/
-    // teardown-construction-after-it shape mountChart's does — see that dispatch's comment).
-    if (renderPhase) {
-      for (const pane of fig.panes) {
-        if (!pane.svg) continue;
-        const renderCtx = { svg: pane.svg, phase: renderPhase };
-        if (renderPhase === "mount") {
-          // Guarded on `disposed` -- see mountChart's identical dispatch comment.
-          queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
-        } else {
-          notify(card, "tbl-render", renderCtx, opts.onRender);
-        }
-      }
-    }
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     // Each pane registers its value-pill driver here; the legend fires them all on highlight.
@@ -2561,6 +2545,29 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       });
       drivers.push(driver ?? (() => {}));
     });
+
+    // onRender: once PER PANE (there is no single wrapping SVG for a figure to report) at the
+    // three real re-render occasions — mirrors mountChart's dispatch, gated the same way, INCLUDING
+    // the "mount" deferral (mountFigure's own initial draw() call has the identical ResizeObserver/
+    // teardown-construction-after-it shape mountChart's does — see that dispatch's comment).
+    // Fired here, at the true end of drawGrid — after the legend is (re)built and every pane's
+    // crosshair/coordinated-cursor DOM is wired — so every phase (mount/resize/reselect) sees the
+    // SAME finished DOM shape mountChart's end-of-draw() dispatch sees. Firing earlier (right after
+    // the pane SVGs were appended, before legendSlot.replaceChildren()) meant a synchronous
+    // resize/reselect saw the PREVIOUS render's legend, and any DOM a consumer applied here was
+    // wiped a few lines later.
+    if (renderPhase) {
+      for (const pane of fig.panes) {
+        if (!pane.svg) continue;
+        const renderCtx = { svg: pane.svg, phase: renderPhase };
+        if (renderPhase === "mount") {
+          // Guarded on `disposed` -- see mountChart's identical dispatch comment.
+          queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
+        } else {
+          notify(card, "tbl-render", renderCtx, opts.onRender);
+        }
+      }
+    }
   };
 
   const draw = (w: number, phase?: "mount" | "resize" | "reselect"): void => { drawGrid(w, phase); };

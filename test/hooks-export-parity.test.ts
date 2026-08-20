@@ -154,3 +154,104 @@ describe("hooks export parity — legendKey (own render, own hooks)", () => {
     expect(legendMediums).toContain("svg");
   });
 });
+
+// Findings 1/2/3 (second review wave): the hook contract promises PARITY across live DOM /
+// markup string / PNG export, and nothing tested the three against each other — a `legendKey`
+// hook could pass its own unit test in isolation and still lay out wrong the moment the row it
+// touches is a banded (multi-tint) chip, live or exported. These two cases are the concrete
+// divergences; each asserts something that actually fails without the corresponding fix (a
+// clipped/overlapping layout), not merely that the hook fired.
+describe("hooks export parity — legendKey swatch width / layout regressions (2a/2b, second review wave)", () => {
+  // Five series, so a `shading` region naming no series gets one tint PER in-scope series
+  // (annotation-legend.ts's shadeSwatchColors → 5 bands): theme.ts's swatchWidthFor(bands) is
+  // `max(SWATCH_WIDTH=14, bands * SWATCH_MIN_BAND=3)`, which stays AT 14 (== ICON_BOX, no
+  // override needed) for 2-4 bands and only exceeds it from 5 bands on — so 5 series is the
+  // smallest fixture that actually exercises the "wider than ICON_BOX" case both fixes are about.
+  const SERIES = ["S1", "S2", "S3", "S4", "S5"];
+  const ROWS: TidyRow[] = ["A", "B"].flatMap((cat, ci) =>
+    SERIES.map((s, si) => ({ cat, series: s, value: String(1 + ci + si) })),
+  ) as unknown as TidyRow[];
+
+  // A `shading` region naming no series gets one tint PER in-scope series (annotation-legend.ts's
+  // shadeSwatchColors), so its legend row is a BANDED chip wider than ICON_BOX (icon.ts's
+  // iconWidth) — the one shape a bare `<span class="tbl-legend-swatch">` (no width override)
+  // silently clips against the CSS rule that pins that class to ICON_BOX.
+  const SPEC_WITH_SHADING: ChartSpec = {
+    chartType: "line",
+    title: "t",
+    xAxisType: "categorical",
+    data: "data.csv",
+    columns: { x: "cat", value: "value", series: "series" },
+    series_order: SERIES,
+    shading: [{ label: "Fill", legend: true }],
+  } as unknown as ChartSpec;
+
+  it("2a: a pass-through legendKey hook's banded chip gets the SAME swatch width the default branch sets — a no-op stays a no-op", () => {
+    const findFillSwatch = (root: ParentNode): HTMLElement =>
+      Array.from(root.querySelectorAll<HTMLElement>(".tbl-legend-swatch")).find((s) =>
+        s.parentElement?.textContent?.includes("Fill"),
+      )!;
+
+    const plain = document.createElement("div");
+    document.body.appendChild(plain);
+    mountChart(plain, { spec: SPEC_WITH_SHADING, rows: ROWS, width: 720, height: 400 });
+    const defaultSwatch = findFillSwatch(plain);
+    // Precondition: this is genuinely the wide-banded case, not a vacuous same-width comparison —
+    // the default branch itself only sets an inline width when the icon is wider than the box.
+    expect(defaultSwatch.style.width).not.toBe("");
+
+    const hooked = document.createElement("div");
+    document.body.appendChild(hooked);
+    mountChart(hooked, {
+      spec: SPEC_WITH_SHADING,
+      rows: ROWS,
+      width: 720,
+      height: 400,
+      hooks: { legendKey: (ctx) => ctx.rendered }, // pure pass-through — must be a true no-op
+    });
+    const hookedSwatch = findFillSwatch(hooked);
+    expect(hookedSwatch.style.width).toBe(defaultSwatch.style.width);
+  });
+
+  it("2b: an export legend item's cursor advances by what the hook ACTUALLY drew, not the pre-hook label width", () => {
+    const TWO_SERIES_ROWS: TidyRow[] = [
+      { cat: "A", series: "Alpha", value: "3" },
+      { cat: "A", series: "Beta", value: "2" },
+      { cat: "B", series: "Alpha", value: "6" },
+      { cat: "B", series: "Beta", value: "1" },
+    ] as unknown as TidyRow[];
+    const SPEC_TWO_SERIES: ChartSpec = {
+      chartType: "line",
+      title: "t",
+      xAxisType: "categorical",
+      data: "data.csv",
+      columns: { x: "cat", value: "value", series: "series" },
+      series_order: ["Alpha", "Beta"],
+    } as unknown as ChartSpec;
+
+    // Only "Alpha" is hooked; "Beta" (the very next legend item) always takes the untouched
+    // default branch, so its position is a clean probe of where the PREVIOUS item's cursor left
+    // off.
+    const shortHook: RenderHooks = { legendKey: (ctx) => (ctx.series === "Alpha" ? ctx.rendered : null) };
+    const suffixHook: RenderHooks = {
+      legendKey: (ctx) =>
+        ctx.series === "Alpha"
+          ? `${ctx.rendered}<text>EXTRA WIDE SUFFIX TEXT EXTRA WIDE SUFFIX TEXT</text>`
+          : null,
+    };
+
+    const betaLabelX = (root: SVGSVGElement): number =>
+      parseFloat(
+        Array.from(root.querySelectorAll("text")).find((t) => t.textContent === "Beta")!.getAttribute("x")!,
+      );
+
+    const xShort = betaLabelX(buildExportSvg(SPEC_TWO_SERIES, TWO_SERIES_ROWS, { hooks: shortHook }));
+    const xSuffixed = betaLabelX(buildExportSvg(SPEC_TWO_SERIES, TWO_SERIES_ROWS, { hooks: suffixHook }));
+
+    // "Beta" must be pushed further right when "Alpha"'s hooked markup is longer — proving the
+    // cursor advance used the hook's ACTUAL rendered content, not "Alpha"'s original (short)
+    // label width. Under the old code this held regardless of what the hook returned, which is
+    // exactly how a hooked item could overlap (or run off the right edge into) the one after it.
+    expect(xSuffixed).toBeGreaterThan(xShort);
+  });
+});

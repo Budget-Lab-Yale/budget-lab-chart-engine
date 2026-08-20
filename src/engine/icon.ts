@@ -416,7 +416,12 @@ export function iconSvgMarkup(icon: IconSpec): string {
  *  legend and a hook that wraps rather than replaces both start from one description. Do NOT
  *  return this HTML string when `ctx.medium === "svg"` — see `legendRowMarkupSvg` below. */
 export function legendRowMarkup(icon: IconSpec, label: string): string {
-  return `<span class="tbl-legend-swatch">${iconSvgMarkup(icon)}</span><span>${escapeHtml(label)}</span>`;
+  // Match legend.ts's DOM branch: CSS pins .tbl-legend-swatch to ICON_BOX (flex-shrink: 0), so a
+  // banded chip wider than the box needs the same inline override the DOM builder applies, or it
+  // renders clipped/overlapping the label — silently, since this string is only ever inspected by
+  // a hook that returns it unchanged.
+  const widthStyle = iconWidth(icon) !== ICON_BOX ? ` style="width:${iconWidth(icon)}px"` : "";
+  return `<span class="tbl-legend-swatch"${widthStyle}>${iconSvgMarkup(icon)}</span><span>${escapeHtml(label)}</span>`;
 }
 
 /** The same row, as SVG markup — the DEFAULT `ctx.rendered` when `ctx.medium === "svg"` (the PNG

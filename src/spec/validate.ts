@@ -1033,6 +1033,75 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // Cross-reference: overlays[].facet must name a real small_multiples pane, and only means
+  // anything on a chart that actually facets. annotation-legend.ts's buildAnnotationLegendItems
+  // pushes an overlay's legend row straight from the spec, guarding only `kind == null` — its own
+  // comment there says a malformed entry "must not get a legend row for a line that is never
+  // drawn", and a misspelled `facet` (or a `facet` on a spec with no small_multiples at all) is
+  // exactly that: nothing will ever paint it. (cols.facet's existence is already enforced above,
+  // same as the pane_order check.)
+  for (const [i, o] of (spec.overlays ?? []).entries()) {
+    if (o.facet == null) continue;
+    if (!spec.small_multiples) {
+      errors.push(
+        `overlays[${i}].facet is set but the chart has no small_multiples — remove \`facet\` or add small_multiples`,
+      );
+    } else if (cols.facet) {
+      const facetValues = new Set(rows.map((r) => r[cols.facet as string] as string));
+      if (!facetValues.has(o.facet)) {
+        errors.push(
+          `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${cols.facet}" (data values: ${JSON.stringify([...facetValues].sort())})`,
+        );
+      }
+    }
+  }
+
+  // Cross-reference: a `column` overlay pooled with `by: "none"` draws ONE polyline from every
+  // in-scope row's value at that x, x-sorted, with NO dedupe (engine/overlays.ts's pooled branch)
+  // — correct when the column is genuinely one value per x, silently zig-zagging when it varies by
+  // series. Scoped the same way the pooled line is actually computed: per facet when the chart
+  // facets (a pane pools only its OWN rows — engine/index.ts calls resolveOverlays once per pane),
+  // narrowed further to the one facet the entry names when it has one, else the whole table.
+  for (const [i, o] of (spec.overlays ?? []).entries()) {
+    if (overlayKind(o) !== "column" || o.by !== "none" || !o.column) continue;
+    const col = o.column;
+    let scopes: TidyRow[][];
+    if (spec.small_multiples && cols.facet) {
+      if (o.facet != null) {
+        scopes = [rows.filter((r) => r[cols.facet as string] === o.facet)];
+      } else {
+        const byFacet = new Map<string, TidyRow[]>();
+        for (const r of rows) {
+          const key = r[cols.facet as string] as string;
+          const list = byFacet.get(key);
+          if (list) list.push(r);
+          else byFacet.set(key, [r]);
+        }
+        scopes = [...byFacet.values()];
+      }
+    } else {
+      scopes = [rows];
+    }
+    for (const scopeRows of scopes) {
+      const byX = new Map<string, Set<string>>();
+      for (const r of scopeRows) {
+        const v = (r[col] as string) ?? "";
+        if (v === "") continue;
+        const x = r[cols.x] as string;
+        const set = byX.get(x);
+        if (set) set.add(v);
+        else byX.set(x, new Set([v]));
+      }
+      for (const [x, vals] of byX) {
+        if (vals.size > 1) {
+          errors.push(
+            `overlays[${i}] pools column "${col}" with by: "none", but ${cols.x} ${JSON.stringify(x)} has differing values (${JSON.stringify([...vals].sort())}) across rows — a pooled overlay draws one polyline with no dedupe and this would zig-zag; use \`by: "series"\` if the value genuinely varies by series`,
+          );
+        }
+      }
+    }
+  }
+
   // Waterfall: the kind column (columns.kind) may only hold delta / total / skip (empty ⇒ delta),
   // and a waterfall is single-series (one bar per step — no series channel). The value-axis reads
   // a running cumulative, so faceted waterfalls share ONE category axis: every facet must carry the

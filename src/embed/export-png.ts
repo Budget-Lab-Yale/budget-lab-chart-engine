@@ -117,12 +117,6 @@ function drawLegend(
     // is why it is no longer written here: engine/icon.ts draws it, the same call the legend makes.
     const icon = iconFromLegendItem(item);
     const swatchW = iconWidth(icon);
-    const itemW = swatchW + GAP + measureText(item.label, legendFont);
-    if (x > MARGIN && x + itemW > MARGIN + INNER_W) {
-      x = MARGIN;
-      y += ROW_H;
-    }
-    const cy = y - 4;
     // `rendered` is SVG markup (legendRowMarkupSvg draws from the same iconShapes(icon) the
     // group below does) -- NOT legend.ts's HTML string. `g` below is SVG-namespaced; setting its
     // innerHTML to an HTML string like legend.ts's `<span>`s creates XHTML-namespaced nodes that
@@ -138,6 +132,28 @@ function drawLegend(
           rendered: legendRowMarkupSvg(icon, item.label),
         })
       : null;
+    // The wrap check below and the cursor advance at the end of this iteration both key off
+    // `itemW` -- it must reflect what the hook ACTUALLY draws, not the untouched default, or a
+    // hook that returns `ctx.rendered` plus a suffix (or otherwise-longer text) lays out fine in
+    // the live flex legend but overlaps the next item here / runs off the right edge. An exact
+    // box (`getBBox()`) isn't reachable: this SVG is built fully detached and only ever
+    // serialized for rasterize()'s <img> load below, never inserted into `document` -- and jsdom,
+    // this repo's own test DOM, has no `getBBox()` implementation at all, so that path could not
+    // be exercised or verified here even if a real browser tolerated it. Re-measuring the hook's
+    // OWN text content with the same canvas-metric approximation this function already uses
+    // elsewhere (and that measureText() itself already degrades to a `text.length * 8` estimate
+    // under jsdom) is the best measurement actually available in this constructor.
+    let itemW = swatchW + GAP + measureText(item.label, legendFont);
+    if (custom != null) {
+      const probe = document.createElementNS(SVG_NS, "g");
+      probe.innerHTML = custom;
+      itemW = swatchW + GAP + measureText(probe.textContent ?? "", legendFont);
+    }
+    if (x > MARGIN && x + itemW > MARGIN + INNER_W) {
+      x = MARGIN;
+      y += ROW_H;
+    }
+    const cy = y - 4;
     if (custom != null) {
       const g = document.createElementNS(SVG_NS, "g");
       g.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);

@@ -6,7 +6,7 @@
 // function cannot cross that boundary, but a bubbling CustomEvent can be heard by the host page.
 // Each event is therefore BOTH a MountOptions callback and a bubbling `tbl-*` CustomEvent from the
 // card root, mirroring the existing `tbl-title-select` pattern (render-live.ts).
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import type { BandHoverCtx } from "../src/engine/crosshair";
@@ -528,6 +528,98 @@ describe("onHover / onRender / onLegendSelect — small multiples (wireFigureSvg
     const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Down"]')!;
     btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(detail?.active).toEqual(["Down"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onRender — resize dispatch sees the finished DOM (Part 1, second review wave)
+// ---------------------------------------------------------------------------
+// The per-pane dispatch must fire AFTER the legend is rebuilt and every pane is wired (the true
+// end of drawGrid), not right after the pane SVGs are appended -- else a SYNCHRONOUS resize (or
+// reselect) dispatch hands a consumer the PREVIOUS render's legend, and the
+// legendSlot.replaceChildren() a few lines later wipes any DOM the consumer just applied.
+// Asserting only that the callback fired would not catch this -- the callback fires either way,
+// before or after the fix. The marker's SURVIVAL past the redraw is the assertion that actually
+// distinguishes "dispatched before replaceChildren" from "dispatched after".
+
+describe("onRender — resize dispatch sees the finished DOM (Part 1)", () => {
+  /** Minimal ResizeObserver stub — jsdom has none. Captures the callback so a test can invoke it
+   *  directly to simulate the engine's own resize re-render, same pattern as
+   *  title-selector-live.test.ts's FakeResizeObserver. */
+  class FakeResizeObserver {
+    static instances: FakeResizeObserver[] = [];
+    cb: ResizeObserverCallback;
+    constructor(cb: ResizeObserverCallback) {
+      this.cb = cb;
+      FakeResizeObserver.instances.push(this);
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+
+  afterEach(() => {
+    delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+    FakeResizeObserver.instances = [];
+  });
+
+  const FACETED_ROWS: TidyRow[] = [
+    { pane: "P1", time: "A", value: "6", series: "Up" },
+    { pane: "P1", time: "A", value: "4", series: "Down" },
+    { pane: "P2", time: "A", value: "9", series: "Up" },
+    { pane: "P2", time: "A", value: "1", series: "Down" },
+  ] as unknown as TidyRow[];
+
+  const FACETED_SPEC: ChartSpec = {
+    chartType: "stacked",
+    title: "faceted",
+    xAxisType: "categorical",
+    data: "data.csv",
+    columns: { x: "time", value: "value", series: "series", facet: "pane" },
+    small_multiples: { columns: 2, mode: "shared" },
+  } as unknown as ChartSpec;
+
+  it("a resize's onRender finds the legend present, and a marker it appends survives the redraw", async () => {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    let legendPresentAtResize: boolean | undefined;
+    mountChart(container, {
+      spec: FACETED_SPEC,
+      rows: FACETED_ROWS,
+      width: 838,
+      height: 420,
+      onRender: (ctx) => {
+        if (ctx.phase !== "resize") return;
+        const legendSlot = container.querySelector(".figure-legend-slot");
+        legendPresentAtResize = !!legendSlot && legendSlot.childElementCount > 0;
+        const marker = document.createElement("span");
+        marker.className = "consumer-marker";
+        legendSlot?.appendChild(marker);
+      },
+    });
+
+    // No resize has happened yet.
+    expect(legendPresentAtResize).toBeUndefined();
+    expect(container.querySelector(".consumer-marker")).toBeNull();
+
+    // Force a genuinely different pane-grid signature so the resize handler doesn't take
+    // drawGrid's `sig === lastSig` same-width early-return branch -- jsdom's card.clientWidth is
+    // always 0, so without this override the resize call would just re-resolve to the SAME width
+    // as mount and skip the redraw (and the dispatch) entirely.
+    const cardEl = container.querySelector<HTMLElement>(".figure-card")!;
+    Object.defineProperty(cardEl, "clientWidth", { value: 480, configurable: true });
+
+    expect(FakeResizeObserver.instances.length).toBeGreaterThan(0);
+    for (const inst of FakeResizeObserver.instances) inst.cb([], inst as unknown as ResizeObserver);
+    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => requestAnimationFrame(r));
+
+    expect(legendPresentAtResize).toBe(true);
+    // The critical assertion: the marker the consumer appended DURING the dispatch must still be
+    // in the DOM afterward -- not wiped by a legendSlot.replaceChildren() later in the same draw.
+    expect(container.querySelector(".consumer-marker")).not.toBeNull();
   });
 });
 

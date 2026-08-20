@@ -248,6 +248,126 @@ describe("overlays — data checks", () => {
   });
 });
 
+// Second review wave, finding 3a: annotation-legend.ts pushes an overlay's legend row straight
+// from the spec, guarding only `kind == null` — a misspelled `facet`, or a `facet` on a spec with
+// no small_multiples, would otherwise key a legend row for a line that is never drawn.
+describe("overlays — facet validation (3a)", () => {
+  const FACETED_BASE = {
+    ...BASE,
+    columns: { x: "time", value: "value", series: "series", facet: "pane" },
+    small_multiples: { columns: 2 },
+  };
+  const facetedRows: TidyRow[] = [
+    { time: "1", value: "1", series: "A", pane: "P1" },
+    { time: "2", value: "2", series: "A", pane: "P2" },
+  ] as unknown as TidyRow[];
+
+  it("rejects overlays[].facet on a spec with no small_multiples, naming the entry", () => {
+    const r = validateChartData(
+      { ...BASE, overlays: [{ slope: 1, intercept: 0, facet: "P1" }] } as never,
+      [{ time: "1", value: "1", series: "A" }] as unknown as TidyRow[],
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/overlays\[0\]\.facet/);
+    expect(r.errors.join(" ")).toMatch(/small_multiples/);
+  });
+
+  it("rejects overlays[].facet naming a pane the data doesn't have", () => {
+    const r = validateChartData(
+      { ...FACETED_BASE, overlays: [{ slope: 1, intercept: 0, facet: "Nope" }] } as never,
+      facetedRows,
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/overlays\[0\]\.facet/);
+    expect(r.errors.join(" ")).toContain("Nope");
+  });
+
+  it("accepts overlays[].facet naming a real pane", () => {
+    const r = validateChartData(
+      { ...FACETED_BASE, overlays: [{ slope: 1, intercept: 0, facet: "P1" }] } as never,
+      facetedRows,
+    );
+    expect(r.valid).toBe(true);
+  });
+});
+
+// Second review wave, finding 3b: engine/overlays.ts's pooled branch concatenates every in-scope
+// row's value for a `by: "none"` column overlay and draws ONE polyline, x-sorted, with NO dedupe
+// — correct when the column is genuinely one value per x, a silent zig-zag when it varies by
+// series.
+describe("overlays — pooled `by: \"none\"` column consistency (3b)", () => {
+  it('rejects a by:"none" column overlay whose value at one x differs across rows', () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", yhat: "9.9" },
+      { time: "2", value: "3", series: "A", yhat: "2.1" },
+      { time: "2", value: "4", series: "B", yhat: "2.1" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/overlays\[0\]/);
+    expect(r.errors.join(" ")).toContain("yhat");
+    expect(r.errors.join(" ")).toContain('"1"'); // the offending x
+  });
+
+  it("accepts a genuinely pooled column — one value per x, replicated across every series' row", () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", yhat: "1.1" },
+      { time: "2", value: "3", series: "A", yhat: "2.1" },
+      { time: "2", value: "4", series: "B", yhat: "2.1" },
+    ] as unknown as TidyRow[];
+    expect(
+      validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2).valid,
+    ).toBe(true);
+  });
+
+  it('does not flag the same disagreeing data when `by` is left at its default ("series", not pooled)', () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    expect(
+      validateChartData({ ...BASE, overlays: [{ column: "yhat" }] } as never, rows2).valid,
+    ).toBe(true);
+  });
+
+  it("on a faceted chart, scopes the check PER FACET — differing values across DIFFERENT facets at the same x is fine", () => {
+    const facetedBase = {
+      ...BASE,
+      columns: { x: "time", value: "value", series: "series", facet: "pane" },
+      small_multiples: { columns: 2 },
+    };
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", pane: "P1", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", pane: "P1", yhat: "1.1" },
+      { time: "1", value: "3", series: "A", pane: "P2", yhat: "9.9" },
+      { time: "1", value: "4", series: "B", pane: "P2", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    expect(
+      validateChartData({ ...facetedBase, overlays: [{ column: "yhat", by: "none" }] } as never, rows2)
+        .valid,
+    ).toBe(true);
+  });
+
+  it("still rejects a WITHIN-facet disagreement on a faceted chart", () => {
+    const facetedBase = {
+      ...BASE,
+      columns: { x: "time", value: "value", series: "series", facet: "pane" },
+      small_multiples: { columns: 2 },
+    };
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", pane: "P1", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", pane: "P1", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData(
+      { ...facetedBase, overlays: [{ column: "yhat", by: "none" }] } as never,
+      rows2,
+    );
+    expect(r.valid).toBe(false);
+  });
+});
+
 describe("overlayDashed — the per-kind style default, shared with the legend row", () => {
   it("defaults solid for the kinds computed FROM the data", () => {
     expect(overlayDashed({ method: "lm" })).toBe(false);
