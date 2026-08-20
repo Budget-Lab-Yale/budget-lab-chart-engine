@@ -170,11 +170,19 @@ describe("resolveOverlays — confidence ribbon (ci)", () => {
 });
 
 describe("resolveOverlays — column", () => {
-  function withCol(pairs: Array<[number, number]>, yhats: number[], series = "A"): PreparedRow[] {
-    return rows(pairs, series).map((r, i) => ({
-      ...r,
-      _overlayCols: { yhat: yhats[i] as number },
-    })) as PreparedRow[];
+  /** `_overlayCols` exactly as engine/index.ts's prep builds it: a BLANK cell leaves the key
+   *  ABSENT (the prep `continue`s past it, and omits the bag entirely when nothing landed in it),
+   *  which is what a `null` in `yhats` means here. Non-numeric cells never reach this code —
+   *  validate.ts rejects them — so "absent" is the only non-number a resolver can see. */
+  function withCol(
+    pairs: Array<[number, number]>,
+    yhats: Array<number | null>,
+    series = "A",
+  ): PreparedRow[] {
+    return rows(pairs, series).map((r, i) => {
+      const v = yhats[i];
+      return (v == null ? r : { ...r, _overlayCols: { yhat: v } }) as PreparedRow;
+    });
   }
 
   it("draws the column's values, x-ordered, per series", () => {
@@ -196,6 +204,56 @@ describe("resolveOverlays — column", () => {
       withCol([[1, 1], [2, 2], [3, 3]], [1, 2, 3]),
     );
     expect(o!.points.map((p) => p.x)).toEqual([2, 3]);
+  });
+
+  // CONFIG-SPEC.md's `overlays[].column` row: "A blank cell is treated as absent, not as zero, so a
+  // sparse column breaks its line rather than diving to the baseline." The break is the half that was
+  // missing — the blank row was skipped outright, so the polyline joined 2 → 4 and rerouted the line.
+  it("emits a BREAK at a blank cell instead of joining across it", () => {
+    const [o] = resolve(
+      [{ column: "yhat" }],
+      withCol([[1, 1], [2, 2], [3, 3], [4, 4]], [1, 2, null, 4]),
+    );
+    expect(o!.points).toEqual([
+      { x: 1, y: 1 },
+      { x: 2, y: 2 },
+      { x: 3, y: null },
+      { x: 4, y: 4 },
+    ]);
+  });
+
+  it("keeps the break in x order when the rows arrive unsorted", () => {
+    const [o] = resolve(
+      [{ column: "yhat" }],
+      withCol([[4, 4], [2, 2], [3, 3], [1, 1]], [4, 2, null, 1]),
+    );
+    expect(o!.points).toEqual([
+      { x: 1, y: 1 },
+      { x: 2, y: 2 },
+      { x: 3, y: null },
+      { x: 4, y: 4 },
+    ]);
+  });
+
+  it("counts only REAL points against the two-point minimum, not the breaks", () => {
+    // One value and two blanks is not a line. If the break placeholders counted, this would resolve
+    // to a 'line' of a single vertex.
+    expect(resolve([{ column: "yhat" }], withCol([[1, 1], [2, 2], [3, 3]], [null, 2, null]))).toEqual(
+      [],
+    );
+  });
+
+  it("does not emit a break for a row cropped OUT by the domain", () => {
+    // Outside the drawn extent is not a gap in the line — the line simply stops there.
+    const [o] = resolve(
+      [{ column: "yhat", domain: [1, 3] }],
+      withCol([[1, 1], [2, 2], [3, 3], [4, 4]], [1, 2, 3, null]),
+    );
+    expect(o!.points).toEqual([
+      { x: 1, y: 1 },
+      { x: 2, y: 2 },
+      { x: 3, y: 3 },
+    ]);
   });
 });
 

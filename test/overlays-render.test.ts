@@ -199,6 +199,53 @@ describe("overlays — the value axis", () => {
   });
 });
 
+describe("overlays — a sparse `column` breaks its line", () => {
+  // CONFIG-SPEC.md's `overlays[].column` row promises the break. Asserted on the PATH DATA, because
+  // the failure mode is invisible in a count of overlay marks: one `Plot.line` mark is emitted either
+  // way, and before the fix it rendered ONE 4-vertex polyline that joined x=2 straight to x=4 —
+  // a plausible-looking wrong line. Two 2-vertex paths is the gap.
+  /** Five in-scope rows; `blankAt` is the 0-based row whose `yhat` cell is empty. */
+  const sparse = (blankAt: number): TidyRow[] =>
+    [1, 2, 3, 4, 5].map((n, i) => ({
+      time: String(n),
+      value: String(n),
+      series: "A",
+      yhat: i === blankAt ? "" : String(n),
+    })) as unknown as TidyRow[];
+
+  /** Vertex count of a path's `d` — one M plus n-1 L commands. */
+  const vertices = (d: string): number => (d.match(/[ML]/g) ?? []).length;
+  const overlayDs = (rows: TidyRow[]): string[] =>
+    lines(renderChart(spec([{ column: "yhat" }]), rows, OPTS).svg).map(
+      (p) => p.getAttribute("d") ?? "",
+    );
+
+  it("draws two 2-vertex paths, not one joined 4-vertex path", () => {
+    const ds = overlayDs(sparse(2));
+    expect(ds.length).toBe(2);
+    expect(ds.map(vertices)).toEqual([2, 2]);
+  });
+
+  it("leaves no stray path for a blank at the very start", () => {
+    const ds = overlayDs(sparse(0));
+    expect(ds.length).toBe(1);
+    expect(vertices(ds[0]!)).toBe(4);
+  });
+
+  it("leaves no stray path for a blank at the very end", () => {
+    const ds = overlayDs(sparse(4));
+    expect(ds.length).toBe(1);
+    expect(vertices(ds[0]!)).toBe(4);
+  });
+
+  it("the break reaches the PNG export path too, which rebuilds from the spec", () => {
+    const ds = lines(buildExportSvg(spec([{ column: "yhat" }]), sparse(2))).map(
+      (p) => p.getAttribute("d") ?? "",
+    );
+    expect(ds.map(vertices)).toEqual([2, 2]);
+  });
+});
+
 describe("overlays — the export path", () => {
   it("reaches the exported SVG, which rebuilds from the spec", () => {
     expect(lines(buildExportSvg(spec([{ method: "lm" }]), ROWS)).length).toBe(1);

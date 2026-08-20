@@ -252,17 +252,30 @@ export function resolveOverlays(
       }
 
       // kind === "column": the values are already in the data — order by x and crop to the domain.
+      //
+      // A row that IS in scope but carries no value for this column emits a BREAK (`y: null`), not
+      // nothing: CONFIG-SPEC.md's `overlays[].column` row promises "a sparse column breaks its line
+      // rather than diving to the baseline", and skipping the row outright joined its neighbours
+      // instead — rerouting the line through a segment the data never claimed, which reads as a
+      // plausible wrong line rather than a gap. (Non-numeric cells never get here: validate.ts
+      // rejects them, for the same reason. "Absent" is the only non-number this can see.)
+      //
+      // A row cropped OUT by the domain, or with no usable x, emits NOTHING — outside the drawn
+      // extent the line simply stops, which is not the same claim as a hole inside it.
       const col = o.column as string;
       const pts: Array<{ x: number; y: number | null }> = [];
       for (const r of g.rows) {
         const x = xOf(r, ctx.xField);
-        const y = r._overlayCols?.[col];
-        if (!Number.isFinite(x) || y == null || !Number.isFinite(y)) continue;
+        if (!Number.isFinite(x)) continue;
         if (x < dom[0] || x > dom[1]) continue;
-        pts.push(pt(x, y));
+        const y = r._overlayCols?.[col];
+        pts.push(y != null && Number.isFinite(y) ? pt(x, y) : { x, y: null });
       }
+      // Sorted by x with the breaks in place, so each one lands between the neighbours it separates
+      // — that position is what the mark builder's run-splitting reads (marks/overlay.ts#runsOf).
       pts.sort((a, b) => a.x - b.x);
-      if (pts.length < 2) continue;
+      // REAL points only: a break is not a vertex, and two blanks around one value is not a line.
+      if (pts.reduce((n, p) => n + (p.y == null ? 0 : 1), 0) < 2) continue;
       out.push({ ...base, points: pts });
     }
   }
