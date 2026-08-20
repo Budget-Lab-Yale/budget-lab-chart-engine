@@ -96,7 +96,8 @@ beforeEach(() => {
 type Cell = {
   /** A floating tooltip CARD is shown (`.tbl-tooltip` at opacity 1). */
   card: boolean;
-  /** The card's row labels, in order, colon stripped. `[]` when no card. */
+  /** The card's row labels, in order, colon stripped. `[]` when no card — and also when a shown
+   *  card's rows carry no label at all (a single-series histogram; see that row). */
   cardRows: string[];
   /** Value pills — `.tbl-coord-pill` inside a shown coordinated-cursor group. */
   pills: boolean;
@@ -383,8 +384,10 @@ const EXPECTED: Record<string, Cell> = {
   "area (temporal) · standalone":         { card: true,  cardRows: ["A", "B", "Total"],       pills: false, guide: false, dot: false, region: false, axisLabel: false },
   "area (temporal) · 2-pane":             { card: false, cardRows: [],                        pills: true,  guide: true,  dot: true,  region: false, axisLabel: true  },
   // Histogram's single row is labelled by its SERIES, and a single-series histogram has no series
-  // name — so the row reads ": 5.00". Recorded as measured, not as it ought to look.
-  "histogram · standalone":               { card: true,  cardRows: [""],                      pills: false, guide: false, dot: false, region: false, axisLabel: false },
+  // name — so that row carries NO label and no colon, just the value (it used to read ": 5.00").
+  // `cardRows: []` beside `card: true` therefore means "a card whose row has no label", NOT "no
+  // card" — the `card` column is what distinguishes them.
+  "histogram · standalone":               { card: true,  cardRows: [],                        pills: false, guide: false, dot: false, region: false, axisLabel: false },
   "histogram · 2-pane":                   { card: false, cardRows: [],                        pills: true,  guide: false, dot: false, region: true,  axisLabel: true  },
   // Scatter: per-POINT hover (`attachPointHover`), never emitOnly — a card in both, and no
   // coordinated cursor in either. Its rows are the axis titles, not series names.

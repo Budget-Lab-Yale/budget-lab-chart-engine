@@ -1700,7 +1700,14 @@ export function buildHistogramTooltipHtml(
     if (v == null || Number.isNaN(v)) continue;
     const display = (seriesLabels && seriesLabels[series]) || series;
     const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    // No name ⇒ no label AND no colon. A histogram with no series column has one implicit
+    // series keyed SINGLE_SERIES_KEY (""), and the row read ": 5.00" — a colon labelling nothing.
+    // There is no honest word to print instead: the height is a row count, a `histogram.weight` sum,
+    // or a pre-binned `value`, so "Count" would be false on two of the three. An author who wants a
+    // word has `series_labels: {"": "…"}`, legal for exactly this case (see validate.ts), and it
+    // still fills the label in above.
+    const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span> `;
+    html += `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   }
   return html;
 }
