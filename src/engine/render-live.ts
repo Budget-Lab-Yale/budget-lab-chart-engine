@@ -111,11 +111,16 @@ export interface MountOptions {
    *  `attachBandCrosshair`, the only attach function this reaches. */
   onHover?: (ctx: BandHoverCtx | null) => void;
   /** Fires after every (re-)render of the chart body: once at mount, once after each width-driven
-   *  resize redraw, and once after a title-selector change forces a redraw (for its color
-   *  accent). A small-multiples figure fires once PER PANE (each call's `svg` is that pane's own),
-   *  rather than once for the figure — there is no single wrapping SVG to report. A bubbling
-   *  `tbl-render` CustomEvent (same detail) also dispatches from the card root. */
-  onRender?: (ctx: { svg: SVGSVGElement; phase: "mount" | "resize" | "reselect" }) => void;
+   *  resize redraw, once after a title-selector change forces a redraw (for its color accent),
+   *  and once after an area chart's legend-driven click-to-restack forces its own redraw
+   *  (`phase: "restack"` — pinning/unpinning a series moves it to the bottom of the stack and
+   *  re-renders; guarded by `suppressRestack` so the pin-restoration loop that follows does not
+   *  re-enter this branch and double-fire). A small-multiples figure fires once PER PANE (each
+   *  call's `svg` is that pane's own), rather than once for the figure — there is no single
+   *  wrapping SVG to report; small multiples has no restack feature, so `"restack"` never reaches
+   *  that path. A bubbling `tbl-render` CustomEvent (same detail) also dispatches from the card
+   *  root. */
+  onRender?: (ctx: { svg: SVGSVGElement; phase: "mount" | "resize" | "reselect" | "restack" }) => void;
   /** Fires whenever the legend's active highlight set changes — a pin (click), a hover, focus/
    *  blur, or the reset button — with the full active series set. A bubbling `tbl-legend-select`
    *  CustomEvent (same detail) also dispatches from the card root. Distinct from `onSelect`,
@@ -855,7 +860,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const draw = (
     outerWidth: number,
     legendPos: "top" | "right",
-    renderPhase?: "mount" | "resize" | "reselect",
+    renderPhase?: "mount" | "resize" | "reselect" | "restack",
   ): void => {
     // For right-legend, the chart width is computed from the OUTER card width (stable),
     // not from canvasScroll (which would shrink as the legend takes space → feedback loop).
@@ -926,7 +931,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           restackOrder = next;
           suppressRestack = true;
           lastWidth = -1; // force draw() past its same-width early return
-          draw(card.clientWidth || target, currentLegendPos ?? legendPos);
+          draw(card.clientWidth || target, currentLegendPos ?? legendPos, "restack");
           if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
           suppressRestack = false;
           // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
@@ -934,6 +939,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           if (newSvg) animateAreaRestack(newSvg, oldDs);
         }
       }
+      // onLegendSelect: reports the active/dimmed set however it changed — a pin click, a hover,
+      // focus/blur, or the reset button (legend.ts's applyHighlight runs onHighlight for all of
+      // them; see its own comment). High-frequency: a bare mouse hover fires this, not only a
+      // click, so a consumer wiring this up will likely want to debounce.
       notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
     };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
@@ -1308,9 +1317,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       card.classList.remove("is-selectable");
     }
 
-    // onRender: only at the three real re-render occasions this mount forces past draw()'s
-    // same-width/same-legendPos guard above — the area click-to-restack redraw a few lines up
-    // passes no phase, so it stays silent (not one of mount/resize/reselect).
+    // onRender: at each of the four real re-render occasions this mount forces past draw()'s
+    // same-width/same-legendPos guard above — mount/resize/reselect, and the area click-to-restack
+    // redraw a few lines up ("restack"). The restack call passes its phase explicitly and is
+    // guarded by suppressRestack there, so this fires exactly once per user-visible restack, not
+    // once per pin the restoration loop re-toggles afterward (those re-entrant calls never reach
+    // a NEW draw()).
     if (renderPhase) notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
   };
 
@@ -2377,6 +2389,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           onHighlight: (active) => {
             for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
             for (const d of pillDrivers) d.setActive(active);
+            // onLegendSelect: same "however it changed" note as mountChart's identical dispatch —
+            // fires on hover/focus/blur too, not only a pin click; high-frequency, debounce-worthy.
             notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
           },
           hooks: opts.hooks,

@@ -390,3 +390,81 @@ describe("onHover / onRender — small multiples (wireFigureSvg forward)", () =>
     expect(seen.map((c) => c.svg)).toEqual(panes);
   });
 });
+
+// ---------------------------------------------------------------------------
+// onRender — phase: "restack" (area chart legend-driven click-to-restack)
+// ---------------------------------------------------------------------------
+// A fourth real re-render occasion beyond mount/resize/reselect: pinning a series on an area
+// chart moves it to the bottom of the stack and forces its own draw() (render-live.ts's
+// onHighlight, gated on spec.chartType === "area" && !suppressRestack). onRender must fire for
+// it too -- silence here is a silent-tweak-death bug for a consumer using onRender as a
+// MutationObserver replacement, not a merely cosmetic gap.
+//
+// Task 6 (hooks.afterRender) shipped a double-fire from a throwaway pre-render once already, so
+// this asserts the COUNT, not just that the phase value is reachable: exactly ONE "restack" event
+// per user click, not one per pin the restoration loop (currentLegendHandle.toggle(s), fired
+// while suppressRestack is still true) re-toggles afterward.
+describe('onRender — phase: "restack" (area click-to-restack)', () => {
+  const AREA_SPEC: ChartSpec = {
+    chartType: "area",
+    title: "Area",
+    xAxisType: "temporal",
+    series_order: ["A", "B", "C"],
+    data: "inline",
+  } as unknown as ChartSpec;
+  const AREA_ROWS: TidyRow[] = ["2024-01-01", "2024-02-01"].flatMap((t) => [
+    { time: t, series: "A", value: "1" },
+    { time: t, series: "B", value: "2" },
+    { time: t, series: "C", value: "3" },
+  ]) as unknown as TidyRow[];
+  const legendItem = (c: HTMLElement, s: string): HTMLElement | undefined =>
+    [...c.querySelectorAll<HTMLElement>(".tbl-legend-item")].find((b) => b.getAttribute("data-series") === s);
+
+  it("fires exactly once per pin, with phase: \"restack\" and the freshly re-rendered svg", () => {
+    const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: AREA_SPEC,
+      rows: AREA_ROWS,
+      onRender: (ctx) => seen.push(ctx),
+    });
+    // One "mount" event already fired synchronously during mountChart() above.
+    expect(seen.filter((c) => c.phase === "restack").length).toBe(0);
+
+    legendItem(container, "C")!.click();
+
+    const restackEvents = seen.filter((c) => c.phase === "restack");
+    expect(restackEvents.length).toBe(1); // not 2+ from the pin-restoration re-toggle loop
+    expect(restackEvents[0]!.svg).toBe(container.querySelector(".figure-canvas svg"));
+  });
+
+  it("a bubbling tbl-render CustomEvent with phase: \"restack\" reaches an ancestor listener, exactly once per pin", () => {
+    const details: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    document.body.addEventListener("tbl-render", (e) => {
+      details.push((e as CustomEvent<{ svg: SVGSVGElement; phase: string }>).detail);
+    });
+    mountChart(container, { spec: AREA_SPEC, rows: AREA_ROWS });
+
+    legendItem(container, "B")!.click();
+    expect(details.filter((d) => d.phase === "restack").length).toBe(1);
+
+    legendItem(container, "C")!.click();
+    expect(details.filter((d) => d.phase === "restack").length).toBe(2); // one more, for the second pin
+  });
+
+  it("does not fire \"restack\" for a NON-area chart's legend pin (no restack feature there)", () => {
+    const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: { ...stackedSpec(), series_order: ["Up", "Down"] },
+      rows: STACKED_ROWS,
+      onRender: (ctx) => seen.push(ctx),
+    });
+    document.body.appendChild(container);
+    const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="Up"]')!;
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(seen.filter((c) => c.phase === "restack").length).toBe(0);
+  });
+});
