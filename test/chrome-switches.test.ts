@@ -273,3 +273,130 @@ describe("chrome.valuePills: false on a faceted LINE figure's coordinated cursor
     expect(sourceCoord!.querySelector(".tbl-coord-pill")).toBeNull();
   });
 });
+
+// The categorical coordinated cursor (attachSecondaryCategoricalLineCursor) — faceted dot plots and
+// faceted categorical-x line charts — drew its value pills unconditionally, on EVERY pane. Wider
+// than the two fixes above it: render-live's `emit` calls every driver and `i === sourceIdx` only
+// picks `active` (which just bolds the pill from weight 600 to 700), so the hovered pane kept its
+// pills too. Everything else the cursor draws — the guide, the band echo, the per-series dots, the
+// hovered pane's category highlight, and the hit area that drives them — is outside the switch.
+//
+// jsdom has no layout, so `readCategoryCentersFromMarks` / `readCategoryCentersFromAxis` (both
+// getBoundingClientRect-based) resolve nothing unmocked. mockLayout below stamps each mark's and
+// each axis label's rect from the SVG attributes Plot already wrote, at the viewBox's 1:1 scale —
+// no geometry is invented, so the category the pointer resolves to is the real one.
+describe("chrome.valuePills: false on the categorical coordinated cursor (faceted dot plot / cat-x line)", () => {
+  const facetRows = (values: [string, string]): TidyRow[] => {
+    const out: TidyRow[] = [];
+    for (const g of ["G1", "G2"]) {
+      for (const cat of ["Low", "High"]) {
+        out.push({ g, cat, m: "A", v: values[0] } as unknown as TidyRow);
+        out.push({ g, cat, m: "B", v: values[1] } as unknown as TidyRow);
+      }
+    }
+    return out;
+  };
+  const DOT_ROWS = facetRows(["0.01", "0.012"]);
+  const LINE_ROWS = facetRows(["10", "20"]);
+
+  const facetedSpec = (chartType: "dotplot" | "line", chrome?: Record<string, unknown>): ChartSpec =>
+    ({
+      chartType,
+      title: chartType,
+      xAxisType: "categorical",
+      data: "data.csv",
+      columns: { x: "cat", value: "v", series: "m", facet: "g" },
+      series_order: ["A", "B"],
+      small_multiples: { columns: 2, mode: "shared", pane_order: ["G1", "G2"] },
+      ...(chrome ? { chrome } : {}),
+    }) as unknown as ChartSpec;
+
+  const rect = (x: number, y: number, w: number, h: number): DOMRect =>
+    ({ x, y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h, toJSON: () => ({}) }) as DOMRect;
+  const translate = (el: Element | null): [number, number] => {
+    const m = /translate\(\s*([-\d.]+)[ ,]\s*([-\d.]+)\s*\)/.exec(el?.getAttribute("transform") ?? "");
+    return m ? [Number(m[1]), Number(m[2])] : [0, 0];
+  };
+  /** Give jsdom just enough layout for the two category-center readers: the pane's own rect at
+   *  viewBox scale, each `[data-category]` dot's rect from its cx/cy/r plus its group's translate,
+   *  and each `<text>`'s rect from its own + its group's translate (axis labels must land BELOW the
+   *  plot for readCategoryCentersFromAxis to accept them, which their real transforms already do). */
+  function mockLayout(svg: SVGSVGElement): void {
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => rect(0, 0, vb.width, vb.height),
+      configurable: true,
+    });
+    for (const el of Array.from(svg.querySelectorAll<SVGElement>("[data-category]"))) {
+      const [tx, ty] = translate(el.parentElement);
+      const cx = tx + Number(el.getAttribute("cx") ?? 0);
+      const cy = ty + Number(el.getAttribute("cy") ?? 0);
+      const r = Number(el.getAttribute("r") ?? 3) || 3;
+      Object.defineProperty(el, "getBoundingClientRect", {
+        value: () => rect(cx - r, cy - r, 2 * r, 2 * r),
+        configurable: true,
+      });
+    }
+    for (const t of Array.from(svg.querySelectorAll<SVGTextElement>("text"))) {
+      const [tx, ty] = translate(t.parentElement);
+      const [ox, oy] = translate(t);
+      const w = Math.max(6, (t.textContent ?? "").length * 5);
+      Object.defineProperty(t, "getBoundingClientRect", {
+        value: () => rect(tx + ox - w / 2, ty + oy - 5, w, 10),
+        configurable: true,
+      });
+    }
+  }
+
+  /** Mount, then hover the "Low" category on pane 0. Returns the coordinated group of BOTH panes:
+   *  pane 0 is the source (active = true), pane 1 is the echo. */
+  function mountAndHover(s: ChartSpec, rows: TidyRow[]): { source: SVGGElement; echo: SVGGElement } {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: s, rows, width: 838, height: 420 });
+    const panes = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+    expect(panes.length).toBe(2);
+    panes.forEach(mockLayout);
+    // Hit-testing must survive the switch: this IS the element the switch must not remove.
+    const hit = panes[0]!.querySelector(".tbl-catline-hit");
+    expect(hit).not.toBeNull();
+    // 146 = the "Low" band center (both panes share the x scale under mode: "shared").
+    hit!.dispatchEvent(new PointerEvent("pointermove", { clientX: 146, clientY: 150, bubbles: true }));
+    const [source, echo] = panes.map((p) => p.querySelector<SVGGElement>("g.tbl-coord")!) as [
+      SVGGElement,
+      SVGGElement,
+    ];
+    expect(source.getAttribute("opacity")).toBe("1");
+    expect(echo.getAttribute("opacity")).toBe("1");
+    return { source, echo };
+  }
+
+  for (const chartType of ["dotplot", "line"] as const) {
+    it(`regression guard: ${chartType} panes DO show pills by default (selectors proven to match)`, () => {
+      const { source, echo } = mountAndHover(facetedSpec(chartType), chartType === "dotplot" ? DOT_ROWS : LINE_ROWS);
+      // Both panes, not just the echo — the hovered pane's pills were the half the CONFIG-SPEC's
+      // old "Known exception" note missed entirely.
+      expect(source.querySelectorAll(".tbl-coord-pill").length).toBe(2);
+      expect(echo.querySelectorAll(".tbl-coord-pill").length).toBe(2);
+    });
+
+    it(`chrome.valuePills: false suppresses ${chartType} pills on EVERY pane, keeping the rest`, () => {
+      const { source, echo } = mountAndHover(
+        facetedSpec(chartType, { valuePills: false }),
+        chartType === "dotplot" ? DOT_ROWS : LINE_ROWS,
+      );
+      for (const g of [source, echo]) {
+        expect(g.querySelectorAll(".tbl-coord-pill").length).toBe(0);
+        expect(g.querySelectorAll(".tbl-coord-pill-text").length).toBe(0);
+        // The per-series highlight dots are untouched.
+        expect(g.querySelectorAll(".tbl-coord-dot").length).toBe(2);
+        // Dot plots echo the hovered category as a shaded band; categorical-x lines draw a guide.
+        if (chartType === "dotplot") expect(g.querySelectorAll(".tbl-coord-region").length).toBe(1);
+        else expect(g.querySelectorAll(".tbl-coord-guide").length).toBe(1);
+      }
+      // The hovered pane keeps its category highlight on the axis row; the echo never had one.
+      expect(source.querySelectorAll(".tbl-coord-axis-label").length).toBe(1);
+      expect(echo.querySelectorAll(".tbl-coord-axis-label").length).toBe(0);
+    });
+  }
+});

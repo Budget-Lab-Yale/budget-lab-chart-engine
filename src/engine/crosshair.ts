@@ -3009,6 +3009,13 @@ export interface CategoricalLineOptions {
    *  dots (filled/hollow/ink) are already visible, and a ring would recolor them — so it draws the
    *  band + value pills only (like bars). Dot plots keep the ring (it sits over dodged points). */
   markerless?: boolean;
+  /** `chrome.valuePills: false` — consumed only by `attachSecondaryCategoricalLineCursor` (the
+   *  coordinated/echo cursor; the primary crosshair above draws no pills): suppress just its
+   *  per-series value pills, on EVERY pane. The guide line, the band echo, the per-series dots, the
+   *  hovered pane's category highlight, and `onResolve`/hit-testing are untouched — same split as
+   *  `SecondaryBandOptions.showPills` / `HistogramHoverOptions.showPills`. `undefined` keeps
+   *  today's behaviour (pills shown). */
+  showPills?: boolean;
   /** Screen-only content hook — see `BandCrosshairOptions.tooltipHook`. This is the categorical
    *  chart family's OTHER call into `buildBandTooltipHtml` (dot plots, dumbbells, categorical-x
    *  line charts); missing the forward here leaves the hook working on bar charts and silently
@@ -3247,9 +3254,14 @@ export function attachSecondaryCategoricalLineCursor(
         const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
         const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
         if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
-        const centersX = spreadPillCentersX(pts.map((p) => ({ x: p.x, w: coordPillWidth(yFormat(p.v)) })), ml, ml + plotW);
-        const pillY = Math.max(mt + 9, b.min - 2); // just above the row strip
-        pts.forEach((p, i) => addCoordPill(g, doc, centersX[i]!, pillY, "middle", yFormat(p.v), colorFor(p.s), weight));
+        // showPills: false (chrome.valuePills) suppresses only these value pills — the row echo
+        // above and the per-series dots just above are untouched, matching
+        // SecondaryBandOptions'/HistogramHoverOptions' identical split.
+        if (opts.showPills !== false) {
+          const centersX = spreadPillCentersX(pts.map((p) => ({ x: p.x, w: coordPillWidth(yFormat(p.v)) })), ml, ml + plotW);
+          const pillY = Math.max(mt + 9, b.min - 2); // just above the row strip
+          pts.forEach((p, i) => addCoordPill(g, doc, centersX[i]!, pillY, "middle", yFormat(p.v), colorFor(p.s), weight));
+        }
       }
       g.setAttribute("opacity", "1");
       return;
@@ -3275,30 +3287,36 @@ export function attachSecondaryCategoricalLineCursor(
       // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
       // Skipped for the dumbbell (markerless): its own dots are visible; a white ring would recolor them.
       if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
-      if (opts.dodge) {
-        // Value pills: side by side around the center line (each on its series' side), both on
-        // the SAME vertical side of the dots — above when there's room, else below.
-        const minY = Math.min(...pts.map((p) => p.y));
-        const maxY = Math.max(...pts.map((p) => p.y));
-        const aboveY = minY - 13;
-        const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
-        // Each pill sits fully on its series' side of the center line, with its inner EDGE a small
-        // gap from center and its TEXT centered within the rect (so short values don't look
-        // unbalanced). A series exactly on the center line falls back to a centered pill.
-        const PILL_GAP = 3;
-        for (const p of pts) {
-          const [anchor, ax] =
-            p.dx < 0 ? (["pill-end", cx - PILL_GAP] as const)
-            : p.dx > 0 ? (["pill-start", cx + PILL_GAP] as const)
-            : (["middle", cx] as const);
-          addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
+      // showPills: false (chrome.valuePills) suppresses only the value pills in BOTH layouts
+      // below — the guide/band echo, the per-series dots just above, and the active pane's
+      // category highlight are untouched, matching SecondaryBandOptions'/
+      // HistogramHoverOptions' identical split.
+      if (opts.showPills !== false) {
+        if (opts.dodge) {
+          // Value pills: side by side around the center line (each on its series' side), both on
+          // the SAME vertical side of the dots — above when there's room, else below.
+          const minY = Math.min(...pts.map((p) => p.y));
+          const maxY = Math.max(...pts.map((p) => p.y));
+          const aboveY = minY - 13;
+          const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
+          // Each pill sits fully on its series' side of the center line, with its inner EDGE a small
+          // gap from center and its TEXT centered within the rect (so short values don't look
+          // unbalanced). A series exactly on the center line falls back to a centered pill.
+          const PILL_GAP = 3;
+          for (const p of pts) {
+            const [anchor, ax] =
+              p.dx < 0 ? (["pill-end", cx - PILL_GAP] as const)
+              : p.dx > 0 ? (["pill-start", cx + PILL_GAP] as const)
+              : (["middle", cx] as const);
+            addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
+          }
+        } else {
+          const flip = cx > ml + (W - ml - mr) * 0.72;
+          const labelYs = spreadLabelYs(pts.map((p) => p.y), COORD_PILL_H, mt, mt + plotH);
+          pts.forEach((p, i) => {
+            addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colorFor(p.s), weight);
+          });
         }
-      } else {
-        const flip = cx > ml + (W - ml - mr) * 0.72;
-        const labelYs = spreadLabelYs(pts.map((p) => p.y), COORD_PILL_H, mt, mt + plotH);
-        pts.forEach((p, i) => {
-          addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colorFor(p.s), weight);
-        });
       }
     }
     g.setAttribute("opacity", "1");

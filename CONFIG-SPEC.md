@@ -562,7 +562,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
 | `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip. Default true. Not bar-specific. |
-| `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). **Known exception:** on a **faceted** dot-plot or categorical-x line chart, the coordinated cursor's echoed pills on the OTHER (non-hovered) panes are not yet gated by this switch — that cursor has no switch of its own. Default true. |
+| `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). On a **faceted** figure it also covers the coordinated cursor's per-series pills, on the hovered pane as well as on the echoed panes. Only the pills go: the guide line, the band/bin highlight, the per-series hover dots, the hovered pane's category echo, and hit-testing are untouched. Default true. |
 
 `chrome` is deliberately just these two switches. There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
 
@@ -841,11 +841,11 @@ so a consumer stylesheet can target them without depending on presentation attri
 All seven live inside a `g.tbl-coord` wrapper, except `tbl-coord-pill`/`tbl-coord-pill-text`, which
 also draw inside a separate `g.tbl-hl-pills` wrapper for the legend-hover/pin pills (same classes,
 different group — see `attachHighlightPills`). `chrome.valuePills: false` (see Bar / stacked-bar
-options, above) removes only `tbl-coord-pill`/`tbl-coord-pill-text` on a bar/stacked-bar band and
-the legend-gesture pills — `tbl-coord-region` and the axis-label echo still render, since
-hit-testing and the band highlight are untouched by that switch, matching `chrome.tooltip`'s
-contract. It does **not** reach a faceted dot-plot or categorical-x line chart's echoed
-`tbl-coord-pill` on the OTHER panes — see the known exception noted on `chrome.valuePills` above.
+options, above) removes `tbl-coord-pill`/`tbl-coord-pill-text` wherever they are drawn — the
+bar/stacked-bar band, the legend-gesture pills, and every coordinated-cursor pane's pills, the
+hovered pane included. The other five classes are untouched — whichever of the band highlight, the
+guide, the hover dots and the axis-label echo a given chart type draws, it still draws, as does the
+hit area behind them, matching `chrome.tooltip`'s contract.
 
 #### Two acceptance criteria this deliberately does not ship
 

@@ -1998,6 +1998,7 @@ function wireFigureSvg(
         bandHighlight: true,
         centersFromMarks: true,
         dodge,
+        showPills: chromePills,
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -2075,6 +2076,7 @@ function wireFigureSvg(
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         symbols: markerSymbols,
+        showPills: chromePills,
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
