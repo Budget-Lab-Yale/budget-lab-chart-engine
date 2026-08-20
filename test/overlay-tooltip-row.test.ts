@@ -212,10 +212,29 @@ describe("overlays[].tooltip on a continuous line chart", () => {
     expect(swatches[1]!.getAttribute("stroke-dasharray")).toBeTruthy();
   });
 
-  it("reaches an AREA chart too — same continuous crosshair, and its Total row stays above", () => {
+  it("reaches an AREA chart too — same continuous crosshair", () => {
+    // One series, so no Total row: that row is the sum of the rows above it, and the sum of one row
+    // is that row (crosshair.ts's `shownRows > 1`). This case used to read "A: 12.00 / Total: 12.00".
     const el = mount(spec({ chartType: "area", overlays: [{ column: "fit", label: "Trend", tooltip: true }] }));
     hoverAt(chartSvg(el), 1);
-    expect(rows()).toEqual(["A|12.00", "Total|12.00", "Trend|2.00"]);
+    expect(rows()).toEqual(["A|12.00", "Trend|2.00"]);
+  });
+
+  it("sits BELOW a stacked area's Total row — a fitted line is not part of the stack it is drawn on", () => {
+    // Two series, so the Total row exists to be ordered against. The card's three kinds of claim in
+    // order: the observed series, the total OF those series, then the overlays.
+    const twoSeries: TidyRow[] = [
+      { t: "0", v: "10", s: "A", fit: "1" },
+      { t: "1", v: "12", s: "A", fit: "2" },
+      { t: "0", v: "20", s: "B", fit: "5" },
+      { t: "1", v: "24", s: "B", fit: "6" },
+    ] as unknown as TidyRow[];
+    const el = mount(
+      spec({ chartType: "area", overlays: [{ column: "fit", label: "Trend", tooltip: true }] }),
+      twoSeries,
+    );
+    hoverAt(chartSvg(el), 1, 0, 1);
+    expect(rows()).toEqual(["A|12.00", "B|24.00", "Total|36.00", "Trend (A)|2.00", "Trend (B)|6.00"]);
   });
 
   it("omits the row across a BREAK — a blank `column` cell is a gap, not a bridge", () => {

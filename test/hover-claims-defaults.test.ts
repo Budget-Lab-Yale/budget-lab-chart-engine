@@ -54,6 +54,11 @@ const temporalRows = (times: string[]): TidyRow[] =>
     ]),
   ) as unknown as TidyRow[];
 
+/** The same temporal shape with NO `series` column — one implicit series, which is what makes a
+ *  card's rows single-row at defaults. */
+const soloTemporalRows = (times: string[]): TidyRow[] =>
+  times.map((t, i) => ({ time: t, value: String(3 + i) })) as unknown as TidyRow[];
+
 const MONTHLY = ["2026-06-01", "2026-07-01", "2026-08-01"];
 const DAILY = ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"];
 
@@ -201,6 +206,31 @@ describe("stacked-area Total row", () => {
     const m = mountHover(spec({ chartType: "area", xAxisType: "temporal", series_order: ["A", "B"] }), temporalRows(MONTHLY));
     hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
     expect(cardText()).toContain("Total");
+  });
+
+  // A Total row states the SUM OF THE ROWS ABOVE IT. Where those rows are one row, it states that
+  // row again — "4.00" and then "Total: 4.00", which is what a reader gets asked to compare. So the
+  // row is gated on there being more than one series to add up, exactly as the band-card builder
+  // gates it (`buildBandTooltipHtml`'s `orderedSeries.length > 1`). Both cases below are DEFAULTS:
+  // what makes them single-row is the data, not a dial.
+  it("standalone, one series: NO Total row — the total of one series is that series", () => {
+    const m = mountHover(spec({ chartType: "area", xAxisType: "temporal" }), soloTemporalRows(MONTHLY));
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("4.00");
+    expect(cardText()).not.toContain("Total");
+  });
+
+  it("standalone, two series but only ONE with a value at the hovered x: no Total row either", () => {
+    // The count that matters is the rows the card actually drew, not the series the chart has —
+    // the band builder counts the series with a finite value AT THE HOVERED CATEGORY, and this
+    // path now counts the same way. `hoverFirstMark(PLOT_MIDDLE)` snaps to the middle month, where
+    // B has no row, so the card draws one series row there.
+    const gappy = temporalRows(MONTHLY).filter((r) => !(r.series === "B" && r.time === MONTHLY[1]));
+    const m = mountHover(spec({ chartType: "area", xAxisType: "temporal", series_order: ["A", "B"] }), gappy);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).not.toContain("Total");
   });
 
   it("2-pane: no card and no total reported anywhere — the pills give each series' own value", () => {

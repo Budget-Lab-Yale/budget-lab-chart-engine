@@ -78,8 +78,10 @@ const CASES: Case[] = [
   { name: "line (categorical x)", spec: { chartType: "line", xAxisType: "categorical" }, rows: CAT_ROWS, mark: PLOT_MIDDLE, value: "10.00" },
   { name: "dotplot", spec: { chartType: "dotplot", xAxisType: "categorical" }, rows: CAT_ROWS, mark: DOT_MARK, value: "10.00" },
   // Temporal line and area both card through `attachCrosshair`'s own row loop — a second builder,
-  // hence a second fix site. The area's card also carries a Total row, which is why every
-  // assertion below is scoped to the SERIES row rather than to the card as a whole.
+  // hence a second fix site. Every assertion below is scoped to the card's FIRST row, which is the
+  // series row on every type here. (A single-series area's card is that row alone: its cumulative
+  // Total row is gated on there being more than one series row to add up — see
+  // test/hover-claims-defaults.test.ts's "stacked-area Total row".)
   { name: "line (temporal)", spec: { chartType: "line", xAxisType: "temporal" }, rows: TEMPORAL_ROWS, mark: PLOT_MIDDLE, value: "4.00" },
   { name: "area (temporal)", spec: { chartType: "area", xAxisType: "temporal" }, rows: TEMPORAL_ROWS, mark: PLOT_MIDDLE, value: "4.00" },
   // The type this rule was first ruled on, kept here so all of them read as one table.

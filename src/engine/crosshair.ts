@@ -58,7 +58,9 @@ export interface CrosshairOptions {
    *  hover dot takes the series' shape so it matches the static marker. */
   symbols?: Map<string, string>;
   /** Append a cumulative "Total" row (sum of the shown series at the hovered x) to the tooltip —
-   *  used for stacked area, where the stack height is the meaningful aggregate. */
+   *  used for stacked area, where the stack height is the meaningful aggregate. Requested, not
+   *  guaranteed: the row is still gated on the card having drawn MORE THAN ONE series row at the
+   *  hovered x (see `shownRows > 1` below), because the sum of one row is that row. */
   showTotal?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
@@ -226,20 +228,26 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
         ? seriesOrder.filter((s) => bySeries.has(s))
         : [...bySeries.keys()];
     let total = 0;
-    let totalAny = false;
+    let shownRows = 0;
     for (const series of tipSeries) {
       const m = bySeries.get(series)!;
       const v = m.get(snap);
       if (v == null || Number.isNaN(v)) continue;
       total += v;
-      totalAny = true;
+      shownRows++;
       html += tooltipSeriesRowHtml(series, yFormat(v), {
         ...(seriesLabels ? { seriesLabels } : {}),
         ...(opts.icons ? { icons: opts.icons } : {}),
       });
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
-    if (opts.showTotal && totalAny) {
+    //
+    // `shownRows > 1`, not `> 0`: a Total row states the sum of the rows above it, and the sum of
+    // one row is that row — a single-series area card read "4.00" and then "Total: 4.00". The count
+    // is of the rows this card actually DREW at the snapped x, not of the chart's series, which is
+    // the same rule `buildBandTooltipHtml` applies with `orderedSeries.length > 1` (also a
+    // per-hovered-category count). The two card builders have to agree: they are the same promise.
+    if (opts.showTotal && shownRows > 1) {
       // The Total of a cumulative stack names no series, so it draws no key — but it still occupies
       // the box, or its label hangs left of every row above it. `shape: "none"` IS that empty box.
       const blank = seriesSwatchHtml({ shape: "none" });
