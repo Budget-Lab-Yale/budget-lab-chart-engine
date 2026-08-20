@@ -43,7 +43,7 @@ import {
   attachPointHover,
   attachHighlightPills,
 } from "./crosshair.js";
-import type { HighlightPillsHandle } from "./crosshair.js";
+import type { HighlightPillsHandle, BandHoverCtx } from "./crosshair.js";
 import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
@@ -99,6 +99,38 @@ export interface MountOptions {
    *  in the mount + resize paths, and to the Image download's export — so a static hook's output
    *  cannot diverge between the screen and the downloaded PNG. */
   hooks?: RenderHooks;
+  /** Fires with the hovered category and its per-series values whenever a categorical bar/stacked
+   *  crosshair (standalone or a small-multiples pane) resolves one, and with `null` on
+   *  pointer-leave so a consumer drawing its own hover card knows when to clear it. Values come
+   *  straight from the crosshair's own resolver (`resolveCategorySeriesValues` in crosshair.ts) —
+   *  never re-derived here — and fire even when `chrome.tooltip: false` suppresses the engine's
+   *  own card, or the pane is a coordinated small-multiples pane with no card of its own: the
+   *  engine still hit-tests and this reports what it resolved either way. A bubbling `tbl-hover`
+   *  CustomEvent (same detail) also dispatches from the card root. Not yet wired for other chart
+   *  types (line, scatter, histogram, dotplot, dumbbell, categorical-line) — see crosshair.ts's
+   *  `attachBandCrosshair`, the only attach function this reaches. */
+  onHover?: (ctx: BandHoverCtx | null) => void;
+  /** Fires after every (re-)render of the chart body: once at mount, once after each width-driven
+   *  resize redraw, and once after a title-selector change forces a redraw (for its color
+   *  accent). A small-multiples figure fires once PER PANE (each call's `svg` is that pane's own),
+   *  rather than once for the figure — there is no single wrapping SVG to report. A bubbling
+   *  `tbl-render` CustomEvent (same detail) also dispatches from the card root. */
+  onRender?: (ctx: { svg: SVGSVGElement; phase: "mount" | "resize" | "reselect" }) => void;
+  /** Fires whenever the legend's active highlight set changes — a pin (click), a hover, focus/
+   *  blur, or the reset button — with the full active series set. A bubbling `tbl-legend-select`
+   *  CustomEvent (same detail) also dispatches from the card root. Distinct from `onSelect`,
+   *  which is the title-selector callback — this is the legend's own pin/dim gesture. No-op on a
+   *  chart with no legend. */
+  onLegendSelect?: (ctx: { active: string[] }) => void;
+}
+
+/** Fire `type`'s host callback (if any) then a bubbling CustomEvent of the same name from `card`,
+ *  with the same `detail` — the `tbl-title-select` pattern (below), generalised for `onHover` /
+ *  `onRender` / `onLegendSelect`, each of which needs the identical callback-then-bubbling-event
+ *  shape at more than one call site. */
+function notify<T>(card: HTMLElement, type: string, detail: T, cb?: (detail: T) => void): void {
+  cb?.(detail);
+  card.dispatchEvent(new CustomEvent(type, { detail, bubbles: true }));
 }
 
 // Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
@@ -718,6 +750,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const card = doc.createElement("div");
   card.className = `figure-card chart-${spec.chartType}`;
 
+  // onHover: forwarded into attachBandCrosshair below as the crosshair's own notifier — see
+  // BandCrosshairOptions.onHover. Fires the host callback then the bubbling `tbl-hover` event,
+  // from whatever the crosshair already resolved (never re-derived here).
+  const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
+
   // Inline title selectors: the mount owns ONE selections object for its whole life. The
   // header's widget change handler mutates it in place, so the PNG download (below) and any
   // later reads see the live state; the header itself is built once and never rebuilt by the
@@ -815,7 +852,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     return [...orderedSeries, ...extras];
   }
 
-  const draw = (outerWidth: number, legendPos: "top" | "right"): void => {
+  const draw = (
+    outerWidth: number,
+    legendPos: "top" | "right",
+    renderPhase?: "mount" | "resize" | "reselect",
+  ): void => {
     // For right-legend, the chart width is computed from the OUTER card width (stable),
     // not from canvasScroll (which would shrink as the legend takes space → feedback loop).
     const chartAvail = legendPos === "right"
@@ -893,6 +934,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           if (newSvg) animateAreaRestack(newSvg, oldDs);
         }
       }
+      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
     };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
     // legend (the color legend still drives hover-dim, which is independent of the crosshair).
@@ -1122,6 +1164,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         orientation: horizontalBar ? "horizontal" : "vertical",
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
+        onHover: hoverNotifier,
         ...(useTooltip
           ? {}
           : {
@@ -1264,6 +1307,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else {
       card.classList.remove("is-selectable");
     }
+
+    // onRender: only at the three real re-render occasions this mount forces past draw()'s
+    // same-width/same-legendPos guard above — the area click-to-restack redraw a few lines up
+    // passes no phase, so it stays silent (not one of mount/resize/reselect).
+    if (renderPhase) notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
   };
 
   // Initial draw: we don't know the series count yet, so render first to get legendItems,
@@ -1292,14 +1340,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     return pos;
   };
 
-  draw(initialCardWidth, resolvedPos());
+  draw(initialCardWidth, resolvedPos(), "mount");
 
   // Wire the accent-redraw hook (see its declaration above): a title-selector change forces
   // draw() past its same-width/same-legendPos early return, mirroring the area click-to-restack
   // pattern (`lastWidth = -1` then a fresh draw() call at the current width/legendPos).
   requestAccentRedraw = () => {
     lastWidth = -1;
-    draw(card.clientWidth || initialCardWidth, currentLegendPos ?? resolvedPos());
+    draw(card.clientWidth || initialCardWidth, currentLegendPos ?? resolvedPos(), "reselect");
   };
 
   // Single persistent scrollLeft → translateX for the sticky y-axis overlay.
@@ -1329,7 +1377,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
         const effectivePos: "top" | "right" =
           pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
-        draw(cardW, effectivePos);
+        draw(cardW, effectivePos, "resize");
       });
     });
     ro.observe(card);
@@ -1743,6 +1791,11 @@ function wireFigureSvg(
      *  chart type -- not just bar/stacked. undefined on the standalone mountChart path -- there is
      *  no facet there. */
     facet?: string;
+    /** MountOptions.onHover's notifier (mountFigure's closure over `card` + `opts.onHover`) —
+     *  forwarded into this pane's attachBandCrosshair call only (see BandCrosshairOptions.onHover;
+     *  render-live's `onHover` doc for the chart-type scope). undefined on chart types that don't
+     *  reach it. */
+    onHover?: (ctx: BandHoverCtx | null) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
@@ -1956,6 +2009,7 @@ function wireFigureSvg(
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
+      onHover: ctx.onHover,
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
       ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
@@ -2119,6 +2173,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
   const card = doc.createElement("div");
   card.className = "figure-card";
+  // onHover: same notifier shape as mountChart's, forwarded per pane through wireFigureSvg's ctx.
+  const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
   // Inline title selectors — same single shared selections object discipline as mountChart.
   // `afterChange` re-renders the pane grid so a colored option's accent recolors every pane's bars
   // live (parity with mountChart's requestAccentRedraw). Forward-declared: assigned once draw()
@@ -2221,7 +2277,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // PNG export (export-png.ts) so the two paths can't drift.
   const figHeight = figurePaneHeight(spec);
 
-  const drawGrid = (outerWidth: number): void => {
+  const drawGrid = (outerWidth: number, renderPhase?: "mount" | "resize" | "reselect"): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
@@ -2303,6 +2359,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
     }
+    // onRender: once PER PANE (there is no single wrapping SVG for a figure to report) at the
+    // three real re-render occasions — mirrors mountChart's dispatch, gated the same way.
+    if (renderPhase) {
+      for (const pane of fig.panes) {
+        if (pane.svg) notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
+      }
+    }
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     // Each pane registers its value-pill driver here; the legend fires them all on highlight.
@@ -2314,6 +2377,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           onHighlight: (active) => {
             for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
             for (const d of pillDrivers) d.setActive(active);
+            notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
           },
           hooks: opts.hooks,
           shapeItems: fig.shapeLegendItems ?? undefined,
@@ -2371,6 +2435,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         onPillDriver: (d) => pillDrivers.push(d),
         hooks: opts.hooks,
         facet: pane.value,
+        onHover: hoverNotifier,
         // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
         // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
         ...(isHorizontalBarFig
@@ -2385,16 +2450,16 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     });
   };
 
-  const draw = (w: number): void => { drawGrid(w); };
+  const draw = (w: number, phase?: "mount" | "resize" | "reselect"): void => { drawGrid(w, phase); };
 
   const initialWidth = card.clientWidth || opts.width || 720;
   // On a selection change, re-render the grid so the accent tracks the active option. Reset the
   // width-keyed guard (sig is width-only) so the same-width re-render isn't skipped.
   requestFigureRedraw = () => {
     lastSig = "";
-    draw(card.clientWidth || initialWidth);
+    draw(card.clientWidth || initialWidth, "reselect");
   };
-  draw(initialWidth);
+  draw(initialWidth, "mount");
 
   let resizeRaf: number | null = null;
   let ro: ResizeObserver | undefined;
@@ -2403,7 +2468,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       if (resizeRaf !== null) return;
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
-        draw(card.clientWidth || initialWidth);
+        draw(card.clientWidth || initialWidth, "resize");
       });
     });
     ro.observe(card);

@@ -684,6 +684,18 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
 // Band-axis (categorical) hover tooltip — bar / stacked charts
 // ---------------------------------------------------------------------------
 
+/** Resolved hover context for `BandCrosshairOptions.onHover` / render-live's `MountOptions.onHover`
+ *  and the bubbling `tbl-hover` CustomEvent — the SAME category + per-series values the tooltip
+ *  card is built from (see `resolveCategorySeriesValues`), never re-derived at a separate site.
+ *  `null` reports pointer-leave (or no category resolved), so a consumer drawing its own card
+ *  knows when to clear it. */
+export interface BandHoverCtx {
+  category: string;
+  series: string[];
+  values: Record<string, number>;
+  facet?: string;
+}
+
 export interface BandCrosshairOptions {
   /** All rows in scope (dataInScope from renderChart). Each must have `_xc` (the category
    *  key), `series`, and `_y`. */
@@ -742,6 +754,13 @@ export interface BandCrosshairOptions {
    *  Forwarded into TooltipHookCtx.facet. undefined on the standalone mountChart path -- there is
    *  no facet there. */
   facet?: string;
+  /** Fires with the resolved category + its per-series values on every pointer resolve, and with
+   *  `null` on pointer-leave / no category resolved. Fired from the SAME values `update()` already
+   *  resolves to build the tooltip (see `resolveCategorySeriesValues`) — BEFORE the `emitOnly` and
+   *  `showTooltip` gates below, so it fires for a coordinated small-multiples pane and with
+   *  `chrome.tooltip: false` alike (render-live's actual use case: hit-test without the engine's
+   *  own card). */
+  onHover?: (ctx: BandHoverCtx | null) => void;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -867,6 +886,28 @@ export function resolveCategoryFromBandsH(
  *   - "text": plain text label only (no swatch) — cumulative stack with text callout.
  *   - "none" (or omitted): Total row is omitted — netDisplay:"none" / normalized stack.
  */
+/** Resolve `rows` down to the values for one category, in tooltip-row order: `series` filtered to
+ *  those with a finite value for `category` (ordered by `seriesOrder` when given, else
+ *  data-encounter order), and `values` keyed by series. The single source `buildBandTooltipHtml`'s
+ *  card and `attachBandCrosshair`'s `onHover` notifier both read from, so the tooltip and the
+ *  hover event can never disagree about what a category's values are. */
+export function resolveCategorySeriesValues(
+  category: string,
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>,
+  seriesOrder?: string[],
+): { series: string[]; values: Record<string, number> } {
+  const valBySeries = new Map<string, number>();
+  for (const r of rows) {
+    if (r._xc === category && r._y != null && Number.isFinite(r._y)) valBySeries.set(r.series, r._y);
+  }
+  const series = seriesOrder && seriesOrder.length
+    ? seriesOrder.filter((s) => valBySeries.has(s))
+    : [...valBySeries.keys()];
+  const values: Record<string, number> = {};
+  for (const s of series) values[s] = valBySeries.get(s)!;
+  return { series, values };
+}
+
 export function buildBandTooltipHtml(
   category: string,
   rows: Array<{ _xc?: string; series: string; _y: number | null }>,
@@ -908,22 +949,15 @@ export function buildBandTooltipHtml(
   const { isStacked, totalRow, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
-  // Collect values for this category, keyed by series.
-  const catRows = rows.filter((r) => r._xc === category);
-  const valBySeries = new Map<string, number>();
-  for (const r of catRows) {
-    if (r._y != null && Number.isFinite(r._y)) valBySeries.set(r.series, r._y);
-  }
-
-  const orderedSeries = seriesOrder && seriesOrder.length
-    ? seriesOrder.filter((s) => valBySeries.has(s))
-    : [...valBySeries.keys()];
+  const { series: orderedSeries, values: valuesBySeries } = resolveCategorySeriesValues(
+    category, rows, seriesOrder,
+  );
 
   let html = `<div class="tbl-tooltip-head">${escapeHtml(categoryLabels?.[category] ?? category)}</div>`;
   let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
-    const v = valBySeries.get(series);
+    const v = valuesBySeries[series];
     if (v == null) continue;
     total += v;
     const display = (seriesLabels && seriesLabels[series]) || series;
@@ -972,15 +1006,10 @@ export function buildBandTooltipHtml(
   // show — callers that never pass isStacked/totalRow (e.g. attachCategoricalLineCrosshair) have
   // no stack "total" concept, and the raw series sum would mislabel one for them.
   if (opts.tooltipHook) {
-    const values: Record<string, number> = {};
-    for (const series of orderedSeries) {
-      const v = valBySeries.get(series);
-      if (v != null) values[series] = v;
-    }
     const hooked = opts.tooltipHook({
       category,
       series: orderedSeries,
-      values,
+      values: valuesBySeries,
       ...(hasTotalRow ? { total } : {}),
       ...(opts.facet != null ? { facet: opts.facet } : {}),
       rendered: html,
@@ -1373,6 +1402,13 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     if (!category) { hide(); return; }
 
     opts.onResolve?.(category);
+    // Fires from the SAME resolver the tooltip card below reads (resolveCategorySeriesValues) —
+    // BEFORE the emitOnly/tip gates, so a coordinated small-multiples pane and `chrome.tooltip:
+    // false` still report what the engine resolved even though neither draws its own card.
+    if (opts.onHover) {
+      const { series, values } = resolveCategorySeriesValues(category, opts.rows, opts.seriesOrder);
+      opts.onHover({ category, series, values, ...(opts.facet != null ? { facet: opts.facet } : {}) });
+    }
     if (emitOnly) return;
 
     showHighlight(hlMin, hlMax);
@@ -1418,6 +1454,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     if (hl) hl.setAttribute("opacity", "0");
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
+    opts.onHover?.(null);
   }
 
   hit.style.pointerEvents = "all";
