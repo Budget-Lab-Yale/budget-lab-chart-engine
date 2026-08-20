@@ -21,8 +21,9 @@
 //
 // WHY IT IS A MATRIX AND NOT A LIST OF CLAIMS
 // -------------------------------------------
-// Nine false hover claims were found in CONFIG-SPEC.md on this branch, one probe at a time. Two
-// earlier defences were not enough:
+// Nine false hover claims had been found in CONFIG-SPEC.md by the time this file was written, one
+// probe at a time — and more have been found since, which is the point: the count is not the sort of
+// number to keep current here. Two earlier defences were not enough:
 //   - "every claim must be test-backed" was already in force. The `overlays[].tooltip`
 //     small-multiples claim WAS test-backed — by a test that set `coordinated_cursor: false`, a
 //     non-default path. It shipped false anyway. Hence: **defaults only** in the matrix below.
@@ -33,8 +34,8 @@
 //     to ask about that field.
 // The `card` column therefore overlaps `hover-card-reach.test.ts` on purpose: the matrix has to be
 // readable as one artifact, and a matrix missing its most-cited column would not be. Per-claim
-// assertions (including the two deliberate `GAP` markers for the released `x_labels` /
-// `tooltip_x_format` gaps) stay in those files; nothing here weakens them.
+// assertions (including the `GAP`-marked ones pinning the two released `x_labels` /
+// `tooltip_x_format` gaps as they are) stay in those files; nothing here weakens them.
 //
 // WHY THE EXPECTED VALUES ARE INLINE AND NOT A SNAPSHOT
 // ----------------------------------------------------
@@ -142,10 +143,29 @@ function observe(svg: SVGSVGElement): Cell {
 }
 
 // ---------------------------------------------------------------------------
-// Fixtures. DEFAULTS ONLY. Every spec below sets nothing but the fields that DEFINE its chart type
-// and, for the 2-pane variant, `columns.facet` + `small_multiples` — whose `coordinated_cursor`
-// defaults to true, which is the whole point. No `coordinated_cursor`, no `barStack.*`, no
-// `chrome.*`, no `valueLabels`. If you add a field here you have broken the file's premise.
+// Fixtures. DEFAULTS ONLY, in the sense that matters here: NO HOVER DIAL IS SET ANYWHERE BELOW.
+// No `coordinated_cursor`, no `barStack.*`, no `chrome.*`, no `valueLabels`, no `tooltip_*`, no
+// `series_labels`, no `x_labels`. The complete inventory of what the specs below DO set, so that
+// "at defaults" can be checked rather than trusted:
+//   - `chartType` + `xAxisType`, and `title` + `data`, which every spec must carry;
+//   - `columns`, where the data's column names are not the defaults, and `columns.facet` +
+//     `small_multiples` for a 2-pane variant — whose `coordinated_cursor` defaults to true, which is
+//     the whole point of the second table. (`FACET_COLS` also spells out `x`/`value`/`series`, but
+//     those three ARE the defaults `resolveColumns` would pick for this data; `facet` is the only
+//     load-bearing entry in it.)
+//   - `histogram.bins` + `histogram.domain` on the histogram fixture: both HAVE defaults (auto bin
+//     count, data extent), and are pinned so the bin the hover lands on is a fixed one;
+//   - `series_order`, on the nine fixtures whose data names two series (bar (grouped), both
+//     stacked, categorical-x line, dotplot, dumbbell, temporal line, area, scatter).
+// Adding anything outside that inventory breaks the file's premise.
+//
+// Why `series_order` is there: it PINS the row order the `cardRows` column asserts instead of
+// leaning on data-encounter order, and it is order + inclusion filter (see spec/types.ts), never a
+// hover setting — no hover surface reads it as anything but a row order. Measured, not assumed:
+// deleting it from all nine fixtures leaves every cell of both tables below unchanged, because each
+// fixture's rows are already in that order. It is kept for the case where that stops being true — a
+// future edit to a fixture's rows must not be able to quietly rewrite which series `cardRows` names
+// first.
 // ---------------------------------------------------------------------------
 
 const sm = { small_multiples: { columns: 2, mode: "shared" } };
@@ -349,8 +369,10 @@ const TYPES: Array<{ name: string; mount: (f: boolean) => Mount }> = [
 ];
 
 // ===========================================================================
-// THE MATRIX. Measured 2026-08-20 against aa84548. Edit a row here only with a behaviour change
-// you meant, and re-read every CONFIG-SPEC claim keyed to it in the same commit.
+// THE MATRIX. First measured 2026-08-20 against aa84548; cells have been edited since (the
+// histogram's `cardRows` in c502add), so the table reads as of the last commit that touched it, not
+// of that sha. Edit a row here only with a behaviour change you meant, and re-read every
+// CONFIG-SPEC claim keyed to it in the same commit.
 //
 //                                            card    cardRows                      pills  guide  dot    region axisLabel
 // ---------------------------------------------------------------------------------------------------------------------
