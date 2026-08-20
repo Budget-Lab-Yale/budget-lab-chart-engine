@@ -326,6 +326,51 @@ describe("overlays — facet validation (3a)", () => {
     );
     expect(r.valid).toBe(true);
   });
+
+  // pane_order is an INCLUSION filter (CONFIG-SPEC.md), so "present in the facet column" is not
+  // the same question as "rendered". An overlay scoped to an excluded pane draws zero paths
+  // anywhere and STILL keys a legend row — annotation-legend.ts builds that row from the spec
+  // alone and guards only `kind == null`, so this validator is the only thing standing between the
+  // author and a legend row for a line no reader can find. Verified by probe before the fix:
+  // one pane rendered, zero overlay paths, legendItems ["Fitted"].
+  it("rejects a facet that pane_order EXCLUDES — the pane renders, so the line never does", () => {
+    const r = validateChartData(
+      {
+        ...FACETED_BASE,
+        small_multiples: { columns: 2, pane_order: ["P1"] },
+        overlays: [{ slope: 1, intercept: 0, facet: "P2", label: "Fitted", legend: true }],
+      } as never,
+      facetedRows,
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/overlays\[0\]\.facet/);
+    expect(r.errors.join(" ")).toContain("pane_order");
+    expect(r.errors.join(" ")).toContain("P2");
+  });
+
+  it("accepts a facet pane_order INCLUDES", () => {
+    const r = validateChartData(
+      {
+        ...FACETED_BASE,
+        small_multiples: { columns: 2, pane_order: ["P2", "P1"] },
+        overlays: [{ slope: 1, intercept: 0, facet: "P2" }],
+      } as never,
+      facetedRows,
+    );
+    expect(r.errors).toEqual([]);
+  });
+
+  it("treats an EMPTY pane_order as no filter, exactly as figure.ts resolves panes", () => {
+    const r = validateChartData(
+      {
+        ...FACETED_BASE,
+        small_multiples: { columns: 2, pane_order: [] },
+        overlays: [{ slope: 1, intercept: 0, facet: "P2" }],
+      } as never,
+      facetedRows,
+    );
+    expect(r.errors).toEqual([]);
+  });
 });
 
 // Second review wave, finding 3b: engine/overlays.ts's pooled branch concatenates every in-scope

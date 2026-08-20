@@ -273,6 +273,21 @@ describe("overlays — facet scoping (small multiples)", () => {
     expect(lines(byValue.get("A")!).length).toBeGreaterThan(0);
     expect(lines(byValue.get("B")!).length).toBe(0);
   });
+
+  // The pane_order-excluded case is a VALIDATION error (test/overlays-spec.test.ts) precisely
+  // because nothing downstream can catch it: with `pane_order: ["A"]` and `facet: "B"` the figure
+  // renders one pane, zero overlay paths anywhere, and still emits a legend row for the line.
+  // This is the mirror case — the pane is included, so the line is really there and the row it
+  // keys is real.
+  it("draws the overlay in a pane pane_order INCLUDES", () => {
+    const fig = renderFigure(
+      { ...facetSpec, small_multiples: { columns: 2, pane_order: ["A"] } } as ChartSpec,
+      facetRows,
+      OPTS,
+    );
+    expect(fig.panes.map((p) => p.value)).toEqual(["A"]);
+    expect(lines(fig.panes[0]!.svg as SVGSVGElement).length).toBeGreaterThan(0);
+  });
 });
 
 describe("overlays — fun density curve over a histogram", () => {

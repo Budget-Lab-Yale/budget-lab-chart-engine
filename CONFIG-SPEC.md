@@ -441,7 +441,7 @@ For a **horizontal or vertical rule**, use `annotations.yAxis` / `annotations.xA
 | `overlays[].labelSide` | enum | Which side of the line the label sits: `top` (default) \| `middle` \| `bottom`. |
 | `overlays[].labelPosition` | enum | Where along the line it anchors: `left` (first point) \| `middle` \| `right` (last point, default). An overlay is sloped, so this picks a point **on** the line rather than a frame edge. |
 | `overlays[].labelDx` / `.labelDy` | number | px nudges — **`+labelDx` = right, `+labelDy` = up**, as everywhere in `annotations`. |
-| `overlays[].facet` | string | Small multiples: scope this overlay to the pane whose facet value matches. |
+| `overlays[].facet` | string | Small multiples: scope this overlay to the pane whose facet value matches. The pane must be one the figure actually renders — a value `pane_order` excludes is a validation error, since the line would be drawn nowhere while still keying its legend row. |
 
 **The value axis, and why `column` is different.** A `column` overlay's values **are** folded into the
 value-axis extent, the same way `confidence_bands`' `lower`/`upper` columns and `annotations.yAxis`

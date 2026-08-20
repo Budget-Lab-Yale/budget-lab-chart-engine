@@ -1047,13 +1047,16 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
-  // Cross-reference: overlays[].facet must name a real small_multiples pane, and only means
-  // anything on a chart that actually facets. annotation-legend.ts's buildAnnotationLegendItems
-  // pushes an overlay's legend row straight from the spec, guarding only `kind == null` — its own
-  // comment there says a malformed entry "must not get a legend row for a line that is never
-  // drawn", and a misspelled `facet` (or a `facet` on a spec with no small_multiples at all) is
-  // exactly that: nothing will ever paint it. (cols.facet's existence is already enforced above,
-  // same as the pane_order check.)
+  // Cross-reference: overlays[].facet must name a pane the figure actually RENDERS (present in the
+  // facet column AND not filtered out by pane_order), and only means anything on a chart that
+  // actually facets. annotation-legend.ts's buildAnnotationLegendItems pushes an overlay's legend
+  // row straight from the spec, guarding only `kind == null` — its own comment there says a
+  // malformed entry "must not get a legend row for a line that is never drawn", and a misspelled
+  // `facet`, a pane pane_order drops, or a `facet` on a spec with no small_multiples at all is
+  // exactly that: nothing will ever paint it. That legend builder gets the spec and no rows, so it
+  // CANNOT tell a misspelled facet from a real one — this validator is the only place that can, and
+  // is deliberately the only gate. (cols.facet's existence is already enforced above, same as the
+  // pane_order check.)
   for (const [i, o] of (spec.overlays ?? []).entries()) {
     if (o.facet == null) continue;
     if (!spec.small_multiples) {
@@ -1061,10 +1064,25 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         `overlays[${i}].facet is set but the chart has no small_multiples — remove \`facet\` or add small_multiples`,
       );
     } else if (cols.facet) {
-      const facetValues = new Set(rows.map((r) => r[cols.facet as string] as string));
-      if (!facetValues.has(o.facet)) {
+      const facetField = cols.facet;
+      // Checked against the panes actually RENDERED, not every value in the column: pane_order is
+      // an inclusion filter (CONFIG-SPEC.md), so a pane it omits is never drawn and an overlay
+      // scoped to it paints nothing while still keying its legend row. Resolved with the same idiom
+      // as the pane_widths pane count above and figure.ts's own pane partition — including its
+      // treatment of a blank facet cell, which is not a pane there and so is not one here.
+      const facetValues = new Set(
+        rows.map((r) => r[facetField] as string).filter((v) => v != null && v !== ""),
+      );
+      const paneOrder = spec.small_multiples.pane_order;
+      const panes =
+        paneOrder && paneOrder.length
+          ? new Set(paneOrder.filter((v) => facetValues.has(v)))
+          : facetValues;
+      if (!panes.has(o.facet)) {
         errors.push(
-          `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${cols.facet}" (data values: ${JSON.stringify([...facetValues].sort())})`,
+          facetValues.has(o.facet)
+            ? `overlays[${i}].facet names pane ${JSON.stringify(o.facet)}, which small_multiples.pane_order excludes — that pane is never rendered, so the line would be drawn nowhere while still keying a legend row (rendered panes: ${JSON.stringify([...panes])})`
+            : `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${facetField}" (data values: ${JSON.stringify([...facetValues].sort())})`,
         );
       }
     }
