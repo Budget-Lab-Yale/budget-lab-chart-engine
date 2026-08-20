@@ -103,6 +103,10 @@ A repin re-renders every published figure at once — here is what a maintainer 
   `barStack.total.bold`/`.divider` default to `true`. No exported/published image changes —
   tooltips are hover-only and appear in no golden fixture — but the on-screen hover card itself
   looks different for every such chart starting now, with no spec change on anyone's part.
+- **A stacked chart's Total row, in its plain-text (no-dot) form, now gets an empty swatch
+  spacer** so its label indents to match every series row's label instead of sitting flush left —
+  a small but visible change to every already-published stacked chart's hover card. Hover-only, no
+  exported/published image changes.
 - **`tbl-hover`/`tbl-render`/`tbl-legend-select` now dispatch on every mount, whether or not a
   callback is passed.** An existing embedder's categorical (bar/stacked) charts now dispatch a
   `tbl-hover` CustomEvent per pointermove regardless of whether anything listens — harmless on
