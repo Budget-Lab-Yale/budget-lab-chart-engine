@@ -561,6 +561,10 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
+| `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip. Default true. Not bar-specific. |
+| `chrome.valuePills` | boolean | Turn the per-segment value pills on the hovered band off. Bar, stacked-bar, and dot-plot charts only — pills are drawn by the band-highlight hover path, which only those chart types use. Default true. |
+
+`chrome` is deliberately just these two switches. There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
 
 ### Histogram options
 
@@ -732,6 +736,91 @@ own row with its own category axis, so different categories per facet are allowe
 | field | type | notes |
 |---|---|---|
 | `tags` | array | Free-form facet tags (recorded by consuming repos' catalogs; ignored by the renderer). |
+
+### Customisation
+
+Everything above this point is `chart.yaml` — data the CLI publishing pipeline JSON-serialises,
+together with the data rows, into a standalone HTML bundle it then screenshots with headless
+Chromium (`src/cli/index.ts` → `buildStandaloneHtml`). A function cannot survive that
+serialisation, so the surface below is **not** part of `chart.yaml` and has no YAML keys — it is
+JavaScript, passed directly to `mountChart`/`renderChart`/`renderFigure` by a consumer embedding
+the engine itself (not by a published figure). If you are only authoring `chart.yaml`/`data.csv`
+for a catalog figure, none of this applies to you.
+
+#### Hooks
+
+`hooks` (a `RenderHooks` object; see `src/spec/hooks.ts`) lets a consumer intercept specific,
+narrow pieces of what the engine draws, without forking the renderer. Every hook returns `null` to
+mean "engine default" — a hook can handle one case and defer the rest, and passing `hooks: {}` is
+byte-identical to passing no `hooks` at all.
+
+| hook | fires for | identical in the PNG export? |
+|---|---|---|
+| `tickLabel` | one value-axis tick's text | Yes |
+| `valueLabel` | one in-mark value label (stacked segment / net callout, waterfall running total) | Yes |
+| `legendKey` | one legend row's key markup | Yes — **but see `ctx.medium` below** |
+| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | Yes (by construction — it runs on both) |
+| `tooltip` | a band tooltip's content | **No — screen-only, see below** |
+
+**`tickLabel`, `valueLabel`, `legendKey` and `afterRender` are guaranteed identical between the
+screen and the downloaded PNG**, because the export re-renders through the very same builders with
+the very same `hooks` object — it does not serialise the live DOM. This is the guarantee `test/hooks-export-parity.test.ts`
+gates: it renders all four together and asserts the export's marks and text match the live render's.
+
+**`hooks.tooltip` is screen-only.** A static PNG export has no hover state, so there is nothing for
+a tooltip's content to be identical *to* — the hook is simply never invoked while building an
+export. It also has a narrower reach than the other four: it is wired at the two
+`buildBandTooltipHtml` call sites only — `attachBandCrosshair` (**bar, stacked-bar, waterfall**)
+and `attachCategoricalLineCrosshair` (**dot-plot, dumbbell, categorical-x line**), standalone and
+faceted alike. A temporal/numeric-x line chart's plain crosshair, a histogram's hover card, and a
+scatter point's hover card build their own markup elsewhere and do not call this hook.
+
+**`legendKey`'s `ctx.medium` is `"html"` on the live legend and `"svg"` in the export — a returned
+string must be written in THAT vocabulary, not just `ctx.rendered` echoed back unconditionally.**
+This is the single easiest thing to get wrong here: the live legend is an HTML button, so
+`<span>`/`<b>` markup renders there; the export's legend is flat SVG rasterised via
+`XMLSerializer → Image → canvas`, and an HTML node placed into that tree lands in the XHTML
+namespace and **silently does not paint** — no error, no warning, just a legend key that is
+correct on screen and missing from the download. Switch on `ctx.medium` (or simply return
+`ctx.rendered` unchanged, which is already written in the right vocabulary for the call you're in).
+
+`onHover`/`onRender`/`onLegendSelect` are not hooks — they're described under Events below.
+
+#### Events
+
+Three callbacks, each passed alongside `hooks` to `mountChart`, and each **also** dispatched as a
+bubbling `CustomEvent` of the same name (`detail` = the same object) from the chart's card root —
+so a published standalone figure's host page can observe it with a plain `addEventListener`, with
+no callback wired through JavaScript at mount time.
+
+| event | callback | fires | frequency note |
+|---|---|---|---|
+| Hover | `onHover` | `attachBandCrosshair` only — categorical bar/stacked band crosshairs, standalone and faceted. **Not** wired for line, scatter, histogram, dot-plot, dumbbell, or categorical-line charts; those report nothing, which is not the same as "no hover occurred." | Fires on every `pointermove`, and once more with `null` on pointer-leave. Consumers wanting less than that should debounce/throttle themselves. |
+| Render | `onRender` | Once per mount, once per width-driven resize, once per title-selector reselect, and once per area-chart click-to-restack. `ctx.phase` is `"mount" \| "resize" \| "reselect" \| "restack"`. A small-multiples figure fires once **per pane**. | **The `"mount"` phase is asynchronous** — it fires one microtask after `mountChart()` returns, so a consumer's `onRender` cannot itself throw back into `mountChart()`'s caller. `"resize"`/`"reselect"`/`"restack"` fire synchronously, inside the redraw that caused them. A mount torn down before that microtask runs never fires it at all. |
+| Legend select | `onLegendSelect` | Any chart with a legend. Reports the full active/dimmed series set. | Fires on a pin (click), **and also on hover, focus, blur, and the reset button** — issue #30's own gloss for this is "pin/**dim**", so hover-firing is intended, not a bug. A consumer that only cares about pins should debounce or de-duplicate. |
+
+**All three CustomEvents dispatch unconditionally, whether or not a host callback was passed to
+`mountChart`.** A published figure has no host callback to gate on, so this is what lets a page
+observe it at all — but it is also a real behavioural change on every categorical-chart hover for
+an existing embedder that mounts charts today and has never looked at these events.
+
+#### `tooltipContainer`
+
+`MountOptions.tooltipContainer` reparents the floating tooltip card into a given element instead of
+the default `document.body`. Opt-in: the card is positioned `position: fixed` at the cursor's
+viewport coordinates, and a container with `overflow: hidden` or a CSS `transform` on it (or an
+ancestor) would clip it or throw off that positioning, which `document.body` never does. Pass a
+container only when it is known to have neither, and keep it **stable across the mount's
+lifetime** — a fresh element passed in on every re-render leaves the previous one's tooltip div
+behind, invisible and unreachable.
+
+#### Two acceptance criteria this deliberately does not ship
+
+Issue #30 also asked for CONFIG-SPEC to publish a **stable-hooks list**, and for a stable hook's
+retirement or rename to be called out under an Upgrading heading. Neither is shipped here — this
+is a deliberate scope decision ("classes only, no policy"), not an oversight, and it means a future
+rework of any hook, event, class, or option named on this page can still break a consumer silently,
+the way `.tbl-legend-swatch.is-dot`'s retirement did in 1.11.0.
 
 ---
 

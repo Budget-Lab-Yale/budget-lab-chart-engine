@@ -41,11 +41,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   Not implemented: `loess`/`lowess` (precompute one and use `column`), and multi-predictor fits (the
   engine is bivariate by design — bring coefficients in through `fun` + `params`).
 
+### Added — customisation without forking the renderer (#30)
+- `chrome.tooltip` and `chrome.valuePills` — spec-level switches that turn hover chrome off from
+  `chart.yaml` itself rather than from a stylesheet the PNG export never sees. Deliberately just
+  these two: the net marker and the legend already have an owning field (`barStack.netDisplay:
+  none`, top-level `legend: false`), so `chrome` doesn't duplicate either decision.
+- `hooks` — five programmatic render hooks (`tickLabel`, `valueLabel`, `legendKey`, `afterRender`,
+  `tooltip`), passed to `mountChart`/`renderChart`/`renderFigure` for a consumer embedding the
+  engine directly. Not spec keys: the publishing pipeline JSON-serialises `chart.yaml` + rows into
+  a standalone HTML bundle for headless Chromium, and a function cannot cross that boundary. The
+  first four are guaranteed to fire identically on screen and in the PNG export, since the export
+  re-renders through the same builders with the same hooks object — `test/hooks-export-parity.test.ts`
+  gates all four together, not just individually. `tooltip` is the one exception: screen-only, by
+  design, since a static PNG has no hover state for its content to match. `legendKey`'s `ctx.medium`
+  (`"html"` live, `"svg"` exported) must be honored by the returned markup — an HTML fragment
+  returned into the SVG export lands in the XHTML namespace and silently fails to rasterise, correct
+  on screen and missing from the download. Every hook returns `null` for "engine default"; `hooks: {}`
+  renders byte-identically to no hooks at all. See CONFIG-SPEC.md's new Customisation section.
+- `onHover`, `onRender`, `onLegendSelect` — mount-time callbacks, each also dispatched as a bubbling
+  `CustomEvent` of the same name from the chart's card root so a published standalone figure's host
+  page can observe it without any callback wiring. `onHover` reaches only `attachBandCrosshair`
+  (categorical bar/stacked, standalone and faceted) — silence from other chart types means "this
+  chart type doesn't report hovers," not "nothing happened." `onRender`'s `"mount"` phase fires one
+  microtask after `mountChart()` returns (its `"resize"`/`"reselect"`/`"restack"` phases fire
+  synchronously) — a consumer writing a synchronous test against mount will be surprised.
+- `MountOptions.tooltipContainer` reparents the floating tooltip card away from `document.body`, for
+  a consumer scoping it to one figure.
+- Seven new classes on previously-unaddressable hover chrome (`tbl-coord-pill`,
+  `tbl-coord-pill-text`, `tbl-coord-axis-label`, `tbl-coord-axis-label-text`, `tbl-coord-region`,
+  `tbl-coord-guide`, `tbl-coord-dot`), so a consumer stylesheet can target them without depending on
+  presentation attributes like `rx="3"`.
+- **Not shipped, deliberately:** CONFIG-SPEC.md does not publish a stable-hooks list, and a stable
+  hook's retirement or rename is not required to be called out under an Upgrading heading — a
+  scope decision ("classes only, no policy"), not an oversight, so a future rework can still break a
+  consumer silently the way `.tbl-legend-swatch.is-dot`'s retirement did in 1.11.0.
+
 ### Changed
 - `barStack.netDisplay` now chooses the net callout only. Defaults are unchanged: a spec that does not
   set `barStack.hover` renders exactly as before.
 - `RenderResult`, `FigurePane` and `FigureRenderResult` rename their `showTotalDot` field to
   `netMode` — breaking for any consumer that reads it off a returned object (see below).
+- `onHover`/`onRender`/`onLegendSelect` dispatch their `CustomEvent` unconditionally on every mount,
+  whether or not a host callback is passed — a real runtime behaviour change on every categorical-
+  chart hover for an existing embedder, even one that never adopts the new callbacks.
 
 ### Changed — internal
 - `MarkLayers.showTotalDot` (a tri-state boolean read for four different purposes) is replaced by

@@ -134,7 +134,9 @@ export interface MountOptions {
    *  that positioning — `document.body` is the one place that never does either. Pass this only
    *  when the target element is known to have neither. Threaded down to every crosshair/hover
    *  attach call (see crosshair.ts's `getSharedTooltip`, keyed per-parent so two mounts with
-   *  different containers never share one tooltip element). */
+   *  different containers never share one tooltip element). Must be a STABLE element across the
+   *  mount's lifetime — a fresh element passed in on every re-render leaves the previous one's
+   *  empty `.tbl-tooltip` div behind, since `getSharedTooltip` keys its cache by this reference. */
   tooltipContainer?: HTMLElement;
 }
 
