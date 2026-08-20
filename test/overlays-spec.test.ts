@@ -373,204 +373,176 @@ describe("overlays — facet validation (3a)", () => {
   });
 });
 
-// Second review wave, finding 3b: engine/overlays.ts's pooled branch concatenates every in-scope
-// row's value for a `by: "none"` column overlay and draws ONE polyline, x-sorted, with NO dedupe
-// — correct when the column is genuinely one value per x, a silent zig-zag when it varies by
-// series.
-describe("overlays — pooled `by: \"none\"` column consistency (3b)", () => {
-  it('rejects a by:"none" column overlay whose value at one x differs across rows', () => {
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", yhat: "9.9" },
-      { time: "2", value: "3", series: "A", yhat: "2.1" },
-      { time: "2", value: "4", series: "B", yhat: "2.1" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
-    expect(r.valid).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/overlays\[0\]/);
-    expect(r.errors.join(" ")).toContain("yhat");
-    expect(r.errors.join(" ")).toContain('"1"'); // the offending x
-  });
+// A pooled (`by: "none"`) `column` overlay concatenates every in-scope row's value into ONE
+// polyline, x-sorted, with no dedupe — so a column that genuinely varies by series draws a
+// sawtooth. Validation used to try to reject that shape. The attempt was WITHDRAWN in 1.12.0
+// rather than patched a fourth time, and the reason is structural rather than a missing condition:
+//
+// "would the pooled polyline zig-zag" is a question about DRAWN GEOMETRY. What gets drawn is
+// decided by six filters that all live in `src/engine`, which `src/spec/*` may not import
+// (module-graph invariant, CLAUDE.md). Every version of the check therefore re-derived the scope
+// from the raw table, and every version got part of it wrong:
+//
+//   1. compared raw cell SPELLINGS, so "1" and "1.0" counted as differing values;
+//   2. keyed the bucket map on the raw X spelling, so x "1" and "1.0" were two positions and a
+//      disagreement between them evaded the guard entirely while the polyline got two vertices
+//      at one coordinate;
+//   3. ignored `overlays[].domain`, which crops rows to the drawn extent (engine/overlays.ts
+//      #columnPoints);
+//   4. ignored `series_order`, which is renderPane's ROW FILTER and not merely an ordering
+//      (engine/index.ts#assemblePaneResult, `dataInScope`);
+//   5. ignored `small_multiples.pane_order`, and blank facet cells, which drop whole panes
+//      (engine/figure.ts#renderFigure, `paneValues`);
+//   6. ignored that a group with fewer than two real points — or with every row at one x, whose
+//      default domain collapses — draws NO line at all.
+//
+// A false rejection refuses a figure that renders correctly, and because `budget-lab-charts`
+// re-renders its entire archive on a repin, a false rejection here breaks already-published
+// figures. A sawtooth is the opposite kind of failure: loud, on the screen the author is looking
+// at, and reachable only by explicitly opting OUT of the safe default (`by` defaults to
+// `"series"`, which is per-series and cannot pool). The guard's failure mode was worse than the
+// defect it caught, so `overlays[].by` documents the hazard in CONFIG-SPEC.md instead.
+//
+// The cases below are the receipts. The first six render correctly and were each rejected by some
+// version of the check; the seventh is the sawtooth, now accepted, which is the price paid.
+// Re-adding a check here means making all six pass, from `src/spec`, without the engine.
+describe('overlays — a pooled `by: "none"` column is NOT checked for consistency', () => {
+  const pooled = (patch: Record<string, unknown>, rows: unknown[]) =>
+    validateChartData(
+      { ...BASE, ...patch, overlays: [{ column: "yhat", by: "none" }] } as never,
+      rows as TidyRow[],
+    );
 
-  // The check compares NUMBERS, not spellings. The renderer converts each cell with unary `+`
-  // (engine/index.ts), so "1" and "1.0" at one x are ONE value to it and the figure draws
-  // correctly — rejecting it would break an already-published figure on the next re-pin, which is
-  // a strictly worse failure than the misdraw this check exists to catch.
-  it('accepts values that differ only in SPELLING — "1" and "1.0" are one number', () => {
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", yhat: "1" },
-      { time: "1", value: "2", series: "B", yhat: "1.0" },
-      { time: "2", value: "3", series: "A", yhat: "2" },
-      { time: "2", value: "4", series: "B", yhat: "2.000" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
-    expect(r.errors).toEqual([]);
-    expect(r.valid).toBe(true);
-  });
-
-  it("accepts the other equal-but-differently-written forms (exponent, leading zero, plus sign)", () => {
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", yhat: "1000" },
-      { time: "1", value: "2", series: "B", yhat: "1e3" },
-      { time: "2", value: "3", series: "A", yhat: "0.5" },
-      { time: "2", value: "4", series: "B", yhat: "+.50" },
-    ] as unknown as TidyRow[];
+  // (1) and (2): the two rounds that were fixed in place. Kept because they are the cheapest
+  // statement of what "same value" and "same x" mean, and both were once wrong.
+  it("(1) accepts values differing only in SPELLING — the renderer reads them with unary `+`", () => {
     expect(
-      validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2).valid,
-    ).toBe(true);
+      pooled({}, [
+        { time: "1", value: "1", series: "A", yhat: "1000" },
+        { time: "1", value: "2", series: "B", yhat: "1e3" },
+        { time: "2", value: "3", series: "A", yhat: "0.5" },
+        { time: "2", value: "4", series: "B", yhat: "+.50" },
+      ]).errors,
+    ).toEqual([]);
   });
 
-  // One bad cell must read as ONE problem. The numeric-or-empty check owns it; a non-numeric cell
-  // is not also a "differing values" disagreement, which would send the author looking for a
-  // second, non-existent fault.
-  it("reports a non-numeric cell ONCE — as not-numeric, not also as a pooled disagreement", () => {
-    const rows2: TidyRow[] = [
+  it("(2) accepts x cells differing only in SPELLING — those are one x position", () => {
+    expect(
+      pooled({}, [
+        { time: "1", value: "1", series: "A", yhat: "1.1" },
+        { time: "1.0", value: "2", series: "B", yhat: "1.1" },
+        { time: "2", value: "3", series: "A", yhat: "2.1" },
+        { time: "2", value: "4", series: "B", yhat: "2.1" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  // (3) `domain: [2, 3]` crops the drawn line to x in [2, 3]. The x = 1 disagreement is outside the
+  // extent the line is drawn over, so it never reaches the polyline. Verified against the render:
+  // the emitted path has vertices only at the two cropped x positions.
+  it("(3) accepts a disagreement OUTSIDE an explicit `domain`", () => {
+    const r = validateChartData(
+      { ...BASE, overlays: [{ column: "yhat", by: "none", domain: [2, 3] }] } as never,
+      [
+        { time: "1", value: "1", series: "A", yhat: "1.1" },
+        { time: "1", value: "2", series: "B", yhat: "9.9" },
+        { time: "2", value: "3", series: "A", yhat: "2.1" },
+        { time: "2", value: "4", series: "B", yhat: "2.1" },
+        { time: "3", value: "5", series: "A", yhat: "3.1" },
+        { time: "3", value: "6", series: "B", yhat: "3.1" },
+      ] as unknown as TidyRow[],
+    );
+    expect(r.errors).toEqual([]);
+  });
+
+  // (4) `series_order` is a filter as well as an order: renderPane pools only the rows of the
+  // series it lists, so B's disagreeing value is not in the pooled set at all.
+  it("(4) accepts a disagreement confined to a series `series_order` excludes", () => {
+    expect(
+      pooled({ series_order: ["A"] }, [
+        { time: "1", value: "1", series: "A", yhat: "1.1" },
+        { time: "1", value: "2", series: "B", yhat: "9.9" },
+        { time: "2", value: "3", series: "A", yhat: "2.1" },
+        { time: "2", value: "4", series: "B", yhat: "2.1" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  // (5) `pane_order` names the panes the figure renders; an excluded pane is not drawn, so a
+  // disagreement inside it reaches no polyline. (Blank facet cells drop a pane the same way.)
+  it("(5) accepts a disagreement confined to a pane `pane_order` excludes", () => {
+    expect(
+      pooled(
+        {
+          columns: { x: "time", value: "value", series: "series", facet: "pane" },
+          small_multiples: { columns: 2, pane_order: ["A"] },
+        },
+        [
+          { time: "1", value: "1", series: "A", pane: "A", yhat: "1.1" },
+          { time: "2", value: "3", series: "A", pane: "A", yhat: "2.1" },
+          { time: "1", value: "1", series: "A", pane: "B", yhat: "5.5" },
+          { time: "1", value: "2", series: "B", pane: "B", yhat: "9.9" },
+          { time: "2", value: "3", series: "A", pane: "B", yhat: "6.1" },
+          { time: "2", value: "4", series: "B", pane: "B", yhat: "6.1" },
+        ],
+      ).errors,
+    ).toEqual([]);
+  });
+
+  it("(5b) accepts a disagreement confined to rows with a BLANK facet cell — no pane is drawn for them", () => {
+    expect(
+      pooled(
+        {
+          columns: { x: "time", value: "value", series: "series", facet: "pane" },
+          small_multiples: { columns: 2 },
+        },
+        [
+          { time: "1", value: "1", series: "A", pane: "", yhat: "1.1" },
+          { time: "1", value: "2", series: "B", pane: "", yhat: "9.9" },
+          { time: "2", value: "9", series: "A", pane: "", yhat: "7.7" },
+          { time: "1", value: "1", series: "A", pane: "A", yhat: "1.1" },
+          { time: "2", value: "3", series: "A", pane: "A", yhat: "2.1" },
+        ],
+      ).errors,
+    ).toEqual([]);
+  });
+
+  // (6) Every row at ONE x: the default `column` domain is the group's x extent, which collapses,
+  // so nothing is drawn — there is no line to zig-zag. Verified against the render: no path.
+  it("(6) accepts a disagreement at the only x in the data — the line is not drawn at all", () => {
+    expect(
+      pooled({}, [
+        { time: "1", value: "1", series: "A", yhat: "1.1" },
+        { time: "1", value: "2", series: "B", yhat: "9.9" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  // THE PRICE. This one really does draw a sawtooth, and validation lets it through. Pinned so the
+  // trade-off is visible in the suite rather than implied by an absence, and so anyone re-adding
+  // the guard has to change this line deliberately.
+  it("(7) ALSO accepts the genuine sawtooth — the trade-off this deletion accepts", () => {
+    expect(
+      pooled({}, [
+        { time: "1", value: "1", series: "A", yhat: "1.1" },
+        { time: "1", value: "2", series: "B", yhat: "9.9" },
+        { time: "2", value: "3", series: "A", yhat: "2.1" },
+        { time: "2", value: "4", series: "B", yhat: "8.8" },
+      ]).errors,
+    ).toEqual([]);
+  });
+
+  // Unchanged and still enforced: a non-numeric cell in the column. This is a check about the
+  // TABLE, not about the geometry, which is why it survives — the renderer would drop the vertex
+  // and reroute the line through a segment the data never claimed.
+  it("still rejects a non-numeric cell in the pooled column", () => {
+    const r = pooled({}, [
       { time: "1", value: "1", series: "A", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", yhat: "oops" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+      { time: "2", value: "2", series: "B", yhat: "oops" },
+    ]);
     expect(r.valid).toBe(false);
     expect(r.errors.length).toBe(1);
     expect(r.errors[0]).toMatch(/not numeric/);
-  });
-
-  it("accepts a genuinely pooled column — one value per x, replicated across every series' row", () => {
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", yhat: "1.1" },
-      { time: "2", value: "3", series: "A", yhat: "2.1" },
-      { time: "2", value: "4", series: "B", yhat: "2.1" },
-    ] as unknown as TidyRow[];
-    expect(
-      validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2).valid,
-    ).toBe(true);
-  });
-
-  // Round 2: the y side of this comparison was made numeric, the x side was left as the raw cell
-  // string — so "1" and "1.0" were two buckets and the disagreement between them evaded the guard
-  // entirely, while the renderer parses both to _xn === 1 and hands the pooled polyline two
-  // vertices at one coordinate. The key is the x the RENDERER positions the row at.
-  it('rejects a disagreement whose x cells differ only in SPELLING — "1" and "1.0" are one x', () => {
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", yhat: "1.1" },
-      { time: "1.0", value: "2", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
-    expect(r.valid).toBe(false);
-    expect(r.errors.length).toBe(1);
-    expect(r.errors[0]).toMatch(/overlays\[0\]/);
-    expect(r.errors[0]).toContain("9.9");
-  });
-
-  // The message has to name an x an author can grep for in the CSV, so it quotes one of the raw
-  // spellings seen at that position — never the parsed number, which for a temporal axis is an
-  // epoch millisecond appearing nowhere in the file.
-  it("names a RAW x spelling from the data, not the parsed key", () => {
-    const rows2: TidyRow[] = [
-      { time: "1.0", value: "1", series: "A", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
-    const quoted = /time "([^"]+)"/.exec(r.errors[0] ?? "");
-    expect(quoted).not.toBeNull();
-    expect(["1", "1.0"]).toContain((quoted as RegExpExecArray)[1]);
-  });
-
-  // x may be temporal, and the parse must be the renderer's own (spec/parse-time.ts, which
-  // engine/x-adapter.ts's parseX calls). A numeric-only key would send `+"2020-01-01"` → NaN for
-  // EVERY row, pooling four distinct dates into one bucket and falsely rejecting a figure that
-  // draws correctly — the exact failure mode the y-side fix was written to avoid.
-  const TEMPORAL = {
-    ...BASE,
-    chartType: "line",
-    xAxisType: "temporal",
-    columns: { x: "time", value: "value", series: "series" },
-  };
-
-  it("keeps DISTINCT temporal x values in distinct buckets", () => {
-    const rows2: TidyRow[] = [
-      { time: "2020-01-01", value: "1", series: "A", yhat: "1.1" },
-      { time: "2020-01-01", value: "2", series: "B", yhat: "1.1" },
-      { time: "2020-02-01", value: "3", series: "A", yhat: "9.9" },
-      { time: "2020-02-01", value: "4", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...TEMPORAL, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
-    expect(r.errors).toEqual([]);
-  });
-
-  it("still rejects a within-x disagreement on a temporal axis", () => {
-    const rows2: TidyRow[] = [
-      { time: "2020-01-01", value: "1", series: "A", yhat: "1.1" },
-      { time: "2020-01-01", value: "2", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...TEMPORAL, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
-    expect(r.valid).toBe(false);
-    expect(r.errors[0]).toContain('"2020-01-01"');
-  });
-
-  it("keeps distinct QUARTERLY x values in distinct buckets, and still catches a real one", () => {
-    const QUARTERLY = { ...TEMPORAL, xAxisType: "quarterly" };
-    const ok: TidyRow[] = [
-      { time: "2020Q1", value: "1", series: "A", yhat: "1.1" },
-      { time: "2020Q1", value: "2", series: "B", yhat: "1.1" },
-      { time: "2020Q2", value: "3", series: "A", yhat: "9.9" },
-      { time: "2020Q2", value: "4", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    expect(
-      validateChartData({ ...QUARTERLY, overlays: [{ column: "yhat", by: "none" }] } as never, ok).errors,
-    ).toEqual([]);
-    const bad: TidyRow[] = [
-      { time: "2020Q1", value: "1", series: "A", yhat: "1.1" },
-      { time: "2020Q1", value: "2", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData({ ...QUARTERLY, overlays: [{ column: "yhat", by: "none" }] } as never, bad);
-    expect(r.valid).toBe(false);
-    expect(r.errors[0]).toContain('"2020Q1"');
-  });
-
-  it('does not flag the same disagreeing data when `by` is left at its default ("series", not pooled)', () => {
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    expect(
-      validateChartData({ ...BASE, overlays: [{ column: "yhat" }] } as never, rows2).valid,
-    ).toBe(true);
-  });
-
-  it("on a faceted chart, scopes the check PER FACET — differing values across DIFFERENT facets at the same x is fine", () => {
-    const facetedBase = {
-      ...BASE,
-      columns: { x: "time", value: "value", series: "series", facet: "pane" },
-      small_multiples: { columns: 2 },
-    };
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", pane: "P1", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", pane: "P1", yhat: "1.1" },
-      { time: "1", value: "3", series: "A", pane: "P2", yhat: "9.9" },
-      { time: "1", value: "4", series: "B", pane: "P2", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    expect(
-      validateChartData({ ...facetedBase, overlays: [{ column: "yhat", by: "none" }] } as never, rows2)
-        .valid,
-    ).toBe(true);
-  });
-
-  it("still rejects a WITHIN-facet disagreement on a faceted chart", () => {
-    const facetedBase = {
-      ...BASE,
-      columns: { x: "time", value: "value", series: "series", facet: "pane" },
-      small_multiples: { columns: 2 },
-    };
-    const rows2: TidyRow[] = [
-      { time: "1", value: "1", series: "A", pane: "P1", yhat: "1.1" },
-      { time: "1", value: "2", series: "B", pane: "P1", yhat: "9.9" },
-    ] as unknown as TidyRow[];
-    const r = validateChartData(
-      { ...facetedBase, overlays: [{ column: "yhat", by: "none" }] } as never,
-      rows2,
-    );
-    expect(r.valid).toBe(false);
   });
 });
 

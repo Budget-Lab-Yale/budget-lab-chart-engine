@@ -23,7 +23,6 @@ import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
 import { overlayKind } from "./overlays";
-import { xPositionKey } from "./parse-time";
 import type { Overlay } from "./types";
 
 export interface ValidationResult {
@@ -1088,76 +1087,6 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
             ? `overlays[${i}].facet names pane ${JSON.stringify(o.facet)}, which small_multiples.pane_order excludes — that pane is never rendered, so the line would be drawn nowhere while still keying a legend row (rendered panes: ${JSON.stringify([...panes])})`
             : `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${facetField}" (data values: ${JSON.stringify([...facetValues].sort())})`,
         );
-      }
-    }
-  }
-
-  // Cross-reference: a `column` overlay pooled with `by: "none"` draws ONE polyline from every
-  // in-scope row's value at that x, x-sorted, with NO dedupe (engine/overlays.ts's pooled branch)
-  // — correct when the column is genuinely one value per x, silently zig-zagging when it varies by
-  // series. Scoped the same way the pooled line is actually computed: per facet when the chart
-  // facets (a pane pools only its OWN rows — engine/index.ts calls resolveOverlays once per pane),
-  // narrowed further to the one facet the entry names when it has one, else the whole table.
-  for (const [i, o] of (spec.overlays ?? []).entries()) {
-    if (overlayKind(o) !== "column" || o.by !== "none" || !o.column) continue;
-    const col = o.column;
-    let scopes: TidyRow[][];
-    if (spec.small_multiples && cols.facet) {
-      if (o.facet != null) {
-        scopes = [rows.filter((r) => r[cols.facet as string] === o.facet)];
-      } else {
-        const byFacet = new Map<string, TidyRow[]>();
-        for (const r of rows) {
-          const key = r[cols.facet as string] as string;
-          const list = byFacet.get(key);
-          if (list) list.push(r);
-          else byFacet.set(key, [r]);
-        }
-        scopes = [...byFacet.values()];
-      }
-    } else {
-      scopes = [rows];
-    }
-    for (const scopeRows of scopes) {
-      // INVARIANT: BOTH axes of this comparison are keyed by the PARSED value, never by the cell's
-      // spelling — the x as well as the y. The renderer positions a row by `parseXValue` and reads
-      // the column with unary `+` (engine/index.ts / x-adapter.ts), so "1" and "1.0" are ONE x and
-      // ONE value to it. Comparing y spellings falsely rejects a spec that renders fine — and a
-      // false rejection breaks an already-published figure the next time a consumer re-pins, which
-      // is strictly worse than the misdraw this check exists to catch. Comparing x spellings does
-      // the mirror-image damage: it puts "1" and "1.0" in different buckets, so the disagreement
-      // between them evades the guard while the pooled polyline gets two vertices at one
-      // coordinate. Keys are `xPositionKey`, which is `x-adapter`'s own `parseX` (dates flattened
-      // to epoch ms) — not a lookalike parser that could drift from it. Each map's VALUE side keeps
-      // the first raw spelling seen, for x and y alike, so the error names strings the author can
-      // find in the CSV rather than an epoch millisecond appearing nowhere in it.
-      const byX = new Map<number | string, { rawX: string; vals: Map<number, string> }>();
-      for (const r of scopeRows) {
-        const raw = (r[col] as string) ?? "";
-        // Blank ⇒ absent, exactly as the renderer treats it. Non-finite ⇒ already reported by the
-        // numeric-or-empty check above; flagging it here too would read as a second, unrelated
-        // fault for one bad cell.
-        if (raw === "") continue;
-        const v = +raw;
-        if (!Number.isFinite(v)) continue;
-        const rawX = (r[cols.x] as string) ?? "";
-        // An x cell that resolves to no position (a malformed date, a non-numeric number) is
-        // already reported by the per-row x-format check above; bucketing every such row together
-        // here would add a second, invented disagreement on top of it.
-        const xKey = xPositionKey(spec.xAxisType, rawX);
-        if (xKey == null) continue;
-        const seen = byX.get(xKey);
-        if (seen) {
-          if (!seen.vals.has(v)) seen.vals.set(v, raw);
-        } else byX.set(xKey, { rawX, vals: new Map([[v, raw]]) });
-      }
-      for (const [, { rawX: x, vals }] of byX) {
-        if (vals.size > 1) {
-          const spellings = [...vals.entries()].sort((a, b) => a[0] - b[0]).map(([, raw]) => raw);
-          errors.push(
-            `overlays[${i}] pools column "${col}" with by: "none", but ${cols.x} ${JSON.stringify(x)} has differing values (${JSON.stringify(spellings)}) across rows — a pooled overlay draws one polyline with no dedupe and this would zig-zag; use \`by: "series"\` if the value genuinely varies by series`,
-          );
-        }
       }
     }
   }

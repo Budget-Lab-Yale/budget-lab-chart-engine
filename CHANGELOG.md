@@ -41,6 +41,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   Not implemented: `loess`/`lowess` (precompute one and use `column`), and multi-predictor fits (the
   engine is bivariate by design — bring coefficients in through `fun` + `params`).
 
+  **A pooled (`by: none`) `column` is NOT validated for consistency across series.** It draws a
+  sawtooth when the column varies by series, and that hazard is documented under `overlays[].by`
+  rather than rejected. Such a check has to know which rows are *drawn*, and `domain`, `facet`,
+  `series_order` and `small_multiples.pane_order` each narrow that set inside the renderer — which
+  `src/spec` may not call. Re-deriving it from the raw table produced false rejections of figures
+  that render correctly, and a false rejection breaks an already-published figure on the next repin,
+  where a sawtooth is self-evident on the author's own screen.
+
   `overlays[].tooltip` (default `false`) opts a single overlay into the hover tooltip, reporting its
   value at the hovered x as a row of its own — behind a separator, so the observed series and their
   Total stay one block, and carrying a line swatch in the overlay's own colour and dash so a modelled

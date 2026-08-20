@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseDate, parseQuarter, formatQuarter } from "../src/spec/parse-time";
-import { parseXValue, xPositionKey } from "../src/spec/parse-time";
+import { parseXValue } from "../src/spec/parse-time";
 import { pickTemporalCadence, temporalXTicks } from "../src/engine/axes";
 import { makeXAdapter } from "../src/engine/x-adapter";
 import type { XAxisType } from "../src/spec/types";
@@ -44,12 +44,11 @@ describe("temporal cadence", () => {
   });
 });
 
-// spec/validate.ts's pooled-overlay guard buckets rows by x, and it must bucket them exactly where
-// the renderer DRAWS them: a guard with its own lookalike x parser is a guard that can disagree
-// with the figure it protects (the raw-spelling version of it let a "1" / "1.0" disagreement
-// through while the pooled polyline got two vertices at x = 1). `x-adapter`'s `parseX` therefore
-// delegates here rather than parsing again, and this pins that it still does.
-describe("parseXValue — the ONE x parse, shared by the renderer and validation", () => {
+// One x parse, one opinion about where a row sits. `x-adapter`'s per-type `parseX` delegates to
+// `parseXValue` rather than parsing again, and this pins that it still does — a second, lookalike
+// parser anywhere in the tree is a second answer to "which x is this row at", and the axis, the
+// marks and the hover would each be free to pick a different one.
+describe("parseXValue — the ONE x parse the renderer positions rows by", () => {
   const CASES: Array<[XAxisType, string[]]> = [
     ["numeric", ["1", "1.0", "1e0", "+.50", "0.5", "-3", "", "oops"]],
     ["temporal", ["2020-01-01", "2020-02-01", "not-a-date"]],
@@ -69,21 +68,5 @@ describe("parseXValue — the ONE x parse, shared by the renderer and validation
         expect([type, raw, norm(viaAdapter)]).toEqual([type, raw, norm(direct)]);
       }
     }
-  });
-
-  it("gives one key to numeric spellings of one x, and distinct keys to distinct dates", () => {
-    expect(xPositionKey("numeric", "1")).toBe(xPositionKey("numeric", "1.0"));
-    expect(xPositionKey("numeric", "1000")).toBe(xPositionKey("numeric", "1e3"));
-    expect(xPositionKey("temporal", "2020-01-01")).not.toBe(xPositionKey("temporal", "2020-02-01"));
-    expect(xPositionKey("quarterly", "2020Q1")).not.toBe(xPositionKey("quarterly", "2020Q2"));
-    expect(xPositionKey("categorical", "Alaska")).toBe("Alaska");
-  });
-
-  it("returns null for a cell that resolves to NO position — validate reports those separately", () => {
-    expect(xPositionKey("numeric", "oops")).toBeNull();
-    expect(xPositionKey("numeric", "")).toBeNull();
-    expect(xPositionKey("temporal", "not-a-date")).toBeNull();
-    expect(xPositionKey("quarterly", "2020-01-01")).toBeNull();
-    expect(xPositionKey("categorical", "")).toBeNull();
   });
 });
