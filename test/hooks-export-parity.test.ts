@@ -255,3 +255,54 @@ describe("hooks export parity — legendKey swatch width / layout regressions (2
     expect(xSuffixed).toBeGreaterThan(xShort);
   });
 });
+
+// The LIMIT of the parity guarantee, for `afterRender` specifically. CONFIG-SPEC.md claimed its
+// output was "guaranteed identical between the screen and the downloaded PNG"; it is not, and this
+// pins the reason so the prose cannot drift back. The export re-renders at the fixed export frame
+// (INNER_W = 920 by a computed content height), not at the live card width by its own height, so a
+// hook that positions anything off the SVG's own dimensions produces DIFFERENT output on the two
+// paths no matter how the hook is written. (A consumer can also branch on `ctx.phase` deliberately —
+// a second, weaker reason.) What IS guaranteed is that the hook runs on both paths, with the phase
+// naming which, and that both SVGs carry its mutation — gated by the suite above.
+describe("afterRender parity has a limit: the two SVGs are not the same size", () => {
+  const frames: Array<{ phase: string; w: number; h: number }> = [];
+  const hooks: RenderHooks = {
+    afterRender: (svg, ctx) => {
+      const w = Number(svg.getAttribute("width") ?? 0);
+      frames.push({ phase: ctx.phase, w, h: Number(svg.getAttribute("height") ?? 0) });
+      // A coordinate-dependent mutation — the kind the strong claim would have to cover: a marker
+      // pinned to the frame's right edge.
+      const r = svg.ownerDocument.createElementNS(SVG_NS, "rect");
+      r.setAttribute("class", "hooked-edge");
+      r.setAttribute("x", String(w - 10));
+      r.setAttribute("y", "0");
+      r.setAttribute("width", "10");
+      r.setAttribute("height", "10");
+      svg.appendChild(r);
+    },
+  };
+  const liveSvg = renderChart(SPEC, ROWS, { ...OPTS, hooks }).svg;
+  const exportChartSvg2 = chartSvg(buildExportSvg(SPEC, ROWS, { hooks }));
+  const edgeX = (svg: SVGSVGElement): string | null =>
+    svg.querySelector(".hooked-edge")!.getAttribute("x");
+
+  it("hands the hook a differently sized SVG on each path", () => {
+    expect(frames.map((f) => f.phase)).toEqual(["live", "export"]);
+    // The export frame is the fixed INNER_W; the live one is the width it was asked for.
+    expect(frames[0]!.w).toBe(720);
+    expect(frames[1]!.w).toBe(920);
+  });
+
+  it("so a coordinate-dependent mutation lands at a different coordinate", () => {
+    // Same hook, same hooks object, different result: 720-10 live vs 920-10 exported. No way to
+    // write the hook makes these agree, which is why the guarantee is about the hook RUNNING on
+    // both paths, not about its output being identical.
+    expect(edgeX(liveSvg)).toBe("710");
+    expect(edgeX(exportChartSvg2)).toBe("910");
+  });
+
+  it("but the mutation IS present on both — that much is guaranteed", () => {
+    expect(liveSvg.querySelectorAll(".hooked-edge").length).toBe(1);
+    expect(exportChartSvg2.querySelectorAll(".hooked-edge").length).toBe(1);
+  });
+});

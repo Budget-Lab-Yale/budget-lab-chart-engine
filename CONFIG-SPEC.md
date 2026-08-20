@@ -762,13 +762,25 @@ byte-identical to passing no `hooks` at all.
 | `tickLabel` | one value-axis tick's text | Yes |
 | `valueLabel` | one in-mark value label (stacked segment / net callout, waterfall running total) | Yes |
 | `legendKey` | one legend row's key markup | Yes — **but see `ctx.medium` below** |
-| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | Yes (by construction — it runs on both) |
+| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | It runs on both, by construction — but see the note below: the two SVGs are not the same size |
 | `tooltip` | a band tooltip's content | **No — screen-only, see below** |
 
-**`tickLabel`, `valueLabel`, `legendKey` and `afterRender` are guaranteed identical between the
-screen and the downloaded PNG**, because the export re-renders through the very same builders with
-the very same `hooks` object — it does not serialise the live DOM. This is the guarantee `test/hooks-export-parity.test.ts`
-gates: it renders all four together and asserts the export's marks and text match the live render's.
+**`tickLabel`, `valueLabel` and `legendKey` are guaranteed identical between the screen and the
+downloaded PNG**, because the export re-renders through the very same builders with the very same
+`hooks` object — it does not serialise the live DOM. This is the guarantee
+`test/hooks-export-parity.test.ts` gates: it renders all four hooks together and asserts the export's
+marks and text match the live render's.
+
+**`afterRender` is guaranteed to RUN on both paths, with `ctx.phase` naming which — not to produce
+identical output.** The export re-renders into its own frame: a fixed 920px-wide content column by a
+height computed from the chart's chrome, against the live card's own width by its own height. A hook
+that positions or sizes anything off the SVG it is handed therefore lands at different coordinates in
+the PNG than on screen, and no way of writing the hook changes that. (A consumer can also branch on
+`ctx.phase` and differ on purpose — but the frame-size difference applies even to a hook that does
+not.) Keep an `afterRender` mutation relative to the SVG's own dimensions if it must survive the trip,
+and check the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates both
+halves: that the hook fires once per path and both SVGs carry its mutation, and that the two frames
+really are different sizes.
 
 **`hooks.tooltip` is screen-only.** A static PNG export has no hover state, so there is nothing for
 a tooltip's content to be identical *to* — the hook is simply never invoked while building an
