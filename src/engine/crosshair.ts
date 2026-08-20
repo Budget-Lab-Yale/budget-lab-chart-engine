@@ -59,6 +59,12 @@ export interface CrosshairOptions {
   showTotal?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `chrome.valuePills: false` — consumed only by `attachSecondaryLineCursor` (the
+   *  coordinated/echo cursor): suppress just its per-series value pills. The guide line, the
+   *  per-series highlight dot, and the active-pane x-value echo are untouched — same split as
+   *  `SecondaryBandOptions.showPills` / `HistogramHoverOptions.showPills`. `undefined` keeps
+   *  today's behaviour (pills shown). */
+  showPills?: boolean;
 }
 
 // One shared tooltip element PER PARENT, not one global element: render-live's
@@ -2473,10 +2479,15 @@ export function attachSecondaryLineCursor(
         .map((s) => ({ s, v: bySeries.get(s)!.get(nx) }))
         .filter((p) => p.v != null && !Number.isNaN(p.v)) as Array<{ s: string; v: number }>;
       for (const p of pts) addCoordDot(g, doc, gx, toPy(p.v), colors?.get(p.s) || "#666666", opts.symbols?.get(p.s));
-      const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
-      pts.forEach((p, i) => {
-        addCoordPill(g, doc, flip ? gx - 10 : gx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colors?.get(p.s) || "#666666", weight);
-      });
+      // showPills: false (chrome.valuePills) suppresses only these value pills — the guide
+      // (above), the per-series highlight dot (just above), and the active-pane x-value echo are
+      // untouched, matching SecondaryBandOptions'/HistogramHoverOptions' identical split.
+      if (opts.showPills !== false) {
+        const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
+        pts.forEach((p, i) => {
+          addCoordPill(g, doc, flip ? gx - 10 : gx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colors?.get(p.s) || "#666666", weight);
+        });
+      }
     }
     g.setAttribute("opacity", "1");
   };

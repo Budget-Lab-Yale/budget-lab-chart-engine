@@ -190,3 +190,86 @@ describe("chrome switches on a faceted (small multiples) figure", () => {
     expect(el.querySelectorAll(".tbl-hl-pills").length).toBeGreaterThan(0);
   });
 });
+
+// The faceted LINE/AREA coordinated cursor (attachSecondaryLineCursor) had no gate on its
+// per-series value pills at all -- chrome.valuePills: false suppressed the primary hover's guide
+// tooltip pills (it draws none) and the legend-hover pills (none exist for a line chart either),
+// but not the coordinated cursor's own pills on the OTHER panes. Same shape of bug as the faceted
+// histogram fix above this file's sibling test (test/facet-crosshair.test.ts), for the chart type
+// most likely to actually appear in the published archive faceted over time.
+describe("chrome.valuePills: false on a faceted LINE figure's coordinated cursor", () => {
+  const LINE_FACETED_ROWS: TidyRow[] = [
+    { pane: "P1", time: "2024-01-01", value: "10", series: "A" },
+    { pane: "P1", time: "2024-01-01", value: "20", series: "B" },
+    { pane: "P1", time: "2024-02-01", value: "30", series: "A" },
+    { pane: "P1", time: "2024-02-01", value: "40", series: "B" },
+    { pane: "P2", time: "2024-01-01", value: "5", series: "A" },
+    { pane: "P2", time: "2024-01-01", value: "15", series: "B" },
+    { pane: "P2", time: "2024-02-01", value: "25", series: "A" },
+    { pane: "P2", time: "2024-02-01", value: "35", series: "B" },
+  ] as unknown as TidyRow[];
+
+  function lineFacetedSpec(chrome?: Record<string, unknown>): ChartSpec {
+    return {
+      chartType: "line",
+      title: "faceted line",
+      xAxisType: "temporal",
+      data: "data.csv",
+      columns: { x: "time", value: "value", series: "series", facet: "pane" },
+      small_multiples: { columns: 2, mode: "shared" },
+      ...(chrome ? { chrome } : {}),
+    } as unknown as ChartSpec;
+  }
+
+  function mockRect1to1(svg: SVGSVGElement): void {
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+  }
+
+  /** Mount the faceted line figure, hover the first x value on pane 0, and return both panes. */
+  function mountAndHover(s: ChartSpec): { pane0: SVGSVGElement; pane1: SVGSVGElement } {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: s, rows: LINE_FACETED_ROWS, width: 838, height: 420 });
+    const [pane0, pane1] = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg")) as [
+      SVGSVGElement,
+      SVGSVGElement,
+    ];
+    mockRect1to1(pane0);
+    const ml = Number(pane0.dataset.marginLeft) || 0;
+    const hit = pane0.querySelector(".tbl-crosshair-hit")!;
+    // Hover just inside the plot's left edge -- the first (2024-01-01) x value.
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: ml + 2, clientY: 100, bubbles: true }));
+    return { pane0, pane1 };
+  }
+
+  it("regression guard: the echoed pane DOES show a pill by default (selector proven to match)", () => {
+    const { pane1 } = mountAndHover(lineFacetedSpec());
+    const echo = pane1.querySelector<SVGGElement>('g.tbl-coord[opacity="1"]');
+    expect(echo).not.toBeNull();
+    expect(echo!.querySelector(".tbl-coord-pill")).not.toBeNull();
+  });
+
+  it("chrome.valuePills: false suppresses the coordinated cursor's pills -- guide and dot survive", () => {
+    const { pane0, pane1 } = mountAndHover(lineFacetedSpec({ valuePills: false }));
+
+    const echo = pane1.querySelector<SVGGElement>("g.tbl-coord");
+    expect(echo).not.toBeNull();
+    expect(echo!.getAttribute("opacity")).toBe("1");
+    // The guide line and the per-series highlight dot are untouched by the switch.
+    expect(echo!.querySelector("line")).not.toBeNull();
+    expect(echo!.querySelector(".tbl-coord-dot")).not.toBeNull();
+    // No pill on the echoed pane...
+    expect(echo!.querySelector(".tbl-coord-pill")).toBeNull();
+    // ...nor on the source (actively-hovered) pane's own coordinated cursor.
+    const sourceCoord = pane0.querySelector<SVGGElement>('g.tbl-coord[opacity="1"]');
+    expect(sourceCoord).not.toBeNull();
+    expect(sourceCoord!.querySelector(".tbl-coord-pill")).toBeNull();
+  });
+});

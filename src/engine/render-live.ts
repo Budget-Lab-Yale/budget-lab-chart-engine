@@ -2244,6 +2244,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       symbols: markerSymbols,
+      showPills: chromePills,
     }) as (key: unknown, active?: boolean) => void;
   }
   return undefined;
