@@ -5,7 +5,7 @@
 import { d3 } from "./vendor";
 import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis, bandLabelMarginBottom, type BandLabelMode } from "./axes";
 import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
-import { parseDate, parseQuarter, formatQuarter } from "./parse-time";
+import { parseXValue, parseDate, parseQuarter, formatQuarter } from "../spec/parse-time";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
 
 type Mark = unknown;
@@ -69,7 +69,7 @@ export function makeXAdapter(
 ): XAdapter {
   if (xType === "numeric") {
     return {
-      parseX: (v) => +v,
+      parseX: (v) => parseXValue("numeric", v),
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
@@ -117,7 +117,7 @@ export function makeXAdapter(
   }
   if (xType === "temporal") {
     return {
-      parseX: (v) => parseDate(v),
+      parseX: (v) => parseXValue("temporal", v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
@@ -151,7 +151,7 @@ export function makeXAdapter(
   }
   if (xType === "quarterly") {
     return {
-      parseX: (v) => parseQuarter(v),
+      parseX: (v) => parseXValue("quarterly", v),
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
@@ -172,7 +172,7 @@ export function makeXAdapter(
   if (xType === "categorical") {
     return {
       // Identity: the raw string IS the category key.
-      parseX: (v) => v,
+      parseX: (v) => parseXValue("categorical", v),
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
       buildXOpts(data, { faceted = false, labelMode = "single", tagCategoryLabels = false }: BuildXOptsOptions = {}) {

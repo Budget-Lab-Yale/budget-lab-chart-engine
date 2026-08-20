@@ -30,7 +30,7 @@ import { resolveColor } from "../src/engine/palette";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
-import { parseDate } from "../src/engine/parse-time";
+import { parseDate } from "../src/spec/parse-time";
 
 // Minimal CSV → TidyRow[]. The real data layer (engine step 5) handles quoting/remote
 // sources; these fixtures are deliberately comma-free so a plain split suffices.

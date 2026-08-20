@@ -11,7 +11,7 @@
 import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
-import { parseDate } from "./parse-time";
+import { parseDate } from "../spec/parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";

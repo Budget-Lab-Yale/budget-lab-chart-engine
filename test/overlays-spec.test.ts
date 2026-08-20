@@ -446,6 +446,88 @@ describe("overlays — pooled `by: \"none\"` column consistency (3b)", () => {
     ).toBe(true);
   });
 
+  // Round 2: the y side of this comparison was made numeric, the x side was left as the raw cell
+  // string — so "1" and "1.0" were two buckets and the disagreement between them evaded the guard
+  // entirely, while the renderer parses both to _xn === 1 and hands the pooled polyline two
+  // vertices at one coordinate. The key is the x the RENDERER positions the row at.
+  it('rejects a disagreement whose x cells differ only in SPELLING — "1" and "1.0" are one x', () => {
+    const rows2: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "1.0", value: "2", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    expect(r.valid).toBe(false);
+    expect(r.errors.length).toBe(1);
+    expect(r.errors[0]).toMatch(/overlays\[0\]/);
+    expect(r.errors[0]).toContain("9.9");
+  });
+
+  // The message has to name an x an author can grep for in the CSV, so it quotes one of the raw
+  // spellings seen at that position — never the parsed number, which for a temporal axis is an
+  // epoch millisecond appearing nowhere in the file.
+  it("names a RAW x spelling from the data, not the parsed key", () => {
+    const rows2: TidyRow[] = [
+      { time: "1.0", value: "1", series: "A", yhat: "1.1" },
+      { time: "1", value: "2", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    const quoted = /time "([^"]+)"/.exec(r.errors[0] ?? "");
+    expect(quoted).not.toBeNull();
+    expect(["1", "1.0"]).toContain((quoted as RegExpExecArray)[1]);
+  });
+
+  // x may be temporal, and the parse must be the renderer's own (spec/parse-time.ts, which
+  // engine/x-adapter.ts's parseX calls). A numeric-only key would send `+"2020-01-01"` → NaN for
+  // EVERY row, pooling four distinct dates into one bucket and falsely rejecting a figure that
+  // draws correctly — the exact failure mode the y-side fix was written to avoid.
+  const TEMPORAL = {
+    ...BASE,
+    chartType: "line",
+    xAxisType: "temporal",
+    columns: { x: "time", value: "value", series: "series" },
+  };
+
+  it("keeps DISTINCT temporal x values in distinct buckets", () => {
+    const rows2: TidyRow[] = [
+      { time: "2020-01-01", value: "1", series: "A", yhat: "1.1" },
+      { time: "2020-01-01", value: "2", series: "B", yhat: "1.1" },
+      { time: "2020-02-01", value: "3", series: "A", yhat: "9.9" },
+      { time: "2020-02-01", value: "4", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...TEMPORAL, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    expect(r.errors).toEqual([]);
+  });
+
+  it("still rejects a within-x disagreement on a temporal axis", () => {
+    const rows2: TidyRow[] = [
+      { time: "2020-01-01", value: "1", series: "A", yhat: "1.1" },
+      { time: "2020-01-01", value: "2", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...TEMPORAL, overlays: [{ column: "yhat", by: "none" }] } as never, rows2);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toContain('"2020-01-01"');
+  });
+
+  it("keeps distinct QUARTERLY x values in distinct buckets, and still catches a real one", () => {
+    const QUARTERLY = { ...TEMPORAL, xAxisType: "quarterly" };
+    const ok: TidyRow[] = [
+      { time: "2020Q1", value: "1", series: "A", yhat: "1.1" },
+      { time: "2020Q1", value: "2", series: "B", yhat: "1.1" },
+      { time: "2020Q2", value: "3", series: "A", yhat: "9.9" },
+      { time: "2020Q2", value: "4", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    expect(
+      validateChartData({ ...QUARTERLY, overlays: [{ column: "yhat", by: "none" }] } as never, ok).errors,
+    ).toEqual([]);
+    const bad: TidyRow[] = [
+      { time: "2020Q1", value: "1", series: "A", yhat: "1.1" },
+      { time: "2020Q1", value: "2", series: "B", yhat: "9.9" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...QUARTERLY, overlays: [{ column: "yhat", by: "none" }] } as never, bad);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]).toContain('"2020Q1"');
+  });
+
   it('does not flag the same disagreeing data when `by` is left at its default ("series", not pooled)', () => {
     const rows2: TidyRow[] = [
       { time: "1", value: "1", series: "A", yhat: "1.1" },

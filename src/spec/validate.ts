@@ -23,6 +23,7 @@ import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
 import { overlayKind } from "./overlays";
+import { xPositionKey } from "./parse-time";
 import type { Overlay } from "./types";
 
 export interface ValidationResult {
@@ -1118,14 +1119,19 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       scopes = [rows];
     }
     for (const scopeRows of scopes) {
-      // INVARIANT: keyed by the PARSED number, never the cell's spelling. The renderer reads each
-      // cell with unary `+` (engine/index.ts), so "1" and "1.0" at one x are ONE value to it and
-      // the figure draws correctly — comparing spellings falsely rejects a spec that renders fine,
-      // and a false rejection breaks an already-published figure the next time a consumer re-pins,
-      // which is strictly worse than the misdraw this check exists to catch. The map's VALUE is the
-      // first raw spelling seen for that number, so the error still names a string the author can
-      // find in the CSV.
-      const byX = new Map<string, Map<number, string>>();
+      // INVARIANT: BOTH axes of this comparison are keyed by the PARSED value, never by the cell's
+      // spelling — the x as well as the y. The renderer positions a row by `parseXValue` and reads
+      // the column with unary `+` (engine/index.ts / x-adapter.ts), so "1" and "1.0" are ONE x and
+      // ONE value to it. Comparing y spellings falsely rejects a spec that renders fine — and a
+      // false rejection breaks an already-published figure the next time a consumer re-pins, which
+      // is strictly worse than the misdraw this check exists to catch. Comparing x spellings does
+      // the mirror-image damage: it puts "1" and "1.0" in different buckets, so the disagreement
+      // between them evades the guard while the pooled polyline gets two vertices at one
+      // coordinate. Keys are `xPositionKey`, which is `x-adapter`'s own `parseX` (dates flattened
+      // to epoch ms) — not a lookalike parser that could drift from it. Each map's VALUE side keeps
+      // the first raw spelling seen, for x and y alike, so the error names strings the author can
+      // find in the CSV rather than an epoch millisecond appearing nowhere in it.
+      const byX = new Map<number | string, { rawX: string; vals: Map<number, string> }>();
       for (const r of scopeRows) {
         const raw = (r[col] as string) ?? "";
         // Blank ⇒ absent, exactly as the renderer treats it. Non-finite ⇒ already reported by the
@@ -1134,13 +1140,18 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         if (raw === "") continue;
         const v = +raw;
         if (!Number.isFinite(v)) continue;
-        const x = r[cols.x] as string;
-        const seen = byX.get(x);
+        const rawX = (r[cols.x] as string) ?? "";
+        // An x cell that resolves to no position (a malformed date, a non-numeric number) is
+        // already reported by the per-row x-format check above; bucketing every such row together
+        // here would add a second, invented disagreement on top of it.
+        const xKey = xPositionKey(spec.xAxisType, rawX);
+        if (xKey == null) continue;
+        const seen = byX.get(xKey);
         if (seen) {
-          if (!seen.has(v)) seen.set(v, raw);
-        } else byX.set(x, new Map([[v, raw]]));
+          if (!seen.vals.has(v)) seen.vals.set(v, raw);
+        } else byX.set(xKey, { rawX, vals: new Map([[v, raw]]) });
       }
-      for (const [x, vals] of byX) {
+      for (const [, { rawX: x, vals }] of byX) {
         if (vals.size > 1) {
           const spellings = [...vals.entries()].sort((a, b) => a[0] - b[0]).map(([, raw]) => raw);
           errors.push(
