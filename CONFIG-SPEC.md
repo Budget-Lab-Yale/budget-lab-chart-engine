@@ -763,7 +763,7 @@ byte-identical to passing no `hooks` at all.
 | `valueLabel` | one in-mark value label (stacked segment / net callout, waterfall running total) | Yes |
 | `legendKey` | one legend row's key markup | Yes — **but see `ctx.medium` below** |
 | `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | It runs on both, by construction — but see the note below: the two SVGs are not the same size |
-| `tooltip` | a band tooltip's content | **No — screen-only, see below** |
+| `tooltip` | a band tooltip's content — on the few chart types that draw one at default settings; **see the reach table below before relying on it** | **No — screen-only, see below** |
 
 **`tickLabel`, `valueLabel` and `legendKey` are guaranteed identical between the screen and the
 downloaded PNG**, because the export re-renders through the very same builders with the very same
@@ -784,11 +784,29 @@ really are different sizes.
 
 **`hooks.tooltip` is screen-only.** A static PNG export has no hover state, so there is nothing for
 a tooltip's content to be identical *to* — the hook is simply never invoked while building an
-export. It also has a narrower reach than the other four: it is wired at the two
-`buildBandTooltipHtml` call sites only — `attachBandCrosshair` (**bar, stacked-bar, waterfall**)
-and `attachCategoricalLineCrosshair` (**dot-plot, dumbbell, categorical-x line**), standalone and
-faceted alike. A temporal/numeric-x line chart's plain crosshair, a histogram's hover card, and a
-scatter point's hover card build their own markup elsewhere and do not call this hook.
+export. It also has a **much** narrower reach than the other four, and the reach is not a list of
+chart types: it is wired at the two `buildBandTooltipHtml` call sites only —
+`attachBandCrosshair` (bar/stacked-bar/waterfall) and `attachCategoricalLineCrosshair` (dot-plot,
+dumbbell, categorical-x line) — and it fires **only where one of those actually draws a floating
+card**. Most of those chart types do not, at default settings: their hover is the in-place
+coordinated cursor (guide, per-series dot, value pill) instead, and a hook that replaces card
+content has no card to replace. Where the hook fires, at defaults:
+
+| chart type | hook fires? | why not |
+|---|---|---|
+| `dumbbell` | **yes**, standalone and faceted | — |
+| `dotplot`, categorical-x `line` | **standalone only** | a multi-pane figure's coordinated cursor replaces each pane's card |
+| `stacked` | **only where the net dot is drawn** — i.e. a stack with a negative value, or an explicit `barStack.hover: "tooltip"`; standalone and faceted alike | an all-positive stack hovers with per-segment value pills, not a card |
+| `bar` (plain or grouped), `waterfall` | **never, in any configuration** | `resolveHoverMode` returns `"pills"` whenever the chart is not a stack, ahead of reading `barStack.hover` at all — these two have no card to hook |
+| temporal/numeric-x `line`, `area`, `histogram`, `scatter` | **never** | their cards are built by `attachCrosshair` / `attachHistogramHover` / `attachPointHover`, which do not call this hook |
+
+`test/hover-card-reach.test.ts` gates every row of that table by mounting each chart type at
+default settings, standalone and two-pane, and asserting both whether a card appears and whether
+the hook fires. If you need to intercept hover content on a chart type marked "never", the hook is
+the wrong tool — there is no card there to intercept, and `hooks.tooltip` will not create one. On
+the categorical bar/stacked types, the `onHover` **event** does report the resolved category and
+values whether or not a card is drawn (it fires ahead of the same gate that suppresses the card);
+see the events table below for the chart types it covers.
 
 **`legendKey`'s `ctx.medium` is `"html"` on the live legend and `"svg"` in the export — a returned
 string must be written in THAT vocabulary, not just `ctx.rendered` echoed back unconditionally.**

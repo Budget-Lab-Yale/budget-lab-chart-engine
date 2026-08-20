@@ -15,7 +15,11 @@
 // SVG do not paint. `ctx.medium` tells the hook which vocabulary is safe to return; a hook that
 // ignores it and always returns HTML will look right on screen and be silently missing from the
 // download, which is the exact failure #30 exists to eliminate. `tooltip` is SCREEN-ONLY: a
-// static PNG has no hover state, so there is nothing for it to be identical to.
+// static PNG has no hover state, so there is nothing for it to be identical to. It is also the one
+// hook with a reach narrower than "the chart types whose builders forward it": it fires only where
+// a floating hover CARD is actually drawn, and at default settings most chart types hover with the
+// in-place coordinated cursor instead (never a card at all on plain/grouped bar or waterfall). See
+// CONFIG-SPEC.md's reach table, gated by test/hover-card-reach.test.ts.
 //
 // This file is a leaf: it imports nothing from `src/engine/*`, so `src/spec/*` stays a leaf layer
 // (`grep -rn 'from "\.\./engine' src/spec/` must stay empty). A ctx field that would otherwise

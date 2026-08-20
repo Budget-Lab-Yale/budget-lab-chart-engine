@@ -5,10 +5,18 @@
 // (see spec/hooks.ts's module note: there is no export-parity guarantee here, unlike every other
 // hook, because a static PNG has no hover state).
 //
-// SCOPE: this hook reaches buildBandTooltipHtml's two call sites only — attachBandCrosshair (bar/
-// stacked/waterfall) and attachCategoricalLineCrosshair (dot plots, dumbbells, categorical-x line
-// charts). attachCrosshair / attachFacetCrosshair / attachHistogramHover / attachPointHover build
-// their card markup elsewhere and are NOT reached (documented at Task 9 / CONFIG-SPEC.md).
+// SCOPE: this hook reaches buildBandTooltipHtml's two call sites only — attachBandCrosshair and
+// attachCategoricalLineCrosshair. attachCrosshair / attachFacetCrosshair / attachHistogramHover /
+// attachPointHover build their card markup elsewhere and are NOT reached (documented at Task 9 /
+// CONFIG-SPEC.md).
+//
+// Being forwarded to those two is NOT the same as being reachable on their chart types: the call
+// sits below `emitOnly` and below `if (!tip)`, so the hook fires only where a card is actually
+// drawn. Several tests below therefore set a NON-DEFAULT dial (`barStack.hover: "tooltip"`,
+// `coordinated_cursor: false`) to force a card into existence — each says so where it does. Which
+// chart types have a card AT DEFAULTS is a separate question, and it is the one CONFIG-SPEC's
+// reach claim depends on: test/hover-card-reach.test.ts owns it and mounts nothing but defaults.
+// Do not read a passing test here as evidence for a claim about default configuration.
 //
 // A builder-only test cannot prove the option actually reaches the DOM: this branch has already
 // shipped two "forgot the forward" defects of exactly this shape (an internal crosshair.ts forward,

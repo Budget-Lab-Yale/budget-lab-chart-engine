@@ -837,7 +837,17 @@ export interface BandCrosshairOptions {
    *  `null` (or no hook) keeps the engine's own card. Forwarded from render-live.ts through here
    *  into `buildBandTooltipHtml`. NOT reached by `attachCrosshair` / `attachFacetCrosshair` /
    *  `attachHistogramHover` / `attachPointHover` — those build their card markup elsewhere; see
-   *  spec/hooks.ts's module note and CONFIG-SPEC.md for that boundary. */
+   *  spec/hooks.ts's module note and CONFIG-SPEC.md for that boundary.
+   *
+   *  Being forwarded here is NOT the same as being reachable. `buildBandTooltipHtml` is called
+   *  below the `emitOnly` return and below `if (!tip)`, so this hook is silently skipped on every
+   *  pane that hovers with the coordinated cursor instead of a card — which at default settings is
+   *  every plain/grouped bar and every waterfall (hoverMode is always "pills" for them), every
+   *  all-positive stack, and every coordinated small-multiples pane. That is by design: the hook
+   *  replaces card CONTENT, so it has nothing to do where no card is drawn. Do NOT "fix" it by
+   *  hoisting the call above the gate the way `onHover` is hoisted — `onHover` is an event that
+   *  reports data, this one renders markup into a card that does not exist. The reachability table
+   *  in CONFIG-SPEC.md is gated by test/hover-card-reach.test.ts. */
   tooltipHook?: (ctx: TooltipHookCtx) => string | null;
   /** This pane facet value (small multiples only; FigurePane.value via wireFigureSvg -- the same
    *  value paneFacetValue threads into MarkContext for the static hooks, e.g. Task 4 valueLabel).

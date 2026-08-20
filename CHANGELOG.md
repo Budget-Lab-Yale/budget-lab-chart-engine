@@ -62,8 +62,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   a standalone HTML bundle for headless Chromium, and a function cannot cross that boundary. The
   first four are guaranteed to fire identically on screen and in the PNG export, since the export
   re-renders through the same builders with the same hooks object — `test/hooks-export-parity.test.ts`
-  gates all four together, not just individually. `tooltip` is the one exception: screen-only, by
-  design, since a static PNG has no hover state for its content to match. `legendKey`'s `ctx.medium`
+  gates all four together, not just individually. `tooltip` is the one exception twice over:
+  screen-only, since a static PNG has no hover state for its content to match, **and** reachable
+  only where a floating hover card is actually drawn — which at default settings is far fewer chart
+  types than forward it (never a plain/grouped bar or a waterfall in any configuration, and not a
+  coordinated small-multiples pane). CONFIG-SPEC.md carries the reach table;
+  `test/hover-card-reach.test.ts` gates it at defaults. `legendKey`'s `ctx.medium`
   (`"html"` live, `"svg"` exported) must be honored by the returned markup — an HTML fragment
   returned into the SVG export lands in the XHTML namespace and silently fails to rasterise, correct
   on screen and missing from the download. Every hook returns `null` for "engine default"; `hooks: {}`
