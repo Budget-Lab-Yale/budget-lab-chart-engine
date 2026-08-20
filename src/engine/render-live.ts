@@ -127,6 +127,15 @@ export interface MountOptions {
    *  which is the title-selector callback — this is the legend's own pin/dim gesture. No-op on a
    *  chart with no legend. */
   onLegendSelect?: (ctx: { active: string[] }) => void;
+  /** Reparent the floating hover-tooltip card into this element instead of the default
+   *  `container.ownerDocument.body`. Opt-in, not the default: the card is positioned
+   *  `position: fixed` at the cursor's viewport coordinates, and a container with
+   *  `overflow: hidden` or a CSS `transform` on it (or an ancestor) would clip it or throw off
+   *  that positioning — `document.body` is the one place that never does either. Pass this only
+   *  when the target element is known to have neither. Threaded down to every crosshair/hover
+   *  attach call (see crosshair.ts's `getSharedTooltip`, keyed per-parent so two mounts with
+   *  different containers never share one tooltip element). */
+  tooltipContainer?: HTMLElement;
 }
 
 /** Fire `type`'s host callback (if any) then a bubbling CustomEvent of the same name from `card`,
@@ -751,6 +760,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // with the bar/row count and everything else uses the fixed default.
   const height = opts.height ?? computeChartHeight(spec, rows);
   const doc = container.ownerDocument;
+  // See MountOptions.tooltipContainer for why body is the default rather than `container` itself.
+  const tooltipContainer = opts.tooltipContainer ?? doc.body;
 
   const card = doc.createElement("div");
   card.className = `figure-card chart-${spec.chartType}`;
@@ -1023,6 +1034,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // matches the chart point.
       const symbols = new Map((shapeLegendItems ?? []).map((s) => [s.shape, s.markerSymbol] as const));
       attachPointHover(svg, {
+        tooltipContainer,
         icons: seriesIcons,
         points: dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
         selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
@@ -1041,6 +1053,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
       // value). Reuses the categorical-line crosshair — no bars required.
       attachCategoricalLineCrosshair(svg, {
+        tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
@@ -1069,6 +1082,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const dbMarkers = new Map(seriesOrder.map((s) => [s, spec.series_marker?.[s] ?? "filled"] as const));
       const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
       attachCategoricalLineCrosshair(svg, {
+        tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
@@ -1086,6 +1100,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
       // guide + tooltip.
       attachCategoricalLineCrosshair(svg, {
+        tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         colors,
@@ -1157,6 +1172,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const totalRow = resolveTotalRow(spec, netMode, hoverMode);
       let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
       attachBandCrosshair(svg, {
+        tooltipContainer,
         rows: bandRows,
         isStacked,
         totalRow,
@@ -1222,6 +1238,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Histogram: continuous numeric/temporal x, but BINNED bars — resolve the bin under the
       // cursor by x-extent (not a snapped point) and show a per-bin tooltip headed by the bin range.
       attachHistogramHover(svg, {
+        tooltipContainer,
         rows: dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
         colors,
         seriesLabels,
@@ -1237,6 +1254,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       });
     } else {
       attachCrosshair(svg, {
+        tooltipContainer,
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
         xField: "time",
         yField: "value",
@@ -1808,6 +1826,10 @@ function wireFigureSvg(
      *  render-live's `onHover` doc for the chart-type scope). undefined on chart types that don't
      *  reach it. */
     onHover?: (ctx: BandHoverCtx | null) => void;
+    /** MountOptions.tooltipContainer, resolved to its default in mountFigure — forwarded into
+     *  every pane's tooltip-creating attach call below (mirrors mountChart's identical
+     *  `tooltipContainer` const). */
+    tooltipContainer: HTMLElement;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
@@ -1840,6 +1862,7 @@ function wireFigureSvg(
     // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
     // before the emitOnly gate), so hovering one pane drives the coordinated band echo on the others.
     attachCategoricalLineCrosshair(svg, {
+      tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
       showTooltip: chromeTooltip,
@@ -1863,6 +1886,7 @@ function wireFigureSvg(
     // offsets so they land over the actual points (panes dodge at the pane gap).
     const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
     attachCategoricalLineCrosshair(svg, {
+      tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       colors: ctx.colors,
@@ -1909,6 +1933,7 @@ function wireFigureSvg(
     // shape value → marker symbol (by shape_order index, matching the chart's symbol scale).
     const symbols = new Map((ctx.spec.shape_order ?? []).map((s, i) => [s, markerSymbolForIndex(i)] as const));
     attachPointHover(svg, {
+      tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       points: ctx.dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
       selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
@@ -1946,6 +1971,7 @@ function wireFigureSvg(
     // Categorical-x LINE pane: resolve the category from the x-axis labels (no bars). Coordinated
     // panes hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
     attachCategoricalLineCrosshair(svg, {
+      tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       colors: ctx.colors,
@@ -2004,6 +2030,7 @@ function wireFigureSvg(
     const totalRow = resolveTotalRow(ctx.spec, ctx.netMode, hoverMode);
     const coord = useCoord && !useTooltip;
     attachBandCrosshair(svg, {
+      tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
       isStacked,
@@ -2101,6 +2128,7 @@ function wireFigureSvg(
       ctx.onResolve != null && (ctx.spec.small_multiples?.mode ?? "shared") !== "per-pane";
     const histRows = ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y }));
     attachHistogramHover(svg, {
+      tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: histRows,
       colors: ctx.colors,
@@ -2125,6 +2153,7 @@ function wireFigureSvg(
   }
 
   attachCrosshair(svg, {
+    tooltipContainer: ctx.tooltipContainer,
     rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
     xField: "time",
     yField: "value",
@@ -2182,6 +2211,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const { spec, rows } = opts;
   const sm = spec.small_multiples!;
   const doc = container.ownerDocument;
+  // See MountOptions.tooltipContainer for why body is the default rather than `container` itself.
+  const tooltipContainer = opts.tooltipContainer ?? doc.body;
 
   const card = doc.createElement("div");
   card.className = "figure-card";
@@ -2431,6 +2462,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       const col = idx % fig.columns;
       const driver = wireFigureSvg(pane.svg, handle, {
         spec,
+        tooltipContainer,
         dataInScope: pane.dataInScope ?? [],
         colors: pane.colors ?? new Map(),
         seriesLabels: fig.seriesLabels,

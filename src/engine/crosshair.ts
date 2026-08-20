@@ -47,6 +47,10 @@ export interface CrosshairOptions {
    *  `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
    *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
   showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   /** series → marker symbol name (line charts with point markers). When set, the coordinated
    *  hover dot takes the series' shape so it matches the static marker. */
   symbols?: Map<string, string>;
@@ -57,14 +61,22 @@ export interface CrosshairOptions {
   icons?: Map<string, IconSpec>;
 }
 
-let activeTooltip: HTMLElement | null = null; // single shared tooltip element
+// One shared tooltip element PER PARENT, not one global element: render-live's
+// `MountOptions.tooltipContainer` lets each mount choose where its card is appended, and two
+// mounts that choose DIFFERENT parents must get their own element rather than fighting over one
+// (the parent that lost would keep re-appending/repositioning the single node under the other's
+// mount). Keyed by the parent itself (a WeakMap, so a removed/GC'd container's entry doesn't
+// pin the tooltip element in memory) — the historical single-tooltip-per-document behaviour is
+// just this map with exactly one key, `document.body`, which is the default below.
+const tooltipsByParent = new WeakMap<Node, HTMLElement>();
 
-function getSharedTooltip(doc: Document): HTMLElement {
-  if (activeTooltip && doc.body.contains(activeTooltip)) return activeTooltip;
+function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body): HTMLElement {
+  const existing = tooltipsByParent.get(parent);
+  if (existing && parent.contains(existing)) return existing;
   const tip = doc.createElement("div");
   tip.className = "tbl-tooltip";
-  doc.body.appendChild(tip);
-  activeTooltip = tip;
+  parent.appendChild(tip);
+  tooltipsByParent.set(parent, tip);
   return tip;
 }
 
@@ -160,7 +172,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   function snapX(svgX: number): number | null {
     if (svgX < ml || svgX > ml + plotW) return null;
@@ -284,6 +296,11 @@ export interface FacetCrosshairOptions {
   seriesOrder?: string[];
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Not
+   *  wired from MountOptions today — this attach function is dead on the live render path (see
+   *  the UN-GATED `getSharedTooltip` call above); kept for interface consistency with the other
+   *  five attach-options types, which all share this field. */
+  tooltipContainer?: HTMLElement;
 }
 
 /** A resolved facet cell's geometry in SVG user coords. The plot area of the cell is
@@ -595,7 +612,7 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
   // Deliberately UN-GATED on showTooltip/chrome.tooltip: dead code on the live path today (see
   // engine/index.ts:274's FacetInfo note — only reachable from test/facet-crosshair.test.ts). Add
   // the gate here if this is ever wired up live.
-  const tip = getSharedTooltip(svgEl.ownerDocument);
+  const tip = getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   /** Snap an absolute svgX to the nearest x in `xs`, given this cell's [x0,x1] plot range. */
   function snapXInCell(svgX: number, cell: FacetCell, xs: number[]): number | null {
@@ -740,6 +757,10 @@ export interface BandCrosshairOptions {
    *  and `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
    *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
   showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
   /** Screen-only hook (spec/hooks.ts's `RenderHooks.tooltip`) — replaces this band tooltip's
@@ -1296,7 +1317,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   // Bar tooltips: colour each series' swatch from the bar's ACTUAL rendered fill (bar_color /
   // accent / category_colors / a waterfall's per-direction palette), not the series' base colour —
@@ -1497,6 +1518,10 @@ export interface HistogramHoverOptions {
    *  and `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
    *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
   showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
 }
@@ -1703,7 +1728,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   // Re-coloured ONCE, not per pointermove: `renderedFills` is read from the bars at attach time, so
   // a `bar_color` histogram's key is settled before the first hover. (This is where that colour is
@@ -1919,6 +1944,7 @@ const TOTAL_PILL_COLOR = "#000000";
 function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string, symbol?: string): void {
   if (symbol && symbol !== "circle") {
     const p = doc.createElementNS(COORD_NS, "path");
+    p.classList.add("tbl-coord-dot");
     // Area ~42 (≈ radius 3.7) — just larger than the static marker (~34) so it reads as a ring.
     p.setAttribute("d", symbolPathD(symbol, 42));
     p.setAttribute("transform", `translate(${cx},${cy})`);
@@ -1929,6 +1955,7 @@ function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, colo
     return;
   }
   const dot = doc.createElementNS(COORD_NS, "circle");
+  dot.classList.add("tbl-coord-dot");
   dot.setAttribute("cx", String(cx));
   dot.setAttribute("cy", String(cy));
   dot.setAttribute("r", "3.6");
@@ -1974,6 +2001,10 @@ function addCoordPill(
   const textCx = anchor === "pill-end" || anchor === "pill-start" ? x0 + w / 2 : cx;
   const textAnchor = anchor === "pill-end" || anchor === "pill-start" ? "middle" : anchor;
   const rect = doc.createElementNS(COORD_NS, "rect");
+  // Named so a consumer stylesheet can select this capsule without depending on rx="3" (issue
+  // #30) — it shares that attribute with addCoordAxisLabel's echo box below, which is otherwise
+  // indistinguishable from this one by any presentation attribute.
+  rect.classList.add("tbl-coord-pill");
   rect.setAttribute("x", String(x0));
   rect.setAttribute("y", String(cy - h / 2));
   rect.setAttribute("width", String(w));
@@ -1985,6 +2016,7 @@ function addCoordPill(
   rect.setAttribute("stroke-opacity", "0.7");
   g.appendChild(rect);
   const t = doc.createElementNS(COORD_NS, "text");
+  t.classList.add("tbl-coord-pill-text");
   t.setAttribute("x", String(textCx));
   t.setAttribute("y", String(cy));
   t.setAttribute("dy", "0.32em");
@@ -2065,6 +2097,7 @@ function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
 /** Draw the thin muted vertical guide line (line panes) into the coord group. */
 function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, yBot: number): void {
   const guide = doc.createElementNS(COORD_NS, "line");
+  guide.classList.add("tbl-coord-guide");
   guide.setAttribute("x1", String(x));
   guide.setAttribute("x2", String(x));
   guide.setAttribute("y1", String(yTop));
@@ -2079,6 +2112,7 @@ function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, y
 /** Draw the shaded band region (bar/stacked panes) into the coord group. */
 function addCoordRegion(g: SVGGElement, doc: Document, x: number, w: number, yTop: number, h: number): void {
   const r = doc.createElementNS(COORD_NS, "rect");
+  r.classList.add("tbl-coord-region");
   r.setAttribute("x", String(x));
   r.setAttribute("y", String(yTop));
   r.setAttribute("width", String(Math.max(0, w)));
@@ -2148,6 +2182,8 @@ function addCoordAxisLabel(
   const top = Math.min(...lines.map((l) => l.cy)) - fontSize / 2 - padY;
   const bot = Math.max(...lines.map((l) => l.cy)) + fontSize / 2 + padY;
   const rect = doc.createElementNS(COORD_NS, "rect");
+  // See addCoordPill's identical note: this echo box needs its own class for the same reason.
+  rect.classList.add("tbl-coord-axis-label");
   rect.setAttribute("x", String(cx - w / 2));
   rect.setAttribute("y", String(top));
   rect.setAttribute("width", String(w));
@@ -2160,6 +2196,7 @@ function addCoordAxisLabel(
   g.appendChild(rect);
   for (const l of lines) {
     const t = doc.createElementNS(COORD_NS, "text");
+    t.classList.add("tbl-coord-axis-label-text");
     t.setAttribute("x", String(cx));
     t.setAttribute("y", String(l.cy));
     t.setAttribute("dy", "0.32em");
@@ -2906,6 +2943,10 @@ export interface CategoricalLineOptions {
    *  all of them together for a coordinated pane. `undefined` keeps today's behaviour (tooltip
    *  shown). */
   showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   onResolve?: (category: string | null) => void;
   /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
   symbols?: Map<string, string>;
@@ -3009,7 +3050,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
   // `resolveHatch` is a module function, so nothing here varies with the cursor.
@@ -3519,6 +3560,10 @@ export interface PointHoverOptions {
    *  feedback is this card (no separate guide/highlight), so `undefined` keeps today's behaviour
    *  (tooltip shown) and `false` makes hovering a point a no-op. */
   showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
 }
 
 /**
@@ -3530,7 +3575,7 @@ export interface PointHoverOptions {
 export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions): void {
   if (!svgEl || !opts.points?.length) return;
   const doc = svgEl.ownerDocument;
-  const tip = opts.showTooltip === false ? null : getSharedTooltip(doc);
+  const tip = opts.showTooltip === false ? null : getSharedTooltip(doc, opts.tooltipContainer);
   const xFormat = opts.xFormat ?? ((v: number) => `${v}`);
   const yFormat = opts.yFormat ?? ((v: number) => `${v}`);
   const markers = svgEl.querySelectorAll<SVGElement>(opts.selector);
