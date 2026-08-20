@@ -605,30 +605,37 @@ function assemblePaneResult(
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxis markers) values + point-callout y values so an annotation at/beyond the
   // data extent gets a little headroom instead of sitting flush against the axis edge.
+  // A `column` overlay is real per-row data — the same kind of thing as the CI bounds below — so it
+  // folds into the value extent rather than being clipped. The CONSTRUCTED kinds (method, fun,
+  // slope+intercept) deliberately do not: `domain: axis` extrapolates as far as the frame goes, and
+  // letting a steep fit dictate the axis is what the clip exists to prevent.
+  //
+  // Scoped to what THIS pane draws — `facet` and `domain` both, via the same code the geometry uses
+  // (overlays.ts#overlayColumnValues). An unscoped fold widened every pane's axis to the overlay's
+  // range, and in `mode: "shared"` the unioned domain then flattened the lot. `xDomain` is the DATA
+  // extent, not xOpts' resolved axis domain (unavailable this early): they differ only in that the
+  // axis domain is the WIDER of the two (x-adapter fits the data, or anchors at zero), and every
+  // value this reads sits at the x of a row — inside the data extent either way — so `domain: "axis"`
+  // crops identically.
+  //
+  // Hoisted out of `yForAxis` because it is needed TWICE: chart types that resolve a `hardDomain`
+  // never reach `yForAxis` at all (computeYAxis returns on the supplied domain without reading the
+  // values), so the AREA branch below has to fold this in itself. Empty for every spec without a
+  // `column` overlay, which is what keeps that fold a no-op everywhere else.
+  const overlayColumnYs = overlayColumnValues(spec, dataInScope, {
+    xField: adapter.xField,
+    seriesNames,
+    ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
+    ...(xExtent ? { xDomain: xExtent } : {}),
+  });
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
     ...ann.yAxis.map((m) => m.y),
     ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
-    // A `column` overlay is real per-row data — the same kind of thing as the CI bounds two lines up
-    // — so it folds into the extent rather than being clipped. The CONSTRUCTED kinds (method, fun,
-    // slope+intercept) deliberately do not: `domain: axis` extrapolates as far as the frame goes, and
-    // letting a steep fit dictate the axis is what the clip exists to prevent.
-    //
-    // Scoped to what THIS pane draws — `facet` and `domain` both, via the same code the geometry
-    // uses (overlays.ts#overlayColumnValues). An unscoped fold widened every pane's axis to the
-    // overlay's range, and in `mode: "shared"` the unioned domain then flattened the lot.
-    // `xDomain` is the DATA extent, not xOpts' resolved axis domain (unavailable this early): they
-    // differ only in that the axis domain is the WIDER of the two (x-adapter fits the data, or
-    // anchors at zero), and every value this reads sits at the x of a row — inside the data extent
-    // either way — so `domain: "axis"` crops identically.
-    ...overlayColumnValues(spec, dataInScope, {
-      xField: adapter.xField,
-      seriesNames,
-      ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
-      ...(xExtent ? { xDomain: xExtent } : {}),
-    }),
+    // See overlayColumnYs above for why a `column` overlay folds in and the constructed kinds do not.
+    ...overlayColumnYs,
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
@@ -690,9 +697,16 @@ function assemblePaneResult(
     // Stacked area: zero baseline; the axis extent comes from the per-x STACKED TOTAL (the
     // cumulative top), not individual series values. Annotation y values are folded in for headroom.
     includeZero = true;
+    // `overlayColumnYs` is folded in HERE as well as into `yForAxis`, because this branch always
+    // resolves a non-null `hardDomain` (its `auto` is unconditional), and computeYAxis returns on a
+    // supplied domain without ever reading `yForAxis`. Without this the axis kept the stack's own
+    // range and a `column` overlay above the stack was drawn hundreds of px off-frame and clipped
+    // invisible, while its `fit` labels still painted. Empty array for every spec without a `column`
+    // overlay, so the fold is a no-op there and no existing figure moves.
     const markerYs = [
       ...ann.yAxis.map((m) => m.y),
       ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+      ...overlayColumnYs,
     ].filter(Number.isFinite);
     const totalByX = new Map<string, number>();
     let minVal = 0;

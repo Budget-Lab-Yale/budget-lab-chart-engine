@@ -291,6 +291,92 @@ describe("overlays — confidence ribbon", () => {
   });
 });
 
+// AREA charts took a different branch of the y-axis resolution and never read the folded overlay
+// values: the branch builds its own `hardDomain` from the stacked totals, and `computeYAxis` returns
+// immediately when a domain is supplied, so `yValues` (which carries the fold) went unread. A
+// `column` overlay above the stack was therefore drawn far outside the frame and clipped invisible,
+// while its `fit` labels still painted — a chart that looks like it lost its overlay line.
+//
+// `line` and `scatter` were never affected: they leave `hardDomain` null unless the author sets a
+// policy bound, so `computeYAxis` reads `yValues`. `confidence_bands` is unaffected too (`_lo`/`_hi`
+// are only drawn by buildLineMarks). `stacked` is structurally identical but unreachable — overlays
+// are a validation error on a categorical x.
+describe("overlays — the value axis on an AREA chart", () => {
+  const areaSpec = (overlays: unknown[]): ChartSpec =>
+    ({
+      chartType: "area",
+      title: "t",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "time", value: "value", series: "series" },
+      overlays,
+    }) as unknown as ChartSpec;
+
+  // The stack tops out at 10; the overlay sits at 50, five times above it.
+  const areaRows: TidyRow[] = [
+    { time: "1", value: "8", series: "A", yhat: "50" },
+    { time: "2", value: "9", series: "A", yhat: "50" },
+    { time: "3", value: "10", series: "A", yhat: "50" },
+  ] as unknown as TidyRow[];
+
+  it("folds a `column` overlay into the area's y extent", () => {
+    const [, hi] = renderPane(areaSpec([{ column: "yhat" }]), areaRows, OPTS).yDomain;
+    expect(hi).toBeGreaterThanOrEqual(50);
+  });
+
+  it("draws the overlay line INSIDE the frame, not clipped off the top", () => {
+    const svg = renderChart(areaSpec([{ column: "yhat" }]), areaRows, OPTS).svg;
+    const d = lines(svg)[0]!.getAttribute("d")!;
+    const ys = [...d.matchAll(/[ ,](-?[\d.]+)(?=[A-Za-z]|$|,|\s)/g)].map((m) => Number(m[1]));
+    // Every vertex sits within the rendered frame. Pre-fix the line landed near y = -1400.
+    const H = Number(svg.getAttribute("height"));
+    for (const y of ys) {
+      expect(y).toBeGreaterThan(0);
+      expect(y).toBeLessThan(H);
+    }
+  });
+
+  it("leaves the area's y extent alone with no `column` overlay, for the same data", () => {
+    const [, hi] = renderPane(areaSpec([{ method: "lm" }]), areaRows, OPTS).yDomain;
+    expect(hi).toBeLessThan(50);
+  });
+
+  // The shared-mode orchestrator's `opts.yDomain` OVERRIDES hardDomain (index.ts), so it could in
+  // principle have carried the same gap independently. It does not: `sharedYDomain` is the UNION of
+  // per-pane probes, and each probe is a full renderPane through the very branch fixed above — so the
+  // narrow domain propagated into the union before, and the widened one propagates now. There is no
+  // second place to fix, and this pins that the derivation stays that way.
+  it("carries the fold through the shared-mode small-multiples domain", () => {
+    const sharedSpec = {
+      ...areaSpec([{ column: "yhat" }]),
+      columns: { x: "time", value: "value", series: "series", facet: "facet" },
+      small_multiples: { columns: 2, mode: "shared" },
+    } as unknown as ChartSpec;
+    const sharedRows: TidyRow[] = [
+      { time: "1", value: "8", series: "A", facet: "P1", yhat: "50" },
+      { time: "2", value: "9", series: "A", facet: "P1", yhat: "50" },
+      { time: "1", value: "3", series: "A", facet: "P2", yhat: "4" },
+      { time: "2", value: "4", series: "A", facet: "P2", yhat: "4" },
+    ] as unknown as TidyRow[];
+    const fig = renderFigure(sharedSpec, sharedRows, OPTS);
+    // Both panes share one scale, so BOTH must reach the P1 overlay's 50 -- and the line must be
+    // inside the frame in the pane that draws it high.
+    for (const pane of fig.panes) {
+      const svg = pane.svg as SVGSVGElement;
+      const H = Number(svg.getAttribute("height"));
+      const path = lines(svg)[0];
+      expect(path).toBeDefined();
+      const ys = [...path!.getAttribute("d")!.matchAll(/[ ,](-?[\d.]+)(?=[A-Za-z]|$|,|\s)/g)].map(
+        (m) => Number(m[1]),
+      );
+      for (const y of ys) {
+        expect(y).toBeGreaterThan(0);
+        expect(y).toBeLessThan(H);
+      }
+    }
+  });
+});
+
 describe("overlays — facet scoping (small multiples)", () => {
   const facetSpec: ChartSpec = {
     chartType: "line",
