@@ -8,6 +8,8 @@ import { renderChart } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
 import { OVERLAY_LABEL_CLASS, OVERLAY_LINE_CLASS } from "../src/engine/marks/overlay";
 import { annotationKey } from "../src/engine/annotation-legend";
+import { renderLegend } from "../src/engine/legend";
+import { ICON_GROUP_CLASS } from "../src/engine/icon";
 import { TBL } from "../src/engine/theme";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -147,5 +149,167 @@ describe("overlays — legend: false on the chart", () => {
     const { svg, legendItems } = renderChart(s, ROWS, OPTS);
     expect(labelTexts(svg)).toEqual(["Asserted"]);
     expect((legendItems ?? []).some((i) => i.label === "Asserted")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The swatch keys the LINE, not a convention.
+//
+// The row's colour and dash used to be derived here-and-there: `dashed` came from overlayDashed
+// (right), but the colour was the annotation neutral for EVERY per-series entry — including one
+// carrying an explicit `color`, whose lines are all that one colour, and one on a single-series
+// chart, whose single line is that series' colour. So a green overlay keyed grey. The rule now is
+// the same one CONFIG-SPEC states for a reference line: the swatch is the line's own colour,
+// dashed when the line is. The neutral survives only where it is TRUE — a per-series entry that
+// really does resolve to several colours, which no one line swatch can key.
+//
+// Every assertion below compares the swatch against the LINE's own resolved presentation, read off
+// the DOM it actually paints, rather than against a hardcoded hex: a swatch that merely stopped
+// being grey is not the fix.
+const strokeOf = (el: Element): string =>
+  (/stroke:\s*([^;]+)/.exec(el.getAttribute("style") ?? "")?.[1] ?? "").trim().toLowerCase();
+
+/** The line's resolved presentation. Plot hoists constant styling onto the mark's `<g>` wrapper
+ *  (see overlays-render.test.ts), so the group is where a line's colour and dash live. */
+function drawnLines(svg: SVGSVGElement): Array<{ color: string; dashed: boolean }> {
+  return Array.from(svg.querySelectorAll<SVGGElement>(`g.${OVERLAY_LINE_CLASS}`))
+    .filter((g) => g.querySelector("path"))
+    .map((g) => ({
+      color: (g.getAttribute("stroke") ?? "").toLowerCase(),
+      dashed: g.getAttribute("stroke-dasharray") != null,
+    }));
+}
+
+/** The live legend's swatch for one annotation row, by label. */
+function liveSwatch(s: ChartSpec, rows: TidyRow[], label: string) {
+  const { svg, legendItems } = renderChart(s, rows, OPTS);
+  const parent = document.createElement("div");
+  renderLegend(parent, legendItems ?? [], { svg });
+  const row = Array.from(
+    parent.querySelectorAll<HTMLElement>(".tbl-legend-item[data-annotation]"),
+  ).find((el) => el.textContent === label)!;
+  const line = row.querySelector<SVGLineElement>(".tbl-legend-swatch svg line")!;
+  return { color: strokeOf(line), dashed: line.getAttribute("stroke-dasharray") != null, line };
+}
+
+/** The PNG export's swatch for one row. The export RE-RENDERS from the spec (it does not serialise
+ *  the live DOM), so a screen-only fix is a silent divergence in the download — and its icon must be
+ *  SVG-namespaced, since XHTML nodes inside the exported `<g>` never rasterise. */
+function exportSwatch(s: ChartSpec, rows: TidyRow[], label: string) {
+  const svg = buildExportSvg(s, rows);
+  const text = Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === label)!;
+  const group = text.previousElementSibling as SVGGElement;
+  expect(group.getAttribute("class")).toBe(ICON_GROUP_CLASS);
+  const line = group.querySelector("line")!;
+  return { color: strokeOf(line), dashed: line.getAttribute("stroke-dasharray") != null, line };
+}
+
+const TWO_SERIES: TidyRow[] = [
+  ...ROWS,
+  { time: "1", value: "10", series: "B" },
+  { time: "2", value: "12", series: "B" },
+  { time: "3", value: "11", series: "B" },
+] as unknown as TidyRow[];
+
+describe("overlays — the legend swatch keys the line it names", () => {
+  it("keys an explicit `color` with THAT colour, on a per-series fit", () => {
+    // The reported defect: `color: green` reached the line and the swatch stayed grey.
+    const s = spec([{ method: "lm", label: "Green fit", legend: true, color: "green" }]);
+    const drawn = drawnLines(renderChart(s, ROWS, OPTS).svg);
+    expect(drawn.length).toBe(1);
+    const swatch = liveSwatch(s, ROWS, "Green fit");
+    expect(swatch.color).toBe(drawn[0]!.color);
+    expect(swatch.color).not.toBe(TBL.color.annotationDim.toLowerCase());
+    expect(exportSwatch(s, ROWS, "Green fit").color).toBe(drawn[0]!.color);
+  });
+
+  it("keys a default-coloured single-series fit with the SERIES' colour", () => {
+    // `by: "series"` (the default) over one series resolves to exactly one line, in that series'
+    // colour. "One row cannot key N colours" does not apply when N is 1.
+    const s = spec([{ method: "lm", label: "Fitted", legend: true }]);
+    const drawn = drawnLines(renderChart(s, ROWS, OPTS).svg);
+    expect(drawn.length).toBe(1);
+    expect(drawn[0]!.color).not.toBe(TBL.color.annotationDim.toLowerCase());
+    const swatch = liveSwatch(s, ROWS, "Fitted");
+    expect(swatch.color).toBe(drawn[0]!.color);
+    expect(swatch.dashed).toBe(drawn[0]!.dashed);
+    expect(exportSwatch(s, ROWS, "Fitted").color).toBe(drawn[0]!.color);
+  });
+
+  it("keys the dash the KIND defaults to, in the line's own colour", () => {
+    // `fun` is dashed by default (overlayDashed) and belongs to no series, so it keeps the neutral —
+    // that neutral is the line's real colour here, not a stand-in for one.
+    const s = spec([{ fun: "2*x", label: "Asserted", legend: true }]);
+    const drawn = drawnLines(renderChart(s, ROWS, OPTS).svg);
+    expect(drawn).toEqual([{ color: TBL.color.annotationDim.toLowerCase(), dashed: true }]);
+    const swatch = liveSwatch(s, ROWS, "Asserted");
+    expect(swatch.color).toBe(drawn[0]!.color);
+    expect(swatch.dashed).toBe(true);
+    expect(exportSwatch(s, ROWS, "Asserted").dashed).toBe(true);
+  });
+
+  it("keys an explicit `style: dashed` dashed, and a solid entry solid, each in its line's colour", () => {
+    const dashedSpec = spec([
+      { method: "lm", label: "Dashed fit", legend: true, style: "dashed", color: "purple" },
+    ]);
+    const solidSpec = spec([{ method: "lm", label: "Solid fit", legend: true, style: "solid" }]);
+    const dashedLine = drawnLines(renderChart(dashedSpec, ROWS, OPTS).svg)[0]!;
+    const solidLine = drawnLines(renderChart(solidSpec, ROWS, OPTS).svg)[0]!;
+    expect(dashedLine.dashed).toBe(true);
+    expect(solidLine.dashed).toBe(false);
+
+    const dashedSwatch = liveSwatch(dashedSpec, ROWS, "Dashed fit");
+    const solidSwatch = liveSwatch(solidSpec, ROWS, "Solid fit");
+    expect(dashedSwatch).toMatchObject({ color: dashedLine.color, dashed: true });
+    expect(solidSwatch).toMatchObject({ color: solidLine.color, dashed: false });
+    expect(exportSwatch(dashedSpec, ROWS, "Dashed fit").dashed).toBe(true);
+    expect(exportSwatch(solidSpec, ROWS, "Solid fit").dashed).toBe(false);
+  });
+
+  it("keys a MULTI-colour per-series fit with the neutral — no one line swatch can carry N colours", () => {
+    // The ruling for the genuinely-many case: the lines' colours are already keyed by the series
+    // legend (each path carries its own `data-series`), so this row keys the CONCEPT. Banding a line
+    // swatch would also collide with the dash, which is the channel carrying "fitted vs asserted".
+    const s = spec([{ method: "lm", label: "Linear fit", legend: true }]);
+    const drawn = drawnLines(renderChart(s, TWO_SERIES, OPTS).svg);
+    expect(new Set(drawn.map((d) => d.color)).size).toBe(2);
+    const swatch = liveSwatch(s, TWO_SERIES, "Linear fit");
+    expect(swatch.color).toBe(TBL.color.annotationDim.toLowerCase());
+    expect(exportSwatch(s, TWO_SERIES, "Linear fit").color).toBe(
+      TBL.color.annotationDim.toLowerCase(),
+    );
+  });
+
+  it("keys a multi-series fit that carries an explicit `color` with THAT colour", () => {
+    // An explicit `color` collapses the N lines to one colour, so the row has one to key.
+    const s = spec([{ method: "lm", label: "One-colour fit", legend: true, color: "green" }]);
+    const drawn = drawnLines(renderChart(s, TWO_SERIES, OPTS).svg);
+    expect(drawn.length).toBe(2);
+    expect(new Set(drawn.map((d) => d.color)).size).toBe(1);
+    expect(liveSwatch(s, TWO_SERIES, "One-colour fit").color).toBe(drawn[0]!.color);
+    expect(exportSwatch(s, TWO_SERIES, "One-colour fit").color).toBe(drawn[0]!.color);
+  });
+
+  it("keys a pooled (`by: none`) fit with its line's colour", () => {
+    const s = spec([{ method: "lm", label: "Pooled fit", legend: true, by: "none", color: "red" }]);
+    const drawn = drawnLines(renderChart(s, TWO_SERIES, OPTS).svg);
+    expect(drawn.length).toBe(1);
+    expect(liveSwatch(s, TWO_SERIES, "Pooled fit").color).toBe(drawn[0]!.color);
+  });
+
+  it("leaves an ANNOTATION row's swatch alone — the neutral is correct there", () => {
+    // The fence for the shared code path (ruleRow): a keyed reference line with no colour of its own
+    // keys the neutral, exactly as it does in already-published figures.
+    const s = {
+      ...BASE,
+      annotations: { yAxis: [{ y: 2, label: "Threshold", legend: true }] },
+    } as unknown as ChartSpec;
+    const swatch = liveSwatch(s, ROWS, "Threshold");
+    expect(swatch).toMatchObject({ color: TBL.color.annotationDim.toLowerCase(), dashed: true });
+  });
+
+  it("draws the exported swatch in the SVG namespace, so it rasterises", () => {
+    const s = spec([{ method: "lm", label: "Fitted", legend: true, color: "green" }]);
+    expect(exportSwatch(s, ROWS, "Fitted").line.namespaceURI).toBe("http://www.w3.org/2000/svg");
   });
 });

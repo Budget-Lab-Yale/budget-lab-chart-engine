@@ -194,13 +194,19 @@ export function buildAnnotationLegendItems(
     // A malformed two-kind (or zero-kind) entry is refused by the resolver at paint time, so it
     // must not get a legend row for a line that is never drawn.
     if (kind == null) return;
-    // A per-series fit is already keyed by the series legend, so this row keys the CONCEPT and takes
-    // the neutral — one row cannot key N colours and a concept at once.
-    const perSeries = overlayPerSeries(o);
+    // The colours this entry's lines ACTUALLY resolve to, asked of the mark's own resolver once per
+    // line it draws. A row keys what one line swatch can carry: one colour, so the swatch takes it.
+    // The neutral is for the case where that is genuinely impossible — a per-series fit resolving to
+    // several colours, already keyed by the series legend, where this row keys the CONCEPT. Testing
+    // `overlayPerSeries` INSTEAD of counting them is what made an explicit `color: green` key grey.
+    const drawn = overlayPerSeries(o)
+      ? seriesNames.map((s) => overlayLineColor(o, colors, s))
+      : [overlayLineColor(o, colors)];
+    const distinct = [...new Set(drawn)];
     rows.push(
       ruleRow(o, o.label, {
         dashed: overlayDashed(o),
-        color: perSeries ? TBL.color.annotationDim : overlayLineColor(o, colors),
+        color: distinct.length === 1 ? (distinct[0] as string) : TBL.color.annotationDim,
       }),
     );
   });
