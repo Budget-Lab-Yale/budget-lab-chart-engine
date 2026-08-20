@@ -793,6 +793,56 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     );
     expect(order.slice(0, 2)).toEqual(["C", "B"]);
   });
+
+  // BOTH throw sites firing in the SAME restack. The render failure comes first and is the more
+  // informative of the two -- the legend error is a consequence of cleaning up after it -- but the
+  // cleanup ran inside a `finally`, and an exception thrown from a `finally` REPLACES the pending
+  // one, so the render failure was discarded and the consumer only ever saw the legend error.
+  it("surfaces the FIRST error when both onRender and onLegendSelect throw in one restack", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    let restackCount = 0;
+    let armed = false;
+    mountChart(container, {
+      spec: AREA_SPEC,
+      rows: AREA_ROWS,
+      onRender: (ctx) => {
+        if (ctx.phase !== "restack") return;
+        restackCount++;
+        if (restackCount === 1) throw new Error("E1-onRender");
+      },
+      onLegendSelect: (ctx) => {
+        // Same arming as the test above: only the pin-restoration toggle carries a non-empty set.
+        if (armed && ctx.active.length > 0) {
+          armed = false;
+          throw new Error("E2-onLegendSelect");
+        }
+      },
+    });
+    const caught: unknown[] = [];
+    const onUncaught = (err: unknown): void => { caught.push(err); };
+    process.once("uncaughtException", onUncaught);
+    armed = true;
+    legendItem(container, "C")!.click();
+    process.removeListener("uncaughtException", onUncaught);
+
+    expect(caught.length).toBe(1);
+    // The render failure, not the cleanup's.
+    expect((caught[0] as Error).message).toBe("E1-onRender");
+    // The later one is not silently dropped either -- it rides along as the cause.
+    expect(((caught[0] as Error).cause as Error | undefined)?.message).toBe("E2-onLegendSelect");
+    expect(restackCount).toBe(1);
+
+    // Both established requirements still hold: the pin was restored on the fresh legend, and
+    // suppressRestack was reset so a SECOND pin still restacks.
+    expect(legendItem(container, "C")!.getAttribute("aria-pressed")).toBe("true");
+    legendItem(container, "B")!.click();
+    expect(restackCount).toBe(2);
+    const order2 = [...container.querySelectorAll('g[aria-label="area"] path[data-series]')].map((p) =>
+      p.getAttribute("data-series"),
+    );
+    expect(order2.slice(0, 2)).toEqual(["C", "B"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
