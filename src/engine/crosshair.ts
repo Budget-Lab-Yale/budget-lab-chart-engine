@@ -2502,6 +2502,9 @@ export interface SecondaryBandOptions {
    *  in the bar and SIGNED (explicit + on gains). Total/skip steps shade without a pill (their
    *  value is the always-on running-total label). */
   waterfall?: { deltaCats: Set<string> };
+  /** `chrome.valuePills: false` — suppress only the per-series value pills; the shaded band region
+   *  and the accented category label still render. Default true. */
+  showPills?: boolean;
 }
 
 /** A rendered bar rect's geometry + series, for one category. */
@@ -2725,28 +2728,33 @@ export function attachSecondaryBandCursor(
         }
       }
       const pillGap = opts.pillGap ?? 6;
-      const valid = (rectsByCat.get(category) ?? [])
-        .map((rect) => ({ rect, v: vals.get(rect.series) }))
-        .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
-      for (const x of valid) {
-        const cy = x.rect.y + x.rect.h / 2;
-        if (opts.isStacked) {
-          // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
-          // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
-          // not a meaningful "value" position, for anything but the outermost segment.
-          addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), pillColor(x.rect), weight);
-        } else {
-          const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
-          addCoordPill(
-            g,
-            doc,
-            tipX + (x.v >= 0 ? pillGap : -pillGap),
-            cy,
-            x.v >= 0 ? "start" : "end",
-            yFormat(x.v),
-            pillColor(x.rect),
-            weight,
-          );
+      // showPills: false (chrome.valuePills) suppresses only the per-series value pills below — the
+      // shaded row region and the accented Y-axis label (above) still render, mirroring
+      // chrome.tooltip's "hit-testing and the band/point highlight are untouched" contract.
+      if (opts.showPills !== false) {
+        const valid = (rectsByCat.get(category) ?? [])
+          .map((rect) => ({ rect, v: vals.get(rect.series) }))
+          .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
+        for (const x of valid) {
+          const cy = x.rect.y + x.rect.h / 2;
+          if (opts.isStacked) {
+            // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
+            // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
+            // not a meaningful "value" position, for anything but the outermost segment.
+            addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), pillColor(x.rect), weight);
+          } else {
+            const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
+            addCoordPill(
+              g,
+              doc,
+              tipX + (x.v >= 0 ? pillGap : -pillGap),
+              cy,
+              x.v >= 0 ? "start" : "end",
+              yFormat(x.v),
+              pillColor(x.rect),
+              weight,
+            );
+          }
         }
       }
       g.setAttribute("opacity", "1");
@@ -2787,32 +2795,36 @@ export function attachSecondaryBandCursor(
     // falling back to the series' legend color.
     const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
     const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
-    if (opts.waterfall) {
-      // Delta steps: a signed value pill CENTERED in the bar. Total/skip steps shade only.
-      if (opts.waterfall.deltaCats.has(category)) {
-        for (const x of valid) {
-          const cy = x.rect.y + x.rect.h / 2;
-          const text = `${x.v >= 0 ? "+" : ""}${yFormat(x.v)}`;
-          addCoordPill(g, doc, x.rect.cx, cy, "middle", text, pillColor(x.rect), weight);
+    // showPills: false (chrome.valuePills) suppresses only the value pills below — the shaded
+    // column region and the accented x-axis category pill (above) still render.
+    if (opts.showPills !== false) {
+      if (opts.waterfall) {
+        // Delta steps: a signed value pill CENTERED in the bar. Total/skip steps shade only.
+        if (opts.waterfall.deltaCats.has(category)) {
+          for (const x of valid) {
+            const cy = x.rect.y + x.rect.h / 2;
+            const text = `${x.v >= 0 ? "+" : ""}${yFormat(x.v)}`;
+            addCoordPill(g, doc, x.rect.cx, cy, "middle", text, pillColor(x.rect), weight);
+          }
         }
+      } else if (opts.isStacked) {
+        // Segments share one x (single band), so de-collide the within-segment labels vertically.
+        const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
+      } else {
+        // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
+        // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
+        const ys = staggerBarLabels(
+          valid.map((x) => ({
+            cx: x.rect.cx,
+            w: coordPillWidth(yFormat(x.v)),
+            value: x.v,
+            y: x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9,
+          })),
+          COORD_PILL_H,
+        );
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       }
-    } else if (opts.isStacked) {
-      // Segments share one x (single band), so de-collide the within-segment labels vertically.
-      const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
-    } else {
-      // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
-      // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
-      const ys = staggerBarLabels(
-        valid.map((x) => ({
-          cx: x.rect.cx,
-          w: coordPillWidth(yFormat(x.v)),
-          value: x.v,
-          y: x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9,
-        })),
-        COORD_PILL_H,
-      );
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
     }
     g.setAttribute("opacity", "1");
   };

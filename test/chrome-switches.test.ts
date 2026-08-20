@@ -75,14 +75,60 @@ describe("chrome.tooltip: false", () => {
 });
 
 describe("chrome.valuePills: false", () => {
-  it("attaches no highlight-pills group", () => {
-    const el = mount(spec({ valuePills: false }));
-    expect(el.querySelectorAll(".tbl-hl-pills").length).toBe(0);
+  // `spec()` above forces `barStack.hover: "tooltip"` so the tooltip-card assertions are
+  // deterministic — but that means it never reaches the "pills" hover path at all, so it can't
+  // exercise chrome.valuePills against the pills a reader actually sees. This spec omits
+  // `barStack.hover`: a plain additive 2-series stack with no explicit config defaults to
+  // hoverMode "pills" (spec/bar-stack.ts resolveHoverMode).
+  function pillsSpec(chrome?: Record<string, unknown>): ChartSpec {
+    return {
+      chartType: "stacked",
+      title: "t",
+      xAxisType: "categorical",
+      data: "data.csv",
+      columns: { x: "time", value: "value", series: "series" },
+      ...(chrome ? { chrome } : {}),
+    } as unknown as ChartSpec;
+  }
+
+  /** Mount `pillsSpec` and hover the first bar (dispatches pointermove on the band-crosshair hit
+   *  rect), returning the chart's SVG in its now-active hovered state. Stubs the SVG's
+   *  `getBoundingClientRect` (jsdom's real one is all-zero), matching dom-contract.test.ts's
+   *  `mockAxisLabelLayout` — the hit-test maps `clientX/Y` through this rect. */
+  function mountAndHover(s: ChartSpec): SVGSVGElement {
+    const el = mount(s);
+    const svg = el.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    const vb = svg.viewBox.baseVal;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      value: () => ({
+        width: vb.width, height: vb.height, top: 0, left: 0,
+        right: vb.width, bottom: vb.height, x: 0, y: 0,
+      }),
+      configurable: true,
+    });
+    const rect = svg.querySelector<SVGRectElement>('g[aria-label="bar"] rect')!;
+    const cx = parseFloat(rect.getAttribute("x") ?? "0") + parseFloat(rect.getAttribute("width") ?? "0") / 2;
+    const hit = svg.querySelector(".tbl-band-crosshair-hit")!;
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 20, bubbles: true }));
+    return svg;
+  }
+
+  it("hovering a band produces no value pills (the documented behaviour)", () => {
+    const svg = mountAndHover(pillsSpec({ valuePills: false }));
+    // Neither pill source fires: the legend-gesture renderer (.tbl-hl-pills, gated at attach) nor
+    // the coordinated band-cursor's per-segment pills (.tbl-coord-pill, drawn on hover) — these are
+    // the pills a reader actually sees hovering a band in "pills" mode (CONFIG-SPEC.md).
+    expect(svg.querySelectorAll(".tbl-hl-pills").length).toBe(0);
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(0);
+    // Hit-testing and the band highlight are untouched — only the value pills are gated, mirroring
+    // chrome.tooltip's contract.
+    expect(svg.querySelectorAll(".tbl-band-crosshair-hit").length).toBeGreaterThan(0);
+    expect(svg.querySelectorAll(".tbl-coord-region").length).toBeGreaterThan(0);
   });
 
-  it("still attaches one by default", () => {
-    const el = mount(spec());
-    expect(el.querySelectorAll(".tbl-hl-pills").length).toBeGreaterThan(0);
+  it("hovering a band shows value pills by default", () => {
+    const svg = mountAndHover(pillsSpec());
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBeGreaterThan(0);
   });
 });
 

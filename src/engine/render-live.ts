@@ -774,8 +774,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
   // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — a
   // synchronous mount-then-teardown (React StrictMode's dev double-invoke, or any fast unmount)
-  // would otherwise fire onRender for a chart that no longer exists, handing the consumer a
-  // detached svg on the very next microtask after they disposed it.
+  // would otherwise fire onRender for a chart that has already been disposed. "Disposed" is a
+  // logical contract state, not DOM detachment: teardown disconnects observers and listeners but
+  // never removes the card from its container, so the svg the consumer would be handed is still
+  // sitting exactly where it was mounted — the problem is that its owner considers it torn down.
   let disposed = false;
 
   // Inline title selectors: the mount owns ONE selections object for its whole life. The
@@ -1249,6 +1251,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           seriesOrder,
           yFormat: bandYFormat,
           horizontal: horizontalBar,
+          showPills: chromePills,
           // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
           // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
           // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.
@@ -1382,9 +1385,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         //
         // Guarded on `disposed`: a caller that tears the mount down before this microtask runs
         // (a synchronous mount-then-teardown — React StrictMode's dev double-invoke does exactly
-        // this) must not have onRender fire afterward for a chart that no longer exists, handed a
-        // detached svg. Checked INSIDE the microtask (not before scheduling it) since `disposed`
-        // is only known at the time this callback actually runs.
+        // this) must not have onRender fire afterward for a chart already disposed of — a logical
+        // contract state, not DOM detachment; teardown never removes the card from its container.
+        // Checked INSIDE the microtask (not before scheduling it) since `disposed` is only known
+        // at the time this callback actually runs.
         queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
       } else {
         notify(card, "tbl-render", renderCtx, opts.onRender);
@@ -2155,6 +2159,7 @@ function wireFigureSvg(
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, wfDecimals ?? ctx.spec.tooltip_decimals),
         horizontal,
+        showPills: chromePills,
         ...(horizontal
           ? {
               regionFromLeftEdge: true,

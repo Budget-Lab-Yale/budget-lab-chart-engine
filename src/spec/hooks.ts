@@ -89,7 +89,13 @@ export interface AfterRenderCtx {
 /** Programmatic render hooks — the tier above `chrome`'s declarative switches, for consumers
  *  calling `mountChart`/`renderChart` themselves (see module note above for why they can't reach
  *  CLI-published figures). Every field is optional; `hooks: {}` renders byte-identically to
- *  passing no `hooks` at all. */
+ *  passing no `hooks` at all.
+ *
+ *  A throwing hook is handled inconsistently, not uniformly forbidden: `tickLabel`/`valueLabel`/
+ *  `afterRender` throw inside `mountChart`'s try/catch and surface as an in-card `.figure-error`,
+ *  while `legendKey`/`tooltip` run after that try/catch and a throw there propagates uncaught,
+ *  leaving the mount without a legend or hover wiring until the next resize (see CONFIG-SPEC.md's
+ *  Hooks section for the full account). */
 export interface RenderHooks {
   /** Screen-only — see `TooltipHookCtx`. Replaces a band tooltip's content; the engine keeps
    *  hit-testing, positioning and the band highlight. */

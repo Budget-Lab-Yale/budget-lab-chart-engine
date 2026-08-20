@@ -11,7 +11,7 @@ import { TBL } from "./theme";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveAnnotations, xMarkerLabel, yMarkerLabel } from "../spec/annotations";
 import { resolveRugTracks } from "../spec/rug";
-import { overlayDashed, overlayKind } from "../spec/overlays";
+import { overlayDashed, overlayKind, overlayPerSeries } from "../spec/overlays";
 import { overlayLineColor } from "./overlays";
 import type { LegendItem } from "./index";
 import type { ChartSpec, ColorRef, Overlay, ShadeRegion, XAxisBand } from "../spec/types";
@@ -196,7 +196,7 @@ export function buildAnnotationLegendItems(
     if (kind == null) return;
     // A per-series fit is already keyed by the series legend, so this row keys the CONCEPT and takes
     // the neutral — one row cannot key N colours and a concept at once.
-    const perSeries = (kind === "method" || kind === "column") && (o.by ?? "series") === "series";
+    const perSeries = overlayPerSeries(o);
     rows.push(
       ruleRow(o, o.label, {
         dashed: overlayDashed(o),

@@ -32,7 +32,7 @@ import { binValues, computeThresholds, temporalThresholds, normalizeBinned } fro
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { assemblePlot } from "./assemble-plot";
+import { assemblePlot, withTickLabelHook } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
@@ -896,7 +896,16 @@ function assemblePaneResult(
     colors,
     valueAffixes,
     yDomain,
-    formatValue: makeTickFormatter(yTicks, valueAffixes),
+    // Wrapped with the SAME tickLabel hook + ctx assemblePlot used internally for the in-frame
+    // annotation label (yTickFallbackFmt) — this is what buildLegendItems passes through as
+    // pane.formatValue for a keyed annotation's LEGEND row token. Left un-wrapped, the two would
+    // resolve `{value}` differently under a `tickLabel` hook: see annotation-legend.ts's invariant
+    // comment on why that can never be allowed to happen.
+    formatValue: withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), opts.hooks, {
+      axis: "y",
+      ticks: yTicks,
+      affixes: valueAffixes,
+    }),
     dataInScope,
     layers,
     seriesHatches,

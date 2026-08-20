@@ -16,13 +16,20 @@
 //      on the band; walking along any other direction leaves it.
 //   3. FLANKED — a single-direction band has ground on BOTH sides ("three bands"), which is what
 //      separates `/` from an edge.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { PNG } from "pngjs";
 import { renderLegend } from "../src/engine/legend";
 import { CHART_CSS } from "../src/embed/styles";
 import { HATCH_CHARS, resolveHatch, type HatchChar } from "../src/engine/hatch";
 import type { LegendItem } from "../src/engine/index";
+
+// This file launches a real Chromium via Playwright, which flakes under parallel test-file load
+// (contending for CPU with the rest of the suite's worker threads) — the suite's 5s/10s defaults
+// are tuned for jsdom-speed tests, not a browser launch + screenshot. Raised per-file (isolated to
+// this file's worker) rather than in vitest.config.ts, so the rest of the suite keeps its tight
+// defaults; see test/tooltip-divider-visibility.test.ts for the other file with the same fix.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const GROUND = "#58A3E7";
 /** Screenshot at 8x so a 14px box gives enough pixels to walk a diagonal. */

@@ -316,7 +316,7 @@ export interface FacetOptions {
 /** Wrap a tick formatter with the caller's `tickLabel` hook. `null` from the hook means "engine
  *  default", so an un-hooked axis returns the formatter's own string unchanged and the output is
  *  byte-identical to not passing hooks at all. */
-function withTickLabelHook(
+export function withTickLabelHook(
   fmt: (d: number) => string,
   hooks: RenderHooks | undefined,
   ctx: TickLabelHookCtx,

@@ -7,7 +7,7 @@
 import { fitPoly, evalPolyFit, polyFitStdError, studentTQuantile } from "./fit";
 import { resolveColor } from "./palette";
 import { TBL } from "./theme";
-import { overlayKind, overlayDashed } from "../spec/overlays";
+import { overlayKind, overlayDashed, overlayPerSeries } from "../spec/overlays";
 import { parseExpression, evalExpression } from "../spec/expr";
 import type { OverlayKind } from "../spec/overlays";
 import type { ChartSpec, Overlay } from "../spec/types";
@@ -181,7 +181,7 @@ export function resolveOverlays(
 
     // Which groups to draw. `method`/`column` split by series unless pooled; the other kinds do not
     // read the data at all, so they are one group with no series identity.
-    const perSeries = (kind === "method" || kind === "column") && (o.by ?? "series") === "series";
+    const perSeries = overlayPerSeries(o);
     const groups: Array<{ series?: string; rows: PreparedRow[] }> = perSeries
       ? ctx.seriesNames.map((s) => ({ series: s, rows: rowsBySeries.get(s) ?? [] }))
       : [{ rows }];

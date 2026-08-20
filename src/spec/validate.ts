@@ -331,6 +331,16 @@ function overlaySpecErrors(spec: {
         `${at}: \`by\` applies to \`method\` and \`column\` — the other kinds do not read the data`,
       );
     }
+    // A dangling `slope`/`intercept` alongside another resolved kind (e.g. `{ method: "lm", slope:
+    // 0.5 }`) reaches here — never both, together they'd make `kind` "abline" (or null, if a THIRD
+    // key is also set) and be caught above instead. Named individually so a typo in either fails
+    // the build, matching every other misapplied key above.
+    if (kind !== "abline") {
+      if (o.slope != null) errors.push(`${at}: \`slope\` applies to \`slope\`+\`intercept\` (an abline)`);
+      if (o.intercept != null) {
+        errors.push(`${at}: \`intercept\` applies to \`slope\`+\`intercept\` (an abline)`);
+      }
+    }
     if (o.legend === true && !o.label) {
       errors.push(`${at}: \`legend: true\` needs a \`label\` — it is the row's text`);
     }

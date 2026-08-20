@@ -12,7 +12,7 @@
 // block at all — every pre-existing stacked chart with a Total row. Both specs below are verified
 // through the same real-browser path; the explicit opt-in case guards against a future change that
 // makes the opt-out the only route to this markup.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 import { PNG } from "pngjs";
@@ -28,6 +28,13 @@ const HAS_BROWSER = (() => {
     return false;
   }
 })();
+
+// This file launches a real Chromium via Playwright, which flakes under parallel test-file load
+// (contending for CPU with the rest of the suite's worker threads) — the suite's 5s/10s defaults
+// are tuned for jsdom-speed tests, not a browser launch + screenshot. Raised per-file (isolated to
+// this file's worker) rather than in vitest.config.ts, so the rest of the suite keeps its tight
+// defaults; see test/hatch-legend-legibility.test.ts for the other file with the same fix.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 // Worst case per the coordinator's report: a dark, saturated bar segment (navy), not the pale
 // palette default. Both series share it, so wherever the hovered pointer/tooltip lands over the

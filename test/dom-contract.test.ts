@@ -107,6 +107,18 @@ describe("hover-chrome elements each carry a class (issue #30)", () => {
     }
   });
 
+  it("each pill's VALUE TEXT carries tbl-coord-pill-text", () => {
+    const container = document.createElement("div");
+    const svg = mountAndHoverStack(container);
+
+    const pillTexts = svg.querySelectorAll<SVGTextElement>("g.tbl-coord text.tbl-coord-pill-text");
+    expect(pillTexts.length).toBeGreaterThan(0); // one per hovered-category segment (Up + Down)
+    for (const t of Array.from(pillTexts)) {
+      expect(t.classList.contains("tbl-coord-axis-label-text")).toBe(false);
+      expect(t.textContent).not.toBe("");
+    }
+  });
+
   it("the axis-label echo box carries tbl-coord-axis-label, not tbl-coord-pill, and is a DIFFERENT element from the pills", () => {
     const container = document.createElement("div");
     const svg = mountAndHoverStack(container);
@@ -122,6 +134,17 @@ describe("hover-chrome elements each carry a class (issue #30)", () => {
     const pill = svg.querySelector<SVGRectElement>("g.tbl-coord rect.tbl-coord-pill")!;
     expect(pill).not.toBeNull();
     expect(axisLabel).not.toBe(pill);
+  });
+
+  it("the axis-label echo box's CATEGORY TEXT carries tbl-coord-axis-label-text", () => {
+    const container = document.createElement("div");
+    const svg = mountAndHoverStack(container);
+
+    const axisLabelTexts = svg.querySelectorAll<SVGTextElement>("g.tbl-coord text.tbl-coord-axis-label-text");
+    expect(axisLabelTexts.length).toBe(1); // one echo box for the hovered category's x value
+    const t = axisLabelTexts[0]!;
+    expect(t.classList.contains("tbl-coord-pill-text")).toBe(false);
+    expect(t.textContent).not.toBe("");
   });
 
   it("no rule in CHART_CSS selects either rect by its rx attribute (the workaround this task removes)", () => {

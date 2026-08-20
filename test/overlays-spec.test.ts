@@ -120,6 +120,16 @@ describe("overlays — field applicability", () => {
     expect(err(check([{ fun: "x", by: "none" }]))).toMatch(/`by` applies to/);
   });
 
+  it("rejects a dangling slope beside another kind, rather than silently ignoring it", () => {
+    const r = check([{ method: "lm", slope: 0.5 }]);
+    expect(r.valid).toBe(false);
+    expect(err(r)).toMatch(/`slope` applies to `slope`\+`intercept`/);
+  });
+
+  it("rejects a dangling intercept beside another kind", () => {
+    expect(err(check([{ column: "yhat", intercept: 2 }]))).toMatch(/`intercept` applies to `slope`\+`intercept`/);
+  });
+
   it("rejects legend: true with no label", () => {
     expect(err(check([{ method: "lm", legend: true }]))).toMatch(/needs a `label`/);
   });

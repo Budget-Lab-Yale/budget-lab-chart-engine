@@ -59,4 +59,38 @@ describe("hooks.tickLabel", () => {
     const b = renderChart(SPEC, ROWS, { width: 720, height: 400, document, hooks: {} }).svg.outerHTML;
     expect(b).toBe(a);
   });
+
+  // annotation-legend.ts's stated invariant: a keyed annotation's `{value}` token "resolves through
+  // the SAME helpers assemble-plot uses [for the in-frame text] ... so moving a label to the legend
+  // can neither print the raw brace token nor format it differently." A `tickLabel` hook wraps the
+  // in-frame formatter (assemble-plot.ts's yTickFallbackFmt) but NOT the legend's own
+  // `pane.formatValue` unless index.ts's construction of it is wrapped identically — this proves the
+  // two still agree once it is. Two twin markers at the same y (one keyed to the legend, one not)
+  // let the same hooked render show both resolutions side by side.
+  it("a keyed annotation's legend row formats {value} identically to an unkeyed twin's in-frame label", () => {
+    const spec = {
+      chartType: "line",
+      title: "t",
+      xAxisType: "numeric",
+      columns: { x: "time", value: "value" },
+      annotations: {
+        yAxis: [
+          { y: 2.5, label: "Target ({value})", legend: true },
+          { y: 2.5, label: "Twin ({value})" },
+        ],
+      },
+    } as unknown as ChartSpec;
+    const data: TidyRow[] = [
+      { time: "2000", value: "1" },
+      { time: "2010", value: "4" },
+    ] as unknown as TidyRow[];
+    const hookedHooks: RenderHooks = { tickLabel: (v) => `<${v.toFixed(3)}>` };
+    const { svg, legendItems } = renderChart(spec, data, {
+      width: 720, height: 400, document, hooks: hookedHooks,
+    });
+    const legendLabel = legendItems?.find((i) => i.annotation)?.label;
+    const inFrameLabel = texts(svg).find((t) => t.startsWith("Twin ("));
+    expect(legendLabel).toBe("Target (<2.500>)");
+    expect(inFrameLabel).toBe("Twin (<2.500>)");
+  });
 });

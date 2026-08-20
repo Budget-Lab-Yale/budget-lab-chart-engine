@@ -4,7 +4,7 @@
 // this file locks which marks are emitted, that they reach the EXPORT path, that they clip, and that
 // a chart without overlays emits nothing.
 import { describe, it, expect } from "vitest";
-import { renderChart, renderPane } from "../src/engine/index";
+import { renderChart, renderPane, renderFigure } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
 import { OVERLAY_LINE_CLASS, OVERLAY_BAND_CLASS } from "../src/engine/marks/overlay";
 import { validateSpec, validateChartData } from "../src/spec/validate";
@@ -226,6 +226,67 @@ describe("overlays — confidence ribbon", () => {
 
   it("reaches the export path", () => {
     expect(bands(buildExportSvg(spec([{ method: "lm", ci: 0.95 }]), ROWS)).length).toBe(1);
+  });
+});
+
+describe("overlays — facet scoping (small multiples)", () => {
+  const facetSpec: ChartSpec = {
+    chartType: "line",
+    title: "faceted overlay",
+    xAxisType: "numeric",
+    data: "data.csv",
+    columns: { x: "time", value: "value", series: "series", facet: "facet" },
+    small_multiples: { columns: 2, mode: "shared" },
+    overlays: [{ method: "lm", facet: "A" }],
+  } as unknown as ChartSpec;
+
+  const facetRows: TidyRow[] = [
+    { time: "1", value: "1", series: "S", facet: "A" },
+    { time: "2", value: "3", series: "S", facet: "A" },
+    { time: "3", value: "2", series: "S", facet: "A" },
+    { time: "1", value: "5", series: "S", facet: "B" },
+    { time: "2", value: "6", series: "S", facet: "B" },
+    { time: "3", value: "4", series: "S", facet: "B" },
+  ] as unknown as TidyRow[];
+
+  it("draws the overlay ONLY in the pane its `facet` names, not the other pane", () => {
+    const fig = renderFigure(facetSpec, facetRows, OPTS);
+    const byValue = new Map(fig.panes.map((p) => [p.value, p.svg as SVGSVGElement]));
+    // A single-pane assertion would still pass with the filter deleted (both panes would draw the
+    // overlay) — asserting BOTH panes is what actually exercises `.filter((o) => o.facet == null ||
+    // o.facet === opts.paneFacetValue)` (index.ts).
+    expect(lines(byValue.get("A")!).length).toBeGreaterThan(0);
+    expect(lines(byValue.get("B")!).length).toBe(0);
+  });
+});
+
+describe("overlays — fun density curve over a histogram", () => {
+  // CONFIG-SPEC.md's FIRST overlay example, and the only overlay kind histograms support (`method`/
+  // `column` are rejected at validation — see test/overlays-spec.test.ts's "histograms take `fun`
+  // only" — because binned rows carry no `_xn`/`_overlayCols` for them to read). Rendering coverage
+  // was missing entirely; this proves the accepted case actually draws a line, not just validates.
+  const histSpec: ChartSpec = {
+    chartType: "histogram",
+    title: "H",
+    xAxisType: "numeric",
+    columns: { x: "amount" },
+    data: "d.csv",
+    histogram: { bins: 5, domain: [-3, 3] },
+    overlays: [{ fun: "dnorm(x, 0, 1)" }],
+  } as unknown as ChartSpec;
+
+  const histRows: TidyRow[] = Array.from({ length: 30 }, (_, i) => ({
+    amount: String(-3 + (i / 29) * 6),
+  })) as unknown as TidyRow[];
+
+  it("draws the density curve as an overlay line over the bars", () => {
+    const { svg } = renderChart(histSpec, histRows, OPTS);
+    expect(svg.querySelectorAll('g[aria-label="rect"], rect').length).toBeGreaterThan(0); // bars exist
+    expect(lines(svg).length).toBe(1);
+  });
+
+  it("reaches the export path", () => {
+    expect(lines(buildExportSvg(histSpec, histRows)).length).toBe(1);
   });
 });
 

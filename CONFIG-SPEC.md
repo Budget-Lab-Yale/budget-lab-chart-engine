@@ -784,6 +784,13 @@ namespace and **silently does not paint** — no error, no warning, just a legen
 correct on screen and missing from the download. Switch on `ctx.medium` (or simply return
 `ctx.rendered` unchanged, which is already written in the right vocabulary for the call you're in).
 
+**A throwing hook is handled inconsistently, not uniformly forbidden.** `tickLabel`, `valueLabel`,
+and `afterRender` run inside `mountChart`'s own try/catch, so a throw there is caught and rendered
+as an in-card `.figure-error`. `legendKey` (called from `renderLegend`) and `tooltip` (called from
+the crosshair/tooltip attach) run **after** that try/catch, so a throw there propagates uncaught out
+of `mountChart` and leaves the mount without a legend or hover wiring until the next resize
+re-attempts it.
+
 `onHover`/`onRender`/`onLegendSelect` are not hooks — they're described under Events below.
 
 #### Events
@@ -813,6 +820,28 @@ ancestor) would clip it or throw off that positioning, which `document.body` nev
 container only when it is known to have neither, and keep it **stable across the mount's
 lifetime** — a fresh element passed in on every re-render leaves the previous one's tooltip div
 behind, invisible and unreachable.
+
+#### Classes
+
+The coordinated-cursor hover chrome — the shaded band/region a reader sees hovering a bar, stacked
+segment, or line-chart point, and its value-pill/axis-label capsules — carries these seven classes,
+so a consumer stylesheet can target them without depending on presentation attributes like `rx="3"`
+(which two different elements shared before this):
+
+| class | element | drawn on |
+|---|---|---|
+| `tbl-coord-region` | the shaded band/column `<rect>` | every coordinated-cursor chart type |
+| `tbl-coord-pill` | a value-pill's background `<rect>` | bar, stacked-bar, waterfall, dot-plot, dumbbell, categorical-x line |
+| `tbl-coord-pill-text` | a value-pill's `<text>` | same as `tbl-coord-pill` |
+| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | bar/stacked (vertical) |
+| `tbl-coord-axis-label-text` | that echoed axis label's `<text>` | same as `tbl-coord-axis-label` |
+| `tbl-coord-guide` | the vertical guide `<line>` | temporal/numeric-x line charts |
+| `tbl-coord-dot` | the hovered point's highlight ring `<circle>` | temporal/numeric-x line charts |
+
+All seven live inside a `g.tbl-coord` wrapper. `chrome.valuePills: false` (see Bar / stacked-bar
+options, above) removes only `tbl-coord-pill`/`tbl-coord-pill-text` — `tbl-coord-region` and the
+axis-label echo still render, since hit-testing and the band highlight are untouched by that
+switch, matching `chrome.tooltip`'s contract.
 
 #### Two acceptance criteria this deliberately does not ship
 

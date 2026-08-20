@@ -28,3 +28,15 @@ export function overlayDashed(o: Overlay): boolean {
   // Computed FROM the data (method, column) reads solid; asserted OVER it (fun, abline) reads dashed.
   return kind === "fun" || kind === "abline";
 }
+
+/** True when a data-derived overlay (`method`/`column`) is fit PER SERIES (the default) rather than
+ *  pooled across all series (`by: "all"`). A per-series fit is already keyed by the series' own
+ *  legend color, so its overlay legend row takes the neutral tint instead — one row cannot key N
+ *  colours and a concept at once. Exported (rather than re-derived at each call site) for the same
+ *  reason `overlayDashed` is: engine/overlays.ts's own geometry and annotation-legend.ts's legend
+ *  row must agree on this, and re-deriving a shared concept is how `.is-dot` silently became a
+ *  square (issue #30). */
+export function overlayPerSeries(o: Overlay): boolean {
+  const kind = overlayKind(o);
+  return (kind === "method" || kind === "column") && (o.by ?? "series") === "series";
+}

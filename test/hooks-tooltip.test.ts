@@ -300,6 +300,9 @@ describe("hooks.tooltip — live DOM via attachCategoricalLineCrosshair (mountCh
     hoverCatLineCategory(container, "18-21");
     const tip = document.body.querySelector<HTMLElement>(".tbl-tooltip")!;
     expect(tip.innerHTML).toBe('<div class="mine">18-21</div>');
+    // A second, different category resolves its OWN ctx.category — not the first hover's, stale.
+    hoverCatLineCategory(container, "22-25");
+    expect(tip.innerHTML).toBe('<div class="mine">22-25</div>');
   });
 
   it("a null-returning hook keeps the engine's own card on this call site too", () => {
