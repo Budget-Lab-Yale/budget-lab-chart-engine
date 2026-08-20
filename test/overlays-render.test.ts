@@ -74,6 +74,21 @@ describe("overlays — mark emission", () => {
   it("draws a `column` overlay from the named data column", () => {
     expect(lines(renderChart(spec([{ column: "yhat" }]), ROWS, OPTS).svg).length).toBe(1);
   });
+
+  // A healthy column keeps EVERY vertex. Worth pinning because the failure it guards is invisible:
+  // engine/index.ts reads the column with unary `+` and drops anything non-finite, so a dropped
+  // middle value does not leave a gap — it reroutes the line straight from its neighbours, and the
+  // result is a plausible-looking wrong line. Three rows ⇒ three points, not two.
+  it("keeps a three-point column overlay's MIDDLE vertex", () => {
+    const three: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1" },
+      { time: "2", value: "2", series: "A", yhat: "5" },
+      { time: "3", value: "3", series: "A", yhat: "9" },
+    ] as unknown as TidyRow[];
+    const path = lines(renderChart(spec([{ column: "yhat" }]), three, OPTS).svg)[0];
+    const d = path?.getAttribute("d") ?? "";
+    expect((d.match(/[ML]/g) ?? []).length).toBe(3);
+  });
 });
 
 describe("overlays — stroke presentation", () => {

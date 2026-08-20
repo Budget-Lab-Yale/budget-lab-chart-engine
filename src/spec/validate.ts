@@ -794,20 +794,34 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   }
 
   // A `column` overlay names a data column, so the data has to have it — the same check the
-  // confidence_bands lower/upper columns get.
+  // confidence_bands lower/upper columns get. Collected once, because the same list is
+  // numeric-checked per row below for the same reason the CI columns are.
+  const overlayCols: string[] = [];
   for (const o of spec.overlays ?? []) {
-    if (o.column != null && !columns.has(o.column)) {
+    if (o.column != null && !overlayCols.includes(o.column)) overlayCols.push(o.column);
+  }
+  for (const col of overlayCols) {
+    if (!columns.has(col)) {
       errors.push(
-        `config/data mismatch: overlays references a "${o.column}" column the data does not have`,
+        `config/data mismatch: overlays references a "${col}" column the data does not have`,
       );
     }
   }
+
+  // INVARIANT: every column whose cells the value axis reads gets ONE numeric-or-empty check —
+  // `value` above, the CI columns, and a `column` overlay's column. The overlay column is not
+  // optional here: engine/index.ts reads it with unary `+` and skips anything non-finite, so a
+  // mistyped cell does not drop a point, it drops the VERTEX and reroutes the line straight from
+  // its neighbours — byte-identical to a blank cell and invisible to the author. A genuinely blank
+  // cell stays legitimate (isNumericOrEmpty accepts ""): blank means absent, per CONFIG-SPEC.md.
+  const numericCols = [...ciCols, ...overlayCols.filter((c) => !ciCols.includes(c))];
 
   // Bail before row scanning if structural columns are absent — the per-row checks would
   // just repeat the same missing-column failure for every row.
   if (errors.length) return { valid: false, errors };
 
-  // Per-row: x parses under xAxisType; value + CI numeric-or-empty. Collect the series + shape sets.
+  // Per-row: x parses under xAxisType; value + numericCols numeric-or-empty. Collect the series +
+  // shape sets.
   const seriesSeen = new Set<string>();
   const shapeSeen = new Set<string>();
   for (let i = 0; i < rows.length; i++) {
@@ -819,7 +833,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     if (!isNumericOrEmpty(valRaw)) {
       errors.push(`row ${rowNum}: ${cols.value} ${JSON.stringify(valRaw)} is not numeric`);
     }
-    for (const col of ciCols) {
+    for (const col of numericCols) {
       const v = row[col] ?? "";
       if (!isNumericOrEmpty(v)) errors.push(`row ${rowNum}: ${col} ${JSON.stringify(v)} is not numeric`);
     }

@@ -246,6 +246,43 @@ describe("overlays — data checks", () => {
     expect(r.valid).toBe(false);
     expect(r.errors.join(" ")).toMatch(/fitted/);
   });
+
+  // The cells have to be numeric-or-empty, exactly like `value` and the confidence_bands
+  // lower/upper columns. engine/index.ts reads an overlay column with unary `+` and drops anything
+  // non-finite, so a typo does not drop a POINT — it drops the whole vertex and REROUTES the line
+  // between its neighbours, byte-identically to the blank-cell case, with nothing reported.
+  it("rejects a non-numeric cell in an overlay column, naming the row and the column", () => {
+    const bad: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "2", value: "2", series: "A", yhat: "oops" },
+    ] as unknown as TidyRow[];
+    const r = validateChartData({ ...BASE, overlays: [{ column: "yhat" }] } as never, bad);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/row 3/);
+    expect(r.errors.join(" ")).toContain("yhat");
+    expect(r.errors.join(" ")).toMatch(/not numeric/);
+  });
+
+  it("accepts a BLANK cell in an overlay column — a blank is legitimately absent, not an error", () => {
+    const sparse: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1" },
+      { time: "2", value: "2", series: "A", yhat: "" },
+      { time: "3", value: "3", series: "A", yhat: "3.1" },
+    ] as unknown as TidyRow[];
+    expect(validateChartData({ ...BASE, overlays: [{ column: "yhat" }] } as never, sparse).valid).toBe(
+      true,
+    );
+  });
+
+  it("leaves columns no overlay names alone — a text column beside the data is not an error", () => {
+    const withText: TidyRow[] = [
+      { time: "1", value: "1", series: "A", yhat: "1.1", note: "revised" },
+      { time: "2", value: "2", series: "A", yhat: "2.1", note: "" },
+    ] as unknown as TidyRow[];
+    expect(validateChartData({ ...BASE, overlays: [{ column: "yhat" }] } as never, withText).valid).toBe(
+      true,
+    );
+  });
 });
 
 // Second review wave, finding 3a: annotation-legend.ts pushes an overlay's legend row straight
