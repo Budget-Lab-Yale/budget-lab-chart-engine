@@ -746,4 +746,51 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     );
     expect(order.slice(0, 2)).toEqual(["C", "B"]); // C first (pinned first) then B, at the bottom
   });
+
+  // The SECOND throw site in the same restack, and the reason the outer try/finally alone was not
+  // enough: the pin-restoration loop itself calls legend.toggle(s) -> applyHighlight -> onHighlight
+  // -> notify(onLegendSelect). A consumer callback that throws THERE throws from inside the
+  // `finally`, which is not covered by that finally -- so `suppressRestack = false` was skipped and
+  // every later restack on the mount was silently dead. Unlike the onRender case above, this throw
+  // is NOT swallowed by jsdom at the toggle call (we call toggle() directly, not via dispatchEvent);
+  // it propagates up to the legend button's click listener, where jsdom reports it.
+  it("a throwing onLegendSelect during pin restoration does not permanently disable future restacks", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    // Armed only for the first notify carrying a NON-EMPTY active set after the click. Call order
+    // inside one restack is: draw()'s fresh legend build (active = [], skipped by the length test),
+    // then the pin-restoration toggle (active = ["C"]) -- the site under test.
+    let armed = false;
+    const seen: string[][] = [];
+    mountChart(container, {
+      spec: AREA_SPEC,
+      rows: AREA_ROWS,
+      onLegendSelect: (ctx) => {
+        seen.push(ctx.active);
+        if (armed && ctx.active.length > 0) {
+          armed = false;
+          throw new Error("consumer bug in onLegendSelect");
+        }
+      },
+    });
+    const caught: unknown[] = [];
+    const onUncaught = (err: unknown): void => { caught.push(err); };
+    process.once("uncaughtException", onUncaught);
+    armed = true;
+    legendItem(container, "C")!.click();
+    process.removeListener("uncaughtException", onUncaught);
+    expect(caught.length).toBe(1);
+    expect((caught[0] as Error).message).toBe("consumer bug in onLegendSelect");
+
+    // The pin itself was restored (togglePin mutates its state and the DOM BEFORE it notifies).
+    expect(legendItem(container, "C")!.getAttribute("aria-pressed")).toBe("true");
+
+    // The observable proof that suppressRestack was reset: a SUBSEQUENT restack still works. With
+    // the reset skipped, clicking "B" re-renders nothing and the band order stays ["C", "A", ...].
+    legendItem(container, "B")!.click();
+    const order = [...container.querySelectorAll('g[aria-label="area"] path[data-series]')].map((p) =>
+      p.getAttribute("data-series"),
+    );
+    expect(order.slice(0, 2)).toEqual(["C", "B"]);
+  });
 });

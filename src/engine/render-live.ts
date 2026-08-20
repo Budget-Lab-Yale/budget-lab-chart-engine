@@ -951,24 +951,46 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           restackOrder = next;
           suppressRestack = true;
           lastWidth = -1; // force draw() past its same-width early return
-          // try/finally: onRender (called at the tail of draw(), inside the "restack" branch
-          // above) may throw. draw()'s OWN body — the render, the DOM swap, and reassigning
-          // currentLegendHandle to the fresh legend — has already completed successfully by the
-          // time onRender's notify() runs, so the finally below always restores the pins onto the
-          // CORRECT (fresh) legend handle. Without this, a throwing onRender would abort
-          // onHighlight before the pin-restoration loop and the suppressRestack reset ran,
-          // leaving suppressRestack stuck true forever (silently disabling every future restack on
-          // this mount) and the legend's pin markers desynced from restackOrder — a permanent,
-          // silent break, worse than the throw itself. The exception is NOT swallowed: it still
-          // propagates to whatever called onHighlight (a legend click, or this same
-          // pin-restoration loop re-entering — guarded off by suppressRestack) after this cleanup
-          // runs, matching the live path's existing rule that a throwing consumer callback should
-          // surface, not be hidden.
+          // A stuck `suppressRestack` silently disables every future restack on this mount — a
+          // permanent break, worse than any throw it could come from. There are THREE consumer
+          // callbacks between here and the reset that can throw, so the cleanup is nested to make
+          // the reset unreachable-proof:
+          //
+          //  - OUTER try: onRender fires at the tail of draw()'s "restack" branch. draw()'s own
+          //    body — the render, the DOM swap, and reassigning currentLegendHandle to the fresh
+          //    legend — has already completed by then, so the outer finally always re-pins onto
+          //    the CORRECT (fresh) handle.
+          //  - INNER try: the re-pin loop itself calls legend.toggle → applyHighlight →
+          //    onHighlight → notify(onLegendSelect). A throwing onLegendSelect therefore throws
+          //    from INSIDE the outer finally, which that finally cannot catch. The inner finally is
+          //    what keeps the reset reachable in that case.
+          //  - PER-TOGGLE catch: legend.ts's togglePin mutates its pin set and the legend DOM
+          //    BEFORE it notifies, so a consumer throw there says nothing about the legend's state.
+          //    Aborting the loop is what would desync the REMAINING pins from restackOrder, which
+          //    already names them all as bottom-of-stack. Every pin is restored; the first error is
+          //    rethrown afterward.
+          //
+          // `suppressRestack` stays true for the whole loop on purpose — each toggle re-enters
+          // onHighlight, and the restack branch above must skip rather than recurse — so the reset
+          // sits AFTER the loop, in the inner finally, never before it.
+          //
+          // No exception is swallowed: the first one still propagates to whatever called
+          // onHighlight (a legend click, or this same loop re-entering) once the cleanup has run,
+          // matching the live path's rule that a throwing consumer callback should surface.
           try {
             draw(card.clientWidth || target, currentLegendPos ?? legendPos, "restack");
           } finally {
-            if (currentLegendHandle) for (const s of pins) currentLegendHandle.toggle(s);
-            suppressRestack = false;
+            try {
+              const pinErrors: unknown[] = [];
+              if (currentLegendHandle) {
+                for (const s of pins) {
+                  try { currentLegendHandle.toggle(s); } catch (e) { pinErrors.push(e); }
+                }
+              }
+              if (pinErrors.length) throw pinErrors[0];
+            } finally {
+              suppressRestack = false;
+            }
           }
           // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
           // Skipped if draw() threw above (the exception already propagated past this point).
