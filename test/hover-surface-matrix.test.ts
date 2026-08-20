@@ -97,7 +97,10 @@ type Cell = {
   /** A floating tooltip CARD is shown (`.tbl-tooltip` at opacity 1). */
   card: boolean;
   /** The card's row labels, in order, colon stripped. `[]` when no card — and also when a shown
-   *  card's rows carry no label at all (a single-series histogram; see that row). */
+   *  card's rows carry no label at all, which is EVERY single-series chart type that cards
+   *  (histogram, categorical-x line, dot plot, temporal line, area): no series name ⇒ no label and
+   *  no colon (crosshair.ts's `tooltipSeriesRowHtml`). Only the histogram row below measures that
+   *  case — the other fixtures name two series each, so their labels are the series names. */
   cardRows: string[];
   /** Value pills — `.tbl-coord-pill` inside a shown coordinated-cursor group. */
   pills: boolean;
@@ -387,6 +390,10 @@ const EXPECTED: Record<string, Cell> = {
   // name — so that row carries NO label and no colon, just the value (it used to read ": 5.00").
   // `cardRows: []` beside `card: true` therefore means "a card whose row has no label", NOT "no
   // card" — the `card` column is what distinguishes them.
+  // This is the one row here that measures the unnamed-series case, because the histogram fixture is
+  // single-series by construction while every other fixture above names two series. The same rule
+  // now governs a single-series categorical-x line, dot plot, temporal line and area — one shared
+  // row builder — and test/single-series-card-label.test.ts is the per-type gate for all five.
   "histogram · standalone":               { card: true,  cardRows: [],                        pills: false, guide: false, dot: false, region: false, axisLabel: false },
   "histogram · 2-pane":                   { card: false, cardRows: [],                        pills: true,  guide: false, dot: false, region: true,  axisLabel: true  },
   // Scatter: per-POINT hover (`attachPointHover`), never emitOnly — a card in both, and no

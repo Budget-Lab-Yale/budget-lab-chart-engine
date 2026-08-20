@@ -233,9 +233,10 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       if (v == null || Number.isNaN(v)) continue;
       total += v;
       totalAny = true;
-      const display = (seriesLabels && seriesLabels[series]) || series;
-      const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-      html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+      html += tooltipSeriesRowHtml(series, yFormat(v), {
+        ...(seriesLabels ? { seriesLabels } : {}),
+        ...(opts.icons ? { icons: opts.icons } : {}),
+      });
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
     if (opts.showTotal && totalAny) {
@@ -524,6 +525,38 @@ function rowIcon(series: string, icons: Map<string, IconSpec> | undefined): Icon
   return icons?.get(series) ?? { shape: "none" };
 }
 
+/** PURE — one SERIES row of a tooltip card: the series' key, then `Label: value` — or the value
+ *  ALONE when the series has no name.
+ *
+ *  **No name ⇒ no label AND no colon**, and this is the single place that rule lives. A chart with no
+ *  series column has one implicit series keyed SINGLE_SERIES_KEY (""), and each of the four card
+ *  builders below used to emit `<span class="tbl-tooltip-label">:</span>` for it regardless — so a
+ *  single-series histogram, categorical-x line, dot plot, temporal line and area card each read
+ *  ": 10.00", a colon labelling nothing.
+ *
+ *  No invented word instead, on any of them: what the value MEANS is whatever the value axis
+ *  measures — dollars, a share, a count — which differs per figure and not per chart type, so
+ *  "Value" would be a word standing in for the absence of one (the histogram case is sharper still:
+ *  its height is a row count, a `histogram.weight` sum, or a pre-binned `value`, so "Count" would be
+ *  false on two of the three). The swatch already identifies the mark, and an author who wants a word
+ *  has `series_labels: {"": "…"}`, legal for exactly this case (see validate.ts) — it resolves into
+ *  `display` here and prints normally.
+ *
+ *  Every label-bearing series row in this file routes through here so the builders cannot drift on
+ *  this again. The `Total` rows deliberately do NOT: their label is a fixed word that is never
+ *  empty, and they carry their own classes and rule/spacer markup.
+ *  Gated by test/single-series-card-label.test.ts (all five types, at defaults). */
+function tooltipSeriesRowHtml(
+  series: string,
+  valueText: string,
+  opts: { seriesLabels?: Record<string, string>; icons?: Map<string, IconSpec> },
+): string {
+  const display = (opts.seriesLabels && opts.seriesLabels[series]) || series;
+  const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
+  const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span> `;
+  return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
+}
+
 /**
  * PURE — build the tooltip inner HTML for ONE facet cell at the snapped x. Header is the
  * pane title + the formatted x label; then one row per series in `seriesOrder` that has a
@@ -552,9 +585,10 @@ export function buildFacetTooltipHtml(
   for (const series of tipSeries) {
     const v = bySeries.get(series)!.get(snappedX);
     if (v == null || Number.isNaN(v)) continue;
-    const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    html += tooltipSeriesRowHtml(series, yFormat(v), {
+      ...(seriesLabels ? { seriesLabels } : {}),
+      ...(opts.icons ? { icons: opts.icons } : {}),
+    });
   }
   return html;
 }
@@ -1061,9 +1095,10 @@ export function buildBandTooltipHtml(
     const v = valuesBySeries[series];
     if (v == null) continue;
     total += v;
-    const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    seriesRows += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+    seriesRows += tooltipSeriesRowHtml(series, fmt(v), {
+      ...(seriesLabels ? { seriesLabels } : {}),
+      ...(opts.icons ? { icons: opts.icons } : {}),
+    });
   }
 
   // Built but not yet placed — `totalPosition` decides which side of the series rows it lands on.
@@ -1698,16 +1733,12 @@ export function buildHistogramTooltipHtml(
   for (const series of ordered) {
     const v = bin.bySeries.get(series);
     if (v == null || Number.isNaN(v)) continue;
-    const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    // No name ⇒ no label AND no colon. A histogram with no series column has one implicit
-    // series keyed SINGLE_SERIES_KEY (""), and the row read ": 5.00" — a colon labelling nothing.
-    // There is no honest word to print instead: the height is a row count, a `histogram.weight` sum,
-    // or a pre-binned `value`, so "Count" would be false on two of the three. An author who wants a
-    // word has `series_labels: {"": "…"}`, legal for exactly this case (see validate.ts), and it
-    // still fills the label in above.
-    const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span> `;
-    html += `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    // No name ⇒ no label and no colon — the rule and its reasoning live in tooltipSeriesRowHtml,
+    // which every card builder here shares so they cannot diverge on it.
+    html += tooltipSeriesRowHtml(series, yFormat(v), {
+      ...(seriesLabels ? { seriesLabels } : {}),
+      ...(opts.icons ? { icons: opts.icons } : {}),
+    });
   }
   return html;
 }

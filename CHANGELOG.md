@@ -140,10 +140,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   carries a `series` column (single-valued, which validates) drew **no value pill at all**: its bars
   are stamped `SINGLE_SERIES_KEY` while its hover rows carried the column's value, so every pill
   lookup missed. Fixed on the hover side rather than at the stamp, because `data-series` is in the
-  rendered SVG and drives series-keyed paint. And a single-series histogram's card row read
+  rendered SVG and drives series-keyed paint. And a single-series card row read
   `": 5.00"` — a colon labelling nothing, since a chart with no series column has one implicit
   series keyed `""`; that row now carries the value alone (`series_labels: {"": "…"}` still labels
-  it). Both are hover-only: no published image changes and no golden moved. The `tbl-coord-pill`
+  it). Every card builder shares one row helper now, so this covers all of the types whose card rows
+  are series-keyed: histogram, categorical-x `line`, `dotplot`, temporal `line`, `area`, `dumbbell`,
+  and `stacked` where a card is drawn. (`scatter` is unaffected — its rows are the axis titles, not
+  series names.) No invented word instead: what the value means is whatever the value axis measures,
+  so no label is honest across figures, and the swatch already identifies the mark.
+  Both are hover-only: no published image changes and no golden moved. The `tbl-coord-pill`
   documentation said pills are drawn on every coordinated-cursor type but dumbbell, which
   over-claimed the waterfall — they are **delta-step-only** there.
 
