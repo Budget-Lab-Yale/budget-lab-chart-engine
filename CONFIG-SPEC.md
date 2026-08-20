@@ -562,7 +562,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `legendPosition` | enum | `top` \| `right`. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. An explicit value always wins. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
 | `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip. Default true. Not bar-specific. |
-| `chrome.valuePills` | boolean | Turn the per-segment value pills on the hovered band off. Bar, stacked-bar, and dot-plot charts only — pills are drawn by the band-highlight hover path, which only those chart types use. Default true. |
+| `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). **Known exception:** on a **faceted** dot-plot or categorical-x line chart, the coordinated cursor's echoed pills on the OTHER (non-hovered) panes are not yet gated by this switch — that cursor has no switch of its own. Default true. |
 
 `chrome` is deliberately just these two switches. There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
 
@@ -839,9 +839,11 @@ so a consumer stylesheet can target them without depending on presentation attri
 | `tbl-coord-dot` | the hovered point's highlight ring `<circle>` | temporal/numeric-x line charts |
 
 All seven live inside a `g.tbl-coord` wrapper. `chrome.valuePills: false` (see Bar / stacked-bar
-options, above) removes only `tbl-coord-pill`/`tbl-coord-pill-text` — `tbl-coord-region` and the
-axis-label echo still render, since hit-testing and the band highlight are untouched by that
-switch, matching `chrome.tooltip`'s contract.
+options, above) removes only `tbl-coord-pill`/`tbl-coord-pill-text` on a bar/stacked-bar band and
+the legend-gesture pills — `tbl-coord-region` and the axis-label echo still render, since
+hit-testing and the band highlight are untouched by that switch, matching `chrome.tooltip`'s
+contract. It does **not** reach a faceted dot-plot or categorical-x line chart's echoed
+`tbl-coord-pill` on the OTHER panes — see the known exception noted on `chrome.valuePills` above.
 
 #### Two acceptance criteria this deliberately does not ship
 
