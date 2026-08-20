@@ -93,6 +93,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   Consumers reading `showTotalDot` off a `renderChart` / `renderFigure` result should read `netMode`
   instead.
 
+### Upgrading
+
+A repin re-renders every published figure at once — here is what a maintainer will see change:
+
+- **`showTotalDot` → `netMode`.** `RenderResult`, `FigurePane` and `FigureRenderResult` no
+  longer carry `showTotalDot`; read `netMode` instead.
+- **Every existing stacked chart with a Total row now renders it bold, with a divider, on hover.**
+  `barStack.total.bold`/`.divider` default to `true`. No exported/published image changes —
+  tooltips are hover-only and appear in no golden fixture — but the on-screen hover card itself
+  looks different for every such chart starting now, with no spec change on anyone's part.
+- **`tbl-hover`/`tbl-render`/`tbl-legend-select` now dispatch on every mount, whether or not a
+  callback is passed.** An existing embedder's categorical (bar/stacked) charts now dispatch a
+  `tbl-hover` CustomEvent per pointermove regardless of whether anything listens — harmless on
+  its own, but new work on a hot path, and a host page listening for an unrelated bubbling event of
+  the same name will now see these.
+- **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
+  current — re-run its vendoring step at repin.
+
 ## [1.11.0] - 2026-08-17
 
 ### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
