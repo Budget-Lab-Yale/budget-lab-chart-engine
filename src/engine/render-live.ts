@@ -2201,6 +2201,7 @@ function wireFigureSvg(
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
         label: histogramBinLabelOpts(ctx.spec),
+        showPills: chromePills,
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;

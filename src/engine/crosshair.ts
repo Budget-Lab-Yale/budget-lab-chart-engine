@@ -1524,6 +1524,12 @@ export interface HistogramHoverOptions {
   tooltipContainer?: HTMLElement;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `chrome.valuePills: false` — consumed only by `attachSecondaryHistogramCursor` (the
+   *  coordinated/echo cursor): suppress just its per-series value pills. The shaded bin region,
+   *  the active-pane bin-range echo, and `onResolve`/hit-testing on the PRIMARY path above are
+   *  untouched — same split as `SecondaryBandOptions.showPills` for bar/stacked/waterfall.
+   *  `undefined` keeps today's behaviour (pills shown). */
+  showPills?: boolean;
 }
 
 /** A histogram bin: its edge values + per-series height. Derived from the binned rows. */
@@ -1869,22 +1875,27 @@ export function attachSecondaryHistogramCursor(
 
     // Per-series height pill ABOVE each bar (staggered on horizontal collision), matching the
     // vertical-bar secondary convention. Ordered by seriesOrder when given.
-    const rects = rectsByBin.get(idx) ?? [];
-    const orderedRects = order
-      ? (order.map((s) => rects.find((r) => r.series === s)).filter(Boolean) as typeof rects)
-      : rects;
-    const valid = orderedRects
-      .map((rect) => ({ rect, v: bin.bySeries.get(rect.series) }))
-      .filter((x) => x.v != null && Number.isFinite(x.v)) as Array<
-      { rect: { series: string; cx: number; y: number; fill: string | null }; v: number }
-    >;
-    const ys = staggerBarLabels(
-      valid.map((x) => ({ cx: x.rect.cx, w: coordPillWidth(yFormat(x.v)), value: x.v, y: x.rect.y - 9 })),
-      COORD_PILL_H,
-    );
-    valid.forEach((x, i) =>
-      addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), x.rect.fill ?? colorFor(x.rect.series), weight),
-    );
+    // showPills: false (chrome.valuePills) suppresses only these value pills — the bin region
+    // above and the active-pane bin-range echo below are untouched, matching
+    // SecondaryBandOptions' identical split (see its two call sites' comments).
+    if (opts.showPills !== false) {
+      const rects = rectsByBin.get(idx) ?? [];
+      const orderedRects = order
+        ? (order.map((s) => rects.find((r) => r.series === s)).filter(Boolean) as typeof rects)
+        : rects;
+      const valid = orderedRects
+        .map((rect) => ({ rect, v: bin.bySeries.get(rect.series) }))
+        .filter((x) => x.v != null && Number.isFinite(x.v)) as Array<
+        { rect: { series: string; cx: number; y: number; fill: string | null }; v: number }
+      >;
+      const ys = staggerBarLabels(
+        valid.map((x) => ({ cx: x.rect.cx, w: coordPillWidth(yFormat(x.v)), value: x.v, y: x.rect.y - 9 })),
+        COORD_PILL_H,
+      );
+      valid.forEach((x, i) =>
+        addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), x.rect.fill ?? colorFor(x.rect.series), weight),
+      );
+    }
 
     // Active (hovered) pane: draw the bin range on the x-axis row as a frosted pill, using the SAME
     // label formatter/opts as the hover tooltip so the coordinated label matches.
