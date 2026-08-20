@@ -341,6 +341,78 @@ describe("overlays[].tooltip on a small-multiples pane", () => {
   });
 });
 
+describe("overlays[].tooltip in the DEFAULT small-multiples configuration", () => {
+  // The block above sets `coordinated_cursor: false`, which is what leaves each pane a tooltip
+  // CARD for the overlay row to land in. This block is the same figure WITHOUT that flag — the
+  // default, i.e. what an author gets without asking for anything — and pins the fact that makes
+  // CONFIG-SPEC's narrowed claim true: a coordinated line/area pane has no card at all, so there
+  // is no row anywhere. `attachCrosshair` is attached `emitOnly` (crosshair.ts: no guide, no
+  // tooltip) and `attachSecondaryLineCursor` draws the hover in place instead — guide, per-series
+  // dot, value pill. If a coordinated pane ever regains a card, THIS test fails, and the doc
+  // sentence naming `coordinated_cursor: false` has to be revisited with it.
+  const FACET_ROWS: TidyRow[] = [
+    { pane: "P1", t: "0", v: "10", s: "A", fit: "1" },
+    { pane: "P1", t: "1", v: "12", s: "A", fit: "2" },
+    { pane: "P2", t: "0", v: "20", s: "A", fit: "5" },
+    { pane: "P2", t: "1", v: "24", s: "A", fit: "6" },
+  ] as unknown as TidyRow[];
+
+  function defaultFacetSpec(chartType: "line" | "area"): ChartSpec {
+    return {
+      ...BASE,
+      chartType,
+      columns: { x: "t", value: "v", series: "s", facet: "pane" },
+      small_multiples: { columns: 2, mode: "per-pane" },
+      overlays: [{ column: "fit", label: "Trend", tooltip: true }],
+    } as unknown as ChartSpec;
+  }
+
+  for (const chartType of ["line", "area"] as const) {
+    it(`${chartType}: the coordinated cursor shows no card, so tooltip: true adds no row`, () => {
+      const el = mount(defaultFacetSpec(chartType), FACET_ROWS);
+      const panes = el.querySelectorAll<SVGSVGElement>(".figure-grid svg");
+      expect(panes.length).toBe(2);
+      hoverAt(panes[0]!, 1, 0, 1);
+      // No card — not "a card missing the overlay row". The series rows are absent too.
+      expect(document.querySelector(".tbl-tooltip")).toBeNull();
+      expect(rows()).toEqual([]);
+      // What the reader gets instead, on the hovered pane and the echoed one alike: the in-place
+      // cursor. Asserted so this test fails if the coordinated cursor stops drawing at all (which
+      // would make "the value is in the pill, not the card" false for a different reason).
+      for (const pane of panes) {
+        expect(pane.querySelectorAll(".tbl-coord-guide").length).toBe(1);
+        expect(pane.querySelectorAll(".tbl-coord-pill-text").length).toBe(1);
+      }
+    });
+  }
+
+  it("a lone pane has nothing to coordinate, so it keeps its card and its row", () => {
+    // render-live's `coordinated` gate is `coordinated_cursor !== false && panes.length > 1` for a
+    // line figure, so a facet column resolving to ONE value keeps the standalone tooltip. Pinned
+    // because CONFIG-SPEC names this case alongside the flag.
+    const el = mount(defaultFacetSpec("line"), FACET_ROWS.filter((r) => r.pane === "P1"));
+    const panes = el.querySelectorAll<SVGSVGElement>(".figure-grid svg");
+    expect(panes.length).toBe(1);
+    hoverAt(panes[0]!, 1, 0, 1);
+    expect(rows()).toEqual(["A|12.00", "Trend|2.00"]);
+  });
+
+  it("coordinated_cursor: false is the whole difference — same spec, and the row is back", () => {
+    // The pair, in one test: only that flag distinguishes the two figures, so it is the flag the
+    // doc has to name.
+    const el = mount(
+      {
+        ...(defaultFacetSpec("line") as object),
+        small_multiples: { columns: 2, mode: "per-pane", coordinated_cursor: false },
+      } as unknown as ChartSpec,
+      FACET_ROWS,
+    );
+    const panes = el.querySelectorAll<SVGSVGElement>(".figure-grid svg");
+    hoverAt(panes[0]!, 1, 0, 1);
+    expect(rows()).toEqual(["A|12.00", "Trend|2.00"]);
+  });
+});
+
 describe("overlays[].tooltip is ignored on a histogram", () => {
   // A histogram's hover resolves a bin RANGE, not an x, so there is no one value for a fitted or
   // asserted line to report there. CONFIG-SPEC.md states the flag is silently ignored on this chart

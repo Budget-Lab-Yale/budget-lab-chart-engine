@@ -45,7 +45,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   value at the hovered x as a row of its own — behind a separator, so the observed series and their
   Total stay one block, and carrying a line swatch in the overlay's own colour and dash so a modelled
   value is not mistaken for an observed one. Honoured on `line` and `area` on a continuous axis
-  (standalone and in small-multiples panes) and on `scatter`; **silently ignored on `histogram`**,
+  (standalone; in small-multiples panes only with `coordinated_cursor: false`, or on a single-pane
+  figure — the default coordinated cursor replaces a pane's card with the in-place guide/dot/pill,
+  and there is then no card for the row to land in) and on `scatter`; **silently ignored on `histogram`**,
   whose hover resolves a bin range rather than a single x. A `by: series` fit adds one row per series,
   which is uncapped — worth thinking about before setting it on a many-series chart.
 
