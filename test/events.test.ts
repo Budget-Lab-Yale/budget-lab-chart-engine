@@ -794,3 +794,106 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     expect(order.slice(0, 2)).toEqual(["C", "B"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// onRender — the deferred "mount" dispatch and a re-render that beats it
+// ---------------------------------------------------------------------------
+// The mount notification is queued on a microtask (see the onRender describe block above) closing
+// over the svg it was built with. A host that changes a title selector SYNCHRONOUSLY after
+// mountChart() returns reaches requestAccentRedraw first, so the observed order is
+// reselect(current) then mount(the svg canvas.replaceChildren has already removed). Anything the
+// consumer's mount handler does to that svg is invisible — a silent no-op in the one callback that
+// exists to let a consumer decorate the chart it just mounted.
+//
+// Asserting only that the callback FIRED passes either way (it always fires; `disposed` is false).
+// The assertion that distinguishes them is whether the mount handler's own DOM mutation is
+// reachable from the container afterward.
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Appends a `<rect data-render-phase="…">` to whatever svg the dispatch handed us. */
+const markPhase = (ctx: { svg: SVGSVGElement; phase: string }): void => {
+  const marker = ctx.svg.ownerDocument.createElementNS(SVG_NS, "rect");
+  marker.setAttribute("data-render-phase", ctx.phase);
+  ctx.svg.appendChild(marker);
+};
+
+/** Drive the inline title selector to its second option, synchronously (same tick). */
+function pickSecondOption(container: HTMLElement): void {
+  container.querySelector<HTMLButtonElement>("button.inline-select")!.click();
+  container.querySelector<HTMLLIElement>('li[data-id="country"]')!.click();
+}
+
+const SELECTOR_SPEC: ChartSpec = {
+  chartType: "line",
+  title: "Real GDP by {dimension}",
+  xAxisType: "temporal",
+  data: "inline",
+  title_selectors: {
+    dimension: {
+      options: [
+        { id: "sector", label: "Sector" },
+        { id: "country", label: "Country" },
+      ],
+      default: "sector",
+    },
+  },
+} as unknown as ChartSpec;
+
+const LINE_ROWS: TidyRow[] = [
+  { time: "2024-01-01", series: "A", value: "1" },
+  { time: "2024-02-01", series: "A", value: "2" },
+];
+
+describe("onRender — a synchronous re-render before the deferred mount dispatch", () => {
+  it("standalone: the mount handler's DOM mutation is visible in the live chart, not on a detached svg", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, {
+      spec: SELECTOR_SPEC,
+      rows: LINE_ROWS,
+      width: 720,
+      height: 360,
+      onRender: markPhase,
+    });
+
+    // Same tick as the mount: this reaches requestAccentRedraw -> draw(…, "reselect"), which
+    // replaces the canvas' svg before the queued mount microtask runs.
+    pickSecondOption(container);
+    await flushMicrotasks();
+
+    // The reselect dispatch is synchronous, so its marker is on the live svg either way — it is
+    // the control, proving the interleaving really happened.
+    expect(container.querySelector('svg [data-render-phase="reselect"]')).not.toBeNull();
+    expect(container.querySelector('svg [data-render-phase="mount"]')).not.toBeNull();
+  });
+
+  it("small multiples: each pane's mount handler mutation is visible in the live panes", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, {
+      spec: {
+        ...SELECTOR_SPEC,
+        chartType: "bar",
+        xAxisType: "categorical",
+        columns: { x: "time", value: "value", facet: "pane" },
+        small_multiples: { columns: 2, mode: "shared" },
+      } as unknown as ChartSpec,
+      rows: [
+        { pane: "P1", time: "A", value: "1" },
+        { pane: "P1", time: "B", value: "2" },
+        { pane: "P2", time: "A", value: "3" },
+        { pane: "P2", time: "B", value: "4" },
+      ] as unknown as TidyRow[],
+      width: 838,
+      height: 420,
+      onRender: markPhase,
+    });
+
+    pickSecondOption(container);
+    await flushMicrotasks();
+
+    expect(container.querySelectorAll('svg [data-render-phase="reselect"]').length).toBe(2);
+    expect(container.querySelectorAll('svg [data-render-phase="mount"]').length).toBe(2);
+  });
+});

@@ -838,6 +838,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // --- chart controller: re-render at the container width on resize ---
   let lastWidth = -1;
   let currentOverlay: OverlayEl | null = null;
+  // The svg CURRENTLY in the canvas, re-read (not captured) by the deferred "mount" onRender
+  // dispatch below — see it for why. Null between a failed render and the next successful one:
+  // draw()'s catch replaces the canvas with a .figure-error and there is no live svg to report.
+  let currentSvg: SVGSVGElement | null = null;
   let xTitleAdded = false;
   // Right-legend slot — created lazily when the right-legend layout is activated.
   let rightLegendSlot: HTMLElement | null = null;
@@ -911,6 +915,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       });
     } catch (e) {
       canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      currentSvg = null;
       return;
     }
     const {
@@ -1011,6 +1016,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
     // overflows into the scroll wrapper below the floor instead of being CSS-scaled down.
     canvas.replaceChildren(svg);
+    currentSvg = svg;
 
     if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
@@ -1391,7 +1397,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // not once per pin the restoration loop re-toggles afterward (those re-entrant calls never
     // reach a NEW draw()).
     if (renderPhase) {
-      const renderCtx = { svg, phase: renderPhase };
       if (renderPhase === "mount") {
         // Deferred: this IS mountChart's own initial call, still executing inside mountChart's
         // own body — everything after it (requestAccentRedraw wiring, the scroll listener, the
@@ -1411,9 +1416,32 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // contract state, not DOM detachment; teardown never removes the card from its container.
         // Checked INSIDE the microtask (not before scheduling it) since `disposed` is only known
         // at the time this callback actually runs.
-        queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
+        //
+        // The svg is RE-READ from `currentSvg` inside the microtask rather than captured with this
+        // closure. Deferring means a synchronous re-render can land first — a host that changes a
+        // title selector immediately after mountChart() returns reaches requestAccentRedraw, whose
+        // draw() runs `canvas.replaceChildren(newSvg)` and notifies "reselect" synchronously — and
+        // the svg this closure was created with is by then DETACHED. Handing a consumer that node
+        // makes every DOM mutation its mount handler performs invisible: a silent no-op in the one
+        // callback that exists so a consumer can decorate the chart it just mounted.
+        //
+        // RE-TARGET rather than skip: "mount" means "the first notification for this mounted
+        // chart", and a consumer's one-time decoration must land SOMEWHERE or it never happens at
+        // all for the life of the chart. (Whether the label is exactly right in that sequence is a
+        // smaller complaint than never firing; a consumer that decorates on more than one phase is
+        // already handed the same fresh svg twice per redraw and has to be idempotent regardless.)
+        // Identity is read as `currentSvg`, the reference draw() assigns beside its own
+        // replaceChildren: `svg.parentNode === canvas` would answer the same question here but not
+        // in mountFigure, where each pane's svg lives in its own cell wrapper, and a draw counter
+        // would need threading and keeping in step to say no more than the live reference does.
+        // Deliberately NOT `svg.isConnected`: a mount into a detached container reports false on a
+        // perfectly current svg (most of the test suite mounts exactly that way).
+        queueMicrotask(() => {
+          if (disposed || !currentSvg) return;
+          notify(card, "tbl-render", { svg: currentSvg, phase: "mount" as const }, opts.onRender);
+        });
       } else {
-        notify(card, "tbl-render", renderCtx, opts.onRender);
+        notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
       }
     }
   };
@@ -2359,6 +2387,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   container.appendChild(card);
 
   let lastSig = "";
+  // The pane svgs CURRENTLY in the grid, by pane index — re-read (not captured) by the deferred
+  // "mount" onRender dispatch below; see mountChart's identical dispatch comment. Emptied by a
+  // failed render, which replaces the grid with a .figure-error and leaves no live pane at all.
+  let currentPaneSvgs: Array<SVGSVGElement | undefined> = [];
 
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
@@ -2457,6 +2489,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           });
     } catch (e) {
       grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      currentPaneSvgs = [];
       return; // leave lastSig unchanged so a same-width re-render retries after a fix
     }
     lastSig = sig; // commit only after a successful render
@@ -2486,6 +2519,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
     }
+    currentPaneSvgs = fig.panes.map((p) => (p.svg as SVGSVGElement | undefined) ?? undefined);
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     // Each pane registers its value-pill driver here; the legend fires them all on highlight.
@@ -2583,16 +2617,20 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // resize/reselect saw the PREVIOUS render's legend, and any DOM a consumer applied here was
     // wiped a few lines later.
     if (renderPhase) {
-      for (const pane of fig.panes) {
-        if (!pane.svg) continue;
-        const renderCtx = { svg: pane.svg, phase: renderPhase };
+      fig.panes.forEach((pane, i) => {
+        if (!pane.svg) return;
         if (renderPhase === "mount") {
-          // Guarded on `disposed` -- see mountChart's identical dispatch comment.
-          queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
+          // Guarded on `disposed`, and RE-READING the pane's live svg by index instead of capturing
+          // this render's -- see mountChart's identical dispatch comment for both.
+          queueMicrotask(() => {
+            const live = currentPaneSvgs[i];
+            if (disposed || !live) return;
+            notify(card, "tbl-render", { svg: live, phase: "mount" as const }, opts.onRender);
+          });
         } else {
-          notify(card, "tbl-render", renderCtx, opts.onRender);
+          notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
         }
-      }
+      });
     }
   };
 
