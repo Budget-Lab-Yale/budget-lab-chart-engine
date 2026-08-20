@@ -282,6 +282,43 @@ describe("onRender", () => {
     expect((caught as Error | undefined)?.message).toBe("boom");
     process.removeListener("uncaughtException", onUncaught);
   });
+
+  // The deferral itself opens a second hole: a synchronous mount-then-teardown (React
+  // StrictMode's dev double-invoke does exactly this) would otherwise let the queued "mount"
+  // dispatch fire AFTER the caller has already torn the chart down -- handing onRender a
+  // detached svg for a chart the consumer explicitly disposed of. The companion assertion (no
+  // teardown call) proves this is the disposed-guard doing the suppressing, not microtask timing
+  // just happening to be slow.
+  it("does NOT fire onRender's mount phase if the mount is torn down before the deferred microtask runs", async () => {
+    const container = document.createElement("div");
+    const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    const destroy = mountChart(container, {
+      spec: stackedSpec(),
+      rows: STACKED_ROWS,
+      width: 600,
+      height: 360,
+      onRender: (ctx) => seen.push(ctx),
+    });
+    destroy(); // synchronous, immediately -- before the deferred microtask has run
+    await flushMicrotasks();
+    expect(seen.length).toBe(0);
+  });
+
+  it("(companion) DOES fire onRender's mount phase when the mount is left standing -- proving the guard, not slow microtasks", async () => {
+    const container = document.createElement("div");
+    const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    mountChart(container, {
+      spec: stackedSpec(),
+      rows: STACKED_ROWS,
+      width: 600,
+      height: 360,
+      onRender: (ctx) => seen.push(ctx),
+    });
+    // No destroy() call.
+    await flushMicrotasks();
+    expect(seen.length).toBe(1);
+    expect(seen[0]!.phase).toBe("mount");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -426,6 +463,38 @@ describe("onHover / onRender / onLegendSelect — small multiples (wireFigureSvg
     expect(seen.length).toBe(2);
     expect(seen.every((c) => c.phase === "mount")).toBe(true);
     expect(seen.map((c) => c.svg)).toEqual(panes);
+  });
+
+  // Same disposed-guard concern as the standalone path's identical pair (mountFigure got the
+  // exact same "mount" deferral, for the exact same reason -- its own ResizeObserver/teardown
+  // construction also comes after the initial draw() call).
+  it("does NOT fire onRender's mount phase on any pane if torn down before the deferred microtask runs", async () => {
+    const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    const container = document.createElement("div");
+    const destroy = mountChart(container, {
+      spec: FACETED_SPEC,
+      rows: FACETED_ROWS,
+      width: 838,
+      height: 420,
+      onRender: (ctx) => seen.push(ctx),
+    });
+    destroy();
+    await flushMicrotasks();
+    expect(seen.length).toBe(0);
+  });
+
+  it("(companion) DOES fire onRender's mount phase per pane when left standing -- proving the guard, not slow microtasks", async () => {
+    const seen: Array<{ svg: SVGSVGElement; phase: string }> = [];
+    const container = document.createElement("div");
+    mountChart(container, {
+      spec: FACETED_SPEC,
+      rows: FACETED_ROWS,
+      width: 838,
+      height: 420,
+      onRender: (ctx) => seen.push(ctx),
+    });
+    await flushMicrotasks();
+    expect(seen.length).toBe(2);
   });
 
   // onLegendSelect's dispatch site inside mountFigure (its own renderLegend onHighlight,

@@ -770,6 +770,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // BandCrosshairOptions.onHover. Fires the host callback then the bubbling `tbl-hover` event,
   // from whatever the crosshair already resolved (never re-derived here).
   const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
+  // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — a
+  // synchronous mount-then-teardown (React StrictMode's dev double-invoke, or any fast unmount)
+  // would otherwise fire onRender for a chart that no longer exists, handing the consumer a
+  // detached svg on the very next microtask after they disposed it.
+  let disposed = false;
 
   // Inline title selectors: the mount owns ONE selections object for its whole life. The
   // header's widget change handler mutates it in place, so the PNG download (below) and any
@@ -1372,7 +1377,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // un-tearable-down and non-resizable). Queuing the notify lets mountChart() finish and
         // return normally first; the throw still surfaces (uncaught, on its own microtask) rather
         // than being swallowed — it just arrives slightly later than the other three phases.
-        queueMicrotask(() => notify(card, "tbl-render", renderCtx, opts.onRender));
+        //
+        // Guarded on `disposed`: a caller that tears the mount down before this microtask runs
+        // (a synchronous mount-then-teardown — React StrictMode's dev double-invoke does exactly
+        // this) must not have onRender fire afterward for a chart that no longer exists, handed a
+        // detached svg. Checked INSIDE the microtask (not before scheduling it) since `disposed`
+        // is only known at the time this callback actually runs.
+        queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
       } else {
         notify(card, "tbl-render", renderCtx, opts.onRender);
       }
@@ -1449,6 +1460,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   }
 
   return () => {
+    disposed = true;
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
@@ -2253,6 +2265,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   card.className = "figure-card";
   // onHover: same notifier shape as mountChart's, forwarded per pane through wireFigureSvg's ctx.
   const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
+  // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — see
+  // mountChart's identical `disposed` flag for why (a synchronous mount-then-teardown must not
+  // fire onRender afterward for a chart that no longer exists).
+  let disposed = false;
   // Inline title selectors — same single shared selections object discipline as mountChart.
   // `afterChange` re-renders the pane grid so a colored option's accent recolors every pane's bars
   // live (parity with mountChart's requestAccentRedraw). Forward-declared: assigned once draw()
@@ -2446,7 +2462,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         if (!pane.svg) continue;
         const renderCtx = { svg: pane.svg, phase: renderPhase };
         if (renderPhase === "mount") {
-          queueMicrotask(() => notify(card, "tbl-render", renderCtx, opts.onRender));
+          // Guarded on `disposed` -- see mountChart's identical dispatch comment.
+          queueMicrotask(() => { if (!disposed) notify(card, "tbl-render", renderCtx, opts.onRender); });
         } else {
           notify(card, "tbl-render", renderCtx, opts.onRender);
         }
@@ -2564,6 +2581,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   }
 
   return () => {
+    disposed = true;
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     closeTitleSelectors();
