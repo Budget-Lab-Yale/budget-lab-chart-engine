@@ -11,6 +11,7 @@ import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
+import { SINGLE_SERIES_KEY } from "../spec/columns";
 import { paintedFill } from "./painted-fill";
 import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
@@ -2752,10 +2753,19 @@ export function attachSecondaryBandCursor(
   const plotH = H - mt - mb;
 
   const valByCat = new Map<string, Map<string, number>>();
+  // A pill is matched to its bar by SERIES: this map is keyed by the ROW's series and read back
+  // with the rendered rect's `data-series`. A waterfall breaks that symmetry — it is single-series
+  // by construction (validate.ts rejects data with more than one series) and its tagging layer
+  // stamps every bar SINGLE_SERIES_KEY (""), while its rows carry whatever `columns.series` holds.
+  // A single-valued series column is legal and passes validation, and there the two keys disagree
+  // and EVERY pill was dropped. Key the waterfall's values the way its rects are keyed. Fixed here
+  // rather than at the stamp: changing what `data-series` holds would alter the RENDERED svg (and
+  // would newly activate series-keyed paint like `series_patterns`) on published figures.
+  const seriesKeyOf = (r: { series: string }): string => (opts.waterfall ? SINGLE_SERIES_KEY : r.series);
   for (const r of opts.rows) {
     if (!r._xc || r._y == null || !Number.isFinite(r._y)) continue;
     if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
-    valByCat.get(r._xc)!.set(r.series, r._y);
+    valByCat.get(r._xc)!.set(seriesKeyOf(r), r._y);
   }
   const horizontal = opts.horizontal === true;
   const rectsByCat = buildRectsByCategory(svgEl, opts, horizontal);

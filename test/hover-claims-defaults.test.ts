@@ -330,3 +330,43 @@ describe("wording-only: the field reaches the pill, not just the card", () => {
     expect(coordTexts(m.svgs[0]!).join("|")).toContain(" yrs");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A WATERFALL'S VALUE PILL, WITH AND WITHOUT A `series` COLUMN.
+//
+// A waterfall is single-series by construction (validate.ts rejects data with more than one
+// series), but `columns.series` naming a column that holds ONE value is legal and passes
+// validation — real data arrives that shape. The pill is drawn by matching each rendered bar's
+// `data-series` against the hover rows' series key, and the waterfall's tagging layer stamps every
+// bar `SINGLE_SERIES_KEY` ("") while the rows carry the column's value, so the match missed and the
+// chart showed NO value pill at all. Both cases are DEFAULT configuration — the difference is the
+// data's shape, not a dial.
+// ---------------------------------------------------------------------------
+
+describe("waterfall value pills survive a single-valued series column", () => {
+  const wfRows = (withSeries: boolean): TidyRow[] =>
+    [["Up", "5"], ["Down", "-3"]].map(([step, value]) => ({
+      step,
+      value,
+      ...(withSeries ? { who: "Baseline" } : {}),
+    })) as unknown as TidyRow[];
+
+  // No `columns.kind`: an absent kind is a delta, and a delta step is the one that carries a pill.
+  const wf = (withSeries: boolean): ChartSpec =>
+    spec({
+      chartType: "waterfall",
+      xAxisType: "categorical",
+      columns: { x: "step", value: "value", ...(withSeries ? { series: "who" } : {}) },
+    });
+
+  for (const withSeries of [false, true]) {
+    it(`${withSeries ? "with" : "without"} a series column: the hovered delta step draws its pill`, () => {
+      const m = mountHover(wf(withSeries), wfRows(withSeries));
+      hoverFirstMark(m.svgs[0]!, BAR_MARK);
+      expect(coordShown(m.svgs[0]!)).toBe(true);
+      expect(
+        Array.from(m.svgs[0]!.querySelectorAll(".tbl-coord-pill-text")).map((t) => t.textContent),
+      ).toEqual(["+5"]);
+    });
+  }
+});

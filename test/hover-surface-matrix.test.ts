@@ -191,10 +191,13 @@ const histRows = (f: boolean): TidyRow[] => {
  *  it is what splits the two waterfall rows below: a delta step gets a signed value pill, a
  *  total/skip step shades only (its number is the always-on running-total label).
  *
- *  NOTE, and it is why there is no `series` column here: `buildRectsByCategory` reads each bar's
- *  `data-series`, which the waterfall's tagging layer stamps as "" — so a waterfall whose data
- *  happens to carry a `series` column keys its pills against a name no bar has and shows NO value
- *  pill at all. Do not "tidy" a series column into this fixture; it silently changes the row. */
+ *  There is no `series` column here because a waterfall does not need one (it is single-series by
+ *  construction). It used to also CHANGE the row: `buildRectsByCategory` reads each bar's
+ *  `data-series`, which the waterfall's tagging layer stamps as "", so a waterfall whose data
+ *  happened to carry a `series` column keyed its pills against a name no bar has and drew no value
+ *  pill at all. `attachSecondaryBandCursor` now keys a waterfall's values by SINGLE_SERIES_KEY, the
+ *  way its rects are keyed, so both data shapes give the rows below; the series-column shape is
+ *  gated in hover-claims-defaults.test.ts rather than doubling the rows here. */
 const wfRows = (f: boolean): TidyRow[] =>
   (f ? ["P1", "P2"] : [""]).flatMap((p) =>
     [["Start", "10", "total"], ["Up", "5", "delta"], ["Down", "-3", "delta"]].map(([t, v, k]) => ({
