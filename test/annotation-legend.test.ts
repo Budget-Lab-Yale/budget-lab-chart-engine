@@ -9,6 +9,7 @@ import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { buildAnnotationLegendItems, flattenOverWhite, annotationKey } from "../src/engine/annotation-legend";
 import { SHADE_CLASS } from "../src/engine/marks/line";
+import { ANNOTATION_LINE_CLASS } from "../src/engine/facet-chrome";
 import { TBL_COLORS } from "../src/engine/palette";
 import { validateSpec } from "../src/spec/validate";
 import { TBL, swatchWidthFor } from "../src/engine/theme";
@@ -290,6 +291,40 @@ describe("reciprocal annotation highlight", () => {
     rowFor(parent, RECESSIONS).dispatchEvent(new window.PointerEvent("pointerleave"));
     expect(dimmed(svg, "[data-annotation]")).not.toContain(true);
     expect(handle.pinnedSeries()).toEqual([]);
+  });
+
+  it("leaves chrome the legend cannot select at FULL strength", () => {
+    // The scope of "dims everything else" (CONFIG-SPEC, Hover and pin). The selection universe is
+    // keyed rows + series; legend.ts's walk is `[data-series], [data-annotation]`, so an element
+    // carrying neither is never reached. An UNKEYED reference line is exactly that — it names nothing
+    // the reader could have picked, so dimming it would only report that they picked something else.
+    // Asserted here rather than left implicit because the spec's blanket wording reads as covering
+    // it, and the same rule is what keeps an identity-less `overlays` line bright (overlays-keying).
+    const spec = {
+      ...SPEC,
+      annotations: {
+        ...(SPEC.annotations as Record<string, unknown>),
+        yAxis: [
+          { y: 3, label: "Threshold", color: "grey", legend: true },
+          { y: 4, label: "Unkeyed threshold", color: "grey" },
+        ],
+      },
+    } as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, DATA, OPTS);
+    const parent = document.createElement("div");
+    const handle = renderLegend(parent, legendItems ?? [], { svg })!;
+    handle.hoverAnnotation(RECESSIONS);
+    // The keys land on the rule's GROUP, not the <line> inside it, so the dim class does too.
+    const rules = Array.from(
+      svg.querySelectorAll<SVGGElement>(`g[class^="${ANNOTATION_LINE_CLASS}-"]`),
+    );
+    expect(rules.length).toBe(2);
+    // Spec order: the keyed "Threshold" first, then the unkeyed one.
+    expect(rules[0]!.getAttribute("data-annotation")).toBe(annotationKey("Threshold"));
+    expect(rules[1]!.getAttribute("data-annotation")).toBeNull();
+    expect(rules[1]!.getAttribute("data-series")).toBeNull();
+    // The fence: dimming really is active — the keyed rule dropped back and the unkeyed one did not.
+    expect(rules.map((g) => g.classList.contains("tbl-dimmed"))).toEqual([true, false]);
   });
 
   it("chart → legend: hoverAnnotation lights the row and its parts", () => {

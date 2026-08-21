@@ -254,8 +254,15 @@ region) and its `label` renders as a **legend row** above the plot instead of as
 **Hover and pin.** Keyed rows are interactive, in both directions:
 
 - **Hovering a row** brightens every chart element it names — all its bands, all its fills, its
-  reference line, all its rug blocks — and dims everything else, the data line included. Clicking
-  pins that highlight; a reset button appears beside the legend to clear it.
+  reference line, all its rug blocks — and dims everything else **the legend could have selected**:
+  the data line included, the other rows' elements, and a per-series [overlay](#overlay-lines) fit.
+  Clicking pins that highlight; a reset button appears beside the legend to clear it.
+- Chrome that is in **neither** universe — no legend row of its own and no series — stays at full
+  strength: an unkeyed reference line, and an [`overlays`](#overlay-lines) line that is neither keyed
+  nor per-series (a pooled `by: none` fit, a `fun`, a `slope`/`intercept` line). Such a line names
+  nothing the reader could have picked, so dimming it would report only that they picked something
+  else. Each `overlays` entry is judged on its own, so mixing the two kinds in one list is fine, and
+  a keyed overlay's confidence ribbon always behaves exactly as its own line does.
 - **Hovering a rug block** does the reverse: it marks its legend row and brightens that track's other
   parts, dimming the rest. Clicking pins it. While the pointer is on the strip the value crosshair
   stands down, so a rug hover gives one answer rather than two.

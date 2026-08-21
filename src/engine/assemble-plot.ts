@@ -1128,7 +1128,14 @@ export function assemblePlot({
 
   for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder, fill } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
-      if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
+      // Sparse, like `annotationOrder` below: an undefined slot holds the element's POSITION (so
+      // later indices don't shift) without giving it a `data-series`. Writing SINGLE_SERIES_KEY
+      // ("") there instead is not equivalent — legend.ts matches `[data-series]` by presence, so ""
+      // is reached by the dim walk and matches no selection, dimming a mark that has no legend
+      // identity against every real series.
+      if (i < seriesOrder.length && seriesOrder[i] !== undefined) {
+        el.setAttribute("data-series", seriesOrder[i] as string);
+      }
       if (shapeOrder && i < shapeOrder.length) el.setAttribute("data-shape", shapeOrder[i] as string);
       if (categoryOrder && i < categoryOrder.length) el.setAttribute("data-category", categoryOrder[i] as string);
       // Sparse: only the elements whose spec entry is keyed in the legend carry an annotation key.
@@ -1137,17 +1144,17 @@ export function assemblePlot({
       // Texture goes on `style`, which beats Plot's own `fill` ATTRIBUTE without rewriting it — so
       // the flat colour survives underneath as the ground we just read, and hover/legend dimming
       // keeps working because it toggles an opacity class rather than repainting fill.
-      const series = seriesOrder[i] as string;
+      const series = seriesOrder[i] as string | undefined;
       // Read once, before any texture is written over it: the walk is the expensive part, and after
       // `style.fill` becomes a `url(#…)` the flat colour underneath is no longer what it returns.
-      const char = fill ? hatchChars[series] : undefined;
+      const char = fill && series !== undefined ? hatchChars[series] : undefined;
       // Walked only when the answer is wanted: a hatch needs the ground of THIS element (a
       // `category_colors` bar grounds per category), while `seriesPainted` only needs the first, so
       // an untextured chart walks once per series rather than once per bar.
-      const needPainted = fill && (isHatchChar(char) || !seriesPainted.has(series));
+      const needPainted = fill && series !== undefined && (isHatchChar(char) || !seriesPainted.has(series));
       const painted = needPainted ? paintedFill(el, svg) : null;
-      if (painted && !seriesPainted.has(series)) seriesPainted.set(series, painted);
-      if (char && isHatchChar(char)) {
+      if (painted && series !== undefined && !seriesPainted.has(series)) seriesPainted.set(series, painted);
+      if (char && isHatchChar(char) && series !== undefined) {
         const ground = painted ?? seriesColorMap.get(series);
         if (ground) {
           const hatch = resolveHatch(char, ground);

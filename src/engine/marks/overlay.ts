@@ -89,9 +89,12 @@ export function buildOverlayMarks(
   // path`), in push order — the same "one tagging entry, one flat seriesOrder built by walking
   // the marks in draw order" idiom `marks/line.ts` uses for its own multi-segment `line` layer.
   // An overlay with no series identity (fun / abline / a pooled fit) still needs an entry at its
-  // position so later overlays' indices don't shift — SINGLE_SERIES_KEY ("") is inert there: no
-  // real series is ever named "", so it never mis-dims when hovering an unrelated series.
-  const combinedSeriesOrder: string[] = [];
+  // position so later overlays' indices don't shift — but that entry is UNDEFINED, not
+  // SINGLE_SERIES_KEY (""). "" is an attribute, and legend.ts's dim walk matches `[data-series]` by
+  // PRESENCE: `data-series=""` is reached and matches no selection, so the line dimmed against every
+  // real series. Only an absent attribute keeps it out of the walk. (See the sparseness contract on
+  // MarkLayers.tagging.seriesOrder.)
+  const combinedSeriesOrder: Array<string | undefined> = [];
   // Parallel to combinedSeriesOrder: the annotation key of the spec entry a keyed line came from, so
   // the same path carries BOTH keys — it dims with its series AND lights up when its legend row is
   // hovered. Undefined for a line whose label stayed in-frame (nothing moved to the legend for it).
@@ -102,14 +105,23 @@ export function buildOverlayMarks(
   // Without them the ribbon carried neither key, and legend.ts's dimming walk
   // (`[data-series], [data-annotation]`) never reached it: selecting the overlay's own annotation row
   // or its series dimmed the line and left the band permanently bright.
-  const bandSeriesOrder: string[] = [];
+  const bandSeriesOrder: Array<string | undefined> = [];
   const bandAnnotationOrder: Array<string | undefined> = [];
-  let anySeries = false;
+  // Whether ANY overlay is keyed, which decides only whether the `annotationOrder` array is attached
+  // at all. It is already sparse, so an unkeyed overlay's slot is undefined either way — this is not
+  // a gate on which elements get tagged. Which of those is per-overlay: see `tagged` below.
   let anyAnnotation = false;
 
   resolved.forEach((o, i) => {
     const entry = entries[o.entryIndex];
     const key = o.keyed && entry?.label ? annotationKey(entry.label) : undefined;
+    // PER OVERLAY, not per chart. With no series and no legend key THIS entry has no identity for the
+    // legend to select on, so its paths must carry no `data-series` — while a sibling that does have
+    // one still gets tagged. Deciding this once for the whole list (which is what accumulating the
+    // flags outside the loop did) makes a mixed list wrong in one direction or the other: either the
+    // reference line dims against every real series, or the real fit stops dimming with its own row.
+    const tagged = o.series != null || key != null;
+    const seriesTag = tagged ? (o.series ?? SINGLE_SERIES_KEY) : undefined;
     // Pushed ahead of the `rows.length < 2` return below on purpose, not by oversight: a populated
     // `o.band` requires >= 2 finite rows to exist at all (engine/overlays.ts), so that return can
     // never fire while a band is waiting to be pushed — there is no ordering bug to "fix" here.
@@ -130,9 +142,10 @@ export function buildOverlayMarks(
           },
         ),
       );
-      // Same keys the line below gets, so the ribbon dims and brightens with it in both
-      // directions — its series' legend row and its own annotation row alike.
-      bandSeriesOrder.push(o.series ?? SINGLE_SERIES_KEY);
+      // Same keys the line below gets — computed ONCE above and used by both — so the ribbon dims
+      // and brightens exactly as its line does in both directions: its series' legend row and its own
+      // annotation row alike, and untagged wherever its line is untagged.
+      bandSeriesOrder.push(seriesTag);
       bandAnnotationOrder.push(key);
     }
 
@@ -157,31 +170,31 @@ export function buildOverlayMarks(
     // keyed overlay's annotation key — that needs `annotationKey` from annotation-legend.ts, which
     // means it has to be minted HERE rather than in engine/overlays.ts (see the module-graph note).
     const segCount = new Set(rows.map((r) => r._seg)).size;
-    if (o.series != null) anySeries = true;
     if (key != null) anyAnnotation = true;
     for (let k = 0; k < segCount; k++) {
-      combinedSeriesOrder.push(o.series ?? SINGLE_SERIES_KEY);
+      combinedSeriesOrder.push(seriesTag);
       combinedAnnotationOrder.push(key);
     }
   });
 
-  // Gated on the SAME flags as the line's entry, deliberately: with no series and no legend key
-  // anywhere, an overlay has no identity for the legend to select on, and tagging its paths with the
-  // inert SINGLE_SERIES_KEY would dim them against every real series. The ribbon must behave exactly
-  // as its line does, so the two entries are pushed together or not at all.
-  if (anySeries || anyAnnotation) {
+  // Pushed UNCONDITIONALLY now. There is no chart-wide "does anything have an identity" question to
+  // ask any more: both arrays are sparse, so an all-identity-less list tags nothing even with the
+  // entry present, and a mixed list tags exactly the overlays that have an identity. The ribbon's
+  // entry is built from the same per-overlay `seriesTag` as the line's, which is what keeps
+  // "the ribbon behaves exactly as its line does" true by construction rather than by a shared flag.
+  if (combinedSeriesOrder.length) {
     tagging.push({
       selector: `g.${OVERLAY_LINE_CLASS} path`,
       seriesOrder: combinedSeriesOrder,
       ...(anyAnnotation ? { annotationOrder: combinedAnnotationOrder } : {}),
     });
-    if (bandSeriesOrder.length) {
-      tagging.push({
-        selector: `g.${OVERLAY_BAND_CLASS} path`,
-        seriesOrder: bandSeriesOrder,
-        ...(anyAnnotation ? { annotationOrder: bandAnnotationOrder } : {}),
-      });
-    }
+  }
+  if (bandSeriesOrder.length) {
+    tagging.push({
+      selector: `g.${OVERLAY_BAND_CLASS} path`,
+      seriesOrder: bandSeriesOrder,
+      ...(anyAnnotation ? { annotationOrder: bandAnnotationOrder } : {}),
+    });
   }
 
   return { underlay, overlay, tagging };

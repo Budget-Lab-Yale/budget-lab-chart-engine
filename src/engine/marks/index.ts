@@ -162,7 +162,14 @@ export interface MarkLayers {
    *  lights up when its annotation row is hovered. */
   tagging: {
     selector: string;
-    seriesOrder: string[];
+    /** SPARSE, like `annotationOrder`: an `undefined` slot leaves that element with NO
+     *  `data-series` attribute at all. That is not the same as SINGLE_SERIES_KEY (""), which IS an
+     *  attribute — legend.ts's dim walk matches `[data-series]` by PRESENCE, so "" is reached and
+     *  never matches a selection, i.e. the element dims against every real series. One selector
+     *  can therefore span marks with and without a legend identity (mixed `overlays`), which a
+     *  layer-wide "tag or don't" flag cannot express: keep the slot so later indices don't shift,
+     *  and leave it undefined so the element stays out of the walk entirely. */
+    seriesOrder: Array<string | undefined>;
     shapeOrder?: string[];
     categoryOrder?: string[];
     annotationOrder?: Array<string | undefined>;

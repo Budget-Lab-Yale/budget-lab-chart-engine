@@ -383,3 +383,136 @@ describe("overlays — a confidence ribbon dims with its line", () => {
     expect(bands[0]!.getAttribute("data-annotation")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Identity is decided PER OVERLAY, not per chart.
+//
+// `anySeries`/`anyAnnotation` were accumulated across the whole list and read once after the loop, so
+// a single keyed or per-series overlay opened the tagging gate for EVERY entry — and an identity-less
+// one (a pooled `by: "none"` fit, a `fun`, an abline with no series and no legend key) went along with
+// it, taking the inert SINGLE_SERIES_KEY ("") as its `data-series`. legend.ts's dimming walk matches
+// `[data-series]` by PRESENCE, so "" is reached, and `active.has("")` is false for every real
+// selection: an unrelated reference line and its ribbon dimmed whenever any series was picked.
+//
+// Alone, the gate stayed shut and the same overlay behaved correctly — only a MIXED list shows it.
+//
+// Both directions are asserted here on purpose. The risk of the fix is the opposite defect: marking a
+// real series identity-less so a legitimate overlay stops dimming with its legend row.
+describe("overlays — identity is decided per overlay, not per chart", () => {
+  const isDimmed = (el: Element): boolean => el.classList.contains("tbl-dimmed");
+  const lines = (svg: SVGSVGElement): SVGPathElement[] =>
+    Array.from(svg.querySelectorAll<SVGPathElement>(`g.${OVERLAY_LINE_CLASS} path`));
+  const bands = (svg: SVGSVGElement): SVGPathElement[] =>
+    Array.from(svg.querySelectorAll<SVGPathElement>(`g.${OVERLAY_BAND_CLASS} path`));
+  const keys = (els: Element[]) =>
+    els.map((e) => [e.getAttribute("data-series"), e.getAttribute("data-annotation")]);
+
+  const FITTED = annotationKey("Fitted");
+  // Entry 0: per-series AND keyed, with ribbons (two series → two lines, two bands).
+  // Entry 1: pooled, unlabelled — no series, nothing in the legend — also with a ribbon.
+  // Resolved order is entry 0's A, entry 0's B, then entry 1's pooled line, and the band marks are
+  // pushed in that same order, so index 2 is the identity-less one in BOTH arrays.
+  const MIXED = spec([
+    { method: "lm", ci: 0.95, label: "Fitted", legend: true },
+    { method: "lm", ci: 0.95, by: "none" },
+  ]);
+
+  const mount = (s: ChartSpec, rows: TidyRow[] = TWO_SERIES) => {
+    const { svg, legendItems } = renderChart(s, rows, OPTS);
+    const parent = document.createElement("div");
+    const handle = renderLegend(parent, legendItems ?? [], { svg })!;
+    return { svg, handle };
+  };
+
+  it("tags the keyed per-series overlay and leaves the identity-less one untagged", () => {
+    const { svg } = mount(MIXED);
+    expect(keys(lines(svg))).toEqual([
+      ["A", FITTED],
+      ["B", FITTED],
+      [null, null],
+    ]);
+  });
+
+  it("gives each RIBBON exactly the keys its own line has", () => {
+    // The property 3105194 established, verified for a keyed overlay and an identity-less one in the
+    // SAME chart: the band is a separate mark, so it can only match its line by construction.
+    const { svg } = mount(MIXED);
+    expect(bands(svg).length).toBe(3);
+    expect(keys(bands(svg))).toEqual(keys(lines(svg)));
+  });
+
+  it("still dims the keyed overlay's line and ribbon with their own series row", () => {
+    // The other direction: selecting A must leave A's fit bright and drop B's — both mark kinds.
+    const { svg, handle } = mount(MIXED);
+    handle.toggle("A");
+    expect(lines(svg).slice(0, 2).map(isDimmed)).toEqual([false, true]);
+    expect(bands(svg).slice(0, 2).map(isDimmed)).toEqual([false, true]);
+  });
+
+  it("does NOT dim the identity-less line or ribbon when a real series is selected", () => {
+    const { svg, handle } = mount(MIXED);
+    handle.toggle("A");
+    expect(isDimmed(lines(svg)[2]!)).toBe(false);
+    expect(isDimmed(bands(svg)[2]!)).toBe(false);
+    // The fence: dimming really is active on this chart — the scatter dropped back.
+    expect(Array.from(svg.querySelectorAll("[data-series]")).some(isDimmed)).toBe(true);
+  });
+
+  it("keeps the keyed overlay bright from its own annotation row, and the identity-less one alone", () => {
+    const { svg, handle } = mount(MIXED);
+    handle.hoverAnnotation(FITTED);
+    expect(lines(svg).map(isDimmed)).toEqual([false, false, false]);
+    expect(bands(svg).map(isDimmed)).toEqual([false, false, false]);
+    expect(Array.from(svg.querySelectorAll("[data-series]")).some(isDimmed)).toBe(true);
+  });
+
+  it("keeps a KEYED but series-less overlay tagged beside an identity-less one", () => {
+    // The third branch of the decision: `key != null` with `o.series == null` (a keyed `fun`). It has
+    // an identity — its own legend row — so it must stay in the dim walk and drop back when a real
+    // series is picked, unlike its unkeyed neighbour. Its `data-series` is the inert SINGLE_SERIES_KEY
+    // (""), retained as before; the `data-annotation` is what actually carries the row.
+    const { svg, handle } = mount(
+      spec([{ slope: 2, intercept: 0 }, { fun: "x", label: "Asserted", legend: true }]),
+    );
+    const ASSERTED = annotationKey("Asserted");
+    expect(keys(lines(svg))).toEqual([
+      [null, null],
+      ["", ASSERTED],
+    ]);
+    handle.toggle("A");
+    // The keyed overlay is not series A, so it dims; the identity-less abline is untouched.
+    expect(lines(svg).map(isDimmed)).toEqual([false, true]);
+    handle.toggle("A");
+    handle.hoverAnnotation(ASSERTED);
+    expect(lines(svg).map(isDimmed)).toEqual([false, false]);
+  });
+
+  it("does not shift indices when a `by: series` fit skips a series it cannot fit", () => {
+    // C has one observation, so fitPoly returns null and NO overlay resolves for it (engine/
+    // overlays.ts) — while C still holds a legend row. The identity-less abline that follows must
+    // stay at index 2 and untagged; taking C's slot would tag it with a series it has nothing to do
+    // with, which is the same mis-dimming from the other side.
+    const three = [
+      ...TWO_SERIES,
+      { time: "2", value: "20", series: "C" },
+    ] as unknown as TidyRow[];
+    const { svg } = mount(
+      spec([{ method: "lm", label: "Fitted", legend: true }, { slope: 1, intercept: 0 }]),
+      three,
+    );
+    expect(keys(lines(svg))).toEqual([
+      ["A", FITTED],
+      ["B", FITTED],
+      [null, null],
+    ]);
+  });
+
+  it("carries the per-overlay decision into the export SVG, which rebuilds from the spec", () => {
+    // buildExportSvg re-renders from the spec rather than serialising the live DOM, so a tagging
+    // change applied only on the live path is a silent divergence in the download.
+    const svg = buildExportSvg(MIXED, TWO_SERIES);
+    const expected = [["A", FITTED], ["B", FITTED], [null, null]];
+    expect(keys(lines(svg))).toEqual(expected);
+    expect(keys(bands(svg))).toEqual(expected);
+  });
+});

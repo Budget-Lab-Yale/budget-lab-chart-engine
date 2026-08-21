@@ -174,6 +174,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   chart hover for an existing embedder, even one that never adopts the new callbacks.
 
 ### Fixed
+- **An identity-less `overlays` line no longer dims when a legend row is selected on a chart that also
+  carries a keyed or per-series one.** Whether an overlay's paths get a `data-series` was decided once
+  for the whole list, from flags any entry could set — so on a mixed list a pooled `by: none` fit, a
+  `fun`, or a bare `slope`/`intercept` line was tagged with the inert single-series key (`""`), which
+  the legend's dim walk matches by attribute *presence* and no selection can ever satisfy. Picking any
+  series dropped an unrelated reference line and its confidence ribbon back to 15 % opacity. The same
+  overlay was correct **alone** (the gate stayed shut), which is how it survived. The decision is now
+  per overlay: a keyed or per-series entry keeps its tag and still dims with its own row, an
+  identity-less one carries no attribute either way, and a ribbon is built from its own line's key so
+  it still behaves exactly as that line does. New in 1.12.0, so no published figure is affected.
+- **`CONFIG-SPEC.md` over-claimed the reach of legend dimming.** "Hovering a row … dims everything
+  else" read as covering every drawn thing; the selection universe is keyed rows plus series, so
+  chrome in neither — an unkeyed reference line, an overlay that is neither keyed nor per-series —
+  stays at full strength. That was already true of unkeyed reference lines before this release, and
+  is now stated and test-backed. Documentation only; no behaviour changed.
 - **A negative or zero standard deviation in `dnorm`/`normalden` now breaks the overlay line instead
   of drawing an invalid curve.** `fun: "dnorm(x, 0, -1)"` validated and drew: a negative `sd` divides
   through by a negative normaliser and returns the correct density with its sign flipped (measured:
