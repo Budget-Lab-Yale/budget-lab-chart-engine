@@ -33,10 +33,14 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 > embedded in, supplied at embed time (`--eyebrow`), not a spec field.
 
 Axis constraints: `bar` and `stacked` require `xAxisType: categorical`, in both orientations — bars
-sit on a band scale, and on a continuous or date axis they silently dropped bars or drew an empty
-frame, so it is a validation error rather than a misdraw (for values over years, ages or
-percentiles, declare the x values as categories and use `x_order` to fix their order, or use
-`chartType: line`); `scatter` requires `xAxisType: numeric`; `dotplot` requires
+sit on a band scale, and on a numeric axis that band domain is the numeric domain's two **endpoints**,
+so only a chart whose entire x set is those two values (i.e. exactly two rows) draws every bar and
+every other shape silently loses the rows in between; a horizontal one draws no bars at all, and a
+date axis draws every bar but doubles the x-axis and paints a warning glyph into the figure. All of
+it is a validation error rather than a misdraw, including the two-row case that would render
+correctly — see [the note below](#why-bar-and-stacked-refuse-a-continuous-axis). For values over
+years, ages or percentiles, declare the x values as categories and use `x_order` to fix their order,
+or use `chartType: line`. `scatter` requires `xAxisType: numeric`; `dotplot` requires
 `xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
 histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
 `xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`);
@@ -597,6 +601,44 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). On a **faceted** figure it also covers the coordinated cursor's per-series pills, on the hovered pane as well as on the echoed panes. Only the pills go: the guide line, the band/bin highlight, the per-series hover dots, the hovered pane's category echo, and hit-testing are untouched. Default true — **except where `valueLabels.show` has painted the numbers into EVERY segment** (a stacked chart that is not diverging, not a small-multiples pane, and with no segment too thin for its label), where the default flips to **off** so the hover does not repeat them. One skipped segment label keeps the default at true for the whole chart, so that segment still gets a number. That is a change of default, not an override: `true` here still wins and shows both, and `false` still suppresses them anywhere. |
 
 `chrome` is deliberately just these two switches. There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
+
+#### Why `bar` and `stacked` refuse a continuous axis
+
+Both require `xAxisType: categorical`. The rule is stricter than the defect it prevents — one shape
+on a numeric axis renders correctly and is refused anyway — so here is what the axis actually does,
+and why the exception is not carved out.
+
+Bars are positioned on a **band** scale, which needs a domain of discrete keys. Only the categorical
+x-axis builds that domain from the data's x values. On a numeric axis, the domain handed to the band
+scale is the numeric domain, `[min, max]` — a two-element array, which the band scale reads as
+**exactly two categories: the endpoints**. A row is drawn only if its x *is* one of those two
+endpoints. So, measured through the renderer on a vertical single-series `bar`:
+
+| rows | bars drawn | x tick labels |
+|---|---|---|
+| 2 | 2 of 2 — every row, correctly | `1`, `2` |
+| 3 | 2 of 3 | `1`, `3` |
+| 5 | 2 of 5 | `1`, `5` |
+
+A two-row chart is complete because its x set *is* its own endpoints. That is a coincidence of how
+the domain is derived, not a supported case, and it is refused for three reasons: the exception is
+really "numeric **and** vertical **and** exactly two distinct x values" — a rule no author should
+have to carry; validation reads the spec, not the data, so narrowing it would make a figure's
+validity depend on today's row count, and a working two-row chart would start failing the day its
+data grew a third row; and the failure profile of allowing it is the worst available — right at two
+rows, quietly short at three, with no warning at any count.
+
+The other combinations fail differently, and none of them silently drop *only* interior rows:
+`orientation: horizontal` draws **no bars at all** on any continuous axis and at any row count (its
+band domain is built from string categories, which a continuous adapter never produces, so the mark
+is dropped whole). `temporal` and `quarterly` draw **every** bar, but stack a second x-axis over the
+engine's, leak an internal field name as the axis label, and paint the renderer's warning glyph into
+the SVG — which the PNG export re-renders into the published image.
+
+For values over years, ages or percentiles, declare the x values as categories and use `x_order` to
+fix their order, or use `chartType: line`. Making a genuine continuous-x bar chart work is a feature
+with axis-ordering, hover and export surface; refusing it now is what keeps that an additive change
+later.
 
 ### Histogram options
 

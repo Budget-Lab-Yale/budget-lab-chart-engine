@@ -115,23 +115,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Changed
 - **`chartType: bar` and `chartType: stacked` now require `xAxisType: categorical`.** Numeric,
   temporal and quarterly are validation errors, in both orientations. Bars are drawn on a band
-  scale whose domain `marks/bar.ts` / `marks/stacked.ts` build from the string categories only the
-  categorical x adapter produces, so every other axis type was already broken while `validateSpec`
-  reported `valid: true` — measured on five rows: `bar` + `numeric` vertical drew **2 of 5** bars, at
-  the domain endpoints and 2.4x too wide (the numeric adapter emits `domain: [xMin, xMax]`, which a
-  bar mark reads as a band domain of two categories, so the interior rows vanish); horizontal drew
-  **none**; `stacked` + `numeric` drew 4 of 8. Temporal and quarterly drew every bar but stacked
-  Plot's own band axis over the engine's, printed the internal field name `_xd` as the x-axis label,
-  and painted Plot's warning glyph into the SVG — which the PNG export re-renders into a published
-  figure. The renderer is deliberately **not** changed here: making a continuous-x bar chart
-  genuinely work is a feature with axis-ordering, hover and export surface, and this refusal is what
-  makes it a safe additive change later. `histogram` is unaffected — it is a separate chart type that
-  bins a continuous axis by design — and so are `line`/`area` on a categorical axis.
+  scale, and only the categorical x adapter builds that band domain from the data's x values. The
+  rule is deliberately **stricter than the defect** — one shape on a numeric axis renders correctly
+  and is refused anyway — so, precisely:
+  - **Numeric, vertical:** the numeric adapter emits `domain: [xMin, xMax]` and the vertical bar
+    path does not replace it, so a bar mark reads that two-element continuous domain as a band
+    domain of exactly two categories — **the endpoints**. A row is drawn only if its x *is* an
+    endpoint. Measured (rects drawn / tick labels): 2 rows → **2 of 2**, `1`,`2`; 3 rows → 2 of 3,
+    `1`,`3`; 5 rows → 2 of 5, `1`,`5`. So a **two-row** chart is complete and correct, and every
+    other shape silently loses the rows in between. The two-row case is refused anyway: it is
+    correct by coincidence of that derivation, the exception would really be "numeric **and**
+    vertical **and** exactly two distinct x values", and `validateSpec` reads the spec and not the
+    data — narrowing it would make a figure's validity depend on today's row count, so a working
+    two-row chart would start failing the day its data grew a third row.
+  - **Horizontal:** **no bars at all**, on any continuous axis at any row count — its band domain is
+    built from string categories a continuous adapter never produces, so the mark is dropped whole.
+  - **Temporal / quarterly, vertical:** drew **every** bar; nothing is dropped. The defect is chrome
+    — a second x-axis stacked over the engine's, the internal field name `_xd` leaked as the x-axis
+    label, and Plot's warning glyph painted into the SVG, which the PNG export re-renders into a
+    published figure.
+
+  Every one of those validated `valid: true` before this release. The renderer is deliberately
+  **not** changed here: making a continuous-x bar chart genuinely work is a feature with
+  axis-ordering, hover and export surface, and this refusal is what makes it a safe additive change
+  later. `histogram` is unaffected — it is a separate chart type that bins a continuous axis by
+  design — and so are `line`/`area` on a categorical axis.
 - **`overlays` are no longer available on `bar` or `stacked` in any orientation.** Unreleased
   feature, narrowed before it shipped: overlays require a non-categorical x, bar/stacked now require
   a categorical one. The horizontal-orientation rejection added earlier in this release is kept as
   the reporting site for the horizontal case, because it names the more specific reason. What this
-  removes was measured to render a fitted line over a chart drawing 2 of its 5 bars.
+  removes was measured, on five rows, to render a fitted line over a chart drawing 2 of those 5 bars.
 - **Value pills now default to off where segment value labels are painted for every segment.** A
   stacked chart with `valueLabels.show` printed its numbers in the segments and then repeated them in
   hover pills a few pixels away. The default is keyed on the labels being *painted*, not on the flag
@@ -269,8 +282,11 @@ A repin re-renders every published figure at once — here is what a maintainer 
   did report seven bar+temporal hits in the state-of-tariffs manifests; structural re-parsing of
   those exact files showed all seven were bar figures whose nearest `xAxisType` in the text
   belonged to a neighbouring `line` figure. If a spec does trip this, the fix is either
-  `xAxisType: categorical` (with `x_order` to fix the tick order) or `chartType: line`; the chart
-  it was drawing before was missing bars or empty.
+  `xAxisType: categorical` (with `x_order` to fix the tick order) or `chartType: line`. What it was
+  drawing before depends on the axis: on a numeric x, every row past the first and last was missing
+  (or, horizontally, every bar); on a temporal or quarterly x, all the bars were there but the figure
+  carried a doubled x-axis and a warning glyph. The one case that was genuinely correct — a two-row
+  numeric vertical chart — is refused too, on purpose; see the Changed entry above.
 - **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
   current — re-run its vendoring step at repin.
 

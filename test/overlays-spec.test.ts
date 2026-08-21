@@ -792,9 +792,12 @@ describe("overlays — orientation restrictions", () => {
   // This slot used to hold "still accepts overlays on a VERTICAL bar/stacked chart". That
   // expectation was deleted, not worked around: `bar`/`stacked` now require a categorical x-axis,
   // and overlays are refused ON a categorical axis, so overlays are unreachable on bar and stacked
-  // in BOTH orientations. What that test pinned had been measured to render a fitted line over a
-  // chart drawing 2 of 5 bars. The assertion below is its inverse, and it is what keeps the
-  // narrowed CONFIG-SPEC claim honest.
+  // in BOTH orientations. What that test pinned had been measured, on five rows, to render a fitted
+  // line over a chart drawing 2 of those 5 bars. (Not every bar/stacked continuous-axis shape
+  // misdraws — a two-row numeric vertical one renders correctly and is refused deliberately; see
+  // the pinning test in test/validate.test.ts. It is refused here too, which is the point.) The
+  // assertion below is the inverse of the deleted one, and it is what keeps the narrowed
+  // CONFIG-SPEC claim honest.
   it("refuses overlays on bar/stacked in EITHER orientation", () => {
     for (const chartType of ["bar", "stacked"]) {
       for (const orientation of [undefined, "vertical", "horizontal"]) {

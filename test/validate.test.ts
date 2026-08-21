@@ -327,16 +327,26 @@ describe("validateSpec (structural)", () => {
 
   // --- bar/stacked require a categorical x-axis ---
   //
-  // Measured before this guard existed (jsdom `renderChart`, 5 rows, 1 series, counting
-  // `g[aria-label="bar"] rect`): bar + numeric + vertical drew 2 of 5 rects, at the domain
-  // endpoints and 2.4x too wide — the numeric adapter emits `xPlotOpts: { domain: [xMin, xMax] }`
-  // and a bar mark reads that two-element continuous domain as a band domain of two categories, so
-  // the interior rows vanish with no warning. bar + numeric + horizontal drew 0 (bar.ts/stacked.ts
-  // build the band domain from string categories, which only the `_xc` adapter produces).
-  // stacked + numeric drew 4 of 8. temporal/quarterly drew every bar but Plot added its own band
-  // axis over the engine's, printed the internal field name `_xd` as the x-axis label, and painted
-  // its own warning glyph into the SVG — which the PNG export would carry into a published figure.
-  // Every one of those validated `true`. A refusal is strictly better than any of them.
+  // Measured before this guard existed (jsdom `renderChart`, 1 series, counting
+  // `g[aria-label="bar"] rect`). The three axis families fail in three different ways, and the
+  // numeric one has a correct case in it — be precise, because "it always misdraws" is false:
+  //
+  //   * bar + numeric + VERTICAL: the numeric adapter emits `xPlotOpts: { domain: [xMin, xMax] }`
+  //     and the vertical bar path does not replace it, so a bar mark reads that two-element
+  //     continuous domain as a band domain of exactly two categories — THE ENDPOINTS. A row is
+  //     drawn only if its x IS an endpoint: 5 rows → 2 of 5, 3 rows → 2 of 3, and 2 rows → 2 OF 2,
+  //     complete and correct, because a two-element x set IS its own endpoints. See the dedicated
+  //     pinning test below for why that correct case is refused anyway.
+  //   * bar/stacked + any continuous axis + HORIZONTAL: 0 rects, at every row count. That path
+  //     builds its band domain from string categories, which only the `_xc` adapter produces, so
+  //     the mark is dropped whole.
+  //   * bar/stacked + temporal/quarterly + vertical: EVERY bar drawn — nothing is dropped here.
+  //     The defect is chrome: Plot added its own band axis over the engine's, `bar` printed the
+  //     internal field name `_xd` as the x-axis label, and Plot painted its warning glyph into the
+  //     SVG — which the PNG export would carry into a published figure.
+  //
+  // Every one of those validated `true`. A refusal is better than all of them, and (per the pinning
+  // test) better than a rule carrying an exception for the one that worked.
   describe("bar/stacked require xAxisType categorical", () => {
     const BASE = { title: "Bar Demo", data: "data.csv" };
 
@@ -431,6 +441,77 @@ describe("validateSpec (structural)", () => {
       });
       expect(r.valid).toBe(false);
       expect(r.errors.join("\n")).toMatch(/horizontal bar chart/);
+    });
+
+    // --- The two-row numeric case is rejected ON PURPOSE. Do not "fix" this by un-guarding. ---
+    //
+    // A review of the guard correctly found that it refuses one shape which renders COMPLETELY and
+    // CORRECTLY, and this test exists so the next reviewer finds the finding already accounted for
+    // rather than rediscovering it and relaxing the rule.
+    //
+    // Measured through the unchanged renderer (jsdom, `bar` + `numeric` + vertical, one series,
+    // counting `g[aria-label="bar"] rect`), varying only the row count:
+    //
+    //   rows | rects drawn | x tick labels
+    //   -----+-------------+---------------------------------------------
+    //      2 |     2 of 2  | "1", "2"   -- every row drawn, and correct
+    //      3 |     2 of 3  | "1", "3"   -- the middle row silently gone
+    //      5 |     2 of 5  | "1", "5"   -- three rows silently gone
+    //
+    // Every rect sits at x=104 or x=404, width 240, at every row count. That is the whole mechanism:
+    // the numeric adapter emits `xPlotOpts: { domain: [xMin, xMax] }` (x-adapter.ts) and the vertical
+    // single-series bar path does not replace it (marks/bar.ts only refines paddingInner/Outer), so
+    // Plot reads that two-element CONTINUOUS domain as a BAND domain of exactly two categories. The
+    // band domain is therefore always the numeric domain's two ENDPOINTS, and a row is drawn only if
+    // its x IS one of those endpoints. With two rows the x set *is* its own endpoints, so nothing is
+    // dropped -- the two-row chart is correct by COINCIDENCE of that derivation, not by design.
+    //
+    // Why the coincidence is not carved out:
+    //   * The carve-out is not even "two rows" -- it is `numeric` AND `vertical` AND exactly two
+    //     distinct x values. Measured at two rows, `orientation: horizontal` draws 0 rects on every
+    //     axis type, and temporal/quarterly draw every bar but double the x-axis and paint Plot's
+    //     warning glyph into the SVG (which the PNG export re-renders into a published figure).
+    //   * `validateSpec` cannot see the data, so the narrowing would have to move to
+    //     `validateChartData` -- making a spec's validity depend on today's row count. A repin
+    //     re-renders the whole archive, so a two-row chart would start FAILING the day its data
+    //     grew a third row. That is worse than refusing it once.
+    //   * The failure profile of allowing it is the worst available: correct at two rows, silently
+    //     short by one at three, with no warning at any count.
+    //   * Measured usage of bar/stacked on a non-categorical axis across five repos is zero, so the
+    //     rule costs nothing published.
+    it("rejects a TWO-ROW numeric bar chart even though it would render correctly", () => {
+      const spec = {
+        ...BASE,
+        chartType: "bar",
+        xAxisType: "numeric",
+        orientation: "vertical",
+        columns: { x: "time", value: "value", series: "series" },
+      };
+      // Rejected on the spec alone -- the guard is row-count-blind by construction.
+      expect(validateSpec(spec).valid).toBe(false);
+      expect(validateSpec(spec).errors.join(" ")).toMatch(/bar.*requires xAxisType "categorical"/);
+
+      // And still rejected when the rows ARE supplied: exactly the two-row data that renders
+      // completely. `validateChart` runs `validateSpec` first, so the verdict does not depend on
+      // the row count, and this assertion is what would fail if someone narrowed the rule to
+      // "only when there are more than two rows".
+      const twoRows = [
+        { time: "1", value: "10", series: "A" },
+        { time: "2", value: "20", series: "A" },
+      ] as unknown as TidyRow[];
+      const threeRows = [
+        ...twoRows,
+        { time: "3", value: "30", series: "A" },
+      ] as unknown as TidyRow[];
+      for (const rows of [twoRows, threeRows]) {
+        const r = validateChart(spec, rows);
+        expect(r.valid).toBe(false);
+        expect(r.errors.join(" ")).toMatch(/requires xAxisType "categorical"/);
+      }
+      // Same verdict for `stacked` on two x values.
+      expect(
+        validateChart({ ...spec, chartType: "stacked" }, twoRows).valid,
+      ).toBe(false);
     });
 
     it("keeps bar/stacked options on a categorical axis working", () => {

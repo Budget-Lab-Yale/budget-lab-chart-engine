@@ -71,15 +71,37 @@ function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): 
   return null;
 }
 
-/** Bar cross-field constraint: `bar` and `stacked` draw on a BAND x-scale, whose domain
- *  `engine/marks/bar.ts` and `marks/stacked.ts` build from `data[xField]` filtered to non-empty
- *  STRINGS — which only the categorical x adapter (`_xc`) produces. On any other axis type the
- *  output was wrong while `validateSpec` said `valid: true`: measured on 5 rows, numeric drew
- *  2 of 5 bars vertically (the numeric adapter emits `domain: [xMin, xMax]`, which a bar mark reads
- *  as a band domain of two categories, so the interior rows vanish) and 0 horizontally;
- *  temporal/quarterly drew every bar but stacked Plot's own band axis over the engine's, printed
- *  the internal field name `_xd` as the x-axis label, and painted Plot's warning glyph into the
- *  SVG — which the PNG export re-renders into a published figure.
+/** Bar cross-field constraint: `bar` and `stacked` draw on a BAND x-scale, and only the categorical
+ *  x adapter (`_xc`) builds a band domain from the actual x values. On every other axis type the
+ *  output was wrong in some way while `validateSpec` said `valid: true`, but the reasons differ and
+ *  it is worth being exact about them, because one shape does render correctly:
+ *
+ *  NUMERIC, vertical — the numeric adapter emits `xPlotOpts: { domain: [xMin, xMax] }`
+ *  (engine/x-adapter.ts) and the vertical single-series path in `marks/bar.ts` does not replace it
+ *  (it only refines paddingInner/paddingOuter), so Plot reads that two-element CONTINUOUS domain as
+ *  a BAND domain of exactly two categories. The band domain is therefore always the numeric
+ *  domain's two ENDPOINTS, and a row is drawn only if its x IS one of those endpoints. So a chart
+ *  whose entire x set is those two endpoints — i.e. exactly two distinct x values — renders
+ *  COMPLETELY AND CORRECTLY, and every other shape silently drops the interior rows. Measured
+ *  (rects drawn / x tick labels): 2 rows → 2 of 2, "1","2"; 3 rows → 2 of 3, "1","3"; 5 rows →
+ *  2 of 5, "1","5". Rects at x=104 and x=404, width 240, at every row count.
+ *
+ *  NUMERIC, horizontal — 0 rects at every row count, including two. The horizontal path builds its
+ *  own band domain from the x values filtered to non-empty STRINGS, which the numeric adapter never
+ *  produces, so the domain is empty and Plot drops the whole mark.
+ *
+ *  TEMPORAL / QUARTERLY, vertical — drew EVERY bar at every row count; nothing is dropped here. The
+ *  defect is chrome, not data: Plot stacks its own band axis over the engine's, `bar` leaks the
+ *  internal field name `_xd` as the x-axis label, and Plot paints its warning glyph into the SVG —
+ *  which the PNG export re-renders into a published figure. Horizontal draws 0, as above.
+ *
+ *  The two-row numeric vertical case is refused ANYWAY, deliberately. It is correct by coincidence
+ *  of the band-domain derivation, not by design; the carve-out would be a three-way conjunction
+ *  (numeric AND vertical AND exactly two distinct x values) that no author should have to hold; and
+ *  `validateSpec` cannot see the data, so narrowing it would move the rule into data validation and
+ *  make a spec's validity depend on today's row count — a chart that renders today would start
+ *  failing the day its data grew a third row, across a whole archive at repin. See the pinning test
+ *  in test/validate.test.ts before relaxing any of this.
  *
  *  Keyed on the two literals ON PURPOSE. `FILLED_CHART_TYPES` (./filled-chart-types) is the
  *  tempting import and the wrong one: it also holds `histogram` (numeric/temporal by design),
@@ -92,10 +114,12 @@ function barBandAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): s
   if (spec.xAxisType === "categorical") return null;
   return (
     `chartType ${JSON.stringify(spec.chartType)} requires xAxisType "categorical" ` +
-    `(got ${JSON.stringify(spec.xAxisType)}) — bars sit on a band scale, so a continuous or ` +
-    "date x-axis silently drops bars or draws an empty frame. For values over years, ages or " +
-    "percentiles, either declare the x values as categories (xAxisType: categorical, with x_order " +
-    "to fix their order) or use chartType: line."
+    `(got ${JSON.stringify(spec.xAxisType)}) — bars sit on a band scale, and on a continuous or ` +
+    "date x-axis that band domain is built from the numeric domain's two endpoints, so all but the " +
+    "first and last row are silently dropped (horizontal draws no bars at all, and a date axis " +
+    "draws a doubled x-axis with a warning glyph). For values over years, ages or percentiles, " +
+    "either declare the x values as categories (xAxisType: categorical, with x_order to fix their " +
+    "order) or use chartType: line."
   );
 }
 
