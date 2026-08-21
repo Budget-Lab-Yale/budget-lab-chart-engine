@@ -206,6 +206,20 @@ describe("resolveOverlays — confidence ribbon (ci)", () => {
     expect(o!.band).toBeUndefined();
   });
 
+  // The ribbon's half-width is t(1 − (1 − ci)/2, n − p) × se, so an understated t quantile draws a
+  // ribbon NARROWER than the level it claims. At df = 1 — three points and an `lm`, which the
+  // "no band below n ≤ degree + 1" rule admits — `ci: 0.99999` needs t ≈ 63,662; a bisection capped
+  // at 10,000 returned 10,000. Checked end-to-end against the Cauchy closed form (t at df = 1 is
+  // tan(π(p − ½))) times the standard error the fit-ci tests derive by hand at x = 0.
+  it("scales the ribbon by the TRUE t quantile at an extreme confidence level", () => {
+    const [o] = resolve([{ method: "lm", ci: 0.99999 }], rows([[0, 1], [1, 3], [2, 2]]));
+    const edge = o!.band![0]!;
+    expect(edge.x).toBe(0);
+    const se = Math.sqrt(1.5) * Math.sqrt(1 / 3 + 1 / 2);
+    const t = Math.tan(Math.PI * (0.999995 - 0.5));
+    expect((edge.hi - edge.lo) / 2 / (t * se)).toBeCloseTo(1, 6);
+  });
+
   it("does not populate a band for a `fun` overlay even if `ci` were present", () => {
     const [o] = resolve([{ fun: "x", ci: 0.95 } as unknown as Overlay]);
     expect(o!.band).toBeUndefined();

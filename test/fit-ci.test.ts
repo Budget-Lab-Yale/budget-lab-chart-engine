@@ -26,6 +26,54 @@ describe("studentTQuantile", () => {
   it("is zero at the median", () => {
     expect(studentTQuantile(0.5, 7)).toBeCloseTo(0, 8);
   });
+
+  it("matches the 99.5% column", () => {
+    expect(studentTQuantile(0.995, 30)).toBeCloseTo(2.75, 3);
+    expect(studentTQuantile(0.9995, 2)).toBeCloseTo(31.599, 2);
+  });
+});
+
+// A quantile bisected inside a FIXED bracket saturates at the bracket and reports the bound as the
+// answer. `ci` is documented as any level in (0, 1) and df = 1 is reachable (an `lm` through three
+// points), so the reachable quantiles run far past any constant one could pick — and a saturated
+// critical value makes the ribbon NARROWER than the interval it claims, which for published policy
+// research is a substantive error, not a rounding one.
+//
+// Checked against the CLOSED FORM at df = 1, where Student's t is Cauchy and Q(p) = tan(π(p − ½)):
+// an independent reference that needs no printed table, at the df that pushes the quantile furthest.
+describe("studentTQuantile — past a fixed bracket", () => {
+  const cauchy = (p: number): number => Math.tan(Math.PI * (p - 0.5));
+
+  it("returns the quantile, not the bound, for ci = 0.99999 on 1 df", () => {
+    // p = 1 − (1 − 0.99999)/2 = 0.999995 ⇒ t ≈ 63,662, not 10,000.
+    const t = studentTQuantile(0.999995, 1);
+    expect(t / cauchy(0.999995)).toBeCloseTo(1, 6);
+    expect(t).toBeGreaterThan(60000);
+  });
+
+  it("tracks the Cauchy closed form out along the tail", () => {
+    for (const p of [0.9, 0.99, 0.999, 0.9999, 0.99999, 0.999999, 0.9999999]) {
+      expect(studentTQuantile(p, 1) / cauchy(p)).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("is symmetric in the far tail too", () => {
+    expect(studentTQuantile(0.000005, 1) / -cauchy(0.999995)).toBeCloseTo(1, 6);
+  });
+
+  // TERMINATION, not accuracy — this one holds before and after the fix, and exists so a growing
+  // bracket cannot run away. `1 - Number.EPSILON / 2` is the largest double below 1, i.e. the most
+  // extreme level the guard `p < 1` admits at all; the CDF saturates at exactly 1 long before, which
+  // is what stops the growth. (`1 - 1e-17` is not such a case: it rounds to exactly 1 and the guard
+  // returns NaN.)
+  it("returns a finite value at the most extreme level the guard admits", () => {
+    const p = 1 - Number.EPSILON / 2;
+    expect(p).toBeLessThan(1);
+    for (const df of [1, 2, 30]) {
+      expect(Number.isFinite(studentTQuantile(p, df))).toBe(true);
+      expect(Number.isFinite(studentTQuantile(1 - p, df))).toBe(true);
+    }
+  });
 });
 
 describe("polyFitStdError", () => {

@@ -240,13 +240,41 @@ function studentTCdf(t: number, df: number): number {
   return t > 0 ? 1 - tail : tail;
 }
 
+/** Start of the bracket search, and the bracket the overwhelming majority of calls use unchanged:
+ *  every ordinary confidence level on any df is inside it, so those quantiles bisect over exactly the
+ *  same numbers they always did. */
+const QUANTILE_BRACKET0 = 1e4;
+
+/** Hard stop on the doubling below. Never reached in practice — the CDF saturates at exactly 0/1
+ *  within ~45 doublings for the worst df, which ends the search on its own (see the note there) — so
+ *  this is a guard against an unforeseen CDF, not the working exit. `1e4 · 2^200 ≈ 1.6e64` stays
+ *  finite, so a saturated search still returns a number rather than propagating Infinity. */
+const QUANTILE_MAX_DOUBLINGS = 200;
+
 /** The p-quantile of Student's t. Bisection on the CDF: a monotone function, fast enough for the
- *  handful of calls one chart makes and much easier to verify than a rational approximation. */
+ *  handful of calls one chart makes and much easier to verify than a rational approximation.
+ *
+ *  The bracket GROWS until it actually contains p, rather than being a constant. A fixed bound
+ *  saturates instead of failing: at df = 1 (an `lm` through three points — reachable, and not
+ *  excluded by the "no band below n ≤ degree + 1" rule) with `ci: 0.99999` the quantile is ≈ 63,662,
+ *  and a bound of 10,000 returned 10,000 — so the ribbon came out NARROWER than the interval it
+ *  claimed. An understated confidence interval in published research is a substantive error, not a
+ *  cosmetic one, and `ci` is documented as any level in (0, 1), so such a spec is accepted.
+ *
+ *  TERMINATION is by the CDF, not by the counter: as |t| grows the tail underflows and `studentTCdf`
+ *  returns exactly 1 (or 0), which brackets ANY p the guard admits — p < 1 and p > 0 — after at most
+ *  ~45 doublings even at df = 1, the heaviest tail. QUANTILE_MAX_DOUBLINGS is a backstop. */
 export function studentTQuantile(p: number, df: number): number {
   if (!(p > 0 && p < 1) || !(df > 0)) return NaN;
   if (p === 0.5) return 0;
-  let lo = -1e4;
-  let hi = 1e4;
+  let bound = QUANTILE_BRACKET0;
+  for (let i = 0; i < QUANTILE_MAX_DOUBLINGS; i++) {
+    // The invariant bisection needs: cdf(-bound) < p ≤ cdf(bound).
+    if (studentTCdf(-bound, df) < p && p <= studentTCdf(bound, df)) break;
+    bound *= 2;
+  }
+  let lo = -bound;
+  let hi = bound;
   for (let i = 0; i < 200; i++) {
     const mid = (lo + hi) / 2;
     if (studentTCdf(mid, df) < p) lo = mid;
