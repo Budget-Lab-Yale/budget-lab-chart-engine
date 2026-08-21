@@ -35,6 +35,7 @@ import { resolveRugTracks, rugHeight, rugTrackColor } from "../spec/rug";
 import { labelMovedToLegend, annotationKey } from "./annotation-legend";
 import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
+import type { RenderHooks, TickLabelHookCtx } from "../spec/hooks";
 import type { XOpts } from "./x-adapter";
 import type { MarkLayers } from "./marks/index";
 
@@ -46,7 +47,7 @@ const PLOT_CLASS = "tblchart";
 
 // A subtle white halo behind annotation text (paint-order: stroke → the white stroke paints
 // behind the fill) so labels stay legible over annotation lines, bands, and dense data.
-const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
+export const LABEL_HALO = { stroke: "#FFFFFF", strokeWidth: 3, paintOrder: "stroke" } as const;
 
 // D6: horizontal bars' category band uses `align: 0` (the outer pad goes to the BOTTOM only), so
 // the first bar sits flush at the plot frame's top edge with no gap above it. A "top"-position
@@ -270,6 +271,11 @@ export interface AssembleOptions {
    *  carry a `facet` key to this pane only (see `filterAnnotationsByFacet`). Absent (single
    *  chart, or a faceted call that omits it) → every marker renders, unchanged from today. */
   paneFacetValue?: string;
+  /** Programmatic render hooks (see spec/hooks.ts). Only `tickLabel` is consumed here, at every
+   *  `makeTickFormatter` call site — wrapped rather than edited into `scales.ts`, so the hook
+   *  applies uniformly and the underlying formatter stays a pure function of ticks + affixes.
+   *  Absent/`{}` → every wrapped formatter falls through to the engine default unchanged. */
+  hooks?: RenderHooks;
 }
 
 /** What assemblePlot drew: the SVG, plus the texture facts only the RENDER knows.
@@ -307,6 +313,19 @@ export interface FacetOptions {
   cells: PaneTitleCell[];
 }
 
+/** Wrap a tick formatter with the caller's `tickLabel` hook. `null` from the hook means "engine
+ *  default", so an un-hooked axis returns the formatter's own string unchanged and the output is
+ *  byte-identical to not passing hooks at all. */
+export function withTickLabelHook(
+  fmt: (d: number) => string,
+  hooks: RenderHooks | undefined,
+  ctx: TickLabelHookCtx,
+): (d: number) => string {
+  const hook = hooks?.tickLabel;
+  if (!hook) return fmt;
+  return (d) => hook(d, ctx) ?? fmt(d);
+}
+
 export function assemblePlot({
   layers,
   yDomain,
@@ -327,6 +346,7 @@ export function assemblePlot({
   facet,
   hideYAxisLabels,
   paneFacetValue,
+  hooks,
 }: AssembleOptions): AssembleResult {
   const effMarginRight = marginRight ?? TBL_MARGIN_RIGHT;
   // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
@@ -400,7 +420,11 @@ export function assemblePlot({
   // the stagger would size its collision boxes from the short literal token instead of the
   // (usually longer) rendered number. Labels without the token are returned unchanged, so
   // charts that don't use it get byte-identical output.
-  const yTickFallbackFmt = makeTickFormatter(yTicks, valueAffixes);
+  const yTickFallbackFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
+    axis: "y",
+    ticks: yTicks,
+    affixes: valueAffixes,
+  });
   const yAxisAnn = ann.yAxis.map((m) =>
     m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
@@ -539,7 +563,15 @@ export function assemblePlot({
   if (horizontal) {
     // 2h. Vertical gridlines + x value-tick labels (skip 0 from the light grid; baseline
     //     is painted darker below). Tick labels go at the bottom (default), top, or both.
-    const xTickFmt = makeTickFormatter(yTicks, valueAffixes);
+    // Horizontal orientation: this formats the VALUE axis, which runs along the screen's x
+    // direction here — same yTicks/valueAffixes as the vertical case, so ctx.axis reports the
+    // semantic value axis ("y") rather than the screen direction, letting a tickLabel hook (e.g.
+    // thousands separators) apply consistently regardless of orientation.
+    const xTickFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
+      axis: "y",
+      ticks: yTicks,
+      affixes: valueAffixes,
+    });
     const xTicksMode = spec.x_axis_ticks ?? "bottom";
     const showBottomTicks = xTicksMode !== "top";
     const showTopTicks = xTicksMode === "top" || xTicksMode === "both";
@@ -599,7 +631,11 @@ export function assemblePlot({
     //    chart edges sit flush with the canvas.)
     marks.push(
       ...gridAndYLabels(yTicks, {
-        yTickFormat: makeTickFormatter(yTicks, valueAffixes),
+        yTickFormat: withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
+          axis: "y",
+          ticks: yTicks,
+          affixes: valueAffixes,
+        }),
         marginLeft: effMarginLeft,
         marginRight: effMarginRight,
         ...(faceted ? { gridlineClassName: GRIDLINE_CLASS } : {}),
@@ -1092,7 +1128,14 @@ export function assemblePlot({
 
   for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder, fill } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
-      if (i < seriesOrder.length) el.setAttribute("data-series", seriesOrder[i] as string);
+      // Sparse, like `annotationOrder` below: an undefined slot holds the element's POSITION (so
+      // later indices don't shift) without giving it a `data-series`. Writing SINGLE_SERIES_KEY
+      // ("") there instead is not equivalent — legend.ts matches `[data-series]` by presence, so ""
+      // is reached by the dim walk and matches no selection, dimming a mark that has no legend
+      // identity against every real series.
+      if (i < seriesOrder.length && seriesOrder[i] !== undefined) {
+        el.setAttribute("data-series", seriesOrder[i] as string);
+      }
       if (shapeOrder && i < shapeOrder.length) el.setAttribute("data-shape", shapeOrder[i] as string);
       if (categoryOrder && i < categoryOrder.length) el.setAttribute("data-category", categoryOrder[i] as string);
       // Sparse: only the elements whose spec entry is keyed in the legend carry an annotation key.
@@ -1101,17 +1144,17 @@ export function assemblePlot({
       // Texture goes on `style`, which beats Plot's own `fill` ATTRIBUTE without rewriting it — so
       // the flat colour survives underneath as the ground we just read, and hover/legend dimming
       // keeps working because it toggles an opacity class rather than repainting fill.
-      const series = seriesOrder[i] as string;
+      const series = seriesOrder[i] as string | undefined;
       // Read once, before any texture is written over it: the walk is the expensive part, and after
       // `style.fill` becomes a `url(#…)` the flat colour underneath is no longer what it returns.
-      const char = fill ? hatchChars[series] : undefined;
+      const char = fill && series !== undefined ? hatchChars[series] : undefined;
       // Walked only when the answer is wanted: a hatch needs the ground of THIS element (a
       // `category_colors` bar grounds per category), while `seriesPainted` only needs the first, so
       // an untextured chart walks once per series rather than once per bar.
-      const needPainted = fill && (isHatchChar(char) || !seriesPainted.has(series));
+      const needPainted = fill && series !== undefined && (isHatchChar(char) || !seriesPainted.has(series));
       const painted = needPainted ? paintedFill(el, svg) : null;
-      if (painted && !seriesPainted.has(series)) seriesPainted.set(series, painted);
-      if (char && isHatchChar(char)) {
+      if (painted && series !== undefined && !seriesPainted.has(series)) seriesPainted.set(series, painted);
+      if (char && isHatchChar(char) && series !== undefined) {
         const ground = painted ?? seriesColorMap.get(series);
         if (ground) {
           const hatch = resolveHatch(char, ground);

@@ -2,7 +2,9 @@
 // small-multiples later means writing a builder and registering it here — the rest of
 // the engine (data prep, axes, assemble, render) is chart-type agnostic.
 import type { ChartSpec, ChartType } from "../../spec/types";
+import type { NetMode } from "../../spec/bar-stack";
 import type { BandLabelMode } from "../axes";
+import type { RenderHooks } from "../../spec/hooks";
 import { buildLineMarks } from "./line";
 import { buildAreaMarks } from "./area";
 import { buildBarMarks } from "./bar";
@@ -51,6 +53,11 @@ export interface PreparedRow {
    *  truthy (`1`/`true`/`yes`, case-insensitive, trimmed). Absent when the field isn't
    *  configured. Drives the line dashed-run split (marks/projected.ts) and the area fade veil. */
   _projected?: boolean;
+  /** Values of any columns named by `overlays[].column`, keyed by column name. Populated only when
+   *  the spec declares such an overlay — the data loader maps a fixed set of ROLES onto canonical
+   *  fields, and an overlay column is author-named, so it cannot have one. Absent ⇒ no `column`
+   *  overlay on this chart, and the row is byte-identical to before. */
+  _overlayCols?: Record<string, number>;
 }
 
 export interface MarkContext {
@@ -122,6 +129,15 @@ export interface MarkContext {
    *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =
    *  yDomain) without recomputing the axis. Other builders may ignore it. */
   yDomain?: [number, number];
+  /** This pane's facet value, when the chart is one pane of a small-multiples figure (set by the
+   *  figure orchestrator from `RenderOptions.paneFacetValue`). Absent → single chart, or a pane
+   *  with no facet identity. Threaded so builders can populate `ValueLabelHookCtx.facet`; the
+   *  DORMANT shared-mode Plot-facet-grid path (`fxField`/`fyField` above) tags rows with `_facet`
+   *  instead, but no live caller uses that path today (see `FacetInfo` in engine/index.ts). */
+  facet?: string;
+  /** Programmatic render hooks (see spec/hooks.ts). Only `valueLabel` is consumed by mark
+   *  builders today. Absent/`{}` ⇒ every builder's own text stands unchanged. */
+  hooks?: RenderHooks;
 }
 
 export interface MarkLayers {
@@ -146,7 +162,14 @@ export interface MarkLayers {
    *  lights up when its annotation row is hovered. */
   tagging: {
     selector: string;
-    seriesOrder: string[];
+    /** SPARSE, like `annotationOrder`: an `undefined` slot leaves that element with NO
+     *  `data-series` attribute at all. That is not the same as SINGLE_SERIES_KEY (""), which IS an
+     *  attribute — legend.ts's dim walk matches `[data-series]` by PRESENCE, so "" is reached and
+     *  never matches a selection, i.e. the element dims against every real series. One selector
+     *  can therefore span marks with and without a legend identity (mixed `overlays`), which a
+     *  layer-wide "tag or don't" flag cannot express: keep the slot so later indices don't shift,
+     *  and leave it undefined so the element stays out of the walk entirely. */
+    seriesOrder: Array<string | undefined>;
     shapeOrder?: string[];
     categoryOrder?: string[];
     annotationOrder?: Array<string | undefined>;
@@ -231,15 +254,19 @@ export interface MarkLayers {
    *  made on the segment's share of the data (see the threshold note in applySegmentGap). Set in
    *  the same literal as `segmentGap`. */
   segmentLabelSelector?: string;
-  /** Controls how the band-crosshair tooltip renders the Total row for stacked charts.
-   *  - true  (netMode==="dot"):  show Total with a circle (is-dot) swatch — the net-dot
-   *    marker exists on the chart and matches this styling.
-   *  - false (netMode==="text"): show Total as plain text with no swatch — the cumulative
-   *    stack shows a text-above callout, not a dot.
-   *  - undefined (netMode==="none"): omit the Total row entirely — netDisplay:"none" or
-   *    normalized stacks suppress all net markers, so no Total should appear.
-   *  Non-stacked mark layers leave this undefined. */
-  showTotalDot?: boolean;
+  /** Stacked bars: the net (sum) callout actually painted — see spec/bar-stack.ts. The single field
+   *  the hover path needs; the tooltip's Total row, the hover treatment and the pills' net-dot flag
+   *  are all DERIVED from this plus the spec, at the sites that read them, rather than forwarded
+   *  alongside it. Absent ⇒ not a stacked chart. */
+  netMode?: NetMode;
+  /** Stacked bars: did the label builder refuse at least one segment's in-bar value label for being
+   *  thinner than the fit threshold? The pill DEFAULT reads it (spec/bar-stack.ts resolveValuePills):
+   *  a chart whose labels do not cover every segment must keep its hover pills, or the refused
+   *  segments carry no number anywhere — the crosshair behind painted labels is `emitOnly`, so there
+   *  is no tooltip either. This is a REPORT of what was painted, not a second derivation of the rule;
+   *  the threshold lives in exactly one place and only the builder can see the frame geometry it
+   *  needs. Absent ⇒ no segment labels were attempted (not a stacked chart, or they were gated off). */
+  segmentLabelsDropped?: boolean;
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;

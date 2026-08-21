@@ -6,6 +6,8 @@
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
 import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { RenderHooks } from "../spec/hooks";
+import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
@@ -25,17 +27,25 @@ import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter } from "./x-adapter";
 import type { XAdapter } from "./x-adapter";
-import { parseDate } from "./parse-time";
+import { parseDate } from "../spec/parse-time";
 import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { assemblePlot } from "./assemble-plot";
+import { assemblePlot, withTickLabelHook } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
+import {
+  resolveOverlays,
+  overlayColumnValues,
+  overlayDrawsInPane,
+  overlayTooltipLines,
+} from "./overlays";
+import type { OverlayTooltipLine } from "./overlays";
+import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -45,6 +55,9 @@ export interface RenderOptions {
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;
+  /** Programmatic render hooks (see spec/hooks.ts). Threaded to the builders; the export passes
+   *  the SAME object, which is what makes a static hook's output identical in the download. */
+  hooks?: RenderHooks;
   /** Small-multiples: this pane is one cell of a figure, so line marks render with the
    *  thinner pane stroke (TBL.strokeWidth.pane). Set by renderFigure for BOTH shared- and
    *  per-pane panes; absent → single chart → default stroke. Threaded into MarkContext.pane. */
@@ -122,6 +135,13 @@ export interface RenderOptions {
    *  (single chart, or per-pane mode where each pane bins independently). Ignored by non-histogram
    *  chart types and by pre-binned histograms (which read x0/x1 directly). */
   binThresholds?: number[];
+  /** hooks.afterRender's ctx.phase (spec/hooks.ts): "export" for buildExportSvg's re-render of the
+   *  PNG download; absent (⇒ "live") for every other caller — mountChart, or renderChart/renderFigure
+   *  called directly. Threaded straight through; has no other effect on rendering. NOT set on the
+   *  metadata-only pre-renders (mountChart's series-count probe, buildExportSvg's legend-metadata
+   *  probe) — those callers omit `afterRender` from the hooks object they pass instead, so the hook
+   *  never sees a discarded SVG (see the call sites in render-live.ts / export-png.ts). */
+  phase?: "live" | "export";
 }
 
 export interface LegendItem {
@@ -203,12 +223,18 @@ export interface RenderResult {
   dataInScope: PreparedRow[];
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** `overlays[].tooltip: true` lines drawn in this frame — one hover-tooltip row each. Empty when
+   *  no overlay opted in. See PaneResult.overlayTooltips. */
+  overlayTooltips: OverlayTooltipLine[];
   /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
    *  (stacked charts only). render-live uses it to order the vertical legend column. */
   legendVisualOrder?: string[];
-  /** Net-dot mode for the band crosshair's Total row (stacked charts only).
-   *  Mirrors MarkLayers.showTotalDot — see that field for the tri-state semantics. */
-  showTotalDot?: boolean;
+  /** Stacked charts only. Mirrors MarkLayers.netMode — see spec/bar-stack.ts. */
+  netMode?: NetMode;
+  /** Stacked charts only. Mirrors MarkLayers.segmentLabelsDropped — the label builder's report that
+   *  at least one segment was too thin for its in-bar number. render-live feeds it to
+   *  resolveValuePills so the pill default cannot leave those segments with no number at all. */
+  segmentLabelsDropped?: boolean;
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -256,7 +282,7 @@ export interface PaneResult {
   formatValue: (v: number) => string;
   dataInScope: PreparedRow[];
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
-   *  seriesColors / legendExtras / legendVisualOrder / showTotalDot off this. */
+   *  seriesColors / legendExtras / legendVisualOrder / netMode off this. */
   layers: MarkLayers;
   /** Series → the `series_patterns` texture this pane's marks were ACTUALLY PAINTED. The ONLY
    *  source a key may take a hatch from — see `AssembleResult.seriesHatches` for why re-deriving
@@ -267,6 +293,12 @@ export interface PaneResult {
   seriesPainted: Map<string, string>;
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** `overlays[].tooltip: true` lines that draw in THIS pane, already cropped to their `domain` and
+   *  filtered by `facet`. Carried out of the render rather than recomputed by the live layer for the
+   *  same reason `seriesHatches` is: the resolved x-domain that decides where a `domain: "axis"` line
+   *  starts and stops is settled here and nowhere else, and a tooltip row for a line that is not on
+   *  screen at that x is the defect this whole field exists to avoid. */
+  overlayTooltips: OverlayTooltipLine[];
 }
 
 /** DORMANT (Plot grid-faceting): the old SHARED-mode combined-SVG path passed this into
@@ -316,6 +348,13 @@ export function renderPane(
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
 
+  // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
+  // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
+  // byte-identical rows.
+  const overlayCols = Array.from(
+    new Set((spec.overlays ?? []).map((o) => o.column).filter((c): c is string => !!c)),
+  );
+
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
   // series column ⇒ a single implicit series.
@@ -345,6 +384,20 @@ export function renderPane(
           row._lo = lo !== "" && lo != null ? +lo : undefined;
           row._hi = hi !== "" && hi != null ? +hi : undefined;
         }
+      }
+      if (overlayCols.length) {
+        const bag: Record<string, number> = {};
+        for (const c of overlayCols) {
+          const raw = r[c];
+          // Blank and null are ABSENT, not zero. `Number("")` is 0, which would draw a fitted line
+          // diving to the baseline wherever the column is sparse — and, since a `column` overlay folds
+          // into yForAxis, drag the value axis down with it. This is the same guard the
+          // confidence_bands `_lo`/`_hi` prep applies four lines below.
+          if (raw === "" || raw == null) continue;
+          const v = +raw;
+          if (Number.isFinite(v)) bag[c] = v;
+        }
+        if (Object.keys(bag).length) row._overlayCols = bag;
       }
       // Shared-mode small multiples: tag the row with its pane's facet value + grid indices.
       // Rows whose facet value isn't in the ordered pane set are dropped below.
@@ -535,15 +588,54 @@ function assemblePaneResult(
     return y != null ? { ...p, y } : p;
   });
 
+  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
+  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
+  // Computed HERE, above the y-extent block, because the `column` overlay fold a few lines down
+  // needs it to crop by the entry's `domain` (see below) — xOpts, which the draw-time overlay
+  // resolution prefers, is not built until much later.
+  const xExtentVals = dataInScope
+    .map((r) =>
+      adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
+    )
+    .filter((v): v is number => Number.isFinite(v as number));
+  const xExtent: [number, number] | undefined = xExtentVals.length
+    ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
+    : undefined;
+
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxis markers) values + point-callout y values so an annotation at/beyond the
   // data extent gets a little headroom instead of sitting flush against the axis edge.
+  // A `column` overlay is real per-row data — the same kind of thing as the CI bounds below — so it
+  // folds into the value extent rather than being clipped. The CONSTRUCTED kinds (method, fun,
+  // slope+intercept) deliberately do not: `domain: axis` extrapolates as far as the frame goes, and
+  // letting a steep fit dictate the axis is what the clip exists to prevent.
+  //
+  // Scoped to what THIS pane draws — `facet` and `domain` both, via the same code the geometry uses
+  // (overlays.ts#overlayColumnValues). An unscoped fold widened every pane's axis to the overlay's
+  // range, and in `mode: "shared"` the unioned domain then flattened the lot. `xDomain` is the DATA
+  // extent, not xOpts' resolved axis domain (unavailable this early): they differ only in that the
+  // axis domain is the WIDER of the two (x-adapter fits the data, or anchors at zero), and every
+  // value this reads sits at the x of a row — inside the data extent either way — so `domain: "axis"`
+  // crops identically.
+  //
+  // Hoisted out of `yForAxis` because it is needed TWICE: chart types that resolve a `hardDomain`
+  // never reach `yForAxis` at all (computeYAxis returns on the supplied domain without reading the
+  // values), so the AREA branch below has to fold this in itself. Empty for every spec without a
+  // `column` overlay, which is what keeps that fold a no-op everywhere else.
+  const overlayColumnYs = overlayColumnValues(spec, dataInScope, {
+    xField: adapter.xField,
+    seriesNames,
+    ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
+    ...(xExtent ? { xDomain: xExtent } : {}),
+  });
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
     ...ann.yAxis.map((m) => m.y),
     ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+    // See overlayColumnYs above for why a `column` overlay folds in and the constructed kinds do not.
+    ...overlayColumnYs,
   ];
   const policy = spec.yAxisPolicy ?? {};
   const tickCount = policy.tickCount ?? 5;
@@ -605,9 +697,16 @@ function assemblePaneResult(
     // Stacked area: zero baseline; the axis extent comes from the per-x STACKED TOTAL (the
     // cumulative top), not individual series values. Annotation y values are folded in for headroom.
     includeZero = true;
+    // `overlayColumnYs` is folded in HERE as well as into `yForAxis`, because this branch always
+    // resolves a non-null `hardDomain` (its `auto` is unconditional), and computeYAxis returns on a
+    // supplied domain without ever reading `yForAxis`. Without this the axis kept the stack's own
+    // range and a `column` overlay above the stack was drawn hundreds of px off-frame and clipped
+    // invisible, while its `fit` labels still painted. Empty array for every spec without a `column`
+    // overlay, so the fold is a no-op there and no existing figure moves.
     const markerYs = [
       ...ann.yAxis.map((m) => m.y),
       ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
+      ...overlayColumnYs,
     ].filter(Number.isFinite);
     const totalByX = new Map<string, number>();
     let minVal = 0;
@@ -757,6 +856,10 @@ function assemblePaneResult(
     // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
     ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
     ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),
+    // This pane's facet identity (per-pane small multiples) — for hooks.valueLabel's ctx.facet.
+    ...(opts.paneFacetValue != null ? { facet: opts.paneFacetValue } : {}),
+    // Programmatic render hooks (spec/hooks.ts) — only `valueLabel` is consumed by mark builders.
+    ...(opts.hooks ? { hooks: opts.hooks } : {}),
   });
 
   // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.
@@ -772,16 +875,50 @@ function assemblePaneResult(
       }
     : undefined;
 
-  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
-  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
-  const xExtentVals = dataInScope
-    .map((r) =>
-      adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
-    )
-    .filter((v): v is number => Number.isFinite(v as number));
-  const xExtent: [number, number] | undefined = xExtentVals.length
-    ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
-    : undefined;
+  // Overlay lines — fits, equations, stated slopes, precomputed columns. Built HERE rather than in a
+  // mark builder because they apply to every numeric/temporal-x chart type, and this is the one site
+  // every chart type passes through. Pushing them into `layers` is also what gets them into the PNG:
+  // buildExportSvg re-renders through renderChart (or renderFigure for small multiples), so anything
+  // derived from spec + rows reaches the download with no second code path to keep in step.
+  // `overlays[].tooltip: true` lines for the live hover card, populated inside the block below (the
+  // one place the pane-filtered, domain-cropped lines exist). Empty on every chart with no overlays.
+  let overlayTooltips: OverlayTooltipLine[] = [];
+  if (spec.overlays?.length && adapter.xField !== "_xc") {
+    // `domain: "axis"` means the resolved x-scale domain when the adapter supplies one (numeric axes
+    // do), else the data extent — the widest honest answer available.
+    const axisDomain = (xOpts.xPlotOpts?.domain as [number, number] | undefined) ?? xExtent;
+    const resolvedOverlays = resolveOverlays(spec, dataInScope, {
+      xField: adapter.xField as "_xn" | "_xd",
+      colors,
+      seriesNames,
+      legendActive: spec.legend !== false,
+      ...(axisDomain ? { xDomain: axisDomain } : {}),
+    }).filter((o) => overlayDrawsInPane(o.facet, opts.paneFacetValue));
+    overlayTooltips = overlayTooltipLines(spec.overlays, resolvedOverlays);
+    // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
+    // fx/fy CHANNEL NAMES passed to `buildOverlayMarks`, but the `OverlayRow` objects it builds
+    // (marks/overlay.ts) carry no `_fxCol`/`_fyRow` fields — those channels would resolve to
+    // `undefined` on every row if this path ever ran. Unreachable today: no production caller
+    // (engine/figure.ts) supplies `facetInfo` to `renderPane`; only a test does. Wiring this for
+    // real needs `runsOf`/the band mapper in marks/overlay.ts to stamp the resolved overlay's
+    // `facet` value onto each row as `_fxCol`/`_fyRow` before this reaches that point.
+    const om = buildOverlayMarks(resolvedOverlays, spec.overlays ?? [], {
+      xField: adapter.xField as "_xn" | "_xd",
+      ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
+    });
+    layers.underlay.push(...om.underlay);
+    layers.overlay.push(
+      ...om.overlay,
+      // Labels last within the overlay layer, so they paint over their own lines. They still sit
+      // BELOW assemblePlot's annotation labels (pushed at its step 8) — correct precedence: an
+      // `annotations` placement is the more deliberate one, and both are nudgeable.
+      ...buildOverlayLabelMarks(resolvedOverlays, {
+        xField: adapter.xField as "_xn" | "_xd",
+        ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
+      }),
+    );
+    layers.tagging.push(...om.tagging);
+  }
 
   const { svg, seriesHatches, seriesPainted } = assemblePlot({
     layers,
@@ -799,6 +936,7 @@ function assemblePaneResult(
     marginRight: opts.marginRight,
     document: opts.document,
     classNameSuffix,
+    hooks: opts.hooks,
     ...(facetOpt ? { facet: facetOpt } : {}),
     ...(opts.hideYAxisLabels ? { hideYAxisLabels: true } : {}),
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),
@@ -811,13 +949,23 @@ function assemblePaneResult(
     colors,
     valueAffixes,
     yDomain,
-    formatValue: makeTickFormatter(yTicks, valueAffixes),
+    // Wrapped with the SAME tickLabel hook + ctx assemblePlot used internally for the in-frame
+    // annotation label (yTickFallbackFmt) — this is what buildLegendItems passes through as
+    // pane.formatValue for a keyed annotation's LEGEND row token. Left un-wrapped, the two would
+    // resolve `{value}` differently under a `tickLabel` hook: see annotation-legend.ts's invariant
+    // comment on why that can never be allowed to happen.
+    formatValue: withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), opts.hooks, {
+      axis: "y",
+      ticks: yTicks,
+      affixes: valueAffixes,
+    }),
     dataInScope,
     layers,
     seriesHatches,
     seriesPainted,
     tooltipXParse: xOpts.tooltipXParse,
     tooltipXFormat: xOpts.tooltipXFormat,
+    overlayTooltips,
   };
 }
 
@@ -1049,6 +1197,15 @@ export function renderChart(
   const legendItems = buildLegendItems(spec, seriesNames, colors, layers, seriesKeyRows, pane.formatValue);
   const shapeLegendItems = buildShapeLegendItems(spec, layers);
 
+  // Escape hatch: LAST thing before the SVG is handed back — every mark/axis/legend-metadata build
+  // above is done, and nothing downstream removes or replaces what's here (render-live.ts only ADDS
+  // interactive-only nodes afterward, e.g. crosshair guides). `opts.phase` distinguishes buildExportSvg's
+  // re-render ("export") from every other, live, caller. Guarded so an absent hook costs nothing —
+  // no ctx object, no call — and `hooks: {}` stays byte-identical to no hooks at all.
+  if (opts.hooks?.afterRender) {
+    opts.hooks.afterRender(svg, { phase: opts.phase ?? "live" });
+  }
+
   return {
     svg,
     legendItems,
@@ -1065,8 +1222,10 @@ export function renderChart(
     dataInScope,
     tooltipXParse: pane.tooltipXParse,
     tooltipXFormat: pane.tooltipXFormat,
+    overlayTooltips: pane.overlayTooltips,
     legendVisualOrder: layers.legendVisualOrder,
-    showTotalDot: layers.showTotalDot,
+    netMode: layers.netMode,
+    segmentLabelsDropped: layers.segmentLabelsDropped,
   };
 }
 

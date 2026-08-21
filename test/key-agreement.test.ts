@@ -632,3 +632,69 @@ describe("a textured key is grounded in the fill its mark is PAINTED", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// A FIGURE legend's flat swatch, in BOTH small-multiples modes.
+//
+// The two modes are two separate pane loops in figure.ts, each maintaining its own parallel arrays of
+// what its panes painted. `paneFills` was declared in both and pushed in only ONE, so shared mode —
+// the DEFAULT (`sm.mode ?? "shared"`) — handed the figure legend an empty map and it fell back
+// through to the palette: every pane painted a dimmed series grey and the one legend over them keyed
+// it amber. That shipped in v1.11.0 with the whole suite green, because the only small-multiples case
+// here covered the hatch GROUND (whose array *was* pushed in both branches) and passed either way.
+//
+// So this is parameterised over the mode rather than written once: the failure mode is not "the
+// legend is wrong", it is "the two modes silently disagree", and a test that renders one mode cannot
+// see that. It asserts against the fill the panes are DRAWN in, never against a hardcoded hex — a
+// swatch that merely stopped being amber is not the fix.
+describe("a figure legend's flat swatch is grounded in the fill its panes PAINT — in both modes", () => {
+  // `highlightSeries` on a MULTI-series bar figure: every pane paints "two" the dim neutral through a
+  // per-<rect> fill that never enters the colour map, and two series means the legend draws rows. No
+  // `series_patterns` here — the texture path is already gated above; this is the FLAT chip.
+  const ROWS_FACET: TidyRow[] = [
+    { time: "A", series: "one", value: "6", region: "North" },
+    { time: "A", series: "two", value: "4", region: "North" },
+    { time: "A", series: "one", value: "5", region: "South" },
+    { time: "A", series: "two", value: "9", region: "South" },
+  ] as unknown as TidyRow[];
+
+  const figSpec = (mode: "shared" | "per-pane"): ChartSpec =>
+    ({
+      chartType: "bar",
+      title: "t",
+      xAxisType: "categorical",
+      data: "d.csv",
+      series_colors: COLORS,
+      highlightSeries: ["one"],
+      columns: { x: "time", value: "value", series: "series", facet: "region" },
+      small_multiples: { columns: 2, mode },
+    }) as unknown as ChartSpec;
+
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`mode: ${mode} — the ONE legend names the colour every pane paints, not the palette's`, () => {
+      const fig = renderFigure(figSpec(mode), ROWS_FACET, OPTS);
+      const painted = fig.panes.map(
+        (p) => p.svg!.querySelector<SVGRectElement>('rect[data-series="two"]')!.getAttribute("fill")!,
+      );
+      expect(new Set(painted).size, "the panes paint one series two different fills").toBe(1);
+      const ground = painted[0]!;
+      const palette = fig.colors.get("two")!;
+      // The divergence is real, not hypothetical: if the dimmed fill ever reaches the colour map,
+      // every assertion below passes for the wrong reason. Fail loudly instead.
+      expect(palette, "the dimmed fill reached the colour map — pick another override").not.toBe(ground);
+
+      const row = fig.legendItems!.find((i) => i.series === "two")!;
+      expect(row.color, `mode: ${mode} — the figure legend keys the palette, not what its panes painted`)
+        .toBe(ground);
+
+      // And at the DRAWN level, which is what a reader compares against the bars.
+      const parent = document.createElement("div");
+      renderLegend(parent, fig.legendItems!);
+      const swatch = drawnFingerprint(
+        parent.querySelector('[data-series="two"] .tbl-legend-swatch svg')!,
+      ).toLowerCase();
+      expect(swatch).toContain(ground.toLowerCase());
+      expect(swatch).not.toContain(palette.toLowerCase());
+    });
+  }
+});

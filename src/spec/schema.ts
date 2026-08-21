@@ -159,6 +159,43 @@ const CONFIDENCE_BAND = {
   },
 } as const;
 
+// One `overlays` entry. Structurally permissive on the kind keys — "exactly one of" and the
+// applicability rules are semantic, and ajv would report them as an unreadable anyOf failure. They
+// live in validate.ts's overlaySpecErrors instead, which can name the field.
+const OVERLAY = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    method: { type: "string", enum: ["lm", "poly"] },
+    degree: { type: "integer", minimum: 2, maximum: 5 },
+    fun: { type: "string", minLength: 1 },
+    params: { type: "object", additionalProperties: { type: "number" } },
+    n: { type: "integer", minimum: 2, maximum: 2000 },
+    slope: { type: "number" },
+    intercept: { type: "number" },
+    column: { type: "string", minLength: 1 },
+    by: { type: "string", enum: ["series", "none"] },
+    ci: { type: "number", exclusiveMinimum: 0, exclusiveMaximum: 1 },
+    domain: {
+      anyOf: [
+        { type: "string", enum: ["axis"] },
+        { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
+      ],
+    },
+    label: { type: "string" },
+    legend: { type: "boolean" },
+    color: { type: "string" },
+    style: { type: "string", enum: ["dashed", "solid"] },
+    strokeWidth: { type: "number", exclusiveMinimum: 0 },
+    labelSide: { type: "string", enum: ["top", "middle", "bottom"] },
+    labelPosition: { type: "string", enum: ["left", "middle", "right"] },
+    labelDx: { type: "number" },
+    labelDy: { type: "number" },
+    facet: { type: "string" },
+    tooltip: { type: "boolean" },
+  },
+} as const;
+
 // One shaded line-to-baseline region (line charts only). Every field is optional: a bare `{}` means
 // "fill under every series, both sides, full x range, in each series' own color".
 const SHADE_REGION = {
@@ -276,6 +313,19 @@ const TITLE_SELECTOR = {
   },
 } as const;
 
+// Declarative switches that turn engine hover chrome OFF from the spec (see spec/types.ts
+// ChartSpec.chrome). Deliberately just these two — netMarker and legend already have an owning
+// field (barStack.netDisplay, top-level legend) and duplicating that decision here is the defect
+// class this exists to end.
+const CHROME = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    tooltip: { type: "boolean" },
+    valuePills: { type: "boolean" },
+  },
+} as const;
+
 const SMALL_MULTIPLES = {
   type: "object",
   additionalProperties: false,
@@ -386,6 +436,7 @@ export const CHART_SPEC_SCHEMA = {
     shape_legend_title: { type: "string" },
 
     confidence_bands: { type: "array", items: CONFIDENCE_BAND },
+    overlays: { type: "array", items: OVERLAY },
     shading: { type: "array", items: SHADE_REGION },
     rug: RUG,
     points: { type: "boolean" },
@@ -427,6 +478,16 @@ export const CHART_SPEC_SCHEMA = {
         // px. Capped well below any sane bar width — a larger value would consume the bar rather
         // than separate its parts.
         segmentGap: { type: "number", minimum: 0, maximum: 12 },
+        hover: { type: "string", enum: ["tooltip", "pills"] },
+        total: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            position: { type: "string", enum: ["first", "last"] },
+            bold: { type: "boolean" },
+            divider: { type: "boolean" },
+          },
+        },
       },
     },
     waterfall: {
@@ -504,6 +565,7 @@ export const CHART_SPEC_SCHEMA = {
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
     legend: { type: "boolean" },
+    chrome: CHROME,
 
     // Small multiples (multi-panel)
     small_multiples: SMALL_MULTIPLES,

@@ -2,6 +2,7 @@
 // Port of C:\dev\GitHub\budget-lab-interactives\tools\ai-labor-market-tracker\export-image.js
 
 import type { ChartSpec } from "../spec/types.js";
+import type { RenderHooks } from "../spec/hooks.js";
 import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
@@ -10,7 +11,7 @@ import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
-import { ICON_BOX, iconFromLegendItem, iconSvgGroup, iconWidth } from "../engine/icon.js";
+import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWidth } from "../engine/icon.js";
 import {
   W,
   H,
@@ -24,6 +25,7 @@ import {
   BODY,
   AXIS,
   HEADING,
+  SVG_NS,
   textEl as textElDoc,
   measureText,
   wrapText,
@@ -83,9 +85,14 @@ function drawLegend(
     /** A dumbbell's hollow end — a ring, not a disc. It was absent from this type entirely, so a
      *  hollow series exported filled. */
     hollow?: boolean;
+    /** Present for a genuine series/color-legend row; absent for the neutral SHAPE-legend rows
+     *  (which have no series key and never invoke `legendKey`). */
+    series?: string;
   }>,
   firstBaseline: number,
   leadingTitle?: string,
+  /** Only `legendKey` is consumed here, and only for rows carrying `series` — see above. */
+  hooks?: RenderHooks,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
   const titleFont = `${W_SEMI} 12px ${FONT}`;
@@ -110,28 +117,67 @@ function drawLegend(
     // is why it is no longer written here: engine/icon.ts draws it, the same call the legend makes.
     const icon = iconFromLegendItem(item);
     const swatchW = iconWidth(icon);
-    const itemW = swatchW + GAP + measureText(item.label, legendFont);
+    // `rendered` is SVG markup (legendRowMarkupSvg draws from the same iconShapes(icon) the
+    // group below does) -- NOT legend.ts's HTML string. `g` below is SVG-namespaced; setting its
+    // innerHTML to an HTML string like legend.ts's `<span>`s creates XHTML-namespaced nodes that
+    // the canvas rasterizer below (rasterize()) never paints -- correct on screen, invisible in
+    // the download. `medium: "svg"` tells the hook which vocabulary is safe to return here.
+    // `null`/no hook falls through to the untouched default drawing.
+    const custom = item.series != null && hooks?.legendKey
+      ? hooks.legendKey({
+          series: item.series,
+          label: item.label,
+          color: item.color,
+          medium: "svg",
+          rendered: legendRowMarkupSvg(icon, item.label),
+        })
+      : null;
+    // The wrap check below and the cursor advance at the end of this iteration both key off
+    // `itemW` -- it must reflect what the hook ACTUALLY draws, not the untouched default, or a
+    // hook that returns `ctx.rendered` plus a suffix (or otherwise-longer text) lays out fine in
+    // the live flex legend but overlaps the next item here / runs off the right edge. An exact
+    // box (`getBBox()`) isn't reachable: this SVG is built fully detached and only ever
+    // serialized for rasterize()'s <img> load below, never inserted into `document` -- and jsdom,
+    // this repo's own test DOM, has no `getBBox()` implementation at all, so that path could not
+    // be exercised or verified here even if a real browser tolerated it. Re-measuring the hook's
+    // OWN text content with the same canvas-metric approximation this function already uses
+    // elsewhere (and that measureText() itself already degrades to a `text.length * 8` estimate
+    // under jsdom) is the best measurement actually available in this constructor.
+    let itemW = swatchW + GAP + measureText(item.label, legendFont);
+    if (custom != null) {
+      const probe = document.createElementNS(SVG_NS, "g");
+      probe.innerHTML = custom;
+      itemW = swatchW + GAP + measureText(probe.textContent ?? "", legendFont);
+    }
     if (x > MARGIN && x + itemW > MARGIN + INNER_W) {
       x = MARGIN;
       y += ROW_H;
     }
     const cy = y - 4;
-    const drawing = iconSvgGroup(document, icon);
-    if (drawing) {
-      // The primitives are in a box at the origin, so the group is placed by its top-left corner.
-      drawing.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
-      // A row with no colour of its own draws in `currentColor`, which the page supplies live and
-      // the export has to supply itself — this frame carries no inherited text colour.
-      drawing.setAttribute("color", NAVY);
-      root.appendChild(drawing);
+    if (custom != null) {
+      const g = document.createElementNS(SVG_NS, "g");
+      g.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
+      g.setAttribute("color", NAVY);
+      g.innerHTML = custom;
+      root.appendChild(g);
+    } else {
+      const drawing = iconSvgGroup(document, icon);
+      if (drawing) {
+        // The primitives are in a box at the origin, so the group is placed by its top-left corner.
+        drawing.setAttribute("transform", `translate(${x},${cy - ICON_BOX / 2})`);
+        // A row with no colour of its own draws in `currentColor`, which the page supplies live and
+        // the export has to supply itself — this frame carries no inherited text colour.
+        drawing.setAttribute("color", NAVY);
+        root.appendChild(drawing);
+      }
+      root.appendChild(
+        textEl(x + swatchW + GAP, y, item.label, {
+          size: 13,
+          weight: W_BODY,
+          fill: BODY,
+        }),
+      );
     }
-    root.appendChild(
-      textEl(x + swatchW + GAP, y, item.label, {
-        size: 13,
-        weight: W_BODY,
-        fill: BODY,
-      }),
-    );
     x += itemW + ITEM_GAP;
   }
   return y;
@@ -155,7 +201,7 @@ function drawLegend(
 export function buildExportSvg(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { selections?: Record<string, string> } = {},
+  opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): SVGSVGElement {
   const isFigure = spec.small_multiples != null;
   const isSingleHorizontalBar =
@@ -164,9 +210,16 @@ export function buildExportSvg(
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
   // figure-level legend), not from a single chart.
+  //
+  // `afterRender` is stripped from the hooks object for THIS call only: its SVG(s) are discarded
+  // (only the legend/title metadata is read below), so calling a mutating, potentially side-
+  // effecting hook against them would double-fire it per export — once here on throwaway output,
+  // once more below on the SVG that's actually returned. Every other hook is a pure formatter
+  // (idempotent), so passing them through unchanged here is harmless.
+  const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: INNER_W })
-    : renderChart(spec, rows, { width: INNER_W });
+    ? renderFigure(spec, rows, { width: INNER_W, hooks: metaHooks })
+    : renderChart(spec, rows, { width: INNER_W, hooks: metaHooks });
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -198,7 +251,7 @@ export function buildExportSvg(
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
   if (legendItems.length) {
-    cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined);
+    cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks);
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
   if (hasShapeLegend) {
@@ -238,6 +291,8 @@ export function buildExportSvg(
     const { svg: chartSvg } = renderChart(spec, rows, {
       width: INNER_W,
       height: contentHeight,
+      hooks: opts.hooks,
+      phase: "export",
       ...(accentColor ? { accentColor } : {}),
     });
     chartSvg.setAttribute("x", String(MARGIN));
@@ -270,8 +325,8 @@ export function buildExportSvg(
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
     const useGridW = isShared || isHorizontalBarFig;
     const fig = useGridW
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) })
-      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, ...(accentColor ? { accentColor } : {}) });
+      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
+      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
     // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
     const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
@@ -417,9 +472,9 @@ export function triggerDownload(blob: Blob, filename: string): void {
 export async function exportChartPng(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { filename?: string; selections?: Record<string, string> } = {},
+  opts: { filename?: string; selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): Promise<void> {
-  const svgElement = buildExportSvg(spec, rows, { selections: opts.selections });
+  const svgElement = buildExportSvg(spec, rows, { selections: opts.selections, hooks: opts.hooks });
   const width = parseInt(svgElement.getAttribute("width") ?? String(W), 10);
   const height = parseInt(svgElement.getAttribute("height") ?? String(H), 10);
   const blob = await rasterize(svgElement, width, height);

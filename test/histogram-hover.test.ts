@@ -237,6 +237,18 @@ describe("buildHistogramTooltipHtml", () => {
     expect(svg.querySelector("line")).toBeNull();
   });
 
+  it("a single-series bin row carries no label and no bare colon", () => {
+    // A chart with no series column has one implicit series keyed "" (SINGLE_SERIES_KEY), so there
+    // is no name to print and the row used to read ": 5.00" — a colon labelling nothing. The swatch
+    // already identifies the mark, and an author who wants a word there has `series_labels: {"": …}`
+    // (validated as legal for exactly this case), which still fills the label in.
+    const html = buildHistogramTooltipHtml(bin(0, 5, [["", 5]]), {});
+    expect(html).not.toContain("tbl-tooltip-label");
+    expect(html).toContain(">5<");
+    const labelled = buildHistogramTooltipHtml(bin(0, 5, [["", 5]]), { seriesLabels: { "": "Count" } });
+    expect(labelled).toContain(">Count:<");
+  });
+
   it("HTML-escapes dangerous characters", () => {
     const html = buildHistogramTooltipHtml(bin(0, 5, [["<b>x</b>", 1]]), {});
     expect(html).not.toContain("<b>x</b>");
@@ -380,8 +392,11 @@ describe("mountChart histogram hover dispatch", () => {
     // Leftmost bin is [0, 5) — now a friendly en-dash range "0 – 5", not the old "[0, 5)".
     expect(head).toContain("0 – 5");
     expect(head).not.toContain("[0");
-    // A value row is present.
+    // A value row is present — and it is a bare value: a single-series histogram has no series
+    // name, so the row carries no label rather than a colon labelling nothing.
     expect(tip.querySelector(".tbl-tooltip-value")).not.toBeNull();
+    expect(tip.querySelector(".tbl-tooltip-label")).toBeNull();
+    expect((tip.querySelector(".tbl-tooltip-row")!.textContent ?? "").trim()).toBe("5.00");
     // Highlight shown.
     const hl = svg.querySelector(".tbl-hist-hover-hl") as SVGRectElement;
     expect(hl.getAttribute("opacity")).not.toBe("0");

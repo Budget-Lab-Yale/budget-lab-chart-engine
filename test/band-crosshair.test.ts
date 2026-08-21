@@ -317,15 +317,15 @@ describe("buildBandTooltipHtml", () => {
     expect(html).not.toContain("Total");
   });
 
-  it("adds a Total row for diverging stacked charts (isStacked=true, showTotalDot=true)", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
+  it('adds a Total row for diverging stacked charts (isStacked=true, totalRow="dot")', () => {
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, totalRow: "dot", icons: ICONS });
     expect(html).toContain("Total");
     // Total = 10 + 5 = 15
     expect(html).toContain("15");
   });
 
   it("draws the Total row's swatch as a circle for diverging stacks; per-series rows stay squares", () => {
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: true, icons: ICONS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, totalRow: "dot", icons: ICONS });
     const doc = new DOMParser().parseFromString(html, "text/html");
     // The Total row's swatch is a circle matching the net dot / legend. It carried an `is-dot` class
     // over CSS that has since been deleted, so the class name outlived the drawing it stood for.
@@ -342,10 +342,10 @@ describe("buildBandTooltipHtml", () => {
     }
   });
 
-  it("draws no Total swatch for cumulative stacked charts (showTotalDot=false)", () => {
+  it('draws no Total swatch for cumulative stacked charts (totalRow="text")', () => {
     // Cumulative (all-positive) stacks show a text-above net callout, not a dot marker,
     // so the tooltip Total row must match: plain label + value, no circle swatch.
-    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, showTotalDot: false, icons: ICONS });
+    const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, totalRow: "text", icons: ICONS });
     expect(html).toContain("Total");
     const doc = new DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelectorAll("circle")).toHaveLength(0);
@@ -353,7 +353,7 @@ describe("buildBandTooltipHtml", () => {
     expect(html).toContain("15");
   });
 
-  it("omits Total row when showTotalDot is undefined (netDisplay:none / normalized)", () => {
+  it("omits Total row when totalRow is omitted (netDisplay:none / normalized)", () => {
     // No net marker on the chart → no Total row in the tooltip.
     const html = buildBandTooltipHtml("Cat1", ROWS, { isStacked: true, icons: ICONS });
     expect(html).not.toContain("Total");
@@ -366,7 +366,7 @@ describe("buildBandTooltipHtml", () => {
     ];
     const html = buildBandTooltipHtml("X", divergingRows, {
       isStacked: true,
-      showTotalDot: true,
+      totalRow: "dot",
       icons: new Map<string, IconSpec>([
         ["Up", { shape: "rect", color: "#0f0" }],
         ["Down", { shape: "rect", color: "#f00" }],
@@ -379,8 +379,8 @@ describe("buildBandTooltipHtml", () => {
 
   it("does NOT add a Total row for a single-series stacked", () => {
     const singleRows: BandRow[] = [{ _xc: "X", series: "Only", _y: 42 }];
-    const html = buildBandTooltipHtml("X", singleRows, { isStacked: true, showTotalDot: true });
-    // Only 1 series → no Total row regardless of showTotalDot
+    const html = buildBandTooltipHtml("X", singleRows, { isStacked: true, totalRow: "dot" });
+    // Only 1 series → no Total row regardless of totalRow
     expect(html).not.toContain("Total");
   });
 
@@ -738,7 +738,7 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     document.body.removeChild(container);
   });
 
-  // Total-dot rule: a diverging stacked chart (netDisplay dot → showTotalDot) hovers with the
+  // Total-dot rule: a diverging stacked chart (netDisplay dot → netMode "dot") hovers with the
   // floating band tooltip (its dot-swatch Total row), NOT the per-segment value pills.
   const DIVERGING_SPEC: ChartSpec = {
     chartType: "stacked",
@@ -798,6 +798,86 @@ describe("mountChart + attachBandCrosshair dispatch", () => {
     // No tooltip; the coordinated cursor is active instead.
     expect(document.body.querySelectorAll(".tbl-tooltip-head").length).toBe(before);
     expect(svg.querySelector("g.tbl-coord")!.getAttribute("opacity")).toBe("1");
+    document.body.removeChild(container);
+  });
+
+  it('barStack.hover "tooltip" attaches the floating tooltip even with no net dot (netDisplay: none)', () => {
+    // netDisplay: none means resolveNetMode is "none", so nothing about the net forces a tooltip on
+    // its own — only the explicit `hover: "tooltip"` field should. Reverting the read site at
+    // render-live.ts back to `netMode === "dot"` makes this render pills instead, and this test red.
+    const spec: ChartSpec = {
+      ...DIVERGING_SPEC,
+      barStack: { netDisplay: "none", hover: "tooltip" },
+    };
+    const rows: TidyRow[] = [
+      { time: "A", series: "Up", value: "6" },
+      { time: "A", series: "Down", value: "4" },
+      { time: "B", series: "Up", value: "5" },
+      { time: "B", series: "Down", value: "2" },
+    ];
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows, width: 600, height: 360 });
+    const svg = hoverFirstBar(container);
+    // The shared tooltip element is a per-document singleton (getSharedTooltip) whose innerHTML is
+    // OVERWRITTEN, not appended, on every hover — so a head-div COUNT does not discriminate once a
+    // prior test has shown a tooltip at all; opacity is what "attached vs. not" turns on.
+    const tip = document.body.querySelector<HTMLElement>(".tbl-tooltip")!;
+    expect(tip.style.opacity).toBe("1");
+    expect(tip.querySelector(".tbl-tooltip-head")).not.toBeNull();
+    expect(svg.querySelector("g.tbl-coord")).toBeNull();
+    document.body.removeChild(container);
+  });
+
+  it('barStack.total.position "first" puts the Total row first in the live tooltip', () => {
+    // Exercises the internal forward at crosshair.ts's attachBandCrosshair call (render-live.ts) all
+    // the way into buildBandTooltipHtml's totalPosition branch. Deleting that forward defaults the
+    // HTML builder to "last", which is what should turn this test red.
+    const spec: ChartSpec = {
+      ...DIVERGING_SPEC,
+      barStack: { netDisplay: "dot", total: { position: "first" } },
+    };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    hoverFirstBar(container);
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    const rowDivs = Array.from(tip.querySelectorAll(":scope > div"));
+    // rowDivs[0] is the head; the Total row must be the very next one, ahead of the series rows.
+    expect(rowDivs[1]?.className).toContain("tbl-tooltip-row--total");
+    document.body.removeChild(container);
+  });
+
+  it("barStack.total.bold and .divider reach the live tooltip (spec -> render-live -> crosshair forward)", () => {
+    // The pure-builder tests cannot catch a broken forward at crosshair.ts's attachBandCrosshair
+    // call, or at either render-live.ts call site — only a live spec-to-DOM path can.
+    const spec: ChartSpec = {
+      ...DIVERGING_SPEC,
+      barStack: { netDisplay: "dot", total: { bold: true, divider: true } },
+    };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    hoverFirstBar(container);
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    const totalRow = tip.querySelector(".tbl-tooltip-row--total")!;
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-bold");
+    // Default position ("last"): the divider rule reads ABOVE the row, separating it from the
+    // series rows sitting above it.
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-rule-above");
+    document.body.removeChild(container);
+  });
+
+  it("with NO barStack.total block at all, the live tooltip still gets bold + divider by default", () => {
+    // This is the case the default flip is actually about: an existing chart with no opinion on
+    // total.bold/.divider at all (not even an empty {}) gets the bold, divided row on hover.
+    // A builder-only test cannot prove the spec path reaches it -- only mountChart -> render-live
+    // -> attachBandCrosshair -> buildBandTooltipHtml, end to end, can.
+    const spec: ChartSpec = { ...DIVERGING_SPEC, barStack: { netDisplay: "dot" } };
+    const container = document.createElement("div");
+    mountChart(container, { spec, rows: DIVERGING_ROWS, width: 600, height: 360 });
+    hoverFirstBar(container);
+    const tip = document.body.querySelector(".tbl-tooltip")!;
+    const totalRow = tip.querySelector(".tbl-tooltip-row--total")!;
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-bold");
+    expect(totalRow.className).toContain("tbl-tooltip-row--total-rule-above");
     document.body.removeChild(container);
   });
 
@@ -1347,7 +1427,7 @@ describe("attachHighlightPills — Total selection net pill", () => {
     isStacked: true,
     categories: ["A"],
     seriesOrder: ["pos", "neg"],
-    showTotalDot: true,
+    hasNetDots: true,
   };
 
   it("draws a black net-value pill at the dot when Total is selected", () => {
@@ -1373,9 +1453,9 @@ describe("attachHighlightPills — Total selection net pill", () => {
     document.body.removeChild(svg);
   });
 
-  it("draws no Total pill when showTotalDot is not set (regression guard)", () => {
+  it("draws no Total pill when hasNetDots is not set (regression guard)", () => {
     const svg = makeVerticalStackWithNetDot(150);
-    const handle = attachHighlightPills(svg, { ...OPTS, showTotalDot: false });
+    const handle = attachHighlightPills(svg, { ...OPTS, hasNetDots: false });
     handle.setActive(new Set([TOTAL_SERIES_KEY]));
     expect(svg.querySelectorAll("g.tbl-hl-pills text").length).toBe(0);
     document.body.removeChild(svg);

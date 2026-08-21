@@ -13,7 +13,7 @@ import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { resolveColor } from "../palette";
 import { CAT_LABEL_CLASS } from "../axes";
-import { applyValueAffixes, resolveValueAffixes } from "../util";
+import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import { computeWaterfallSteps, waterfallValueDecimals, isReversedDomain } from "../scales";
 import type { WaterfallStep } from "../scales";
@@ -120,13 +120,23 @@ export function buildWaterfallMarks(
     const pushLabels = (rising: boolean): void => {
       const rows = barSteps
         .filter((s) => s.rise === rising)
-        .map((s) => ({ _xc: s.cat, level: s.level, fill: fillFor(s) }));
+        .map((s) => ({
+          _xc: s.cat,
+          level: s.level,
+          fill: fillFor(s),
+          text: applyValueLabelHook(fmt(s.level), ctx.hooks, {
+            series: s.row.series,
+            category: s.cat,
+            value: s.level,
+            facet: ctx.facet,
+          }),
+        }));
       if (!rows.length) return;
       overlay.push(
         Plot.text(rows, {
           x: "_xc",
           y: "level",
-          text: (d: { level: number }) => fmt(d.level),
+          text: (d: { text: string }) => d.text,
           textAnchor: "middle",
           dy: rising !== reversed ? -TBL_VALUE_LABEL.gap : TBL_VALUE_LABEL.gapBelow,
           fontSize: labelSize,

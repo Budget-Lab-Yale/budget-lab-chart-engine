@@ -30,7 +30,7 @@ import { resolveColor } from "../src/engine/palette";
 import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
-import { parseDate } from "../src/engine/parse-time";
+import { parseDate } from "../src/spec/parse-time";
 
 // Minimal CSV → TidyRow[]. The real data layer (engine step 5) handles quoting/remote
 // sources; these fixtures are deliberately comma-free so a plain split suffices.
@@ -2223,8 +2223,8 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
     // Diverging stack → figure legend carries the 4 series (rect swatches) + a Total dot row.
     expect(fig.legendItems?.some((l) => l.series === TOTAL_SERIES_KEY)).toBe(true);
     expect(fig.legendItems?.every((l) => l.markerShape === "rect" || l.series === TOTAL_SERIES_KEY)).toBe(true);
-    // The figure-level showTotalDot reflects the diverging panes.
-    expect(fig.showTotalDot).toBe(true);
+    // The figure-level netMode reflects the diverging panes.
+    expect(fig.netMode).toBe("dot");
 
     await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-stacked-perpane.golden.svg");
   });
@@ -2281,7 +2281,7 @@ describe("golden figure — faceted horizontal stacked (renderFigure)", () => {
       });
     });
 
-    expect(fig.showTotalDot).toBe(true);
+    expect(fig.netMode).toBe("dot");
     await expect(serializePanes(fig)).toMatchFileSnapshot("./fixtures/figure-hstacked-shared.golden.svg");
   });
 

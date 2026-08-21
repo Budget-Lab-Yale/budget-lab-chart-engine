@@ -226,6 +226,96 @@ export interface ShadeRegion {
   rug?: boolean;
 }
 
+/** One overlay line, layered over the data marks. Exactly ONE of `method`, `fun`, `slope`+`intercept`
+ *  or `column` selects the kind; everything else is shared styling and keying. The four differ only
+ *  in how the polyline's points are produced, which is why they share one array — and one paint
+ *  order, since overlays paint in list order.
+ *
+ *  Numeric and temporal x only; a categorical band scale has no position between categories. On a
+ *  temporal axis `fun`, `slope`/`intercept` and an explicit numeric `domain` are rejected — x would be
+ *  epoch milliseconds, and a slope per millisecond is not a quantity anyone means. */
+export interface Overlay {
+  /** KIND 1 — a least-squares fit of the plotted data. `lm` is a straight line (Stata `lfit`, R
+   *  `geom_smooth(method = "lm")`); `poly` is a polynomial of `degree` (Stata `qfit` at degree 2).
+   *  Always BIVARIATE: y against the plotted x. A multi-predictor model belongs upstream, arriving
+   *  through `fun` + `params` or `column`. */
+  method?: "lm" | "poly";
+  /** `method: poly` only. 2–5; default 2. Higher degrees are refused rather than drawn badly. */
+  degree?: number;
+  /** KIND 2 — an equation in `x`, sampled over `domain` (Stata `twoway function`, R
+   *  `geom_function`). Arithmetic (`+ - * / ^`, parentheses, unary minus) over `x`, the constants
+   *  `pi`/`e`, any `params` key, and a closed function table; R precedence, so `^` is
+   *  right-associative and binds tighter than unary minus. Checked at validation time. */
+  fun?: string;
+  /** `fun` only. Named constants substituted into the expression — the readable way to carry
+   *  coefficients computed upstream, instead of inlining four-decimal floats. */
+  params?: Record<string, number>;
+  /** `fun` only. Sample count across `domain`. Default 100. A non-finite sample breaks the polyline
+   *  there rather than erroring, so `log(x)` over a domain crossing zero draws its valid half. */
+  n?: number;
+  /** KIND 3 — a straight line stated rather than fitted (R `geom_abline`). Both required together.
+   *  For a horizontal or vertical rule use `annotations.yAxis` / `annotations.xAxis` instead. */
+  slope?: number;
+  intercept?: number;
+  /** KIND 4 — a data column holding a precomputed value per row (a fit produced in Stata, R or
+   *  Python), drawn as a line over the marks. Unlike the other three kinds, this is real per-row data
+   *  and therefore DOES fold into the value-axis extent — see index.ts's yForAxis. */
+  column?: string;
+  /** `method` and `column`: one line per colour series (`series`, default) or one over every in-scope
+   *  point (`none`). Rejected on `fun` and `slope`+`intercept`, which do not read the data. */
+  by?: "series" | "none";
+  /** `method` only. Confidence level for a pointwise ribbon around the fit, e.g. 0.95. Omitted ⇒ no
+   *  ribbon. Needs residual degrees of freedom (n > degree + 1); a fit without them draws the line
+   *  and no band. */
+  ci?: number;
+  /** X extent the line is drawn over. `"axis"` spans the resolved x-domain — the declarative way to
+   *  say "all the way across the frame", replacing a hardcoded range that breaks when the data move.
+   *  `[min, max]` states it explicitly (numeric x only, min < max). Omitted ⇒ the extent of the
+   *  group's OBSERVATIONS for `method`/`column` (matching Stata `lfit`'s own default) — a row with a
+   *  blank value cell is not one, so a fit stops at the last point it was fitted from — and the
+   *  resolved x-domain for `fun` and `slope`+`intercept`. An overlay NEVER widens the axis, and no
+   *  field currently does: `xAxisPolicy` carries only `anchorAtZero`, which extends the domain to
+   *  include 0 and nothing more. There is no x counterpart to `yAxisPolicy.min`/`.max`, so a
+   *  `[min, max]` reaching past the data is CLIPPED rather than expanding the frame. */
+  domain?: "axis" | [number, number];
+  /** What this line MEANS. Drawn in-frame at the line's `labelPosition` end unless `legend: true`
+   *  moves it to a legend row (the convention `annotations.yAxis` follows). */
+  label?: string;
+  /** Key this line in the legend instead of labelling it in-frame. Needs a `label`. A per-series fit
+   *  gets ONE neutral row for the concept — the series colours are already keyed by the series
+   *  legend, and one row cannot key both. Ignored when the chart sets `legend: false`, in which case
+   *  the label stays in-frame rather than disappearing. */
+  legend?: boolean;
+  /** Named palette token or "#hex". Omitted ⇒ the series' colour for a per-series `method`/`column`,
+   *  else the dim annotation neutral. */
+  color?: ColorRef;
+  /** Omitted ⇒ `solid` for `method` and `column`, `dashed` for `fun` and `slope`+`intercept`. The
+   *  split is the point: a line computed FROM these data reads differently from one asserted OVER
+   *  them, and defaulting everything dashed would flatten that. */
+  style?: "dashed" | "solid";
+  strokeWidth?: number;
+  /** Which SIDE of the line the in-frame label sits: "top" (default) | "middle" | "bottom". */
+  labelSide?: "top" | "middle" | "bottom";
+  /** WHERE along the line the label anchors: "left" (first point) | "middle" | "right" (last point,
+   *  default). An overlay is sloped, so this picks a point ON the line, not a frame edge. */
+  labelPosition?: "left" | "middle" | "right";
+  /** Label nudges in px, signed: +labelDx = right, +labelDy = UP (matching `annotations`). */
+  labelDx?: number;
+  labelDy?: number;
+  /** Small multiples only: scope this overlay to the pane whose facet value equals `facet`. */
+  facet?: string;
+  /** Contribute a row to the HOVER TOOLTIP showing this line's value at the hovered x. Default
+   *  false: an overlay is usually chrome (a reference slope, a target) whose value at an arbitrary x
+   *  says nothing, and three lines all reporting into one card is noise. A fitted trend is the case
+   *  where it says a lot. Needs a `label` — it is the row's text.
+   *
+   *  Honoured only where the hover resolves a single x: the continuous crosshair (line/area on a
+   *  numeric/temporal/quarterly axis) and a scatter's per-point hover. A histogram's hover resolves
+   *  a BIN RANGE, not an x, so there is no one value to report and the flag is ignored there. See
+   *  CONFIG-SPEC.md's `overlays[].tooltip` row, which states the coverage. */
+  tooltip?: boolean;
+}
+
 /** One closed interval on the x-axis rug. Bounds are x-value strings in the same form as
  *  `annotations.bands.start`/`end` (numeric, date, or quarter — parsed under the chart's
  *  `xAxisType`), both required: a rug block is a span, not a point. */
@@ -427,7 +517,14 @@ export interface ChartSpec {
    *  right for month- or quarter-spaced data, wrong for a DAILY series, where every point in a
    *  month shares one tooltip label and hovering can't tell you which day you're on. Opt-in
    *  rather than a granularity auto-detect deliberately: a repin re-renders the whole archive, so
-   *  changing the default would move the tooltips of every published temporal figure at once. */
+   *  changing the default would move the tooltips of every published temporal figure at once.
+   *
+   *  Reaches the CARD and the coordinated cursor alike: render-live.ts passes it as `xFormat` into
+   *  `attachSecondaryLineCursor` (with `xFormatExplicit`, which is what distinguishes an author's
+   *  pattern from the adapter's axis-matching default), and the cursor draws its x echo with it on
+   *  one line — including on a DAILY multi-pane line, where the axis ticks on whole months, no tick
+   *  row exists to annotate, and the echo would otherwise be skipped. See CONFIG-SPEC.md and
+   *  test/hover-claims-defaults.test.ts, which gates set-and-absent on monthly and daily panes. */
   tooltip_x_format?: string;
 
   /** Text placed BEFORE every rendered value — axis ticks, value labels, tooltips. Concatenated
@@ -493,8 +590,19 @@ export interface ChartSpec {
   /** Dumbbell charts: category render order along the categorical axis — a synonym for `x_order`
    *  (order-only, never filters). `category_order` wins when both are set. See `categoryOrderFor`. */
   category_order?: string[];
-  /** Categorical x: raw category value → display label, used in the hover tooltip header (e.g.
-   *  "1" → "1st Decile"). Lets the tooltip read more verbosely than the compact axis ticks. */
+  /** Categorical x: raw category value → display label, used in the hover CARD's header
+   *  (e.g. "1" → "1st Decile"). Lets that card read more verbosely than the compact axis ticks.
+   *
+   *  A CARD-HEADER field, not a general category-label field. It is consumed inside
+   *  `buildBandTooltipHtml`, fed `categoryLabels` by both `attachBandCrosshair` and
+   *  `attachCategoricalLineCrosshair` (dumbbell / dot plot / categorical-x line) — so it renders
+   *  wherever a hover card is drawn, faceted included where the card survives coordination. Where
+   *  no card is drawn there is no header to render it in: plain/grouped bar and waterfall hover
+   *  with pills in any configuration (`resolveHoverMode` ⇒ "pills"), and a coordinated pane draws
+   *  the in-place cursor instead. That cursor's category echo keeps the RAW category on purpose —
+   *  `addCoordCategoryHighlight` overlays the rendered axis tick, taking its box, wrap mode and
+   *  rotation, and this field is for reading more verbosely than the tick. See CONFIG-SPEC.md and
+   *  test/hover-claims-defaults.test.ts. */
   x_labels?: Record<string, string>;
 
   // Section axis (horizontal bars; the section COLUMN is mapped via `columns.section`).
@@ -516,6 +624,10 @@ export interface ChartSpec {
   shape_legend_title?: string;
 
   confidence_bands?: ConfidenceBand[];
+
+  /** Lines layered over the data marks — fits, equations, stated slopes, or precomputed columns.
+   *  Numeric/temporal x only. See Overlay. */
+  overlays?: Overlay[];
 
   /** Line charts ONLY: shaded regions between a line and its baseline. See ShadeRegion. */
   shading?: ShadeRegion[];
@@ -576,6 +688,29 @@ export interface ChartSpec {
      *  added at the bar's outer ends — the baseline and the total do not move — and the net marker
      *  stays at the true net. */
     segmentGap?: number;
+    /** Which hover treatment a stacked chart gets, INDEPENDENT of the net callout.
+     *  - "tooltip": the floating card, with a Total row.
+     *  - "pills":   per-segment value pills on the hovered band (the coordinated cursor).
+     *  Absent ⇒ the historical coupling: "tooltip" when `netDisplay` resolves to a dot, else "pills".
+     *  Two reasons to set it. A tooltip with NO dot: `netDisplay: none` + `hover: tooltip` gives the
+     *  card a plain-text Total row, draws no marker and no "Total" legend entry, and — coming from
+     *  the spec rather than a stylesheet — the PNG export agrees. And DETERMINISM: `netDisplay: auto`
+     *  resolves to a dot only when some value is negative, so a series that dips below zero at some
+     *  dial settings silently flipped the reader between a tooltip and value pills (issue #29). */
+    hover?: "tooltip" | "pills";
+    /** The hover tooltip's Total row. Stacked charts with 2+ series only; a 100 %-normalized stack
+     *  never gets a Total row (its total is always 100). `bold` and `divider` default ON — every
+     *  such Total row gets a bold, divided row on hover unless a chart opts out. */
+    total?: {
+      /** Where the row sits: "last" (default, after the series rows) or "first". */
+      position?: "first" | "last";
+      /** Bold the row's label (the value is already bold). Default true — set `false` to opt out. */
+      bold?: boolean;
+      /** Rule separating the Total row from the series rows; the side flips with `position` (see
+       *  `position` above) so it always separates the Total row from the series rows, never from
+       *  the category header. Default true — set `false` to opt out. */
+      divider?: boolean;
+    };
   };
   /** Waterfall-chart display options. A waterfall is a vertical, single-series categorical chart
    *  whose bars float on a running cumulative (see `columns.kind`). Ignored by other chart types. */
@@ -631,6 +766,18 @@ export interface ChartSpec {
    *  unavailable, since it is driven through the legend. Default true (legend shown per the
    *  usual ≥2-series / style-override rules). */
   legend?: boolean;
+  /** Turn engine hover chrome OFF, for a consumer drawing its own. Switching a piece off rather
+   *  than hiding it in CSS is what makes the PNG export agree — the export re-renders from the
+   *  spec, so a stylesheet never reached it.
+   *  Deliberately NOT here: the net marker (use `barStack.netDisplay: none`, which also expresses
+   *  dot/text) and the legend (use the top-level `legend: false`). Each would otherwise be a
+   *  second formula for a decision that already has one. */
+  chrome?: {
+    /** The floating hover tooltip card. Default true. */
+    tooltip?: boolean;
+    /** The per-segment value pills on the hovered band. Default true. */
+    valuePills?: boolean;
+  };
 
   // Small multiples (multi-panel); per-pane base chart type stays `chartType`.
   small_multiples?: SmallMultiplesConfig;

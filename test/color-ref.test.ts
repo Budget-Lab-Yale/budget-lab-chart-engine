@@ -46,14 +46,20 @@ describe("an unpaintable color blanks the figure (the bug being gated)", () => {
 });
 
 /** Every field in the schema that takes a color, with a value that names nothing. Keep this list
- *  exhaustive: it is the only thing standing between a new color field and a silently blank figure. */
+ *  exhaustive: it is the only thing standing between a new color field and a silently blank figure.
+ *
+ *  Entries that need a non-categorical axis (date-valued annotations, markers, bands, shading,
+ *  overlays) override the base to `chartType: "line"`: `bar`/`stacked` require a categorical
+ *  x-axis, and that axis error would report instead of the colour error these cases exist to pin.
+ *  Coverage is unchanged -- `colorErrors` reads `annotations.*` / `xAxisPolicy.*` without
+ *  consulting `chartType`. */
 const COLOR_FIELDS: Array<[field: string, spec: Record<string, unknown>]> = [
   ["series_colors", { ...BAR, series_colors: { one: "blu" } }],
   ["bar_color", { ...BAR, bar_color: "blu" }],
   ["category_colors", { ...BAR, category_colors: { A: "blu" } }],
   [
     "annotations.xAxis",
-    { ...BAR, xAxisType: "temporal", annotations: { xAxis: [{ x: "2020-01-01", color: "blu" }] } },
+    { ...BAR, chartType: "line", xAxisType: "temporal", annotations: { xAxis: [{ x: "2020-01-01", color: "blu" }] } },
   ],
   [
     "annotations.yAxis",
@@ -63,22 +69,24 @@ const COLOR_FIELDS: Array<[field: string, spec: Record<string, unknown>]> = [
     "annotations.bands",
     {
       ...BAR,
+      chartType: "line",
       xAxisType: "temporal",
       annotations: { bands: [{ start: "2020-01-01", end: "2021-01-01", color: "blu" }] },
     },
   ],
   [
     "annotations.points",
-    { ...BAR, xAxisType: "temporal", annotations: { points: [{ x: "2020-01-01", label: "p", color: "blu" }] } },
+    { ...BAR, chartType: "line", xAxisType: "temporal", annotations: { points: [{ x: "2020-01-01", label: "p", color: "blu" }] } },
   ],
   [
     "xAxisPolicy.markers",
-    { ...BAR, xAxisType: "temporal", xAxisPolicy: { markers: [{ x: "2020-01-01", color: "blu" }] } },
+    { ...BAR, chartType: "line", xAxisType: "temporal", xAxisPolicy: { markers: [{ x: "2020-01-01", color: "blu" }] } },
   ],
   [
     "xAxisPolicy.bands",
     {
       ...BAR,
+      chartType: "line",
       xAxisType: "temporal",
       xAxisPolicy: { bands: [{ start: "2020-01-01", end: "2021-01-01", color: "blu" }] },
     },
@@ -116,6 +124,10 @@ const COLOR_FIELDS: Array<[field: string, spec: Record<string, unknown>]> = [
   ["waterfall.connectorColor", { ...BAR, chartType: "waterfall", waterfall: { connectorColor: "blu" } }],
   ["connector.color", { ...BAR, chartType: "dumbbell", connector: { color: "blu" } }],
   ["barStack.mono.base", { ...BAR, chartType: "stacked", barStack: { mono: { base: "blu" } } }],
+  [
+    "overlays",
+    { ...BAR, chartType: "line", xAxisType: "numeric", overlays: [{ slope: 1, intercept: 0, color: "blu" }] },
+  ],
 ];
 
 describe("every color-valued field is checked", () => {
@@ -161,6 +173,7 @@ describe("what still passes", () => {
     // color is never painted — failing the spec over it would break a chart that renders correctly.
     const r = validateSpec({
       ...BAR,
+      chartType: "line",
       xAxisType: "temporal",
       annotations: { xAxis: [{ x: "2020-01-01", color: "blue" }] },
       xAxisPolicy: { markers: [{ x: "2020-01-01", color: "blu" }] },

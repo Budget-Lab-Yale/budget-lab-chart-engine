@@ -21,6 +21,9 @@ import { resolveAnnotations } from "./annotations";
 import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
+import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
+import { overlayKind, overlayPerSeries } from "./overlays";
+import type { Overlay } from "./types";
 
 export interface ValidationResult {
   valid: boolean;
@@ -66,6 +69,58 @@ function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): 
     return `chartType "dumbbell" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`;
   }
   return null;
+}
+
+/** Bar cross-field constraint: `bar` and `stacked` draw on a BAND x-scale, and only the categorical
+ *  x adapter (`_xc`) builds a band domain from the actual x values. On every other axis type the
+ *  output was wrong in some way while `validateSpec` said `valid: true`, but the reasons differ and
+ *  it is worth being exact about them, because one shape does render correctly:
+ *
+ *  NUMERIC, vertical — the numeric adapter emits `xPlotOpts: { domain: [xMin, xMax] }`
+ *  (engine/x-adapter.ts) and the vertical single-series path in `marks/bar.ts` does not replace it
+ *  (it only refines paddingInner/paddingOuter), so Plot reads that two-element CONTINUOUS domain as
+ *  a BAND domain of exactly two categories. The band domain is therefore always the numeric
+ *  domain's two ENDPOINTS, and a row is drawn only if its x IS one of those endpoints. So a chart
+ *  whose entire x set is those two endpoints — i.e. exactly two distinct x values — renders
+ *  COMPLETELY AND CORRECTLY, and every other shape silently drops the interior rows. Measured
+ *  (rects drawn / x tick labels): 2 rows → 2 of 2, "1","2"; 3 rows → 2 of 3, "1","3"; 5 rows →
+ *  2 of 5, "1","5". Rects at x=104 and x=404, width 240, at every row count.
+ *
+ *  NUMERIC, horizontal — 0 rects at every row count, including two. The horizontal path builds its
+ *  own band domain from the x values filtered to non-empty STRINGS, which the numeric adapter never
+ *  produces, so the domain is empty and Plot drops the whole mark.
+ *
+ *  TEMPORAL / QUARTERLY, vertical — drew EVERY bar at every row count; nothing is dropped here. The
+ *  defect is chrome, not data: Plot stacks its own band axis over the engine's, `bar` leaks the
+ *  internal field name `_xd` as the x-axis label, and Plot paints its warning glyph into the SVG —
+ *  which the PNG export re-renders into a published figure. Horizontal draws 0, as above.
+ *
+ *  The two-row numeric vertical case is refused ANYWAY, deliberately. It is correct by coincidence
+ *  of the band-domain derivation, not by design; the carve-out would be a three-way conjunction
+ *  (numeric AND vertical AND exactly two distinct x values) that no author should have to hold; and
+ *  `validateSpec` cannot see the data, so narrowing it would move the rule into data validation and
+ *  make a spec's validity depend on today's row count — a chart that renders today would start
+ *  failing the day its data grew a third row, across a whole archive at repin. See the pinning test
+ *  in test/validate.test.ts before relaxing any of this.
+ *
+ *  Keyed on the two literals ON PURPOSE. `FILLED_CHART_TYPES` (./filled-chart-types) is the
+ *  tempting import and the wrong one: it also holds `histogram` (numeric/temporal by design),
+ *  `area` (usually temporal) and `waterfall` (already checked, with its own vertical-only message
+ *  that a second check here would make unreachable). This must never read as
+ *  "categorical implies bar" either — line and area on a categorical axis render correctly and are
+ *  used by published figures. */
+function barBandAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
+  if (spec.chartType !== "bar" && spec.chartType !== "stacked") return null;
+  if (spec.xAxisType === "categorical") return null;
+  return (
+    `chartType ${JSON.stringify(spec.chartType)} requires xAxisType "categorical" ` +
+    `(got ${JSON.stringify(spec.xAxisType)}) — bars sit on a band scale, and on a continuous or ` +
+    "date x-axis that band domain is built from the numeric domain's two endpoints, so all but the " +
+    "first and last row are silently dropped (horizontal draws no bars at all, and a date axis " +
+    "draws a doubled x-axis with a warning glyph). For values over years, ages or percentiles, " +
+    "either declare the x values as categories (xAxisType: categorical, with x_order to fix their " +
+    "order) or use chartType: line."
+  );
 }
 
 /** `title_selectors` cross-field rules the JSON schema can't express: every selector key must
@@ -256,6 +311,7 @@ function colorErrors(spec: ChartSpec): string[] {
   checkColors("annotations.points", ann?.points);
   checkColors("shading", spec.shading);
   checkColors("rug.tracks", spec.rug?.tracks);
+  checkColors("overlays", spec.overlays);
 
   for (const [key, selector] of Object.entries(spec.title_selectors ?? {})) {
     (selector.options ?? []).forEach((o, i) =>
@@ -279,6 +335,132 @@ function shadingSpecError(spec: { chartType?: unknown; shading?: unknown[] }): s
   return spec.chartType === "line"
     ? null
     : `shading is supported on chartType "line" only (got ${JSON.stringify(spec.chartType)})`;
+}
+
+/** Semantic checks on `overlays` — the ones ajv cannot express readably. Returns every error found,
+ *  each naming the entry index and the field, so an author fixing three mistakes sees three messages
+ *  rather than one per run. */
+function overlaySpecErrors(spec: {
+  overlays?: Overlay[];
+  xAxisType?: unknown;
+  chartType?: unknown;
+  orientation?: unknown;
+}): string[] {
+  const overlays = spec.overlays;
+  if (!overlays?.length) return [];
+  const errors: string[] = [];
+  const xAxisType = spec.xAxisType;
+  const histogram = spec.chartType === "histogram";
+
+  if (xAxisType === "categorical") {
+    return [
+      "overlays are not supported with xAxisType categorical — a band scale has no position between categories, so a fitted or drawn line has nowhere to land",
+    ];
+  }
+  // Same "nowhere to land" reason as the categorical rejection above, one axis over: a HORIZONTAL
+  // bar/stacked chart puts the category band on screen-y, and the overlay mark writes its values to
+  // the `y` channel unconditionally (engine/marks/overlay.ts), so a band y-scale cannot place them.
+  // Transposing that mark's channels would not have been the fix: horizontal bar/stacked with a
+  // non-categorical x draws no BARS either (bar.ts/stacked.ts build the band domain from string
+  // categories, which only the `_xc` adapter produces), so the fit would land on an empty frame.
+  // Scoped to bar/stacked — the only overlay-eligible chart types that HONOUR `orientation`.
+  // dumbbell/waterfall already require categorical x / vertical; on line/area/scatter `orientation`
+  // is dead config the renderer ignores, and those draw their overlay correctly, so rejecting them
+  // would break figures that render fine today.
+  if (
+    spec.orientation === "horizontal" &&
+    (spec.chartType === "bar" || spec.chartType === "stacked")
+  ) {
+    return [
+      `overlays are not supported on a horizontal ${spec.chartType} chart — the category band is on the y axis there, so a fitted or drawn line has nowhere to land (drop \`orientation: horizontal\`, or drop the overlay)`,
+    ];
+  }
+  const temporal = xAxisType === "temporal" || xAxisType === "quarterly";
+
+  overlays.forEach((o, i) => {
+    const at = `overlays[${i}]`;
+    const kind = overlayKind(o);
+    if (!kind) {
+      if ((o.slope == null) !== (o.intercept == null)) {
+        errors.push(`${at}: \`slope\` and \`intercept\` must be given together`);
+      } else {
+        errors.push(
+          `${at}: an overlay needs exactly one of \`method\`, \`fun\`, \`slope\`+\`intercept\`, \`column\``,
+        );
+      }
+      return;
+    }
+
+    if (o.degree != null && o.method !== "poly") {
+      errors.push(`${at}: \`degree\` applies to \`method: poly\``);
+    }
+    if (o.params != null && kind !== "fun") errors.push(`${at}: \`params\` applies to \`fun\``);
+    if (o.n != null && kind !== "fun") errors.push(`${at}: \`n\` applies to \`fun\``);
+    if (o.ci != null && kind !== "method") errors.push(`${at}: \`ci\` applies to \`method\``);
+    if (o.by != null && kind !== "method" && kind !== "column") {
+      errors.push(
+        `${at}: \`by\` applies to \`method\` and \`column\` — the other kinds do not read the data`,
+      );
+    }
+    // A dangling `slope`/`intercept` alongside another resolved kind (e.g. `{ method: "lm", slope:
+    // 0.5 }`) reaches here — never both, together they'd make `kind` "abline" (or null, if a THIRD
+    // key is also set) and be caught above instead. Named individually so a typo in either fails
+    // the build, matching every other misapplied key above.
+    if (kind !== "abline") {
+      if (o.slope != null) errors.push(`${at}: \`slope\` applies to \`slope\`+\`intercept\` (an abline)`);
+      if (o.intercept != null) {
+        errors.push(`${at}: \`intercept\` applies to \`slope\`+\`intercept\` (an abline)`);
+      }
+    }
+    if (o.legend === true && !o.label) {
+      errors.push(`${at}: \`legend: true\` needs a \`label\` — it is the row's text`);
+    }
+    if (o.tooltip === true && !o.label) {
+      errors.push(`${at}: \`tooltip: true\` needs a \`label\` — it is the row's text`);
+    }
+
+    // Histogram rows are BinnedRows ({_x0, _x1, _y}) built on a path that skips the row preparation
+    // where `_xn` and `_overlayCols` are set, so the two data-reading kinds would fit NaN / find no
+    // values and be dropped WITHOUT a message — while the spec validated. Reject them by name.
+    if (histogram && (kind === "method" || kind === "column")) {
+      errors.push(
+        `${at}: \`${kind}\` is not supported on chartType histogram — histogram rows carry bin edges, not a per-row x, so there is nothing to fit or read. Use \`fun\` (e.g. a \`dnorm\` density curve over \`histogram.normalize: density\`).`,
+      );
+    }
+
+    if (kind === "fun") {
+      const parsed = parseExpression(o.fun as string);
+      if (!parsed.ok) {
+        errors.push(`${at}: \`fun\` does not parse — ${parsed.error}`);
+      } else {
+        const allowed = new Set(["x", ...Object.keys(EXPR_CONSTANTS), ...Object.keys(o.params ?? {})]);
+        const unknown = exprVariables(parsed.ast).filter((v) => !allowed.has(v));
+        if (unknown.length) {
+          errors.push(
+            `${at}: \`fun\` uses ${unknown.map((v) => JSON.stringify(v)).join(", ")}, which is neither \`x\`, a constant (${Object.keys(EXPR_CONSTANTS).join(", ")}), nor a declared \`params\` key`,
+          );
+        }
+      }
+    }
+
+    if (temporal && (kind === "fun" || kind === "abline")) {
+      const field = kind === "fun" ? "`fun`" : "`slope`+`intercept`";
+      errors.push(
+        `${at}: ${field} is not supported on a temporal x-axis — x would be epoch milliseconds, so the coefficients would not mean anything. Use \`method\` or \`column\` there.`,
+      );
+    }
+    if (Array.isArray(o.domain)) {
+      if (temporal) {
+        errors.push(
+          `${at}: an explicit numeric \`domain\` is not supported on a temporal x-axis — use \`domain: axis\``,
+        );
+      } else if (!(o.domain[0]! < o.domain[1]!)) {
+        errors.push(`${at}: \`domain\` must satisfy min < max (got [${o.domain[0]}, ${o.domain[1]}])`);
+      }
+    }
+  });
+
+  return errors;
 }
 
 /** A band / shading / marker entry as the legend + rug flags see it. */
@@ -481,6 +663,21 @@ export function validateSpec(spec: unknown): ValidationResult {
     },
   );
   if (histErrors.length) return { valid: false, errors: histErrors };
+  const overlayErrors = overlaySpecErrors(
+    spec as {
+      overlays?: Overlay[];
+      xAxisType?: unknown;
+      chartType?: unknown;
+      orientation?: unknown;
+    },
+  );
+  if (overlayErrors.length) return { valid: false, errors: overlayErrors };
+  // Deliberately AFTER `overlaySpecErrors`, not up with the other axis checks: a horizontal
+  // bar/stacked chart carrying an overlay violates BOTH rules, and the overlay message is the more
+  // specific of the two. Placed with its family, this guard would report first and make the
+  // horizontal-bar/stacked branch of `overlaySpecErrors` unreachable dead code.
+  const barAxisErr = barBandAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
+  if (barAxisErr) return { valid: false, errors: [barAxisErr] };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
   const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
@@ -681,11 +878,35 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // A `column` overlay names a data column, so the data has to have it — the same check the
+  // confidence_bands lower/upper columns get. Collected once, because the same list is
+  // numeric-checked per row below for the same reason the CI columns are.
+  const overlayCols: string[] = [];
+  for (const o of spec.overlays ?? []) {
+    if (o.column != null && !overlayCols.includes(o.column)) overlayCols.push(o.column);
+  }
+  for (const col of overlayCols) {
+    if (!columns.has(col)) {
+      errors.push(
+        `config/data mismatch: overlays references a "${col}" column the data does not have`,
+      );
+    }
+  }
+
+  // INVARIANT: every column whose cells the value axis reads gets ONE numeric-or-empty check —
+  // `value` above, the CI columns, and a `column` overlay's column. The overlay column is not
+  // optional here: engine/index.ts reads it with unary `+` and skips anything non-finite, so a
+  // mistyped cell does not drop a point, it drops the VERTEX and reroutes the line straight from
+  // its neighbours — byte-identical to a blank cell and invisible to the author. A genuinely blank
+  // cell stays legitimate (isNumericOrEmpty accepts ""): blank means absent, per CONFIG-SPEC.md.
+  const numericCols = [...ciCols, ...overlayCols.filter((c) => !ciCols.includes(c))];
+
   // Bail before row scanning if structural columns are absent — the per-row checks would
   // just repeat the same missing-column failure for every row.
   if (errors.length) return { valid: false, errors };
 
-  // Per-row: x parses under xAxisType; value + CI numeric-or-empty. Collect the series + shape sets.
+  // Per-row: x parses under xAxisType; value + numericCols numeric-or-empty. Collect the series +
+  // shape sets.
   const seriesSeen = new Set<string>();
   const shapeSeen = new Set<string>();
   for (let i = 0; i < rows.length; i++) {
@@ -697,7 +918,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     if (!isNumericOrEmpty(valRaw)) {
       errors.push(`row ${rowNum}: ${cols.value} ${JSON.stringify(valRaw)} is not numeric`);
     }
-    for (const col of ciCols) {
+    for (const col of numericCols) {
       const v = row[col] ?? "";
       if (!isNumericOrEmpty(v)) errors.push(`row ${rowNum}: ${col} ${JSON.stringify(v)} is not numeric`);
     }
@@ -907,6 +1128,117 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
             `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars/stacks share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
           );
         }
+      }
+    }
+  }
+
+  // Cross-reference: overlays[].facet must name a pane the figure actually RENDERS (present in the
+  // facet column AND not filtered out by pane_order), and only means anything on a chart that
+  // actually facets. annotation-legend.ts's buildAnnotationLegendItems pushes an overlay's legend
+  // row straight from the spec, guarding only `kind == null` — its own comment there says a
+  // malformed entry "must not get a legend row for a line that is never drawn", and a misspelled
+  // `facet`, a pane pane_order drops, or a `facet` on a spec with no small_multiples at all is
+  // exactly that: nothing will ever paint it. That legend builder gets the spec and no rows, so it
+  // CANNOT tell a misspelled facet from a real one — this validator is the only place that can, and
+  // is deliberately the only gate. (cols.facet's existence is already enforced above, same as the
+  // pane_order check.)
+  for (const [i, o] of (spec.overlays ?? []).entries()) {
+    if (o.facet == null) continue;
+    if (!spec.small_multiples) {
+      errors.push(
+        `overlays[${i}].facet is set but the chart has no small_multiples — remove \`facet\` or add small_multiples`,
+      );
+    } else if (cols.facet) {
+      const facetField = cols.facet;
+      // Checked against the panes actually RENDERED, not every value in the column: pane_order is
+      // an inclusion filter (CONFIG-SPEC.md), so a pane it omits is never drawn and an overlay
+      // scoped to it paints nothing while still keying its legend row. Resolved with the same idiom
+      // as the pane_widths pane count above and figure.ts's own pane partition — including its
+      // treatment of a blank facet cell, which is not a pane there and so is not one here.
+      const facetValues = new Set(
+        rows.map((r) => r[facetField] as string).filter((v) => v != null && v !== ""),
+      );
+      const paneOrder = spec.small_multiples.pane_order;
+      const panes =
+        paneOrder && paneOrder.length
+          ? new Set(paneOrder.filter((v) => facetValues.has(v)))
+          : facetValues;
+      if (!panes.has(o.facet)) {
+        errors.push(
+          facetValues.has(o.facet)
+            ? `overlays[${i}].facet names pane ${JSON.stringify(o.facet)}, which small_multiples.pane_order excludes — that pane is never rendered, so the line would be drawn nowhere while still keying a legend row (rendered panes: ${JSON.stringify([...panes])})`
+            : `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${facetField}" (data values: ${JSON.stringify([...facetValues].sort())})`,
+        );
+      }
+    }
+  }
+
+  // Cross-reference: a `legend: true` overlay must be able to draw SOMETHING. Sibling of the
+  // `facet` check above, and for the same reason: `buildAnnotationLegendItems` emits an entry's
+  // legend row from the spec alone, while `resolveOverlays` DROPS an entry it cannot compute from
+  // the data — a `method` fit with fewer usable points than its degree needs, a `column` with fewer
+  // than two finite cells. The two disagreed, so a one-point `lm` with `legend: true` rendered zero
+  // paths and a legend row anyway. The row is the half a reader sees. That builder gets no rows, so
+  // it cannot implement this; here is the only place that can.
+  //
+  // INVARIANT — this check is DELIBERATELY GENEROUS, and the direction is the point. It reads the
+  // raw table and ignores every filter that NARROWS what is drawn: `domain`, `series_order`,
+  // `pane_order`, `facet`, and the requirement that a line span two distinct x. Those can only
+  // REMOVE rows, so ignoring them makes this estimate too optimistic — it can miss a phantom row,
+  // and can never refuse an entry that draws. Do not "tighten" it by folding any of those in: that
+  // is exactly the re-derivation that made the pooled-column consistency guard wrong three times
+  // before it was withdrawn (test/overlays-spec.test.ts records the six ways). A missed phantom row
+  // is a cosmetic defect the author sees on screen; a false rejection breaks a published figure on
+  // the next repin.
+  //
+  // A COUNT, NEVER A CONTIGUITY TEST — and this is the one place the "those filters only remove
+  // rows" argument above does NOT license a tightening. A blank cell BREAKS the polyline
+  // (engine/overlays.ts#columnPoints, engine/marks/overlay.ts#runsOf), so `5, blank, 7` resolves to
+  // two one-point runs and paints two dots with no segment between them. Requiring two ADJACENT
+  // cells in x-sorted order looks like the obvious repair and is unsound: removing a row can DELETE
+  // THE BREAK BETWEEN TWO RUNS AND JOIN THEM, so the longest run is not monotone under the filters
+  // this check ignores, even though the count is. `series_order: ["A"]` dropping the B row that
+  // carried the blank, and a pooled entry on a faceted chart whose blank lives in another pane, both
+  // draw a real two-vertex line from a raw table with no two adjacent cells anywhere
+  // (test/overlays-render.test.ts, "a contiguity test would refuse a spec that draws"). Scoping the
+  // contiguity soundly means re-deriving the pane partition and the series filter — the exact
+  // re-derivation the paragraph above forbids. The isolated-dots case stays accepted on purpose: it
+  // is the cheaper error, and it is plain on the author's own screen.
+  //
+  // The row is EARNED BY ANY ONE GROUP: a per-series entry where one series can be fitted and
+  // another cannot still gets its single concept row (CONFIG-SPEC.md, `overlays[].legend`), so the
+  // threshold test is a MAX over groups, never an "every group" test.
+  // `legend: false` ⇒ no legend at all, so no row can be phantom (the label stays in-frame, where it
+  // is drawn from the resolved line and vanishes with it). A categorical axis draws no overlay at
+  // all and validateSpec already refuses `overlays` there — skipped so a direct validateChartData
+  // call cannot add a second, derivative complaint on top of that one.
+  if (spec.legend !== false && spec.xAxisType !== "categorical") {
+    for (const [i, o] of (spec.overlays ?? []).entries()) {
+      if (o.legend !== true || !o.label) continue;
+      const kind = overlayKind(o);
+      // `fun` and `slope`+`intercept` are constructed from the spec and read no data, so they draw
+      // wherever there is a domain — nothing here can starve them.
+      if (kind !== "method" && kind !== "column") continue;
+      const field = kind === "column" ? (o.column as string) : cols.value;
+      if (!field || !columns.has(field)) continue; // absent column: already reported above
+      // What `resolveOverlays` needs from ONE group: fitPoly wants degree + 1 finite pairs, and
+      // columnPoints wants 2 real points. Both counted over finite cells of the driving column.
+      const need = kind === "column" ? 2 : (o.method === "poly" ? (o.degree ?? 2) : 1) + 1;
+      const perSeries = overlayPerSeries(o);
+      const counts = new Map<string, number>();
+      for (const r of rows) {
+        const raw = (r[field] as string) ?? "";
+        if (raw === "" || !Number.isFinite(+raw)) continue;
+        const key = perSeries && cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const best = Math.max(0, ...counts.values());
+      if (best < need) {
+        errors.push(
+          kind === "column"
+            ? `overlays[${i}] has \`legend: true\` with label ${JSON.stringify(o.label)}, but column "${field}" ${perSeries && cols.series ? `has fewer than 2 numeric cells in any one series (most in one series: ${best})` : `has only ${best} numeric cell(s)`} — no line can be drawn, so the legend would key a line that is not on the chart. Remove \`legend: true\`, or give the column values.`
+            : `overlays[${i}] has \`legend: true\` with label ${JSON.stringify(o.label)}, but \`method: ${o.method}\` needs ${need} points and "${field}" has at most ${best} numeric cell(s)${perSeries && cols.series ? " in any one series" : ""} — the fit cannot be computed, so the legend would key a line that is not on the chart. Remove \`legend: true\`${o.method === "poly" ? ", or lower `degree`" : ""}, or give the chart more data.`,
+        );
       }
     }
   }

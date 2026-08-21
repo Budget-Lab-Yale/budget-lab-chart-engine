@@ -9,8 +9,9 @@
 // BOTH modes support line/bar/stacked (each pane is an independent single frame, so grouped
 // bars' own `fx` faceting never collides with the grid — the grid is CSS-composed).
 import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
-import { parseDate } from "./parse-time";
+import { parseDate } from "../spec/parse-time";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -21,6 +22,7 @@ import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABE
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 import type { SeriesHatch } from "./hatch";
+import type { OverlayTooltipLine } from "./overlays";
 
 // Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
 // without a module cycle through figure.ts).
@@ -293,12 +295,14 @@ export interface FigurePane {
   /** This pane's x-value parse/format for the crosshair. */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
-  /** Stacked panes: net-dot mode for the band crosshair's Total row. Mirrors
-   *  MarkLayers.showTotalDot — line/bar panes leave this undefined. */
-  showTotalDot?: boolean;
+  /** Stacked panes: mirrors MarkLayers.netMode — line/bar panes leave this undefined. */
+  netMode?: NetMode;
   /** Stacked panes: visual top→bottom stack order, for the band crosshair's
    *  Total/series ordering. Line/bar panes leave this undefined. */
   legendVisualOrder?: string[];
+  /** `overlays[].tooltip: true` lines that draw in THIS pane — see PaneResult.overlayTooltips.
+   *  Per-pane because `facet` scoping and the pane's own x-domain both decide it. */
+  overlayTooltips?: OverlayTooltipLine[];
   /** This pane's key row per series, INCLUDING the ones the figure legend suppresses — a
    *  single-series figure draws no legend but still tooltips. Per-pane, not figure-level, because
    *  per-pane mode resolves colours independently. See index.ts buildSeriesKeyRows. */
@@ -339,9 +343,8 @@ export interface FigureRenderResult {
   /** Visual top-to-bottom stack order of the interactive series (stacked panes only; line
    *  panes leave this undefined). Mirrors RenderResult.legendVisualOrder. */
   legendVisualOrder?: string[];
-  /** Net-dot mode for the band crosshair's Total row (stacked panes only; line panes leave
-   *  this undefined). Mirrors RenderResult.showTotalDot. */
-  showTotalDot?: boolean;
+  /** Stacked panes only; line panes leave this undefined. Mirrors RenderResult.netMode. */
+  netMode?: NetMode;
 }
 
 /**
@@ -696,8 +699,13 @@ export function renderFigure(
         firstFormatValue = p.formatValue;
       }
       panePainted.push(p.seriesHatches);
-    paneFills.push(p.seriesPainted);
       paneFills.push(p.seriesPainted);
+      // Escape hatch, per pane: a figure has no single SVG (each pane is its own), so this fires
+      // once per pane, LAST — after renderPane's own assembly — with ctx.facet set to the SAME
+      // FigurePane.value the tooltip hook (Task 5) already uses, not a second derivation of it.
+      if (opts.hooks?.afterRender && p.svg) {
+        opts.hooks.afterRender(p.svg, { phase: opts.phase ?? "live", facet: value });
+      }
       return {
         value,
         title: titleFor(value),
@@ -709,7 +717,8 @@ export function renderFigure(
         valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
         tooltipXParse: p.tooltipXParse,
         tooltipXFormat: p.tooltipXFormat,
-        showTotalDot: p.layers.showTotalDot,
+        overlayTooltips: p.overlayTooltips,
+        netMode: p.layers.netMode,
         legendVisualOrder: p.layers.legendVisualOrder,
         seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
       };
@@ -752,7 +761,7 @@ export function renderFigure(
       tooltipXParse: first?.tooltipXParse,
       tooltipXFormat: first?.tooltipXFormat,
       legendVisualOrder: firstLayers?.legendVisualOrder,
-      showTotalDot: firstLayers?.showTotalDot,
+      netMode: firstLayers?.netMode,
     };
   }
 
@@ -860,6 +869,16 @@ export function renderFigure(
       firstFormatValue = p.formatValue;
     }
     panePainted.push(p.seriesHatches);
+    // Pushed in BOTH pane loops or the figure legend lies. `paneFills` was declared here and pushed
+    // only in the per-pane branch, so shared mode — the DEFAULT — handed firstPainted() an empty map
+    // and the legend fell through to the palette: panes painted a `highlightSeries`-dimmed series
+    // grey, the one legend over them keyed it amber. Gated by key-agreement.test.ts, which asserts
+    // both modes against the fill the panes are drawn in.
+    paneFills.push(p.seriesPainted);
+    // Escape hatch, per pane — see the identical call + rationale in the per-pane-mode branch above.
+    if (opts.hooks?.afterRender && p.svg) {
+      opts.hooks.afterRender(p.svg, { phase: opts.phase ?? "live", facet: value });
+    }
     return {
       value,
       title: titleFor(value),
@@ -871,7 +890,8 @@ export function renderFigure(
       valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
       tooltipXParse: p.tooltipXParse,
       tooltipXFormat: p.tooltipXFormat,
-      showTotalDot: p.layers.showTotalDot,
+      overlayTooltips: p.overlayTooltips,
+      netMode: p.layers.netMode,
       legendVisualOrder: p.layers.legendVisualOrder,
       seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
     };
@@ -914,6 +934,6 @@ export function renderFigure(
     tooltipXParse: first?.tooltipXParse,
     tooltipXFormat: first?.tooltipXFormat,
     legendVisualOrder: firstLayers?.legendVisualOrder,
-    showTotalDot: firstLayers?.showTotalDot,
+    netMode: firstLayers?.netMode,
   };
 }

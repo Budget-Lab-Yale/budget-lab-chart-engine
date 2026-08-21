@@ -1259,6 +1259,21 @@ describe("mountChart two-way selection wiring", () => {
     }
   });
 
+  it("LINE chart with a per-series overlay fit still adds exactly one hit-path per REAL line, none for the overlay", () => {
+    // The overlay's Plot.line mark lands in the same g[aria-label="line"] namespace as the data
+    // lines (marks/overlay.ts), so without excluding it, addLineHitPaths (render-live.ts) would
+    // hand a fit line a 14px invisible click/hover zone spanning its full domain.
+    const overlaySpec: ChartSpec = { ...MULTI_SERIES_SPEC, overlays: [{ method: "lm" }] };
+    const container = document.createElement("div");
+    mountChart(container, { spec: overlaySpec, rows: MULTI_SERIES_ROWS, width: 720 });
+    const svg = container.querySelector(".figure-canvas svg")!;
+    expect(svg.querySelector("g.tbl-overlay-line")).not.toBeNull();
+    const hitPaths = Array.from(svg.querySelectorAll<SVGPathElement>(".tbl-line-hitpath"));
+    const hitSeries = new Set(hitPaths.map((p) => p.getAttribute("data-series")));
+    expect(hitSeries).toEqual(new Set(["A", "B"]));
+    expect(hitPaths.length).toBe(2);
+  });
+
   it("single-series no-legend LINE chart adds NO hit-paths", () => {
     const container = document.createElement("div");
     mountChart(container, { spec: SINGLE_SERIES_SPEC, rows: SINGLE_SERIES_ROWS, width: 720 });

@@ -24,15 +24,16 @@ import { isReversedDomain } from "../scales";
 import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
-import { applyValueAffixes, resolveValueAffixes } from "../util";
+import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import type { ChartSpec } from "../../spec/types";
+import { resolveNetMode, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
 
 // Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
 // pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
-const NET_DOT_CLASS = "tbl-net-marker";
+export const NET_DOT_CLASS = "tbl-net-marker";
 
 // Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.
 const NET_DOT_R = 8;
@@ -159,18 +160,7 @@ export function buildStackedMarks(
         }
       : {};
 
-  const netDisplayCfg = spec.barStack?.netDisplay ?? "auto";
-  const netMode: "dot" | "text" | "none" = normalize
-    ? "none"
-    : netDisplayCfg === "none"
-      ? "none"
-      : netDisplayCfg === "dot"
-        ? "dot"
-        : netDisplayCfg === "text"
-          ? "text"
-          : hasNegatives
-            ? "dot"
-            : "text";
+  const netMode = resolveNetMode(spec, hasNegatives);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data
@@ -284,7 +274,15 @@ export function buildStackedMarks(
     // 700 text_heading, baseline 6px above the top.
     // Shared callout style (matches the per-bar value labels — see theme.ts TBL_VALUE_LABEL).
     const common = {
-      text: (d: { net: number }) => netFmt(d.net),
+      // The net callout's series identity is the Total pseudo-series (TOTAL_SERIES_KEY), matching
+      // the legendExtras/net-dot tagging below — it names the aggregate row, not a real series.
+      text: (d: { _xc: string; net: number }) =>
+        applyValueLabelHook(netFmt(d.net), ctx.hooks, {
+          series: TOTAL_SERIES_KEY,
+          category: d._xc,
+          value: d.net,
+          facet: ctx.facet,
+        }),
       fill: TBL.color.heading,
       fontSize: TBL_VALUE_LABEL.fontSize,
       fontWeight: TBL_VALUE_LABEL.fontWeight,
@@ -325,9 +323,17 @@ export function buildStackedMarks(
   }
 
   // --- Segment labels ---
-  // Suppressed entirely when net is a dot (diverging). For cumulative (text) they are
-  // OPTIONAL, default OFF — only when spec.valueLabels.show === true.
-  if (netMode !== "dot" && !pane && spec.valueLabels?.show === true) {
+  // Suppressed entirely when net is a dot (diverging), and on a small-multiples pane. For cumulative
+  // (text) they are OPTIONAL, default OFF — only when spec.valueLabels.show === true.
+  //
+  // The rule lives in spec/bar-stack.ts because the hover value pills DEFAULT off exactly when these
+  // labels are painted, and the two must not be able to disagree about when that is. That agreement
+  // has TWO halves: this per-chart gate, which both sides read from the shared helper, and the
+  // per-SEGMENT fit threshold inside buildSegmentLabels, which only this builder can evaluate (it
+  // needs the frame geometry). The builder therefore REPORTS the second half out as
+  // `segmentLabelsDropped` rather than letting the pill side re-derive it.
+  let segmentLabelsDropped = false;
+  if (stackedSegmentLabelsShown(spec, netMode, pane)) {
     // Mono light tiers (the two lightest, 100 & 200 per the Style-Guide) get dark text;
     // everything else white. monoScale returns darkest-first, so the light tiers are the
     // last two hexes assigned.
@@ -337,20 +343,22 @@ export function buildStackedMarks(
       lightSeries = new Set<string>();
       for (const [s, hex] of monoTierForSeries) if (lightHexes.has(hex)) lightSeries.add(s);
     }
-    overlay.push(
-      ...buildSegmentLabels(data, categories, {
-        catField,
-        rank,
-        posSumByCat,
-        normalize,
-        horizontal,
-        plotHeight: ctx.plotHeight ?? 0,
-        plotWidth: ctx.plotWidth ?? 0,
-        mono: monoBase != null,
-        lightSeries,
-        fmt: segFmt,
-      }),
-    );
+    const segLabels = buildSegmentLabels(data, categories, {
+      catField,
+      rank,
+      posSumByCat,
+      normalize,
+      horizontal,
+      plotHeight: ctx.plotHeight ?? 0,
+      plotWidth: ctx.plotWidth ?? 0,
+      mono: monoBase != null,
+      lightSeries,
+      fmt: segFmt,
+      hooks: ctx.hooks,
+      facet: ctx.facet,
+    });
+    overlay.push(...segLabels.marks);
+    segmentLabelsDropped = segLabels.dropped;
   }
 
   // --- Rect tagging order ---
@@ -390,12 +398,6 @@ export function buildStackedMarks(
         ]
       : [];
 
-  // showTotalDot: true = diverging (dot marker exists on chart → circle swatch in tooltip);
-  // false = cumulative (text callout only → plain text Total in tooltip, no swatch);
-  // undefined = netMode "none" or normalized (no net marker at all → omit Total row).
-  const showTotalDot: boolean | undefined =
-    netMode === "dot" ? true : netMode === "text" ? false : undefined;
-
   if (horizontal) {
     // Responsive left gutter so the longest category label is not clipped (see bar.ts); sized to
     // the (now larger, faceted-matching) catFont so the wider glyphs still fit. Faceted small
@@ -420,7 +422,8 @@ export function buildStackedMarks(
       marginLeft: gutter,
       seriesColors,
       legendVisualOrder,
-      showTotalDot,
+      netMode,
+      segmentLabelsDropped,
       ...segmentGapLayer,
       ...(legendExtras ? { legendExtras } : {}),
     };
@@ -442,7 +445,8 @@ export function buildStackedMarks(
     xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
     seriesColors,
     legendVisualOrder,
-    showTotalDot,
+    netMode,
+    segmentLabelsDropped,
     ...segmentGapLayer,
     ...(legendExtras ? { legendExtras } : {}),
   };
@@ -475,11 +479,13 @@ function buildSegmentLabels(
     mono: boolean;
     lightSeries: Set<string> | null;
     fmt: (d: number) => string;
+    hooks: MarkContext["hooks"];
+    facet: string | undefined;
   },
-): unknown[] {
+): { marks: unknown[]; dropped: boolean } {
   const {
     catField, rank, posSumByCat, normalize,
-    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt,
+    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet,
   } = opts;
 
   // Per-category totals (sum of |value| on each side) for normalization shares.
@@ -507,6 +513,8 @@ function buildSegmentLabels(
   // in declaration order, tracking cumulative offsets.
   type LabelRow = { _xc: string; mid: number; text: string; light: boolean };
   const rows: LabelRow[] = [];
+  // Did any segment that HAS a label-worthy value get its label refused below?
+  let dropped = false;
   for (const cat of categories) {
     const catRows = data.filter(
       (r) =>
@@ -539,15 +547,31 @@ function buildSegmentLabels(
         labelNum = normalize ? segValue : y;
       }
       // Suppress when the segment's pixel size is below the threshold.
+      //
+      // Every refusal is COUNTED, because the hover value pills default off only when the labels
+      // cover the whole chart (spec/bar-stack.ts resolveValuePills). This loop is the sole authority
+      // on which segments earn a label, so it REPORTS what it did rather than letting the pill side
+      // re-derive it against a copy of this arithmetic -- the drift that would reintroduce the very
+      // gap the pill default opened. Do not move the threshold itself: it predates 1.12.0 and every
+      // published figure's labels are placed by it.
       const segPx = valueAxisPx > 0 ? (segValue / valueSpan) * valueAxisPx : Infinity;
-      if (Number.isFinite(segPx) && segPx < SEGMENT_LABEL_MIN_PX) continue;
+      if (Number.isFinite(segPx) && segPx < SEGMENT_LABEL_MIN_PX) {
+        dropped = true;
+        continue;
+      }
       // Light mono tiers (100/200) get dark text; everything else white (§7).
       const light = mono && lightSeries != null && lightSeries.has(r.series);
-      rows.push({ _xc: cat, mid, text: fmt(labelNum), light });
+      const text = applyValueLabelHook(fmt(labelNum), hooks, {
+        series: r.series,
+        category: cat,
+        value: labelNum,
+        facet,
+      });
+      rows.push({ _xc: cat, mid, text, light });
     }
   }
 
-  if (!rows.length) return [];
+  if (!rows.length) return { marks: [], dropped };
   // Text color: white on categorical/dark mono; dark on light mono tiers (per-row).
   const fill = (d: LabelRow) => (d.light ? TBL.color.heading : WHITE);
   const common = {
@@ -557,9 +581,12 @@ function buildSegmentLabels(
     fontSize: 10,
     fontWeight: 600,
   };
-  return [
-    horizontal
-      ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
-      : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
-  ];
+  return {
+    marks: [
+      horizontal
+        ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
+        : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
+    ],
+    dropped,
+  };
 }

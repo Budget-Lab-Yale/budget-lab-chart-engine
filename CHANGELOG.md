@@ -4,6 +4,307 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] - 2026-08-18
+
+### Added — a stacked-bar hover/net-callout split, and overlay lines on scatter and line charts
+- `barStack.hover` (`tooltip` | `pills`) selects a stacked chart's hover treatment independently of
+  `barStack.netDisplay`. A chart can now have the floating tooltip with no net dot and no "Total"
+  legend entry, from the spec alone — so the PNG export matches the screen, which a CSS override could
+  not achieve. It also pins the treatment against `netDisplay: auto`'s data-dependent flip.
+- `barStack.total` orders and styles the tooltip's Total row: `position` (`first` | `last`, default
+  `last`), `bold`, and `divider` — a rule separating the Total row from the series rows, whose side
+  flips with `position` so it never lands between the header and the Total row instead. **`bold`
+  and `divider` default to `true`** (opt out with `false`) — every stacked chart with a Total row
+  now shows it bold and divided on hover, including the pre-existing diverging/dot case, with no
+  spec change required. This changes on-screen hover cards for existing charts; it does **not**
+  change any exported/published image — tooltips are hover-only, never appear in the PNG export,
+  and no golden fixture contains tooltip HTML. Also fixed: the Total row's plain-text form (no dot)
+  now gets an empty swatch spacer, so its label indents to match every series row's label instead
+  of sitting flush left.
+- `overlays` — lines drawn over the data marks on a numeric- or temporal-x `line`, `area`, `scatter`
+  or `histogram` chart (`bar` and `stacked` cannot carry one: they require a categorical x, and a
+  categorical axis has no position between categories to land a line on). Four kinds, one per
+  entry: `method` (`lm` / `poly`, a bivariate least-squares fit of the plotted data, optionally with a
+  `ci` ribbon), `fun` (an equation in x with named `params`), `slope`+`intercept` (a stated line), and
+  `column` (a fit computed upstream). `by: series` (default) fits per colour series; `by: none` pools.
+  `domain: axis` spans the frame. Keyed in-frame with `label` or in the legend with `legend: true`.
+
+  Three conventions worth knowing. **`style` defaults by kind** — `method` and `column` solid, `fun` and
+  `slope`+`intercept` dashed — because a line computed from the data and one asserted over it are
+  different claims. **`fun`'s grammar follows R**: `^` is right-associative and binds tighter than unary
+  minus, so `-2^2` is `-4`; expressions are parsed and name-checked at validation time, so a typo fails
+  the build. And **only `column` affects the value axis** — it is real per-row data, like
+  `confidence_bands`' bounds; the constructed kinds are clipped at the frame instead.
+
+  On a **histogram**, `fun` and `slope`+`intercept` only — histogram rows carry bin edges rather than a
+  per-row x, so `method` and `column` are validation errors there rather than lines that silently fail
+  to draw. `fun: "dnorm(…)"` over `histogram.normalize: density` is the density-curve case.
+
+  Not implemented: `loess`/`lowess` (precompute one and use `column`), and multi-predictor fits (the
+  engine is bivariate by design — bring coefficients in through `fun` + `params`).
+
+  **A pooled (`by: none`) `column` is NOT validated for consistency across series.** It draws a
+  sawtooth when the column varies by series, and that hazard is documented under `overlays[].by`
+  rather than rejected. Such a check has to know which rows are *drawn*, and `domain`, `facet`,
+  `series_order` and `small_multiples.pane_order` each narrow that set inside the renderer — which
+  `src/spec` may not call. Re-deriving it from the raw table produced false rejections of figures
+  that render correctly, and a false rejection breaks an already-published figure on the next repin,
+  where a sawtooth is self-evident on the author's own screen.
+
+  **A `legend: true` overlay must hold enough values to resolve a line.** `method` and `column`
+  entries are dropped by the renderer when the data cannot feed them (a fit with fewer numeric values
+  than `degree + 1`, a column with fewer than two), but the legend row was built from the spec alone
+  and survived the line's absence — so a one-point `lm` keyed a line that was not on the chart. Now a
+  validation error. A per-series entry needs only ONE drawable series, since the row keys the
+  concept rather than each line. The check counts cells and deliberately does not require ADJACENT
+  ones: a blank is a break, so a column whose blanks isolate every value paints dots rather than a
+  segment and keeps its row. Requiring adjacency is unsound for the same reason the pooled guard
+  above was withdrawn — dropping a row can delete the break between two runs and join them, so
+  `series_order` or a facet partition can make a raw table with no two adjacent cells draw a real
+  line.
+
+  `overlays[].tooltip` (default `false`) opts a single overlay into the hover tooltip, reporting its
+  value at the hovered x as a row of its own — behind a separator, so the observed series and their
+  Total stay one block, and carrying a line swatch in the overlay's own colour and dash so a modelled
+  value is not mistaken for an observed one. Honoured on `line` and `area` on a continuous axis
+  (standalone; in small-multiples panes only with `coordinated_cursor: false`, or on a single-pane
+  figure — the default coordinated cursor replaces a pane's card with the in-place guide/dot/pill,
+  and there is then no card for the row to land in) and on `scatter`; **silently ignored on `histogram`**,
+  whose hover resolves a bin range rather than a single x. A `by: series` fit adds one row per series,
+  which is uncapped — worth thinking about before setting it on a many-series chart.
+
+### Added — customisation without forking the renderer (#30)
+- `chrome.tooltip` and `chrome.valuePills` — spec-level switches that turn hover chrome off from
+  `chart.yaml` itself rather than from a stylesheet the PNG export never sees. Deliberately just
+  these two: the net marker and the legend already have an owning field (`barStack.netDisplay:
+  none`, top-level `legend: false`), so `chrome` doesn't duplicate either decision.
+- `hooks` — five programmatic render hooks (`tickLabel`, `valueLabel`, `legendKey`, `afterRender`,
+  `tooltip`), passed to `mountChart`/`renderChart`/`renderFigure` for a consumer embedding the
+  engine directly. Not spec keys: the publishing pipeline JSON-serialises `chart.yaml` + rows into
+  a standalone HTML bundle for headless Chromium, and a function cannot cross that boundary. The
+  first four are guaranteed to fire identically on screen and in the PNG export, since the export
+  re-renders through the same builders with the same hooks object — `test/hooks-export-parity.test.ts`
+  gates all four together, not just individually. `tooltip` is the one exception twice over:
+  screen-only, since a static PNG has no hover state for its content to match, **and** reachable
+  only where a floating hover card is actually drawn — which at default settings is far fewer chart
+  types than forward it (never a plain/grouped bar or a waterfall in any configuration, and not a
+  coordinated small-multiples pane). CONFIG-SPEC.md carries the reach table;
+  `test/hover-card-reach.test.ts` gates it at defaults. `legendKey`'s `ctx.medium`
+  (`"html"` live, `"svg"` exported) must be honored by the returned markup — an HTML fragment
+  returned into the SVG export lands in the XHTML namespace and silently fails to rasterise, correct
+  on screen and missing from the download. Every hook returns `null` for "engine default"; `hooks: {}`
+  renders byte-identically to no hooks at all. See CONFIG-SPEC.md's new Customisation section.
+- `onHover`, `onRender`, `onLegendSelect` — mount-time callbacks, each also dispatched as a bubbling
+  `CustomEvent` of the same name from the chart's card root so a published standalone figure's host
+  page can observe it without any callback wiring. `onHover` reaches only `attachBandCrosshair`
+  (categorical bar/stacked, standalone and faceted) — silence from other chart types means "this
+  chart type doesn't report hovers," not "nothing happened." `onRender`'s `"mount"` phase fires one
+  microtask after `mountChart()` returns (its `"resize"`/`"reselect"`/`"restack"` phases fire
+  synchronously) — a consumer writing a synchronous test against mount will be surprised.
+- `MountOptions.tooltipContainer` reparents the floating tooltip card away from `document.body`, for
+  a consumer scoping it to one figure.
+- Seven new classes on previously-unaddressable hover chrome (`tbl-coord-pill`,
+  `tbl-coord-pill-text`, `tbl-coord-axis-label`, `tbl-coord-axis-label-text`, `tbl-coord-region`,
+  `tbl-coord-guide`, `tbl-coord-dot`), so a consumer stylesheet can target them without depending on
+  presentation attributes like `rx="3"`.
+- **Not shipped, deliberately:** CONFIG-SPEC.md does not publish a stable-hooks list, and a stable
+  hook's retirement or rename is not required to be called out under an Upgrading heading — a
+  scope decision ("classes only, no policy"), not an oversight, so a future rework can still break a
+  consumer silently the way `.tbl-legend-swatch.is-dot`'s retirement did in 1.11.0.
+
+### Changed
+- **`chartType: bar` and `chartType: stacked` now require `xAxisType: categorical`.** Numeric,
+  temporal and quarterly are validation errors, in both orientations. Bars are drawn on a band
+  scale, and only the categorical x adapter builds that band domain from the data's x values. The
+  rule is deliberately **stricter than the defect** — one shape on a numeric axis renders correctly
+  and is refused anyway — so, precisely:
+  - **Numeric, vertical:** the numeric adapter emits `domain: [xMin, xMax]` and the vertical bar
+    path does not replace it, so a bar mark reads that two-element continuous domain as a band
+    domain of exactly two categories — **the endpoints**. A row is drawn only if its x *is* an
+    endpoint. Measured (rects drawn / tick labels): 2 rows → **2 of 2**, `1`,`2`; 3 rows → 2 of 3,
+    `1`,`3`; 5 rows → 2 of 5, `1`,`5`. So a **two-row** chart is complete and correct, and every
+    other shape silently loses the rows in between. The two-row case is refused anyway: it is
+    correct by coincidence of that derivation, the exception would really be "numeric **and**
+    vertical **and** exactly two distinct x values", and `validateSpec` reads the spec and not the
+    data — narrowing it would make a figure's validity depend on today's row count, so a working
+    two-row chart would start failing the day its data grew a third row.
+  - **Horizontal:** **no bars at all**, on any continuous axis at any row count — its band domain is
+    built from string categories a continuous adapter never produces, so the mark is dropped whole.
+  - **Temporal / quarterly, vertical:** drew **every** bar; nothing is dropped. The defect is chrome
+    — a second x-axis stacked over the engine's, the internal field name `_xd` leaked as the x-axis
+    label, and Plot's warning glyph painted into the SVG, which the PNG export re-renders into a
+    published figure.
+
+  Every one of those validated `valid: true` before this release. The renderer is deliberately
+  **not** changed here: making a continuous-x bar chart genuinely work is a feature with
+  axis-ordering, hover and export surface, and this refusal is what makes it a safe additive change
+  later. `histogram` is unaffected — it is a separate chart type that bins a continuous axis by
+  design — and so are `line`/`area` on a categorical axis.
+- **`overlays` are no longer available on `bar` or `stacked` in any orientation.** Unreleased
+  feature, narrowed before it shipped: overlays require a non-categorical x, bar/stacked now require
+  a categorical one. The horizontal-orientation rejection added earlier in this release is kept as
+  the reporting site for the horizontal case, because it names the more specific reason. What this
+  removes was measured, on five rows, to render a fitted line over a chart drawing 2 of those 5 bars.
+- **Value pills now default to off where segment value labels are painted for every segment.** A
+  stacked chart with `valueLabels.show` printed its numbers in the segments and then repeated them in
+  hover pills a few pixels away. The default is keyed on the labels being *painted*, not on the flag
+  being set — `valueLabels.show` is a request that four cases refuse, and suppressing pills wherever
+  the flag appeared would have removed them from charts printing no numbers at all: a diverging
+  net-dot stack and every small-multiples pane paint no segment labels; a waterfall's labels are the
+  running *level* while its hover pill is the signed *delta*, so nothing is duplicated there; and a
+  segment thinner than the 25px fit threshold is skipped individually, so a chart whose labels do not
+  cover **every** segment keeps its pills for the whole chart. That last refusal is per-segment and
+  frame-size dependent, and the label builder reports which it skipped rather than the pill rule
+  re-deriving the threshold. An explicit `chrome.valuePills: true` still wins, so asking for both
+  remains possible.
+- **`CONFIG-SPEC.md`'s "Axis constraints" list was missing `waterfall`.** The code has enforced
+  `waterfall` = categorical x + vertical only since it shipped; the list named only four of the
+  five constraints. Documentation only — no behaviour changed. An under-documented constraint is
+  the same defect class as an over-claimed one.
+- **`valueLabels.show` is not "stacked bars only".** A waterfall paints segment labels for the same
+  flag. `CONFIG-SPEC.md` claimed otherwise; the claim was false before this release and is now
+  corrected and test-backed. No behaviour changed — only the documentation of behaviour that already
+  existed.
+- `barStack.netDisplay` now chooses the net callout only. Defaults are unchanged: a spec that does not
+  set `barStack.hover` renders exactly as before.
+- `RenderResult`, `FigurePane` and `FigureRenderResult` rename their `showTotalDot` field to
+  `netMode` — breaking for any consumer that reads it off a returned object (see below).
+- `onHover`/`onRender`/`onLegendSelect` dispatch their `CustomEvent` unconditionally on every mount,
+  whether or not a host callback is passed — a real runtime behaviour change on every categorical-
+  chart hover for an existing embedder, even one that never adopts the new callbacks.
+
+### Fixed
+- **An identity-less `overlays` line no longer dims when a legend row is selected on a chart that also
+  carries a keyed or per-series one.** Whether an overlay's paths get a `data-series` was decided once
+  for the whole list, from flags any entry could set — so on a mixed list a pooled `by: none` fit, a
+  `fun`, or a bare `slope`/`intercept` line was tagged with the inert single-series key (`""`), which
+  the legend's dim walk matches by attribute *presence* and no selection can ever satisfy. Picking any
+  series dropped an unrelated reference line and its confidence ribbon back to 15 % opacity. The same
+  overlay was correct **alone** (the gate stayed shut), which is how it survived. The decision is now
+  per overlay: a keyed or per-series entry keeps its tag and still dims with its own row, an
+  identity-less one carries no attribute either way, and a ribbon is built from its own line's key so
+  it still behaves exactly as that line does. New in 1.12.0, so no published figure is affected.
+- **`CONFIG-SPEC.md` over-claimed the reach of legend dimming.** "Hovering a row … dims everything
+  else" read as covering every drawn thing; the selection universe is keyed rows plus series, so
+  chrome in neither — an unkeyed reference line, an overlay that is neither keyed nor per-series —
+  stays at full strength. That was already true of unkeyed reference lines before this release, and
+  is now stated and test-backed. Documentation only; no behaviour changed.
+- **A negative or zero standard deviation in `dnorm`/`normalden` now breaks the overlay line instead
+  of drawing an invalid curve.** `fun: "dnorm(x, 0, -1)"` validated and drew: a negative `sd` divides
+  through by a negative normaliser and returns the correct density with its sign flipped (measured:
+  `dnorm(0.5, 0, -1)` = `-0.352…`), so the renderer painted a smooth **inverted** density curve
+  hanging below the axis. `dnorm` is the documented density-curve case, over
+  `histogram.normalize: density`, so a typed minus sign produced a plausible-looking wrong published
+  figure rather than an error. `sd <= 0` now evaluates to `NaN`, which is this evaluator's
+  established convention for an unrepresentable value and breaks the line at that sample. Also
+  found by auditing the whole function table rather than only the reported function: **`log(x, base)`
+  with a base of `0`** evaluated to `-0` — finite, so an undefined logarithm drew a flat line along
+  zero — and now returns `NaN` too, as do bases `1` and negative (those two were already `Infinity`
+  and `NaN`, so nothing drawn changes for them). Every other domain edge in the evaluator (`sqrt` of
+  a negative, `log`/`ln`/`log10`/`log2` of a non-positive, division by zero) was already non-finite
+  and needed no guard; those are now pinned by test so a later tidy-up cannot make one finite.
+  New in 1.12.0 — no published figure is affected, and no golden moved.
+
+### Changed — internal
+- `MarkLayers.showTotalDot` (a tri-state boolean read for four different purposes) is replaced by
+  `MarkLayers.netMode`; the tooltip's Total row, the hover treatment and the highlight pills' net-dot
+  flag are now derived from it by resolver functions in `src/spec/bar-stack.ts`, read at their call
+  sites in `src/engine/render-live.ts`, `src/engine/crosshair.ts` and `src/engine/marks/stacked.ts`.
+  Consumers reading `showTotalDot` off a `renderChart` / `renderFigure` result should read `netMode`
+  instead.
+- **Every CONFIG-SPEC.md claim of the form "X reaches the hover tooltip" is narrowed to what the
+  code does, and gated.** A floating hover card is rarer than the doc assumed: a coordinated
+  small-multiples pane draws none (the in-place cursor replaces it), and a plain/grouped bar or a
+  waterfall draws none in *any* configuration. Claims corrected: `hooks.tooltip`'s reach,
+  `x_labels`, `tooltip_x_format`, the stacked-area `Total` row, the three `series_patterns` texture
+  sentences, `small_multiples.coordinated_cursor`'s single-pane parenthetical, `chrome.tooltip`'s
+  scope, `tbl-coord-axis-label`'s conditions, and the `tooltip_decimals` / `histogram.bin_label`
+  wording. **No rendered output changes** — these were doc defects, not behaviour changes.
+  `test/hover-card-reach.test.ts` and `test/hover-claims-defaults.test.ts` gate them by mounting
+  every chart type at DEFAULT settings, standalone and two-pane; the earlier claims had each been
+  "verified" by a test that first turned a default off.
+- **Two of those claims were gaps, and are now fixed rather than narrowed** (hover-only: no
+  exported image changes, and no golden moves). `tooltip_x_format` is honoured by a faceted
+  figure's coordinated cursor, which drew its x echo with a hardcoded `%b` / `%Y` while being
+  handed the author's formatter and ignoring it. On a **daily** multi-pane line that echo was
+  missing altogether — it could only annotate an existing x-axis tick and a sub-month span draws
+  none — so with the field set it is now anchored below the plot instead of skipped. Where the pane
+  DOES tick, the echo stays on the tick rows and hides the tick labels its pill covers for as long
+  as it shows: the pill is sized from the author's format, not from the tick, so `Jun 1, 2026` over
+  a `Jun`/`Jul` axis was reaching across its neighbour and leaving a fragment of it (`Apr` read as
+  `pr`) sticking out past the pill's edge. Absent the
+  field nothing moves: the echo keeps its two-line, axis-matching form, which is why the fix reads
+  an explicit-format flag rather than the formatter alone. And `x_labels` now heads the
+  `dumbbell` / `dotplot` / categorical-x `line` hover card, which shared the band card's builder
+  but was never handed `categoryLabels`. One limit stays, and is documented rather than promised
+  away: a coordinated pane's category echo keeps the raw category, because it overlays the rendered
+  axis tick and `x_labels` exists to read more verbosely than that tick.
+- **Three hover-only fixes, and the `tbl-coord-pill` claim narrowed to match.** A waterfall whose data
+  carries a `series` column (single-valued, which validates) drew **no value pill at all**: its bars
+  are stamped `SINGLE_SERIES_KEY` while its hover rows carried the column's value, so every pill
+  lookup missed. Fixed on the hover side rather than at the stamp, because `data-series` is in the
+  rendered SVG and drives series-keyed paint. And a single-series card row read
+  `": 5.00"` — a colon labelling nothing, since a chart with no series column has one implicit
+  series keyed `""`; that row now carries the value alone (`series_labels: {"": "…"}` still labels
+  it). Every card builder shares one row helper now, so this covers all of the types whose card rows
+  are series-keyed: histogram, categorical-x `line`, `dotplot`, temporal `line`, `area`, `dumbbell`,
+  and `stacked` where a card is drawn. (`scatter` is unaffected — its rows are the axis titles, not
+  series names.) No invented word instead: what the value means is whatever the value axis measures,
+  so no label is honest across figures, and the swatch already identifies the mark.
+  Third: a stacked **area** card stated a `Total` of a single series — `4.00` and then
+  `Total: 4.00`. That row is the sum of the rows above it, so it is now gated on the card having
+  drawn more than one series row at the hovered x, which is the rule the band card builder already
+  applied (`orderedSeries.length > 1`). It also drops at an x where only one series has a value.
+  All are hover-only: no published image changes and no golden moved. The `tbl-coord-pill`
+  documentation said pills are drawn on every coordinated-cursor type but dumbbell, which
+  over-claimed the waterfall — they are **delta-step-only** there.
+
+### Upgrading
+
+A repin re-renders every published figure at once — here is what a maintainer will see change:
+
+- **`showTotalDot` → `netMode`.** `RenderResult`, `FigurePane` and `FigureRenderResult` no
+  longer carry `showTotalDot`; read `netMode` instead.
+- **Every existing stacked chart with a Total row now renders it bold, with a divider, on hover.**
+  `barStack.total.bold`/`.divider` default to `true`. No exported/published image changes —
+  tooltips are hover-only and appear in no golden fixture — but the on-screen hover card itself
+  looks different for every such chart starting now, with no spec change on anyone's part.
+- **A stacked chart's Total row, in its plain-text (no-dot) form, now gets an empty swatch
+  spacer** so its label indents to match every series row's label instead of sitting flush left —
+  a small but visible change to every already-published stacked chart's hover card. Hover-only, no
+  exported/published image changes.
+- **`tbl-hover`/`tbl-render`/`tbl-legend-select` now dispatch on every mount, whether or not a
+  callback is passed.** An existing embedder's categorical (bar/stacked) charts now dispatch a
+  `tbl-hover` CustomEvent per pointermove regardless of whether anything listens — harmless on
+  its own, but new work on a hot path, and a host page listening for an unrelated bubbling event of
+  the same name will now see these.
+- **A published stacked chart with `valueLabels.show` loses its hover value pills — unless some
+  segment is too thin to print its number.** The numbers are already in the segments, so the pills
+  were repeating them; this is the intended change, but it lands on every such chart at repin with no
+  spec change on anyone's part. A chart with any segment under the 25px fit threshold keeps its pills
+  instead, since those segments have no printed number to repeat. Hover-only — no exported/published
+  image changes, and no golden fixture moved. Set `chrome.valuePills: true` explicitly on a chart
+  that should keep both.
+- **A bar or stacked chart on a numeric, temporal or quarterly x-axis is now refused at
+  validation.** This is a new refusal on a schema released without it, so it is called out even
+  though **no known spec is affected**. That was established by parsing, not grepping: every
+  authored `.yaml`/`.json` spec (179), the YAML front matter of every interactives `config.md`
+  (80 — a format a `*.yaml`-only search misses entirely), and every spec instance recovered from
+  built and published output by brace-balanced JSON decoding (236). Every bar/stacked spec found —
+  66 in authored YAML/JSON, 8 in `config.md` front matter, 74 instances in built output — declares
+  `xAxisType: categorical`, and `xAxisType` is a *required*
+  property, so there is no "absent, defaults to something else" case. A proximity-based first pass
+  did report seven bar+temporal hits in the state-of-tariffs manifests; structural re-parsing of
+  those exact files showed all seven were bar figures whose nearest `xAxisType` in the text
+  belonged to a neighbouring `line` figure. If a spec does trip this, the fix is either
+  `xAxisType: categorical` (with `x_order` to fix the tick order) or `chartType: line`. What it was
+  drawing before depends on the axis: on a numeric x, every row past the first and last was missing
+  (or, horizontally, every bar); on a temporal or quarterly x, all the bars were there but the figure
+  carried a doubled x-axis and a warning glyph. The one case that was genuinely correct — a two-row
+  numeric vertical chart — is refused too, on purpose; see the Changed entry above.
+- **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
+  current — re-run its vendoring step at repin.
+
 ## [1.11.0] - 2026-08-17
 
 ### Added — a second fill channel, whitespace between stacked segments, and a tooltip x-format
@@ -23,7 +324,11 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   today: 21.6 at `red-50`, 32.5 at `sky`). The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
   own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
-  The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
+  The texture reaches the marks, the legend key, the export, and the hover tooltip on the chart types
+  that draw one — which among the filled types is standalone `area`, standalone `histogram` and a
+  stacked chart with a net dot; `bar` and `waterfall` hover with value pills and have no tooltip key,
+  and neither does a coordinated small-multiples pane (corrected in 1.12.0; the original wording
+  over-claimed). A key draws ONE centred
   instance of the texture as a glyph rather than a patch of the tiling — at 14px a tiling shows an
   edge with no direction in it — so `"/"` reads as three bands, `"+"` as a plus, `"x"` as an x. A
   rasterising test measures all six from their pixels. An unrecognised
@@ -896,7 +1201,8 @@ backward-compatible — existing chart specs render unchanged.
   `shape_order`, `shape_labels`, with separate `color_legend_title` / `shape_legend_title`),
   category dodge, per-point hover tooltips, and a coordinated cursor.
 - **Area** (`chartType: "area"`). Stacked areas, with a single series filling to the zero
-  baseline. The hover tooltip adds a cumulative **Total** row. **Click-to-restack**: selecting
+  baseline. The hover tooltip adds a cumulative **Total** row (standalone only — a coordinated
+  small-multiples pane has no card; clarified in 1.12.0). **Click-to-restack**: selecting
   series animates them to the bottom of the stack (in click order) so they can be read against
   zero; deselecting restores the default order.
 

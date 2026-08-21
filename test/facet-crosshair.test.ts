@@ -554,4 +554,58 @@ describe("coordinated cursor — faceted histogram (shared mode: cross-pane bin 
     teardown();
     container.remove();
   });
+
+  // chrome.valuePills: false was threaded to the PRIMARY per-pane hover and to the legend-hover
+  // pills, but attachSecondaryHistogramCursor's own addCoordPill call had no gate at all — a
+  // faceted histogram with the switch off still drew pills on the coordinated (echoed) panes.
+  // Asserts the concrete DOM fact (no .tbl-coord-pill node) rather than that a function was
+  // called, and includes the default-true case as a regression guard so the selector is proven
+  // to match something real, not merely absent for an unrelated reason.
+  it("chrome.valuePills: false suppresses the coordinated cursor's pills too — band echo untouched", () => {
+    function hoverLeftBin(container: HTMLElement, spec: ChartSpec): { pane0: SVGSVGElement; pane1: SVGSVGElement; teardown: () => void } {
+      const teardown = mountChart(container, { spec, rows: histRows, width: 838, height: 420 });
+      const [pane0, pane1] = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg")) as [
+        SVGSVGElement,
+        SVGSVGElement,
+      ];
+      mockRect1to1(pane0);
+      const rects0 = Array.from(pane0.querySelectorAll<SVGRectElement>('g[aria-label="rect"] rect'));
+      const minX = Math.min(...rects0.map((r) => parseFloat(r.getAttribute("x")!)));
+      const leftRect = rects0.find((r) => parseFloat(r.getAttribute("x")!) === minX)!;
+      const cx = minX + parseFloat(leftRect.getAttribute("width")!) / 2;
+      const hit = pane0.querySelector(".tbl-hist-hover-hit")!;
+      hit.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: 120, bubbles: true }));
+      return { pane0, pane1, teardown };
+    }
+
+    // Regression guard: the default (chrome unset) case DOES draw a pill on the echoed pane, so
+    // the absence asserted below is the switch's doing, not a selector that never matches.
+    const defaultContainer = document.createElement("div");
+    document.body.appendChild(defaultContainer);
+    const { pane1: defaultPane1, teardown: defaultTeardown } = hoverLeftBin(defaultContainer, histSpec);
+    expect(defaultPane1.querySelector("g.tbl-coord .tbl-coord-pill")).not.toBeNull();
+    defaultTeardown();
+    defaultContainer.remove();
+
+    const noPillsSpec: ChartSpec = { ...histSpec, chrome: { valuePills: false } } as ChartSpec;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const { pane0, pane1, teardown } = hoverLeftBin(container, noPillsSpec);
+
+    // The band echo (region) is untouched — same "highlight stays, pills go" split as
+    // chrome.tooltip's own contract.
+    const echo = pane1.querySelector<SVGGElement>("g.tbl-coord");
+    expect(echo).not.toBeNull();
+    expect(echo!.getAttribute("opacity")).toBe("1");
+    expect(echo!.querySelectorAll('rect[opacity="0.12"]').length).toBe(1);
+    // No pill on the OTHER (echoed) pane's coordinated cursor.
+    expect(echo!.querySelector(".tbl-coord-pill")).toBeNull();
+    // ...nor on the source (actively-hovered) pane's own coordinated cursor.
+    const sourceCoord = pane0.querySelector<SVGGElement>('g.tbl-coord[opacity="1"]');
+    expect(sourceCoord).not.toBeNull();
+    expect(sourceCoord!.querySelector(".tbl-coord-pill")).toBeNull();
+
+    teardown();
+    container.remove();
+  });
 });

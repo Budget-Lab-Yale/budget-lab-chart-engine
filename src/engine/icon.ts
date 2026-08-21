@@ -22,6 +22,7 @@ import { symbolPathD } from "./symbols";
 import { TBL, swatchWidthFor, SWATCH_OUTLINE, SHAPE_LEGEND_COLOR, MARK_POINT_R, MARK_LINE_POINT_R } from "./theme";
 import { hatchGlyphShapes, type HatchChar, type SeriesHatch } from "./hatch";
 import { markerInk, MARKER_KEYLINE_COLOR, type MarkerStyle } from "./marker-ink";
+import { escapeHtml } from "./util";
 
 /** The box every icon occupies, px. Square, so a vertical and a horizontal shape weigh the same. */
 export const ICON_BOX = 14;
@@ -406,6 +407,37 @@ export function iconSvgMarkup(icon: IconSpec): string {
   return (
     `<svg width="${w}" height="${ICON_BOX}" viewBox="0 0 ${w} ${ICON_BOX}" aria-hidden="true">` +
     `${body}</svg>`
+  );
+}
+
+/** One legend row's key markup — the icon plus its label, as a single HTML string. This is the
+ *  DEFAULT a `legendKey` hook receives as `ctx.rendered` when `ctx.medium === "html"` (the live
+ *  legend, spec/hooks.ts): the same drawing `iconSvgElement` builds for this row, so the live
+ *  legend and a hook that wraps rather than replaces both start from one description. Do NOT
+ *  return this HTML string when `ctx.medium === "svg"` — see `legendRowMarkupSvg` below. */
+export function legendRowMarkup(icon: IconSpec, label: string): string {
+  // Match legend.ts's DOM branch: CSS pins .tbl-legend-swatch to ICON_BOX (flex-shrink: 0), so a
+  // banded chip wider than the box needs the same inline override the DOM builder applies, or it
+  // renders clipped/overlapping the label — silently, since this string is only ever inspected by
+  // a hook that returns it unchanged.
+  const widthStyle = iconWidth(icon) !== ICON_BOX ? ` style="width:${iconWidth(icon)}px"` : "";
+  return `<span class="tbl-legend-swatch"${widthStyle}>${iconSvgMarkup(icon)}</span><span>${escapeHtml(label)}</span>`;
+}
+
+/** The same row, as SVG markup — the DEFAULT `ctx.rendered` when `ctx.medium === "svg"` (the PNG
+ *  export's row: a flat SVG `<g>`, not an HTML container). `legendRowMarkup`'s `<span>`s would
+ *  create XHTML-namespaced nodes inside that `<g>`, which the export's rasterizer —
+ *  `XMLSerializer` -> `Image` -> `canvas.drawImage`, export-png.ts's `rasterize()` — never
+ *  paints: correct on screen, invisible in the download. This draws the same row from the same
+ *  `iconSvgMarkup`/`iconShapes(icon)` description, but in the SVG vocabulary a hook can safely
+ *  return into that `<g>`. Position matches `drawLegend`'s own default layout (icon at the
+ *  origin, label GAP=6 to its right, vertically centred in the ICON_BOX). */
+export function legendRowMarkupSvg(icon: IconSpec, label: string): string {
+  const GAP = 6;
+  const labelX = iconWidth(icon) + GAP;
+  return (
+    iconSvgMarkup(icon) +
+    `<text x="${labelX}" y="${ICON_BOX - 3}" font-family="${escapeHtml(TBL.font)}" font-size="13" font-weight="500" fill="${TBL.color.text}">${escapeHtml(label)}</text>`
   );
 }
 

@@ -11,8 +11,10 @@ import { TBL } from "./theme";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveAnnotations, xMarkerLabel, yMarkerLabel } from "../spec/annotations";
 import { resolveRugTracks } from "../spec/rug";
+import { overlayDashed, overlayKind, overlayPerSeries } from "../spec/overlays";
+import { overlayLineColor } from "./overlays";
 import type { LegendItem } from "./index";
-import type { ChartSpec, ShadeRegion, XAxisBand, XAxisMarker, YAxisMarker } from "../spec/types";
+import type { ChartSpec, ColorRef, Overlay, ShadeRegion, XAxisBand } from "../spec/types";
 
 /**
  * The selection key shared by a legend row and every chart element it names — the annotation
@@ -107,12 +109,19 @@ function shadeSwatchColors(
   return out.length ? out : [tint(TBL.color.blue)];
 }
 
-function ruleRow(m: XAxisMarker | YAxisMarker, label: string): LegendItem {
+/** A line-swatch annotation row. `override` lets a caller supply a colour/dash it resolved elsewhere
+ *  — `overlays` does, because its style default depends on the entry's KIND (see spec/overlays.ts's
+ *  overlayDashed) rather than on `style || "dashed"`. */
+function ruleRow(
+  m: { color?: ColorRef; style?: "dashed" | "solid" },
+  label: string,
+  override?: { color?: string; dashed?: boolean },
+): LegendItem {
   return {
     series: annotationKey(label),
     label,
-    color: resolveColorOr(m.color, TBL.color.annotationDim),
-    dashed: (m.style || "dashed") === "dashed",
+    color: override?.color ?? resolveColorOr(m.color, TBL.color.annotationDim),
+    dashed: override?.dashed ?? (m.style || "dashed") === "dashed",
     markerShape: "line",
     annotation: true,
     isExtra: true,
@@ -174,6 +183,40 @@ export function buildAnnotationLegendItems(
   (spec.shading ?? []).forEach((s: ShadeRegion) => {
     if (!wantsRow(s)) return;
     rows.push(fillRow(s.label as string, shadeSwatchColors(s, seriesNames, colors)));
+  });
+
+  // Overlay lines. Derivable from the spec alone, so both render paths agree — and the style and
+  // colour come from the SAME helpers the mark uses (spec/overlays.ts, engine/overlays.ts) rather
+  // than being re-derived here. Re-deriving is how `.is-dot` silently became a square.
+  (spec.overlays ?? []).forEach((o: Overlay) => {
+    if (!o.label || o.legend !== true) return;
+    const kind = overlayKind(o);
+    // A malformed two-kind (or zero-kind) entry is refused by the resolver at paint time, so it
+    // must not get a legend row for a line that is never drawn.
+    //
+    // This is the ONLY undrawable case decidable here, and deliberately so: the resolver also drops
+    // an entry whose DATA cannot feed it (a `method` fit under its degree, a `column` with fewer
+    // than two finite cells), and this function receives no rows, so it cannot see that. Do not try
+    // to add it — a half-rule here could filter on `pane_order` but could never tell
+    // `facet: "Norteast"` from `"Northeast"`, and would read as complete while missing the case
+    // that matters. `validateChartData` has the rows and owns that gate (search validate.ts for
+    // "must be able to draw SOMETHING").
+    if (kind == null) return;
+    // The colours this entry's lines ACTUALLY resolve to, asked of the mark's own resolver once per
+    // line it draws. A row keys what one line swatch can carry: one colour, so the swatch takes it.
+    // The neutral is for the case where that is genuinely impossible — a per-series fit resolving to
+    // several colours, already keyed by the series legend, where this row keys the CONCEPT. Testing
+    // `overlayPerSeries` INSTEAD of counting them is what made an explicit `color: green` key grey.
+    const drawn = overlayPerSeries(o)
+      ? seriesNames.map((s) => overlayLineColor(o, colors, s))
+      : [overlayLineColor(o, colors)];
+    const distinct = [...new Set(drawn)];
+    rows.push(
+      ruleRow(o, o.label, {
+        dashed: overlayDashed(o),
+        color: distinct.length === 1 ? (distinct[0] as string) : TBL.color.annotationDim,
+      }),
+    );
   });
 
   // A `{value}` token resolves through the SAME helpers assemble-plot uses for the in-frame text, so

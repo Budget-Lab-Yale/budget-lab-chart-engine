@@ -11,10 +11,15 @@ import { escapeHtml } from "./util";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
+import { SINGLE_SERIES_KEY } from "../spec/columns";
 import { paintedFill } from "./painted-fill";
 import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
 import { formatBinLabel, type BinLabelOpts } from "./histogram-label";
+import { overlayValueAt } from "./overlays";
+import type { OverlayTooltipLine } from "./overlays";
+import type { TotalRow } from "../spec/bar-stack";
+import type { TooltipHookCtx } from "../spec/hooks";
 
 type Row = Record<string, unknown>;
 
@@ -25,6 +30,12 @@ export interface CrosshairOptions {
   seriesField?: string;
   xParse?: (v: unknown) => number;
   xFormat?: (v: number) => string;
+  /** True when `xFormat` came from the spec's own `tooltip_x_format` rather than the x-adapter's
+   *  axis-matching default. Read ONLY by `attachSecondaryLineCursor`, which shares this options
+   *  type: its x echo annotates the axis ticks, so it draws the author's single-line format when
+   *  the author asked for one and keeps the two-line `%b` / `%Y` (one line per axis tick row) when
+   *  nobody did. `attachCrosshair`'s card has one line to fill either way and ignores this. */
+  xFormatExplicit?: boolean;
   yFormat?: (v: number) => string;
   /** Series → colour, for the COORDINATED cursor's echo dots and value pills
    *  (attachSecondaryLineCursor, which shares this options type). NOT the tooltip key's colour —
@@ -41,24 +52,52 @@ export interface CrosshairOptions {
    *  NO tooltip. Used by coordinated small-multiples figures, where the unified secondary-cursor
    *  renderer (driven by the figure bus) draws every pane's indicators instead. */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The guide, hit area, and
+   *  `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
+   *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
+  showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   /** series → marker symbol name (line charts with point markers). When set, the coordinated
    *  hover dot takes the series' shape so it matches the static marker. */
   symbols?: Map<string, string>;
   /** Append a cumulative "Total" row (sum of the shown series at the hovered x) to the tooltip —
-   *  used for stacked area, where the stack height is the meaningful aggregate. */
+   *  used for stacked area, where the stack height is the meaningful aggregate. Requested, not
+   *  guaranteed: the row is still gated on the card having drawn MORE THAN ONE series row at the
+   *  hovered x (see `shownRows > 1` below), because the sum of one row is that row. */
   showTotal?: boolean;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `overlays[].tooltip: true` lines drawn in this frame (engine/overlays.ts
+   *  `overlayTooltipLines`), each contributing ONE row at the snapped x. Read by `attachCrosshair`
+   *  only — `attachSecondaryLineCursor` shares this options type and draws pills, not a card. */
+  overlays?: OverlayTooltipLine[];
+  /** `chrome.valuePills: false` — consumed only by `attachSecondaryLineCursor` (the
+   *  coordinated/echo cursor): suppress just its per-series value pills. The guide line, the
+   *  per-series highlight dot, and the active-pane x-value echo are untouched — same split as
+   *  `SecondaryBandOptions.showPills` / `HistogramHoverOptions.showPills`. `undefined` keeps
+   *  today's behaviour (pills shown). */
+  showPills?: boolean;
 }
 
-let activeTooltip: HTMLElement | null = null; // single shared tooltip element
+// One shared tooltip element PER PARENT, not one global element: render-live's
+// `MountOptions.tooltipContainer` lets each mount choose where its card is appended, and two
+// mounts that choose DIFFERENT parents must get their own element rather than fighting over one
+// (the parent that lost would keep re-appending/repositioning the single node under the other's
+// mount). Keyed by the parent itself (a WeakMap, so a removed/GC'd container's entry doesn't
+// pin the tooltip element in memory) — the historical single-tooltip-per-document behaviour is
+// just this map with exactly one key, `document.body`, which is the default below.
+const tooltipsByParent = new WeakMap<Node, HTMLElement>();
 
-function getSharedTooltip(doc: Document): HTMLElement {
-  if (activeTooltip && doc.body.contains(activeTooltip)) return activeTooltip;
+function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body): HTMLElement {
+  const existing = tooltipsByParent.get(parent);
+  if (existing && parent.contains(existing)) return existing;
   const tip = doc.createElement("div");
   tip.className = "tbl-tooltip";
-  doc.body.appendChild(tip);
-  activeTooltip = tip;
+  parent.appendChild(tip);
+  tooltipsByParent.set(parent, tip);
   return tip;
 }
 
@@ -154,7 +193,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   function snapX(svgX: number): number | null {
     if (svgX < ml || svgX > ml + plotW) return null;
@@ -187,30 +226,42 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     guide!.setAttribute("x2", String(gx));
     guide!.setAttribute("opacity", "1");
 
+    if (!tip) return; // chrome.tooltip: false — guide shown, no card.
+
     let html = `<div class="tbl-tooltip-head">${escapeHtml(xFormat!(snap))}</div>`;
     const tipSeries =
       seriesOrder && seriesOrder.length
         ? seriesOrder.filter((s) => bySeries.has(s))
         : [...bySeries.keys()];
     let total = 0;
-    let totalAny = false;
+    let shownRows = 0;
     for (const series of tipSeries) {
       const m = bySeries.get(series)!;
       const v = m.get(snap);
       if (v == null || Number.isNaN(v)) continue;
       total += v;
-      totalAny = true;
-      const display = (seriesLabels && seriesLabels[series]) || series;
-      const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-      html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+      shownRows++;
+      html += tooltipSeriesRowHtml(series, yFormat(v), {
+        ...(seriesLabels ? { seriesLabels } : {}),
+        ...(opts.icons ? { icons: opts.icons } : {}),
+      });
     }
     // Cumulative total (stacked area): a bold summary row, set off by a top rule.
-    if (opts.showTotal && totalAny) {
+    //
+    // `shownRows > 1`, not `> 0`: a Total row states the sum of the rows above it, and the sum of
+    // one row is that row — a single-series area card read "4.00" and then "Total: 4.00". The count
+    // is of the rows this card actually DREW at the snapped x, not of the chart's series, which is
+    // the same rule `buildBandTooltipHtml` applies with `orderedSeries.length > 1` (also a
+    // per-hovered-category count). The two card builders have to agree: they are the same promise.
+    if (opts.showTotal && shownRows > 1) {
       // The Total of a cumulative stack names no series, so it draws no key — but it still occupies
       // the box, or its label hangs left of every row above it. `shape: "none"` IS that empty box.
       const blank = seriesSwatchHtml({ shape: "none" });
       html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
     }
+    // `overlays[].tooltip: true` lines LAST — a fitted or asserted line is a third kind of claim,
+    // after the observed series and the total OF those series, and its own separator rule says so.
+    html += overlayTooltipRows(opts.overlays, snap, yFormat, seriesLabels);
     tip!.innerHTML = html;
 
     const offset = 14;
@@ -276,6 +327,11 @@ export interface FacetCrosshairOptions {
   seriesOrder?: string[];
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Not
+   *  wired from MountOptions today — this attach function is dead on the live render path (see
+   *  the UN-GATED `getSharedTooltip` call above); kept for interface consistency with the other
+   *  five attach-options types, which all share this field. */
+  tooltipContainer?: HTMLElement;
 }
 
 /** A resolved facet cell's geometry in SVG user coords. The plot area of the cell is
@@ -407,6 +463,60 @@ export function seriesSwatchHtml(icon: IconSpec): string {
   return `<span class="tbl-tooltip-swatch">${iconSvgMarkup(icon)}</span>`;
 }
 
+/** The tooltip rows a set of `overlays[].tooltip: true` lines contributes at `x`.
+ *
+ *  ONE emitter, shared by the continuous crosshair and the scatter point hover, so the two cannot
+ *  drift on what a modelled row looks like — the same discipline `seriesSwatchHtml` enforces for
+ *  series keys.
+ *
+ *  A line with NO value at `x` contributes no row: `overlayValueAt` returns null outside the drawn
+ *  extent (an `overlays[].domain` crop) and across a break, and the caller has already dropped the
+ *  overlays that do not draw in this pane. A row for a line the reader cannot see at that x is the
+ *  same class of defect as a legend row for a line drawn nowhere.
+ *
+ *  Every row draws a LINE swatch in the line's own colour and dash, and the first carries a
+ *  separator rule. A modelled number set in a list of observed ones with no marker is the thing this
+ *  guards against, and the dash is the engine's own statement of which kind of claim a line is
+ *  (CONFIG-SPEC `overlays[].style`: computed FROM the data draws solid, asserted OVER it dashed).
+ *
+ *  The series name is appended only when it DISAMBIGUATES — a per-series fit resolves to one line
+ *  per series under one label, and two rows reading "Trend" would be unreadable. A single line keeps
+ *  the author's label exactly as written. */
+export function overlayTooltipRows(
+  overlays: OverlayTooltipLine[] | undefined,
+  x: number,
+  yFormat: (v: number) => string,
+  seriesLabels?: Record<string, string>,
+): string {
+  if (!overlays?.length) return "";
+  const drawn: Array<{ o: OverlayTooltipLine; v: number }> = [];
+  for (const o of overlays) {
+    const v = overlayValueAt(o.points, x);
+    if (v != null && Number.isFinite(v)) drawn.push({ o, v });
+  }
+  if (!drawn.length) return "";
+  const perLabel = new Map<string, number>();
+  for (const d of drawn) perLabel.set(d.o.label, (perLabel.get(d.o.label) ?? 0) + 1);
+  let html = "";
+  drawn.forEach(({ o, v }, i) => {
+    const name =
+      o.series != null && (perLabel.get(o.label) ?? 0) > 1
+        ? `${o.label} (${seriesLabels?.[o.series] ?? o.series})`
+        : o.label;
+    const swatch = seriesSwatchHtml({
+      shape: "line",
+      color: o.color,
+      ...(o.dashed ? { dashed: true } : {}),
+    });
+    const cls =
+      "tbl-tooltip-row tbl-tooltip-row--overlay" + (i === 0 ? " tbl-tooltip-row--overlay-first" : "");
+    html +=
+      `<div class="${cls}">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(name)}:</span> ` +
+      `<span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+  });
+  return html;
+}
+
 /** The icon a tooltip row should draw for `series`. `icons` (see icon.ts resolveTooltipIcons) is
  *  the ONLY source, and that is the whole point of this function existing.
  *
@@ -427,6 +537,38 @@ export function seriesSwatchHtml(icon: IconSpec): string {
  *  type — including the ones that draw no legend. */
 function rowIcon(series: string, icons: Map<string, IconSpec> | undefined): IconSpec {
   return icons?.get(series) ?? { shape: "none" };
+}
+
+/** PURE — one SERIES row of a tooltip card: the series' key, then `Label: value` — or the value
+ *  ALONE when the series has no name.
+ *
+ *  **No name ⇒ no label AND no colon**, and this is the single place that rule lives. A chart with no
+ *  series column has one implicit series keyed SINGLE_SERIES_KEY (""), and each of the four card
+ *  builders below used to emit `<span class="tbl-tooltip-label">:</span>` for it regardless — so a
+ *  single-series histogram, categorical-x line, dot plot, temporal line and area card each read
+ *  ": 10.00", a colon labelling nothing.
+ *
+ *  No invented word instead, on any of them: what the value MEANS is whatever the value axis
+ *  measures — dollars, a share, a count — which differs per figure and not per chart type, so
+ *  "Value" would be a word standing in for the absence of one (the histogram case is sharper still:
+ *  its height is a row count, a `histogram.weight` sum, or a pre-binned `value`, so "Count" would be
+ *  false on two of the three). The swatch already identifies the mark, and an author who wants a word
+ *  has `series_labels: {"": "…"}`, legal for exactly this case (see validate.ts) — it resolves into
+ *  `display` here and prints normally.
+ *
+ *  Every label-bearing series row in this file routes through here so the builders cannot drift on
+ *  this again. The `Total` rows deliberately do NOT: their label is a fixed word that is never
+ *  empty, and they carry their own classes and rule/spacer markup.
+ *  Gated by test/single-series-card-label.test.ts (all five types, at defaults). */
+function tooltipSeriesRowHtml(
+  series: string,
+  valueText: string,
+  opts: { seriesLabels?: Record<string, string>; icons?: Map<string, IconSpec> },
+): string {
+  const display = (opts.seriesLabels && opts.seriesLabels[series]) || series;
+  const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
+  const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span> `;
+  return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
 }
 
 /**
@@ -457,9 +599,10 @@ export function buildFacetTooltipHtml(
   for (const series of tipSeries) {
     const v = bySeries.get(series)!.get(snappedX);
     if (v == null || Number.isNaN(v)) continue;
-    const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    html += tooltipSeriesRowHtml(series, yFormat(v), {
+      ...(seriesLabels ? { seriesLabels } : {}),
+      ...(opts.icons ? { icons: opts.icons } : {}),
+    });
   }
   return html;
 }
@@ -584,7 +727,10 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = getSharedTooltip(svgEl.ownerDocument);
+  // Deliberately UN-GATED on showTooltip/chrome.tooltip: dead code on the live path today (see
+  // engine/index.ts:274's FacetInfo note — only reachable from test/facet-crosshair.test.ts). Add
+  // the gate here if this is ever wired up live.
+  const tip = getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   /** Snap an absolute svgX to the nearest x in `xs`, given this cell's [x0,x1] plot range. */
   function snapXInCell(svgX: number, cell: FacetCell, xs: number[]): number | null {
@@ -673,17 +819,39 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
 // Band-axis (categorical) hover tooltip — bar / stacked charts
 // ---------------------------------------------------------------------------
 
+/** Resolved hover context for `BandCrosshairOptions.onHover` / render-live's `MountOptions.onHover`
+ *  and the bubbling `tbl-hover` CustomEvent — the SAME category + per-series values the tooltip
+ *  card is built from (see `resolveCategorySeriesValues`), never re-derived at a separate site.
+ *  `null` reports pointer-leave (or no category resolved), so a consumer drawing its own card
+ *  knows when to clear it. */
+export interface BandHoverCtx {
+  category: string;
+  series: string[];
+  values: Record<string, number>;
+  facet?: string;
+}
+
 export interface BandCrosshairOptions {
   /** All rows in scope (dataInScope from renderChart). Each must have `_xc` (the category
    *  key), `series`, and `_y`. */
   rows: Array<{ _xc?: string; series: string; _y: number | null }>;
   /** True for stacked charts — enables the Total row logic in the tooltip. */
   isStacked?: boolean;
-  /** Controls the Total row style for stacked charts (mirrors MarkLayers.showTotalDot).
-   *  - true:      diverging/net-dot stack — Total row uses a circle (is-dot) swatch.
-   *  - false:     cumulative stack — Total row shows as plain text with no swatch.
-   *  - undefined: netDisplay:"none" or normalized — Total row is omitted entirely. */
-  showTotalDot?: boolean;
+  /** The tooltip's Total row style for stacked charts — see spec/bar-stack.ts's `TotalRow`.
+   *  - "dot":  diverging/net-dot stack — Total row uses a circle (is-dot) swatch.
+   *  - "text": cumulative stack — Total row shows as plain text with no swatch.
+   *  - "none" (or omitted): netDisplay:"none" or normalized — Total row is omitted entirely. */
+  totalRow?: TotalRow;
+  /** Where the tooltip's Total row sits: "last" (default, after the series rows) or "first". See
+   *  spec/types.ts's `barStack.total.position`. */
+  totalPosition?: "first" | "last";
+  /** Bold the Total row. See spec/types.ts's `barStack.total.bold`. Default ON — pass `false`
+   *  to opt out. */
+  totalBold?: boolean;
+  /** Rule separating the Total row from the series rows; side flips with `totalPosition` — see
+   *  `buildBandTooltipHtml`. See spec/types.ts's `barStack.total.divider`. Default ON — pass
+   *  `false` to opt out. */
+  totalDivider?: boolean;
   /** True when grouped bars use fx-faceted layout (xScaleField === "fx"). */
   isFaceted?: boolean;
   /** Ordered list of categories (declaration order → facet index order for fx layout). */
@@ -703,8 +871,45 @@ export interface BandCrosshairOptions {
    *  show NO tooltip (the coordinated secondary renderer draws every pane's shaded region +
    *  labels instead). */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The highlight, hit area,
+   *  and `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
+   *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
+  showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** Screen-only hook (spec/hooks.ts's `RenderHooks.tooltip`) — replaces this band tooltip's
+   *  CONTENT while the engine keeps doing the hit-testing, positioning and highlight around it.
+   *  `null` (or no hook) keeps the engine's own card. Forwarded from render-live.ts through here
+   *  into `buildBandTooltipHtml`. NOT reached by `attachCrosshair` / `attachFacetCrosshair` /
+   *  `attachHistogramHover` / `attachPointHover` — those build their card markup elsewhere; see
+   *  spec/hooks.ts's module note and CONFIG-SPEC.md for that boundary.
+   *
+   *  Being forwarded here is NOT the same as being reachable. `buildBandTooltipHtml` is called
+   *  below the `emitOnly` return and below `if (!tip)`, so this hook is silently skipped on every
+   *  pane that hovers with the coordinated cursor instead of a card — which at default settings is
+   *  every plain/grouped bar and every waterfall (hoverMode is always "pills" for them), every
+   *  all-positive stack, and every coordinated small-multiples pane. That is by design: the hook
+   *  replaces card CONTENT, so it has nothing to do where no card is drawn. Do NOT "fix" it by
+   *  hoisting the call above the gate the way `onHover` is hoisted — `onHover` is an event that
+   *  reports data, this one renders markup into a card that does not exist. The reachability table
+   *  in CONFIG-SPEC.md is gated by test/hover-card-reach.test.ts. */
+  tooltipHook?: (ctx: TooltipHookCtx) => string | null;
+  /** This pane facet value (small multiples only; FigurePane.value via wireFigureSvg -- the same
+   *  value paneFacetValue threads into MarkContext for the static hooks, e.g. Task 4 valueLabel).
+   *  Forwarded into TooltipHookCtx.facet. undefined on the standalone mountChart path -- there is
+   *  no facet there. */
+  facet?: string;
+  /** Fires with the resolved category + its per-series values on every pointer resolve, and with
+   *  `null` on pointer-leave / no category resolved. Fired from the SAME values `update()` already
+   *  resolves to build the tooltip (see `resolveCategorySeriesValues`) — BEFORE the `emitOnly` and
+   *  `showTooltip` gates below, so it fires for a coordinated small-multiples pane and with
+   *  `chrome.tooltip: false` alike (render-live's actual use case: hit-test without the engine's
+   *  own card). */
+  onHover?: (ctx: BandHoverCtx | null) => void;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -825,17 +1030,52 @@ export function resolveCategoryFromBandsH(
  * present for `category`, ordered by `seriesOrder`, plus an optional Total row
  * for stacked charts. PURE — no DOM access.
  *
- * The Total row rendering depends on `showTotalDot`:
- *   - true:      dot-swatch circle (is-dot) — diverging stack with a net-dot marker.
- *   - false:     plain text label only (no swatch) — cumulative stack with text callout.
- *   - undefined: Total row is omitted — netDisplay:"none" / normalized stack.
+ * The Total row rendering depends on `totalRow` (spec/bar-stack.ts's `TotalRow`):
+ *   - "dot":  dot-swatch circle (is-dot) — diverging stack with a net-dot marker.
+ *   - "text": plain text label only (no swatch) — cumulative stack with text callout.
+ *   - "none" (or omitted): Total row is omitted — netDisplay:"none" / normalized stack.
  */
+/** Resolve `rows` down to the values for one category, in tooltip-row order: `series` filtered to
+ *  those with a finite value for `category` (ordered by `seriesOrder` when given, else
+ *  data-encounter order), and `values` keyed by series. The single source `buildBandTooltipHtml`'s
+ *  card and `attachBandCrosshair`'s `onHover` notifier both read from, so the tooltip and the
+ *  hover event can never disagree about what a category's values are. */
+export function resolveCategorySeriesValues(
+  category: string,
+  rows: Array<{ _xc?: string; series: string; _y: number | null }>,
+  seriesOrder?: string[],
+): { series: string[]; values: Record<string, number> } {
+  const valBySeries = new Map<string, number>();
+  for (const r of rows) {
+    if (r._xc === category && r._y != null && Number.isFinite(r._y)) valBySeries.set(r.series, r._y);
+  }
+  const series = seriesOrder && seriesOrder.length
+    ? seriesOrder.filter((s) => valBySeries.has(s))
+    : [...valBySeries.keys()];
+  const values: Record<string, number> = {};
+  for (const s of series) values[s] = valBySeries.get(s)!;
+  return { series, values };
+}
+
 export function buildBandTooltipHtml(
   category: string,
   rows: Array<{ _xc?: string; series: string; _y: number | null }>,
   opts: {
     isStacked?: boolean;
-    showTotalDot?: boolean;
+    totalRow?: TotalRow;
+    /** Where the Total row sits: "last" (default, after the series rows) or "first". */
+    totalPosition?: "first" | "last";
+    /** Bold the Total row. Default ON (opt-out: pass `false`) — this builder is the single
+     *  source of that default; callers (attachBandCrosshair's forward, render-live.ts's two
+     *  attachBandCrosshair call sites) pass the spec value straight through un-defaulted. */
+    totalBold?: boolean;
+    /** Rule separating the Total row from the series rows; side flips with `totalPosition` —
+     *  "last" (row sits below the series rows) draws the rule ABOVE it (border-top), "first" (row
+     *  sits above them) draws it BELOW (border-bottom). A fixed top-only rule would, in "first"
+     *  position, separate the category header from the Total row instead of the Total row from
+     *  the series rows — the wrong pair. Default ON (opt-out: pass `false`), for the same
+     *  single-source-of-default reason as totalBold above. */
+    totalDivider?: boolean;
     seriesLabels?: Record<string, string>;
     seriesOrder?: string[];
     yFormat?: (v: number) => string;
@@ -846,48 +1086,85 @@ export function buildBandTooltipHtml(
      *  per category — see `readCategoryFills`), which is what keeps a `bar_color` /
      *  `category_colors` / waterfall bar's key on the colour under the cursor. */
     icons?: Map<string, IconSpec>;
+    /** Screen-only (see spec/hooks.ts's `TooltipHookCtx`) — replaces the returned markup; `null`
+     *  keeps the engine's own `html` built below. Both callers (attachBandCrosshair,
+     *  attachCategoricalLineCrosshair) forward their own `tooltipHook` option straight through. */
+    tooltipHook?: (ctx: TooltipHookCtx) => string | null;
+    /** This pane facet value, threaded straight into TooltipHookCtx.facet -- see
+     *  BandCrosshairOptions.facet. undefined outside small multiples. */
+    facet?: string;
   },
 ): string {
-  const { isStacked, showTotalDot, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
+  const { isStacked, totalRow, seriesLabels, seriesOrder, yFormat, categoryLabels } = opts;
   const fmt = yFormat ?? ((v: number) => String(v));
 
-  // Collect values for this category, keyed by series.
-  const catRows = rows.filter((r) => r._xc === category);
-  const valBySeries = new Map<string, number>();
-  for (const r of catRows) {
-    if (r._y != null && Number.isFinite(r._y)) valBySeries.set(r.series, r._y);
-  }
-
-  const orderedSeries = seriesOrder && seriesOrder.length
-    ? seriesOrder.filter((s) => valBySeries.has(s))
-    : [...valBySeries.keys()];
+  const { series: orderedSeries, values: valuesBySeries } = resolveCategorySeriesValues(
+    category, rows, seriesOrder,
+  );
 
   let html = `<div class="tbl-tooltip-head">${escapeHtml(categoryLabels?.[category] ?? category)}</div>`;
+  let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
-    const v = valBySeries.get(series);
+    const v = valuesBySeries[series];
     if (v == null) continue;
     total += v;
-    const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(v))}</span></span></div>`;
+    seriesRows += tooltipSeriesRowHtml(series, fmt(v), {
+      ...(seriesLabels ? { seriesLabels } : {}),
+      ...(opts.icons ? { icons: opts.icons } : {}),
+    });
   }
 
-  // Total row: only for stacked charts with 2+ series, and only when showTotalDot is not
-  // undefined (undefined = netDisplay:"none"/normalized — no net marker, no Total row).
-  if (isStacked && orderedSeries.length > 1 && showTotalDot !== undefined) {
-    if (showTotalDot) {
-      // Diverging stack: the Total row keys the net-dot marker, so it draws the SAME icon the
-      // legend's "Total" row draws — a colourless `dot`, which icon.ts resolves to the white disc
-      // with the black ring that marks/stacked.ts paints. It was a bare `is-dot` class over CSS that
-      // no longer exists, which is to say an empty box.
+  // Built but not yet placed — `totalPosition` decides which side of the series rows it lands on.
+  // The two branches are kept separate rather than parameterised on an empty swatch string, so the
+  // default path emits byte-identical markup to what it emitted before this field existed.
+  const hasTotalRow = !!(isStacked && orderedSeries.length > 1 && totalRow && totalRow !== "none");
+  let totalRowHtml = "";
+  if (hasTotalRow) {
+    const position = opts.totalPosition ?? "last";
+    const rowClasses = [
+      "tbl-tooltip-row",
+      "tbl-tooltip-row--total",
+      // Default ON (opt-out): (opts.totalBold ?? true). The builder is the single source of
+      // this default — render-live.ts passes spec.barStack?.total?.bold/.divider straight
+      // through undefined-when-unset, and an explicit `false` in the spec still wins here.
+      ...((opts.totalBold ?? true) ? ["tbl-tooltip-row--total-bold"] : []),
+      ...((opts.totalDivider ?? true)
+        ? [position === "first" ? "tbl-tooltip-row--total-rule-below" : "tbl-tooltip-row--total-rule-above"]
+        : []),
+    ].join(" ");
+    if (totalRow === "dot") {
+      // Keys the net-dot marker, so it draws the SAME icon the legend's "Total" row draws — a
+      // colourless `dot`, which icon.ts resolves to the white disc with the black ring.
       const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
-      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="${rowClasses}">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
-      // Cumulative stack: net callout is a text-above marker, not a dot — no swatch in
-      // the tooltip either. Show Total as a plain label + value row.
-      html += `<div class="tbl-tooltip-row tbl-tooltip-row--total"><span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      // No real swatch (no dot on the chart) — but an EMPTY spacer with the SAME class as a real
+      // swatch, so the label still sits at the swatch+gap indent every series row uses. Before
+      // this the text row emitted no swatch element at all and sat flush left, one swatch-plus-gap
+      // short of every row above it.
+      const spacer = `<span class="tbl-tooltip-swatch" aria-hidden="true"></span>`;
+      totalRowHtml = `<div class="${rowClasses}">${spacer}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     }
+  }
+
+  html += (opts.totalPosition ?? "last") === "first" ? totalRowHtml + seriesRows : seriesRows + totalRowHtml;
+
+  // hooks.tooltip (#30, Task 5): screen-only content replacement — the engine still does the
+  // hit-testing/positioning/highlight around this card (see the two call sites below). `total`
+  // reuses `hasTotalRow` above so it is only handed to the hook when a Total row would actually
+  // show — callers that never pass isStacked/totalRow (e.g. attachCategoricalLineCrosshair) have
+  // no stack "total" concept, and the raw series sum would mislabel one for them.
+  if (opts.tooltipHook) {
+    const hooked = opts.tooltipHook({
+      category,
+      series: orderedSeries,
+      values: valuesBySeries,
+      ...(hasTotalRow ? { total } : {}),
+      ...(opts.facet != null ? { facet: opts.facet } : {}),
+      rendered: html,
+    });
+    if (hooked != null) return hooked;
   }
 
   return html;
@@ -1169,7 +1446,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   // Bar tooltips: colour each series' swatch from the bar's ACTUAL rendered fill (bar_color /
   // accent / category_colors / a waterfall's per-direction palette), not the series' base colour —
@@ -1275,9 +1552,18 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     if (!category) { hide(); return; }
 
     opts.onResolve?.(category);
+    // Fires from the SAME resolver the tooltip card below reads (resolveCategorySeriesValues) —
+    // BEFORE the emitOnly/tip gates, so a coordinated small-multiples pane and `chrome.tooltip:
+    // false` still report what the engine resolved even though neither draws its own card.
+    if (opts.onHover) {
+      const { series, values } = resolveCategorySeriesValues(category, opts.rows, opts.seriesOrder);
+      opts.onHover({ category, series, values, ...(opts.facet != null ? { facet: opts.facet } : {}) });
+    }
     if (emitOnly) return;
 
     showHighlight(hlMin, hlMax);
+
+    if (!tip) return; // chrome.tooltip: false — highlight shown, no card.
 
     // The key set for THIS category (see iconsByCategory). Falling back to `opts.icons` keeps a
     // category with no rect of its own on the palette colour rather than on a neighbour's.
@@ -1285,11 +1571,16 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     const html = buildBandTooltipHtml(category, opts.rows, {
       isStacked: opts.isStacked,
-      showTotalDot: opts.showTotalDot,
+      totalRow: opts.totalRow,
+      totalPosition: opts.totalPosition,
+      totalBold: opts.totalBold,
+      totalDivider: opts.totalDivider,
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
       categoryLabels: opts.categoryLabels,
+      tooltipHook: opts.tooltipHook,
+      facet: opts.facet,
       ...(icons ? { icons } : {}),
     });
     tip!.innerHTML = html;
@@ -1313,6 +1604,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     if (hl) hl.setAttribute("opacity", "0");
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
+    opts.onHover?.(null);
   }
 
   hit.style.pointerEvents = "all";
@@ -1351,8 +1643,22 @@ export interface HistogramHoverOptions {
   /** Coordinated small-multiples: hit-test + emit only (no highlight/tooltip drawn); the secondary
    *  cursor renders the echo on every pane. */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The highlight, hit area,
+   *  and `onResolve` emission still fire; independent of `emitOnly`, which suppresses all of them
+   *  together for a coordinated pane. `undefined` keeps today's behaviour (tooltip shown). */
+  showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `chrome.valuePills: false` — consumed only by `attachSecondaryHistogramCursor` (the
+   *  coordinated/echo cursor): suppress just its per-series value pills. The shaded bin region,
+   *  the active-pane bin-range echo, and `onResolve`/hit-testing on the PRIMARY path above are
+   *  untouched — same split as `SecondaryBandOptions.showPills` for bar/stacked/waterfall.
+   *  `undefined` keeps today's behaviour (pills shown). */
+  showPills?: boolean;
 }
 
 /** A histogram bin: its edge values + per-series height. Derived from the binned rows. */
@@ -1441,9 +1747,12 @@ export function buildHistogramTooltipHtml(
   for (const series of ordered) {
     const v = bin.bySeries.get(series);
     if (v == null || Number.isNaN(v)) continue;
-    const display = (seriesLabels && seriesLabels[series]) || series;
-    const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-    html += `<div class="tbl-tooltip-row">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(display)}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
+    // No name ⇒ no label and no colon — the rule and its reasoning live in tooltipSeriesRowHtml,
+    // which every card builder here shares so they cannot diverge on it.
+    html += tooltipSeriesRowHtml(series, yFormat(v), {
+      ...(seriesLabels ? { seriesLabels } : {}),
+      ...(opts.icons ? { icons: opts.icons } : {}),
+    });
   }
   return html;
 }
@@ -1557,7 +1866,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   hit.style.cursor = "default";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
 
   // Re-coloured ONCE, not per pointermove: `renderedFills` is read from the bars at attach time, so
   // a `bar_color` histogram's key is settled before the first hover. (This is where that colour is
@@ -1597,6 +1906,8 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     if (emitOnly) return;
 
     showHighlight(spans[idx]!.min, spans[idx]!.max);
+
+    if (!tip) return; // chrome.tooltip: false — highlight shown, no card.
 
     tip!.innerHTML = buildHistogramTooltipHtml(bin, {
       seriesLabels: opts.seriesLabels,
@@ -1696,22 +2007,27 @@ export function attachSecondaryHistogramCursor(
 
     // Per-series height pill ABOVE each bar (staggered on horizontal collision), matching the
     // vertical-bar secondary convention. Ordered by seriesOrder when given.
-    const rects = rectsByBin.get(idx) ?? [];
-    const orderedRects = order
-      ? (order.map((s) => rects.find((r) => r.series === s)).filter(Boolean) as typeof rects)
-      : rects;
-    const valid = orderedRects
-      .map((rect) => ({ rect, v: bin.bySeries.get(rect.series) }))
-      .filter((x) => x.v != null && Number.isFinite(x.v)) as Array<
-      { rect: { series: string; cx: number; y: number; fill: string | null }; v: number }
-    >;
-    const ys = staggerBarLabels(
-      valid.map((x) => ({ cx: x.rect.cx, w: coordPillWidth(yFormat(x.v)), value: x.v, y: x.rect.y - 9 })),
-      COORD_PILL_H,
-    );
-    valid.forEach((x, i) =>
-      addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), x.rect.fill ?? colorFor(x.rect.series), weight),
-    );
+    // showPills: false (chrome.valuePills) suppresses only these value pills — the bin region
+    // above and the active-pane bin-range echo below are untouched, matching
+    // SecondaryBandOptions' identical split (see its two call sites' comments).
+    if (opts.showPills !== false) {
+      const rects = rectsByBin.get(idx) ?? [];
+      const orderedRects = order
+        ? (order.map((s) => rects.find((r) => r.series === s)).filter(Boolean) as typeof rects)
+        : rects;
+      const valid = orderedRects
+        .map((rect) => ({ rect, v: bin.bySeries.get(rect.series) }))
+        .filter((x) => x.v != null && Number.isFinite(x.v)) as Array<
+        { rect: { series: string; cx: number; y: number; fill: string | null }; v: number }
+      >;
+      const ys = staggerBarLabels(
+        valid.map((x) => ({ cx: x.rect.cx, w: coordPillWidth(yFormat(x.v)), value: x.v, y: x.rect.y - 9 })),
+        COORD_PILL_H,
+      );
+      valid.forEach((x, i) =>
+        addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), x.rect.fill ?? colorFor(x.rect.series), weight),
+      );
+    }
 
     // Active (hovered) pane: draw the bin range on the x-axis row as a frosted pill, using the SAME
     // label formatter/opts as the hover tooltip so the coordinated label matches.
@@ -1771,6 +2087,7 @@ const TOTAL_PILL_COLOR = "#000000";
 function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, color: string, symbol?: string): void {
   if (symbol && symbol !== "circle") {
     const p = doc.createElementNS(COORD_NS, "path");
+    p.classList.add("tbl-coord-dot");
     // Area ~42 (≈ radius 3.7) — just larger than the static marker (~34) so it reads as a ring.
     p.setAttribute("d", symbolPathD(symbol, 42));
     p.setAttribute("transform", `translate(${cx},${cy})`);
@@ -1781,6 +2098,7 @@ function addCoordDot(g: SVGGElement, doc: Document, cx: number, cy: number, colo
     return;
   }
   const dot = doc.createElementNS(COORD_NS, "circle");
+  dot.classList.add("tbl-coord-dot");
   dot.setAttribute("cx", String(cx));
   dot.setAttribute("cy", String(cy));
   dot.setAttribute("r", "3.6");
@@ -1826,6 +2144,10 @@ function addCoordPill(
   const textCx = anchor === "pill-end" || anchor === "pill-start" ? x0 + w / 2 : cx;
   const textAnchor = anchor === "pill-end" || anchor === "pill-start" ? "middle" : anchor;
   const rect = doc.createElementNS(COORD_NS, "rect");
+  // Named so a consumer stylesheet can select this capsule without depending on rx="3" (issue
+  // #30) — it shares that attribute with addCoordAxisLabel's echo box below, which is otherwise
+  // indistinguishable from this one by any presentation attribute.
+  rect.classList.add("tbl-coord-pill");
   rect.setAttribute("x", String(x0));
   rect.setAttribute("y", String(cy - h / 2));
   rect.setAttribute("width", String(w));
@@ -1837,6 +2159,7 @@ function addCoordPill(
   rect.setAttribute("stroke-opacity", "0.7");
   g.appendChild(rect);
   const t = doc.createElementNS(COORD_NS, "text");
+  t.classList.add("tbl-coord-pill-text");
   t.setAttribute("x", String(textCx));
   t.setAttribute("y", String(cy));
   t.setAttribute("dy", "0.32em");
@@ -1917,6 +2240,7 @@ function makeCoordGroup(svgEl: SVGSVGElement): SVGGElement {
 /** Draw the thin muted vertical guide line (line panes) into the coord group. */
 function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, yBot: number): void {
   const guide = doc.createElementNS(COORD_NS, "line");
+  guide.classList.add("tbl-coord-guide");
   guide.setAttribute("x1", String(x));
   guide.setAttribute("x2", String(x));
   guide.setAttribute("y1", String(yTop));
@@ -1931,6 +2255,7 @@ function addCoordGuide(g: SVGGElement, doc: Document, x: number, yTop: number, y
 /** Draw the shaded band region (bar/stacked panes) into the coord group. */
 function addCoordRegion(g: SVGGElement, doc: Document, x: number, w: number, yTop: number, h: number): void {
   const r = doc.createElementNS(COORD_NS, "rect");
+  r.classList.add("tbl-coord-region");
   r.setAttribute("x", String(x));
   r.setAttribute("y", String(yTop));
   r.setAttribute("width", String(Math.max(0, w)));
@@ -1984,15 +2309,17 @@ function makeAxisRows(svgEl: SVGSVGElement, plotBottom: number) {
 /**
  * Draw the active pane's highlighted x value as text on a frosted pill, one line per axis row so
  * the line breaks match the axis (e.g. month on the first row, year on the second). Centered on
- * `cx`; bold + dark so it reads as the highlighted axis label.
+ * `cx`; bold + dark so it reads as the highlighted axis label. Returns the pill's box in SVG user
+ * coords (null when there was nothing to draw) — the caller needs it to tell which tick labels the
+ * pill has landed on top of; see `hideAxisLabelsUnder`.
  */
 function addCoordAxisLabel(
   g: SVGGElement,
   doc: Document,
   cx: number,
   lines: Array<{ text: string; cy: number }>,
-): void {
-  if (!lines.length) return;
+): { left: number; right: number; top: number; bot: number } | null {
+  if (!lines.length) return null;
   const fontSize = 10.5;
   const padX = 4;
   const padY = 2;
@@ -2000,6 +2327,8 @@ function addCoordAxisLabel(
   const top = Math.min(...lines.map((l) => l.cy)) - fontSize / 2 - padY;
   const bot = Math.max(...lines.map((l) => l.cy)) + fontSize / 2 + padY;
   const rect = doc.createElementNS(COORD_NS, "rect");
+  // See addCoordPill's identical note: this echo box needs its own class for the same reason.
+  rect.classList.add("tbl-coord-axis-label");
   rect.setAttribute("x", String(cx - w / 2));
   rect.setAttribute("y", String(top));
   rect.setAttribute("width", String(w));
@@ -2012,6 +2341,7 @@ function addCoordAxisLabel(
   g.appendChild(rect);
   for (const l of lines) {
     const t = doc.createElementNS(COORD_NS, "text");
+    t.classList.add("tbl-coord-axis-label-text");
     t.setAttribute("x", String(cx));
     t.setAttribute("y", String(l.cy));
     t.setAttribute("dy", "0.32em");
@@ -2022,6 +2352,61 @@ function addCoordAxisLabel(
     t.textContent = l.text;
     g.appendChild(t);
   }
+  return { left: cx - w / 2, right: cx + w / 2, top, bot };
+}
+
+/** A tick label hidden while an echo pill covers it, plus the inline `visibility` to put back. */
+type HiddenTick = { el: SVGTextElement; prev: string };
+
+/**
+ * Hide the x-axis tick labels an echo pill overlaps, and return what to restore.
+ *
+ * WHY THIS EXISTS: the echo pill is centred on the CURSOR's x and sized from its own text, so it
+ * is only as wide as what it says — it is not the tick's box. That is harmless while the echo says
+ * what the tick says (the default `%b` / `%Y` is never wider than the tick it covers), but an
+ * author-set `tooltip_x_format` is arbitrary: `"%b %-d, %Y"` renders `Jun 1, 2026` over a monthly
+ * axis whose ticks are `Jun`, so the pill reaches across its neighbour and leaves a fragment of it
+ * sticking out past the pill's edge (`Apr` read as `pr`). Hiding just the ticks the pill actually
+ * covers keeps the echo where the reader expects it — on the axis row — while the ticks it does
+ * NOT reach stay put, so the axis keeps its context. Restored on the next cursor move and on
+ * clear; the export path re-renders from the spec and never sees this.
+ */
+function hideAxisLabelsUnder(
+  svgEl: SVGSVGElement,
+  plotBottom: number,
+  box: { left: number; right: number; top: number; bot: number },
+): HiddenTick[] {
+  const svgRect = svgEl.getBoundingClientRect();
+  if (!svgRect.width || !svgRect.height) return [];
+  const vb = svgEl.viewBox?.baseVal;
+  const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const sx = Wd / svgRect.width;
+  const sy = Hd / svgRect.height;
+  const PAD = 1; // a tick a hair from the pill's edge still reads as a collision
+  const hidden: HiddenTick[] = [];
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+    if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
+    const r = t.getBoundingClientRect();
+    if (!r.width) continue;
+    const top = (r.top - svgRect.top) * sy;
+    if (top < plotBottom - 2) continue; // x-axis labels only
+    const left = (r.left - svgRect.left) * sx;
+    const right = (r.right - svgRect.left) * sx;
+    const bot = (r.bottom - svgRect.top) * sy;
+    const overlapX = Math.min(box.right + PAD, right) - Math.max(box.left - PAD, left);
+    const overlapY = Math.min(box.bot + PAD, bot) - Math.max(box.top - PAD, top);
+    if (overlapX <= 0 || overlapY <= 0) continue;
+    hidden.push({ el: t, prev: t.style.visibility });
+    t.style.visibility = "hidden";
+  }
+  return hidden;
+}
+
+/** Put back every tick label `hideAxisLabelsUnder` hid. Safe to call on an empty list. */
+function restoreAxisLabels(hidden: HiddenTick[]): void {
+  for (const h of hidden) h.el.style.visibility = h.prev;
+  hidden.length = 0;
 }
 
 /** Detect how the rendered categorical x-axis labels are laid out, so the active-pane highlight
@@ -2171,7 +2556,16 @@ function coordPillWidth(text: string): number {
  * Attach a coordinated cursor to a CONTINUOUS (line) small-multiples pane. Returns a driver:
  * `driver(xValue, active)` snaps to this pane's nearest x and renders the guide + per-series dot
  * and a compact value label (on a pill); when `active`, labels use a heavier weight and the
- * current x value is shown above the plot. `driver(null)` clears. No pointer handlers.
+ * current x value is shown at the axis. `driver(null)` clears. No pointer handlers.
+ *
+ * The x echo has two forms. By DEFAULT it mirrors the axis ticks — one line per tick row, `%b`
+ * over `%Y` — and so needs tick rows to sit on: `makeAxisRows` finds none on a temporal span
+ * shorter than a month, and the echo is skipped. With `xFormatExplicit` (the spec set
+ * `tooltip_x_format`) it draws that format on ONE line, anchored to the tick rows where they exist
+ * and just below the plot where they do not — an author who states an x format is telling us the x
+ * value has to be readable, and a daily figure is exactly the case with no ticks to hang it on.
+ * On that branch only, the tick labels the pill covers are hidden for as long as it is showing
+ * (`hideAxisLabelsUnder`), because an author's format can be wider than the tick it lands on.
  */
 export function attachSecondaryLineCursor(
   svgEl: SVGSVGElement,
@@ -2194,8 +2588,14 @@ export function attachSecondaryLineCursor(
   const plotW = W - ml - mr;
   const plotH = H - mt - mb;
 
-  // The active pane highlights the EXISTING x-axis label(s), so only x PARSING is needed here
-  // (no x formatting — we never draw our own x text).
+  // x PARSING is derived here; x FORMATTING is `opts.xFormat`, read in the `active` branch below
+  // and gated on `opts.xFormatExplicit` — see this function's contract above and the
+  // `attachSecondaryHistogramCursor` precedent (it re-uses the primary's own `formatBinLabel` opts
+  // "so the coordinated label matches"). The gate is the load-bearing part: `tooltipXFormat` is
+  // ALWAYS a function on a temporal axis (the x-adapter defaults it to `%b %Y`), so honouring it
+  // unconditionally would collapse the default two-line echo — one line per axis tick row — into a
+  // single "Jun 2026" on every published multi-pane temporal figure, including the ones that set
+  // nothing. Only an author-set `tooltip_x_format` may change what a pane echoes.
   if (!xParse) {
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
@@ -2231,9 +2631,14 @@ export function attachSecondaryLineCursor(
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
+  // Tick labels this pane's echo pill is currently covering. Restored at the TOP of every driver
+  // call (the clear path included), so the axis is whole again before anything is redrawn — a pane
+  // can never accumulate hidden ticks as the cursor moves across it.
+  let hiddenTicks: HiddenTick[] = [];
 
   return (xValue: number | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
+    restoreAxisLabels(hiddenTicks);
     if (xValue == null) {
       g.setAttribute("opacity", "0");
       return;
@@ -2248,10 +2653,27 @@ export function attachSecondaryLineCursor(
     const gx = xToPx(nx);
     addCoordGuide(g, doc, gx, mt, mt + plotH);
     // Active pane: draw the full current x value at the axis, matching its line breaks (a
-    // temporal date shows month + year on two lines even mid-year, e.g. "Jul" / "2021").
+    // temporal date shows month + year on two lines even mid-year, e.g. "Jul" / "2021") — unless
+    // the spec named its own `tooltip_x_format`, which is one string and so one line.
     if (active) {
       const ys = axisRows.get();
-      if (ys.length) {
+      if (opts.xFormatExplicit && opts.xFormat) {
+        // Centre the single line on the tick rows it replaces; with no rows to replace (a temporal
+        // span under a month draws no ticks — the case the field exists for) sit just below the
+        // plot, clamped inside the frame so the pill cannot spill out of the viewBox.
+        const cy = ys.length
+          ? (ys[0]! + ys[ys.length - 1]!) / 2
+          : Math.min(mt + plotH + 11, H - 8);
+        const box = addCoordAxisLabel(g, doc, gx, [{ text: opts.xFormat(nx), cy }]);
+        // The pill is sized from the AUTHOR's format, not from the tick it lands on, so it can be
+        // wider than that tick and spill onto its neighbours (issue #30). Below-the-rows is not
+        // available to move it to: the bottom margin is sized for the tick rows it already has
+        // (two 13px rows in a 38px margin), so a 14.5px pill under the last row falls outside the
+        // viewBox. Hide the ticks it covers instead — the echo IS the x value those ticks name,
+        // read finer. Only on this branch: the default echo is no wider than its tick, and this
+        // must not move it.
+        if (box) hiddenTicks = hideAxisLabelsUnder(svgEl, mt + plotH, box);
+      } else if (ys.length) {
         let lines: Array<{ text: string; cy: number }>;
         if (isDate) {
           const dt = new Date(nx);
@@ -2277,10 +2699,15 @@ export function attachSecondaryLineCursor(
         .map((s) => ({ s, v: bySeries.get(s)!.get(nx) }))
         .filter((p) => p.v != null && !Number.isNaN(p.v)) as Array<{ s: string; v: number }>;
       for (const p of pts) addCoordDot(g, doc, gx, toPy(p.v), colors?.get(p.s) || "#666666", opts.symbols?.get(p.s));
-      const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
-      pts.forEach((p, i) => {
-        addCoordPill(g, doc, flip ? gx - 10 : gx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colors?.get(p.s) || "#666666", weight);
-      });
+      // showPills: false (chrome.valuePills) suppresses only these value pills — the guide
+      // (above), the per-series highlight dot (just above), and the active-pane x-value echo are
+      // untouched, matching SecondaryBandOptions'/HistogramHoverOptions' identical split.
+      if (opts.showPills !== false) {
+        const labelYs = spreadLabelYs(pts.map((p) => toPy(p.v)), COORD_PILL_H, mt, mt + plotH);
+        pts.forEach((p, i) => {
+          addCoordPill(g, doc, flip ? gx - 10 : gx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colors?.get(p.s) || "#666666", weight);
+        });
+      }
     }
     g.setAttribute("opacity", "1");
   };
@@ -2317,6 +2744,9 @@ export interface SecondaryBandOptions {
    *  in the bar and SIGNED (explicit + on gains). Total/skip steps shade without a pill (their
    *  value is the always-on running-total label). */
   waterfall?: { deltaCats: Set<string> };
+  /** `chrome.valuePills: false` — suppress only the per-series value pills; the shaded band region
+   *  and the accented category label still render. Default true. */
+  showPills?: boolean;
 }
 
 /** A rendered bar rect's geometry + series, for one category. */
@@ -2452,10 +2882,19 @@ export function attachSecondaryBandCursor(
   const plotH = H - mt - mb;
 
   const valByCat = new Map<string, Map<string, number>>();
+  // A pill is matched to its bar by SERIES: this map is keyed by the ROW's series and read back
+  // with the rendered rect's `data-series`. A waterfall breaks that symmetry — it is single-series
+  // by construction (validate.ts rejects data with more than one series) and its tagging layer
+  // stamps every bar SINGLE_SERIES_KEY (""), while its rows carry whatever `columns.series` holds.
+  // A single-valued series column is legal and passes validation, and there the two keys disagree
+  // and EVERY pill was dropped. Key the waterfall's values the way its rects are keyed. Fixed here
+  // rather than at the stamp: changing what `data-series` holds would alter the RENDERED svg (and
+  // would newly activate series-keyed paint like `series_patterns`) on published figures.
+  const seriesKeyOf = (r: { series: string }): string => (opts.waterfall ? SINGLE_SERIES_KEY : r.series);
   for (const r of opts.rows) {
     if (!r._xc || r._y == null || !Number.isFinite(r._y)) continue;
     if (!valByCat.has(r._xc)) valByCat.set(r._xc, new Map());
-    valByCat.get(r._xc)!.set(r.series, r._y);
+    valByCat.get(r._xc)!.set(seriesKeyOf(r), r._y);
   }
   const horizontal = opts.horizontal === true;
   const rectsByCat = buildRectsByCategory(svgEl, opts, horizontal);
@@ -2540,28 +2979,33 @@ export function attachSecondaryBandCursor(
         }
       }
       const pillGap = opts.pillGap ?? 6;
-      const valid = (rectsByCat.get(category) ?? [])
-        .map((rect) => ({ rect, v: vals.get(rect.series) }))
-        .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
-      for (const x of valid) {
-        const cy = x.rect.y + x.rect.h / 2;
-        if (opts.isStacked) {
-          // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
-          // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
-          // not a meaningful "value" position, for anything but the outermost segment.
-          addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), pillColor(x.rect), weight);
-        } else {
-          const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
-          addCoordPill(
-            g,
-            doc,
-            tipX + (x.v >= 0 ? pillGap : -pillGap),
-            cy,
-            x.v >= 0 ? "start" : "end",
-            yFormat(x.v),
-            pillColor(x.rect),
-            weight,
-          );
+      // showPills: false (chrome.valuePills) suppresses only the per-series value pills below — the
+      // shaded row region and the accented Y-axis label (above) still render, mirroring
+      // chrome.tooltip's "hit-testing and the band/point highlight are untouched" contract.
+      if (opts.showPills !== false) {
+        const valid = (rectsByCat.get(category) ?? [])
+          .map((rect) => ({ rect, v: vals.get(rect.series) }))
+          .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
+        for (const x of valid) {
+          const cy = x.rect.y + x.rect.h / 2;
+          if (opts.isStacked) {
+            // Stacked: one pill per segment, centered on the segment (mirrors attachHighlightPills'
+            // horizontal stacked branch) — a tip-anchored pill would land at the segment's own edge,
+            // not a meaningful "value" position, for anything but the outermost segment.
+            addCoordPill(g, doc, x.rect.cx, cy, "middle", yFormat(x.v), pillColor(x.rect), weight);
+          } else {
+            const tipX = x.v >= 0 ? x.rect.x + x.rect.w : x.rect.x;
+            addCoordPill(
+              g,
+              doc,
+              tipX + (x.v >= 0 ? pillGap : -pillGap),
+              cy,
+              x.v >= 0 ? "start" : "end",
+              yFormat(x.v),
+              pillColor(x.rect),
+              weight,
+            );
+          }
         }
       }
       g.setAttribute("opacity", "1");
@@ -2602,32 +3046,36 @@ export function attachSecondaryBandCursor(
     // falling back to the series' legend color.
     const colorFor = (s: string) => opts.colors?.get(s) || COORD_LABEL_DARK;
     const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
-    if (opts.waterfall) {
-      // Delta steps: a signed value pill CENTERED in the bar. Total/skip steps shade only.
-      if (opts.waterfall.deltaCats.has(category)) {
-        for (const x of valid) {
-          const cy = x.rect.y + x.rect.h / 2;
-          const text = `${x.v >= 0 ? "+" : ""}${yFormat(x.v)}`;
-          addCoordPill(g, doc, x.rect.cx, cy, "middle", text, pillColor(x.rect), weight);
+    // showPills: false (chrome.valuePills) suppresses only the value pills below — the shaded
+    // column region and the accented x-axis category pill (above) still render.
+    if (opts.showPills !== false) {
+      if (opts.waterfall) {
+        // Delta steps: a signed value pill CENTERED in the bar. Total/skip steps shade only.
+        if (opts.waterfall.deltaCats.has(category)) {
+          for (const x of valid) {
+            const cy = x.rect.y + x.rect.h / 2;
+            const text = `${x.v >= 0 ? "+" : ""}${yFormat(x.v)}`;
+            addCoordPill(g, doc, x.rect.cx, cy, "middle", text, pillColor(x.rect), weight);
+          }
         }
+      } else if (opts.isStacked) {
+        // Segments share one x (single band), so de-collide the within-segment labels vertically.
+        const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
+      } else {
+        // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
+        // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
+        const ys = staggerBarLabels(
+          valid.map((x) => ({
+            cx: x.rect.cx,
+            w: coordPillWidth(yFormat(x.v)),
+            value: x.v,
+            y: x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9,
+          })),
+          COORD_PILL_H,
+        );
+        valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
       }
-    } else if (opts.isStacked) {
-      // Segments share one x (single band), so de-collide the within-segment labels vertically.
-      const cys = spreadLabelYs(valid.map((x) => x.rect.y + x.rect.h / 2), COORD_PILL_H, mt, mt + plotH);
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, cys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
-    } else {
-      // ABOVE each bar (centered), or below a negative bar. When narrow bars bring the labels
-      // close enough to collide, stagger vertically: higher value stays higher (ties: left on top).
-      const ys = staggerBarLabels(
-        valid.map((x) => ({
-          cx: x.rect.cx,
-          w: coordPillWidth(yFormat(x.v)),
-          value: x.v,
-          y: x.v >= 0 ? x.rect.y - 9 : x.rect.y + x.rect.h + 9,
-        })),
-        COORD_PILL_H,
-      );
-      valid.forEach((x, i) => addCoordPill(g, doc, x.rect.cx, ys[i]!, "middle", yFormat(x.v), pillColor(x.rect), weight));
     }
     g.setAttribute("opacity", "1");
   };
@@ -2753,6 +3201,15 @@ export interface CategoricalLineOptions {
   yFormat?: (v: number) => string;
   /** Hit-test + emit only (coordinated figures); no tooltip/guide. */
   emitOnly?: boolean;
+  /** `chrome.tooltip: false` — suppress just the floating tooltip card. The guide/band highlight,
+   *  hit area, and `onResolve` emission still fire; independent of `emitOnly`, which suppresses
+   *  all of them together for a coordinated pane. `undefined` keeps today's behaviour (tooltip
+   *  shown). */
+  showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
   onResolve?: (category: string | null) => void;
   /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
   symbols?: Map<string, string>;
@@ -2772,6 +3229,13 @@ export interface CategoricalLineOptions {
   orientation?: "vertical" | "horizontal";
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `spec.x_labels` — category → display label for the CARD HEADER, exactly as
+   *  `BandCrosshairOptions.categoryLabels`: this family (dot plot / dumbbell / categorical-x line)
+   *  feeds the same `buildBandTooltipHtml`, and without the forward its cards showed the raw
+   *  category while a band card showed the label. The coordinated cursor's category echo is
+   *  deliberately NOT labelled from this: it overlays the rendered axis tick (taking that tick's
+   *  box, wrap mode and rotation), and this field is for reading MORE verbosely than the tick. */
+  categoryLabels?: Record<string, string>;
   /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend.
    *  Series-keyed, not category-keyed as the band crosshair's is: this is handed in by the CALLER
    *  from the series' own marker style, never read off the marks, and a line/dot mark carries no
@@ -2781,6 +3245,21 @@ export interface CategoricalLineOptions {
    *  dots (filled/hollow/ink) are already visible, and a ring would recolor them — so it draws the
    *  band + value pills only (like bars). Dot plots keep the ring (it sits over dodged points). */
   markerless?: boolean;
+  /** `chrome.valuePills: false` — consumed only by `attachSecondaryCategoricalLineCursor` (the
+   *  coordinated/echo cursor; the primary crosshair above draws no pills): suppress just its
+   *  per-series value pills, on EVERY pane. The guide line, the band echo, the per-series dots, the
+   *  hovered pane's category highlight, and `onResolve`/hit-testing are untouched — same split as
+   *  `SecondaryBandOptions.showPills` / `HistogramHoverOptions.showPills`. `undefined` keeps
+   *  today's behaviour (pills shown). */
+  showPills?: boolean;
+  /** Screen-only content hook — see `BandCrosshairOptions.tooltipHook`. This is the categorical
+   *  chart family's OTHER call into `buildBandTooltipHtml` (dot plots, dumbbells, categorical-x
+   *  line charts); missing the forward here leaves the hook working on bar charts and silently
+   *  not on these. */
+  tooltipHook?: (ctx: TooltipHookCtx) => string | null;
+  /** This pane facet value -- see BandCrosshairOptions.facet. undefined on the standalone
+   *  mountChart path. */
+  facet?: string;
 }
 
 /**
@@ -2848,7 +3327,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   hit.style.cursor = "crosshair";
   svgEl.appendChild(hit);
 
-  const tip = emitOnly ? null : getSharedTooltip(svgEl.ownerDocument);
+  const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
   // `resolveHatch` is a module function, so nothing here varies with the cursor.
@@ -2889,10 +3368,16 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       guide.setAttribute("x2", String(cx));
       guide.setAttribute("opacity", "1");
     }
+
+    if (!tip) return; // chrome.tooltip: false — guide/highlight shown, no card.
+
     tip!.innerHTML = buildBandTooltipHtml(category, opts.rows, {
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
+      categoryLabels: opts.categoryLabels,
+      tooltipHook: opts.tooltipHook,
+      facet: opts.facet,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
     });
     const offset = 14;
@@ -3006,9 +3491,14 @@ export function attachSecondaryCategoricalLineCursor(
         const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
         const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
         if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
-        const centersX = spreadPillCentersX(pts.map((p) => ({ x: p.x, w: coordPillWidth(yFormat(p.v)) })), ml, ml + plotW);
-        const pillY = Math.max(mt + 9, b.min - 2); // just above the row strip
-        pts.forEach((p, i) => addCoordPill(g, doc, centersX[i]!, pillY, "middle", yFormat(p.v), colorFor(p.s), weight));
+        // showPills: false (chrome.valuePills) suppresses only these value pills — the row echo
+        // above and the per-series dots just above are untouched, matching
+        // SecondaryBandOptions'/HistogramHoverOptions' identical split.
+        if (opts.showPills !== false) {
+          const centersX = spreadPillCentersX(pts.map((p) => ({ x: p.x, w: coordPillWidth(yFormat(p.v)) })), ml, ml + plotW);
+          const pillY = Math.max(mt + 9, b.min - 2); // just above the row strip
+          pts.forEach((p, i) => addCoordPill(g, doc, centersX[i]!, pillY, "middle", yFormat(p.v), colorFor(p.s), weight));
+        }
       }
       g.setAttribute("opacity", "1");
       return;
@@ -3034,30 +3524,36 @@ export function attachSecondaryCategoricalLineCursor(
       // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
       // Skipped for the dumbbell (markerless): its own dots are visible; a white ring would recolor them.
       if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
-      if (opts.dodge) {
-        // Value pills: side by side around the center line (each on its series' side), both on
-        // the SAME vertical side of the dots — above when there's room, else below.
-        const minY = Math.min(...pts.map((p) => p.y));
-        const maxY = Math.max(...pts.map((p) => p.y));
-        const aboveY = minY - 13;
-        const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
-        // Each pill sits fully on its series' side of the center line, with its inner EDGE a small
-        // gap from center and its TEXT centered within the rect (so short values don't look
-        // unbalanced). A series exactly on the center line falls back to a centered pill.
-        const PILL_GAP = 3;
-        for (const p of pts) {
-          const [anchor, ax] =
-            p.dx < 0 ? (["pill-end", cx - PILL_GAP] as const)
-            : p.dx > 0 ? (["pill-start", cx + PILL_GAP] as const)
-            : (["middle", cx] as const);
-          addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
+      // showPills: false (chrome.valuePills) suppresses only the value pills in BOTH layouts
+      // below — the guide/band echo, the per-series dots just above, and the active pane's
+      // category highlight are untouched, matching SecondaryBandOptions'/
+      // HistogramHoverOptions' identical split.
+      if (opts.showPills !== false) {
+        if (opts.dodge) {
+          // Value pills: side by side around the center line (each on its series' side), both on
+          // the SAME vertical side of the dots — above when there's room, else below.
+          const minY = Math.min(...pts.map((p) => p.y));
+          const maxY = Math.max(...pts.map((p) => p.y));
+          const aboveY = minY - 13;
+          const pillY = aboveY >= mt + 9 ? aboveY : Math.min(maxY + 13, mt + plotH - 9);
+          // Each pill sits fully on its series' side of the center line, with its inner EDGE a small
+          // gap from center and its TEXT centered within the rect (so short values don't look
+          // unbalanced). A series exactly on the center line falls back to a centered pill.
+          const PILL_GAP = 3;
+          for (const p of pts) {
+            const [anchor, ax] =
+              p.dx < 0 ? (["pill-end", cx - PILL_GAP] as const)
+              : p.dx > 0 ? (["pill-start", cx + PILL_GAP] as const)
+              : (["middle", cx] as const);
+            addCoordPill(g, doc, ax, pillY, anchor, yFormat(p.v), colorFor(p.s), weight);
+          }
+        } else {
+          const flip = cx > ml + (W - ml - mr) * 0.72;
+          const labelYs = spreadLabelYs(pts.map((p) => p.y), COORD_PILL_H, mt, mt + plotH);
+          pts.forEach((p, i) => {
+            addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colorFor(p.s), weight);
+          });
         }
-      } else {
-        const flip = cx > ml + (W - ml - mr) * 0.72;
-        const labelYs = spreadLabelYs(pts.map((p) => p.y), COORD_PILL_H, mt, mt + plotH);
-        pts.forEach((p, i) => {
-          addCoordPill(g, doc, flip ? cx - 10 : cx + 10, labelYs[i]!, flip ? "end" : "start", yFormat(p.v), colorFor(p.s), weight);
-        });
       }
     }
     g.setAttribute("opacity", "1");
@@ -3085,10 +3581,11 @@ export interface HighlightPillsOptions {
   dodge?: Map<string, number>;
   /** Horizontal bars (categories on Y): pills sit beside the bar tip / at the segment center. */
   horizontal?: boolean;
-  /** Diverging / net-dot stack: when true, selecting the Total pseudo-series (TOTAL_SERIES_KEY)
-   *  draws a black net-value pill at each category's net dot (below the dot, flipping above when
-   *  space is tight). Absent/false → the Total selection draws nothing (it has no rect). */
-  showTotalDot?: boolean;
+  /** Whether net-dot markers exist in the DOM (spec/bar-stack.ts's `hasNetDots`). When true,
+   *  selecting the Total pseudo-series (TOTAL_SERIES_KEY) draws a black net-value pill at each
+   *  category's net dot (below the dot, flipping above when space is tight). Absent/false → the
+   *  Total selection draws nothing (it has no rect to pin to). */
+  hasNetDots?: boolean;
 }
 
 export interface HighlightPillsHandle {
@@ -3267,7 +3764,7 @@ export function attachHighlightPills(
     // draw a black net-value pill at each category's net dot. Vertical: centered under the dot,
     // flipping above when it would fall out of the plot; horizontal: just past the dot on the side
     // with room. Additive — composes with any segment series also selected.
-    if (opts.showTotalDot && active.has(TOTAL_SERIES_KEY)) {
+    if (opts.hasNetDots && active.has(TOTAL_SERIES_KEY)) {
       const dots = readNetDotMarkers(svgEl);
       if (dots.length) {
         const loY = mt + COORD_PILL_H / 2;
@@ -3348,6 +3845,18 @@ export interface PointHoverOptions {
   yLabel?: string;
   xFormat?: (v: number) => string;
   yFormat?: (v: number) => string;
+  /** `overlays[].tooltip: true` lines drawn in this frame. A scatter's card names ONE point, so the
+   *  row is the overlay's value at THAT point's x — and only the lines that apply to it: a per-series
+   *  fit for another series is not this point's trend. */
+  overlays?: OverlayTooltipLine[];
+  /** `chrome.tooltip: false` — suppress the floating tooltip card. A scatter point's ONLY hover
+   *  feedback is this card (no separate guide/highlight), so `undefined` keeps today's behaviour
+   *  (tooltip shown) and `false` makes hovering a point a no-op. */
+  showTooltip?: boolean;
+  /** Reparent the floating tooltip card into this element instead of `document.body`. Threaded
+   *  from MountOptions.tooltipContainer (render-live.ts) — see that option's doc for why
+   *  reparenting is opt-in. `undefined` keeps today's behaviour (body). */
+  tooltipContainer?: HTMLElement;
 }
 
 /**
@@ -3359,12 +3868,13 @@ export interface PointHoverOptions {
 export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions): void {
   if (!svgEl || !opts.points?.length) return;
   const doc = svgEl.ownerDocument;
-  const tip = getSharedTooltip(doc);
+  const tip = opts.showTooltip === false ? null : getSharedTooltip(doc, opts.tooltipContainer);
   const xFormat = opts.xFormat ?? ((v: number) => `${v}`);
   const yFormat = opts.yFormat ?? ((v: number) => `${v}`);
   const markers = svgEl.querySelectorAll<SVGElement>(opts.selector);
 
   const place = (evt: PointerEvent): void => {
+    if (!tip) return;
     const offset = 14;
     const win = doc.defaultView!;
     let left = evt.clientX + offset;
@@ -3380,6 +3890,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
     if (!p) return;
     el.style.cursor = "pointer";
     const show = (evt: PointerEvent): void => {
+      if (!tip) return;
       const color = opts.colors?.get(p.series) || TBL.color.navy;
       const sLabel = opts.seriesLabels?.[p.series] ?? p.series;
       // Header: the point's actual marker (its symbol, filled in the series color) followed by
@@ -3409,12 +3920,20 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       if (p.y != null && Number.isFinite(p.y)) {
         html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
       }
+      // Scoped to the hovered point: a pooled fit / `fun` / abline applies to every point, a
+      // per-series fit only to its own series. The header already names that series, so the rows
+      // carry the author's label unadorned (see overlayTooltipRows on when the suffix appears).
+      html += overlayTooltipRows(
+        opts.overlays?.filter((o) => o.series == null || o.series === p.series),
+        p.x,
+        yFormat,
+      );
       tip.innerHTML = html;
       tip.style.opacity = "1";
       place(evt);
     };
     el.addEventListener("pointerenter", show as EventListener);
     el.addEventListener("pointermove", place as EventListener);
-    el.addEventListener("pointerleave", () => { tip.style.opacity = "0"; });
+    el.addEventListener("pointerleave", () => { if (tip) tip.style.opacity = "0"; });
   });
 }
