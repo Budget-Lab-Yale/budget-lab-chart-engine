@@ -609,3 +609,82 @@ describe("overlays — a legend row for a line that cannot be drawn (why validat
     expect(validateChartData(s, rows).errors).toEqual([]);
   });
 });
+
+// WHY THE `legend: true` DRAWABILITY CHECK COUNTS CELLS AND DOES NOT REQUIRE ADJACENT ONES.
+//
+// A blank cell BREAKS the polyline (engine/overlays.ts#columnPoints), and `runsOf` splits it into
+// separate `_seg` groups Plot draws as separate paths — so `5, blank, 7` clears the "two numeric
+// cells" threshold and still paints no segment, only two dots. The obvious repair is to require two
+// ADJACENT cells in x-sorted order. It is unsound, and these are the counterexamples: removing a row
+// can DELETE THE BREAK BETWEEN TWO RUNS AND JOIN THEM, so "longest run of adjacent cells" is not
+// monotone under the filters the validator ignores, even though "how many cells" is. Both specs
+// below draw a REAL two-vertex line from a raw table in which no two numeric cells are adjacent
+// anywhere, so a contiguity check would refuse a figure that renders — the failure mode that
+// withdrew the pooled-consistency guard. See the note in src/spec/validate.ts.
+describe("overlays — a contiguity test would refuse a spec that draws", () => {
+  /** Vertex count of each overlay path: 1 ⇒ a lone dot (d3 emits `M x,y Z`, which a round linecap
+   *  paints), 2+ ⇒ a real segment. */
+  const vertices = (svg: SVGSVGElement) =>
+    lines(svg).map((p) => (p.getAttribute("d") ?? "").split(/(?=[ML])/).filter((s) => /[ML]/.test(s)).length);
+
+  const pooled = (patch: Record<string, unknown>) =>
+    ({
+      chartType: "line",
+      title: "t",
+      xAxisType: "numeric",
+      data: "data.csv",
+      columns: { x: "time", value: "value", series: "series" },
+      overlays: [{ column: "yhat", by: "none", label: "Fit", legend: true }],
+      ...patch,
+    }) as unknown as ChartSpec;
+
+  // Raw pooled column, x-sorted: 1 numeric, 2 BLANK, 3 numeric — longest adjacent run is 1.
+  // `series_order` drops series B, whose row carried the blank, so the drawn group is 1 and 3: one
+  // segment, two vertices.
+  it("series_order can remove the row that carried the break, joining two runs", () => {
+    const rows = [
+      { time: "1", value: "1", series: "A", yhat: "1" },
+      { time: "2", value: "2", series: "B", yhat: "" },
+      { time: "3", value: "3", series: "A", yhat: "3" },
+    ] as unknown as TidyRow[];
+    const s = pooled({ series_order: ["A"] });
+    expect(vertices(renderChart(s, rows, OPTS).svg)).toEqual([2]);
+    expect(validateChartData(s, rows).errors).toEqual([]);
+  });
+
+  // Same mechanism with no `series_order` at all: a pooled entry resolves per PANE, so a blank in
+  // another pane never breaks this pane's line. Raw whole-table column, x-sorted, is
+  // numeric/blank/blank/numeric/blank — no two adjacent — while pane P1 draws 1 → 3.
+  it("the facet partition can leave the break in another pane", () => {
+    const rows = [
+      { time: "1", value: "1", series: "A", pane: "P1", yhat: "1" },
+      { time: "2", value: "2", series: "A", pane: "P2", yhat: "" },
+      { time: "3", value: "3", series: "A", pane: "P1", yhat: "3" },
+      { time: "1", value: "1", series: "A", pane: "P2", yhat: "" },
+      { time: "3", value: "3", series: "A", pane: "P2", yhat: "" },
+    ] as unknown as TidyRow[];
+    const s = pooled({
+      columns: { x: "time", value: "value", series: "series", facet: "pane" },
+      small_multiples: { columns: 2, mode: "shared" },
+    });
+    const byPane = new Map(renderFigure(s, rows, OPTS).panes.map((p) => [p.value, p.svg as SVGSVGElement]));
+    expect(vertices(byPane.get("P1")!)).toEqual([2]);
+    expect(validateChartData(s, rows).errors).toEqual([]);
+  });
+
+  // The case the tightening was meant to catch, pinned as ACCEPTED so the trade-off is explicit:
+  // isolated cells paint dots and keep the legend row. The cheaper error, and self-evident on the
+  // author's own screen — unlike a false rejection, which breaks a published figure on the repin.
+  it("isolated numeric cells paint dots, keep their legend row, and stay accepted", () => {
+    const rows = [
+      { time: "1", value: "1", series: "A", yhat: "1" },
+      { time: "2", value: "2", series: "A", yhat: "" },
+      { time: "3", value: "3", series: "A", yhat: "3" },
+    ] as unknown as TidyRow[];
+    const s = pooled({});
+    const r = renderChart(s, rows, OPTS);
+    expect(vertices(r.svg)).toEqual([1, 1]);
+    expect((r.legendItems ?? []).map((i) => i.label)).toContain("Fit");
+    expect(validateChartData(s, rows).errors).toEqual([]);
+  });
+});

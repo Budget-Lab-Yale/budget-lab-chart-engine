@@ -1109,6 +1109,20 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // is a cosmetic defect the author sees on screen; a false rejection breaks a published figure on
   // the next repin.
   //
+  // A COUNT, NEVER A CONTIGUITY TEST — and this is the one place the "those filters only remove
+  // rows" argument above does NOT license a tightening. A blank cell BREAKS the polyline
+  // (engine/overlays.ts#columnPoints, engine/marks/overlay.ts#runsOf), so `5, blank, 7` resolves to
+  // two one-point runs and paints two dots with no segment between them. Requiring two ADJACENT
+  // cells in x-sorted order looks like the obvious repair and is unsound: removing a row can DELETE
+  // THE BREAK BETWEEN TWO RUNS AND JOIN THEM, so the longest run is not monotone under the filters
+  // this check ignores, even though the count is. `series_order: ["A"]` dropping the B row that
+  // carried the blank, and a pooled entry on a faceted chart whose blank lives in another pane, both
+  // draw a real two-vertex line from a raw table with no two adjacent cells anywhere
+  // (test/overlays-render.test.ts, "a contiguity test would refuse a spec that draws"). Scoping the
+  // contiguity soundly means re-deriving the pane partition and the series filter — the exact
+  // re-derivation the paragraph above forbids. The isolated-dots case stays accepted on purpose: it
+  // is the cheaper error, and it is plain on the author's own screen.
+  //
   // The row is EARNED BY ANY ONE GROUP: a per-series entry where one series can be fitted and
   // another cannot still gets its single concept row (CONFIG-SPEC.md, `overlays[].legend`), so the
   // threshold test is a MAX over groups, never an "every group" test.
