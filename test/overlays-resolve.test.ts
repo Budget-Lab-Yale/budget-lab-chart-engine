@@ -13,6 +13,13 @@ function rows(pairs: Array<[number, number]>, series = "A"): PreparedRow[] {
   return pairs.map(([x, y]) => ({ series, time: String(x), _y: y, _xn: x })) as PreparedRow[];
 }
 
+/** Rows where a `null` y is a BLANK value cell (`_y: null`) — exactly what engine/index.ts's prep
+ *  builds from an empty cell, and the only non-number a resolver can see (validate.ts rejects
+ *  non-numeric cells). */
+function rowsWithBlanks(pairs: Array<[number, number | null]>, series = "A"): PreparedRow[] {
+  return pairs.map(([x, y]) => ({ series, time: String(x), _y: y, _xn: x })) as PreparedRow[];
+}
+
 const CTX = {
   xField: "_xn" as const,
   colors: new Map([["A", "#1111aa"], ["B", "#aa1111"]]),
@@ -135,12 +142,48 @@ describe("resolveOverlays — method", () => {
   it("drops a group it cannot fit rather than emitting an empty line", () => {
     expect(resolve([{ method: "lm" }], rows([[1, 1]])).length).toBe(0);
   });
+
+  // The default domain is CONFIG-SPEC's "the fitted group's data extent": the extent of the
+  // observations the fit ACTUALLY used. A row with a blank value cell is skipped by the fitting
+  // loop, so its x is not part of that extent — including it drew the line out to an observation
+  // the fit never saw, which is extrapolation presented as fit.
+  it("stops at the last FITTED observation, not at a trailing blank value", () => {
+    const [o] = resolve([{ method: "lm" }], rowsWithBlanks([[1, 1], [2, 2], [3, 3], [5, null]]));
+    expect(ends(o!)).toEqual([{ x: 1, y: 1 }, { x: 3, y: 3 }]);
+  });
+
+  it("starts at the first FITTED observation, not at a leading blank value", () => {
+    const [o] = resolve([{ method: "lm" }], rowsWithBlanks([[0, null], [1, 1], [2, 2], [3, 3]]));
+    expect(ends(o!)[0]).toEqual({ x: 1, y: 1 });
+  });
+
+  it("drops a group whose only two distinct x values carry no value", () => {
+    // Every fittable point sits at one x: no extent, so there is nothing to draw — the blank rows
+    // must not manufacture a width the fit cannot support.
+    expect(resolve([{ method: "lm" }], rowsWithBlanks([[1, 1], [1, 2], [4, null]])).length).toBe(0);
+  });
+
+  it("still extrapolates to the axis with domain: axis, blank rows or not", () => {
+    const [o] = resolve(
+      [{ method: "lm", domain: "axis" }],
+      rowsWithBlanks([[1, 1], [2, 2], [3, 3], [5, null]]),
+    );
+    expect(ends(o!)[1]!.x).toBe(10);
+  });
 });
 
 describe("resolveOverlays — confidence ribbon (ci)", () => {
   it("adds no band without `ci`", () => {
     const [o] = resolve([{ method: "lm" }]);
     expect(o!.band).toBeUndefined();
+  });
+
+  it("bands the FITTED extent, not a trailing blank row's x", () => {
+    const [o] = resolve(
+      [{ method: "lm", ci: 0.95 }],
+      rowsWithBlanks([[0, 1], [1, 3], [2, 2], [9, null]]),
+    );
+    expect(o!.band!.at(-1)!.x).toBe(2);
   });
 
   it("adds a band spanning the same x samples as the line, bracketing the fit", () => {
@@ -241,6 +284,16 @@ describe("resolveOverlays — column", () => {
     expect(resolve([{ column: "yhat" }], withCol([[1, 1], [2, 2], [3, 3]], [null, 2, null]))).toEqual(
       [],
     );
+  });
+
+  // The domain default is stated for `column` too, and this path already honours it by a different
+  // mechanism than `method`'s: a row past the last value IS admitted by the default domain, but it
+  // emits a BREAK, and a trailing break opens no segment (marks/overlay.ts#runsOf) — so the drawn
+  // line already stops at the data. Asserted so a later domain change cannot quietly extend it.
+  it("draws nothing past the last real value when the trailing cells are blank", () => {
+    const [o] = resolve([{ column: "yhat" }], withCol([[1, 1], [2, 2], [3, 3]], [1, 2, null]));
+    const drawn = o!.points.filter((p) => p.y != null);
+    expect(drawn.at(-1)).toEqual({ x: 2, y: 2 });
   });
 
   it("does not emit a break for a row cropped OUT by the domain", () => {

@@ -292,19 +292,25 @@ export function overlayValueAt(points: Array<{ x: number; y: number | null }>, x
   return a.y + ((x - a.x) / (b.x - a.x)) * (b.y - a.y);
 }
 
-/** The x extent this entry draws over, per the `domain` rules. Null ⇒ nothing to draw. */
+/** The x extent this entry draws over, per the `domain` rules. Null ⇒ nothing to draw.
+ *
+ *  `dataXs` is the x of the group's OBSERVATIONS, not of its rows: for `method` the caller passes
+ *  the xs of the (x, y) pairs the fit uses, so a row the fit skipped cannot widen the default
+ *  domain. `column` passes every row's x, which is equivalent for what it draws — a row past the
+ *  last value emits a break, and a trailing break opens no segment. */
 function overlayDomain(
   o: Overlay,
   kind: OverlayKind,
-  groupXs: number[],
+  dataXs: number[],
   xDomain?: [number, number],
 ): [number, number] | null {
   if (Array.isArray(o.domain)) return [o.domain[0]!, o.domain[1]!];
   if (o.domain === "axis") return xDomain ?? null;
-  // Default: the fitted group's data extent for the kinds that read the data (matching Stata `lfit`'s
-  // own default, which stops at the data), the axis for the kinds that do not.
+  // Default: the extent of the OBSERVATIONS for the kinds that read the data (matching Stata `lfit`'s
+  // own default, which stops at the data), the axis for the kinds that do not. See `dataXs` above:
+  // what counts as an observation is the caller's call, and for `method` it excludes a blank value.
   if (kind === "method" || kind === "column") {
-    const ext = extentOf(groupXs);
+    const ext = extentOf(dataXs);
     return ext && ext[0] !== ext[1] ? ext : null;
   }
   return xDomain ?? null;
@@ -315,6 +321,18 @@ function sampleGrid(lo: number, hi: number, n: number): number[] {
   if (n <= 1) return [lo];
   const step = (hi - lo) / (n - 1);
   return Array.from({ length: n }, (_, i) => (i === n - 1 ? hi : lo + i * step));
+}
+
+/** The observations a `method` fit uses: rows with BOTH a finite x and a finite value. The single
+ *  source for the fit's input and for its default domain — see the note at the call site. */
+function fitPairs(rows: PreparedRow[], xField: "_xn" | "_xd"): Array<[number, number]> {
+  const pairs: Array<[number, number]> = [];
+  for (const r of rows) {
+    const x = xOf(r, xField);
+    const y = r._y;
+    if (y != null && Number.isFinite(x) && Number.isFinite(y)) pairs.push([x, y]);
+  }
+  return pairs;
 }
 
 /** Finite → a drawn point; anything else → a break. */
@@ -359,8 +377,15 @@ export function resolveOverlays(
     const groups = overlayGroups(o, rows, ctx.seriesNames, rowsBySeries);
 
     for (const g of groups) {
-      const groupXs = g.rows.map((r) => xOf(r, ctx.xField));
-      const dom = overlayDomain(o, kind, groupXs, ctx.xDomain);
+      // A `method` fit reads (x, y) PAIRS: a row whose value cell is blank (or whose x did not
+      // parse) is not an observation, and the fitting loop below skips it. Its x must therefore not
+      // reach the DEFAULT domain either — the default is "the fitted group's data extent"
+      // (CONFIG-SPEC.md), and taking the extent of every row in the group drew the line out to an
+      // observation the fit never saw, i.e. extrapolation presented as fit. Built ONCE here so the
+      // domain and the fit can only ever read the same pairs.
+      const pairs = kind === "method" ? fitPairs(g.rows, ctx.xField) : null;
+      const domXs = pairs ? pairs.map((pr) => pr[0]) : g.rows.map((r) => xOf(r, ctx.xField));
+      const dom = overlayDomain(o, kind, domXs, ctx.xDomain);
       if (!dom) continue;
       const color = overlayLineColor(o, ctx.colors, g.series);
       const base = { ...shared, entryIndex, color, ...(g.series != null ? { series: g.series } : {}) };
@@ -384,14 +409,8 @@ export function resolveOverlays(
       }
 
       if (kind === "method") {
-        const pairs: Array<[number, number]> = [];
-        for (const r of g.rows) {
-          const x = xOf(r, ctx.xField);
-          const y = r._y;
-          if (y != null) pairs.push([x, y]);
-        }
         const degree = o.method === "poly" ? (o.degree ?? 2) : 1;
-        const fit = fitPoly(pairs, degree);
+        const fit = fitPoly(pairs!, degree);
         if (!fit) continue;
         // A straight line needs two points; a curve is sampled. (`n` is rejected on a fit, so the
         // grid is always the default — plenty for degree ≤ 5 across one frame.) A banded fit samples
