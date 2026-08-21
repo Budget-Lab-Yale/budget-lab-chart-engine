@@ -38,12 +38,35 @@ interface FnDef {
   f: (a: number[]) => number;
 }
 
-/** Normal density, shared by `dnorm` and its Stata alias. R's argument order. */
+/** Normal density, shared by `dnorm` and its Stata alias. R's argument order.
+ *
+ *  `sd <= 0` yields NaN, which engine/overlays.ts draws as a BREAK in the line — this module's
+ *  convention for an unrepresentable value, and the same reason a blank overlay cell breaks a line
+ *  rather than diving to zero. Load-bearing, not defensive: a NEGATIVE sd otherwise divides through
+ *  by a negative normaliser and returns the correct density with its sign flipped (measured:
+ *  `dnorm(0.5, 0, -1)` = -0.3520653267642995), so the renderer drew a smooth INVERTED density curve
+ *  hanging below the axis. That is the worst possible failure for the documented use of this
+ *  function — a `fun: "dnorm(...)"` overlay over a `histogram.normalize: density` chart — because an
+ *  author sees a plausible published figure rather than an error. `sd = 0` already produced NaN via
+ *  0/0; it is folded into the same check so the domain is stated once instead of relying on that. */
 function normalDensity(a: number[]): number {
   const mu = a.length >= 2 ? a[1]! : 0;
   const sd = a.length >= 3 ? a[2]! : 1;
+  if (!(sd > 0)) return NaN;
   const z = (a[0]! - mu) / sd;
   return Math.exp(-0.5 * z * z) / (sd * Math.sqrt(2 * Math.PI));
+}
+
+/** R's `log(x, base)`. A base of 0, 1 or a negative number names no logarithm, and the same
+ *  break-on-NaN convention applies. Base 0 is the case that needed the guard: `Math.log(x) /
+ *  Math.log(0)` is `x / -Infinity` = **-0**, a FINITE value, so an undefined logarithm drew a flat
+ *  line along zero instead of breaking. Base 1 gave Infinity and a negative base gave NaN — both
+ *  already broke the line, and returning NaN leaves what is drawn unchanged for those two. */
+function logWithBase(a: number[]): number {
+  if (a.length === 1) return Math.log(a[0]!);
+  const base = a[1]!;
+  if (!(base > 0) || base === 1) return NaN;
+  return Math.log(a[0]!) / Math.log(base);
 }
 
 /** The function table. R's spelling is canonical; a Stata spelling is added as an alias only where
@@ -51,7 +74,7 @@ function normalDensity(a: number[]): number {
  *  closed and a spec cannot reach arbitrary code. */
 const FUNCS: Record<string, FnDef> = {
   // R's log(x, base); one argument is the natural log, which is also Stata's `log`.
-  log: { min: 1, max: 2, f: (a) => (a.length === 1 ? Math.log(a[0]!) : Math.log(a[0]!) / Math.log(a[1]!)) },
+  log: { min: 1, max: 2, f: logWithBase },
   ln: { min: 1, max: 1, f: (a) => Math.log(a[0]!) },
   log10: { min: 1, max: 1, f: (a) => Math.log10(a[0]!) },
   log2: { min: 1, max: 1, f: (a) => Math.log2(a[0]!) },

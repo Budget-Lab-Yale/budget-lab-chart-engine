@@ -158,3 +158,69 @@ describe("expr — non-finite results are values, not errors", () => {
     expect(ev("1/x", { x: 0 })).toBe(Infinity);
   });
 });
+
+// A PARAMETER outside a function's mathematical domain must not yield a finite number. The rest of
+// the evaluator already satisfies this for free, because IEEE arithmetic hands back NaN or ±Infinity
+// and a non-finite sample is a BREAK in the drawn polyline (engine/overlays.ts): `sqrt(-1)` and
+// `ln(-1)` are NaN, `ln(0)` is -Infinity, `1/0` is Infinity. Two cases did NOT, and they are the
+// dangerous ones precisely because a finite result draws a smooth, plausible, wrong curve instead of
+// stopping — the author sees a figure, not an error.
+describe("expr — an out-of-domain PARAMETER yields NaN, never a finite wrong value", () => {
+  // `dnorm` is the documented density-curve case (`fun: "dnorm(...)"` over
+  // `histogram.normalize: density`), so this typo's whole cost is a wrong published figure.
+  // Measured before the guard: dnorm(0.5, 0, -1) = -0.3520653267642995 and dnorm(0, 0, -1) =
+  // -0.3989422804014327 — the correct density with its sign flipped, i.e. an INVERTED density curve
+  // hanging below the axis, drawn without complaint. A negative sd is not a small sd; there is no
+  // distribution it describes.
+  it("returns NaN for a NEGATIVE sd rather than an inverted density", () => {
+    for (const fn of ["dnorm", "normalden"]) {
+      expect(ev(`${fn}(x, 0, -1)`, { x: 0.5 })).toBeNaN();
+      expect(ev(`${fn}(x, 0, 0 - 2)`, { x: 0.5 })).toBeNaN();
+      // sd as a bound param, which is how an author actually supplies it.
+      expect(ev(`${fn}(x, mu, sd)`, { x: 1, mu: 0, sd: -3 })).toBeNaN();
+    }
+  });
+
+  it("returns NaN for sd = 0 (a division by a zero parameter)", () => {
+    for (const fn of ["dnorm", "normalden"]) {
+      expect(ev(`${fn}(x, 0, 0)`, { x: 0.5 })).toBeNaN();
+      // The x === mu sample too: that one is 0/0 in BOTH the exponent and the normaliser.
+      expect(ev(`${fn}(x, 0, 0)`, { x: 0 })).toBeNaN();
+    }
+  });
+
+  // The second finite-but-invalid case, found by auditing the whole table rather than only the
+  // reported function. `log(x, base)` evaluates as `Math.log(x) / Math.log(base)`, so base 0 gave
+  // `4.605.../-Infinity` = **-0** — a finite value, so the overlay drew a flat line along zero for
+  // an undefined logarithm. Base 1 gave Infinity and base < 0 gave NaN; both already broke the line,
+  // and NaN keeps them breaking it. No base outside (0,1)∪(1,∞) names a logarithm.
+  it("returns NaN for a log base of 0, 1 or negative", () => {
+    expect(ev("log(x, 0)", { x: 100 })).toBeNaN();
+    expect(ev("log(x, 1)", { x: 100 })).toBeNaN();
+    expect(ev("log(x, b)", { x: 100, b: -2 })).toBeNaN();
+  });
+
+  it("leaves every VALID base and sd alone", () => {
+    expect(ev("log(x, 2)", { x: 8 })).toBeCloseTo(3, 12);
+    expect(ev("log(x, 0.5)", { x: 0.25 })).toBeCloseTo(2, 12);
+    expect(ev("log(x, 10)", { x: 1000 })).toBeCloseTo(3, 12);
+    // One argument is still the natural log and must not be touched by a base check.
+    expect(ev("log(x)", { x: Math.E })).toBeCloseTo(1, 12);
+    expect(ev("dnorm(0, 0, 2)")).toBeCloseTo(1 / (2 * Math.sqrt(2 * Math.PI)), 12);
+    expect(ev("dnorm(0)")).toBeCloseTo(1 / Math.sqrt(2 * Math.PI), 12);
+  });
+
+  // The cases that were ALREADY correct, pinned so a later "tidy-up" of the table cannot quietly
+  // turn one of them into a finite number.
+  it("keeps the already-correct domain edges non-finite", () => {
+    expect(ev("sqrt(x)", { x: -1 })).toBeNaN();
+    expect(ev("ln(x)", { x: -1 })).toBeNaN();
+    expect(ev("log10(x)", { x: -1 })).toBeNaN();
+    expect(ev("log2(x)", { x: -1 })).toBeNaN();
+    expect(ev("ln(x)", { x: 0 })).toBe(-Infinity);
+    expect(ev("x/y", { x: 1, y: 0 })).toBe(Infinity);
+    for (const src of ["sqrt(x)", "ln(x)", "log10(x)", "log2(x)"]) {
+      expect(Number.isFinite(ev(src, { x: -1 }))).toBe(false);
+    }
+  });
+});

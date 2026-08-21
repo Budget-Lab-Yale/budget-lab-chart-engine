@@ -483,6 +483,14 @@ the build rather than drawing nothing in the browser.
 A sample point that evaluates to `NaN` or `±Inf` **breaks** the line there instead of erroring, so
 `fun: "log(x)"` over a domain crossing zero draws only the half that exists.
 
+An argument outside a function's mathematical domain breaks the line the same way, rather than
+returning a number: `dnorm`/`normalden` with a standard deviation of zero or less, and `log(x, base)`
+with a base of zero, one or negative. Those two are guarded explicitly because plain floating-point
+arithmetic hands back a *finite* value for them — a negative `sd` yields the density with its sign
+flipped, drawing a smooth inverted curve below the axis, and `log(x, 0)` yields `-0`, drawing a flat
+line along zero. Every other domain edge (`sqrt` of a negative, `log`/`ln` of a non-positive, a
+division by zero) is already non-finite and breaks without a guard.
+
 `dnorm` is there so a density curve can go over a histogram — the one overlay kind histograms support,
 along with `slope`+`intercept`. It only reads correctly with `histogram.normalize: density`; against raw
 counts the curve's y-scale is meaningless.

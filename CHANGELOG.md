@@ -160,6 +160,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   whether or not a host callback is passed — a real runtime behaviour change on every categorical-
   chart hover for an existing embedder, even one that never adopts the new callbacks.
 
+### Fixed
+- **A negative or zero standard deviation in `dnorm`/`normalden` now breaks the overlay line instead
+  of drawing an invalid curve.** `fun: "dnorm(x, 0, -1)"` validated and drew: a negative `sd` divides
+  through by a negative normaliser and returns the correct density with its sign flipped (measured:
+  `dnorm(0.5, 0, -1)` = `-0.352…`), so the renderer painted a smooth **inverted** density curve
+  hanging below the axis. `dnorm` is the documented density-curve case, over
+  `histogram.normalize: density`, so a typed minus sign produced a plausible-looking wrong published
+  figure rather than an error. `sd <= 0` now evaluates to `NaN`, which is this evaluator's
+  established convention for an unrepresentable value and breaks the line at that sample. Also
+  found by auditing the whole function table rather than only the reported function: **`log(x, base)`
+  with a base of `0`** evaluated to `-0` — finite, so an undefined logarithm drew a flat line along
+  zero — and now returns `NaN` too, as do bases `1` and negative (those two were already `Infinity`
+  and `NaN`, so nothing drawn changes for them). Every other domain edge in the evaluator (`sqrt` of
+  a negative, `log`/`ln`/`log10`/`log2` of a non-positive, division by zero) was already non-finite
+  and needed no guard; those are now pinned by test so a later tidy-up cannot make one finite.
+  New in 1.12.0 — no published figure is affected, and no golden moved.
+
 ### Changed — internal
 - `MarkLayers.showTotalDot` (a tri-state boolean read for four different purposes) is replaced by
   `MarkLayers.netMode`; the tooltip's Total row, the hover treatment and the highlight pills' net-dot
