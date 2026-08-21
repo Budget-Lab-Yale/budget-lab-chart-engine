@@ -325,6 +325,132 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/dotplot.*requires xAxisType "categorical"/);
   });
 
+  // --- bar/stacked require a categorical x-axis ---
+  //
+  // Measured before this guard existed (jsdom `renderChart`, 5 rows, 1 series, counting
+  // `g[aria-label="bar"] rect`): bar + numeric + vertical drew 2 of 5 rects, at the domain
+  // endpoints and 2.4x too wide — the numeric adapter emits `xPlotOpts: { domain: [xMin, xMax] }`
+  // and a bar mark reads that two-element continuous domain as a band domain of two categories, so
+  // the interior rows vanish with no warning. bar + numeric + horizontal drew 0 (bar.ts/stacked.ts
+  // build the band domain from string categories, which only the `_xc` adapter produces).
+  // stacked + numeric drew 4 of 8. temporal/quarterly drew every bar but Plot added its own band
+  // axis over the engine's, printed the internal field name `_xd` as the x-axis label, and painted
+  // its own warning glyph into the SVG — which the PNG export would carry into a published figure.
+  // Every one of those validated `true`. A refusal is strictly better than any of them.
+  describe("bar/stacked require xAxisType categorical", () => {
+    const BASE = { title: "Bar Demo", data: "data.csv" };
+
+    for (const chartType of ["bar", "stacked"]) {
+      for (const xAxisType of ["numeric", "temporal", "quarterly"]) {
+        for (const orientation of ["vertical", "horizontal"]) {
+          it(`rejects ${chartType} + ${xAxisType} + ${orientation}`, () => {
+            const r = validateSpec({ ...BASE, chartType, xAxisType, orientation });
+            expect(r.valid).toBe(false);
+            expect(r.errors.join("\n")).toMatch(
+              new RegExp(`${chartType}.*requires xAxisType "categorical"`),
+            );
+          });
+        }
+      }
+
+      it(`rejects ${chartType} + numeric with orientation left to its default`, () => {
+        const r = validateSpec({ ...BASE, chartType, xAxisType: "numeric" });
+        expect(r.valid).toBe(false);
+        expect(r.errors.join("\n")).toMatch(/requires xAxisType "categorical"/);
+      });
+
+      it(`accepts ${chartType} + categorical in both orientations`, () => {
+        for (const orientation of ["vertical", "horizontal"]) {
+          expect(
+            validateSpec({ ...BASE, chartType, xAxisType: "categorical", orientation }),
+          ).toEqual({ valid: true, errors: [] });
+        }
+      });
+    }
+
+    // The exception list. Each of these is a chart type or combination that renders correctly
+    // today; a false rejection here would break a published figure at the next repin, which is
+    // worse than the misdraw the guard prevents.
+    it("does not touch histogram, which bins a CONTINUOUS axis by design", () => {
+      // `histogram` is a separate ChartType with its own mark builder and binned x adapter — not a
+      // bar variant. Keying this guard on `FILLED_CHART_TYPES` (bar, stacked, area, histogram,
+      // waterfall) instead of the two literals would refuse it.
+      for (const xAxisType of ["numeric", "temporal"]) {
+        expect(validateSpec({ ...BASE, chartType: "histogram", xAxisType })).toEqual({
+          valid: true,
+          errors: [],
+        });
+      }
+    });
+
+    it("does not touch line/area on a categorical axis", () => {
+      // The guard is "bar/stacked => categorical", never "categorical => bar/stacked". 10 authored
+      // specs and 20 built instances are line + categorical.
+      for (const chartType of ["line", "area"]) {
+        expect(validateSpec({ ...BASE, chartType, xAxisType: "categorical" })).toEqual({
+          valid: true,
+          errors: [],
+        });
+      }
+    });
+
+    it("does not touch line/area on a continuous axis", () => {
+      for (const chartType of ["line", "area"]) {
+        for (const xAxisType of ["numeric", "temporal", "quarterly"]) {
+          expect(validateSpec({ ...BASE, chartType, xAxisType })).toEqual({
+            valid: true,
+            errors: [],
+          });
+        }
+      }
+    });
+
+    it("leaves waterfall's own 'vertical only' message reachable", () => {
+      // waterfall is already categorical-only AND vertical-only. Double-checking it here — or
+      // reporting the axis error first — would make that message unreachable.
+      const r = validateSpec({
+        ...BASE,
+        chartType: "waterfall",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/waterfall.*vertical only/);
+    });
+
+    it("leaves the horizontal-bar OVERLAY message reachable", () => {
+      // Both refusals apply to this spec. The overlay one is the more specific and must report:
+      // placing this guard with the other axis checks would turn that branch into dead code.
+      const r = validateSpec({
+        ...BASE,
+        chartType: "bar",
+        xAxisType: "numeric",
+        orientation: "horizontal",
+        columns: { x: "time", value: "value", series: "series" },
+        overlays: [{ method: "lm" }],
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/horizontal bar chart/);
+    });
+
+    it("keeps bar/stacked options on a categorical axis working", () => {
+      // The fields an author reaches for on a bar chart are all categorical-axis features already.
+      expect(
+        validateSpec({
+          ...BASE,
+          chartType: "stacked",
+          xAxisType: "categorical",
+          orientation: "horizontal",
+          x_order: ["A", "B"],
+          x_labels: { A: "Ay" },
+          barStack: { mono: { base: "blue" } },
+          valueLabels: { show: true },
+          x_axis_ticks: "both",
+        }),
+      ).toEqual({ valid: true, errors: [] });
+    });
+  });
+
   it("accepts a bar spec with categorical xAxisType and bar fields", () => {
     const r = validateSpec({
       chartType: "bar",

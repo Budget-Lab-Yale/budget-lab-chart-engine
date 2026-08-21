@@ -21,7 +21,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   and no golden fixture contains tooltip HTML. Also fixed: the Total row's plain-text form (no dot)
   now gets an empty swatch spacer, so its label indents to match every series row's label instead
   of sitting flush left.
-- `overlays` — lines drawn over the data marks on any numeric- or temporal-x chart. Four kinds, one per
+- `overlays` — lines drawn over the data marks on a numeric- or temporal-x `line`, `area`, `scatter`
+  or `histogram` chart (`bar` and `stacked` cannot carry one: they require a categorical x, and a
+  categorical axis has no position between categories to land a line on). Four kinds, one per
   entry: `method` (`lm` / `poly`, a bivariate least-squares fit of the plotted data, optionally with a
   `ci` ribbon), `fun` (an equation in x with named `params`), `slope`+`intercept` (a stated line), and
   `column` (a fit computed upstream). `by: series` (default) fits per colour series; `by: none` pools.
@@ -111,6 +113,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   consumer silently the way `.tbl-legend-swatch.is-dot`'s retirement did in 1.11.0.
 
 ### Changed
+- **`chartType: bar` and `chartType: stacked` now require `xAxisType: categorical`.** Numeric,
+  temporal and quarterly are validation errors, in both orientations. Bars are drawn on a band
+  scale whose domain `marks/bar.ts` / `marks/stacked.ts` build from the string categories only the
+  categorical x adapter produces, so every other axis type was already broken while `validateSpec`
+  reported `valid: true` — measured on five rows: `bar` + `numeric` vertical drew **2 of 5** bars, at
+  the domain endpoints and 2.4x too wide (the numeric adapter emits `domain: [xMin, xMax]`, which a
+  bar mark reads as a band domain of two categories, so the interior rows vanish); horizontal drew
+  **none**; `stacked` + `numeric` drew 4 of 8. Temporal and quarterly drew every bar but stacked
+  Plot's own band axis over the engine's, printed the internal field name `_xd` as the x-axis label,
+  and painted Plot's warning glyph into the SVG — which the PNG export re-renders into a published
+  figure. The renderer is deliberately **not** changed here: making a continuous-x bar chart
+  genuinely work is a feature with axis-ordering, hover and export surface, and this refusal is what
+  makes it a safe additive change later. `histogram` is unaffected — it is a separate chart type that
+  bins a continuous axis by design — and so are `line`/`area` on a categorical axis.
+- **`overlays` are no longer available on `bar` or `stacked` in any orientation.** Unreleased
+  feature, narrowed before it shipped: overlays require a non-categorical x, bar/stacked now require
+  a categorical one. The horizontal-orientation rejection added earlier in this release is kept as
+  the reporting site for the horizontal case, because it names the more specific reason. What this
+  removes was measured to render a fitted line over a chart drawing 2 of its 5 bars.
 - **Value pills now default to off where segment value labels are painted for every segment.** A
   stacked chart with `valueLabels.show` printed its numbers in the segments and then repeated them in
   hover pills a few pixels away. The default is keyed on the labels being *painted*, not on the flag
@@ -123,6 +144,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   frame-size dependent, and the label builder reports which it skipped rather than the pill rule
   re-deriving the threshold. An explicit `chrome.valuePills: true` still wins, so asking for both
   remains possible.
+- **`CONFIG-SPEC.md`'s "Axis constraints" list was missing `waterfall`.** The code has enforced
+  `waterfall` = categorical x + vertical only since it shipped; the list named only four of the
+  five constraints. Documentation only — no behaviour changed. An under-documented constraint is
+  the same defect class as an over-claimed one.
 - **`valueLabels.show` is not "stacked bars only".** A waterfall paints segment labels for the same
   flag. `CONFIG-SPEC.md` claimed otherwise; the claim was false before this release and is now
   corrected and test-backed. No behaviour changed — only the documentation of behaviour that already
@@ -215,6 +240,20 @@ A repin re-renders every published figure at once — here is what a maintainer 
   instead, since those segments have no printed number to repeat. Hover-only — no exported/published
   image changes, and no golden fixture moved. Set `chrome.valuePills: true` explicitly on a chart
   that should keep both.
+- **A bar or stacked chart on a numeric, temporal or quarterly x-axis is now refused at
+  validation.** This is a new refusal on a schema released without it, so it is called out even
+  though **no known spec is affected**. That was established by parsing, not grepping: every
+  authored `.yaml`/`.json` spec (179), the YAML front matter of every interactives `config.md`
+  (80 — a format a `*.yaml`-only search misses entirely), and every spec instance recovered from
+  built and published output by brace-balanced JSON decoding (236). Every bar/stacked spec found —
+  66 in authored YAML/JSON, 8 in `config.md` front matter, 74 instances in built output — declares
+  `xAxisType: categorical`, and `xAxisType` is a *required*
+  property, so there is no "absent, defaults to something else" case. A proximity-based first pass
+  did report seven bar+temporal hits in the state-of-tariffs manifests; structural re-parsing of
+  those exact files showed all seven were bar figures whose nearest `xAxisType` in the text
+  belonged to a neighbouring `line` figure. If a spec does trip this, the fix is either
+  `xAxisType: categorical` (with `x_order` to fix the tick order) or `chartType: line`; the chart
+  it was drawing before was missing bars or empty.
 - **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
   current — re-run its vendoring step at repin.
 

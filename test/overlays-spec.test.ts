@@ -789,19 +789,36 @@ describe("overlays — orientation restrictions", () => {
     expect(err(r)).toMatch(/categorical/);
   });
 
-  it("still accepts overlays on a VERTICAL bar/stacked chart, explicit or defaulted", () => {
+  // This slot used to hold "still accepts overlays on a VERTICAL bar/stacked chart". That
+  // expectation was deleted, not worked around: `bar`/`stacked` now require a categorical x-axis,
+  // and overlays are refused ON a categorical axis, so overlays are unreachable on bar and stacked
+  // in BOTH orientations. What that test pinned had been measured to render a fitted line over a
+  // chart drawing 2 of 5 bars. The assertion below is its inverse, and it is what keeps the
+  // narrowed CONFIG-SPEC claim honest.
+  it("refuses overlays on bar/stacked in EITHER orientation", () => {
     for (const chartType of ["bar", "stacked"]) {
-      expect(
-        check([{ method: "lm" }], { chartType, xAxisType: "numeric", columns: cols }).valid,
-      ).toBe(true);
-      expect(
-        check([{ method: "lm" }], {
+      for (const orientation of [undefined, "vertical", "horizontal"]) {
+        const r = check([{ method: "lm" }], {
           chartType,
           xAxisType: "numeric",
-          orientation: "vertical",
+          ...(orientation ? { orientation } : {}),
           columns: cols,
-        }).valid,
-      ).toBe(true);
+        });
+        expect(r.valid).toBe(false);
+      }
+      // The horizontal case still reports the more specific OVERLAY message, not the axis one --
+      // that branch of `overlaySpecErrors` stays reachable because the axis guard is checked after
+      // it. If this flips to the axis message, the guard has been moved too early.
+      expect(
+        err(
+          check([{ method: "lm" }], {
+            chartType,
+            xAxisType: "numeric",
+            orientation: "horizontal",
+            columns: cols,
+          }),
+        ),
+      ).toMatch(/horizontal/);
     }
   });
 

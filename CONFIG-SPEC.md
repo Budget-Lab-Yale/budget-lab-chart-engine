@@ -32,13 +32,18 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 > There is **no `eyebrow`** field — the figure number is a property of the article a chart is
 > embedded in, supplied at embed time (`--eyebrow`), not a spec field.
 
-Axis constraints: `scatter` requires `xAxisType: numeric`; `dotplot` requires
+Axis constraints: `bar` and `stacked` require `xAxisType: categorical`, in both orientations — bars
+sit on a band scale, and on a continuous or date axis they silently dropped bars or drew an empty
+frame, so it is a validation error rather than a misdraw (for values over years, ages or
+percentiles, declare the x values as categories and use `x_order` to fix their order, or use
+`chartType: line`); `scatter` requires `xAxisType: numeric`; `dotplot` requires
 `xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
 histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
-`xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`).
-[`overlays`](#overlay-lines) additionally requires a non-categorical x-axis, on any chart type, and a
-**vertical** chart — `orientation: horizontal` with `overlays` is a validation error on `bar` and
-`stacked`.
+`xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`);
+`waterfall` requires `xAxisType: categorical` **and** is vertical only — `orientation: horizontal`
+is a validation error there (the running cumulative reads down the value axis).
+[`overlays`](#overlay-lines) additionally requires a non-categorical x-axis and a **vertical**
+chart, which together leave it unavailable on `bar` and `stacked`.
 
 ### Column mapping
 
@@ -417,11 +422,14 @@ in list order.
 temporal axis, `fun`, `slope`+`intercept` and an explicit numeric `domain` are also rejected: x would be
 epoch milliseconds and the coefficients would not mean anything. Use `method` or `column` there.
 
-**Vertical charts only.** An overlay's values are drawn against the **y** axis, so a chart whose value
-axis is x has nowhere to put them: `overlays` with `orientation: horizontal` is a validation error on
-`bar` and `stacked` (the chart types that act on `orientation` and can otherwise carry an overlay).
-`dumbbell` — horizontal by default — is already excluded by its categorical x. On `line`, `area` and
-`scatter`, `orientation` has no effect at all, so it neither changes the chart nor the overlay there.
+**Vertical charts only — so not on `bar` or `stacked` at all.** An overlay's values are drawn against
+the **y** axis, so a chart whose value axis is x has nowhere to put them: `overlays` with
+`orientation: horizontal` is a validation error on `bar` and `stacked`, the chart types that act on
+`orientation`. Those two are unavailable in *either* orientation, because they also require
+`xAxisType: categorical` and a categorical axis is rejected above — a bar or stacked chart cannot
+carry an overlay. `dumbbell` — horizontal by default — is likewise excluded by its categorical x.
+On `line`, `area` and `scatter`, `orientation` has no effect at all, so it neither changes the chart
+nor the overlay there.
 
 **On a histogram, `fun` and `slope`+`intercept` only.** `method` and `column` are validation errors
 there: histogram rows carry bin edges rather than a per-row x, so there is nothing to fit and no column

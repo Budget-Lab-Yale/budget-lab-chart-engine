@@ -71,6 +71,34 @@ function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): 
   return null;
 }
 
+/** Bar cross-field constraint: `bar` and `stacked` draw on a BAND x-scale, whose domain
+ *  `engine/marks/bar.ts` and `marks/stacked.ts` build from `data[xField]` filtered to non-empty
+ *  STRINGS — which only the categorical x adapter (`_xc`) produces. On any other axis type the
+ *  output was wrong while `validateSpec` said `valid: true`: measured on 5 rows, numeric drew
+ *  2 of 5 bars vertically (the numeric adapter emits `domain: [xMin, xMax]`, which a bar mark reads
+ *  as a band domain of two categories, so the interior rows vanish) and 0 horizontally;
+ *  temporal/quarterly drew every bar but stacked Plot's own band axis over the engine's, printed
+ *  the internal field name `_xd` as the x-axis label, and painted Plot's warning glyph into the
+ *  SVG — which the PNG export re-renders into a published figure.
+ *
+ *  Keyed on the two literals ON PURPOSE. `FILLED_CHART_TYPES` (./filled-chart-types) is the
+ *  tempting import and the wrong one: it also holds `histogram` (numeric/temporal by design),
+ *  `area` (usually temporal) and `waterfall` (already checked, with its own vertical-only message
+ *  that a second check here would make unreachable). This must never read as
+ *  "categorical implies bar" either — line and area on a categorical axis render correctly and are
+ *  used by published figures. */
+function barBandAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
+  if (spec.chartType !== "bar" && spec.chartType !== "stacked") return null;
+  if (spec.xAxisType === "categorical") return null;
+  return (
+    `chartType ${JSON.stringify(spec.chartType)} requires xAxisType "categorical" ` +
+    `(got ${JSON.stringify(spec.xAxisType)}) — bars sit on a band scale, so a continuous or ` +
+    "date x-axis silently drops bars or draws an empty frame. For values over years, ages or " +
+    "percentiles, either declare the x values as categories (xAxisType: categorical, with x_order " +
+    "to fix their order) or use chartType: line."
+  );
+}
+
 /** `title_selectors` cross-field rules the JSON schema can't express: every selector key must
  *  appear as a literal `{key}` token in the title (else the control has nowhere to render), and
  *  `default` (when set) must name one of that selector's own option ids. Duplicate option ids
@@ -620,6 +648,12 @@ export function validateSpec(spec: unknown): ValidationResult {
     },
   );
   if (overlayErrors.length) return { valid: false, errors: overlayErrors };
+  // Deliberately AFTER `overlaySpecErrors`, not up with the other axis checks: a horizontal
+  // bar/stacked chart carrying an overlay violates BOTH rules, and the overlay message is the more
+  // specific of the two. Placed with its family, this guard would report first and make the
+  // horizontal-bar/stacked branch of `overlaySpecErrors` unreachable dead code.
+  const barAxisErr = barBandAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
+  if (barAxisErr) return { valid: false, errors: [barAxisErr] };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
   if (shadeErr) return { valid: false, errors: [shadeErr] };
   const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
