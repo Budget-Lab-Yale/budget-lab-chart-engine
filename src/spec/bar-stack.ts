@@ -6,7 +6,21 @@
 // read site, rather than shipping four fields through MarkLayers → FigurePane → FigureRenderResult →
 // wireFigureSvg, is deliberate: that forwarding chain is four hops long, a missed hop yields
 // `undefined` (which silently reads as "off"), and no golden can catch it because goldens are static
-// SVG and never hover. One field crosses the chain; everything else is computed where it is used.
+// SVG and never hover.
+//
+// So the rule is not "one field crosses the chain" — it is that a value crosses it ONLY when the
+// read site cannot compute the value itself, which makes every field that crosses a REPORT of what
+// the mark builder observed rather than a DECISION about what to do. Two qualify:
+//   - `netMode` — which net callout the stack actually painted. `undefined` additionally carries
+//     "not a stacked chart" (marks/stacked.ts is its only writer), which resolveHoverMode below
+//     depends on, so it is passed un-defaulted.
+//   - `segmentLabelsDropped` — whether the label builder refused any segment's in-bar value label
+//     for being thinner than the fit threshold. That is a function of the data AND the frame
+//     geometry the builder was handed, and the pill read site has neither; re-deriving it there
+//     would mean a second copy of the threshold, free to drift from what was painted. See
+//     resolveValuePills.
+// Everything else — the hover treatment, the tooltip's Total row, the value-pill default — is a
+// decision computed from the spec plus those two reports, at the site that acts on it.
 import type { ChartSpec } from "./types";
 
 /** The net (sum) callout actually painted on a stacked chart. */
