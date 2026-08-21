@@ -699,7 +699,6 @@ export function renderFigure(
         firstFormatValue = p.formatValue;
       }
       panePainted.push(p.seriesHatches);
-    paneFills.push(p.seriesPainted);
       paneFills.push(p.seriesPainted);
       // Escape hatch, per pane: a figure has no single SVG (each pane is its own), so this fires
       // once per pane, LAST — after renderPane's own assembly — with ctx.facet set to the SAME
@@ -870,6 +869,12 @@ export function renderFigure(
       firstFormatValue = p.formatValue;
     }
     panePainted.push(p.seriesHatches);
+    // Pushed in BOTH pane loops or the figure legend lies. `paneFills` was declared here and pushed
+    // only in the per-pane branch, so shared mode — the DEFAULT — handed firstPainted() an empty map
+    // and the legend fell through to the palette: panes painted a `highlightSeries`-dimmed series
+    // grey, the one legend over them keyed it amber. Gated by key-agreement.test.ts, which asserts
+    // both modes against the fill the panes are drawn in.
+    paneFills.push(p.seriesPainted);
     // Escape hatch, per pane — see the identical call + rationale in the per-pane-mode branch above.
     if (opts.hooks?.afterRender && p.svg) {
       opts.hooks.afterRender(p.svg, { phase: opts.phase ?? "live", facet: value });
