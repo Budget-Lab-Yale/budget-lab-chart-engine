@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
-import { OVERLAY_LABEL_CLASS, OVERLAY_LINE_CLASS } from "../src/engine/marks/overlay";
+import { OVERLAY_LABEL_CLASS, OVERLAY_LINE_CLASS, OVERLAY_BAND_CLASS } from "../src/engine/marks/overlay";
 import { annotationKey } from "../src/engine/annotation-legend";
 import { renderLegend } from "../src/engine/legend";
 import { ICON_GROUP_CLASS } from "../src/engine/icon";
@@ -311,5 +311,75 @@ describe("overlays — the legend swatch keys the line it names", () => {
   it("draws the exported swatch in the SVG namespace, so it rasterises", () => {
     const s = spec([{ method: "lm", label: "Fitted", legend: true, color: "green" }]);
     expect(exportSwatch(s, ROWS, "Fitted").line.namespaceURI).toBe("http://www.w3.org/2000/svg");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// A confidence ribbon dims WITH the line it belongs to.
+//
+// The ribbon is a separate Plot mark from the line (underlay vs overlay — see marks/overlay.ts), and
+// it was emitted with neither `data-series` nor `data-annotation` while only the line paths entered
+// the tagging arrays. Legend dimming walks `[data-series], [data-annotation]` (legend.ts), so a path
+// carrying neither is never reached: selecting the overlay's own annotation row, or the series row it
+// belongs to, dimmed the line and every other keyed mark and left the ribbon permanently bright.
+//
+// Both directions are asserted, because the ribbon needs BOTH keys for the same reason a keyed
+// `shading` fill does: bright from its annotation row AND bright from its series' row.
+describe("overlays — a confidence ribbon dims with its line", () => {
+  // Per-series `lm` + `ci` on two series: two lines, two ribbons, and ONE neutral annotation row for
+  // the concept. Legend universe = series A + series B + the "Fitted" row, so selecting any one of
+  // the three is a strict subset and dimming fires.
+  const CI_SPEC = spec([{ method: "lm", ci: 0.95, label: "Fitted", legend: true }]);
+  const FITTED = annotationKey("Fitted");
+
+  const mountCi = () => {
+    const { svg, legendItems } = renderChart(CI_SPEC, TWO_SERIES, OPTS);
+    const parent = document.createElement("div");
+    const handle = renderLegend(parent, legendItems ?? [], { svg })!;
+    return { svg, parent, handle };
+  };
+  const ribbons = (svg: SVGSVGElement): SVGPathElement[] =>
+    Array.from(svg.querySelectorAll<SVGPathElement>(`g.${OVERLAY_BAND_CLASS} path`));
+  const isDimmed = (el: Element): boolean => el.classList.contains("tbl-dimmed");
+
+  it("tags each ribbon with its series AND its annotation key", () => {
+    const bands = ribbons(mountCi().svg);
+    expect(bands.length).toBe(2);
+    expect(bands.map((b) => b.getAttribute("data-series"))).toEqual(["A", "B"]);
+    expect(bands.map((b) => b.getAttribute("data-annotation"))).toEqual([FITTED, FITTED]);
+  });
+
+  it("keeps both ribbons bright when the overlay's own annotation row is selected", () => {
+    const { svg, handle } = mountCi();
+    handle.hoverAnnotation(FITTED);
+    expect(ribbons(svg).map(isDimmed)).toEqual([false, false]);
+    // The fence: dimming really is active — the scatter points dropped back.
+    expect(Array.from(svg.querySelectorAll("[data-series]")).some(isDimmed)).toBe(true);
+  });
+
+  it("dims the ribbon of the series that is NOT selected", () => {
+    const { svg, handle } = mountCi();
+    handle.toggle("A");
+    expect(ribbons(svg).map(isDimmed)).toEqual([false, true]);
+  });
+
+  it("carries the tags into the export SVG, which rebuilds from the spec", () => {
+    const bands = ribbons(buildExportSvg(CI_SPEC, TWO_SERIES));
+    expect(bands.map((b) => b.getAttribute("data-series"))).toEqual(["A", "B"]);
+    expect(bands.map((b) => b.getAttribute("data-annotation"))).toEqual([FITTED, FITTED]);
+  });
+
+  it("leaves an identity-less ribbon untagged, exactly as it leaves its line untagged", () => {
+    // `by: none` has no series identity and `legend` is omitted, so nothing moved to the legend:
+    // there is no key of either kind for the legend to select on. The line paths are untagged in that
+    // case (tagging the inert SINGLE_SERIES_KEY would dim them against every real series), and the
+    // ribbon must match its line rather than acquire a key the line does not have.
+    const { svg } = renderChart(spec([{ method: "lm", ci: 0.95, by: "none" }]), TWO_SERIES, OPTS);
+    const bands = ribbons(svg);
+    expect(bands.length).toBe(1);
+    const line = svg.querySelector(`g.${OVERLAY_LINE_CLASS} path`)!;
+    expect(line.getAttribute("data-series")).toBeNull();
+    expect(bands[0]!.getAttribute("data-series")).toBeNull();
+    expect(bands[0]!.getAttribute("data-annotation")).toBeNull();
   });
 });

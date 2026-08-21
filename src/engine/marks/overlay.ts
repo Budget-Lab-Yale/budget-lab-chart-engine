@@ -96,6 +96,14 @@ export function buildOverlayMarks(
   // the same path carries BOTH keys — it dims with its series AND lights up when its legend row is
   // hovered. Undefined for a line whose label stayed in-frame (nothing moved to the legend for it).
   const combinedAnnotationOrder: Array<string | undefined> = [];
+  // The CONFIDENCE RIBBON is a separate mark from the line it belongs to (areaY in `underlay` vs
+  // line in `overlay`), so it needs its own tagging entry against its own selector — one band mark
+  // emits exactly one `path`, so these are indexed per overlay, not per segment like the line's.
+  // Without them the ribbon carried neither key, and legend.ts's dimming walk
+  // (`[data-series], [data-annotation]`) never reached it: selecting the overlay's own annotation row
+  // or its series dimmed the line and left the band permanently bright.
+  const bandSeriesOrder: string[] = [];
+  const bandAnnotationOrder: Array<string | undefined> = [];
   let anySeries = false;
   let anyAnnotation = false;
 
@@ -122,6 +130,10 @@ export function buildOverlayMarks(
           },
         ),
       );
+      // Same keys the line below gets, so the ribbon dims and brightens with it in both
+      // directions — its series' legend row and its own annotation row alike.
+      bandSeriesOrder.push(o.series ?? SINGLE_SERIES_KEY);
+      bandAnnotationOrder.push(key);
     }
 
     const rows = runsOf(o, ctx.xField, i);
@@ -153,12 +165,23 @@ export function buildOverlayMarks(
     }
   });
 
+  // Gated on the SAME flags as the line's entry, deliberately: with no series and no legend key
+  // anywhere, an overlay has no identity for the legend to select on, and tagging its paths with the
+  // inert SINGLE_SERIES_KEY would dim them against every real series. The ribbon must behave exactly
+  // as its line does, so the two entries are pushed together or not at all.
   if (anySeries || anyAnnotation) {
     tagging.push({
       selector: `g.${OVERLAY_LINE_CLASS} path`,
       seriesOrder: combinedSeriesOrder,
       ...(anyAnnotation ? { annotationOrder: combinedAnnotationOrder } : {}),
     });
+    if (bandSeriesOrder.length) {
+      tagging.push({
+        selector: `g.${OVERLAY_BAND_CLASS} path`,
+        seriesOrder: bandSeriesOrder,
+        ...(anyAnnotation ? { annotationOrder: bandAnnotationOrder } : {}),
+      });
+    }
   }
 
   return { underlay, overlay, tagging };
