@@ -158,7 +158,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   figure's coordinated cursor, which drew its x echo with a hardcoded `%b` / `%Y` while being
   handed the author's formatter and ignoring it. On a **daily** multi-pane line that echo was
   missing altogether — it could only annotate an existing x-axis tick and a sub-month span draws
-  none — so with the field set it is now anchored below the plot instead of skipped. Absent the
+  none — so with the field set it is now anchored below the plot instead of skipped. Where the pane
+  DOES tick, the echo stays on the tick rows and hides the tick labels its pill covers for as long
+  as it shows: the pill is sized from the author's format, not from the tick, so `Jun 1, 2026` over
+  a `Jun`/`Jul` axis was reaching across its neighbour and leaving a fragment of it (`Apr` read as
+  `pr`) sticking out past the pill's edge. Absent the
   field nothing moves: the echo keeps its two-line, axis-matching form, which is why the fix reads
   an explicit-format flag rather than the formatter alone. And `x_labels` now heads the
   `dumbbell` / `dotplot` / categorical-x `line` hover card, which shared the band card's builder

@@ -2309,15 +2309,17 @@ function makeAxisRows(svgEl: SVGSVGElement, plotBottom: number) {
 /**
  * Draw the active pane's highlighted x value as text on a frosted pill, one line per axis row so
  * the line breaks match the axis (e.g. month on the first row, year on the second). Centered on
- * `cx`; bold + dark so it reads as the highlighted axis label.
+ * `cx`; bold + dark so it reads as the highlighted axis label. Returns the pill's box in SVG user
+ * coords (null when there was nothing to draw) — the caller needs it to tell which tick labels the
+ * pill has landed on top of; see `hideAxisLabelsUnder`.
  */
 function addCoordAxisLabel(
   g: SVGGElement,
   doc: Document,
   cx: number,
   lines: Array<{ text: string; cy: number }>,
-): void {
-  if (!lines.length) return;
+): { left: number; right: number; top: number; bot: number } | null {
+  if (!lines.length) return null;
   const fontSize = 10.5;
   const padX = 4;
   const padY = 2;
@@ -2350,6 +2352,61 @@ function addCoordAxisLabel(
     t.textContent = l.text;
     g.appendChild(t);
   }
+  return { left: cx - w / 2, right: cx + w / 2, top, bot };
+}
+
+/** A tick label hidden while an echo pill covers it, plus the inline `visibility` to put back. */
+type HiddenTick = { el: SVGTextElement; prev: string };
+
+/**
+ * Hide the x-axis tick labels an echo pill overlaps, and return what to restore.
+ *
+ * WHY THIS EXISTS: the echo pill is centred on the CURSOR's x and sized from its own text, so it
+ * is only as wide as what it says — it is not the tick's box. That is harmless while the echo says
+ * what the tick says (the default `%b` / `%Y` is never wider than the tick it covers), but an
+ * author-set `tooltip_x_format` is arbitrary: `"%b %-d, %Y"` renders `Jun 1, 2026` over a monthly
+ * axis whose ticks are `Jun`, so the pill reaches across its neighbour and leaves a fragment of it
+ * sticking out past the pill's edge (`Apr` read as `pr`). Hiding just the ticks the pill actually
+ * covers keeps the echo where the reader expects it — on the axis row — while the ticks it does
+ * NOT reach stay put, so the axis keeps its context. Restored on the next cursor move and on
+ * clear; the export path re-renders from the spec and never sees this.
+ */
+function hideAxisLabelsUnder(
+  svgEl: SVGSVGElement,
+  plotBottom: number,
+  box: { left: number; right: number; top: number; bot: number },
+): HiddenTick[] {
+  const svgRect = svgEl.getBoundingClientRect();
+  if (!svgRect.width || !svgRect.height) return [];
+  const vb = svgEl.viewBox?.baseVal;
+  const Wd = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgRect.width;
+  const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
+  const sx = Wd / svgRect.width;
+  const sy = Hd / svgRect.height;
+  const PAD = 1; // a tick a hair from the pill's edge still reads as a collision
+  const hidden: HiddenTick[] = [];
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
+    if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
+    const r = t.getBoundingClientRect();
+    if (!r.width) continue;
+    const top = (r.top - svgRect.top) * sy;
+    if (top < plotBottom - 2) continue; // x-axis labels only
+    const left = (r.left - svgRect.left) * sx;
+    const right = (r.right - svgRect.left) * sx;
+    const bot = (r.bottom - svgRect.top) * sy;
+    const overlapX = Math.min(box.right + PAD, right) - Math.max(box.left - PAD, left);
+    const overlapY = Math.min(box.bot + PAD, bot) - Math.max(box.top - PAD, top);
+    if (overlapX <= 0 || overlapY <= 0) continue;
+    hidden.push({ el: t, prev: t.style.visibility });
+    t.style.visibility = "hidden";
+  }
+  return hidden;
+}
+
+/** Put back every tick label `hideAxisLabelsUnder` hid. Safe to call on an empty list. */
+function restoreAxisLabels(hidden: HiddenTick[]): void {
+  for (const h of hidden) h.el.style.visibility = h.prev;
+  hidden.length = 0;
 }
 
 /** Detect how the rendered categorical x-axis labels are laid out, so the active-pane highlight
@@ -2507,6 +2564,8 @@ function coordPillWidth(text: string): number {
  * `tooltip_x_format`) it draws that format on ONE line, anchored to the tick rows where they exist
  * and just below the plot where they do not — an author who states an x format is telling us the x
  * value has to be readable, and a daily figure is exactly the case with no ticks to hang it on.
+ * On that branch only, the tick labels the pill covers are hidden for as long as it is showing
+ * (`hideAxisLabelsUnder`), because an author's format can be wider than the tick it lands on.
  */
 export function attachSecondaryLineCursor(
   svgEl: SVGSVGElement,
@@ -2572,9 +2631,14 @@ export function attachSecondaryLineCursor(
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
+  // Tick labels this pane's echo pill is currently covering. Restored at the TOP of every driver
+  // call (the clear path included), so the axis is whole again before anything is redrawn — a pane
+  // can never accumulate hidden ticks as the cursor moves across it.
+  let hiddenTicks: HiddenTick[] = [];
 
   return (xValue: number | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
+    restoreAxisLabels(hiddenTicks);
     if (xValue == null) {
       g.setAttribute("opacity", "0");
       return;
@@ -2600,7 +2664,15 @@ export function attachSecondaryLineCursor(
         const cy = ys.length
           ? (ys[0]! + ys[ys.length - 1]!) / 2
           : Math.min(mt + plotH + 11, H - 8);
-        addCoordAxisLabel(g, doc, gx, [{ text: opts.xFormat(nx), cy }]);
+        const box = addCoordAxisLabel(g, doc, gx, [{ text: opts.xFormat(nx), cy }]);
+        // The pill is sized from the AUTHOR's format, not from the tick it lands on, so it can be
+        // wider than that tick and spill onto its neighbours (issue #30). Below-the-rows is not
+        // available to move it to: the bottom margin is sized for the tick rows it already has
+        // (two 13px rows in a 38px margin), so a 14.5px pill under the last row falls outside the
+        // viewBox. Hide the ticks it covers instead — the echo IS the x value those ticks name,
+        // read finer. Only on this branch: the default echo is no wider than its tick, and this
+        // must not move it.
+        if (box) hiddenTicks = hideAxisLabelsUnder(svgEl, mt + plotH, box);
       } else if (ys.length) {
         let lines: Array<{ text: string; cy: number }>;
         if (isDate) {

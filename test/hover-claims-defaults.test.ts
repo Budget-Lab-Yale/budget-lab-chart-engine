@@ -29,6 +29,7 @@ import {
   mountHover, cardShown, cardText, coordShown, coordTexts, hoverFirstMark,
   BAR_MARK, DOT_MARK, PLOT_MIDDLE,
 } from "./helpers/hover-harness";
+import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -183,6 +184,75 @@ describe("tooltip_x_format", () => {
     expect(texts.some((t) => /^[A-Z][a-z]{2} \d{1,2}, 2026$/.test(t)), texts.join("|")).toBe(true);
     // One echo, not the author's format drawn on top of the old two-line %b / %Y.
     expect(texts).not.toContain("2026");
+  });
+
+  // ISSUE #30 PLACEMENT. The echo pill is centred on the cursor and sized from ITS OWN text, so
+  // an author format wider than the tick it lands on reaches across a neighbouring tick and leaves
+  // a fragment of it sticking out past the pill's edge — `Jun 1, 2026` over a monthly axis clipped
+  // `Apr` to `pr`. Found in a browser, because jsdom has no layout; what these two gate is that the
+  // pill's box is measured against the tick boxes and the ticks it covers are hidden for as long as
+  // it shows, then restored. The GEOMETRY here is the harness's mock (a text is `len * 5` wide), not
+  // real font metrics, so these prove the mechanism fires and targets the right elements — the
+  // absence of a visible collision at real widths is a browser screenshot, not this.
+  const xTicks = (svg: SVGSVGElement): Array<{ text: string; hidden: boolean }> => {
+    const vb = svg.viewBox.baseVal;
+    const plotBottom = vb.height - (+(svg.dataset.marginBottom ?? "") || 28);
+    return Array.from(svg.querySelectorAll<SVGTextElement>("text"))
+      .filter((t) => !t.closest(".tbl-coord") && !t.closest(".tbl-y-tick-label"))
+      .filter((t) => t.getBoundingClientRect().width > 0)
+      .filter((t) => t.getBoundingClientRect().top >= plotBottom - 2)
+      .map((t) => ({ text: t.textContent ?? "", hidden: t.style.visibility === "hidden" }));
+  };
+  /** The echo pill's box, from the rect the engine actually drew. */
+  const pillBox = (svg: SVGSVGElement) => {
+    const r = svg.querySelector<SVGRectElement>("rect.tbl-coord-axis-label");
+    if (!r) return null;
+    const x = +r.getAttribute("x")!, y = +r.getAttribute("y")!;
+    return { left: x, right: x + +r.getAttribute("width")!, top: y, bot: y + +r.getAttribute("height")! };
+  };
+
+  it("2-pane MONTHLY temporal line: the echo hides the tick labels it covers, and only those", () => {
+    // A year of months puts the ticks close enough together that a long format's pill lands on one.
+    const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}-01`);
+    const m = mountHover(
+      spec({
+        chartType: "line", xAxisType: "temporal", series_order: ["A", "B"],
+        data: "d.csv", ...facetCols, ...sm, tooltip_x_format: "%A, %B %-d, %Y",
+      }),
+      temporalRows(YEAR),
+      true,
+    );
+    const svg = m.svgs[0]!;
+    hoverFirstMark(svg, PLOT_MIDDLE);
+    const box = pillBox(svg)!;
+    expect(box).toBeTruthy();
+    const ticks = xTicks(svg);
+    // The mechanism fired: something was covered and is now hidden.
+    expect(ticks.some((t) => t.hidden), ticks.map((t) => `${t.text}:${t.hidden}`).join("|")).toBe(true);
+    // And nothing still VISIBLE intersects the pill — the collision itself, in mocked geometry.
+    const visibleUnderPill = Array.from(svg.querySelectorAll<SVGTextElement>("text"))
+      .filter((t) => !t.closest(".tbl-coord") && t.style.visibility !== "hidden")
+      .map((t) => t.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.top >= box.top - 1)
+      .filter((r) => Math.min(box.right, r.right) - Math.max(box.left, r.left) > 0.5)
+      .filter((r) => Math.min(box.bot, r.bottom) - Math.max(box.top, r.top) > 0.5);
+    expect(visibleUnderPill.length).toBe(0);
+    // The pane the cursor LEFT is whole again: pointerleave clears the echo and restores the axis.
+    svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+    expect(xTicks(svg).filter((t) => t.hidden)).toEqual([]);
+    // The un-hovered sibling pane never had a tick hidden at all.
+    expect(xTicks(m.svgs[1]!).filter((t) => t.hidden)).toEqual([]);
+  });
+
+  it("2-pane MONTHLY temporal line, FIELD ABSENT: no tick is hidden — the default echo is tick-width", () => {
+    const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}-01`);
+    const m = mountHover(
+      spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm }),
+      temporalRows(YEAR),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(xTicks(m.svgs[0]!).filter((t) => t.hidden)).toEqual([]);
   });
 
   it("2-pane MONTHLY temporal line, FIELD ABSENT: the two-line %b / %Y echo is unchanged", () => {
