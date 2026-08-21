@@ -1139,6 +1139,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+        categoryLabels: spec.x_labels,
         bandHighlight: true,
         centersFromMarks: true,
         showTooltip: chromeTooltip,
@@ -1168,6 +1169,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+        categoryLabels: spec.x_labels,
         bandHighlight: true,
         centersFromMarks: true,
         orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
@@ -1186,6 +1188,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
+        categoryLabels: spec.x_labels,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
       });
@@ -1993,6 +1996,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v: number) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+      categoryLabels: ctx.spec.x_labels,
       bandHighlight: true,
       centersFromMarks: true,
       orientation: orientation as "vertical" | "horizontal",
@@ -2034,6 +2038,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+      categoryLabels: ctx.spec.x_labels,
       bandHighlight: true,
       centersFromMarks: true,
       showTooltip: chromeTooltip,
@@ -2121,6 +2126,7 @@ function wireFigureSvg(
       seriesLabels: ctx.seriesLabels,
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+      categoryLabels: ctx.spec.x_labels,
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
@@ -2331,6 +2337,10 @@ function wireFigureSvg(
       seriesField: "series",
       xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
       xFormat: ctx.tooltipXFormat,
+      // `tooltipXFormat` is always a function on a temporal axis (the x-adapter defaults it to the
+      // axis-matching "%b %Y"), so the cursor cannot tell an author's format from the default and
+      // would otherwise collapse its two-line echo on every figure. The spec field is the signal.
+      xFormatExplicit: ctx.spec.tooltip_x_format != null,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,

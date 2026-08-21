@@ -34,8 +34,9 @@
 //     to ask about that field.
 // The `card` column therefore overlaps `hover-card-reach.test.ts` on purpose: the matrix has to be
 // readable as one artifact, and a matrix missing its most-cited column would not be. Per-claim
-// assertions (including the `GAP`-marked ones pinning the two released `x_labels` /
-// `tooltip_x_format` gaps as they are) stay in those files; nothing here weakens them.
+// assertions (including the reach of the released `x_labels` / `tooltip_x_format` fields, whose
+// faceted gaps were closed in 1.12.0, and the one `GAP`-marked limit that remains — a coordinated
+// pane's category echo shows the raw category) stay in those files; nothing here weakens them.
 //
 // WHY THE EXPECTED VALUES ARE INLINE AND NOT A SNAPSHOT
 // ----------------------------------------------------

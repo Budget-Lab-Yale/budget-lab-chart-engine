@@ -152,10 +152,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   wording. **No rendered output changes** — these were doc defects, not behaviour changes.
   `test/hover-card-reach.test.ts` and `test/hover-claims-defaults.test.ts` gate them by mounting
   every chart type at DEFAULT settings, standalone and two-pane; the earlier claims had each been
-  "verified" by a test that first turned a default off. Two gaps stay **open** by decision, because
-  closing either would change rendered hover text across the published archive at the next repin:
-  `x_labels` renders in the band tooltip only, and `tooltip_x_format` is ignored by the coordinated
-  cursor (a multi-pane *daily* line shows no x value at all).
+  "verified" by a test that first turned a default off.
+- **Two of those claims were gaps, and are now fixed rather than narrowed** (hover-only: no
+  exported image changes, and no golden moves). `tooltip_x_format` is honoured by a faceted
+  figure's coordinated cursor, which drew its x echo with a hardcoded `%b` / `%Y` while being
+  handed the author's formatter and ignoring it. On a **daily** multi-pane line that echo was
+  missing altogether — it could only annotate an existing x-axis tick and a sub-month span draws
+  none — so with the field set it is now anchored below the plot instead of skipped. Absent the
+  field nothing moves: the echo keeps its two-line, axis-matching form, which is why the fix reads
+  an explicit-format flag rather than the formatter alone. And `x_labels` now heads the
+  `dumbbell` / `dotplot` / categorical-x `line` hover card, which shared the band card's builder
+  but was never handed `categoryLabels`. One limit stays, and is documented rather than promised
+  away: a coordinated pane's category echo keeps the raw category, because it overlays the rendered
+  axis tick and `x_labels` exists to read more verbosely than that tick.
 - **Three hover-only fixes, and the `tbl-coord-pill` claim narrowed to match.** A waterfall whose data
   carries a `series` column (single-valued, which validates) drew **no value pill at all**: its bars
   are stamped `SINGLE_SERIES_KEY` while its hover rows carried the column's value, so every pill

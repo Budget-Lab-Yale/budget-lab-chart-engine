@@ -517,13 +517,12 @@ export interface ChartSpec {
    *  rather than a granularity auto-detect deliberately: a repin re-renders the whole archive, so
    *  changing the default would move the tooltips of every published temporal figure at once.
    *
-   *  STANDALONE ONLY, and the forward into the coordinated cursor is DEAD: render-live.ts passes
-   *  this as `xFormat` into `attachSecondaryLineCursor`, which never reads `opts.xFormat` and
-   *  formats its x echo with hardcoded `%b` / `%Y`. Do not delete the forward to tidy up and do not
-   *  start honouring it as a drive-by — either one changes published hover text at the next repin,
-   *  which makes it a release decision. See CONFIG-SPEC.md and test/hover-claims-defaults.test.ts,
-   *  which pins today's behaviour including the worse sub-case (a DAILY multi-pane line gets no x
-   *  readout at all, because the echo can only annotate an existing axis tick). */
+   *  Reaches the CARD and the coordinated cursor alike: render-live.ts passes it as `xFormat` into
+   *  `attachSecondaryLineCursor` (with `xFormatExplicit`, which is what distinguishes an author's
+   *  pattern from the adapter's axis-matching default), and the cursor draws its x echo with it on
+   *  one line — including on a DAILY multi-pane line, where the axis ticks on whole months, no tick
+   *  row exists to annotate, and the echo would otherwise be skipped. See CONFIG-SPEC.md and
+   *  test/hover-claims-defaults.test.ts, which gates set-and-absent on monthly and daily panes. */
   tooltip_x_format?: string;
 
   /** Text placed BEFORE every rendered value — axis ticks, value labels, tooltips. Concatenated
@@ -589,18 +588,19 @@ export interface ChartSpec {
   /** Dumbbell charts: category render order along the categorical axis — a synonym for `x_order`
    *  (order-only, never filters). `category_order` wins when both are set. See `categoryOrderFor`. */
   category_order?: string[];
-  /** Categorical x: raw category value → display label, used in the BAND hover tooltip's header
-   *  (e.g. "1" → "1st Decile"). Lets that tooltip read more verbosely than the compact axis ticks.
+  /** Categorical x: raw category value → display label, used in the hover CARD's header
+   *  (e.g. "1" → "1st Decile"). Lets that card read more verbosely than the compact axis ticks.
    *
-   *  Narrower than it looks, and NOT a general category-label field. It is read only at the two
-   *  `attachBandCrosshair` call sites and consumed only inside `buildBandTooltipHtml`, below the
-   *  `emitOnly` return — so it renders only where the band card is drawn: a stack with a net dot,
-   *  or an explicit `barStack.hover: "tooltip"`. Plain/grouped bar and waterfall have no card in
-   *  any configuration (`resolveHoverMode` ⇒ "pills"); a coordinated pane has none; and
-   *  `attachCategoricalLineCrosshair` (dumbbell / dot plot / categorical-x line) has no
-   *  `categoryLabels` option at all, so those cards show the raw category. Closing that gap would
-   *  change rendered hover text across the published archive at the next repin, so it is a release
-   *  decision rather than a fix. See CONFIG-SPEC.md and test/hover-claims-defaults.test.ts. */
+   *  A CARD-HEADER field, not a general category-label field. It is consumed inside
+   *  `buildBandTooltipHtml`, fed `categoryLabels` by both `attachBandCrosshair` and
+   *  `attachCategoricalLineCrosshair` (dumbbell / dot plot / categorical-x line) — so it renders
+   *  wherever a hover card is drawn, faceted included where the card survives coordination. Where
+   *  no card is drawn there is no header to render it in: plain/grouped bar and waterfall hover
+   *  with pills in any configuration (`resolveHoverMode` ⇒ "pills"), and a coordinated pane draws
+   *  the in-place cursor instead. That cursor's category echo keeps the RAW category on purpose —
+   *  `addCoordCategoryHighlight` overlays the rendered axis tick, taking its box, wrap mode and
+   *  rotation, and this field is for reading more verbosely than the tick. See CONFIG-SPEC.md and
+   *  test/hover-claims-defaults.test.ts. */
   x_labels?: Record<string, string>;
 
   // Section axis (horizontal bars; the section COLUMN is mapped via `columns.section`).

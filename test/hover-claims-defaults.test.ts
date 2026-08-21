@@ -13,11 +13,17 @@
 // doc names it. Nothing below sets `coordinated_cursor` or `barStack.hover` except as such a
 // control.
 //
-// TWO GAPS ARE DELIBERATELY LEFT OPEN, and the assertions here pin them as they are rather than as
-// they should be — `x_labels` and `tooltip_x_format` are RELEASED fields whose faceted behaviour
-// cannot be fixed without changing rendered hover text on the published archive at the next repin.
-// That is a release decision. If either is ever fixed, the tests marked GAP below are the ones that
-// must flip, and CONFIG-SPEC.md's narrowed wording must be widened in the same commit.
+// TWO OF THOSE CLAIMS WERE GAPS, PINNED HERE AS "GAP —" ASSERTIONS UNTIL 1.12.0 CLOSED THEM:
+// `tooltip_x_format` is now read by the coordinated line cursor (and draws its echo below the plot
+// where a sub-month span leaves no axis tick to annotate), and `x_labels` now heads the
+// categorical-line family's card (dumbbell / dot plot / categorical-x line), faceted included
+// wherever that card survives coordination. Those assertions were flipped, not deleted.
+//
+// ONE GAP STAYS OPEN, still marked "GAP —" below: a coordinated pane's CATEGORY echo shows the raw
+// category, because `addCoordCategoryHighlight` overlays the RENDERED axis tick — taking that
+// tick's own box, wrap mode and rotation — and `x_labels` exists precisely to read more verbosely
+// than the tick. Substituting the verbose string there is a redesign of the echo (its width, and
+// collision with neighbouring ticks), not a value to thread. CONFIG-SPEC.md names that limit.
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   mountHover, cardShown, cardText, coordShown, coordTexts, hoverFirstMark,
@@ -63,10 +69,11 @@ const MONTHLY = ["2026-06-01", "2026-07-01", "2026-08-01"];
 const DAILY = ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"];
 
 // ---------------------------------------------------------------------------
-// `x_labels` — GAP. Documented as the hover-tooltip header's display label. It is read at exactly
-// the two `attachBandCrosshair` call sites and consumed only inside `buildBandTooltipHtml`, so it
-// renders only where that card is drawn — and `CategoricalLineOptions` has no `categoryLabels`
-// field at all, so the chart types with a card that is NOT a band card never show it.
+// `x_labels` — the hover card's category header. Consumed inside `buildBandTooltipHtml`, which both
+// `attachBandCrosshair` and `attachCategoricalLineCrosshair` now feed `categoryLabels` — so it
+// renders wherever a hover CARD is drawn. Where a chart draws no card (a plain bar's value pills, a
+// coordinated pane's in-place cursor) there is no header to put it in, and the coordinated category
+// echo stays the raw axis tick (see the header note).
 // ---------------------------------------------------------------------------
 
 describe("x_labels", () => {
@@ -79,24 +86,45 @@ describe("x_labels", () => {
     expect(document.body.textContent ?? "").not.toContain("Verbose label for A");
   });
 
-  it("GAP — categorical-x line, standalone: a card IS drawn and still shows the raw category", () => {
+  it("categorical-x line, standalone: the card header shows the display label", () => {
     const m = mountHover(
       spec({ chartType: "line", xAxisType: "categorical", series_order: ["A", "B"], ...LABELS }),
       catRows([["A", 10, 20], ["B", 12, 22]]),
     );
     hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
     expect(cardShown()).toBe(true);
-    expect(cardText()).not.toContain("Verbose label for A");
+    expect(cardText()).toContain("Verbose label for A");
   });
 
-  it("GAP — dumbbell, standalone: same — a card, and the raw category in its header", () => {
+  it("dumbbell, standalone: same — the display label heads the card", () => {
     const m = mountHover(
       spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], ...LABELS }),
       catRows([["A", 3, 4], ["B", 7, 9]]),
     );
     hoverFirstMark(m.svgs[0]!, DOT_MARK);
     expect(cardShown()).toBe(true);
-    expect(cardText()).not.toContain("Verbose label for A");
+    expect(cardText()).toContain("Verbose label for A");
+  });
+
+  it("dumbbell, 2-pane: the label reaches a FACETED card — a dumbbell keeps its card by design", () => {
+    const m = mountHover(
+      spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...LABELS }),
+      twoPane([["A", 3, 4], ["B", 7, 9]]),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, DOT_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("Verbose label for A");
+  });
+
+  it("dot plot, standalone: the display label heads the card there too", () => {
+    const m = mountHover(
+      spec({ chartType: "dotplot", xAxisType: "categorical", series_order: ["A", "B"], ...LABELS }),
+      catRows([["A", 3, 4], ["B", 7, 9]]),
+    );
+    hoverFirstMark(m.svgs[0]!, DOT_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("Verbose label for A");
   });
 
   it("GAP — 2-pane bar: never renders; the coordinated cursor echoes the raw category", () => {
@@ -128,8 +156,9 @@ describe("x_labels", () => {
 });
 
 // ---------------------------------------------------------------------------
-// `tooltip_x_format` — GAP. `render-live.ts` forwards it into `attachSecondaryLineCursor` as
-// `xFormat` and that function never reads it, hardcoding `%b` / `%Y`.
+// `tooltip_x_format` — `render-live.ts` forwards it into `attachSecondaryLineCursor` as `xFormat`,
+// which now draws the coordinated x echo with it when the spec set the field. Absent the field the
+// echo keeps its axis-matching two-line `%b` / `%Y`, so no figure that does not set it moves.
 // ---------------------------------------------------------------------------
 
 describe("tooltip_x_format", () => {
@@ -142,7 +171,7 @@ describe("tooltip_x_format", () => {
     expect(cardText()).toMatch(/Jun \d, 2026/);
   });
 
-  it("GAP — 2-pane MONTHLY temporal line: ignored; the x echo is the hardcoded %b / %Y", () => {
+  it("2-pane MONTHLY temporal line: the coordinated cursor's x echo honours it", () => {
     const m = mountHover(
       spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...FMT }),
       temporalRows(MONTHLY),
@@ -151,28 +180,54 @@ describe("tooltip_x_format", () => {
     hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
     expect(coordShown(m.svgs[0]!)).toBe(true);
     const texts = coordTexts(m.svgs[0]!);
-    expect(texts.join("|")).not.toMatch(/Jun \d, 2026/);
+    expect(texts.some((t) => /^[A-Z][a-z]{2} \d{1,2}, 2026$/.test(t)), texts.join("|")).toBe(true);
+    // One echo, not the author's format drawn on top of the old two-line %b / %Y.
+    expect(texts).not.toContain("2026");
+  });
+
+  it("2-pane MONTHLY temporal line, FIELD ABSENT: the two-line %b / %Y echo is unchanged", () => {
+    const m = mountHover(
+      spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm }),
+      temporalRows(MONTHLY),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    const texts = coordTexts(m.svgs[0]!);
     expect(texts).toContain("2026");
     expect(texts.some((t) => /^[A-Z][a-z]{2}$/.test(t))).toBe(true);
   });
 
-  it("GAP — 2-pane DAILY temporal line: no x readout at all, with the field set or without", () => {
-    for (const extra of [FMT, {}]) {
-      document.body.innerHTML = "";
-      const m = mountHover(
-        spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...extra }),
-        temporalRows(DAILY),
-        true,
-      );
-      hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
-      const svg = m.svgs[0]!;
-      expect(coordShown(svg)).toBe(true);
-      // Value pills, but no echoed axis label to put an x value in: the temporal axis ticks on
-      // timeMonth and a four-day span crosses no month boundary, so there is no axis row to echo.
-      expect(svg.querySelectorAll(".tbl-coord-pill").length).toBeGreaterThan(0);
-      expect(svg.querySelectorAll(".tbl-coord-axis-label").length).toBe(0);
-      expect(coordTexts(svg).every((t) => /^[\d.,-]+$/.test(t))).toBe(true);
-    }
+  it("2-pane DAILY temporal line: the field draws an x readout where there is no axis tick to echo", () => {
+    const m = mountHover(
+      spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...FMT }),
+      temporalRows(DAILY),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    const svg = m.svgs[0]!;
+    expect(coordShown(svg)).toBe(true);
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBeGreaterThan(0);
+    // The temporal axis ticks on timeMonth and a four-day span crosses no month boundary, so there
+    // is no axis row to annotate — the echo anchors just below the plot instead of being skipped.
+    expect(svg.querySelectorAll(".tbl-coord-axis-label").length).toBe(1);
+    const texts = coordTexts(svg);
+    expect(texts.some((t) => /^Jun \d, 2026$/.test(t)), texts.join("|")).toBe(true);
+  });
+
+  it("2-pane DAILY temporal line, FIELD ABSENT: still no x readout — that is the field's whole job", () => {
+    // Not a gap left open by accident: without the field the echo matches the axis ticks, and a
+    // sub-month span draws none. `%b` / `%Y` on a daily series labels every point in the month
+    // identically, which is the failure `tooltip_x_format` exists to fix.
+    const m = mountHover(
+      spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm }),
+      temporalRows(DAILY),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    const svg = m.svgs[0]!;
+    expect(coordShown(svg)).toBe(true);
+    expect(svg.querySelectorAll(".tbl-coord-axis-label").length).toBe(0);
+    expect(coordTexts(svg).every((t) => /^[\d.,-]+$/.test(t))).toBe(true);
   });
 });
 

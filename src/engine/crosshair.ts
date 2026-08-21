@@ -30,6 +30,12 @@ export interface CrosshairOptions {
   seriesField?: string;
   xParse?: (v: unknown) => number;
   xFormat?: (v: number) => string;
+  /** True when `xFormat` came from the spec's own `tooltip_x_format` rather than the x-adapter's
+   *  axis-matching default. Read ONLY by `attachSecondaryLineCursor`, which shares this options
+   *  type: its x echo annotates the axis ticks, so it draws the author's single-line format when
+   *  the author asked for one and keeps the two-line `%b` / `%Y` (one line per axis tick row) when
+   *  nobody did. `attachCrosshair`'s card has one line to fill either way and ignores this. */
+  xFormatExplicit?: boolean;
   yFormat?: (v: number) => string;
   /** Series → colour, for the COORDINATED cursor's echo dots and value pills
    *  (attachSecondaryLineCursor, which shares this options type). NOT the tooltip key's colour —
@@ -2493,9 +2499,14 @@ function coordPillWidth(text: string): number {
  * Attach a coordinated cursor to a CONTINUOUS (line) small-multiples pane. Returns a driver:
  * `driver(xValue, active)` snaps to this pane's nearest x and renders the guide + per-series dot
  * and a compact value label (on a pill); when `active`, labels use a heavier weight and the
- * current x value is shown above the plot — but ONLY where the pane has x-axis tick labels to
- * annotate (`makeAxisRows` finds none on a temporal span shorter than one month, so a daily figure
- * gets pills and no x value at all). `driver(null)` clears. No pointer handlers.
+ * current x value is shown at the axis. `driver(null)` clears. No pointer handlers.
+ *
+ * The x echo has two forms. By DEFAULT it mirrors the axis ticks — one line per tick row, `%b`
+ * over `%Y` — and so needs tick rows to sit on: `makeAxisRows` finds none on a temporal span
+ * shorter than a month, and the echo is skipped. With `xFormatExplicit` (the spec set
+ * `tooltip_x_format`) it draws that format on ONE line, anchored to the tick rows where they exist
+ * and just below the plot where they do not — an author who states an x format is telling us the x
+ * value has to be readable, and a daily figure is exactly the case with no ticks to hang it on.
  */
 export function attachSecondaryLineCursor(
   svgEl: SVGSVGElement,
@@ -2518,23 +2529,14 @@ export function attachSecondaryLineCursor(
   const plotW = W - ml - mr;
   const plotH = H - mt - mb;
 
-  // Only x PARSING is derived here. `opts.xFormat` is deliberately NOT read, and the caller's
-  // forward of it (render-live.ts passes `xFormat: ctx.tooltipXFormat`) is therefore DEAD.
-  //
-  // That is a known gap, not a policy: this function DOES draw its own x text about fifty lines
-  // below, in the `active` branch, with hardcoded `%b` / `%Y` (or `YYYYQ#`) — so a spec's
-  // `tooltip_x_format` is silently ignored on every multi-pane temporal figure. An earlier version
-  // really did only bold the existing axis label, and the comment that used to sit here still said
-  // so long after `addCoordAxisLabel` was added; the sibling `attachSecondaryHistogramCursor` shows
-  // the intended pattern, re-using the primary's own `formatBinLabel` opts "so the coordinated
-  // label matches".
-  //
-  // Do NOT close the gap as a drive-by, and do not delete the dead forward to tidy up: honouring
-  // `xFormat` here changes the rendered x label on every published multi-pane temporal figure that
-  // sets the field, and drawing an x value where `axisRows` is empty changes every published
-  // multi-pane temporal figure, period. Both land across the archive at the next repin, which makes
-  // it a release decision. CONFIG-SPEC.md documents the field as standalone-only meanwhile, and
-  // test/hover-claims-defaults.test.ts pins today's behaviour so a fix has to be deliberate.
+  // x PARSING is derived here; x FORMATTING is `opts.xFormat`, read in the `active` branch below
+  // and gated on `opts.xFormatExplicit` — see this function's contract above and the
+  // `attachSecondaryHistogramCursor` precedent (it re-uses the primary's own `formatBinLabel` opts
+  // "so the coordinated label matches"). The gate is the load-bearing part: `tooltipXFormat` is
+  // ALWAYS a function on a temporal axis (the x-adapter defaults it to `%b %Y`), so honouring it
+  // unconditionally would collapse the default two-line echo — one line per axis tick row — into a
+  // single "Jun 2026" on every published multi-pane temporal figure, including the ones that set
+  // nothing. Only an author-set `tooltip_x_format` may change what a pane echoes.
   if (!xParse) {
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
@@ -2587,10 +2589,19 @@ export function attachSecondaryLineCursor(
     const gx = xToPx(nx);
     addCoordGuide(g, doc, gx, mt, mt + plotH);
     // Active pane: draw the full current x value at the axis, matching its line breaks (a
-    // temporal date shows month + year on two lines even mid-year, e.g. "Jul" / "2021").
+    // temporal date shows month + year on two lines even mid-year, e.g. "Jul" / "2021") — unless
+    // the spec named its own `tooltip_x_format`, which is one string and so one line.
     if (active) {
       const ys = axisRows.get();
-      if (ys.length) {
+      if (opts.xFormatExplicit && opts.xFormat) {
+        // Centre the single line on the tick rows it replaces; with no rows to replace (a temporal
+        // span under a month draws no ticks — the case the field exists for) sit just below the
+        // plot, clamped inside the frame so the pill cannot spill out of the viewBox.
+        const cy = ys.length
+          ? (ys[0]! + ys[ys.length - 1]!) / 2
+          : Math.min(mt + plotH + 11, H - 8);
+        addCoordAxisLabel(g, doc, gx, [{ text: opts.xFormat(nx), cy }]);
+      } else if (ys.length) {
         let lines: Array<{ text: string; cy: number }>;
         if (isDate) {
           const dt = new Date(nx);
@@ -3146,6 +3157,13 @@ export interface CategoricalLineOptions {
   orientation?: "vertical" | "horizontal";
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
+  /** `spec.x_labels` — category → display label for the CARD HEADER, exactly as
+   *  `BandCrosshairOptions.categoryLabels`: this family (dot plot / dumbbell / categorical-x line)
+   *  feeds the same `buildBandTooltipHtml`, and without the forward its cards showed the raw
+   *  category while a band card showed the label. The coordinated cursor's category echo is
+   *  deliberately NOT labelled from this: it overlays the rendered axis tick (taking that tick's
+   *  box, wrap mode and rotation), and this field is for reading MORE verbosely than the tick. */
+  categoryLabels?: Record<string, string>;
   /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend.
    *  Series-keyed, not category-keyed as the band crosshair's is: this is handed in by the CALLER
    *  from the series' own marker style, never read off the marks, and a line/dot mark carries no
@@ -3285,6 +3303,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
+      categoryLabels: opts.categoryLabels,
       tooltipHook: opts.tooltipHook,
       facet: opts.facet,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
