@@ -273,8 +273,10 @@ export interface Overlay {
    *  `[min, max]` states it explicitly (numeric x only, min < max). Omitted ⇒ the extent of the
    *  group's OBSERVATIONS for `method`/`column` (matching Stata `lfit`'s own default) — a row with a
    *  blank value cell is not one, so a fit stops at the last point it was fitted from — and the
-   *  resolved x-domain for `fun` and `slope`+`intercept`. An overlay NEVER widens the axis — that is
-   *  `xAxisPolicy`'s job — so a line beyond the frame is clipped. */
+   *  resolved x-domain for `fun` and `slope`+`intercept`. An overlay NEVER widens the axis, and no
+   *  field currently does: `xAxisPolicy` carries only `anchorAtZero`, which extends the domain to
+   *  include 0 and nothing more. There is no x counterpart to `yAxisPolicy.min`/`.max`, so a
+   *  `[min, max]` reaching past the data is CLIPPED rather than expanding the frame. */
   domain?: "axis" | [number, number];
   /** What this line MEANS. Drawn in-frame at the line's `labelPosition` end unless `legend: true`
    *  moves it to a legend row (the convention `annotations.yAxis` follows). */
