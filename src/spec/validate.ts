@@ -292,6 +292,7 @@ function overlaySpecErrors(spec: {
   overlays?: Overlay[];
   xAxisType?: unknown;
   chartType?: unknown;
+  orientation?: unknown;
 }): string[] {
   const overlays = spec.overlays;
   if (!overlays?.length) return [];
@@ -302,6 +303,24 @@ function overlaySpecErrors(spec: {
   if (xAxisType === "categorical") {
     return [
       "overlays are not supported with xAxisType categorical — a band scale has no position between categories, so a fitted or drawn line has nowhere to land",
+    ];
+  }
+  // Same "nowhere to land" reason as the categorical rejection above, one axis over: a HORIZONTAL
+  // bar/stacked chart puts the category band on screen-y, and the overlay mark writes its values to
+  // the `y` channel unconditionally (engine/marks/overlay.ts), so a band y-scale cannot place them.
+  // Transposing that mark's channels would not have been the fix: horizontal bar/stacked with a
+  // non-categorical x draws no BARS either (bar.ts/stacked.ts build the band domain from string
+  // categories, which only the `_xc` adapter produces), so the fit would land on an empty frame.
+  // Scoped to bar/stacked — the only overlay-eligible chart types that HONOUR `orientation`.
+  // dumbbell/waterfall already require categorical x / vertical; on line/area/scatter `orientation`
+  // is dead config the renderer ignores, and those draw their overlay correctly, so rejecting them
+  // would break figures that render fine today.
+  if (
+    spec.orientation === "horizontal" &&
+    (spec.chartType === "bar" || spec.chartType === "stacked")
+  ) {
+    return [
+      `overlays are not supported on a horizontal ${spec.chartType} chart — the category band is on the y axis there, so a fitted or drawn line has nowhere to land (drop \`orientation: horizontal\`, or drop the overlay)`,
     ];
   }
   const temporal = xAxisType === "temporal" || xAxisType === "quarterly";
@@ -593,7 +612,12 @@ export function validateSpec(spec: unknown): ValidationResult {
   );
   if (histErrors.length) return { valid: false, errors: histErrors };
   const overlayErrors = overlaySpecErrors(
-    spec as { overlays?: Overlay[]; xAxisType?: unknown; chartType?: unknown },
+    spec as {
+      overlays?: Overlay[];
+      xAxisType?: unknown;
+      chartType?: unknown;
+      orientation?: unknown;
+    },
   );
   if (overlayErrors.length) return { valid: false, errors: overlayErrors };
   const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });

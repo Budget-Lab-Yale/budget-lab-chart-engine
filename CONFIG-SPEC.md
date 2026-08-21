@@ -36,7 +36,9 @@ Axis constraints: `scatter` requires `xAxisType: numeric`; `dotplot` requires
 `xAxisType: categorical`; `histogram` requires `xAxisType: numeric` or `xAxisType: temporal` (a
 histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
 `xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`).
-[`overlays`](#overlay-lines) additionally requires a non-categorical x-axis, on any chart type.
+[`overlays`](#overlay-lines) additionally requires a non-categorical x-axis, on any chart type, and a
+**vertical** chart — `orientation: horizontal` with `overlays` is a validation error on `bar` and
+`stacked`.
 
 ### Column mapping
 
@@ -414,6 +416,12 @@ in list order.
 `overlays` is a validation error there — the same restriction the [x-axis rug](#x-axis-rug) has. On a
 temporal axis, `fun`, `slope`+`intercept` and an explicit numeric `domain` are also rejected: x would be
 epoch milliseconds and the coefficients would not mean anything. Use `method` or `column` there.
+
+**Vertical charts only.** An overlay's values are drawn against the **y** axis, so a chart whose value
+axis is x has nowhere to put them: `overlays` with `orientation: horizontal` is a validation error on
+`bar` and `stacked` (the chart types that act on `orientation` and can otherwise carry an overlay).
+`dumbbell` — horizontal by default — is already excluded by its categorical x. On `line`, `area` and
+`scatter`, `orientation` has no effect at all, so it neither changes the chart nor the overlay there.
 
 **On a histogram, `fun` and `slope`+`intercept` only.** `method` and `column` are validation errors
 there: histogram rows carry bin edges rather than a per-row x, so there is nothing to fit and no column

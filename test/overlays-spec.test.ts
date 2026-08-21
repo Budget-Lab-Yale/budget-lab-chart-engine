@@ -744,3 +744,80 @@ describe("expr module — pinning the cross-task contract", () => {
     );
   });
 });
+
+// A HORIZONTAL bar/stacked chart puts the category band on screen-y and the values on screen-x.
+// The overlay mark writes its values to the `y` channel unconditionally (engine/marks/overlay.ts),
+// so on such a chart there is no y position for them — the same "nowhere to land" reason categorical
+// x is rejected, one axis over. Reachability was checked before this guard existed: `chartType: bar`
+// + `xAxisType: numeric` + `orientation: horizontal` + `overlays: [{ method: "lm" }]` validated, and
+// rendered ZERO overlay paths and zero overlay labels (and zero bar rects — see the note in
+// validate.ts). Transposing the mark's channels would have drawn a fit over an empty frame.
+describe("overlays — orientation restrictions", () => {
+  const cols = { x: "time", value: "value", series: "series" };
+
+  it("rejects overlays on a horizontal bar chart", () => {
+    const r = check([{ method: "lm" }], {
+      chartType: "bar",
+      xAxisType: "numeric",
+      orientation: "horizontal",
+      columns: cols,
+    });
+    expect(r.valid).toBe(false);
+    expect(err(r)).toMatch(/horizontal/);
+  });
+
+  it("rejects overlays on a horizontal stacked chart", () => {
+    const r = check([{ column: "yhat" }], {
+      chartType: "stacked",
+      xAxisType: "numeric",
+      orientation: "horizontal",
+      columns: cols,
+    });
+    expect(r.valid).toBe(false);
+    expect(err(r)).toMatch(/horizontal/);
+  });
+
+  it("keeps the categorical message when a horizontal bar also has a categorical axis", () => {
+    // Both restrictions apply; the axis one is the more fundamental and reports first.
+    const r = check([{ method: "lm" }], {
+      chartType: "bar",
+      xAxisType: "categorical",
+      orientation: "horizontal",
+      columns: cols,
+    });
+    expect(r.valid).toBe(false);
+    expect(err(r)).toMatch(/categorical/);
+  });
+
+  it("still accepts overlays on a VERTICAL bar/stacked chart, explicit or defaulted", () => {
+    for (const chartType of ["bar", "stacked"]) {
+      expect(
+        check([{ method: "lm" }], { chartType, xAxisType: "numeric", columns: cols }).valid,
+      ).toBe(true);
+      expect(
+        check([{ method: "lm" }], {
+          chartType,
+          xAxisType: "numeric",
+          orientation: "vertical",
+          columns: cols,
+        }).valid,
+      ).toBe(true);
+    }
+  });
+
+  it("still accepts overlays where `orientation` is dead config the renderer ignores", () => {
+    // line/area/scatter never read `orientation` (only bar/stacked/dumbbell marks do), so these
+    // charts draw exactly as they do without it — overlay included. Rejecting them would break
+    // figures that render correctly today, which is worse than the misdraw this guard prevents.
+    for (const chartType of ["line", "area", "scatter"]) {
+      expect(
+        check([{ method: "lm" }], {
+          chartType,
+          xAxisType: "numeric",
+          orientation: "horizontal",
+          columns: cols,
+        }).valid,
+      ).toBe(true);
+    }
+  });
+});

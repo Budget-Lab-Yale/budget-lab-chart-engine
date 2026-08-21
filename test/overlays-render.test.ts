@@ -91,6 +91,26 @@ describe("overlays — mark emission", () => {
   });
 });
 
+// Backs the CONFIG-SPEC claim that `orientation` does not reach a line/area/scatter chart, which is
+// what makes it safe for validation to accept `orientation: horizontal` there while rejecting it on
+// bar/stacked (see overlaySpecErrors in spec/validate.ts). If some future change starts honouring
+// orientation on these chart types, this fails and the validator's scoping has to be revisited.
+describe("overlays — `orientation` is inert on line/area/scatter", () => {
+  for (const chartType of ["line", "area", "scatter"]) {
+    it(`draws the same overlay with and without orientation: horizontal (${chartType})`, () => {
+      const s = (patch: Record<string, unknown>) =>
+        spec([{ method: "lm", label: "Fit" }], { chartType, ...patch });
+      const d = (sp: ChartSpec) =>
+        lines(renderChart(sp, ROWS, OPTS).svg).map((p) => p.getAttribute("d"));
+      const plain = d(s({}));
+      expect(plain.length).toBe(1);
+      expect(plain[0]).toBeTruthy();
+      expect(d(s({ orientation: "horizontal" }))).toEqual(plain);
+      expect(d(s({ orientation: "vertical" }))).toEqual(plain);
+    });
+  }
+});
+
 describe("overlays — stroke presentation", () => {
   it("draws a fit solid", () => {
     const svg = renderChart(spec([{ method: "lm" }]), ROWS, OPTS).svg;
