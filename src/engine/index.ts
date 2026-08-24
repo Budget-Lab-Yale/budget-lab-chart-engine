@@ -210,6 +210,19 @@ export interface RenderResult {
   /** Point charts with two-field encoding: the SHAPE legend rows (neutral markers). Null when
    *  shape encodes the same field as color (redundant → folded into `legendItems`) or absent. */
   shapeLegendItems?: ShapeLegendItem[] | null;
+  /** The symbol scale the MARKS were drawn with — the domain/range handed to Plot, including the
+   *  substitution to series identity when shape and color encode one field. This is what the hover
+   *  card's header marker must key off. It is NOT `shapeLegendItems`, which answers the different
+   *  question of what the legend displays and is nulled by `legend: false` and by the redundant
+   *  case — reading the legend's answer is what made a hidden legend draw circles over triangles. */
+  symbolScale?: { domain: string[]; range: string[] } | undefined;
+  /** Shape and color encode the same column, so the header names the series once (no shape token)
+   *  while still keying the marker off `symbolScale`. */
+  shapeIsSeries?: boolean;
+  /** Point charts: the rows that produced DOM markers, in marker order. The per-point hover pairs
+   *  by index, so it must read this rather than `dataInScope`, which still holds the rows that
+   *  rendered nothing. */
+  pointOrder?: PreparedRow[];
   /** Optional headings for the color/shape legend groups (point charts, dual encoding). */
   colorLegendTitle?: string;
   shapeLegendTitle?: string;
@@ -370,6 +383,8 @@ export function renderPane(
       // Point charts: the independent shape-encoding value (drives marker symbol). When the shape
       // column IS the series column (redundant encoding) this simply mirrors `series`.
       if (cols.shape) row._shape = r[cols.shape] ?? "";
+      // Verbatim: this names an observation, so it is not a number to format or a key to look up.
+      if (cols.point_label) row._pointLabel = r[cols.point_label] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
       // Waterfall step kind (delta/total/skip).
       if (cols.kind) row._kind = r[cols.kind] ?? "";
@@ -1211,6 +1226,9 @@ export function renderChart(
     legendItems,
     seriesKeyRows,
     shapeLegendItems,
+    symbolScale: layers.symbolScaleOpts,
+    shapeIsSeries: layers.shapeIsSeries ?? false,
+    pointOrder: layers.pointOrder,
     colorLegendTitle: spec.color_legend_title,
     shapeLegendTitle: spec.shape_legend_title,
     seriesLabels,

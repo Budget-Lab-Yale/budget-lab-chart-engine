@@ -295,6 +295,13 @@ export interface FigurePane {
   /** This pane's x-value parse/format for the crosshair. */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
+  /** Scatter panes: the symbol scale THIS pane's marks were drawn with, and its rows in marker
+   *  order. Both are per-pane on purpose — a pane's shape domain is filtered to the values in its
+   *  own scope, so a figure-level scale would assign a different symbol to the same value in
+   *  different panes. */
+  symbolScale?: { domain: string[]; range: string[] } | undefined;
+  shapeIsSeries?: boolean;
+  pointOrder?: PreparedRow[];
   /** Stacked panes: mirrors MarkLayers.netMode — line/bar panes leave this undefined. */
   netMode?: NetMode;
   /** Stacked panes: visual top→bottom stack order, for the band crosshair's
@@ -714,6 +721,9 @@ export function renderFigure(
         colors: p.colors,
         seriesOrder: p.seriesNames,
         dashedNames: p.layers.dashedNames,
+        symbolScale: p.layers.symbolScaleOpts,
+        shapeIsSeries: p.layers.shapeIsSeries ?? false,
+        pointOrder: p.layers.pointOrder,
         valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
         tooltipXParse: p.tooltipXParse,
         tooltipXFormat: p.tooltipXFormat,
@@ -887,6 +897,9 @@ export function renderFigure(
       colors: p.colors,
       seriesOrder: p.seriesNames,
       dashedNames: p.layers.dashedNames,
+      symbolScale: p.layers.symbolScaleOpts,
+      shapeIsSeries: p.layers.shapeIsSeries ?? false,
+      pointOrder: p.layers.pointOrder,
       valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
       tooltipXParse: p.tooltipXParse,
       tooltipXFormat: p.tooltipXFormat,

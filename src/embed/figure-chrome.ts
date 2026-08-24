@@ -7,6 +7,35 @@
 
 import { TBL } from "../engine/theme.js";
 import { LOGO_DATA_URL, FIGTREE_FONT_FACE, LOGO_ASPECT } from "./assets.js";
+import { parseInlineLinks, isPlainText } from "../spec/rich-text.js";
+import type { TextRun } from "../spec/rich-text.js";
+
+/** A run as the EXPORT draws it: the parser's run plus the bold flag the "Source: " prefix needs.
+ *  `bold` is presentation, so it stays out of the shared spec-side type. */
+export type ChromeRun = TextRun & { bold?: boolean };
+
+/** Wrap one chrome string, taking the ORIGINAL `wrapText` path whenever it holds no link.
+ *
+ *  That branch is the byte-identical guarantee, not an optimization: every spec written before this
+ *  feature parses to a single plain run, so it wraps through exactly the code it always did, and
+ *  `composeBottomChrome` then draws it through exactly the branch it always did. `linked` is what
+ *  the caller keys that decision off. */
+function wrapChrome(
+  s: string,
+  font: string,
+  maxWidth: number,
+  prefix?: string,
+): { lines: ChromeRun[][]; linked: boolean } {
+  const runs = parseInlineLinks(s);
+  if (isPlainText(runs)) {
+    return {
+      lines: wrapText(`${prefix ?? ""}${s}`, font, maxWidth).map((l) => [{ text: l }]),
+      linked: false,
+    };
+  }
+  const withPrefix: ChromeRun[] = prefix ? [{ text: prefix, bold: true }, ...runs] : runs;
+  return { lines: wrapRuns(withPrefix, font, maxWidth), linked: true };
+}
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
 export const XLINK_NS = "http://www.w3.org/1999/xlink";
@@ -82,6 +111,60 @@ export function measureText(text: string, font: string): number {
   if (!_measureCtx) return text.length * 8; // fallback
   _measureCtx.font = font;
   return _measureCtx.measureText(text).width;
+}
+
+/** `wrapText`'s greedy fill, carrying each word's styling.
+ *
+ *  Three properties are load-bearing and easy to lose:
+ *   - **adjacency.** A run boundary is not a word boundary. `[CES](url).` is ONE word whose last
+ *     character is unlinked, and treating the two runs as separate words puts a space before the
+ *     full stop. So words are built by walking the runs and breaking only on real whitespace; a
+ *     word may carry several differently-styled segments.
+ *   - **measurement.** The concatenated visible trial line is measured, exactly as `wrapText` does,
+ *     never a sum of per-segment widths — summing drops the kerning across a boundary and moves
+ *     wrap points, which would resize a content-height frame.
+ *   - **exactness.** The returned segments' text concatenates to the visible line, separators
+ *     included, so the drawing step adds nothing of its own.
+ *
+ *  Whitespace collapses on the same `/\s+/` boundaries `wrapText` uses, so a link-free input wraps
+ *  to the lines it always did. Callers still take the plain path for that case; this is the belt to
+ *  its braces. */
+export function wrapRuns(runs: ChromeRun[], font: string, maxWidth: number): ChromeRun[][] {
+  const words: ChromeRun[][] = [];
+  let word: ChromeRun[] = [];
+  for (const run of runs) {
+    for (const part of run.text.split(/(\s+)/)) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) {
+        if (word.length) { words.push(word); word = []; }
+      } else {
+        word.push({ ...run, text: part });
+      }
+    }
+  }
+  if (word.length) words.push(word);
+
+  const visible = (ws: ChromeRun[][]): string => ws.map((w) => w.map((sg) => sg.text).join("")).join(" ");
+  const lines: ChromeRun[][][] = [];
+  let line: ChromeRun[][] = [];
+  for (const w of words) {
+    const trial = [...line, w];
+    if (line.length && measureText(visible(trial), font) > maxWidth) {
+      lines.push(line);
+      line = [w];
+    } else {
+      line = trial;
+    }
+  }
+  if (line.length) lines.push(line);
+
+  // Flatten to segments, folding each separating space into the segment that follows it, so the
+  // drawer concatenates and never has to reason about where a space belongs.
+  return (lines.length ? lines : [[]]).map((ln) =>
+    ln.flatMap((w, i) =>
+      w.map((sg, j) => (i > 0 && j === 0 ? { ...sg, text: ` ${sg.text}` } : sg)),
+    ),
+  );
 }
 
 export function wrapText(text: string, font: string, maxWidth: number): string[] {
@@ -213,13 +296,49 @@ export function composeTopChrome(
  * caller can reserve it. Mirrors the drawing logic in `composeBottomChrome`. Does NOT include
  * the x-axis title (chart-specific) — that is reserved by the chart exporter separately.
  */
+const SOURCE_PREFIX = "Source: ";
+
+/** A wrapped line's visible text — the plain path's lines hold exactly one run. */
+const plainOf = (line: ChromeRun[]): string => line.map((r) => r.text).join(" ");
+
+/** Draw wrapped runs as SVG text: one <text> per line, one <tspan> per run.
+ *
+ *  SVG, not HTML — HTML injected into an SVG lands in the XHTML namespace and does not rasterise,
+ *  so a link here is drawn as underlined text and is deliberately NOT an <a>: a raster PNG cannot
+ *  carry a link target, and an <a> would imply otherwise. Consecutive tspans without `x` flow
+ *  naturally, which the bold "Source: " prefix already relied on. */
+function drawRunLines(doc: Document, root: SVGElement, lines: ChromeRun[][], top: number): number {
+  lines.forEach((line, i) => {
+    const g = svgEl(doc, "text", {
+      x: MARGIN,
+      y: top + i * 15,
+      fill: MUTED,
+      "font-family": FONT,
+      "font-size": 11,
+      "font-weight": W_BODY,
+      "text-anchor": "start",
+    });
+    line.forEach((run) => {
+      const t = svgEl(doc, "tspan", {
+        ...(run.bold ? { "font-weight": W_SEMI } : {}),
+        ...(run.href ? { "text-decoration": "underline" } : {}),
+      });
+      t.textContent = run.text;
+      g.appendChild(t);
+    });
+    root.appendChild(g);
+  });
+  return top + (lines.length - 1) * 15;
+}
+
 export function bottomChromeHeight(opts: { note?: string; source?: string; width?: number }): number {
   const width = opts.width ?? W;
   const innerW = width - MARGIN * 2;
   const note = opts.note ?? "";
   const source = opts.source ?? "";
-  const noteLines = note ? wrapText(note, `${W_BODY} 11px ${FONT}`, innerW) : [];
-  const sourceLines = source ? wrapText(`Source: ${source}`, `${W_BODY} 11px ${FONT}`, innerW) : [];
+  const font = `${W_BODY} 11px ${FONT}`;
+  const noteLines = note ? wrapChrome(note, font, innerW).lines : [];
+  const sourceLines = source ? wrapChrome(source, font, innerW, SOURCE_PREFIX).lines : [];
   let bottomH = 0;
   if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
   if (sourceLines.length) bottomH += (note ? 15 : 18) + (sourceLines.length - 1) * 15;
@@ -241,38 +360,48 @@ export function composeBottomChrome(
   const innerW = width - MARGIN * 2;
   const note = opts.note ?? "";
   const source = opts.source ?? "";
-  const noteLines = note ? wrapText(note, `${W_BODY} 11px ${FONT}`, innerW) : [];
+  const font = `${W_BODY} 11px ${FONT}`;
+  const noteWrap = note ? wrapChrome(note, font, innerW) : null;
 
-  if (noteLines.length) {
-    by = drawLines(doc, root, noteLines, MARGIN, by + 18, 15, { size: 11, weight: W_BODY, fill: MUTED });
+  if (noteWrap?.lines.length) {
+    if (noteWrap.linked) {
+      by = drawRunLines(doc, root, noteWrap.lines, by + 18);
+    } else {
+      by = drawLines(doc, root, noteWrap.lines.map(plainOf), MARGIN, by + 18, 15, {
+        size: 11, weight: W_BODY, fill: MUTED,
+      });
+    }
   }
   if (source) {
     by += note ? 15 : 18;
-    // Wrap the whole "Source: …" string to the content width; the "Source: " prefix stays bold on
-    // the first line (the rest of that line, and any continuation lines, are regular weight).
-    const PREFIX = "Source: ";
-    const sourceLines = wrapText(`${PREFIX}${source}`, `${W_BODY} 11px ${FONT}`, innerW);
-    sourceLines.forEach((ln, i) => {
-      const g = svgEl(doc, "text", {
-        x: MARGIN,
-        y: by + i * 15,
-        fill: MUTED,
-        "font-family": FONT,
-        "font-size": 11,
-        "font-weight": W_BODY,
-        "text-anchor": "start",
+    // The "Source: " prefix stays bold on the first line; the rest of that line and every
+    // continuation line are regular weight.
+    const { lines, linked } = wrapChrome(source, font, innerW, SOURCE_PREFIX);
+    if (linked) {
+      drawRunLines(doc, root, lines, by);
+    } else {
+      lines.map(plainOf).forEach((ln, i) => {
+        const g = svgEl(doc, "text", {
+          x: MARGIN,
+          y: by + i * 15,
+          fill: MUTED,
+          "font-family": FONT,
+          "font-size": 11,
+          "font-weight": W_BODY,
+          "text-anchor": "start",
+        });
+        if (i === 0 && ln.startsWith(SOURCE_PREFIX)) {
+          const pfx = svgEl(doc, "tspan", { "font-weight": W_SEMI });
+          pfx.textContent = SOURCE_PREFIX;
+          g.appendChild(pfx);
+          g.appendChild(doc.createTextNode(ln.slice(SOURCE_PREFIX.length)));
+        } else {
+          g.textContent = ln;
+        }
+        root.appendChild(g);
       });
-      if (i === 0 && ln.startsWith(PREFIX)) {
-        const pfx = svgEl(doc, "tspan", { "font-weight": W_SEMI });
-        pfx.textContent = PREFIX;
-        g.appendChild(pfx);
-        g.appendChild(doc.createTextNode(ln.slice(PREFIX.length)));
-      } else {
-        g.textContent = ln;
-      }
-      root.appendChild(g);
-    });
-    by += (sourceLines.length - 1) * 15;
+    }
+    by += (lines.length - 1) * 15;
   }
   return by;
 }

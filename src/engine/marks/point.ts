@@ -31,6 +31,30 @@ export function buildPointMarks(
   // a single shape (Plot's default circle) and no symbol scale / shape legend is emitted.
   const hasShape = !!shapeField;
 
+  // Symbol scale: distinct marker per shape value, in MARKER_SYMBOLS order. When shape encodes
+  // the same field as color (redundant), key the domain off series identity so the chart symbols
+  // line up with the combined legend's per-series symbols.
+  let symbolScaleOpts: { domain: string[]; range: string[] } | undefined;
+  if (hasShape) {
+    const domain = (shapeIsSeries ? ctx.seriesNames : shapeNames) ?? shapeNames ?? [];
+    symbolScaleOpts = {
+      domain,
+      range: domain.map((_, i) => markerSymbolForIndex(i)),
+    };
+  }
+
+  // ONE list feeds the mark, the `data-series`/`data-shape` tagging and the hover point array, so
+  // they cannot disagree about which row is the i-th marker. They used to be built from the
+  // unfiltered rows while Plot rendered fewer markers than that, which silently shifted every
+  // marker after a gap onto the wrong row — wrong legend dimming, wrong texture, wrong tooltip.
+  // Two things drop a row, and both are legal author input, not errors:
+  //   - a blank value (mirrored by `defined` in dotOpts below, kept there for Plot's own filtering)
+  //   - a shape value the author left out of `shape_order`, hence out of the symbol domain
+  const symbolDomain = symbolScaleOpts ? new Set(symbolScaleOpts.domain) : null;
+  const rendered = data.filter(
+    (d) => Number.isFinite(d._y) && (!symbolDomain || symbolDomain.has(d._shape ?? "")),
+  );
+
   // Marker radius. Dot plots (and other faceted point panes) use a larger marker so the data
   // dots read close to the ~11px legend symbols; single-frame scatters stay a touch smaller.
   const r = ctx.pane ? MARK_POINT_PANE_R : MARK_POINT_R;
@@ -67,14 +91,14 @@ export function buildPointMarks(
     const offsets = pointDodgeOffsets(seriesNames, !!ctx.pane);
     taggedData = [];
     seriesNames.forEach((s) => {
-      const seriesData = data.filter((d) => d.series === s);
+      const seriesData = rendered.filter((d) => d.series === s);
       if (!seriesData.length) return;
       overlay.push(Plot.dot(seriesData, dotOpts({ dx: offsets.get(s) ?? 0 })));
       taggedData.push(...seriesData);
     });
   } else {
-    overlay.push(Plot.dot(data, dotOpts({})));
-    taggedData = data;
+    overlay.push(Plot.dot(rendered, dotOpts({})));
+    taggedData = rendered;
   }
 
   // Categorical x (dotplot): DON'T override the x scale — use the adapter's BAND scale (the same
@@ -84,17 +108,7 @@ export function buildPointMarks(
   // for connecting LINES, only insets the end categories slightly and would leave the end dots
   // off-center within equal bands.) Numeric scatter likewise uses the adapter's linear domain.
 
-  // Symbol scale: distinct marker per shape value, in MARKER_SYMBOLS order. When shape encodes
-  // the same field as color (redundant), key the domain off series identity so the chart symbols
-  // line up with the combined legend's per-series symbols.
-  let symbolScaleOpts: { domain: string[]; range: string[] } | undefined;
-  if (hasShape) {
-    const domain = (shapeIsSeries ? ctx.seriesNames : shapeNames) ?? shapeNames ?? [];
-    symbolScaleOpts = {
-      domain,
-      range: domain.map((_, i) => markerSymbolForIndex(i)),
-    };
-  }
+  // (Symbol scale is built above, before the data is filtered — the domain decides what renders.)
 
   // Tag each rendered marker with its COLOR series (DOM order == data order) so the color legend's
   // hover-dim / pin works exactly as it does for the other chart types. With a symbol channel Plot
@@ -122,5 +136,6 @@ export function buildPointMarks(
     ...(symbolScaleOpts ? { symbolScaleOpts } : {}),
     ...(hasShape && shapeNames ? { shapeNames } : {}),
     ...(shapeIsSeries ? { shapeIsSeries: true } : {}),
+    pointOrder: taggedData,
   };
 }

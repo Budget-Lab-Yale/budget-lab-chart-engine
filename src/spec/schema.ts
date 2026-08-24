@@ -364,6 +364,7 @@ export const CHART_SPEC_SCHEMA = {
         series: { type: "string" },
         facet: { type: "string" },
         shape: { type: "string" },
+        point_label: { type: "string" },
         section: { type: "string" },
         kind: { type: "string" },
         x0: { type: "string" },

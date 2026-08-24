@@ -34,6 +34,10 @@ export interface PreparedRow {
   /** Point charts (scatter / dotplot): the raw shape-encoding value (from columns.shape).
    *  Drives the marker symbol independently of `series` (color). Absent ⇒ no shape channel. */
   _shape?: string;
+  /** Scatter: the row's identity label (from columns.point_label), shown verbatim in the hover
+   *  card's header. Encodes nothing — it names the observation. Absent ⇒ no point-label channel,
+   *  and empty ⇒ this row contributes no token. */
+  _pointLabel?: string;
   /** Horizontal sectioned bars: the row's section value (from columns.section). Drives the
    *  section-ordered category band + section headers. Absent ⇒ no sections. */
   _section?: string;
@@ -193,6 +197,11 @@ export interface MarkLayers {
   /** Point charts: true when shape encodes the same field as color (series) — the legend is
    *  then a single combined group of colored shapes rather than two groups. */
   shapeIsSeries?: boolean;
+  /** Point charts: the rows that actually produced DOM markers, in marker order. Anything pairing
+   *  rows to markers by index MUST use this, never the unfiltered row list — a blank value or a
+   *  shape outside the symbol domain renders nothing, and indexing the unfiltered list shifts every
+   *  later marker onto the wrong row. */
+  pointOrder?: PreparedRow[];
   /** Optional: faceted-group band scale options (vertical grouped bars use `fx`). */
   fxScaleOpts?: Record<string, unknown>;
   /** Optional: faceted-group band scale options for HORIZONTAL grouped bars, which facet

@@ -18,6 +18,11 @@ export interface ResolvedColumns {
   facet: string | null;
   /** Column driving marker shape (point charts), or null. */
   shape: string | null;
+  /** Scatter: column naming each observation for the hover header, or null. Null ALSO when it
+   *  resolves to the series or shape column: the header already names those, and a repeated token
+   *  ("Observed · Observed") is noise. Collapsing here rather than at render keeps the rule in one
+   *  place, the way `shapeIsSeries` collapses the redundant shape channel. */
+  point_label: string | null;
   /** Column grouping categories into sections (horizontal bars), or null. */
   section: string | null;
   /** Column flagging a waterfall step's kind (delta/total/skip), or null. */
@@ -61,7 +66,14 @@ export function resolveColumns(
     series = "series";
   }
 
-  return { x, value, series, facet, shape, section, kind, x0, x1 };
+  // Resolved LAST: the redundancy check needs the resolved `series`, which has an inferred default
+  // (a "series" column is picked up when present), so comparing the raw spec text would miss the
+  // common case of a chart that never wrote `columns.series` at all.
+  const rawPointLabel = c.point_label != null && c.point_label !== "" ? c.point_label : null;
+  const point_label =
+    rawPointLabel !== null && rawPointLabel !== series && rawPointLabel !== shape ? rawPointLabel : null;
+
+  return { x, value, series, facet, shape, section, kind, x0, x1, point_label };
 }
 
 /** True only when both bin-edge roles (`x0`/`x1`) are mapped — i.e. the data arrives pre-binned. */

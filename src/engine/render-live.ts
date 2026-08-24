@@ -58,6 +58,58 @@ const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
 /** Resolve the friendly bin-label options for a histogram from its spec: the x kind, the calendar
  *  interval (only when `binWidth` is a calendar-interval NAME — count/day-count bins → null), and
  *  the optional `bin_label` unit/rounding config. */
+/** Everything the scatter card needs, derived ONCE from what the render resolved.
+ *
+ *  Standalone and faceted scatter used to build this twice, and the two copies disagreed about both
+ *  halves: whether to name the shape (one asked the legend, which `legend: false` nulls) and which
+ *  symbol a value gets (one indexed raw `spec.shape_order`, which is optional and gets filtered per
+ *  pane before it becomes the domain). Each divergence was a live defect. One builder, two callers,
+ *  so there is exactly one expression of each rule.
+ *
+ *  `symbolScale` is the domain/range handed to Plot — not the legend's view of it — and `pointOrder`
+ *  is the rows that actually produced markers, which is what index-pairing requires. */
+function scatterPointHoverOptions(a: {
+  spec: ChartSpec;
+  pointOrder: PreparedRow[];
+  colors: Map<string, string>;
+  seriesLabels: Record<string, string>;
+  icons?: Map<string, IconSpec>;
+  valueAffixes: ValueAffixes;
+  symbolScale?: { domain: string[]; range: string[] } | undefined;
+  shapeIsSeries?: boolean;
+  overlayTooltips?: OverlayTooltipLine[];
+  tooltipContainer: HTMLElement;
+  chromeTooltip: boolean;
+}): Parameters<typeof attachPointHover>[1] {
+  const { spec, symbolScale } = a;
+  const hasShape = !!spec.columns?.shape;
+  return {
+    tooltipContainer: a.tooltipContainer,
+    ...(a.icons ? { icons: a.icons } : {}),
+    points: a.pointOrder.map((r) => ({
+      series: r.series,
+      shape: r._shape,
+      x: r._xn ?? 0,
+      y: r._y,
+      ...(r._pointLabel ? { pointLabel: r._pointLabel } : {}),
+    })),
+    selector: hasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+    colors: a.colors,
+    seriesLabels: a.seriesLabels,
+    shapeLabels: spec.shape_labels,
+    // The shape token names a SECOND encoding; a redundant shape===series channel is already named
+    // by the series itself. The marker still keys off `symbolScale` either way.
+    showShape: !!symbolScale?.domain.length && !a.shapeIsSeries,
+    symbols: new Map((symbolScale?.domain ?? []).map((d, i) => [d, symbolScale!.range[i]!] as const)),
+    xLabel: spec.x_axis_title ?? "x",
+    yLabel: spec.y_axis_title ?? "Value",
+    xFormat: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+    yFormat: (v: number) => formatValue(v, a.valueAffixes, spec.tooltip_decimals),
+    ...(a.overlayTooltips ? { overlays: a.overlayTooltips } : {}),
+    showTooltip: a.chromeTooltip,
+  };
+}
+
 function histogramBinLabelOpts(spec: ChartSpec): BinLabelOpts {
   const xType = spec.xAxisType === "temporal" ? "temporal" : "numeric";
   const bw = spec.histogram?.binWidth;
@@ -923,6 +975,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, netMode,
       shapeLegendItems, colorLegendTitle, shapeLegendTitle, overlayTooltips, segmentLabelsDropped,
+      symbolScale, shapeIsSeries, pointOrder,
     } = built;
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
@@ -1104,30 +1157,20 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     currentLegendPos = legendPos;
 
     if (spec.chartType === "scatter") {
-      // Scatter: per-point hover (no shared-x guide — points aren't aligned on x). Markers render
-      // as <path> when a shape channel is active, else <circle>; tag order == dataInScope order.
-      const pointHasShape = !!spec.columns?.shape;
-      const showShape = !!(shapeLegendItems && shapeLegendItems.length);
-      // shape value → its marker symbol (from the shape legend), so the tooltip header marker
-      // matches the chart point.
-      const symbols = new Map((shapeLegendItems ?? []).map((s) => [s.shape, s.markerSymbol] as const));
-      attachPointHover(svg, {
-        tooltipContainer,
-        icons: seriesIcons,
-        points: dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
-        selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+      // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
+      attachPointHover(svg, scatterPointHoverOptions({
+        spec,
+        pointOrder: pointOrder ?? dataInScope,
         colors,
         seriesLabels,
-        shapeLabels: spec.shape_labels,
-        showShape,
-        symbols,
-        xLabel: spec.x_axis_title ?? "x",
-        yLabel: spec.y_axis_title ?? "Value",
-        xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        overlays: overlayTooltips,
-        showTooltip: chromeTooltip,
-      });
+        icons: seriesIcons,
+        valueAffixes,
+        symbolScale,
+        shapeIsSeries,
+        overlayTooltips,
+        tooltipContainer,
+        chromeTooltip,
+      }));
     } else if (spec.chartType === "dotplot") {
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
       // value). Reuses the categorical-line crosshair — no bars required.
@@ -1929,6 +1972,12 @@ function wireFigureSvg(
      *  two attach sites below that resolve a single x (attachCrosshair, attachPointHover). Per-pane,
      *  because `overlays[].facet` and the pane's own x-domain both decide what draws here. */
     overlayTooltips?: OverlayTooltipLine[];
+    /** Scatter panes: THIS pane's resolved symbol scale and marker-order rows. Per-pane, because a
+     *  pane filters its shape domain to its own scope — a figure-level scale would give one value
+     *  different symbols in different panes. */
+    symbolScale?: { domain: string[]; range: string[] } | undefined;
+    shapeIsSeries?: boolean;
+    pointOrder?: PreparedRow[];
     netMode?: NetMode;
     /** Series → its resolved icon, from the figure's legend rows. */
     icons?: Map<string, IconSpec>;
@@ -2075,27 +2124,19 @@ function wireFigureSvg(
     return undefined;
   }
   if (ctx.spec.chartType === "scatter") {
-    const cols = ctx.spec.columns ?? {};
-    const pointHasShape = !!cols.shape;
-    // shape value → marker symbol (by shape_order index, matching the chart's symbol scale).
-    const symbols = new Map((ctx.spec.shape_order ?? []).map((s, i) => [s, markerSymbolForIndex(i)] as const));
-    attachPointHover(svg, {
-      tooltipContainer: ctx.tooltipContainer,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      points: ctx.dataInScope.map((r) => ({ series: r.series, shape: r._shape, x: r._xn ?? 0, y: r._y })),
-      selector: pointHasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
+    attachPointHover(svg, scatterPointHoverOptions({
+      spec: ctx.spec,
+      pointOrder: ctx.pointOrder ?? ctx.dataInScope,
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
-      shapeLabels: ctx.spec.shape_labels,
-      showShape: pointHasShape && cols.shape !== cols.series,
-      symbols,
-      xLabel: ctx.spec.x_axis_title ?? "x",
-      yLabel: ctx.spec.y_axis_title ?? "Value",
-      xFormat: (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
-      showTooltip: chromeTooltip,
-    });
+      ...(ctx.icons ? { icons: ctx.icons } : {}),
+      valueAffixes: ctx.valueAffixes,
+      symbolScale: ctx.symbolScale,
+      shapeIsSeries: ctx.shapeIsSeries,
+      ...(ctx.overlayTooltips ? { overlayTooltips: ctx.overlayTooltips } : {}),
+      tooltipContainer: ctx.tooltipContainer,
+      chromeTooltip,
+    }));
     return undefined;
   }
 
@@ -2632,6 +2673,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         tooltipXParse: pane.tooltipXParse,
         tooltipXFormat: pane.tooltipXFormat,
         overlayTooltips: pane.overlayTooltips,
+        symbolScale: pane.symbolScale,
+        shapeIsSeries: pane.shapeIsSeries,
+        pointOrder: pane.pointOrder,
         netMode: pane.netMode,
         // One shared key for the whole figure, so every pane's tooltip agrees with it. The
         // fallback is per-PANE: per-pane mode resolves each pane's colours independently, and a

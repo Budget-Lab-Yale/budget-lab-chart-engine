@@ -61,6 +61,23 @@ function pointChartAxisError(spec: { chartType?: unknown; xAxisType?: unknown })
   return null;
 }
 
+/** `columns.point_label` names the observation in the SCATTER hover card's header, and no other
+ *  chart type draws that header — a dot plot's card is keyed by category, and the rest hover by
+ *  band or bin. Silently ignoring it would leave an author believing a label was configured, so it
+ *  is rejected, like `x_axis_ticks` on a vertical bar.
+ *
+ *  This lives with the other cross-field checks rather than in the shared data validator on
+ *  purpose: `validateChartData` returns to the histogram-specific validator before it reaches the
+ *  column-role checks, so a gate placed there would let `chartType: histogram` through. */
+function pointLabelChartTypeError(spec: {
+  chartType?: unknown;
+  columns?: { point_label?: unknown };
+}): string | null {
+  if (!spec.columns?.point_label) return null;
+  if (spec.chartType === "scatter") return null;
+  return `columns.point_label is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)})`;
+}
+
 /** Dumbbell cross-field constraint: like bars, the categorical axis is declared via
  *  `xAxisType: categorical` (NOT a separate yAxisType); `orientation` then flips it to screen-y
  *  (horizontal, default) or screen-x (vertical). A non-categorical xAxisType has no meaning. */
@@ -638,6 +655,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
+  const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
+  if (plErr) return { valid: false, errors: [plErr] };
   const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (dbErr) return { valid: false, errors: [dbErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
@@ -849,6 +868,10 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   ];
   if (cols.series) requiredRoles.push(["series", cols.series]);
   if (cols.shape) requiredRoles.push(["shape", cols.shape]);
+  // The RAW field, not the resolved one: resolveColumns nulls a point_label that merely repeats the
+  // series or shape column, and a typo'd column name must still be reported rather than collapsed.
+  const rawPointLabel = spec.columns?.point_label;
+  if (rawPointLabel) requiredRoles.push(["point_label", rawPointLabel]);
   if (spec.projected_field) requiredRoles.push(["projected_field", spec.projected_field]);
   if (spec.small_multiples) {
     if (!cols.facet) {

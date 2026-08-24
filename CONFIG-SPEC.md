@@ -62,6 +62,7 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. |
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
+| `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
 | `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
 | `columns.x0` / `columns.x1` | string | Histograms only: columns holding each row's bin **lower**/**upper** edge, for **pre-binned** input. Map both to switch the histogram to pre-binned mode; mapping only one is a validation error. See [Histogram](#histogram-options). |
 
@@ -70,8 +71,8 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | field | type | notes |
 |---|---|---|
 | `subtitle` | string | Below the title (conventionally naming the units). **Display text only** — it does not affect number formatting; use `value_prefix`/`value_suffix` for that. |
-| `source` | string | Source line below the chart. |
-| `note` | string | Note line below the chart, above the source. |
+| `source` | string | Source line below the chart. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
+| `note` | string | Note line below the chart, above the source. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
 | `x_axis_title` | string | Caption below the x-axis. |
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
 | `tooltip_decimals` | integer | Decimal places for every hover **value**, independent of the axis ticks — the tooltip card where one is drawn, and the coordinated cursor's value pills where those replace it, so a multi-pane figure honours it too. Default 2. |
@@ -1085,8 +1086,8 @@ collapse state (or the spec's defaults, when exported without interaction).
 | field | type | notes |
 |---|---|---|
 | `subtitle` | string | Below the title. |
-| `source` | string | Source line below the table. |
-| `notes` | string \| array | Explanatory note(s); each string renders as a paragraph. |
+| `source` | string | Source line below the table. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
+| `notes` | string \| array | Explanatory note(s). An array is **joined into a single note paragraph** (it does not render one paragraph per entry). Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
 
 ### Inline math & special characters
 
@@ -1282,8 +1283,8 @@ the engine expects `time`, `series`, `value`.
 | value | Numeric y-value. May be empty for missing observations. |
 
 Optional chart columns: confidence-bound columns (if `confidence_bands` references them), the facet
-column (if `columns.facet` is set), the shape column (if `columns.shape` is set), and the section
-column (if `columns.section` is set).
+column (if `columns.facet` is set), the shape column (if `columns.shape` is set), the point-label
+column (if `columns.point_label` is set), and the section column (if `columns.section` is set).
 
 **Tables** also use tidy/long data: one row per cell, with the `stub`, `header`, and `value`
 columns (plus optional `pane`, `emphasis_column`, `footnote_column`). The `value` column may hold

@@ -421,6 +421,10 @@ export interface ColumnMap {
    *  independent of `series` (which drives color). Point both at the same column for redundant
    *  color+shape encoding (the dot-plot default). Omit ⇒ a single shape (circle), no shape legend. */
   shape?: string;
+  /** Scatter only: column naming each OBSERVATION (a year, a state, a firm), shown verbatim as the
+   *  last token of the hover card's header. Encodes nothing — it identifies the point rather than
+   *  mapping it to a channel — so there is no `point_labels` display map: the cell IS the label. */
+  point_label?: string;
   /** Horizontal bar charts: column whose distinct values group the categories into labeled
    *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
    *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
