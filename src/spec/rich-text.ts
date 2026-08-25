@@ -75,6 +75,7 @@ export function parseInlineLinks(s: string): TextRun[] {
   // failed opener only advances the cursor by one: re-scanning from each of the `[`s in `[[[[…]`
   // is Θ(n²), and note/source text has no length limit.
   let nextClose = -1;
+  let noCloseParen = false;
   let i = 0;
   while (i < s.length) {
     if (s[i] !== "[") {
@@ -87,7 +88,15 @@ export function parseInlineLinks(s: string): TextRun[] {
     if (nextClose < i + 1) nextClose = s.indexOf("]", i + 1);
     const close = nextClose;
     const text = close === -1 ? "" : s.slice(i + 1, close);
-    const end = close !== -1 && s[close + 1] === "(" ? urlEnd(s, close + 2) : -1;
+    // Check the SCHEME before scanning for the closing paren. `urlEnd` walks the whole URL tail, so
+    // rejecting on scheme afterwards made every opener in `[[[[…x](javascript:aaaa…)` pay that walk
+    // — quadratic again, just further along. The longest allowed prefix is "https://" (8), so a
+    // bounded slice decides it. `noCloseParen` covers the other tail: once there is no `)` left at
+    // all, no later opener can find one either.
+    const plausible =
+      close !== -1 && s[close + 1] === "(" && ALLOWED_SCHEME.test(s.slice(close + 2, close + 10));
+    if (plausible && !noCloseParen && s.indexOf(")", close + 2) === -1) noCloseParen = true;
+    const end = plausible && !noCloseParen ? urlEnd(s, close + 2) : -1;
     const url = end === -1 ? "" : s.slice(close + 2, end);
     if (!text || end === -1 || !isAllowedHref(url)) {
       plain += s[i];

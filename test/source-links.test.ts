@@ -95,6 +95,24 @@ describe("parseInlineLinks", () => {
     expect(runs[1]).toEqual({ text: "two", href: "https://x.org" });
   });
 
+  it("stays linear when every candidate is REJECTED on its scheme", () => {
+    // The shape the first perf test missed: it had no `](`, so it never reached the URL scan. Here
+    // every opener finds the same `]`, sees `(`, and must reject without walking the URL tail.
+    const n = 20000;
+    const pathological = "[".repeat(n) + "x](javascript:" + "a".repeat(n) + ")";
+    const t0 = Date.now();
+    expect(parseInlineLinks(pathological)).toEqual([{ text: pathological }]);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it("stays linear when a plausible scheme never closes its paren", () => {
+    const n = 20000;
+    const pathological = "[x](https://a".repeat(n / 13);
+    const t0 = Date.now();
+    parseInlineLinks(pathological);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
   it("stays linear on bracket-heavy text", () => {
     // `[[[[…]` used to re-scan for the same `]` from every opener — quadratic, on a field with no
     // length limit, run during both live render and export.

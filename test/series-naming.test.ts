@@ -30,12 +30,14 @@ const BASE = {
   overlays: [{ method: "lm", domain: "axis", by: "none", label: "Linear fit", legend: true }],
 } as unknown as ChartSpec;
 
-function mount(spec: ChartSpec): HTMLElement {
+function mountRows(spec: ChartSpec, rows: TidyRow[]): HTMLElement {
   const c = document.createElement("div");
   document.body.appendChild(c);
-  mountChart(c, { spec, rows: ROWS, width: 720, height: 400 } as never);
+  mountChart(c, { spec, rows, width: 720, height: 400 } as never);
   return c;
 }
+
+const mount = (spec: ChartSpec): HTMLElement => mountRows(spec, ROWS);
 
 /** Each legend row's text. The reset control (⟲) is chrome, not a key, so it is excluded. */
 const legendLabels = (c: HTMLElement): string[] =>
@@ -145,5 +147,87 @@ describe("validation", () => {
 
   it("accepts series_legend on any chart type", () => {
     expect(validateSpec(spec({ chartType: "line", xAxisType: "temporal", series_legend: false })).valid).toBe(true);
+  });
+});
+
+// The two CONFIG-SPEC sentences that were NARROWED rather than fixed in code. The repo's rule is
+// that a documented claim is verified by a test before it is written, so these assert the narrowed
+// wording rather than leaving it as reasoning about the source.
+describe("documented interactions of series_legend", () => {
+  const stackedRows = rowsOf(
+    ["A", "B", "C", "D", "E"].flatMap((g) => [
+      { x: "Q1", y: "10", g },
+      { x: "Q2", y: "20", g },
+    ]),
+  );
+  const stacked = (extra: Record<string, unknown>) =>
+    ({
+      chartType: "stacked", xAxisType: "categorical",
+      columns: { x: "x", value: "y", series: "g" }, ...extra,
+    }) as unknown as ChartSpec;
+
+  const isRightLegend = (c: HTMLElement): boolean => !!c.querySelector(".figure-body--legend-right");
+
+  it("puts a 5-series stacked legend on the right by default", () => {
+    expect(isRightLegend(mountRows(stacked({}), stackedRows))).toBe(true);
+  });
+
+  it("falls back to top when series_legend removes the rows the ≥5 rule counts", () => {
+    expect(isRightLegend(mountRows(stacked({ series_legend: false }), stackedRows))).toBe(false);
+  });
+
+  const clickRow = (c: HTMLElement, label: string): void => {
+    const row = Array.from(c.querySelectorAll<HTMLElement>(".tbl-legend-item"))
+      .find((e) => (e.textContent ?? "").trim() === label);
+    expect(row, `no legend row labelled ${label}`).toBeTruthy();
+    row!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  };
+
+  it("still puts a DIVERGING stacked legend on the right — that test is on the data", () => {
+    // The case the first version of this claim missed: `isDiverging` is decided from the rows, so
+    // suppressing the series rows never reaches it. Only the count-based route falls back to top.
+    const diverging = rowsOf([
+      { x: "Q1", y: "10", g: "A" },
+      { x: "Q1", y: "-5", g: "B" },
+      { x: "Q2", y: "20", g: "A" },
+    ]);
+    expect(isRightLegend(mountRows(stacked({ series_legend: false }), diverging))).toBe(true);
+  });
+
+  it("dims the other marks when one of SEVERAL rows is selected", () => {
+    // The positive control: without it, the assertion below passes for any chart that never dims.
+    const c = mount(BASE);
+    clickRow(c, "Observed");
+    expect(c.querySelectorAll(".tbl-dimmed").length).toBeGreaterThan(0);
+  });
+
+  it("dims nothing for a lone row in its OWN dimension, even beside live shape rows", () => {
+    // series_legend strips colour rows but not SHAPE rows (those follow top-level `legend`), so a
+    // dual-encoding scatter keeps three rows while the colour/annotation dimension holds only the
+    // overlay — and each dimension dims on a strict subset of itself.
+    const spec = {
+      chartType: "scatter", xAxisType: "numeric", series_legend: false,
+      columns: { x: "x", value: "y", series: "g", shape: "sh" },
+      overlays: [{ method: "lm", domain: "axis", by: "none", label: "Linear fit", legend: true }],
+    } as unknown as ChartSpec;
+    const rows = rowsOf([
+      { x: "1", y: "10", g: "Other", sh: "round" },
+      { x: "2", y: "20", g: "Other", sh: "square" },
+      { x: "3", y: "30", g: "2020", sh: "square" },
+    ]);
+    const c = mountRows(spec, rows);
+    const labels = legendLabels(c);
+    expect(labels).toContain("Linear fit");
+    expect(labels).toContain("round"); // shape rows survive
+    clickRow(c, "Linear fit");
+    expect(c.querySelectorAll(".tbl-dimmed").length).toBe(0);
+  });
+
+  it("dims nothing when the only remaining row is selected", () => {
+    const c = mount({ ...BASE, series_legend: false } as unknown as ChartSpec);
+    clickRow(c, "Linear fit");
+    // Selecting the sole row is selecting everything, so nothing is dimmed. Documented, and already
+    // true of a single-series scatter with one keyed overlay.
+    expect(c.querySelectorAll(".tbl-dimmed").length).toBe(0);
   });
 });
