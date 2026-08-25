@@ -137,3 +137,20 @@ describe("table rich-text validation coexists with link syntax", () => {
     expect(res.valid).toBe(false);
   });
 });
+
+// CONFIG-SPEC says a table `notes` ARRAY is joined into a single note paragraph. That row used to
+// claim one paragraph per entry, which was never true; the corrected claim needs its own assertion.
+describe("table notes array", () => {
+  it("joins into ONE note paragraph, not one per entry", () => {
+    const c = document.createElement("div");
+    document.body.appendChild(c);
+    mountTable(c, {
+      spec: { title: "T", stub: ["r"], header: ["h"], notes: ["First note.", "Second note."] },
+      rows: [{ stub: "r", header: "h", value: "1" }],
+    } as never);
+    const paras = c.querySelectorAll(".figure-note");
+    expect(paras).toHaveLength(1);
+    expect(paras[0]!.textContent).toContain("First note.");
+    expect(paras[0]!.textContent).toContain("Second note.");
+  });
+});

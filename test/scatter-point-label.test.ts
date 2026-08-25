@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { validateSpec, validateChartData } from "../src/spec/validate";
+import { buildExportSvg } from "../src/embed/export-png";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -148,6 +149,20 @@ describe("columns.point_label", () => {
     ]);
     const panes = mount(spec, rows, true).querySelectorAll<SVGSVGElement>(".figure-pane svg");
     expect(header(panes[0]!, 0)).toBe("Observed · 2004");
+  });
+});
+
+describe("columns.point_label in the PNG export", () => {
+  it("does not appear — CONFIG-SPEC says hover-only, and a PNG has no hover", () => {
+    // The claim is only as good as this assertion: the export re-renders from the spec, so a
+    // channel wired into the render rather than the hover would silently show up here.
+    const titled = { ...SPEC, title: "Exported" } as unknown as ChartSpec;
+    const svg = buildExportSvg(titled, ROWS);
+    // Positive control: without it, an export that rendered nothing would pass the absence checks.
+    expect(svg.textContent).toContain("Exported");
+    expect(svg.querySelectorAll("text").length).toBeGreaterThan(1);
+    expect(svg.textContent).not.toContain("2004");
+    expect(svg.textContent).not.toContain("2005");
   });
 });
 
