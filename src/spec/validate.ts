@@ -73,7 +73,10 @@ function pointLabelChartTypeError(spec: {
   chartType?: unknown;
   columns?: { point_label?: unknown };
 }): string | null {
-  if (!spec.columns?.point_label) return null;
+  // PRESENCE, not truthiness: `point_label: ""` is a no-op the resolver nulls anyway, but letting
+  // it through on a line chart contradicts the documented scatter-only gate. Matches the
+  // `tooltip_series_name` gate below.
+  if (spec.columns?.point_label === undefined) return null;
   if (spec.chartType === "scatter") return null;
   return `columns.point_label is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)})`;
 }

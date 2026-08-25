@@ -767,7 +767,8 @@ export interface ChartSpec {
    *
    * Four routes ignore this field entirely, an explicit value included: `legend: false` resolves
    * "top" before the field is read (unobservable — nothing is drawn), a card narrower than
-   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" (and re-resolves on resize), a `small_multiples`
+   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" at mount (a card narrowed AFTER mounting keeps
+   * its right column — the resize path re-resolves but does not tear one down), a `small_multiples`
    * figure has only a top legend slot, and the PNG export always draws the legend above the chart.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */

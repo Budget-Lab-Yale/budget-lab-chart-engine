@@ -182,6 +182,20 @@ describe("columns.point_label validation", () => {
     expect(res.errors.join(" ")).toMatch(/point_label/);
   });
 
+  it("rejects an EMPTY point_label off a scatter, not just a populated one", () => {
+    // `""` is a no-op the resolver nulls, but the documented gate says the field is rejected on
+    // every non-scatter chart type — and a truthiness check let the empty string through.
+    const res = validateSpec({ ...withType("line"), columns: { x: "x", value: "y", point_label: "" } });
+    expect(res.valid).toBe(false);
+    expect(res.errors.join(" ")).toMatch(/point_label/);
+  });
+
+  it("still accepts a non-scatter that never mentions the field", () => {
+    const spec = { title: "T", data: "d.csv", chartType: "line", xAxisType: "temporal",
+      columns: { x: "x", value: "y" } };
+    expect(validateSpec(spec).valid).toBe(true);
+  });
+
   it("rejects the field on a histogram, which returns early from data validation", () => {
     const res = validateSpec(withType("histogram", { xAxisType: "numeric", histogram: { binWidth: 1 } }));
     expect(res.valid).toBe(false);
