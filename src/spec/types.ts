@@ -762,7 +762,13 @@ export interface ChartSpec {
    * Where to render the legend.
    *
    * Defaults to "top", except: a stacked chart that is diverging (any category/series has a
-   * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
+   * negative value) OR has ≥5 series defaults to "right" — where the ≥5 count is of the series rows
+   * the legend actually SHOWS (`series_legend: false` removes them).
+   *
+   * Three routes ignore this field entirely, an explicit value included: a card narrower than
+   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" (and re-resolves on resize), a `small_multiples`
+   * figure has only a top legend slot, and the PNG export always draws the legend above the chart.
+   * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */
   legendPosition?: "top" | "right";
   /** Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping

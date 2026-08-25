@@ -41,11 +41,23 @@ export function isAllowedHref(url: string): boolean {
   }
 }
 
-/** Index just past the `)` closing a URL that starts at `from`, or -1 when it never closes.
- *  Parens nest, so a trailing `)` inside the URL (Wikipedia-style) stays part of it. */
+/** The longest URL a link may carry, and the STRUCTURAL reason this parser is linear.
+ *
+ *  Measured: with the bound removed, the six shapes in `test/source-links.test.ts` take 13-14s each;
+ *  with it, ~5ms. Without a cap, one `(` that never closes makes every candidate walk to the end of
+ *  the string, and a failed candidate advances the cursor by one character — the quadratic that
+ *  survived three narrower fixes here. The per-`]` memo below lowers the constant (removing it costs
+ *  ~310ms on those shapes) but is not what bounds the work; this is.
+ *
+ *  2048 is the conventional practical URL limit, far past any real source line. */
+const MAX_URL = 2048;
+
+/** Index of the `)` closing a URL that starts at `from`, or -1 when it does not close within
+ *  `MAX_URL` characters. Parens nest, so a `)` inside the URL (Wikipedia-style) stays part of it. */
 function urlEnd(s: string, from: number): number {
   let depth = 1;
-  for (let i = from; i < s.length; i++) {
+  const limit = Math.min(s.length, from + MAX_URL);
+  for (let i = from; i < limit; i++) {
     const c = s[i];
     if (c === "(") depth++;
     else if (c === ")" && --depth === 0) return i;
@@ -71,11 +83,15 @@ export function parseInlineLinks(s: string): TextRun[] {
     plain = "";
   };
 
-  // The next `]` at or after the cursor. Cached because the answer is monotonic in `i`, and a
-  // failed opener only advances the cursor by one: re-scanning from each of the `[`s in `[[[[…]`
-  // is Θ(n²), and note/source text has no length limit.
+  // The candidate URL depends ONLY on the closing `]`, never on which `[` opened it, so it is
+  // resolved once per `]` and reused; `nextClose` is likewise monotonic in the cursor. Both are
+  // constant-factor wins on top of MAX_URL, which is what actually bounds the work — see there
+  // before assuming either of these is load-bearing for complexity.
   let nextClose = -1;
-  let noCloseParen = false;
+  let memoClose = -2;
+  let memoEnd = -1;
+  let memoUrl = "";
+
   let i = 0;
   while (i < s.length) {
     if (s[i] !== "[") {
@@ -83,29 +99,32 @@ export function parseInlineLinks(s: string): TextRun[] {
       i++;
       continue;
     }
-    // `[` only opens a link if the whole construct closes and resolves; otherwise it is a literal
-    // `[` and scanning resumes at the very next character, so `[[a](url)` still finds the link.
     if (nextClose < i + 1) nextClose = s.indexOf("]", i + 1);
     const close = nextClose;
-    const text = close === -1 ? "" : s.slice(i + 1, close);
-    // Check the SCHEME before scanning for the closing paren. `urlEnd` walks the whole URL tail, so
-    // rejecting on scheme afterwards made every opener in `[[[[…x](javascript:aaaa…)` pay that walk
-    // — quadratic again, just further along. The longest allowed prefix is "https://" (8), so a
-    // bounded slice decides it. `noCloseParen` covers the other tail: once there is no `)` left at
-    // all, no later opener can find one either.
-    const plausible =
-      close !== -1 && s[close + 1] === "(" && ALLOWED_SCHEME.test(s.slice(close + 2, close + 10));
-    if (plausible && !noCloseParen && s.indexOf(")", close + 2) === -1) noCloseParen = true;
-    const end = plausible && !noCloseParen ? urlEnd(s, close + 2) : -1;
-    const url = end === -1 ? "" : s.slice(close + 2, end);
-    if (!text || end === -1 || !isAllowedHref(url)) {
+    if (close !== memoClose) {
+      memoClose = close;
+      memoEnd = -1;
+      memoUrl = "";
+      if (close !== -1 && s[close + 1] === "(") {
+        const end = urlEnd(s, close + 2);
+        const url = end === -1 ? "" : s.slice(close + 2, end);
+        if (end !== -1 && isAllowedHref(url)) {
+          memoEnd = end;
+          memoUrl = url;
+        }
+      }
+    }
+    // `[` opens a link only if the construct closes AND resolves; otherwise it is a literal `[` and
+    // scanning resumes at the next character, so `[[a](url)` still finds the link.
+    // `close === i + 1` is empty link text — an invisible link, so the construct stays literal.
+    if (memoEnd === -1 || close === i + 1) {
       plain += s[i];
       i++;
       continue;
     }
     flush();
-    runs.push({ text, href: url });
-    i = end + 1;
+    runs.push({ text: s.slice(i + 1, close), href: memoUrl });
+    i = memoEnd + 1;
   }
   flush();
   return runs;

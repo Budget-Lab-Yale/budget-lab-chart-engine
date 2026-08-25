@@ -95,32 +95,18 @@ describe("parseInlineLinks", () => {
     expect(runs[1]).toEqual({ text: "two", href: "https://x.org" });
   });
 
-  it("stays linear when every candidate is REJECTED on its scheme", () => {
-    // The shape the first perf test missed: it had no `](`, so it never reached the URL scan. Here
-    // every opener finds the same `]`, sees `(`, and must reject without walking the URL tail.
-    const n = 20000;
-    const pathological = "[".repeat(n) + "x](javascript:" + "a".repeat(n) + ")";
-    const t0 = Date.now();
-    expect(parseInlineLinks(pathological)).toEqual([{ text: pathological }]);
-    expect(Date.now() - t0).toBeLessThan(1000);
+
+
+  it("refuses a URL longer than the scan bound, rather than walking the whole string", () => {
+    const huge = `[x](https://e.org/${"a".repeat(3000)})`;
+    expect(parseInlineLinks(huge)).toEqual([{ text: huge }]);
+    // Just inside the bound still links, so the cap is a cap and not an off-by-everything.
+    const ok = `[x](https://e.org/${"a".repeat(1000)})`;
+    expect(parseInlineLinks(ok)[0]!.href).toContain("e.org");
   });
 
-  it("stays linear when a plausible scheme never closes its paren", () => {
-    const n = 20000;
-    const pathological = "[x](https://a".repeat(n / 13);
-    const t0 = Date.now();
-    parseInlineLinks(pathological);
-    expect(Date.now() - t0).toBeLessThan(1000);
-  });
 
-  it("stays linear on bracket-heavy text", () => {
-    // `[[[[…]` used to re-scan for the same `]` from every opener — quadratic, on a field with no
-    // length limit, run during both live render and export.
-    const pathological = "[".repeat(20000) + "]";
-    const t0 = Date.now();
-    expect(parseInlineLinks(pathological)).toEqual([{ text: pathological }]);
-    expect(Date.now() - t0).toBeLessThan(1000);
-  });
+
 
   it("never emits an empty run", () => {
     for (const s of ["", "[a](https://x.org)", "a[b](https://x.org)c", "[a](bad)"]) {
@@ -167,5 +153,49 @@ describe("wrapRuns", () => {
     const lines = wrapRuns(parseInlineLinks(s), FONT, 30);
     expect(lines.length).toBeGreaterThan(1);
     expect(lines.flat().every((r) => r.href === "https://x.org")).toBe(true);
+  });
+});
+
+// Complexity. Each shape below defeated an earlier fix to this parser, so each is pinned.
+//
+// The assertion is an ABSOLUTE bound at a large n, not a growth ratio. A ratio looks more rigorous
+// and is not: measured in isolation these shapes double cleanly (~2.1x), but inside a full test run
+// GC and JIT noise pushed a genuinely linear parser to 3.1-3.4x, which is indistinguishable from
+// quadratic at any threshold worth setting. The absolute gap, by contrast, is not close — at
+// n = 80000 the linear parser takes single-digit milliseconds, while any of the quadratic versions
+// this replaced would do ~10^9 character-steps. A one-second bound cannot be reached by the former
+// or met by the latter, so it is a real regression gate rather than a knife edge.
+describe("parseInlineLinks complexity", () => {
+  const N = 80000;
+
+  const SHAPES: Array<[string, string]> = [
+    ["openers sharing one close, rejected on scheme",
+      "[".repeat(N) + "x](javascript:" + "a".repeat(N) + ")"],
+    ["openers sharing one close, allowed scheme rejected LATER on a forbidden char",
+      "[".repeat(N) + "x](https://" + "a".repeat(N) + " bad)"],
+    ["openers sharing one close, no closing paren at all",
+      "[".repeat(N) + "x](https://" + "a".repeat(N)],
+    ["many distinct closes whose paren never closes",
+      "x](https://a".repeat(N) + ")"],
+    ["nested unbalanced parens in the URL tail",
+      "[".repeat(N) + "x](https://a" + "(".repeat(100) + ")".repeat(50) + "a".repeat(N)],
+    ["plain text with no construct at all", "a".repeat(N * 2)],
+  ];
+
+  for (const [name, input] of SHAPES) {
+    it(`parses in bounded time: ${name}`, () => {
+      const t0 = performance.now();
+      const runs = parseInlineLinks(input);
+      const ms = performance.now() - t0;
+      expect(runs.length).toBeGreaterThan(0);
+      expect(ms).toBeLessThan(1000);
+    });
+  }
+
+  it("refuses a URL longer than the scan bound", () => {
+    const huge = `[x](https://e.org/${"a".repeat(3000)})`;
+    expect(parseInlineLinks(huge)).toEqual([{ text: huge }]);
+    const ok = `[x](https://e.org/${"a".repeat(1000)})`;
+    expect(parseInlineLinks(ok)[0]!.href).toContain("e.org");
   });
 });

@@ -10,6 +10,7 @@
 //   `tooltip_series_name: false` drops the series token from the scatter card's header
 import { describe, it, expect, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
+import { buildExportSvg } from "../src/embed/export-png";
 import { validateSpec } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -192,6 +193,47 @@ describe("documented interactions of series_legend", () => {
       { x: "Q2", y: "20", g: "A" },
     ]);
     expect(isRightLegend(mountRows(stacked({ series_legend: false }), diverging))).toBe(true);
+  });
+
+  it("ignores an explicit right legend on a card too narrow for the column", () => {
+    const c = document.createElement("div");
+    document.body.appendChild(c);
+    mountChart(c, {
+      spec: stacked({ legendPosition: "right" }), rows: stackedRows, width: 400, height: 400,
+    } as never);
+    expect(!!c.querySelector(".figure-body--legend-right")).toBe(false);
+  });
+
+  it("gives a small_multiples figure a top legend, explicit right or not", () => {
+    const spec = stacked({ legendPosition: "right", facet: undefined, small_multiples: { columns: 2 } });
+    (spec as unknown as { columns: Record<string, string> }).columns.facet = "f";
+    const rows = rowsOf(stackedRows.map((r, i) =>
+      ({ ...(r as unknown as Record<string, string>), f: i % 2 ? "P" : "Q" })));
+    const c = document.createElement("div");
+    document.body.appendChild(c);
+    mountChart(c, { spec, rows, width: 900, height: 500 } as never);
+    expect(!!c.querySelector(".figure-body--legend-right")).toBe(false);
+  });
+
+  it("draws the exported legend above the chart even when the live one is on the right", () => {
+    const live = mountRows(stacked({}), stackedRows);
+    expect(!!live.querySelector(".figure-body--legend-right")).toBe(true);
+    // Same spec through the export: the legend is composed into the top chrome, so no right column
+    // exists to find. Asserted on the ORDER — the legend text sits above the plot.
+    const svg = buildExportSvg(stacked({}), stackedRows);
+    const texts = Array.from(svg.querySelectorAll("text"));
+    const legendIdx = texts.findIndex((t) => (t.textContent ?? "").trim() === "A");
+    expect(legendIdx).toBeGreaterThanOrEqual(0);
+    // Position within the frame, not order among <text> nodes: the axis labels are placed by
+    // transform and carry no `y`, so there is nothing to compare against that way. A top legend
+    // sits in the upper-left chrome; a right column would be far across and vertically centred.
+    const legendY = Number(texts[legendIdx]!.getAttribute("y"));
+    const legendX = Number(texts[legendIdx]!.getAttribute("x"));
+    const w = Number(svg.getAttribute("width"));
+    const h = Number(svg.getAttribute("height"));
+    expect([legendX, legendY, w, h].every(Number.isFinite)).toBe(true);
+    expect(legendY).toBeLessThan(h / 2);
+    expect(legendX).toBeLessThan(w / 2);
   });
 
   it("dims the other marks when one of SEVERAL rows is selected", () => {
