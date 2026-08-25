@@ -83,6 +83,78 @@ describe("overlay label clears a steep line", () => {
   });
 });
 
+describe("clipping leaves an in-frame line exactly as it was", () => {
+  it("does not move a label on a line that never leaves the frame", () => {
+    // `a + 1 * (b - a)` is not guaranteed to equal `b`, so a clipper that reconstructs every
+    // endpoint can shift an untouched figure by an ulp — and make the "was it clipped?" identity
+    // check fire when nothing was. Coordinates chosen to be unfriendly to float round-tripping.
+    const rows = [
+      { x: "270.73624672732234", y: "10.5" },
+      { x: "960.2969964209482", y: "88.25" },
+    ] as unknown as TidyRow[];
+    const inFrame = {
+      chartType: "scatter", xAxisType: "numeric", title: "T",
+      columns: { x: "x", value: "y" },
+      overlays: [{ slope: 0.05, intercept: 5, domain: "axis", label: "untouched" }],
+    } as unknown as ChartSpec;
+    const o = labelOffset(renderChart(inFrame, rows) as never, /untouched/)!;
+    // The unclipped pairing: `right` extends LEFT and clears vertically. An edge-aware anchor
+    // would surface here as a zero or positive dx. (Plot folds its own half-pixel offset into the
+    // same transform, so the direction is the assertable part, not the exact magnitude.)
+    expect(o.dx).toBeLessThan(-3);
+    expect(Math.abs(o.dy)).toBeGreaterThanOrEqual(5);
+  });
+
+  it("keeps duplicate vertices, which a middle anchor counts", () => {
+    // `column` overlays may repeat a row. De-duplicating would shift the middle anchor.
+    const rows = [
+      { x: "1", y: "10", c: "20" }, { x: "2", y: "20", c: "20" },
+      { x: "3", y: "30", c: "20" }, { x: "4", y: "40", c: "60" },
+    ] as unknown as TidyRow[];
+    const spec2 = {
+      chartType: "scatter", xAxisType: "numeric", title: "T",
+      columns: { x: "x", value: "y" }, yAxisPolicy: { min: 0, max: 100 },
+      overlays: [{ column: "c", by: "none", label: "dupes", labelPosition: "middle" }],
+    } as unknown as ChartSpec;
+    const p = labelPos(renderChart(spec2, rows) as never, /dupes/);
+    expect(p.found).toBe(true);
+    expect(onCanvas(p as never)).toBe(true);
+  });
+});
+
+describe("overlay label respects a break in the line", () => {
+  it("does not bridge a null gap to invent a visible crossing", () => {
+    // A `column` overlay's blank cell is a BREAK — the line is drawn as two paths. Two points
+    // outside the frame on OPPOSITE sides of that gap must not be joined into a segment that
+    // appears to cross the view, with a label hung on it.
+    const rows = [
+      { x: "1", y: "10", c: "-500" },
+      { x: "50", y: "50", c: "" },
+      { x: "100", y: "90", c: "5000" },
+    ] as unknown as TidyRow[];
+    const res = renderChart(
+      spec([{ column: "c", by: "none", label: "broken" }], { columns: { x: "x", value: "y" } }),
+      rows,
+    );
+    expect(labelPos(res as never, /broken/).found).toBe(false);
+  });
+});
+
+describe("labelSide still means something on a steep line", () => {
+  const steepSpec = (labelSide?: "top" | "bottom") =>
+    spec([{ slope: 10, intercept: 5, domain: "axis", label: "sided",
+            ...(labelSide ? { labelSide } : {}) }]);
+
+  it("puts `bottom` on the opposite side from the default", () => {
+    // Above/below is meaningless on a near-vertical line, so the field toggles sides instead of
+    // being silently ignored — which is what the CONFIG-SPEC row now promises.
+    const a = labelOffset(renderChart(steepSpec(), ROWS) as never, /sided/)!;
+    const b = labelOffset(renderChart(steepSpec("bottom"), ROWS) as never, /sided/)!;
+    expect(Math.sign(a.dx)).not.toBe(Math.sign(b.dx));
+    expect(Math.abs(b.dx)).toBeGreaterThanOrEqual(8);
+  });
+});
+
 describe("overlay label stays on the canvas", () => {
   it("anchors a steep line's label inside the frame, not at its off-screen end", () => {
     const res = renderChart(spec([{ slope: 3, intercept: 5, domain: "axis", label: "steep fit" }]), ROWS);
