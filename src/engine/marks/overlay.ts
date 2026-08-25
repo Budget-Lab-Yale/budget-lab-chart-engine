@@ -388,6 +388,9 @@ export function buildOverlayLabelMarks(
           if (c.x !== anchor.x || c.y !== anchor.y) { other = c; break; }
         }
       }
+      // Defensive: a run with no direction at all needs every vertex coincident, which means a
+      // line at a single x — not drawable, so no spec reaches this. Falling back to no slope
+      // keeps the normal vertical clearing rather than inheriting a stale classification.
       if (!other) return null;
       const xSpan = Math.max(...ctx.xDomain) - Math.min(...ctx.xDomain);
       const ySpan = Math.max(...ctx.yDomain) - Math.min(...ctx.yDomain);

@@ -125,6 +125,23 @@ describe("clipping leaves an in-frame line exactly as it was", () => {
     expect(Math.abs(o.dx)).toBeLessThanOrEqual(7);
   });
 
+  it("searches FORWARD for direction when the anchor is the run's first vertex", () => {
+    // [A, A, B] with a left anchor: nothing sits behind it, so the backward search comes up empty
+    // and the forward one must supply the direction. A→B is SHALLOW here on purpose — taking the
+    // coincident duplicate instead yields dx 0, reads as infinite slope, and would clear sideways.
+    const rows = [
+      { x: "1", y: "10", c: "50" }, { x: "1", y: "10", c: "50" }, { x: "20", y: "90", c: "55" },
+    ] as unknown as TidyRow[];
+    const spec3 = {
+      chartType: "scatter", xAxisType: "numeric", title: "T",
+      columns: { x: "x", value: "y" }, yAxisPolicy: { min: 0, max: 100 },
+      overlays: [{ column: "c", by: "none", label: "fwd", labelPosition: "left" }],
+    } as unknown as ChartSpec;
+    const o = labelOffset(renderChart(spec3, rows) as never, /fwd/)!;
+    expect(Math.abs(o.dy)).toBeGreaterThanOrEqual(5);
+    expect(Math.abs(o.dx)).toBeLessThanOrEqual(7);
+  });
+
   it("keeps duplicate vertices, which a middle anchor counts", () => {
     // EXACTLY [A, A, B], coincident in both coordinates — the only shape where de-duplicating
     // changes the middle anchor: with the duplicate it is the second A (left), without it B
