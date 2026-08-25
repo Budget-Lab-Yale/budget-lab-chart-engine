@@ -179,6 +179,10 @@ describe("parseInlineLinks complexity", () => {
       "x](https://a".repeat(N) + ")"],
     ["nested unbalanced parens in the URL tail",
       "[".repeat(N) + "x](https://a" + "(".repeat(100) + ")".repeat(50) + "a".repeat(N)],
+    // Sized larger than the rest on purpose: this shape's quadratic is a raw `indexOf` scan over a
+    // single repeated character, which V8 runs fast enough that the pre-fix parser cleared the
+    // bound at 160k. Verified to blow it at this size.
+    ["openers with NO closing bracket anywhere", "[".repeat(N * 8)],
     ["plain text with no construct at all", "a".repeat(N * 2)],
   ];
 

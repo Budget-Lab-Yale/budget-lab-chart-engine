@@ -765,7 +765,8 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right" — where the ≥5 count is of the series rows
    * the legend actually SHOWS (`series_legend: false` removes them).
    *
-   * Three routes ignore this field entirely, an explicit value included: a card narrower than
+   * Four routes ignore this field entirely, an explicit value included: `legend: false` resolves
+   * "top" before the field is read (unobservable — nothing is drawn), a card narrower than
    * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" (and re-resolves on resize), a `small_multiples`
    * figure has only a top legend slot, and the PNG export always draws the legend above the chart.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.

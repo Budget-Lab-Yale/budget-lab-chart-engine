@@ -102,7 +102,16 @@ export function parseInlineLinks(s: string): TextRun[] {
       i++;
       continue;
     }
-    if (nextClose < i + 1) nextClose = s.indexOf("]", i + 1);
+    if (nextClose < i + 1) {
+      nextClose = s.indexOf("]", i + 1);
+      // No `]` anywhere ahead means no construct can close, so the rest is literal — finish now.
+      // Leaving `-1` in `nextClose` conflated "not searched yet" with "none exists", and re-ran
+      // `indexOf` over the whole remaining suffix for every opener: `"[".repeat(n)` was quadratic.
+      if (nextClose === -1) {
+        plain += s.slice(i);
+        break;
+      }
+    }
     const close = nextClose;
     if (close !== memoClose) {
       memoClose = close;

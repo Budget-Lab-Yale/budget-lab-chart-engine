@@ -243,7 +243,9 @@ const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGE
  * Resolve the effective legend position for this chart.
  *
  * Rule (per Style-Guide §8.2/§8.3):
- *   - Explicit `spec.legendPosition` always wins.
+ *   - Explicit `spec.legendPosition` wins over the defaults below — but NOT over `legend: false`
+ *     (handled first), nor over the narrow-card fallback applied by the caller. A
+ *     small_multiples figure never reaches here, and the PNG export always draws a top legend.
  *   - Otherwise: "right" when chartType === "stacked" AND (seriesCount >= 5 OR the chart is
  *     diverging — any row with _y < 0); "top" otherwise.
  *

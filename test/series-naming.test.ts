@@ -102,14 +102,16 @@ describe("tooltip_series_name", () => {
   });
 
   it("keeps the shape token, which names a different channel", () => {
+    // A DISTINCT shape column. Pointing shape at the series column would suppress the token as
+    // redundant regardless, so the test would pass even if the field wrongly ate the shape too.
     const spec = {
       ...BASE,
       tooltip_series_name: false,
-      columns: { x: "x", value: "y", series: "g", shape: "g", point_label: "yr" },
+      columns: { x: "x", value: "y", series: "g", shape: "sh", point_label: "yr" },
+      shape_labels: { round: "Rounded" },
     } as unknown as ChartSpec;
-    // shape === series here, so the shape token is already suppressed as redundant; the point
-    // label is what survives.
-    expect(header(mount(spec))).toBe("2004");
+    const rows = rowsOf([{ x: "1", y: "10", g: "Other", sh: "round", yr: "2004" }]);
+    expect(header(mountRows(spec, rows))).toBe("Rounded · 2004");
   });
 
   it("is independent of the legend switch", () => {
@@ -213,6 +215,8 @@ describe("documented interactions of series_legend", () => {
     document.body.appendChild(c);
     mountChart(c, { spec, rows, width: 900, height: 500 } as never);
     expect(!!c.querySelector(".figure-body--legend-right")).toBe(false);
+    // Presence too: absence of the right wrapper would also hold if the legend vanished entirely.
+    expect(legendLabels(c).length).toBeGreaterThan(0);
   });
 
   it("draws the exported legend above the chart even when the live one is on the right", () => {
@@ -262,6 +266,8 @@ describe("documented interactions of series_legend", () => {
     expect(labels).toContain("Linear fit");
     expect(labels).toContain("round"); // shape rows survive
     clickRow(c, "Linear fit");
+    // The click must have LANDED: zero dimmed marks would also be true of a dead legend row.
+    expect(c.querySelectorAll(".is-pinned").length).toBeGreaterThan(0);
     expect(c.querySelectorAll(".tbl-dimmed").length).toBe(0);
   });
 
