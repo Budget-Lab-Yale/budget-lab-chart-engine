@@ -1,7 +1,7 @@
 ﻿// Chart-relevant CSS ported from the AI Labor Market Tracker's styles.css.
 // Includes only the rules required to render the MVP classes:
 //   figure-card, figure-title, figure-subtitle, figure-canvas, figure-legend-slot,
-//   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix,
+//   figure-meta / figure-meta-text / figure-note / figure-source / figure-source-prefix / figure-link,
 //   tbl-legend / tbl-legend-item / tbl-legend-swatch / tbl-legend-reset /
 //   tbl-legend-reset-icon / .is-pinned / .is-hovered, tbl-dimmed,
 //   tbl-tooltip / tbl-tooltip-head / tbl-tooltip-row / tbl-tooltip-swatch /
@@ -335,6 +335,10 @@ body {
 .figure-meta .figure-note { margin: 0 0 4px; }
 .figure-meta .figure-source { margin: 0; }
 .figure-meta .figure-source-prefix { font-weight: var(--tw-semi); }
+/* Inline [text](url) links in note/source. Colour is INHERITED so the source line stays quiet
+   chrome; the underline is what marks it as a link, so the affordance never depends on colour alone
+   (WCAG 1.4.1). A new class name, so this matches nothing the engine rendered before. */
+.figure-meta .figure-link { color: inherit; text-decoration: underline; }
 
 /* =========================================================================
  * Legend

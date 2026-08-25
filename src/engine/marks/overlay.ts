@@ -34,6 +34,16 @@ export interface OverlayMarkContext {
   xField: "_xn" | "_xd";
   fxField?: string;
   fyField?: string;
+  /** The frame the reader can actually see, used to keep an in-frame LABEL on the canvas. Omitted
+   *  ⇒ no filtering, which is the pre-1.13 behaviour (and what a caller with no resolved scales
+   *  gets). Only the label builder reads these; the LINE still draws over its full domain and is
+   *  clipped by the plot, as before. */
+  xDomain?: [number, number];
+  yDomain?: [number, number];
+  /** Inner plot size in px. With the domains, this gives the line's SCREEN slope, which decides
+   *  whether a label clears it by moving vertically or horizontally. Omitted ⇒ vertical, as before. */
+  plotWidth?: number;
+  plotHeight?: number;
 }
 
 /** Numeric x → the adapter's own x units. Shared with the label builder. */
@@ -202,6 +212,88 @@ export function buildOverlayMarks(
 
 export const OVERLAY_LABEL_CLASS = "tbl-overlay-label";
 
+/** One run's vertices CLIPPED to the visible frame, as the sub-runs that survive.
+ *
+ *  Liang-Barsky per segment. Three properties are load-bearing:
+ *
+ *  - **Original vertices are returned by identity, never recomputed.** `a + 1 * (b - a)` is not
+ *    guaranteed to equal `b` in floating point, so reconstructing an unclipped endpoint could move
+ *    it by an ulp — enough to alter rendered output for a figure that is entirely in frame, and
+ *    enough to make the `wasClipped` identity check below fire when nothing was clipped.
+ *  - **Input duplicates survive.** `column` overlays may repeat a row, and a `middle` anchor counts
+ *    positions; only the SEAM between two adjacent segments is de-duplicated.
+ *  - **Sub-runs stay separate.** A curve that leaves and re-enters the frame yields two runs. Joining
+ *    them would put the exit and re-entry points side by side, and the slope measured between them
+ *    is meaningless — it is not a direction the line ever travels.
+ */
+function clipRunToFrame(
+  pts: Array<{ x: number; y: number }>,
+  xDomain?: [number, number],
+  yDomain?: [number, number],
+): Array<Array<{ x: number; y: number }>> {
+  const xLo = xDomain ? Math.min(...xDomain) : -Infinity;
+  const xHi = xDomain ? Math.max(...xDomain) : Infinity;
+  const yLo = yDomain ? Math.min(...yDomain) : -Infinity;
+  const yHi = yDomain ? Math.max(...yDomain) : Infinity;
+  const inside = (p: { x: number; y: number }): boolean =>
+    p.x >= xLo && p.x <= xHi && p.y >= yLo && p.y <= yHi;
+  // A non-finite coordinate has no position to clip against; treat the run as undrawable rather
+  // than letting NaN fall through every comparison and emit NaN vertices.
+  if (pts.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return [];
+  if (!xDomain && !yDomain) return pts.length ? [pts] : [];
+  if (pts.length === 1) return inside(pts[0]!) ? [[pts[0]!]] : [];
+
+  /** An intersection, clamped so rounding cannot land it a hair outside the frame. */
+  const at = (a: { x: number; y: number }, dx: number, dy: number, t: number) => ({
+    x: Math.min(Math.max(a.x + t * dx, xLo), xHi),
+    y: Math.min(Math.max(a.y + t * dy, yLo), yHi),
+  });
+
+  const runs: Array<Array<{ x: number; y: number }>> = [];
+  let cur: Array<{ x: number; y: number }> = [];
+  /** Index of the input vertex most recently pushed, so a shared seam is not duplicated. */
+  let lastIdx = -1;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    let t0 = 0;
+    let t1 = 1;
+    // Each boundary is `t * den >= num`. A POSITIVE den bounds t from below (t0), a negative one
+    // from above (t1); den === 0 means the segment is parallel to that edge, so it survives only if
+    // it starts on the inside.
+    const clip = (num: number, den: number): boolean => {
+      if (den === 0) return num <= 0;
+      const t = num / den;
+      if (den > 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+      else { if (t < t0) return false; if (t < t1) t1 = t; }
+      return true;
+    };
+    const kept =
+      clip(xLo - a.x, dx) && clip(a.x - xHi, -dx) && clip(yLo - a.y, dy) && clip(a.y - yHi, -dy);
+    if (!kept) {
+      if (cur.length) { runs.push(cur); cur = []; }
+      lastIdx = -1;
+      continue;
+    }
+    const startWhole = t0 === 0;
+    const endWhole = t1 === 1;
+    // Identity, not arithmetic, whenever the endpoint is the input vertex itself.
+    const A = startWhole ? a : at(a, dx, dy, t0);
+    const B = endWhole ? b : at(a, dx, dy, t1);
+    if (!(startWhole && lastIdx === i)) {
+      if (lastIdx !== -1 && !startWhole) { runs.push(cur); cur = []; }
+      cur.push(A);
+    }
+    cur.push(B);
+    lastIdx = endWhole ? i + 1 : -1;
+    if (!endWhole) { runs.push(cur); cur = []; }
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
 /** In-frame labels for the overlays that carry one.
  *
  *  An overlay line is SLOPED, so unlike an `annotations.yAxis` label this cannot anchor to a frame
@@ -225,21 +317,128 @@ export function buildOverlayLabelMarks(
   for (const o of resolved) {
     // A keyed overlay's text moved to a legend row, so there is nothing in-frame to draw.
     if (!o.label) continue;
-    const drawn = o.points.filter((p): p is { x: number; y: number } => p.y != null);
+    // Per RUN, not over the flattened points: a `column` overlay's blank cell is a BREAK, and the
+    // line is drawn as separate paths either side of it (see `runsOf`). Flattening first and then
+    // clipping would invent a segment across the gap — two points outside the frame on opposite
+    // sides would manufacture a crossing, and hang a label on a line that is not drawn there.
+    const runs: Array<Array<{ x: number; y: number }>> = [];
+    let run: Array<{ x: number; y: number }> = [];
+    for (const pt of o.points) {
+      if (pt.y == null) {
+        if (run.length) runs.push(run);
+        run = [];
+        continue;
+      }
+      run.push({ x: pt.x, y: pt.y });
+    }
+    if (run.length) runs.push(run);
+    const drawn = runs.flat();
     if (!drawn.length) continue;
-    const anchor =
+    // Anchor on the VISIBLE line, not the whole line. A line is sampled across its `domain`, which
+    // routinely leaves the frame — a steep `domain: axis` fit exceeds the value axis, and an
+    // explicit domain can run past the x axis. Anchoring at the last sampled point put the label
+    // off-canvas, and because labels are never clipped it simply vanished.
+    //
+    // CLIPPED, not filtered: a `slope`+`intercept` line is sampled at its two domain endpoints and
+    // nothing between, so filtering samples to the frame would leave one point (whichever end
+    // happens to be inside) and drop the label at that end instead of where the line leaves the
+    // view. Clipping produces the crossing point, which is where the visible line actually ends.
+    const visibleRuns = runs.flatMap((r) => clipRunToFrame(r, ctx.xDomain, ctx.yDomain));
+    const visible = visibleRuns.flat();
+    // A label for a line the reader cannot see anywhere is the same defect as a legend row for a
+    // line drawn nowhere, which validation already rejects.
+    if (!visible.length) continue;
+    const pick = <T,>(arr: T[]): T =>
       o.labelPosition === "left"
-        ? drawn[0]!
+        ? arr[0]!
         : o.labelPosition === "middle"
-          ? drawn[Math.floor(drawn.length / 2)]!
-          : drawn[drawn.length - 1]!;
+          ? arr[Math.floor(arr.length / 2)]!
+          : arr[arr.length - 1]!;
+    const anchor = pick(visible);
+    const raw = pick(drawn);
+    // Did clipping move the anchor? Only then is the text's own direction in question. On an
+    // unclipped line the pairing is already right — `right` anchors at the line's right end and
+    // extends LEFT, `left` the mirror — so leaving that case alone keeps existing figures identical.
+    const wasClipped = anchor.x !== raw.x || anchor.y !== raw.y;
+
+    // How steep is the line WHERE THE LABEL SITS, in screen terms? `labelSide`'s ±7px vertical nudge
+    // clears a shallow line and does nothing against a steep one: over the width of the text the
+    // line climbs far more than 7px, so it runs straight through. Past ~45° the clearing direction
+    // has to be horizontal instead — the label sits beside the line and its text extends away from
+    // it. Needs the pixel geometry, since "steep" is a screen property, not a data one.
+    const screenSlope = ((): number | null => {
+      if (!ctx.xDomain || !ctx.yDomain || !ctx.plotWidth || !ctx.plotHeight) return null;
+      // Within the anchor's own run. Across a gap the neighbour is a point the line never travels
+      // to from here, and the slope between them describes nothing.
+      const own = visibleRuns.find((r) => r.includes(anchor));
+      if (!own || own.length < 2) return null;
+      const i = own.indexOf(anchor);
+      // The nearest vertex with a DIFFERENT position, searching backwards then forwards. A
+      // `column` overlay may repeat a row exactly, and duplicates are preserved on purpose — but a
+      // coincident neighbour has no direction, and treating its zero dx as infinite slope would
+      // classify even a horizontal line as steep.
+      let other: { x: number; y: number } | null = null;
+      for (let k = i - 1; k >= 0; k--) {
+        const c = own[k]!;
+        if (c.x !== anchor.x || c.y !== anchor.y) { other = c; break; }
+      }
+      if (!other) {
+        for (let k = i + 1; k < own.length; k++) {
+          const c = own[k]!;
+          if (c.x !== anchor.x || c.y !== anchor.y) { other = c; break; }
+        }
+      }
+      // Defensive: a run with no direction at all needs every vertex coincident, which means a
+      // line at a single x — not drawable, so no spec reaches this. Falling back to no slope
+      // keeps the normal vertical clearing rather than inheriting a stale classification.
+      if (!other) return null;
+      const xSpan = Math.max(...ctx.xDomain) - Math.min(...ctx.xDomain);
+      const ySpan = Math.max(...ctx.yDomain) - Math.min(...ctx.yDomain);
+      if (!xSpan || !ySpan) return null;
+      const dxPx = ((anchor.x - other.x) / xSpan) * ctx.plotWidth;
+      const dyPx = ((anchor.y - other.y) / ySpan) * ctx.plotHeight;
+      return dxPx === 0 ? Infinity : Math.abs(dyPx / dxPx);
+    })();
+    const steep = screenSlope != null && screenSlope > 1;
 
     const lineAnchor =
       o.labelSide === "middle" ? "middle" : o.labelSide === "bottom" ? "top" : undefined;
-    const baseDy = o.labelSide === "middle" ? 0 : o.labelSide === "bottom" ? 6 : -7;
+    const baseDy = steep ? 0 : o.labelSide === "middle" ? 0 : o.labelSide === "bottom" ? 6 : -7;
+    // A clipped line ends wherever it crosses the frame, which may be nothing like the side
+    // `labelPosition` names: a steep `right`-labelled fit exits through the TOP, often near the left
+    // edge, and extending the text leftward from there pushes it off the canvas. So when the anchor
+    // has moved, the text extends INWARD from whichever edge it landed near.
+    const edgeAnchor = ((): "start" | "middle" | "end" | null => {
+      if (!wasClipped || !ctx.xDomain) return null;
+      const lo = Math.min(...ctx.xDomain);
+      const hi = Math.max(...ctx.xDomain);
+      if (hi === lo) return null;
+      const frac = (anchor.x - lo) / (hi - lo);
+      return frac < 0.25 ? "start" : frac > 0.75 ? "end" : "middle";
+    })();
+    // On a steep line the label goes to whichever side has more room, with its text running away
+    // from the line rather than across it. `labelSide` still chooses which side when the author has
+    // said: `bottom`/`middle` read as "the far side", `top` as the near one.
+    const steepSide = ((): "start" | "end" | null => {
+      if (!steep || !ctx.xDomain) return null;
+      const lo = Math.min(...ctx.xDomain);
+      const hi = Math.max(...ctx.xDomain);
+      if (hi === lo) return null;
+      // Default to the side with more room. `bottom` is the author's way to say "the other side" —
+      // above/below is meaningless on a near-vertical line, so the field becomes a side TOGGLE
+      // rather than being silently ignored.
+      const roomier: "start" | "end" = (anchor.x - lo) / (hi - lo) > 0.5 ? "end" : "start";
+      if (o.labelSide === "bottom") return roomier === "end" ? "start" : "end";
+      return roomier;
+    })();
     const textAnchor =
-      o.labelPosition === "left" ? "start" : o.labelPosition === "middle" ? "middle" : "end";
-    const baseDx = o.labelPosition === "left" ? 6 : o.labelPosition === "middle" ? 0 : -6;
+      steepSide ??
+      edgeAnchor ??
+      (o.labelPosition === "left" ? "start" : o.labelPosition === "middle" ? "middle" : "end");
+    const steepGap = 9;
+    const baseDx = steep
+      ? textAnchor === "start" ? steepGap : -steepGap
+      : textAnchor === "start" ? 6 : textAnchor === "middle" ? 0 : -6;
 
     marks.push(
       Plot.text([{ x: toAxisX(anchor.x, ctx.xField), y: anchor.y, t: o.label }], {

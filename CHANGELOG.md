@@ -4,6 +4,86 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] - 2026-08-25
+
+### Added
+- `columns.point_label` — **`scatter` only**: a column naming each OBSERVATION (a year, a state, a
+  firm), appended verbatim to the hover card's header after the series and any shape token
+  (`Observed · Compressive · 2004`). It encodes nothing, so there is no display map and no
+  formatting: the cell is the label. A blank cell contributes no token, and a `point_label` pointed
+  at the series or shape column collapses to nothing rather than repeating what the header already
+  says. Rejected on every other chart type rather than ignored. Hover-only — a PNG export has no
+  hover state.
+
+- Inline links in `note` / `source` (charts) and `notes` / `source` (tables): `[text](url)`. The
+  URL must carry an explicit `http://`, `https://` or `mailto:` scheme — anything else, a bare
+  `www.` or a slash-less `http:` included, does not form a link and stays literal text, which is
+  also why no unsafe scheme can ever reach an anchor. A URL over 2048 characters is refused
+  outright rather than truncated. There is **no
+  escape syntax**, deliberately: `\[` already opens display math in table text, and an escape would
+  both collide with that and re-interpret strings that are legal today. Following
+  `table/richtext.ts`, a marker only means anything inside a complete, well-formed construct, so any
+  line without one renders byte-identically to before. In a **PNG export** the link text is
+  underlined but not clickable and the URL is not shown — a raster image cannot carry a link target,
+  and the export draws SVG `<tspan>`s rather than an `<a>` so it cannot imply otherwise.
+
+- `series_legend: false` — drop the legend's **series rows** while keeping the rows overlays and
+  annotations opted into with `legend: true`. For a chart whose colour channel needs no naming
+  because the points are identified some other way. Distinct from `legend: false`, which removes the
+  whole box and pushes overlay labels back in-frame; here the box survives, so click-to-pin still
+  works for the rows that remain. Any chart type.
+- `tooltip_series_name: false` — **`scatter` only**: drop the series token from the hover card's
+  header, so `Observed · 2004` reads `2004`. Rejected on other chart types, where the series name
+  labels a tooltip ROW against a value rather than heading the card. Independent of `series_legend`.
+
+- **An overlay's in-frame label no longer wanders off the canvas.** The label anchors at a point on
+  the line and is deliberately never clipped; together those put it wherever the line's last SAMPLED
+  point was — and a line is drawn across its `domain`, not across the part you can see. A steep
+  `domain: axis` fit exceeded the value axis and a `domain` wider than the x axis ran off the side,
+  so the label was placed outside the frame and silently vanished. Measured before the fix: a
+  slope-3 line's label sat 675px above a 400px frame, and a real spec's second fit label was 44%
+  visible. The line is now clipped to the frame before the anchor is chosen, so `labelPosition:
+  right` means the last point you can see. A line with no visible portion draws no label at all.
+- **A label on a steep line now clears it.** `labelSide`'s few px of vertical offset does nothing
+  against a line that climbs further than that across the width of the text — it ran straight
+  through. Past 45° on screen the label moves beside the line instead, its text running away from
+  it. Across a 19-label sweep this took own-line intersections from 8 to 0; the one remaining
+  collision is a label crossing a DIFFERENT overlay, which nothing arbitrates.
+
+### Fixed — the scatter hover layer read three things it should have been told
+Each of these was the hover/tagging layer reconstructing what the render had already decided,
+instead of reading it. All three are hover- or attribute-level; no rendered geometry changes and no
+golden moved.
+- **`legend: false` no longer strips a scatter card's shape name and marker.** The header keyed off
+  the shape LEGEND, which `legend: false` nulls, so hiding the legend emptied the symbol map and
+  every header fell back to a circle over whatever the point actually was. CONFIG-SPEC has always
+  promised `legend: false` keeps tooltips; now it does. The header now keys off the symbol scale the
+  marks were drawn with.
+- **A faceted scatter no longer draws the wrong marker in its card.** That path indexed raw
+  `shape_order`, which is optional and, when set, is filtered to each pane's own values before it
+  becomes the domain — so an absent order made every header a circle, and a filtered one shifted
+  every later symbol.
+- **A point chart no longer pairs markers with the wrong rows.** A row that renders no marker — a
+  blank value, or a shape value left out of `shape_order` — stayed in the array that `data-series`,
+  `data-shape`, hatch textures and the hover card are all indexed against, shifting every later
+  marker onto the wrong row. The legend dimmed and pinned the wrong points, textures painted onto
+  the wrong series, and the card reported the wrong x and y. The mark, the tagging and the hover now
+  share one list of the rows that actually rendered.
+
+- **A scatter card's header no longer opens with a dangling separator.** A chart with no `series`
+  column resolves to the single-series key (`""`), and that empty token was being joined rather than
+  dropped — so a single-series scatter with a shape channel has always read `· Compressive`. Empty
+  tokens are now dropped, which also covers the new `point_label`.
+
+### Docs
+- `CONFIG-SPEC.md`: the table `notes` row claimed "each string renders as a paragraph". Both table
+  mount branches join the array into one string and the source-line renderer emits a single `<p>`,
+  so an array has never produced one paragraph per entry. Corrected to what the code does.
+- `CONFIG-SPEC.md` + `types.ts`: the `legendPosition` row promised "an explicit value always
+  wins". Four routes ignore the field outright — `legend: false`, a card too narrow for the
+  column, any `small_multiples` figure, and the PNG export, which always draws the legend on
+  top. Long-standing; scoped now because the row was edited here. Each route has a test.
+
 ## [1.12.0] - 2026-08-18
 
 ### Added — a stacked-bar hover/net-callout split, and overlay lines on scatter and line charts

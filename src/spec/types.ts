@@ -421,6 +421,10 @@ export interface ColumnMap {
    *  independent of `series` (which drives color). Point both at the same column for redundant
    *  color+shape encoding (the dot-plot default). Omit ⇒ a single shape (circle), no shape legend. */
   shape?: string;
+  /** Scatter only: column naming each OBSERVATION (a year, a state, a firm), shown verbatim as the
+   *  last token of the hover card's header. Encodes nothing — it identifies the point rather than
+   *  mapping it to a channel — so there is no `point_labels` display map: the cell IS the label. */
+  point_label?: string;
   /** Horizontal bar charts: column whose distinct values group the categories into labeled
    *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
    *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
@@ -758,7 +762,15 @@ export interface ChartSpec {
    * Where to render the legend.
    *
    * Defaults to "top", except: a stacked chart that is diverging (any category/series has a
-   * negative value) OR has ≥5 series defaults to "right". An explicit value always wins.
+   * negative value) OR has ≥5 series defaults to "right" — where the ≥5 count is of the series rows
+   * the legend actually SHOWS (`series_legend: false` removes them).
+   *
+   * Four routes ignore this field entirely, an explicit value included: `legend: false` resolves
+   * "top" before the field is read (unobservable — nothing is drawn), a card narrower than
+   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" at mount (a card narrowed AFTER mounting keeps
+   * its right column — the resize path re-resolves but does not tear one down), a `small_multiples`
+   * figure has only a top legend slot, and the PNG export always draws the legend above the chart.
+   * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */
   legendPosition?: "top" | "right";
   /** Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping
@@ -766,6 +778,14 @@ export interface ChartSpec {
    *  unavailable, since it is driven through the legend. Default true (legend shown per the
    *  usual ≥2-series / style-override rules). */
   legend?: boolean;
+  /** Drop the SERIES rows from the legend while keeping overlay/annotation rows in it. For a chart
+   *  whose colour channel needs no naming because the points are identified some other way. Use the
+   *  top-level `legend: false` to remove the whole box instead. Default true. */
+  series_legend?: boolean;
+  /** Scatter only: drop the series token from the hover card's header, leaving the shape and
+   *  `point_label` tokens. Other chart types use the series name as a ROW label against a value, so
+   *  suppressing it there would leave unlabelled numbers — validation rejects it. Default true. */
+  tooltip_series_name?: boolean;
   /** Turn engine hover chrome OFF, for a consumer drawing its own. Switching a piece off rather
    *  than hiding it in CSS is what makes the PNG export agree — the export re-renders from the
    *  spec, so a stylesheet never reached it.

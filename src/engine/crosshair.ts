@@ -3828,8 +3828,10 @@ export function attachHighlightPills(
 export interface PointHoverOptions {
   /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
   icons?: Map<string, IconSpec>;
-  /** One entry per rendered marker, in the SAME DOM order as `selector` matches. */
-  points: Array<{ series: string; shape?: string; x: number; y: number | null }>;
+  /** One entry per RENDERED marker, in the SAME DOM order as `selector` matches. Rows that render
+   *  nothing (a blank value, a shape outside the symbol domain) must already be excluded — pairing
+   *  is positional, so a stale entry shifts every later marker onto the wrong row. */
+  points: Array<{ series: string; shape?: string; x: number; y: number | null; pointLabel?: string }>;
   /** CSS selector for the marker elements (e.g. 'g[aria-label="dot"] path'). */
   selector: string;
   colors?: Map<string, string>;
@@ -3837,6 +3839,9 @@ export interface PointHoverOptions {
   shapeLabels?: Record<string, string>;
   /** Combine the shape value into the header line ("series · shape") — dual encoding. */
   showShape?: boolean;
+  /** Name the series in the header. False for a scatter whose points are identified some other way
+   *  (`tooltip_series_name: false`); the shape and point-label tokens are unaffected. */
+  showSeriesName?: boolean;
   /** shape value → d3 symbol name, so the tooltip header shows the point's actual marker shape
    *  (filled in the series color). Falls back to a circle. */
   symbols?: Map<string, string>;
@@ -3911,10 +3916,14 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
         symbol: symbolName,
         ...(resolved?.marker ? { marker: resolved.marker } : {}),
       });
-      const headText =
-        opts.showShape && p.shape
-          ? `${escapeHtml(sLabel)} · ${escapeHtml(opts.shapeLabels?.[p.shape] ?? p.shape)}`
-          : escapeHtml(sLabel);
+      // series · shape · identity. The identity token comes last so every header that existed
+      // before this field reads exactly as it did. EMPTY tokens are dropped rather than joined: a
+      // single-series chart resolves to SINGLE_SERIES_KEY (""), and joining that produced a header
+      // opening with a dangling "· ".
+      const tokens = opts.showSeriesName === false ? [] : [sLabel];
+      if (opts.showShape && p.shape) tokens.push(opts.shapeLabels?.[p.shape] ?? p.shape);
+      if (p.pointLabel) tokens.push(p.pointLabel);
+      const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
       let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;
       html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span> <span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
       if (p.y != null && Number.isFinite(p.y)) {

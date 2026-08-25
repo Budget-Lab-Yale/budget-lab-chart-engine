@@ -364,6 +364,7 @@ export const CHART_SPEC_SCHEMA = {
         series: { type: "string" },
         facet: { type: "string" },
         shape: { type: "string" },
+        point_label: { type: "string" },
         section: { type: "string" },
         kind: { type: "string" },
         x0: { type: "string" },
@@ -391,6 +392,7 @@ export const CHART_SPEC_SCHEMA = {
     x_axis_ticks: { type: "string", enum: ["bottom", "top", "both"] },
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
+    tooltip_series_name: { type: "boolean" },
     // A d3 timeFormat pattern. Only the emptiness is structural; "is this axis date-based?" is a
     // cross-field question, so it lives in validate.ts.
     tooltip_x_format: { type: "string", minLength: 1 },
@@ -565,6 +567,7 @@ export const CHART_SPEC_SCHEMA = {
     highlightSeries: { type: "array", items: { type: "string" } },
     legendPosition: { type: "string", enum: ["top", "right"] },
     legend: { type: "boolean" },
+    series_legend: { type: "boolean" },
     chrome: CHROME,
 
     // Small multiples (multi-panel)
