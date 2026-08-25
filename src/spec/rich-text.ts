@@ -56,7 +56,10 @@ const MAX_URL = 2048;
  *  `MAX_URL` characters. Parens nest, so a `)` inside the URL (Wikipedia-style) stays part of it. */
 function urlEnd(s: string, from: number): number {
   let depth = 1;
-  const limit = Math.min(s.length, from + MAX_URL);
+  // `+ 1` because the closing `)` of a MAX_URL-length URL sits AT `from + MAX_URL`: the URL itself
+  // occupies from .. from+MAX_URL-1, so an exclusive bound of `from + MAX_URL` would never look at
+  // the paren and would refuse a URL of exactly the documented maximum.
+  const limit = Math.min(s.length, from + MAX_URL + 1);
   for (let i = from; i < limit; i++) {
     const c = s[i];
     if (c === "(") depth++;

@@ -192,10 +192,26 @@ describe("parseInlineLinks complexity", () => {
     });
   }
 
-  it("refuses a URL longer than the scan bound", () => {
+  /** A link whose URL is exactly `len` characters. */
+  const linkOfUrlLength = (len: number): string => {
+    const head = "https://e.org/";
+    return `[x](${head}${"a".repeat(len - head.length)})`;
+  };
+
+  it("accepts a URL of exactly the documented maximum, and refuses one character more", () => {
+    // The boundary itself, because CONFIG-SPEC promises "longer than 2048" is refused — so 2048
+    // must LINK. An exclusive loop bound made the closing paren of a 2048-char URL unreachable.
+    expect(parseInlineLinks(linkOfUrlLength(2047))[0]!.href).toHaveLength(2047);
+    expect(parseInlineLinks(linkOfUrlLength(2048))[0]!.href).toHaveLength(2048);
+    const over = linkOfUrlLength(2049);
+    expect(parseInlineLinks(over)).toEqual([{ text: over }]);
+  });
+
+  it("refuses an over-long URL outright rather than truncating it", () => {
+    // Refusing is the safe failure; a truncated href would point somewhere the author never wrote.
     const huge = `[x](https://e.org/${"a".repeat(3000)})`;
-    expect(parseInlineLinks(huge)).toEqual([{ text: huge }]);
-    const ok = `[x](https://e.org/${"a".repeat(1000)})`;
-    expect(parseInlineLinks(ok)[0]!.href).toContain("e.org");
+    const runs = parseInlineLinks(huge);
+    expect(runs).toEqual([{ text: huge }]);
+    expect(runs.some((r) => r.href)).toBe(false);
   });
 });
