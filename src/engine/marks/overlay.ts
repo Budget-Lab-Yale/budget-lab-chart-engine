@@ -373,8 +373,22 @@ export function buildOverlayLabelMarks(
       const own = visibleRuns.find((r) => r.includes(anchor));
       if (!own || own.length < 2) return null;
       const i = own.indexOf(anchor);
-      const other = own[i > 0 ? i - 1 : 1]!;
-      if (other === anchor) return null;
+      // The nearest vertex with a DIFFERENT position, searching backwards then forwards. A
+      // `column` overlay may repeat a row exactly, and duplicates are preserved on purpose — but a
+      // coincident neighbour has no direction, and treating its zero dx as infinite slope would
+      // classify even a horizontal line as steep.
+      let other: { x: number; y: number } | null = null;
+      for (let k = i - 1; k >= 0; k--) {
+        const c = own[k]!;
+        if (c.x !== anchor.x || c.y !== anchor.y) { other = c; break; }
+      }
+      if (!other) {
+        for (let k = i + 1; k < own.length; k++) {
+          const c = own[k]!;
+          if (c.x !== anchor.x || c.y !== anchor.y) { other = c; break; }
+        }
+      }
+      if (!other) return null;
       const xSpan = Math.max(...ctx.xDomain) - Math.min(...ctx.xDomain);
       const ySpan = Math.max(...ctx.yDomain) - Math.min(...ctx.yDomain);
       if (!xSpan || !ySpan) return null;

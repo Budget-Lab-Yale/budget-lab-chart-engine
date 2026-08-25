@@ -105,11 +105,34 @@ describe("clipping leaves an in-frame line exactly as it was", () => {
     expect(Math.abs(o.dy)).toBeGreaterThanOrEqual(5);
   });
 
-  it("keeps duplicate vertices, which a middle anchor counts", () => {
-    // `column` overlays may repeat a row. De-duplicating would shift the middle anchor.
+  it("does not read a repeated vertex as an infinitely steep line", () => {
+    // Duplicates are preserved on purpose, but a coincident neighbour has no direction. Treating
+    // its zero dx as infinite slope would move a HORIZONTAL line's label sideways.
+    // The LAST two rows are coincident in BOTH x and the column value, so the anchor's immediate
+    // backward neighbour has no direction. Distinct x values would never reproduce this.
     const rows = [
-      { x: "1", y: "10", c: "20" }, { x: "2", y: "20", c: "20" },
-      { x: "3", y: "30", c: "20" }, { x: "4", y: "40", c: "60" },
+      { x: "1", y: "10", c: "50" }, { x: "2", y: "20", c: "50" },
+      { x: "3", y: "30", c: "50" }, { x: "3", y: "30", c: "50" },
+    ] as unknown as TidyRow[];
+    const flat = {
+      chartType: "scatter", xAxisType: "numeric", title: "T",
+      columns: { x: "x", value: "y" }, yAxisPolicy: { min: 0, max: 100 },
+      overlays: [{ column: "c", by: "none", label: "flatdupes" }],
+    } as unknown as ChartSpec;
+    const o = labelOffset(renderChart(flat, rows) as never, /flatdupes/)!;
+    // A flat line clears VERTICALLY.
+    expect(Math.abs(o.dy)).toBeGreaterThanOrEqual(5);
+    expect(Math.abs(o.dx)).toBeLessThanOrEqual(7);
+  });
+
+  it("keeps duplicate vertices, which a middle anchor counts", () => {
+    // EXACTLY [A, A, B], coincident in both coordinates — the only shape where de-duplicating
+    // changes the middle anchor: with the duplicate it is the second A (left), without it B
+    // (right). Distinct x values, as an earlier version of this test used, cannot detect the bug.
+    const rows = [
+      { x: "1", y: "10", c: "20" },
+      { x: "1", y: "10", c: "20" },
+      { x: "9", y: "90", c: "60" },
     ] as unknown as TidyRow[];
     const spec2 = {
       chartType: "scatter", xAxisType: "numeric", title: "T",
@@ -119,6 +142,39 @@ describe("clipping leaves an in-frame line exactly as it was", () => {
     const p = labelPos(renderChart(spec2, rows) as never, /dupes/);
     expect(p.found).toBe(true);
     expect(onCanvas(p as never)).toBe(true);
+    // Anchored at the duplicated LEFT vertex, not at B on the right.
+    expect(p.x).toBeLessThan(p.w / 2);
+  });
+});
+
+describe("a curve that leaves and re-enters keeps its pieces apart", () => {
+  it("measures slope within the anchor's own visible piece, not across the gap", () => {
+    // A parabola that dives below the frame and climbs back. Clipping yields TWO visible runs. If
+    // they were joined, the exit and re-entry would sit side by side — both on the same boundary,
+    // so the slope between them reads ~0 and the label would clear vertically straight through a
+    // steeply re-entering line. Kept apart, the neighbour is a real step along the curve.
+    const rows = [
+      { x: "0", y: "10" }, { x: "50", y: "50" }, { x: "100", y: "90" },
+    ] as unknown as TidyRow[];
+    const uCurve = {
+      chartType: "scatter", xAxisType: "numeric", title: "T",
+      columns: { x: "x", value: "y" }, yAxisPolicy: { min: 0, max: 100 },
+      overlays: [{
+        // Sampled coarsely on purpose so the two visible pieces are short and the MIDDLE anchor
+        // lands on the second piece's first vertex — the one point where "neighbour within my run"
+        // and "neighbour across the gap" differ. Within the run the neighbour is the steep
+        // re-entry; across the gap it is the previous piece's exit, at the same boundary y, which
+        // reads as slope zero.
+        fun: "b0 + b1*x + b2*x*x", params: { b0: 50, b1: -20, b2: 1 }, n: 8,
+        domain: "axis", label: "ucurve", labelPosition: "middle",
+      }],
+    } as unknown as ChartSpec;
+    const p = labelPos(renderChart(uCurve, rows) as never, /ucurve/);
+    expect(p.found).toBe(true);
+    expect(onCanvas(p as never)).toBe(true);
+    const o = labelOffset(renderChart(uCurve, rows) as never, /ucurve/)!;
+    // The curve is steep where it crosses the frame edge, so the label clears sideways.
+    expect(Math.abs(o.dx)).toBeGreaterThanOrEqual(8);
   });
 });
 
