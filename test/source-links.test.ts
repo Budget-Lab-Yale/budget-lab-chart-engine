@@ -108,6 +108,24 @@ describe("parseInlineLinks", () => {
 
 
 
+  it("loses nothing when it gives up on finding a closing bracket", () => {
+    // The early exit fires when no `]` remains. It must append the WHOLE untouched tail: any
+    // construct opening later would still need a `]` after it, so there is nothing left to find —
+    // but a mistake here silently truncates a source line rather than failing loudly.
+    for (const s of ["a[b[c", "[", "text [ more [ text", "trailing["]) {
+      expect(parseInlineLinks(s)).toEqual([{ text: s }]);
+    }
+  });
+
+  it("still finds a link that appears BEFORE the unmatched bracket", () => {
+    const s = "see [CES](https://www.bls.gov/ces/) and [more";
+    expect(parseInlineLinks(s)).toEqual([
+      { text: "see " },
+      { text: "CES", href: "https://www.bls.gov/ces/" },
+      { text: " and [more" },
+    ]);
+  });
+
   it("never emits an empty run", () => {
     for (const s of ["", "[a](https://x.org)", "a[b](https://x.org)c", "[a](bad)"]) {
       expect(parseInlineLinks(s).some((r) => r.text === "")).toBe(false);
