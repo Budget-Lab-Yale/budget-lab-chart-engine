@@ -61,6 +61,29 @@ describe("columns.point_label", () => {
     expect(header(svg, 1)).toBe("Observed · 2005");
   });
 
+  it("emits no leading separator when the chart has no series to name", () => {
+    // A single-series chart resolves to SINGLE_SERIES_KEY (""), so the series token is empty. It
+    // must be DROPPED, not joined — otherwise the header opens with a dangling "· ".
+    const spec = {
+      chartType: "scatter", xAxisType: "numeric",
+      columns: { x: "x", value: "y", point_label: "yr" },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([{ x: "1", y: "10", yr: "2004" }]);
+    expect(header(canvas(mount(spec, rows)), 0)).toBe("2004");
+  });
+
+  it("emits no leading separator for a single-series chart with a shape channel", () => {
+    // Pre-dates point_label: the old header was `${sLabel} · ${shapeLabel}`, which already opened
+    // with "· " whenever the chart had no series column.
+    const spec = {
+      chartType: "scatter", xAxisType: "numeric",
+      columns: { x: "x", value: "y", shape: "s" },
+      shape_labels: { one: "Compressive" },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([{ x: "1", y: "10", s: "one" }]);
+    expect(header(canvas(mount(spec, rows)), 0)).toBe("Compressive");
+  });
+
   it("orders series · shape · label when a shape channel is also active", () => {
     const spec = {
       ...SPEC,

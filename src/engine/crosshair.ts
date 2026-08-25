@@ -3914,11 +3914,13 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
         ...(resolved?.marker ? { marker: resolved.marker } : {}),
       });
       // series · shape · identity. The identity token comes last so every header that existed
-      // before this field reads exactly as it did.
-      const tokens = [escapeHtml(sLabel)];
-      if (opts.showShape && p.shape) tokens.push(escapeHtml(opts.shapeLabels?.[p.shape] ?? p.shape));
-      if (p.pointLabel) tokens.push(escapeHtml(p.pointLabel));
-      const headText = tokens.join(" · ");
+      // before this field reads exactly as it did. EMPTY tokens are dropped rather than joined: a
+      // single-series chart resolves to SINGLE_SERIES_KEY (""), and joining that produced a header
+      // opening with a dangling "· ".
+      const tokens = [sLabel];
+      if (opts.showShape && p.shape) tokens.push(opts.shapeLabels?.[p.shape] ?? p.shape);
+      if (p.pointLabel) tokens.push(p.pointLabel);
+      const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
       let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;
       html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span> <span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
       if (p.y != null && Number.isFinite(p.y)) {

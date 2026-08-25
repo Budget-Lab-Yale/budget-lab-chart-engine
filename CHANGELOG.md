@@ -45,6 +45,11 @@ golden moved.
   the wrong series, and the card reported the wrong x and y. The mark, the tagging and the hover now
   share one list of the rows that actually rendered.
 
+- **A scatter card's header no longer opens with a dangling separator.** A chart with no `series`
+  column resolves to the single-series key (`""`), and that empty token was being joined rather than
+  dropped — so a single-series scatter with a shape channel has always read `· Compressive`. Empty
+  tokens are now dropped, which also covers the new `point_label`.
+
 ### Docs
 - `CONFIG-SPEC.md`: the table `notes` row claimed "each string renders as a paragraph". Both table
   mount branches join the array into one string and the source-line renderer emits a single `<p>`,
