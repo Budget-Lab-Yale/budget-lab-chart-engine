@@ -1,0 +1,134 @@
+// @vitest-environment jsdom
+//
+// An overlay's in-frame label must land ON the canvas.
+//
+// The label anchors at a point on the line and is deliberately never clipped ("a half-cut label
+// reads worse than one sitting past the axis"). Those two together used to put the label wherever
+// the line's LAST SAMPLED point was — including far outside the frame, because a line is drawn over
+// its `domain`, not over the part of it you can see:
+//   - `domain: axis` on a steep fit reaches y values the axis does not show;
+//   - an explicit `domain: [min, max]` wider than the x axis runs off the side.
+// Measured before the fix: a slope-3 line's label sat 675px above a 400px-tall frame, and a real
+// published spec's SAHM label was 44% visible. Silently invisible, with nothing in validation or
+// rendering to say so.
+//
+// The anchor is now chosen from the sampled points that are actually inside the frame.
+import { describe, it, expect } from "vitest";
+import { renderChart } from "../src/engine/index";
+import type { ChartSpec } from "../src/spec/types";
+import type { TidyRow } from "../src/data/index";
+
+const ROWS = [
+  { x: "1", y: "10" }, { x: "25", y: "30" }, { x: "50", y: "50" },
+  { x: "75", y: "70" }, { x: "100", y: "90" },
+] as unknown as TidyRow[];
+
+const spec = (overlays: unknown[], extra: Record<string, unknown> = {}): ChartSpec =>
+  ({
+    chartType: "scatter", xAxisType: "numeric", title: "T",
+    columns: { x: "x", value: "y" },
+    yAxisPolicy: { min: 0, max: 100 },
+    overlays, ...extra,
+  }) as unknown as ChartSpec;
+
+/** Where the label actually sits in the SVG's own user space, plus the frame it must fit in. */
+function labelPos(res: { svg: SVGSVGElement }, match: RegExp) {
+  const svg = res.svg;
+  const w = Number(svg.getAttribute("width"));
+  const h = Number(svg.getAttribute("height"));
+  const el = Array.from(svg.querySelectorAll("text")).find((t) => match.test(t.textContent ?? ""));
+  if (!el) return { found: false as const, w, h };
+  const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(el.getAttribute("transform") ?? "");
+  return { found: true as const, x: m ? +m[1]! : NaN, y: m ? +m[2]! : NaN, w, h };
+}
+
+const onCanvas = (p: { x: number; y: number; w: number; h: number }): boolean =>
+  p.x >= 0 && p.x <= p.w && p.y >= 0 && p.y <= p.h;
+
+/** The label's own offset from its anchor — Plot bakes dx/dy into the parent <g>. */
+function labelOffset(res: { svg: SVGSVGElement }, match: RegExp): { dx: number; dy: number } | null {
+  const el = Array.from(res.svg.querySelectorAll("text")).find((t) => match.test(t.textContent ?? ""));
+  const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(el?.parentElement?.getAttribute("transform") ?? "");
+  return m ? { dx: +m[1]!, dy: +m[2]! } : null;
+}
+
+describe("overlay label clears a steep line", () => {
+  it("clears a shallow line vertically", () => {
+    const res = renderChart(spec([{ slope: 0.1, intercept: 5, domain: "axis", label: "shallow" }]), ROWS);
+    const o = labelOffset(res as never, /shallow/)!;
+    expect(Math.abs(o.dy)).toBeGreaterThanOrEqual(5);
+    expect(Math.abs(o.dx)).toBeLessThanOrEqual(7);
+  });
+
+  it("clears a steep line HORIZONTALLY instead", () => {
+    // A few px of vertical nudge cannot clear a line that climbs further than that across the width
+    // of the text — it runs straight through. Past 45° on screen the label moves beside the line.
+    const res = renderChart(spec([{ slope: 10, intercept: 5, domain: "axis", label: "steepy" }]), ROWS);
+    const o = labelOffset(res as never, /steepy/)!;
+    expect(Math.abs(o.dx)).toBeGreaterThanOrEqual(8);
+    expect(Math.abs(o.dy)).toBeLessThanOrEqual(2);
+  });
+
+  it("is a SCREEN judgement, not a data one — a wide value range flattens the same slope", () => {
+    // Same data slope, y range 100x larger: on screen the line is now shallow, so the label should
+    // go back to clearing vertically. Keying off the data slope alone would miss this.
+    const res = renderChart(
+      spec([{ slope: 10, intercept: 5, domain: "axis", label: "flattened" }], {
+        yAxisPolicy: { min: 0, max: 10000 },
+      }),
+      ROWS,
+    );
+    const o = labelOffset(res as never, /flattened/)!;
+    expect(Math.abs(o.dy)).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe("overlay label stays on the canvas", () => {
+  it("anchors a steep line's label inside the frame, not at its off-screen end", () => {
+    const res = renderChart(spec([{ slope: 3, intercept: 5, domain: "axis", label: "steep fit" }]), ROWS);
+    const p = labelPos(res as never, /steep fit/);
+    expect(p.found).toBe(true);
+    expect(onCanvas(p as never)).toBe(true);
+  });
+
+  it("anchors a label whose domain runs past the x axis", () => {
+    // The shape of the published SAHM fit: domain far wider than the plotted x range.
+    const res = renderChart(
+      spec([{ fun: "b0 + b1*x", params: { b0: 40, b1: 0.02 }, domain: [-1000, 1000], label: "wide fit" }]),
+      ROWS,
+    );
+    const p = labelPos(res as never, /wide fit/);
+    expect(p.found).toBe(true);
+    expect(onCanvas(p as never)).toBe(true);
+  });
+
+  it("holds for every labelPosition", () => {
+    for (const labelPosition of ["left", "middle", "right"] as const) {
+      const res = renderChart(
+        spec([{ slope: 3, intercept: 5, domain: "axis", label: `pos ${labelPosition}`, labelPosition }]),
+        ROWS,
+      );
+      const p = labelPos(res as never, new RegExp(`pos ${labelPosition}`));
+      expect(p.found, labelPosition).toBe(true);
+      expect(onCanvas(p as never), labelPosition).toBe(true);
+    }
+  });
+
+  it("draws NO label when the line is nowhere in the frame", () => {
+    // A label for a line the reader cannot see is the same defect as a legend row for a line drawn
+    // nowhere — which this codebase already rejects.
+    const res = renderChart(
+      spec([{ slope: 0, intercept: 5000, domain: "axis", label: "way above" }]),
+      ROWS,
+    );
+    expect(labelPos(res as never, /way above/).found).toBe(false);
+  });
+
+  it("leaves a line that fits entirely in frame exactly where it was", () => {
+    // The regression guard: this is every existing figure, and its label must not move.
+    const res = renderChart(spec([{ slope: 0.5, intercept: 20, domain: "axis", label: "gentle fit" }]), ROWS);
+    const p = labelPos(res as never, /gentle fit/);
+    expect(p.found).toBe(true);
+    expect(onCanvas(p as never)).toBe(true);
+  });
+});

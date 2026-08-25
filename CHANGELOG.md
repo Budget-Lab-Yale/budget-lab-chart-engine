@@ -36,6 +36,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   header, so `Observed · 2004` reads `2004`. Rejected on other chart types, where the series name
   labels a tooltip ROW against a value rather than heading the card. Independent of `series_legend`.
 
+- **An overlay's in-frame label no longer wanders off the canvas.** The label anchors at a point on
+  the line and is deliberately never clipped; together those put it wherever the line's last SAMPLED
+  point was — and a line is drawn across its `domain`, not across the part you can see. A steep
+  `domain: axis` fit exceeded the value axis and a `domain` wider than the x axis ran off the side,
+  so the label was placed outside the frame and silently vanished. Measured before the fix: a
+  slope-3 line's label sat 675px above a 400px frame, and a real spec's second fit label was 44%
+  visible. The line is now clipped to the frame before the anchor is chosen, so `labelPosition:
+  right` means the last point you can see. A line with no visible portion draws no label at all.
+- **A label on a steep line now clears it.** `labelSide`'s few px of vertical offset does nothing
+  against a line that climbs further than that across the width of the text — it ran straight
+  through. Past 45° on screen the label moves beside the line instead, its text running away from
+  it. Across a 19-label sweep this took own-line intersections from 8 to 0; the one remaining
+  collision is a label crossing a DIFFERENT overlay, which nothing arbitrates.
+
 ### Fixed — the scatter hover layer read three things it should have been told
 Each of these was the hover/tagging layer reconstructing what the render had already decided,
 instead of reading it. All three are hover- or attribute-level; no rendered geometry changes and no

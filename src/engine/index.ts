@@ -930,6 +930,11 @@ function assemblePaneResult(
       ...buildOverlayLabelMarks(resolvedOverlays, {
         xField: adapter.xField as "_xn" | "_xd",
         ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
+        // The visible frame, so a label anchors on the part of the line that is on screen.
+        ...(axisDomain ? { xDomain: axisDomain } : {}),
+        yDomain,
+        plotWidth,
+        plotHeight,
       }),
     );
     layers.tagging.push(...om.tagging);
