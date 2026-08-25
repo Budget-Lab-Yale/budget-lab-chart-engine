@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.13.0] - 2026-08-24
+## [1.13.0] - 2026-08-25
 
 ### Added
 - `columns.point_label` — **`scatter` only**: a column naming each OBSERVATION (a year, a state, a
@@ -16,8 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   hover state.
 
 - Inline links in `note` / `source` (charts) and `notes` / `source` (tables): `[text](url)`. The
-  URL must carry an explicit `http`, `https` or `mailto` scheme — anything else does not form a link
-  and stays literal text, which is also why no unsafe scheme can ever reach an anchor. There is **no
+  URL must carry an explicit `http://`, `https://` or `mailto:` scheme — anything else, a bare
+  `www.` or a slash-less `http:` included, does not form a link and stays literal text, which is
+  also why no unsafe scheme can ever reach an anchor. A URL over 2048 characters is refused
+  outright rather than truncated. There is **no
   escape syntax**, deliberately: `\[` already opens display math in table text, and an escape would
   both collide with that and re-interpret strings that are legal today. Following
   `table/richtext.ts`, a marker only means anything inside a complete, well-formed construct, so any
@@ -63,6 +65,10 @@ golden moved.
 - `CONFIG-SPEC.md`: the table `notes` row claimed "each string renders as a paragraph". Both table
   mount branches join the array into one string and the source-line renderer emits a single `<p>`,
   so an array has never produced one paragraph per entry. Corrected to what the code does.
+- `CONFIG-SPEC.md` + `types.ts`: the `legendPosition` row promised "an explicit value always
+  wins". Four routes ignore the field outright — `legend: false`, a card too narrow for the
+  column, any `small_multiples` figure, and the PNG export, which always draws the legend on
+  top. Long-standing; scoped now because the row was edited here. Each route has a test.
 
 ## [1.12.0] - 2026-08-18
 
