@@ -78,6 +78,25 @@ function pointLabelChartTypeError(spec: {
   return `columns.point_label is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)})`;
 }
 
+/** `tooltip_series_name` suppresses the series token in the SCATTER card's header, which is the only
+ *  card where the series name is a header naming one hovered point. Everywhere else the series name
+ *  is a ROW label against a value — a line or bar card without it is a list of unlabelled numbers —
+ *  so the field is rejected rather than ignored.
+ *
+ *  `series_legend` deliberately has NO such gate: dropping the series rows leaves a legend that
+ *  still keys the overlays, which is a legible outcome on any chart type. */
+function tooltipSeriesNameChartTypeError(spec: {
+  chartType?: unknown;
+  tooltip_series_name?: unknown;
+}): string | null {
+  // PRESENCE, not value: `tooltip_series_name: true` on a line chart is a no-op, but accepting it
+  // would contradict the documented "rejected elsewhere" and leave an author believing the field
+  // is wired there. Matches the point_label gate above.
+  if (spec.tooltip_series_name === undefined) return null;
+  if (spec.chartType === "scatter") return null;
+  return `tooltip_series_name is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the series name labels a tooltip ROW, not the header`;
+}
+
 /** Dumbbell cross-field constraint: like bars, the categorical axis is declared via
  *  `xAxisType: categorical` (NOT a separate yAxisType); `orientation` then flips it to screen-y
  *  (horizontal, default) or screen-x (vertical). A non-categorical xAxisType has no meaning. */
@@ -657,6 +676,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (axisErr) return { valid: false, errors: [axisErr] };
   const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
   if (plErr) return { valid: false, errors: [plErr] };
+  const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
+  if (tsnErr) return { valid: false, errors: [tsnErr] };
   const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (dbErr) return { valid: false, errors: [dbErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });

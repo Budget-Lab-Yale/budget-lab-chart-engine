@@ -100,6 +100,7 @@ function scatterPointHoverOptions(a: {
     // The shape token names a SECOND encoding; a redundant shape===series channel is already named
     // by the series itself. The marker still keys off `symbolScale` either way.
     showShape: !!symbolScale?.domain.length && !a.shapeIsSeries,
+    showSeriesName: spec.tooltip_series_name !== false,
     symbols: new Map((symbolScale?.domain ?? []).map((d, i) => [d, symbolScale!.range[i]!] as const)),
     xLabel: spec.x_axis_title ?? "x",
     yLabel: spec.y_axis_title ?? "Value",

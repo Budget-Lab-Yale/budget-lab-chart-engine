@@ -25,6 +25,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   underlined but not clickable and the URL is not shown — a raster image cannot carry a link target,
   and the export draws SVG `<tspan>`s rather than an `<a>` so it cannot imply otherwise.
 
+- `series_legend: false` — drop the legend's **series rows** while keeping the rows overlays and
+  annotations opted into with `legend: true`. For a chart whose colour channel needs no naming
+  because the points are identified some other way. Distinct from `legend: false`, which removes the
+  whole box and pushes overlay labels back in-frame; here the box survives, so click-to-pin still
+  works for the rows that remain. Any chart type.
+- `tooltip_series_name: false` — **`scatter` only**: drop the series token from the hover card's
+  header, so `Observed · 2004` reads `2004`. Rejected on other chart types, where the series name
+  labels a tooltip ROW against a value rather than heading the card. Independent of `series_legend`.
+
 ### Fixed — the scatter hover layer read three things it should have been told
 Each of these was the hover/tagging layer reconstructing what the render had already decided,
 instead of reading it. All three are hover- or attribute-level; no rendered geometry changes and no

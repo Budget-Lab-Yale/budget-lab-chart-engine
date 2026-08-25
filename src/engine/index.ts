@@ -1116,6 +1116,11 @@ export function buildSeriesKeyRows(
  *  would be a restatement of the title — except when a dash override makes the style itself the
  *  thing being named. Point/dumbbell charts have no dash channel, so they key on count alone. */
 function legendShowsSeriesRows(spec: ChartSpec, seriesNames: string[], layers: MarkLayers): boolean {
+  // An explicit opt-out wins over every automatic rule: the author is saying the colour channel
+  // does not need naming (the points are identified some other way). Only the SERIES rows go —
+  // overlay and annotation rows are appended by the caller regardless, which is what distinguishes
+  // this from the top-level `legend: false` that removes the whole box.
+  if (spec.series_legend === false) return false;
   if (seriesNames.length > 1) return true;
   const chartType = spec.chartType;
   if (chartType === "scatter" || chartType === "dotplot" || chartType === "dumbbell") return false;

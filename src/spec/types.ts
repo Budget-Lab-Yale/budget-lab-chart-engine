@@ -770,6 +770,14 @@ export interface ChartSpec {
    *  unavailable, since it is driven through the legend. Default true (legend shown per the
    *  usual ≥2-series / style-override rules). */
   legend?: boolean;
+  /** Drop the SERIES rows from the legend while keeping overlay/annotation rows in it. For a chart
+   *  whose colour channel needs no naming because the points are identified some other way. Use the
+   *  top-level `legend: false` to remove the whole box instead. Default true. */
+  series_legend?: boolean;
+  /** Scatter only: drop the series token from the hover card's header, leaving the shape and
+   *  `point_label` tokens. Other chart types use the series name as a ROW label against a value, so
+   *  suppressing it there would leave unlabelled numbers — validation rejects it. Default true. */
+  tooltip_series_name?: boolean;
   /** Turn engine hover chrome OFF, for a consumer drawing its own. Switching a piece off rather
    *  than hiding it in CSS is what makes the PNG export agree — the export re-renders from the
    *  spec, so a stylesheet never reached it.

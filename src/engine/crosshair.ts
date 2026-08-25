@@ -3839,6 +3839,9 @@ export interface PointHoverOptions {
   shapeLabels?: Record<string, string>;
   /** Combine the shape value into the header line ("series · shape") — dual encoding. */
   showShape?: boolean;
+  /** Name the series in the header. False for a scatter whose points are identified some other way
+   *  (`tooltip_series_name: false`); the shape and point-label tokens are unaffected. */
+  showSeriesName?: boolean;
   /** shape value → d3 symbol name, so the tooltip header shows the point's actual marker shape
    *  (filled in the series color). Falls back to a circle. */
   symbols?: Map<string, string>;
@@ -3917,7 +3920,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       // before this field reads exactly as it did. EMPTY tokens are dropped rather than joined: a
       // single-series chart resolves to SINGLE_SERIES_KEY (""), and joining that produced a header
       // opening with a dangling "· ".
-      const tokens = [sLabel];
+      const tokens = opts.showSeriesName === false ? [] : [sLabel];
       if (opts.showShape && p.shape) tokens.push(opts.shapeLabels?.[p.shape] ?? p.shape);
       if (p.pointLabel) tokens.push(p.pointLabel);
       const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
