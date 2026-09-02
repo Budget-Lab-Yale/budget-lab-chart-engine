@@ -20,6 +20,7 @@ import {
   X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
+import { placePointCallouts, type CalloutBox } from "./callout-placement";
 import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
@@ -909,13 +910,54 @@ export function assemblePlot({
     }
   });
 
+  // 6b. Point-callout auto-placement. A callout with NO explicit dx/dy is movable: its label box is
+  //     estimated at the default offset (width from the longest line, one LABEL_ROW_H per line,
+  //     anchored like the drawn text) and colliding movable boxes are spread apart vertically; a callout with
+  //     an explicit dx or dy is pinned and the others route around it. Same preconditions as the
+  //     connector below (numeric axis domain, known width/height) and the same estimate-based
+  //     geometry as the stagger above — getBBox would make live, PNG and SSR disagree. A box that
+  //     collides with nothing gets NO entry here, so it takes exactly today's default below and
+  //     every existing chart renders byte-identically.
+  const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
+  const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
+  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -28 : -6);
+  const autoDy = new Map<number, number>();
+  if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
+    const boxes: CalloutBox[] = [];
+    const boxIdx: number[] = [];
+    const boxPy: number[] = [];
+    pointsAnn.forEach((p, i) => {
+      if (p.x == null || !Number.isFinite(p.y as number)) return;
+      const mx = xOpts.markerToX({ x: p.x });
+      if (mx == null || typeof mx === "string") return;
+      const xn = typeof mx === "number" ? mx : mx.getTime();
+      const px = effMarginLeft + ((xn - xAxisDomain[0]) / (xAxisDomain[1] - xAxisDomain[0])) * innerWForPx;
+      const py = TBL_MARGIN_TOP + ((yDomain[1] - (p.y as number)) / (yDomain[1] - yDomain[0])) * innerHForPx;
+      const dx = p.dx != null ? p.dx : 0;
+      const text = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
+      const lines = text.split("\n");
+      const w = Math.max(...lines.map((l) => l.length)) * LABEL_CHAR_PX;
+      const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed: p.dx != null || p.dy != null });
+      boxIdx.push(i);
+      boxPy.push(py);
+    });
+    const ys = placePointCallouts(boxes, {
+      gap: LABEL_GAP,
+      lo: TBL_MARGIN_TOP + LABEL_ROW_H / 2,
+      hi: TBL_MARGIN_TOP + innerHForPx - LABEL_ROW_H / 2,
+    });
+    ys.forEach((y, k) => {
+      if (y !== boxes[k]!.y) autoDy.set(boxIdx[k]!, y - boxPy[k]!);
+    });
+  }
+
   // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
   //     (series-snap). With connector, draw a leader arrow from the label to the point — the label
   //     offset (dx/dy px) is converted to a second data coordinate via the x/y extents so the arrow
   //     lands exactly on the point. The arrowhead marks the point (no separate dot).
-  const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
-  const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  for (const p of pointsAnn) {
+  for (let pi = 0; pi < pointsAnn.length; pi++) {
+    const p = pointsAnn[pi]!;
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
     // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
     // A `point:` callout arrives with `x` filled in by index.ts (or was dropped there); one that
@@ -926,9 +968,10 @@ export function assemblePlot({
     const py = p.y as number;
     const pColor = resolveColorOr(p.color, TBL.color.heading);
     // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
-    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28).
+    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28). An auto-placed
+    // label (6b) overrides the default; an explicit dy always wins.
     const dx = p.dx != null ? p.dx : 0;
-    const dy = p.dy != null ? -p.dy : p.connector ? -28 : -6;
+    const dy = autoDy.get(pi) ?? defaultDy(p);
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
