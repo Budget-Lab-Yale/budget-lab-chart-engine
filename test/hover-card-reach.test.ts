@@ -450,6 +450,57 @@ describe("faceted stack with the hover card — card on the hovered pane, band e
       expect(count(svg, ".tbl-coord-pill")).toBeGreaterThan(0);
     }
   });
+
+  // The LEGEND-highlight pills (`.tbl-hl-pills`, a legend gesture) are a different renderer from
+  // the cursor's `.tbl-coord-pill` above, and the figure bus suppresses the hovered category in
+  // them (`emit` → `setSuppressedCategory`) so they don't double up with the cursor's own pill.
+  // In tooltip mode the cursor draws NO pill to double up with, so there is nothing to suppress:
+  // the standalone chart in the same mode passes no `onResolve` at all and never suppresses
+  // ("Legend-highlight pills stay in BOTH modes", render-live.ts's mountChart branch). Before the
+  // fix, giving these panes an `onResolve` reached the suppression for the first time and made a
+  // pinned series' pill vanish from the hovered category on every pane, replaced by nothing.
+  const hlTexts = (svg: SVGSVGElement): string[] =>
+    Array.from(svg.querySelectorAll("g.tbl-hl-pills text")).map((t) => t.textContent ?? "");
+  const pinSeries = (m: { container: HTMLElement }, series: string): void => {
+    m.container
+      .querySelector<HTMLElement>(`.tbl-legend-item[data-series="${series}"]`)!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  };
+
+  it("DEFAULTS + a pinned legend series: the hover leaves the pinned pills alone on BOTH panes", () => {
+    const m = mount(stackSpec(), twoPane([["Up", 6, 5], ["Down", -4, -2]]), true);
+    pinSeries(m, "Up");
+    // One pill per category, on every pane — the pinned state, before any band hover.
+    const before = m.svgs.map(hlTexts);
+    for (const t of before) expect(t.length).toBe(2);
+
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    // The sibling keeps the pinned series' value for the hovered category: the echo is a shade
+    // with no numbers, so suppressing the only read-out there would lose it outright.
+    expect(hlTexts(m.svgs[1]!)).toEqual(before[1]!);
+    // And so does the hovered pane, matching the standalone chart in this mode. The card is an
+    // additional read-out, not a replacement drawn in the pill's place.
+    expect(hlTexts(m.svgs[0]!)).toEqual(before[0]!);
+  });
+
+  // The paired control: in the PILLS mode the suppression is still wanted and still happens —
+  // proof the fix is scoped to the card panes and did not disable the mechanism figure-wide.
+  it("no-dial control: the pills mode still suppresses the hovered category's pinned pill", () => {
+    const m = mount(stackSpec(), twoPane([["Up", 6, 5], ["Down", 4, 2]]), true);
+    pinSeries(m, "Up");
+    for (const svg of m.svgs) expect(hlTexts(svg).length).toBe(2);
+
+    hoverBandCentre(m.svgs[0]!);
+
+    // The cursor's own pill takes the suppressed one's place, on every pane.
+    for (const svg of m.svgs) {
+      expect(hlTexts(svg).length).toBe(1);
+      expect(count(svg, ".tbl-coord-pill")).toBeGreaterThan(0);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

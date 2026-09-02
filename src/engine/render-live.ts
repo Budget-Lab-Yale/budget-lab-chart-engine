@@ -2267,19 +2267,27 @@ function wireFigureSvg(
       });
     }
     if (chromePills) {
+      const pills = attachHighlightPills(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        chartType: isStacked ? "stacked" : "bar",
+        isStacked,
+        isFaceted,
+        categories: cats,
+        colors: ctx.colors,
+        seriesOrder: ctx.seriesOrder,
+        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
+        horizontal,
+        hasNetDots: hasNetDots(ctx.netMode),
+      });
+      // The bus suppresses the hovered category in the legend-highlight pills so they don't double
+      // up with the coordinated cursor's own per-category pill. An `echoWithCard` pane draws no
+      // such pill (the echo is a bare shade, the read-out is the card), so there is nothing to
+      // double up with and the suppression would just delete the pinned series' only value for
+      // that category — on the siblings outright, and on the hovered pane too. Register a
+      // suppression-deaf handle for these panes, matching mountChart's standalone tooltip mode,
+      // which passes no `onResolve` at all: legend-highlight pills stay in BOTH hover modes.
       ctx.onPillDriver?.(
-        attachHighlightPills(svg, {
-          rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-          chartType: isStacked ? "stacked" : "bar",
-          isStacked,
-          isFaceted,
-          categories: cats,
-          colors: ctx.colors,
-          seriesOrder: ctx.seriesOrder,
-          yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-          horizontal,
-          hasNetDots: hasNetDots(ctx.netMode),
-        }),
+        echoWithCard ? { setActive: (a) => pills.setActive(a), setSuppressedCategory: () => {} } : pills,
       );
     }
     if (coord) {
