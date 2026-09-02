@@ -385,6 +385,9 @@ export function renderPane(
       if (cols.shape) row._shape = r[cols.shape] ?? "";
       // Verbatim: this names an observation, so it is not a number to format or a key to look up.
       if (cols.point_label) row._pointLabel = r[cols.point_label] ?? "";
+      // The RAW cell, read past the resolver's series/shape dedupe, so a `point:` callout keyed to
+      // such a column still finds its row. Same exact-match contract as validateChartData.
+      if (spec.columns?.point_label) row._pointKey = r[spec.columns.point_label] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
       // Waterfall step kind (delta/total/skip).
       if (cols.kind) row._kind = r[cols.kind] ?? "";
@@ -574,12 +577,22 @@ function assemblePaneResult(
   // paneFacetValue (single chart) returns `ann` unchanged (byte-identical).
   const ann = filterAnnotationsByFacet(resolveAnnotations(spec), opts.paneFacetValue);
 
-  // Point callouts: resolve a y for any callout that gives a `series` but omits `y` — snap to that
+  // Point callouts. A `point:` callout takes BOTH coordinates from the one row whose raw
+  // `columns.point_label` cell equals it (validateChartData guaranteed exactly one across all rows).
+  // No match in THIS pane's rows ⇒ dropped here: on a faceted chart the row lives in exactly one
+  // pane, and a callout without `facet:` reaches every pane, so this drop is what makes it appear
+  // only where its observation is. `x` is the raw string because markerToX re-parses it.
+  // Otherwise resolve a y for any callout that gives a `series` but omits `y` — snap to that
   // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
   // band; otherwise the series' own value. Rows are matched at x by the raw time / numeric key.
   const stackedChart = spec.chartType === "area" || spec.chartType === "stacked";
   const seriesRank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
-  const resolvedPoints = ann.points.map((p) => {
+  const resolvedPoints = ann.points.flatMap((p) => {
+    if (p.point != null) {
+      const row = dataInScope.find((r) => r._pointKey === p.point);
+      if (!row || !Number.isFinite(row._y as number)) return [];
+      return [{ ...p, x: row.time, y: row._y as number }];
+    }
     if (Number.isFinite(p.y as number) || !p.series) return p;
     const atX = dataInScope.filter((r) => r.time === p.x || String(r._xn ?? "") === p.x);
     const targetRank = seriesRank.get(p.series);

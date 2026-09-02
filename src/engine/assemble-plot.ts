@@ -902,6 +902,9 @@ export function assemblePlot({
   for (const p of pointsAnn) {
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
     // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
+    // A `point:` callout arrives with `x` filled in by index.ts (or was dropped there); one that
+    // reaches this loop without `x` has no anchor and draws nothing.
+    if (p.x == null) continue;
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
