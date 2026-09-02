@@ -307,9 +307,11 @@ body {
   color: var(--tbl-text-axis);
   text-align: center;
 }
-/* Scatter's numeric x-axis labels sit tighter to the frame than the temporal axis the default
-   was tuned for, so give the x-axis title a little more breathing room. */
-.chart-scatter .figure-x-axis-title {
+/* A numeric x-axis reserves less room below its tick labels than the two-row temporal axis the
+   default margin was tuned for (x-adapter.ts: 22px vs 38px), so its title would sit on the tick
+   row. Keyed to the AXIS type via the card's x-<xAxisType> class — not the chart type — so a
+   histogram, a scatter, a numeric-x line and their faceted figures all get the same gap. */
+.x-numeric .figure-x-axis-title {
   margin-top: 8px;
 }
 .figure-y-axis-title {
