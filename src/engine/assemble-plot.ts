@@ -27,7 +27,9 @@ import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
-  substituteValueToken,
+  substituteRowTokens,
+  formatAnnotationValue,
+  type RowTokenValues,
   xMarkerLabel,
   yMarkerLabel,
 } from "../spec/annotations";
@@ -216,6 +218,14 @@ function labelsInside(
   );
 }
 
+/** A point callout as index.ts hands it to assemblePlot: coordinates resolved, plus the display
+ *  strings its `{point_label}` / `{x}` / `{series}` tokens read. The VALUES are computed where the
+ *  rows are; the substitution happens here, in one pass with `{value}`, so a data cell that happens
+ *  to contain "{value}" is never re-expanded by a second pass. */
+export interface ResolvedPointCallout extends PointCallout {
+  rowTokens?: RowTokenValues;
+}
+
 export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
@@ -226,9 +236,10 @@ export interface AssembleOptions {
   seriesNames: string[];
   colors: Map<string, string>;
   spec: ChartSpec;
-  /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
-   *  present, used instead of spec.annotations.points so the snap values render. */
-  points?: PointCallout[];
+  /** Point callouts with any series-snap / `point:` coordinates already resolved and the row-token
+   *  VALUES attached (index.ts has the data). When present, used instead of spec.annotations.points
+   *  so the resolved coordinates render. */
+  points?: ResolvedPointCallout[];
   /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
    *  the marks are actually DRAWN in, so px estimates match what a reader sees. Falls back to the
    *  data extent only where the adapter supplies no explicit domain (temporal/quarterly
@@ -419,11 +430,13 @@ export function assemblePlot({
 
   // Substitute a `{value}` token in yAxis/xAxis/points labels with the annotation's own
   // coordinate value (per-annotation `value_format`, else the chart's y-tick format) BEFORE
-  // anything below reads `.label` — both the auto-stagger geometry (which estimates label px
-  // width from `label.length`) and the drawn text must see the SAME (substituted) string, or
-  // the stagger would size its collision boxes from the short literal token instead of the
-  // (usually longer) rendered number. Labels without the token are returned unchanged, so
-  // charts that don't use it get byte-identical output.
+  // anything below reads `.label` — both the auto-stagger / placement geometry (which estimates
+  // label px width from `label.length`) and the drawn text must see the SAME (substituted) string,
+  // or the geometry would size its collision boxes from the short literal token instead of the
+  // (usually longer) rendered text. Point callouts also take their row tokens here, in the same
+  // single pass. Labels without a token are returned unchanged, so charts that don't use one get
+  // byte-identical output. `{value}` is formatted only when the authored label asks for it, so the
+  // tick-label hook is not invoked for labels that never show a value.
   const yTickFallbackFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
     axis: "y",
     ticks: yTicks,
@@ -433,11 +446,14 @@ export function assemblePlot({
     m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
   const xAxisAnn = ann.xAxis.map((m) => (m.label ? { ...m, label: xMarkerLabel(m) } : m));
-  const pointsAnn = (points ?? ann.points).map((p) =>
-    Number.isFinite(p.y as number)
-      ? { ...p, label: substituteValueToken(p.label, p.y as number, p.value_format, yTickFallbackFmt) }
-      : p,
-  );
+  const pointsAnn = (points ?? ann.points).map((p: ResolvedPointCallout) => {
+    const value =
+      Number.isFinite(p.y as number) && p.label.includes("{value}")
+        ? formatAnnotationValue(p.y as number, p.value_format, yTickFallbackFmt)
+        : undefined;
+    const label = substituteRowTokens(p.label, { ...p.rowTokens, value });
+    return label === p.label ? p : { ...p, label };
+  });
 
   // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
   // label's px position/width and greedily push overlapping labels onto stacked rows so they don't

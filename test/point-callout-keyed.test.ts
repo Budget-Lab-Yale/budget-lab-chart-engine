@@ -6,6 +6,7 @@
 // `(x, series)` snap would have silently resolved to the first of.
 import { describe, it, expect } from "vitest";
 import { validateSpec, validateChartData } from "../src/spec/validate";
+import { substituteRowTokens } from "../src/spec/annotations";
 import { renderChart, renderFigure } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -282,5 +283,156 @@ describe("annotations.points[].point — resolution", () => {
     const texts = fig.panes.map((p) => Array.from(p.svg!.querySelectorAll("text")).some((t) => t.textContent === "ONLY-Q"));
     expect(fig.panes.map((p) => p.value)).toEqual(["P", "Q"]);
     expect(texts).toEqual([false, true]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Row tokens — {point_label} {x} {series} read from the matched / snapped row
+// ---------------------------------------------------------------------------
+
+describe("substituteRowTokens (pure helper)", () => {
+  it("returns the SAME string when the label carries no token", () => {
+    const label = "Plain 2025b*";
+    expect(substituteRowTokens(label, { point_label: "2025b*", x: "2.32", series: "Recent" })).toBe(label);
+  });
+
+  it("substitutes each token from the row", () => {
+    expect(substituteRowTokens("{point_label} | {x} | {series}", { point_label: "2025b*", x: "2.32", series: "Recent" }))
+      .toBe("2025b* | 2.32 | Recent");
+  });
+
+  it("replaces every occurrence of a repeated token", () => {
+    expect(substituteRowTokens("{x}-{x}", { x: "1" })).toBe("1-1");
+  });
+
+  it("leaves an unresolvable token literal — never 'undefined'", () => {
+    expect(substituteRowTokens("{point_label} at {x}", { x: "2.32" })).toBe("{point_label} at 2.32");
+    expect(substituteRowTokens("{series}", {})).toBe("{series}");
+  });
+
+  it("never re-scans a substituted value, and treats `$` patterns in a cell literally", () => {
+    expect(substituteRowTokens("{point_label}/{x}", { point_label: "Forecast {x}", x: "2025" })).toBe("Forecast {x}/2025");
+    expect(substituteRowTokens("[{point_label}]", { point_label: "cost $& up $$1" })).toBe("[cost $& up $$1]");
+  });
+
+  it("leaves {value} literal when no value string is supplied, and fills it in the same pass when one is", () => {
+    expect(substituteRowTokens("{point_label}: {value}", { point_label: "A" })).toBe("A: {value}");
+    expect(substituteRowTokens("{point_label} = {value}", { point_label: "Fc {value}", value: "12" })).toBe("Fc {value} = 12");
+  });
+});
+
+describe("annotations.points — row tokens in the rendered label", () => {
+  const text = (svg: SVGSVGElement, re: RegExp): string | undefined =>
+    Array.from(svg.querySelectorAll("text")).map((t) => t.textContent ?? "").find((t) => re.test(t));
+
+  it("a point: callout fills {point_label}, {x} and {series} from its matched row", () => {
+    const spec = withPoints([{ point: "2025b*", label: "{point_label} @ {x} ({series})" }], {
+      series_labels: { Recent: "Recent era" },
+    });
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    // {x} on a numeric axis is the plain number; {series} is the display label when one exists.
+    expect(text(svg as SVGSVGElement, /@/)).toBe("2025b* @ 2.32 (Recent era)");
+  });
+
+  it("{series} falls back to the raw key when no series_labels entry exists", () => {
+    const { svg } = renderChart(withPoints([{ point: "2019", label: "S={series}" }]), ROWS, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^S=/)).toBe("S=Earlier");
+  });
+
+  it("{value} still works alongside the row tokens, with value_format", () => {
+    const spec = withPoints([{ point: "2025b", label: "{point_label}: {value}", value_format: { decimals: 2 } }]);
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^2025b:/)).toBe("2025b: -1.50");
+  });
+
+  it("a label with no token renders the identical string", () => {
+    const { svg } = renderChart(withPoints([{ point: "2019", label: "Plain {not_a_token}" }]), ROWS, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^Plain/)).toBe("Plain {not_a_token}");
+  });
+
+  it("a series-snap callout (line chart) fills {series} and {x} from the snapped row; {point_label} stays literal", () => {
+    const spec = {
+      title: "T", chartType: "line", xAxisType: "numeric", data: "d.csv",
+      series_labels: { a: "Alpha" },
+      annotations: { points: [{ x: "2021", series: "a", label: "{series}/{x}/{point_label}" }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([
+      { time: "2020", series: "a", value: "1" }, { time: "2021", series: "a", value: "2" },
+      { time: "2020", series: "b", value: "4" }, { time: "2021", series: "b", value: "5" },
+    ]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^Alpha/)).toBe("Alpha/2021/{point_label}");
+  });
+
+  it("a stacked-area series callout (no single row) still fills {series} from p.series and {x} from p.x", () => {
+    const spec = {
+      title: "T", chartType: "area", xAxisType: "numeric", data: "d.csv",
+      annotations: { points: [{ x: "2021", series: "b", label: "{series}@{x}" }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([
+      { time: "2020", series: "a", value: "1" }, { time: "2021", series: "a", value: "2" },
+      { time: "2020", series: "b", value: "4" }, { time: "2021", series: "b", value: "5" },
+    ]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /@2021$/)).toBe("b@2021");
+  });
+
+  it("a plain x + y callout fills {x} (via the temporal tooltip format) and a given {series}; {point_label} stays literal", () => {
+    const spec = {
+      title: "T", chartType: "line", xAxisType: "temporal", data: "d.csv",
+      annotations: { points: [{ x: "2021-06-15", y: 2, series: "a", label: "{x}|{series}|{point_label}" }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([
+      { time: "2021-01-01", series: "a", value: "1" }, { time: "2021-06-15", series: "a", value: "2" }, { time: "2021-12-01", series: "a", value: "3" },
+    ]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    // The temporal adapter's tooltip format is "%b %Y" by default.
+    expect(text(svg as SVGSVGElement, /\|a\|/)).toBe("Jun 2021|a|{point_label}");
+  });
+
+  it("a point_label cell that itself contains {value} is shown verbatim — never expanded by the value pass", () => {
+    const rows = rowsOf([...ROWS, { x: "0.7", y: "0.3", g: "Earlier", period: "Forecast {value}" }]);
+    const { svg } = renderChart(withPoints([{ point: "Forecast {value}", label: "{point_label}" }]), rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^Forecast/)).toBe("Forecast {value}");
+  });
+
+  it("a blank point_label cell leaves {point_label} literal rather than erasing it", () => {
+    const rows = rowsOf([...ROWS, { x: "0.7", y: "0.3", g: "Earlier", period: "" }]);
+    const spec = withPoints([{ x: "0.7", series: "Earlier", label: "A: {point_label}" }]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^A:/)).toBe("A: {point_label}");
+  });
+
+  it("{series} on a single-series chart takes a series_labels name given for the implicit key", () => {
+    const spec = withPoints([{ point: "2019", label: "[{series}]" }], {
+      columns: { x: "x", value: "y", point_label: "period" },
+      series_labels: { "": "Households" },
+    });
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^\[/)).toBe("[Households]");
+  });
+
+  it("a series key that names an Object.prototype member falls through to the raw key, not the prototype", () => {
+    const spec = withPoints([{ point: "p", label: "[{series}]" }], { series_labels: {} });
+    const rows = rowsOf([{ x: "1", y: "1", g: "toString", period: "p" }, { x: "2", y: "2", g: "Other", period: "q" }]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^\[/)).toBe("[toString]");
+  });
+
+  it("{x} on a categorical axis shows the x_labels display name, as the hover card does", () => {
+    const spec = {
+      title: "T", chartType: "bar", xAxisType: "categorical", data: "d.csv",
+      x_labels: { a: "Alpha" },
+      annotations: { points: [{ x: "a", series: "s", label: "<{x}>" }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([{ time: "a", series: "s", value: "1" }, { time: "b", series: "s", value: "2" }]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^</)).toBe("<Alpha>");
+  });
+
+  it("{series} on a single-series chart (nameless implicit series) stays literal rather than emitting an empty string", () => {
+    const spec = withPoints([{ point: "2019", label: "[{series}]" }], { columns: { x: "x", value: "y", point_label: "period" } });
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^\[/)).toBe("[{series}]");
   });
 });

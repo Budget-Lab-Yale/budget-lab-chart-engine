@@ -67,6 +67,43 @@ export function yMarkerLabel(m: YAxisMarker, fallbackFormat: (v: number) => stri
   return substituteValueToken(m.label, m.y, m.value_format, fallbackFormat);
 }
 
+/** The values a point callout's `label` tokens read, already DISPLAY strings: the caller formats
+ *  `x` through the axis's tooltip format, maps `series` through `series_labels` and formats `value`
+ *  through `value_format` / the y-tick format, because this module must not know the engine.
+ *  `undefined` = nothing to fill that token with. */
+export interface RowTokenValues {
+  point_label?: string;
+  x?: string;
+  series?: string;
+  value?: string;
+}
+
+/** Substitute `{point_label}`, `{x}`, `{series}` and `{value}` in a point callout's `label`. The
+ *  row tokens come from the row it matched (`point:`) or snapped to (`series`); `value` is its
+ *  resolved y. A token whose value is `undefined` stays LITERAL: "{point_label}" in a published
+ *  label is a visible misconfiguration, while a substituted "undefined" or "" is an invisible one.
+ *  ONE pass with a callback, so a substituted value is never re-scanned for another token (a
+ *  point_label cell reading "Forecast {value}" comes out verbatim) and no `$&`-style replacement
+ *  pattern in a data cell is interpreted. A label with no token returns the same string, so every
+ *  existing callout renders byte-identically. Pure. */
+export function substituteRowTokens(label: string, tokens: RowTokenValues): string {
+  if (!label.includes("{")) return label;
+  return label.replace(/\{(point_label|x|series|value)\}/g, (token, key: keyof RowTokenValues) => tokens[key] ?? token);
+}
+
+/** `value` as an annotation label shows it: via `fmt` when given, else `fallbackFormat` (the
+ *  chart's value-axis tick formatter). Shared by the `{value}` token of every annotation kind so a
+ *  marker and a callout never format the same number two ways. */
+export function formatAnnotationValue(
+  value: number,
+  fmt: ValueFormat | undefined,
+  fallbackFormat: (v: number) => string,
+): string {
+  return fmt
+    ? `${fmt.prefix ?? ""}${value.toFixed(fmt.decimals ?? VALUE_FORMAT_DEFAULT_DECIMALS)}${fmt.suffix ?? ""}`
+    : fallbackFormat(value);
+}
+
 /** Substitute a literal `{value}` token in an annotation `label` with `value`, formatted via
  *  `fmt` when given, else via `fallbackFormat` (the chart's value-axis tick formatter, or — for
  *  an xAxis marker whose `x` doesn't parse as a number — a function that just returns the raw
@@ -79,8 +116,5 @@ export function substituteValueToken(
   fallbackFormat: (v: number) => string,
 ): string {
   if (!label.includes("{value}")) return label;
-  const formatted = fmt
-    ? `${fmt.prefix ?? ""}${value.toFixed(fmt.decimals ?? VALUE_FORMAT_DEFAULT_DECIMALS)}${fmt.suffix ?? ""}`
-    : fallbackFormat(value);
-  return label.replaceAll("{value}", formatted);
+  return label.replaceAll("{value}", formatAnnotationValue(value, fmt, fallbackFormat));
 }
