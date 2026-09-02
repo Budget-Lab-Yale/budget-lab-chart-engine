@@ -24,10 +24,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   rounded to at most two decimals and never grouped on a numeric axis (`2.593569308310415` reads
   `2.59`, `2000` reads `2000`, a year reads `2021`) — ungrouped like the numeric axis ticks, and
   identical to the scatter hover card's x row, so a callout and a scatter card never disagree;
-  `tooltip_x_format` on a
-  temporal or quarterly one, `x_labels` on a categorical one;
-  `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
-  pass, so a data cell that happens to contain `{value}` is text, not a token. A token that cannot be
+  `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a categorical one; `{series}`
+  honours `series_labels`. `{value}` is unchanged. All four are substituted in one pass, so a
+  data cell that happens to contain `{value}` is text, not a token. A token that cannot be
   resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
 - Point-callout labels that would sit on each other now move apart. Callouts without an explicit
   `dx`/`dy` whose estimated label boxes overlap are swept apart vertically, top to bottom, each
@@ -66,7 +65,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   card with a long series name, category name or overlay label. The card now wraps at the same
   320px — a label with no space or hyphen to break at is broken mid-word rather than left to run
   out through the border — and every row's value is joined to its label by a non-breaking space
-  so a wrap can never leave the number alone on a line. Pre-existing since the card was introduced. Hover-only: the
+  so a wrap does not separate them. Pre-existing since the card was introduced. Hover-only: the
   card is live-DOM CSS and a PNG export has no card, so no exported or published image changes.
   (#41)
 - **A faceted stacked bar in tooltip mode keeps its cross-pane band echo.** A stack whose hover is
@@ -103,8 +102,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   auto-placement, with a new "Row tokens" paragraph and a worked scatter example keyed to
   observations; the `barStack.hover` row and the small-multiples paragraph state that a card pane
   coordinates a band echo and leaves a pinned series' pills standing; the `tooltip_x_label` /
-  `tooltip_y_label` row; and a paragraph under the class table documenting `figure-card`,
-  `chart-<chartType>` and `x-<xAxisType>` on the card roots.
+  `tooltip_y_label` row, now also noting the pre-1.14.0 clipping the wrap fix replaces; the
+  `chrome.tooltip` row's new paragraph on the card's 320px wrap; and a paragraph under the class
+  table documenting `figure-card`, `chart-<chartType>` and `x-<xAxisType>` on the card roots.
 - Four pre-existing `CONFIG-SPEC.md` claims corrected. Two were made false by this release and
   narrowed to match: the `x_labels` row said a coordinated small-multiples pane replaces its card
   with the in-place cursor (a dumbbell and a stacked pane in tooltip mode keep theirs), and the
@@ -144,8 +144,9 @@ A repin re-renders every published figure at once — here is what a maintainer 
   off the canvas on the right or cross the frame edge into the y-tick-label gutter on the left.
   **No published callout moves**, established by rendering both figures that carry an unpinned
   callout before and after the change — `etr-vintages` ("Projected") and `price-waterfall`
-  ("Apply ηs", "50% passthrough") — and finding identical label positions and text-anchors. A
-  callout whose label fits is untouched, and a pinned (`dx`/`dy`) callout never flips. (#37)
+  ("(no step in original)", on a categorical axis where the flip is gated off) — and finding
+  identical label positions and text-anchors. A callout whose label fits is untouched, and a
+  pinned (`dx`/`dy`) callout never flips. (#37)
 - **The scatter hover card's x row loses its thousands separator**: it read `2,000` and now reads
   `2000`, because the card and the new `{x}` callout token share one formatter and a numeric x is
   most often a year or an index, which the axis ticks have always printed ungrouped. Rounding to two
