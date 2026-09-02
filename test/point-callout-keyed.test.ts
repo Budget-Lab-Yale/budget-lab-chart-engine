@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { substituteRowTokens } from "../src/spec/annotations";
 import { renderChart, renderFigure } from "../src/engine/index";
+import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -350,15 +351,15 @@ describe("annotations.points — row tokens in the rendered label", () => {
       series_labels: { Recent: "Recent era" },
     });
     const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
-    // {x} on a numeric axis is the plain number; {series} is the display label when one exists.
+    // {series} is the display label when one exists; this x needs no rounding to print as "2.32".
     expect(text(svg as SVGSVGElement, /@/)).toBe("2025b* @ 2.32 (Recent era)");
   });
 
-  it("{x} on a numeric axis is the plain number the AXIS prints, not the hover card's rounded form", () => {
-    // The scatter card formats x with toLocaleString({ maximumFractionDigits: 2 }) — "2.59",
-    // "2,000" — but the token goes through the axis's own tooltipXFormat (`${+v}`), so it is
-    // unrounded and ungrouped. CONFIG-SPEC's row-token paragraph promises the axis form; a test
-    // using a short x like "2.32" cannot tell the two apart.
+  it("{x} on a numeric axis is rounded and grouped the way the hover card formats x", () => {
+    // The unrounded axis form put `2025a: -0.` and `2026a at x=2.285011857607663` on the frame in
+    // the 1.14.0 visual review — a raw float is not a label. Both the card and the token now go
+    // through `formatNumericX`, so a callout reads `2.59` / `2,000`. A test using a short x like
+    // "2.32" cannot tell the two forms apart, hence the many-decimal and four-digit rows here.
     const rows = rowsOf([
       { x: "2.593569308310415", y: "-0.12", g: "Recent", period: "2025a" },
       { x: "2000", y: "0.80", g: "Earlier", period: "2019" },
@@ -368,8 +369,25 @@ describe("annotations.points — row tokens in the rendered label", () => {
       { point: "2019", label: "b={x}" },
     ]);
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
-    expect(text(svg as SVGSVGElement, /^a=/)).toBe("a=2.593569308310415");
-    expect(text(svg as SVGSVGElement, /^b=/)).toBe("b=2000");
+    expect(text(svg as SVGSVGElement, /^a=/)).toBe("a=2.59");
+    expect(text(svg as SVGSVGElement, /^b=/)).toBe("b=2,000");
+  });
+
+  it("{x} equals the scatter card's own x row for the same row (one formatter, two callers)", () => {
+    // Parity against the card as MOUNTED, not against the shared helper — a second copy of the
+    // toLocaleString call would pass a helper-vs-helper assertion and still be able to drift.
+    document.body.innerHTML = "";
+    const rows = rowsOf([{ x: "2.593569308310415", y: "-0.12", g: "Recent", period: "2025a" }]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: withPoints([{ point: "2025a", label: "a={x}" }]), rows, width: 720, height: 400 } as never);
+    const svg = container.querySelector<SVGSVGElement>(".figure-canvas svg")!;
+    svg.querySelector('g[aria-label="dot"] circle')!
+      .dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10, bubbles: true }));
+    // The card's rows are x then y, so the first value cell is the formatted x.
+    const cardX = document.body.querySelector(".tbl-tooltip .tbl-tooltip-row .tbl-tooltip-value")!.textContent;
+    expect(cardX).toBe("2.59");
+    expect(text(svg, /^a=/)).toBe(`a=${cardX}`);
   });
 
   it("{series} falls back to the raw key when no series_labels entry exists", () => {
@@ -399,7 +417,11 @@ describe("annotations.points — row tokens in the rendered label", () => {
       { time: "2020", series: "b", value: "4" }, { time: "2021", series: "b", value: "5" },
     ]);
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
-    expect(text(svg as SVGSVGElement, /^Alpha/)).toBe("Alpha/2021/{point_label}");
+    // A YEAR on a numeric axis is grouped, because `{x}` is the card's formatter and the card
+    // groups: "2,021", not the axis tick's "2021". Pinned deliberately — this is the visible cost
+    // of card parity, and `xAxisType: "temporal"` is the way to label a year axis with a date
+    // format. Changing it means changing `formatNumericX`, which moves the card too.
+    expect(text(svg as SVGSVGElement, /^Alpha/)).toBe("Alpha/2,021/{point_label}");
   });
 
   it("a stacked-area series callout (no single row) still fills {series} from p.series and {x} from p.x", () => {
@@ -412,7 +434,7 @@ describe("annotations.points — row tokens in the rendered label", () => {
       { time: "2020", series: "b", value: "4" }, { time: "2021", series: "b", value: "5" },
     ]);
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
-    expect(text(svg as SVGSVGElement, /@2021$/)).toBe("b@2021");
+    expect(text(svg as SVGSVGElement, /@2,021$/)).toBe("b@2,021");
   });
 
   it("a plain x + y callout fills {x} (via the temporal tooltip format) and a given {series}; {point_label} stays literal", () => {

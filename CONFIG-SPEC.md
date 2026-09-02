@@ -234,12 +234,12 @@ parse as a number). A `label` without the token is unaffected.
 
 **Row tokens (`points` only).** A callout `label` may also carry `{point_label}`, `{x}` and
 `{series}`, filled from the row the callout is keyed to (`point:`) or snapped to (`series` without
-`y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x as the **axis** prints
-it — the plain number on a numeric axis (unrounded and ungrouped, so a cell of
-`2.593569308310415` prints in full and `2000` prints as `2000`), the tooltip date format
-(`tooltip_x_format`, default `%b %Y`) on a temporal or quarterly one, the `x_labels` name of a
-category. This is not always what the hover card shows: a scatter card rounds x to two decimals
-and groups thousands, so the same row reads `2.59` there. `{series}` is that row's
+`y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x formatted the way the
+**hover card** formats x, so a callout and the card for the same observation agree — at most two
+decimals with thousands grouped on a numeric axis (`2.593569308310415` reads `2.59`, `2000` reads
+`2,000`, and so a year reads `2,021`: label a year axis with `xAxisType: temporal` if that is not
+wanted), the tooltip date format (`tooltip_x_format`, default `%b %Y`) on a temporal or quarterly
+axis, the `x_labels` name of a category. `{series}` is that row's
 display name (`series_labels`, else the raw key). A plain `x` + `y` callout fills `{x}` from its own
 `x` and `{series}` from its own `series` when given. A token with nothing to fill it stays literal
 in the rendered text — a chart without `columns.point_label` or without a series column leaves

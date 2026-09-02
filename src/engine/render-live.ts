@@ -22,7 +22,7 @@ import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { applyValueAffixes } from "./util.js";
+import { applyValueAffixes, formatNumericX } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
@@ -104,7 +104,7 @@ function scatterPointHoverOptions(a: {
     symbols: new Map((symbolScale?.domain ?? []).map((d, i) => [d, symbolScale!.range[i]!] as const)),
     xLabel: spec.tooltip_x_label ?? spec.x_axis_title ?? "x",
     yLabel: spec.tooltip_y_label ?? spec.y_axis_title ?? "Value",
-    xFormat: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+    xFormat: formatNumericX,
     yFormat: (v: number) => formatValue(v, a.valueAffixes, spec.tooltip_decimals),
     ...(a.overlayTooltips ? { overlays: a.overlayTooltips } : {}),
     showTooltip: a.chromeTooltip,

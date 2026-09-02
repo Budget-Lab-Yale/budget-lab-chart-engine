@@ -29,6 +29,17 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
   return `${negative ? "-" : ""}${affixes.prefix}${magnitude}${affixes.suffix}`;
 }
 
+/** The one x formatter for a NUMERIC x: at most two decimals, thousands grouped. Both the scatter
+ *  hover card's x row (`scatterPointHoverOptions`, render-live.ts) and the `{x}` row token in a
+ *  point-callout label (`xTokenFor`, index.ts) call this, so a callout and the card for the same
+ *  observation cannot disagree. Keep it one function: the callout token used to reuse the AXIS
+ *  format instead (`${+v}`), which put `2025a: -0.` and `x=2.285011857607663` on the frame — a raw
+ *  float is not a label. Temporal/quarterly x keeps `tooltip_x_format` and categorical x keeps its
+ *  `x_labels` name; neither is a number to round. */
+export function formatNumericX(v: number): string {
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 /** Apply the `valueLabel` hook to one in-mark label's text. `rendered` is the engine's own
  *  formatted text; the hook receives it (plus the label's series/category/value/facet) and may
  *  return a replacement, or `null` for "engine default". Absent hook / `hooks: {}` / a `null`

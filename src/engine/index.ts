@@ -34,7 +34,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
-import { resolveValueAffixes, isTruthyFlag } from "./util";
+import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
@@ -836,12 +836,12 @@ function assemblePaneResult(
 
   // Row-token VALUES for point-callout labels, computed HERE (the rows and the x formatter are
   // here) and applied by assemblePlot in one pass together with `{value}`, whose y-tick fallback
-  // formatter lives there. `{x}` is the AXIS-print form: the adapter's `tooltipXFormat` for a
-  // number or Date, else the `x_labels` display name of a category. That is NOT always what the
-  // hover card shows — the scatter card formats x with toLocaleString (maximumFractionDigits: 2,
-  // and grouped), so the same row renders unrounded and ungrouped here (2.593569308310415, 2000)
-  // and rounded and grouped there (2.59, 2,000). The axis form is what CONFIG-SPEC promises, and
-  // it is what makes a callout read like the tick it sits under.
+  // formatter lives there. `{x}` is formatted the way the scatter CARD formats x — `formatNumericX`
+  // (at most two decimals, grouped) on a numeric axis — so a callout and the card for the same
+  // observation agree. It was the axis form (`tooltipXFormat`, a plain `${+v}`) through 1.14.0's
+  // visual review, which printed `x=2.285011857607663` on the frame. Temporal and quarterly x still
+  // take the adapter's date format (`tooltip_x_format`) and a category still takes its `x_labels`
+  // display name; neither is a number to round.
   // `{series}` reads the `series_labels` name, which may name the implicit single series too
   // (SINGLE_SERIES_KEY = ""); unmapped, that nameless series and a blank point_label cell are
   // `undefined`, which leaves the token literal rather than printing nothing.
@@ -855,7 +855,8 @@ function assemblePaneResult(
     if (x == null) return undefined;
     const mx = xOpts.markerToX({ x });
     if (typeof mx === "string") return own(spec.x_labels, mx) ?? x;
-    const n = typeof mx === "number" ? mx : mx instanceof Date ? mx.getTime() : NaN;
+    if (typeof mx === "number") return Number.isFinite(mx) ? formatNumericX(mx) : x;
+    const n = mx instanceof Date ? mx.getTime() : NaN;
     return Number.isFinite(n) && xOpts.tooltipXFormat ? xOpts.tooltipXFormat(n) : x;
   };
   const pointsForPlot: ResolvedPointCallout[] = resolvedPoints.map((p, i) => {

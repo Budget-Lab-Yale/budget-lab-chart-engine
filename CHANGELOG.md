@@ -21,9 +21,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   nothing) still keys. (#37)
 - Row tokens in a point callout's `label`: `{point_label}`, `{x}` and `{series}` fill from the
   callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
-  formatted the way the AXIS prints x: the plain number on a numeric axis (unrounded and ungrouped,
-  so a scatter card showing `2.59` for the same row leaves `{x}` at `2.593569308310415`),
-  `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a categorical one;
+  formatted the way the hover CARD formats x, so a callout and the card for the same observation
+  agree: at most two decimals with thousands grouped on a numeric axis (`2.593569308310415` reads
+  `2.59`, `2000` reads `2,000` — and so a year reads `2,021`; use `xAxisType: temporal` for a year
+  axis if that is not wanted), `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a
+  categorical one;
   `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
   pass, so a data cell that happens to contain `{value}` is text, not a token. A token that cannot be
   resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
