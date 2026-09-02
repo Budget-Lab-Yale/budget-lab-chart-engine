@@ -484,9 +484,10 @@ const SIBLING_ECHO: Record<string, PaneEcho> = {
   "waterfall (total step)":   { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
   "waterfall (delta step)":   { pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
   "stacked (all positive)":   { pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
-  // A net-dot stack hovers with the card, which is not coordinated — so a sibling pane echoes
-  // NOTHING. The one default multi-pane configuration where the other panes go dark on hover.
-  "stacked (with a negative)": { pills: false, guide: false, dot: false, region: false, axisLabel: false },
+  // A net-dot stack hovers with the card and STILL coordinates (issue #32): the sibling echo is a
+  // pure band shade, no pills — the card is that pane's read-out, so a pill would double it up.
+  // The same split as the dumbbell row below.
+  "stacked (with a negative)": { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
   "line (categorical x)":     { pills: true,  guide: true,  dot: true,  region: false, axisLabel: false },
   "dotplot":                  { pills: true,  guide: false, dot: true,  region: true,  axisLabel: false },
   // Dumbbell keeps its per-pane card AND coordinates: the sibling echo is a pure band shade, with

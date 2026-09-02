@@ -2217,12 +2217,18 @@ function wireFigureSvg(
     // reorder to match the rendered (section) order.
     const cats = sectionOrderedCategories(ctx.spec, ctx.dataInScope, catsRaw);
     // Total-dot stacks hover with the tooltip (dot-swatch Total row), never per-segment pills —
-    // matching the standalone rule. Coordination is dropped for these panes (they tooltip
-    // independently), so pills never appear anywhere in a total-dot figure.
+    // matching the standalone rule. So the PILLS half of coordination is dropped for these panes,
+    // and pills never appear anywhere in a total-dot figure. The cross-pane band ECHO is
+    // independent of both, and a faceted stack exists to show the same category across panes, so
+    // these panes keep it: mirror the dumbbell branch above and pass `onResolve` WITHOUT `emitOnly`
+    // (the card survives, and the emit still fires), then give every pane an echo-only secondary
+    // cursor. `coord` keeps the pills path for every other pane kind. Issue #32: dropping
+    // coordination wholesale left a two-pane stack echoing nothing.
     const hoverMode = resolveHoverMode(ctx.spec, ctx.netMode);
     const useTooltip = hoverMode === "tooltip";
     const totalRow = resolveTotalRow(ctx.spec, ctx.netMode, hoverMode);
     const coord = useCoord && !useTooltip;
+    const echoWithCard = useCoord && useTooltip;
     attachBandCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
@@ -2244,7 +2250,13 @@ function wireFigureSvg(
       facet: ctx.facet,
       onHover: ctx.onHover,
       // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
-      ...(coord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
+      // `echoWithCard` emits WITHOUT `emitOnly` (`onResolve` fires before that gate), so this pane
+      // keeps its card + highlight and still drives the other panes' echo.
+      ...(coord
+        ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) }
+        : echoWithCard
+          ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) }
+          : {}),
     });
     if (handle) {
       // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
@@ -2309,6 +2321,22 @@ function wireFigureSvg(
             }
           : {}),
         ...(wfCursor ? { waterfall: wfCursor } : {}),
+      }) as (key: unknown, active?: boolean) => void;
+    }
+    if (echoWithCard) {
+      // Echo only: no colors/labels/formatter, because it draws no pills — just the band geometry
+      // inputs (`readCategoryBands`/`readCategoryBandsH` read rows + the category list) and, for
+      // horizontal, the same row-continuity options the pills path passes, so the echoed strip
+      // bridges the inter-pane gap exactly as it does in a pills figure.
+      return attachSecondaryBandCursor(svg, {
+        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        isFaceted,
+        categories: cats,
+        horizontal,
+        echoOnly: true,
+        ...(horizontal
+          ? { regionFromLeftEdge: true, regionExtendRight: ctx.coordExtendRight ?? 0 }
+          : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
