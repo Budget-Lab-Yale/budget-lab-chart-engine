@@ -836,10 +836,11 @@ function assemblePaneResult(
 
   // Row-token VALUES for point-callout labels, computed HERE (the rows and the x formatter are
   // here) and applied by assemblePlot in one pass together with `{value}`, whose y-tick fallback
-  // formatter lives there. `{x}` is formatted the way the scatter CARD formats x — `formatNumericX`
-  // (at most two decimals, grouped) on a numeric axis — so a callout and the card for the same
-  // observation agree. It was the axis form (`tooltipXFormat`, a plain `${+v}`) through 1.14.0's
-  // visual review, which printed `x=2.285011857607663` on the frame. Temporal and quarterly x still
+  // formatter lives there. `{x}` on a numeric axis goes through `formatNumericX` — at most two
+  // decimals, never grouped — which the scatter card's x row also uses, so the callout, the card and
+  // the axis ticks all read the same number. It was the raw axis form (`tooltipXFormat`, a plain
+  // `${+v}`) through 1.14.0's visual review, which printed `x=2.285011857607663` on the frame; the
+  // fix is the ROUNDING, and grouping is deliberately not part of it. Temporal and quarterly x still
   // take the adapter's date format (`tooltip_x_format`) and a category still takes its `x_labels`
   // display name; neither is a number to round.
   // `{series}` reads the `series_labels` name, which may name the implicit single series too

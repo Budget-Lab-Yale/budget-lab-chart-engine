@@ -400,9 +400,12 @@ describe("annotations.points — rendered auto-placement", () => {
 // ---------------------------------------------------------------------------
 
 // The inner plot frame at 720x400 (TBL_MARGIN_LEFT 44, TBL_MARGIN_RIGHT 16). Plot adds a half-pixel
-// crisp-edge offset to text, so the edge assertions carry a 1px tolerance.
+// crisp-edge offset to text, so the edge assertions carry a 1px tolerance. The two thresholds are
+// asymmetric: CANVAS_RIGHT on the right (the empty right margin is fair game; past the canvas the
+// label is truncated), FRAME_LEFT on the left (that margin holds the y-tick labels).
 const FRAME_LEFT = 44;
 const FRAME_RIGHT = 720 - 16;
+const CANVAS_RIGHT = 720;
 // 28 chars — the unreadable label from the 1.14.0 visual review, wide enough (~174px) that a
 // centred box at either frame edge hangs well outside it.
 const LONG = "2026a at x=2.285011857607663";
@@ -465,13 +468,34 @@ describe("annotations.points — labels that would leave the frame flip to the i
     expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBeNull();
   });
 
-  it("the same label centred would have crossed the right edge (the test above is not vacuous)", () => {
+  it("the same label centred would have run off the CANVAS (the test above is not vacuous)", () => {
     // Pinned by an explicit dy, so the flip never looks at it: it keeps the middle anchor and
-    // hangs outside the frame exactly as it did before this change.
+    // hangs off the canvas exactly as it did before this change.
     const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, dy: 6 }]), ROWS, { width: 720, height: 400, document });
     const b = anchoredBox(svg as SVGSVGElement, LONG);
     expect(b.anchor).toBeNull();
-    expect(b.x1).toBeGreaterThan(FRAME_RIGHT + 1);
+    expect(b.x1).toBeGreaterThan(CANVAS_RIGHT);
+  });
+
+  it("a right-side label that overhangs the FRAME but stays on the canvas does NOT flip", () => {
+    // The asymmetry, and a byte-identity win: the right margin is empty, so this label was never
+    // truncated and must render exactly where it always did.
+    const auto = renderChart(withPoints([{ point: "2009", label: "Right" }]), ROWS, { width: 720, height: 400, document });
+    const pinned = renderChart(withPoints([{ point: "2009", label: "Right", dx: 0 }]), ROWS, { width: 720, height: 400, document });
+    const a = anchoredBox(auto.svg as SVGSVGElement, "Right");
+    expect(a.anchor).toBeNull();
+    expect(a.x1).toBeGreaterThan(FRAME_RIGHT);
+    expect(a.x1).toBeLessThanOrEqual(CANVAS_RIGHT);
+    expect(a.x).toBe(anchoredBox(pinned.svg as SVGSVGElement, "Right").x);
+  });
+
+  it("a right-side label whose flip would overrun the LEFT gutter stays centred", () => {
+    // ~694px wide at the right edge of a 660px frame: it runs off the canvas centred, but anchoring
+    // it end would put its start 3.6px from the canvas left, inside the tick-label gutter. Flipping
+    // would only trade which end is cut off, so it does not happen.
+    const nearlyFrameWide = LONG.repeat(4);
+    const { svg } = renderChart(withPoints([{ point: "2009", label: nearlyFrameWide }]), ROWS, { width: 720, height: 400, document });
+    expect(anchoredBox(svg as SVGSVGElement, nearlyFrameWide).anchor).toBeNull();
   });
 
   it("mirrors at the left edge: anchored start and drawn to the RIGHT of its point", () => {
@@ -481,9 +505,24 @@ describe("annotations.points — labels that would leave the frame flip to the i
     expect(b.x0).toBeGreaterThanOrEqual(FRAME_LEFT - 1);
   });
 
-  it("a label that overruns BOTH edges keeps the middle anchor — no anchor fits, so nothing moves", () => {
-    // ~1215px wide against a 660px frame, centred on an interior point: it crosses the left and
-    // the right edge at once, so a flip could only make it worse.
+  it("a left-side label still inside the canvas flips, because that margin is the tick-label gutter", () => {
+    // 14 chars (~87px) centred on the leftmost point: its left edge lands at 0.6px, on the canvas
+    // but well inside the y-tick-label gutter. The right threshold would have let this pass; the
+    // left one must not.
+    const label = "Left edge here";
+    const { svg } = renderChart(withPoints([{ point: "2001", label }]), ROWS, { width: 720, height: 400, document });
+    const pinned = renderChart(withPoints([{ point: "2001", label, dy: 6 }]), ROWS, { width: 720, height: 400, document });
+    const centred = anchoredBox(pinned.svg as SVGSVGElement, label);
+    expect(centred.x0).toBeGreaterThan(0);
+    expect(centred.x0).toBeLessThan(FRAME_LEFT);
+    const b = anchoredBox(svg as SVGSVGElement, label);
+    expect(b.anchor).toBe("start");
+    expect(b.x0).toBeGreaterThanOrEqual(FRAME_LEFT - 1);
+  });
+
+  it("a label that overruns BOTH limits keeps the middle anchor — no anchor fits, so nothing moves", () => {
+    // ~1215px wide centred on an interior point: it runs off the canvas on the right and into the
+    // gutter on the left at once, so a flip could only make it worse.
     const tooWide = LONG.repeat(7);
     const { svg } = renderChart(withPoints([{ point: "MID", label: tooWide }]), ROWS, { width: 720, height: 400, document });
     expect(anchoredBox(svg as SVGSVGElement, tooWide).anchor).toBeNull();
@@ -529,10 +568,11 @@ describe("annotations.points — labels that would leave the frame flip to the i
 
   it("the connector's label coordinate follows the flip", () => {
     const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, connector: true }]), ROWS, { width: 720, height: 400, document });
-    const b = anchoredBox(svg as SVGSVGElement, LONG);
-    expect(b.anchor).toBe("end");
-    // The arrow starts at the label's anchor, which the flip moved to the left of the point.
-    expect(arrowStart(svg as SVGSVGElement).x).toBeLessThan(FRAME_RIGHT);
+    // `dy: 28` equals the connector's own default offset and pins the callout, so this arrow starts
+    // at the point's px and the difference between the two starts is the flip itself.
+    const pinned = renderChart(withPoints([{ point: "2009", label: LONG, connector: true, dy: 28 }]), ROWS, { width: 720, height: 400, document });
+    expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBe("end");
+    expect(arrowStart(svg as SVGSVGElement).x).toBeCloseTo(arrowStart(pinned.svg as SVGSVGElement).x - 6, 6);
   });
 
   it("is gated off with the rest of placement when the render has no width/height", () => {

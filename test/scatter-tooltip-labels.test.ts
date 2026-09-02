@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { validateSpec } from "../src/spec/validate";
 import { buildExportSvg } from "../src/embed/export-png";
+import { formatNumericX } from "../src/engine/util";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -154,5 +155,35 @@ describe("tooltip_x_label / tooltip_y_label validation", () => {
       columns: { x: "x", value: "y" },
     });
     expect(res.valid).toBe(true);
+  });
+});
+
+describe("the scatter card's x value formatting", () => {
+  /** The card's value cells, in row order (x then y). */
+  function rowValues(svg: SVGSVGElement, i: number): string[] {
+    hoverDot(svg, i);
+    const tip = document.body.querySelector<HTMLElement>(".tbl-tooltip")!;
+    return [...tip.querySelectorAll(".tbl-tooltip-row .tbl-tooltip-value")].map((el) => el.textContent ?? "");
+  }
+
+  it("rounds to two decimals and does NOT group thousands, matching the axis ticks", () => {
+    // The card and the `{x}` callout token share `formatNumericX`. It groups nothing on purpose: a
+    // numeric x is most often a year or an index and the axis ticks are ungrouped for that reason,
+    // so a card reading `2,000` under a `2000` tick is the divergence, not the fix.
+    const rows = rowsOf([{ x: "2.593569308310415", y: "10" }, { x: "2000", y: "20" }, { x: "2021", y: "30" }]);
+    const svg = canvas(mount(SPEC, rows));
+    expect(rowValues(svg, 0)[0]).toBe("2.59");
+    expect(rowValues(svg, 1)[0]).toBe("2000");
+    expect(rowValues(svg, 2)[0]).toBe("2021");
+  });
+
+  it("is locale-fixed: the same string on any host, because the token it shares is drawn into the SVG", () => {
+    // `toLocaleString()` with no locale renders `2,59` on a de-DE host, and `{x}` reaches the SVG
+    // and the PNG export. Asserting the formatter directly is the only way to pin the locale
+    // argument itself — a card assertion passes on an en-US test runner either way.
+    expect(formatNumericX(2.593569308310415)).toBe("2.59");
+    expect(formatNumericX(2000)).toBe("2000");
+    expect(formatNumericX(-1234.5678)).toBe("-1234.57");
+    expect(formatNumericX(1e6)).toBe("1000000");
   });
 });

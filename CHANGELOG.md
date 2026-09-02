@@ -21,11 +21,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   nothing) still keys. (#37)
 - Row tokens in a point callout's `label`: `{point_label}`, `{x}` and `{series}` fill from the
   callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
-  formatted the way the hover CARD formats x, so a callout and the card for the same observation
-  agree: at most two decimals with thousands grouped on a numeric axis (`2.593569308310415` reads
-  `2.59`, `2000` reads `2,000` — and so a year reads `2,021`; use `xAxisType: temporal` for a year
-  axis if that is not wanted), `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a
-  categorical one;
+  rounded to at most two decimals and never grouped on a numeric axis (`2.593569308310415` reads
+  `2.59`, `2000` reads `2000`, a year reads `2021`) — ungrouped like the numeric axis ticks, and
+  identical to the scatter hover card's x row, so nothing on the chart disagrees about the number;
+  `tooltip_x_format` on a
+  temporal or quarterly one, `x_labels` on a categorical one;
   `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
   pass, so a data cell that happens to contain `{value}` is text, not a token. A token that cannot be
   resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
@@ -35,14 +35,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the frame deliberately overflows the bottom, since the top of the column wins; a callout with an
   explicit `dx` or `dy` is pinned where the author put it and the others clear it. A callout that
   collides with nothing keeps exactly today's offset, which is what keeps every published figure
-  byte-identical. The connector follows the placed label. An auto-placed label whose estimated box
-  would cross the frame's left or right edge is also flipped to the inside of its point — anchored
-  away from the edge and offset 6px clear of it — because the visual review found callouts cut off
-  at the right edge of the frame; the flipped box is what the vertical sweep then works from, so the
-  flip decides which labels collide. A label that fits keeps the centred anchor and offset it always
-  had, one whose width overruns both edges stays centred (no side fits), and a pinned label is never
-  flipped. Note this does move an auto-placed label sitting on the x-domain's own endpoint, whose
-  centred box always half-hangs outside the frame. An explicit `\n` in a `label` is now a hard line
+  byte-identical. The connector follows the placed label. An auto-placed label that would run off one
+  side is also flipped, anchored away from that side and offset 6px to the inside of its point,
+  because the visual review found callouts cut off at the right of the frame; the flipped box is what
+  the vertical sweep then works from, so the flip decides which labels collide. The thresholds are
+  asymmetric: the CANVAS edge on the right, where the margin is empty and only a truncated label is a
+  problem, and the FRAME edge on the left, where the margin holds the y-axis tick labels. A label
+  that fits keeps the centred anchor and offset it always had; one that overruns both limits, or
+  whose flip would overrun the opposite limit, stays centred because no side fits; a pinned label is
+  never flipped. An explicit `\n` in a `label` is now a hard line
   break even when `maxWidth` is set — the wrapper split on all whitespace, so setting `maxWidth`
   silently destroyed authored breaks; each line now wraps at word boundaries on its own. Placement
   is otherwise one-dimensional, vertical only, like the x-axis stagger; it runs under the same
@@ -126,6 +127,17 @@ A repin re-renders every published figure at once — here is what a maintainer 
   spec: two figures carry a single unpinned callout each (a lone callout never collides) and the one
   figure with several callouts pins all of them. No golden fixture carries `annotations.points`, so
   this guarantee rests on the exact-equality tests in the engine, not on the golden suite. (#37)
+- **An unpinned point callout near a horizontal edge now flips to the inside of its point.** This is
+  a separate condition from the collision above, and the "no published spec is affected" finding
+  there does NOT cover it: a LONE unpinned callout flips too, whenever its centred label would run
+  off the canvas on the right or cross the frame edge into the y-tick-label gutter on the left. Two
+  published figures carry a single unpinned callout each and should be eyeballed on repin. A callout
+  whose label fits is untouched, and a pinned (`dx`/`dy`) callout never flips. (#37)
+- **The scatter hover card's x row loses its thousands separator**: it read `2,000` and now reads
+  `2000`, because the card and the new `{x}` callout token share one formatter and a numeric x is
+  most often a year or an index, which the axis ticks have always printed ungrouped. Rounding to two
+  decimals is unchanged. Hover-only — no rendered SVG or PNG changes for a chart without an `{x}`
+  callout. (#37)
 - **Every published histogram and faceted scatter gains 8px between its x-axis title and its tick
   labels.** Screen only; the PNG export is unchanged. (#34)
 - **A faceted stacked bar whose hover is the card now also shades the hovered category on its

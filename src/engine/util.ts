@@ -29,15 +29,24 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
   return `${negative ? "-" : ""}${affixes.prefix}${magnitude}${affixes.suffix}`;
 }
 
-/** The one x formatter for a NUMERIC x: at most two decimals, thousands grouped. Both the scatter
- *  hover card's x row (`scatterPointHoverOptions`, render-live.ts) and the `{x}` row token in a
- *  point-callout label (`xTokenFor`, index.ts) call this, so a callout and the card for the same
- *  observation cannot disagree. Keep it one function: the callout token used to reuse the AXIS
+/** The one x formatter for a NUMERIC x: at most two decimals, NEVER grouped. Both the scatter hover
+ *  card's x row (`scatterPointHoverOptions`, render-live.ts) and the `{x}` row token in a
+ *  point-callout label (`xTokenFor`, index.ts) call this, so a callout, the card and the axis ticks
+ *  all read the same `2021` / `2.29`. Keep it one function: the callout token used to reuse the AXIS
  *  format instead (`${+v}`), which put `2025a: -0.` and `x=2.285011857607663` on the frame — a raw
  *  float is not a label. Temporal/quarterly x keeps `tooltip_x_format` and categorical x keeps its
- *  `x_labels` name; neither is a number to round. */
+ *  `x_labels` name; neither is a number to round.
+ *
+ *  Two things here are load-bearing, both found by review:
+ *  - `useGrouping: false`, because a numeric x is most often a year or an index and the axis ticks
+ *    are ungrouped for that reason (`x-adapter.ts`): a callout reading `2,021` under a tick reading
+ *    `2021` is the defect, not the fix. Rounding the raw float was the whole reported problem.
+ *  - the EXPLICIT `"en-US"` locale, because this string is drawn into the SVG and into the PNG
+ *    export, and rendered output must not depend on the rendering machine. `toLocaleString()` with
+ *    no locale yields `2,59` on a de-DE host. No other rendered text uses a locale formatter
+ *    (`marks/stacked.ts` says so explicitly) and this one must not become the exception. */
 export function formatNumericX(v: number): string {
-  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return v.toLocaleString("en-US", { maximumFractionDigits: 2, useGrouping: false });
 }
 
 /** Apply the `valueLabel` hook to one in-mark label's text. `rendered` is the engine's own

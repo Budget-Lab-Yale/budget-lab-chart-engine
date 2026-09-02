@@ -922,11 +922,17 @@ export function assemblePlot({
   //     collides with nothing gets NO entry here, so it takes exactly today's default below and
   //     every existing chart renders byte-identically.
   //
-  //     A movable label is also FLIPPED to the inside of its point when the centred box would cross
-  //     an inner frame edge: `2025b (2025a–2026…` ran off the right of the frame in the 1.14.0
-  //     visual review. The flip is decided here, before the vertical sweep, because it changes the
-  //     box's horizontal extent and therefore which labels are near enough to collide — one
-  //     estimate has to feed both or the sweep separates the wrong pair.
+  //     A movable label is also FLIPPED to the inside of its point when the centred box would run
+  //     off one side: `2025b (2025a–2026…` was cut off at the right in the 1.14.0 visual review. The
+  //     flip is decided here, before the vertical sweep, because it changes the box's horizontal
+  //     extent and therefore which labels are near enough to collide — one estimate has to feed
+  //     both or the sweep separates the wrong pair.
+  //
+  //     The two thresholds are deliberately ASYMMETRIC. On the right it is the CANVAS edge: the
+  //     right margin is empty, so a label may overhang the frame harmlessly and only a label past
+  //     the canvas is actually truncated. On the left it is the inner FRAME edge, because the left
+  //     margin is the y-tick-label gutter — an overhang there collides with the tick labels rather
+  //     than merely leaving the frame.
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
   const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -28 : -6);
@@ -947,14 +953,22 @@ export function assemblePlot({
       const text = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
       const lines = text.split("\n");
       const w = Math.max(...lines.map((l) => l.length)) * LABEL_CHAR_PX;
-      // Flip a movable label whose CENTRED box leaves the frame on one side: anchor it away from
-      // that edge, LABEL_FLIP_DX clear of the point. A box that overruns BOTH edges is wider than
-      // the frame, so no anchor fits and the centred default is kept rather than made worse.
+      // Flip a movable label that runs off ONE side: anchor it away from that side,
+      // LABEL_FLIP_DX to the inside of its point. Two ways to decline: a box that overruns both
+      // limits is wider than the space available, and a flipped box that would overrun the
+      // OPPOSITE limit has only traded which end is cut off (a label nearly as wide as the frame
+      // at the right edge lands past the left gutter once flipped). Both keep the centred default.
+      const rightLimit = effMarginLeft + innerWForPx + effMarginRight; // the canvas edge (= width)
+      const leftLimit = effMarginLeft; // the inner frame edge — the y-tick-label gutter starts here
       let dx = p.dx ?? 0;
       if (!fixed) {
-        const overRight = px + w / 2 > effMarginLeft + innerWForPx;
-        const overLeft = px - w / 2 < effMarginLeft;
-        if (overRight !== overLeft) dx = overRight ? -LABEL_FLIP_DX : LABEL_FLIP_DX;
+        const overRight = px + w / 2 > rightLimit;
+        const overLeft = px - w / 2 < leftLimit;
+        if (overRight !== overLeft) {
+          const flipped = overRight ? -LABEL_FLIP_DX : LABEL_FLIP_DX;
+          const fLeft = flipped < 0 ? px + flipped - w : px + flipped;
+          if (fLeft >= leftLimit && fLeft + w <= rightLimit) dx = flipped;
+        }
         if (dx !== 0) autoDx.set(i, dx);
       }
       const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;

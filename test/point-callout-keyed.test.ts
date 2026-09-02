@@ -355,10 +355,10 @@ describe("annotations.points — row tokens in the rendered label", () => {
     expect(text(svg as SVGSVGElement, /@/)).toBe("2025b* @ 2.32 (Recent era)");
   });
 
-  it("{x} on a numeric axis is rounded and grouped the way the hover card formats x", () => {
+  it("{x} on a numeric axis is rounded to two decimals and never grouped", () => {
     // The unrounded axis form put `2025a: -0.` and `2026a at x=2.285011857607663` on the frame in
     // the 1.14.0 visual review — a raw float is not a label. Both the card and the token now go
-    // through `formatNumericX`, so a callout reads `2.59` / `2,000`. A test using a short x like
+    // through `formatNumericX`, so a callout reads `2.59` / `2000`. A test using a short x like
     // "2.32" cannot tell the two forms apart, hence the many-decimal and four-digit rows here.
     const rows = rowsOf([
       { x: "2.593569308310415", y: "-0.12", g: "Recent", period: "2025a" },
@@ -370,7 +370,9 @@ describe("annotations.points — row tokens in the rendered label", () => {
     ]);
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
     expect(text(svg as SVGSVGElement, /^a=/)).toBe("a=2.59");
-    expect(text(svg as SVGSVGElement, /^b=/)).toBe("b=2,000");
+    // No thousands separator: the axis ticks and the crosshair are ungrouped for the same reason
+    // (a numeric x is most often a year or an index), so `2,000` under a `2000` tick was the defect.
+    expect(text(svg as SVGSVGElement, /^b=/)).toBe("b=2000");
   });
 
   it("{x} equals the scatter card's own x row for the same row (one formatter, two callers)", () => {
@@ -417,11 +419,9 @@ describe("annotations.points — row tokens in the rendered label", () => {
       { time: "2020", series: "b", value: "4" }, { time: "2021", series: "b", value: "5" },
     ]);
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
-    // A YEAR on a numeric axis is grouped, because `{x}` is the card's formatter and the card
-    // groups: "2,021", not the axis tick's "2021". Pinned deliberately — this is the visible cost
-    // of card parity, and `xAxisType: "temporal"` is the way to label a year axis with a date
-    // format. Changing it means changing `formatNumericX`, which moves the card too.
-    expect(text(svg as SVGSVGElement, /^Alpha/)).toBe("Alpha/2,021/{point_label}");
+    // A YEAR on a numeric axis reads exactly as its axis tick does: rounding is what `{x}` adds,
+    // grouping is not. This chart's own crosshair card reads `2021` too, so nothing on it disagrees.
+    expect(text(svg as SVGSVGElement, /^Alpha/)).toBe("Alpha/2021/{point_label}");
   });
 
   it("a stacked-area series callout (no single row) still fills {series} from p.series and {x} from p.x", () => {
@@ -434,7 +434,7 @@ describe("annotations.points — row tokens in the rendered label", () => {
       { time: "2020", series: "b", value: "4" }, { time: "2021", series: "b", value: "5" },
     ]);
     const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
-    expect(text(svg as SVGSVGElement, /@2,021$/)).toBe("b@2,021");
+    expect(text(svg as SVGSVGElement, /@2021$/)).toBe("b@2021");
   });
 
   it("a plain x + y callout fills {x} (via the temporal tooltip format) and a given {series}; {point_label} stays literal", () => {
