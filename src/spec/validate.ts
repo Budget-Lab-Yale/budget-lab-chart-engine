@@ -1006,9 +1006,12 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches ${n} rows — a keyed callout must name exactly one; disambiguate the ${JSON.stringify(rawPointLabel)} cells or anchor the callout by x and y`);
       } else {
         const row = matched[0] as TidyRow;
+        // Blank exactly as the engine reads it (`valRaw === ""` gives `_y: null`, index.ts); a
+        // whitespace-only cell parses to 0 there and draws. Non-numeric cells are already reported
+        // once per row below, so only blankness is this callout's own error.
         const valRaw = (row[cols.value] as string | undefined) ?? "";
-        if (valRaw.trim() === "" || !Number.isFinite(Number(valRaw))) {
-          errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.value)} cell is ${JSON.stringify(valRaw)} — the callout takes its y from that cell and needs a number`);
+        if (columns.has(cols.value) && valRaw === "") {
+          errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.value)} cell is empty — the callout takes its y from that cell`);
         }
         if (cols.series && columns.has(cols.series) && spec.series_order?.length) {
           const s = (row[cols.series] as string | undefined) ?? "";

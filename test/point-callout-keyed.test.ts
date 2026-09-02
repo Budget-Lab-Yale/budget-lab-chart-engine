@@ -144,7 +144,27 @@ describe("annotations.points[].point — data validation", () => {
     const rows = rowsOf([...ROWS, { x: "0.5", y: "", g: "Earlier", period: "blank" }]);
     const r = validateChartData(withPoints([{ point: "blank", label: "l" }]), rows);
     expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/annotations\.points\[0\]\.point "blank" matches a row whose "y" cell is ""/);
+    expect(r.errors.join("\n")).toMatch(/annotations\.points\[0\]\.point "blank" matches a row whose "y" cell is empty/);
+  });
+
+  it("accepts a whitespace-only value cell, which the engine draws at 0, and reports a non-numeric one once (per row, not per callout)", () => {
+    const ws = rowsOf([...ROWS, { x: "0.5", y: " ", g: "Earlier", period: "ws" }]);
+    expect(validateChartData(withPoints([{ point: "ws", label: "l" }]), ws).valid).toBe(true);
+    const bad = rowsOf([...ROWS, { x: "0.5", y: "abc", g: "Earlier", period: "bad" }]);
+    const r = validateChartData(withPoints([{ point: "bad", label: "l" }]), bad);
+    expect(r.valid).toBe(false);
+    expect(r.errors.filter((e) => /annotations\.points/.test(e))).toHaveLength(0);
+    expect(r.errors.filter((e) => /is not numeric/.test(e))).toHaveLength(1);
+  });
+
+  it("a missing value column is reported once by the role check, not again per callout", () => {
+    const spec = withPoints([{ point: "2025b", label: "l" }, { point: "2019", label: "l" }], {
+      columns: { x: "x", value: "nope", series: "g", point_label: "period" },
+    });
+    const r = validateChartData(spec, ROWS);
+    expect(r.valid).toBe(false);
+    expect(r.errors.filter((e) => /columns\.value is "nope"/.test(e))).toHaveLength(1);
+    expect(r.errors.filter((e) => /annotations\.points/.test(e))).toHaveLength(0);
   });
 
   it("rejects a match whose series is filtered out by series_order — the callout would be drawn nowhere", () => {

@@ -28,15 +28,17 @@ export interface PlacementOpts {
  * with another box — overlapping in both axes — is ever assigned a new y; every other entry is the
  * input `y` itself (copied, not recomputed), so a chart whose callouts never touched renders
  * byte-identically to before this existed. That is also why a lone label near the frame edge is
- * NOT clamped: the clamp only runs on a column in which something moved.
+ * NOT clamped: the clamp considers only labels that took part in a collision.
  *
- * Within each column of horizontally-near movable boxes, labels are pushed apart by a cascaded
- * sweep, top to bottom: each label moves just clear of every near movable label above it and of
- * every near FIXED box (a pinned label is an obstacle, never moved), so a pushed label pushes the
- * next, however many there are — monotone, so no iteration to bound and no collision left behind.
- * If the stack overflows `hi`, a mirror sweep from `hi` pushes it back up (again clearing fixed
- * boxes); if its top then sits above `lo`, the top wins: it is pinned to `lo` and the stack
- * overflows downward, which keeps the labels in reading order when a stack is taller than the frame.
+ * Within each column of horizontally-near movable boxes, labels are settled by a sweep in the
+ * current visual order: each label is pushed (down, or up in the mirror sweep) until it collides
+ * with no near label already settled in this sweep and no near FIXED box (a pinned label is an
+ * obstacle, never moved). A label already settled never moves again within a sweep, so every
+ * branch below ends with a full sweep and therefore with no collision left behind. If the involved
+ * stack overflows `hi`, its lowest label is pinned to `hi` and the column swept upward, repeated
+ * while an involved label is still past `hi` (each pin is permanent, so this ends); if an involved
+ * label then sits above `lo`, the top wins — it is pinned to `lo` and the column swept downward,
+ * overflowing the bottom when a stack is taller than the frame.
  */
 export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): number[] {
   const n = boxes.length;
@@ -44,10 +46,9 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
   const near = (a: CalloutBox, b: CalloutBox): boolean => a.x0 < b.x1 + o.gap && b.x0 < a.x1 + o.gap;
   // Two boxes are clear when their centres are at least half of each height apart.
   const clearance = (a: CalloutBox, b: CalloutBox): number => (a.h + b.h) / 2;
-  const collide = (a: CalloutBox, ay: number, b: CalloutBox, by: number): boolean =>
-    near(a, b) && Math.abs(ay - by) < clearance(a, b);
-  const fixedUp = boxes.map((_, i) => i).filter((i) => boxes[i]!.fixed).sort((a, b) => ys[a]! - ys[b]!);
-  const fixedDown = [...fixedUp].reverse();
+  const collide = (i: number, j: number): boolean =>
+    near(boxes[i]!, boxes[j]!) && Math.abs(ys[i]! - ys[j]!) < clearance(boxes[i]!, boxes[j]!);
+  const fixed = boxes.map((_, i) => i).filter((i) => boxes[i]!.fixed);
 
   // Columns: union-find over the movable boxes on horizontal nearness alone (A near B, B near C
   // joins A and C), so a whole stack is swept together even when its ends never touch.
@@ -69,74 +70,56 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
     else columns.set(root, [i]);
   }
 
-  // Push label i down past every near fixed box it collides with. Fixed boxes are visited in
-  // ascending y and the label only ever moves down, so a box already passed cannot be hit again;
-  // the loop re-runs only for two fixed boxes of different heights stacked on one y.
-  const clearFixedDown = (i: number): boolean => {
-    let moved = false;
-    for (let again = true; again; ) {
-      again = false;
-      for (const f of fixedUp) {
-        if (!collide(boxes[i]!, ys[i]!, boxes[f]!, ys[f]!)) continue;
-        ys[i] = ys[f]! + clearance(boxes[i]!, boxes[f]!);
-        moved = again = true;
-      }
-    }
-    return moved;
-  };
-  const clearFixedUp = (i: number): void => {
-    for (let again = true; again; ) {
-      again = false;
-      for (const f of fixedDown) {
-        if (!collide(boxes[i]!, ys[i]!, boxes[f]!, ys[f]!)) continue;
-        ys[i] = ys[f]! - clearance(boxes[i]!, boxes[f]!);
-        again = true;
-      }
-    }
-  };
-
   for (const col of columns.values()) {
-    // Stable by input index, then by default y: the sweep order is the visual order.
-    const order = [...col].sort((a, b) => ys[a]! - ys[b]! || a - b);
-    // Downward sweep. Non-near labels in the same column are not obstacles — they do not overlap,
-    // so they must not move anything.
-    const down = (): boolean => {
+    // Labels that collided in some sweep (pushed, or pushed against): the only ones the clamp may
+    // touch. Everything else keeps its input y bit for bit.
+    const involved = new Set<number>();
+    // One sweep in direction `dir` (+1 down, -1 up) over the column in CURRENT visual order (ties
+    // by input index). Each label is pushed past every near label settled before it and every near
+    // fixed box until it collides with none; pushes are monotone, so the loop ends.
+    const sweep = (dir: 1 | -1): boolean => {
+      const order = [...col].sort((a, b) => dir * (ys[a]! - ys[b]!) || a - b);
       let moved = false;
       for (let k = 0; k < order.length; k++) {
         const i = order[k]!;
-        for (let m = 0; m < k; m++) {
-          const j = order[m]!;
-          if (!near(boxes[i]!, boxes[j]!)) continue;
-          const floor = ys[j]! + clearance(boxes[i]!, boxes[j]!);
-          if (ys[i]! < floor) {
-            ys[i] = floor;
-            moved = true;
+        const obstacles = [...order.slice(0, k), ...fixed];
+        for (let again = true; again; ) {
+          again = false;
+          for (const j of obstacles) {
+            if (!collide(i, j)) continue;
+            ys[i] = ys[j]! + dir * clearance(boxes[i]!, boxes[j]!);
+            involved.add(i);
+            involved.add(j);
+            moved = again = true;
           }
         }
-        if (clearFixedDown(i)) moved = true;
       }
       return moved;
     };
-    if (!down()) continue;
-    const last = order[order.length - 1]!;
-    if (ys[last]! > o.hi) {
-      ys[last] = o.hi;
-      clearFixedUp(last);
-      for (let k = order.length - 2; k >= 0; k--) {
-        const i = order[k]!;
-        for (let m = order.length - 1; m > k; m--) {
-          const j = order[m]!;
-          if (!near(boxes[i]!, boxes[j]!)) continue;
-          const ceil = ys[j]! - clearance(boxes[i]!, boxes[j]!);
-          if (ys[i]! > ceil) ys[i] = ceil;
-        }
-        clearFixedUp(i);
+    if (!sweep(1)) continue;
+    const extreme = (dir: 1 | -1): number | null => {
+      let best: number | null = null;
+      for (const i of involved) {
+        if (boxes[i]!.fixed) continue;
+        if (best == null || dir * (ys[i]! - ys[best]!) > 0) best = i;
       }
+      return best;
+    };
+    // Bottom overflow: pin the lowest involved label to `hi` and sweep up; each pin is permanent
+    // (an upward sweep only raises labels), so at most one iteration per label.
+    for (let g = 0; g < col.length; g++) {
+      const low = extreme(1);
+      if (low == null || ys[low]! <= o.hi) break;
+      ys[low] = o.hi;
+      sweep(-1);
     }
-    const first = order[0]!;
-    if (ys[first]! < o.lo) {
-      ys[first] = o.lo;
-      down();
+    // Top overflow: the top wins — pin the highest involved label to `lo` and sweep down, letting a
+    // stack taller than the frame overflow the bottom in reading order.
+    for (let g = 0; g < col.length; g++) {
+      const high = extreme(-1);
+      if (high == null || ys[high]! >= o.lo) break;
+      ys[high] = o.lo;
+      sweep(1);
     }
   }
   return ys;

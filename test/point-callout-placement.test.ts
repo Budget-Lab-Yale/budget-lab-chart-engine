@@ -115,6 +115,21 @@ describe("placePointCallouts (pure helper)", () => {
     expect(Math.abs(ys[1]! - f.y)).toBeGreaterThanOrEqual(ROW_H);
   });
 
+  it("clamps on the column's ACTUAL lowest label, not the one with the largest input y (reviewer's reproduction)", () => {
+    // A near-chain joins a four-label stack at the bottom to an unrelated box at 325 via boxes it
+    // never touches. The stack is pushed to 320/333/346/359 — three past hi — but the box with the
+    // largest INPUT y (325) is not the one that was pushed furthest.
+    const boxes = [
+      box(0, 320), box(0, 321), box(0, 322), box(0, 323),
+      box(45, 50), box(90, 100), box(135, 150), box(180, 200), box(200, 325),
+    ];
+    const ys = placePointCallouts(boxes, OPTS);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(OPTS.hi);
+    for (const k of [4, 5, 6, 7, 8]) expect(ys[k]).toBe(boxes[k]!.y);
+    const stack = [ys[0]!, ys[1]!, ys[2]!, ys[3]!].sort((p, q) => p - q);
+    for (let k = 1; k < 4; k++) expect(stack[k]! - stack[k - 1]!).toBeGreaterThanOrEqual(ROW_H - 1e-9);
+  });
+
   it("a colliding group is clamped into [lo, hi]", () => {
     const ys = placePointCallouts([box(100, OPTS.hi - 2), box(100, OPTS.hi + 1)], OPTS);
     expect(Math.max(...ys)).toBeLessThanOrEqual(OPTS.hi);
@@ -154,6 +169,52 @@ describe("placePointCallouts (pure helper)", () => {
     expect(ys[0]).toBe(a.y);
     expect(ys[1]! - a.y).toBeGreaterThanOrEqual(ROW_H);
     expect(ys[2]! - ys[1]!).toBeGreaterThanOrEqual(ROW_H);
+  });
+});
+
+describe("placePointCallouts — seeded property check", () => {
+  // mulberry32: deterministic, so a failure is reproducible from the seed in the message.
+  const rng = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const near = (a: CalloutBox, b: CalloutBox) => a.x0 < b.x1 + OPTS.gap && b.x0 < a.x1 + OPTS.gap;
+  const collideAt = (a: CalloutBox, ay: number, b: CalloutBox, by: number) =>
+    near(a, b) && Math.abs(ay - by) < (a.h + b.h) / 2;
+
+  it("leaves no near overlap behind, never moves a fixed box, and returns collision-free input bit-for-bit", () => {
+    const next = rng(37);
+    let untouchedCases = 0;
+    for (let c = 0; c < 1500; c++) {
+      const count = 1 + Math.floor(next() * 8);
+      const boxes: CalloutBox[] = [];
+      for (let i = 0; i < count; i++) {
+        const x0 = Math.floor(next() * 300);
+        boxes.push({ x0, x1: x0 + 30 + Math.floor(next() * 30), y: OPTS.lo - 20 + next() * (OPTS.hi - OPTS.lo + 40), h: next() < 0.3 ? 26 : 13, fixed: next() < 0.25 });
+      }
+      const ys = placePointCallouts(boxes, OPTS);
+      const label = `case ${c}: ${JSON.stringify(boxes)} -> ${JSON.stringify(ys)}`;
+      expect(ys.length, label).toBe(count);
+      let anyInputCollision = false;
+      for (let i = 0; i < count; i++) {
+        expect(Number.isFinite(ys[i]!), label).toBe(true);
+        if (boxes[i]!.fixed) expect(ys[i], label).toBe(boxes[i]!.y);
+        for (let j = i + 1; j < count; j++) {
+          if (collideAt(boxes[i]!, boxes[i]!.y, boxes[j]!, boxes[j]!.y)) anyInputCollision = true;
+          // Two FIXED boxes may overlap by the author's choice; every other near pair must be clear.
+          if (boxes[i]!.fixed && boxes[j]!.fixed) continue;
+          expect(collideAt(boxes[i]!, ys[i]!, boxes[j]!, ys[j]!), label).toBe(false);
+        }
+      }
+      if (!anyInputCollision) {
+        untouchedCases++;
+        expect(ys, label).toEqual(boxes.map((b) => b.y));
+      }
+    }
+    // Sanity: the identity branch was actually exercised.
+    expect(untouchedCases).toBeGreaterThan(100);
   });
 });
 
@@ -289,6 +350,27 @@ describe("annotations.points — rendered auto-placement", () => {
     const g = texts.find((t) => (t.textContent ?? "").includes("Gamma"))!;
     expect(a.querySelectorAll("tspan").length).toBe(2);
     expect(Math.abs(absPos(a).y - absPos(g).y)).toBeGreaterThanOrEqual(2 * LABEL_ROW_H - 1e-6);
+  });
+
+  it("is gated off on a categorical x-axis: colliding callouts keep their default offsets", () => {
+    // The band scale has no numeric domain to estimate px from, so — like the stagger and the
+    // connector leader — placement does not run and both labels sit at the default 6px up.
+    const spec = {
+      title: "T", chartType: "bar", xAxisType: "categorical", data: "d.csv",
+      annotations: { points: [{ x: "a", y: 1, label: "One" }, { x: "a", y: 1, label: "Two" }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([{ time: "a", series: "s", value: "1" }, { time: "b", series: "s", value: "2" }]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const [one, two] = labelBoxes(svg as SVGSVGElement, ["One", "Two"]);
+    expect(one!.y).toBe(two!.y);
+  });
+
+  it("is gated off when the render has no width/height: colliding callouts keep their default offsets", () => {
+    const { svg } = renderChart(withPoints([{ point: "2025b", label: "PLAIN" }, { point: "2025b*", label: "STAR" }]), ROWS, { document });
+    const [plain, star] = labelBoxes(svg as SVGSVGElement, ["PLAIN", "STAR"]);
+    // 2025b and 2025b* share an x and differ by 0.01 in y, so at the default offset the two labels
+    // overlap by a row — which placement would otherwise have fixed.
+    expect(Math.abs(plain!.y - star!.y)).toBeLessThan(ROW_H);
   });
 
   it("the connector follows a moved label", () => {
