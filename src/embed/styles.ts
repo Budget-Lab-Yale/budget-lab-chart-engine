@@ -536,7 +536,29 @@ body {
      --tbl-gridline is. One token so the two cannot drift apart. */
   --tbl-tooltip-rule: rgba(200, 205, 215, 0.7);
   border: 1px solid var(--tbl-tooltip-rule);
-  white-space: nowrap;
+  /* The card WRAPS its rows, and max-width below is the width it wraps AT. These two declarations
+     are one fix and neither works alone (#41).
+
+     white-space was nowrap, which contradicted the cap: the box stopped at 320px while the line
+     did not, so it ran out through the right border and the row's value was painted outside the
+     card and clipped. A scatter card falling back to its axis titles lost the 2.59 it existed to
+     report.
+
+     overflow-wrap covers the case white-space alone does not. Normal wrapping only breaks at an
+     existing space or hyphen, so ONE long unbroken label -- a bare identifier, a URL, an
+     unhyphenated compound -- offers no break opportunity and clips exactly as before. anywhere,
+     not break-word: only anywhere lets those mid-word opportunities count toward min-content, so
+     the card is sized from the width it can actually wrap to. The table cells further down
+     (td.is-text, td.is-wrap, th.tbl-table-stub.is-wrap) deliberately use break-word instead --
+     they are sized by table layout against column_width/stub_min_width, where shrinking
+     min-content to one character is the wrong answer. Do not harmonise the two.
+
+     The label-to-value separator is the other half of this: a non-breaking space, so a wrap never
+     strands the number on a line without its label. See LABEL_VALUE_GAP in crosshair.ts.
+
+     No backticks in this comment: the whole stylesheet is one template literal. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   z-index: 9999;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -552,6 +574,12 @@ body {
 .tbl-tooltip-value { font-weight: var(--tw-bold); }
 .tbl-tooltip-row {
   display: flex;
+  /* center, NOT flex-start, now that a row can be two lines tall (#41): the swatch keys the
+     whole row, so it belongs against the row's middle -- which is what the LEGEND already
+     does with its own multi-line labels, and the card's key and the legend's are one
+     drawing. flex-start was the alternative considered and rejected from the render: it puts
+     the swatch on the label's first line but also lifts it about a pixel on every
+     SINGLE-line row of every published chart, for nothing. */
   align-items: center;
   gap: 6px;
   margin-bottom: 2px;

@@ -23,6 +23,22 @@ import type { TooltipHookCtx } from "../spec/hooks";
 
 type Row = Record<string, unknown>;
 
+/** The separator between a card row's LABEL span and its VALUE span: a NON-BREAKING space.
+ *
+ *  `.tbl-tooltip` wraps at its 320px `max-width` (it used to `nowrap` and clip the overflow
+ *  instead -- see the rule in styles.ts, #41). A PLAIN space here is a break opportunity, so a
+ *  label longer than one line filled that line and the number it labels dropped onto a line of its
+ *  own -- "...(percentage points)" above a lone "2.59", which reads as two statements rather than
+ *  one. Written as the escape rather than the character so it is greppable and cannot be mistaken
+ *  for the plain space it replaced, and as a text node rather than `&nbsp;` so the markup carries
+ *  no HTML-only entity.
+ *
+ *  Every row builder in this file reads this constant -- there are seven emission sites (the
+ *  scatter card's x and y rows, the shared series row, the band card's two Total variants, the
+ *  cumulative-area Total, and the overlay rows) and they drifted apart on smaller things than
+ *  this. Gated by test/card-wrap.test.ts. */
+const LABEL_VALUE_GAP = "\u00a0";
+
 export interface CrosshairOptions {
   rows: Row[];
   xField?: string;
@@ -257,7 +273,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       // The Total of a cumulative stack names no series, so it draws no key — but it still occupies
       // the box, or its label hangs left of every row above it. `shape: "none"` IS that empty box.
       const blank = seriesSwatchHtml({ shape: "none" });
-      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
+      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
     }
     // `overlays[].tooltip: true` lines LAST — a fitted or asserted line is a third kind of claim,
     // after the observed series and the total OF those series, and its own separator rule says so.
@@ -511,7 +527,7 @@ export function overlayTooltipRows(
     const cls =
       "tbl-tooltip-row tbl-tooltip-row--overlay" + (i === 0 ? " tbl-tooltip-row--overlay-first" : "");
     html +=
-      `<div class="${cls}">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(name)}:</span> ` +
+      `<div class="${cls}">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(name)}:</span>${LABEL_VALUE_GAP}` +
       `<span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   });
   return html;
@@ -567,7 +583,7 @@ function tooltipSeriesRowHtml(
 ): string {
   const display = (opts.seriesLabels && opts.seriesLabels[series]) || series;
   const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-  const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span> `;
+  const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span>${LABEL_VALUE_GAP}`;
   return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
 }
 
@@ -1137,14 +1153,14 @@ export function buildBandTooltipHtml(
       // Keys the net-dot marker, so it draws the SAME icon the legend's "Total" row draws — a
       // colourless `dot`, which icon.ts resolves to the white disc with the black ring.
       const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
-      totalRowHtml = `<div class="${rowClasses}">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="${rowClasses}">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
       // No real swatch (no dot on the chart) — but an EMPTY spacer with the SAME class as a real
       // swatch, so the label still sits at the swatch+gap indent every series row uses. Before
       // this the text row emitted no swatch element at all and sat flush left, one swatch-plus-gap
       // short of every row above it.
       const spacer = `<span class="tbl-tooltip-swatch" aria-hidden="true"></span>`;
-      totalRowHtml = `<div class="${rowClasses}">${spacer}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="${rowClasses}">${spacer}<span><span class="tbl-tooltip-label">Total:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     }
   }
 
@@ -3966,9 +3982,9 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       if (p.pointLabel) tokens.push(p.pointLabel);
       const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
       let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;
-      html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span> <span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
+      html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
       if (p.y != null && Number.isFinite(p.y)) {
-        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
+        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
       }
       // Scoped to the hovered point: a pooled fit / `fun` / abline applies to every point, a
       // per-series fit only to its own series. The header already names that series, so the rows

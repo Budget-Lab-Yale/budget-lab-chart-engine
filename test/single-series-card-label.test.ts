@@ -118,7 +118,10 @@ describe("a single-series card row: no label, no bare colon (defaults)", () => {
       expect(cardShown()).toBe(true);
       const { label, text } = firstRow();
       expect(label?.textContent).toBe("Households:");
-      expect(text).toBe(`Households: ${c.value}`);
+      // The separator is a NON-BREAKING space, not the plain one this read before #41: the card
+      // wraps at 320px now, and a plain space there would let the value break away from its label
+      // (LABEL_VALUE_GAP in crosshair.ts). Written as the escape so it cannot be retyped as " ".
+      expect(text).toBe(`Households:\u00a0${c.value}`);
     });
   }
 });
