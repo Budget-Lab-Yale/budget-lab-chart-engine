@@ -61,6 +61,18 @@ const temporalMarginBottom = (xDomain: [Date, Date]): number => {
   return allJanuary ? 22 : 38;
 };
 
+/** Reads an `XOpts.xPlotOpts.domain` as a numeric span, for callers that map px <-> data against
+ *  the DRAWN axis. Numbers pass through; Dates (a temporal histogram's bin-edge span) become epoch
+ *  ms; anything else is not a span — notably the categorical adapter's `domain`, which is the list
+ *  of category strings — and returns undefined so the caller falls back to the data extent. */
+export function numericAxisDomain(domain: unknown): [number, number] | undefined {
+  if (!Array.isArray(domain) || domain.length !== 2) return undefined;
+  const lo = domain[0] instanceof Date ? domain[0].getTime() : domain[0];
+  const hi = domain[1] instanceof Date ? domain[1].getTime() : domain[1];
+  // Number.isFinite does NOT coerce, so a category string fails here rather than becoming NaN.
+  return Number.isFinite(lo) && Number.isFinite(hi) ? [lo as number, hi as number] : undefined;
+}
+
 export function makeXAdapter(
   xType: XAxisType,
   xAxisPolicy?: XAxisPolicy,
