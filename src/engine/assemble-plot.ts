@@ -229,9 +229,13 @@ export interface AssembleOptions {
   /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
    *  present, used instead of spec.annotations.points so the snap values render. */
   points?: PointCallout[];
-  /** Numeric extent [min,max] of the parsed x values (ms for dates) — used to estimate label px
-   *  positions for annotation-label collision avoidance. Absent → no auto-stagger. */
-  xExtent?: [number, number];
+  /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
+   *  the marks are actually DRAWN in, so px estimates match what a reader sees. Falls back to the
+   *  data extent only where the adapter supplies no explicit domain (temporal/quarterly
+   *  non-histogram, where Plot infers the domain from the data). Used to estimate label px
+   *  positions for annotation-label collision avoidance and to convert a point callout's px
+   *  connector offset back to data space. Absent → no auto-stagger, no connector leader. */
+  xAxisDomain?: [number, number];
   width?: number;
   height?: number;
   marginRight?: number;
@@ -336,7 +340,7 @@ export function assemblePlot({
   colors,
   spec,
   points,
-  xExtent,
+  xAxisDomain,
   width,
   height,
   marginRight,
@@ -444,12 +448,12 @@ export function assemblePlot({
   const LABEL_GAP = 6;
   const LABEL_CHAR_PX = 6.2; // ~annotation font advance
   const staggerDy = new Map<string, number>();
-  if (xExtent && xExtent[1] > xExtent[0] && width != null) {
+  if (xAxisDomain && xAxisDomain[1] > xAxisDomain[0] && width != null) {
     const innerW = width - effMarginLeft - effMarginRight;
     const toPx = (v: number | Date | string | null): number | null => {
       if (v == null || typeof v === "string") return null;
       const n = typeof v === "number" ? v : v.getTime();
-      return effMarginLeft + ((n - xExtent[0]) / (xExtent[1] - xExtent[0])) * innerW;
+      return effMarginLeft + ((n - xAxisDomain[0]) / (xAxisDomain[1] - xAxisDomain[0])) * innerW;
     };
     type Iv = [number, number];
     // Two labels in the same stagger row collide when their px spans come within LABEL_GAP.
@@ -907,11 +911,11 @@ export function assemblePlot({
     const dx = p.dx != null ? p.dx : 0;
     const dy = p.dy != null ? -p.dy : p.connector ? -28 : -6;
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
-    // A pixel-offset leader needs a numeric x extent; the band (categorical) scale has none, so a
-    // category-anchored callout falls back to the simple dot (or no marker).
-    if (p.connector && typeof px !== "string" && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null) {
+    // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
+    // a category-anchored callout falls back to the simple dot (or no marker).
+    if (p.connector && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
       // Label position in DATA space: shift the point by the px offset using the per-px data deltas.
-      const dppx = (xExtent[1] - xExtent[0]) / innerWForPx;
+      const dppx = (xAxisDomain[1] - xAxisDomain[0]) / innerWForPx;
       const dppy = (yDomain[1] - yDomain[0]) / innerHForPx;
       const baseN = typeof px === "number" ? px : px.getTime();
       const labelN = baseN + dx * dppx;

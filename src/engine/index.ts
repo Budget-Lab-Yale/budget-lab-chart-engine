@@ -25,7 +25,7 @@ import {
 } from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
-import { makeXAdapter } from "./x-adapter";
+import { makeXAdapter, numericAxisDomain } from "./x-adapter";
 import type { XAdapter } from "./x-adapter";
 import { parseDate } from "../spec/parse-time";
 import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
@@ -603,11 +603,11 @@ function assemblePaneResult(
     return y != null ? { ...p, y } : p;
   });
 
-  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
-  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
+  // Numeric extent of the parsed x values (numeric/temporal axes only; categorical → undefined).
   // Computed HERE, above the y-extent block, because the `column` overlay fold a few lines down
   // needs it to crop by the entry's `domain` (see below) — xOpts, which the draw-time overlay
-  // resolution prefers, is not built until much later.
+  // resolution prefers, is not built until much later. Everything that measures against the DRAWN
+  // axis reads `xAxisDomain` instead (built once xOpts exists); this is only its fallback.
   const xExtentVals = dataInScope
     .map((r) =>
       adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
@@ -802,6 +802,16 @@ function assemblePaneResult(
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
+
+  // The resolved x-axis domain as a numeric span, for anything that maps px <-> data against the
+  // DRAWN axis: annotation-label stagger geometry and point-callout connectors (assemblePlot), and
+  // overlay `domain: "axis"` cropping below. The numeric adapter always supplies a domain (it fits
+  // the data, or anchors at zero); a histogram's is the bin-edge span (Dates on a temporal axis —
+  // convert); temporal/quarterly non-histogram adapters supply none and Plot infers the data
+  // extent, so `xExtent` is the honest fallback there. The categorical band domain is a list of
+  // categories, not a span — never a candidate.
+  const xAxisDomain = numericAxisDomain(xOpts.xPlotOpts?.domain) ?? xExtent;
+
   const valueAffixes = resolveValueAffixes(spec);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
@@ -900,14 +910,13 @@ function assemblePaneResult(
   let overlayTooltips: OverlayTooltipLine[] = [];
   if (spec.overlays?.length && adapter.xField !== "_xc") {
     // `domain: "axis"` means the resolved x-scale domain when the adapter supplies one (numeric axes
-    // do), else the data extent — the widest honest answer available.
-    const axisDomain = (xOpts.xPlotOpts?.domain as [number, number] | undefined) ?? xExtent;
+    // do), else the data extent — the widest honest answer available. See `xAxisDomain` above.
     const resolvedOverlays = resolveOverlays(spec, dataInScope, {
       xField: adapter.xField as "_xn" | "_xd",
       colors,
       seriesNames,
       legendActive: spec.legend !== false,
-      ...(axisDomain ? { xDomain: axisDomain } : {}),
+      ...(xAxisDomain ? { xDomain: xAxisDomain } : {}),
     }).filter((o) => overlayDrawsInPane(o.facet, opts.paneFacetValue));
     overlayTooltips = overlayTooltipLines(spec.overlays, resolvedOverlays);
     // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
@@ -931,7 +940,7 @@ function assemblePaneResult(
         xField: adapter.xField as "_xn" | "_xd",
         ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
         // The visible frame, so a label anchors on the part of the line that is on screen.
-        ...(axisDomain ? { xDomain: axisDomain } : {}),
+        ...(xAxisDomain ? { xDomain: xAxisDomain } : {}),
         yDomain,
         plotWidth,
         plotHeight,
@@ -950,7 +959,7 @@ function assemblePaneResult(
     colors,
     spec,
     points: resolvedPoints,
-    ...(xExtent ? { xExtent } : {}),
+    ...(xAxisDomain ? { xAxisDomain } : {}),
     width: opts.width,
     height: opts.height,
     marginRight: opts.marginRight,
