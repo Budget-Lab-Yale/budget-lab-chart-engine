@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { placePointCallouts, type CalloutBox } from "../src/engine/callout-placement";
+import { MARK_POINT_R } from "../src/engine/theme";
 import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -388,10 +389,12 @@ describe("annotations.points — rendered auto-placement", () => {
       ROWS,
       { width: 720, height: 400, document },
     );
-    // Two arrows drawn; both labels present and not overlapping.
-    expect(svg.querySelectorAll('g[aria-label="arrow"] path').length).toBe(2);
     const boxes = labelBoxes(svg as SVGSVGElement, ["2025b", "2025b*"]);
     expect(boxesOverlap(boxes[0]!, boxes[1]!)).toBe(false);
+    // The sweep settles the upper label where it already was and pushes only the lower one, so
+    // exactly ONE of the pair is off its default and exactly one leader mark is emitted — see
+    // "connector leader defaults" below for the rule and for the leader that follows the move.
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
   });
 });
 
@@ -637,5 +640,172 @@ describe("annotations.points — an explicit newline is a hard line break", () =
     expect(a.querySelectorAll("tspan").length).toBe(2);
     expect(b.querySelectorAll("tspan").length).toBe(2);
     expect(Math.abs(absPos(a).y - absPos(b).y)).toBeGreaterThanOrEqual(2 * LABEL_ROW_H - 1e-6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rendered — connector leader defaults: 12px offset, headless line, gap at the marker
+// ---------------------------------------------------------------------------
+
+/** Every arrow-mark path in the plot, as its `d` string. */
+function leaderPaths(svg: SVGSVGElement): string[] {
+  return Array.from(svg.querySelectorAll('g[aria-label="arrow"] path')).map((p) => p.getAttribute("d") ?? "");
+}
+
+/** The two endpoints of a leader path. A headless leader is exactly `M x1,y1 L x2,y2`. */
+function leaderEnds(d: string): { start: { x: number; y: number }; end: { x: number; y: number } } {
+  const m = /^M\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*L\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*$/.exec(d.trim());
+  expect(m, d).not.toBeNull();
+  return { start: { x: Number(m![1]), y: Number(m![2]) }, end: { x: Number(m![3]), y: Number(m![4]) } };
+}
+
+const DOT_GROUPS = (svg: SVGSVGElement): number => svg.querySelectorAll('g[aria-label="dot"]').length;
+
+describe("annotations.points — connector leader defaults", () => {
+  const DIMS = { width: 720, height: 400, document };
+
+  it("a connector label's default offset is 12px above the point", () => {
+    // Pinning the same callout with `dy: 12` must land on the identical pixel. LONE is interior and
+    // isolated, so neither the vertical sweep nor the frame-edge flip can move it.
+    const auto = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true }]), ROWS, DIMS);
+    const pinned = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 12 }]), ROWS, DIMS);
+    const a = labelBoxes(auto.svg as SVGSVGElement, ["Lonely"])[0]!;
+    const p = labelBoxes(pinned.svg as SVGSVGElement, ["Lonely"])[0]!;
+    expect(a.y).toBe(p.y);
+    expect(a.x0).toBe(p.x0);
+  });
+
+  it("and it is 6px lower than the old 28px default (this test is not vacuous)", () => {
+    const auto = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true }]), ROWS, DIMS);
+    const old = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 28 }]), ROWS, DIMS);
+    const a = labelBoxes(auto.svg as SVGSVGElement, ["Lonely"])[0]!;
+    const o = labelBoxes(old.svg as SVGSVGElement, ["Lonely"])[0]!;
+    expect(a.y - o.y).toBeCloseTo(16, 6);
+  });
+
+  it("the NO-connector default is unchanged at 6px above the point", () => {
+    // Two published figures carry an unpinned connector-less callout; this pins that default.
+    const auto = renderChart(withPoints([{ point: "LONE", label: "Lonely" }]), ROWS, DIMS);
+    const pinned = renderChart(withPoints([{ point: "LONE", label: "Lonely", dy: 6 }]), ROWS, DIMS);
+    const a = labelBoxes(auto.svg as SVGSVGElement, ["Lonely"])[0]!;
+    const p = labelBoxes(pinned.svg as SVGSVGElement, ["Lonely"])[0]!;
+    expect(a.y).toBe(p.y);
+    expect(a.x0).toBe(p.x0);
+  });
+
+  it("an auto-placed callout sitting at its default draws NO leader and no fallback marker", () => {
+    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true }]), ROWS, DIMS);
+    const bare = renderChart(withPoints([{ point: "LONE", label: "Lonely" }]), ROWS, DIMS);
+    expect(leaderPaths(svg as SVGSVGElement)).toEqual([]);
+    // The fallback dot must not stand in for the leader either: same number of dot marks as the
+    // identical chart with no connector at all.
+    expect(DOT_GROUPS(svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement));
+  });
+
+  it("the same callout pinned at that very offset DOES draw a leader — the author asked for it", () => {
+    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 12 }]), ROWS, DIMS);
+    expect(leaderPaths(svg as SVGSVGElement).length).toBe(1);
+  });
+
+  // Two callouts at one x whose points are 12px apart vertically (0.1 in y is 12px on this
+  // 400px-high render). Their default labels are 12px apart too, one row's clearance is 13, so the
+  // LOWER label is pushed down 1px and the upper one keeps its default exactly.
+  const PAIR = [
+    { x: "2.3211", y: -0.05, label: "UP", connector: true },
+    { x: "2.3211", y: -0.15, label: "DOWN", connector: true },
+  ];
+
+  it("a callout the vertical sweep pushed off its default draws a leader — and only that one", () => {
+    const { svg } = renderChart(withPoints(PAIR), ROWS, DIMS);
+    const pinned = renderChart(withPoints(PAIR.map((c) => ({ ...c, dy: 12 }))), ROWS, DIMS);
+    const auto = labelBoxes(svg as SVGSVGElement, ["UP", "DOWN"]);
+    const atDefault = labelBoxes(pinned.svg as SVGSVGElement, ["UP", "DOWN"]);
+    const moved = auto.filter((b, k) => Math.abs(b.y - atDefault[k]!.y) > 1e-9);
+    // Exactly one of the pair left its default, so exactly one leader is drawn: the label that
+    // stayed is still 12px above its own point and needs no line.
+    expect(moved.map((m) => m.label)).toEqual(["DOWN"]);
+    const paths = leaderPaths(svg as SVGSVGElement);
+    expect(paths.length).toBe(1);
+    // And it starts at the label the sweep MOVED, not at the one that stayed — that is what the
+    // leader "following" the placed label means. Plot adds its half-pixel crisp-edge offset to
+    // text but not to the arrow path, so the two agree to within 0.5px, against 12px of separation.
+    const start = leaderEnds(paths[0]!).start;
+    const stayed = auto.find((b) => b !== moved[0])!;
+    expect(Math.abs(start.y - moved[0]!.y)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(start.y - stayed.y)).toBeGreaterThan(LABEL_ROW_H - 1);
+  });
+
+  it("a leader shorter than the gap itself is not drawn at all — Plot drops the whole shaft", () => {
+    // 2025b and 2025b* are 1.2px apart in y, so the sweep pushes the lower label a full row down
+    // onto its own point: the remaining shaft is under MARK_POINT_R + 2 and Plot emits no path
+    // geometry for it. The mark is still there; it draws nothing.
+    const { svg } = renderChart(
+      withPoints([{ point: "2025b", label: "{point_label}", connector: true }, { point: "2025b*", label: "{point_label}", connector: true }]),
+      ROWS,
+      DIMS,
+    );
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
+    expect(leaderPaths(svg as SVGSVGElement)).toEqual([""]);
+  });
+
+  it("a callout the frame-edge flip moved draws a leader, even though nothing collided with it", () => {
+    const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, connector: true }]), ROWS, DIMS);
+    // Non-vacuity: the flip is what moved this label — it is anchored away from the right edge.
+    expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBe("end");
+    expect(leaderPaths(svg as SVGSVGElement).length).toBe(1);
+  });
+
+  it("the leader stops MARK_POINT_R + 2 px short of the point's centre", () => {
+    // dx: 0, dy: 30 pins the label straight above the point, so the leader is vertical and the
+    // point's own centre is exactly 30px below the leader's start.
+    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dx: 0, dy: 30 }]), ROWS, DIMS);
+    const { start, end } = leaderEnds(leaderPaths(svg as SVGSVGElement)[0]!);
+    const centre = { x: start.x, y: start.y + 30 };
+    expect(Math.hypot(centre.x - end.x, centre.y - end.y)).toBeCloseTo(MARK_POINT_R + 2, 6);
+  });
+
+  it("the gap is measured along the leader, so a horizontal leader gets the same 2px of white", () => {
+    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dx: -40, dy: 0 }]), ROWS, DIMS);
+    const { start, end } = leaderEnds(leaderPaths(svg as SVGSVGElement)[0]!);
+    const centre = { x: start.x + 40, y: start.y };
+    expect(Math.hypot(centre.x - end.x, centre.y - end.y)).toBeCloseTo(MARK_POINT_R + 2, 6);
+  });
+
+  it("the leader is a plain two-point line in the callout's colour, with no arrowhead geometry", () => {
+    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 30, color: "#C1121F" }]), ROWS, DIMS);
+    // Plot hoists the constant stroke onto the mark's <g>; the path carries only the geometry.
+    const g = svg.querySelector('g[aria-label="arrow"]')!;
+    expect(g.getAttribute("stroke")).toBe("#C1121F");
+    const d = leaderPaths(svg as SVGSVGElement)[0]!;
+    // An arrowhead is appended to the shaft as a second `M…L…L…` run; a headless leader has exactly
+    // one M, one L and no third coordinate pair.
+    expect(d.trim()).toMatch(/^M-?[\d.]+,-?[\d.]+L-?[\d.]+,-?[\d.]+$/);
+    expect(Array.from(d.matchAll(/[ML]/g)).length).toBe(2);
+    expect(svg.querySelector('g[aria-label="arrow"] path')!.getAttribute("marker-end")).toBeNull();
+  });
+
+  it("with no width/height, where no leader can be drawn either, only a PINNED callout keeps the fallback dot", () => {
+    // The leader needs the rendered dimensions to convert its px offset into data space, and so
+    // does placement — so an auto-placed callout here is always at its default and draws nothing.
+    const bare = renderChart(withPoints([{ point: "LONE", label: "Lonely" }]), ROWS, { document });
+    const auto = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true }]), ROWS, { document });
+    const pinned = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 20 }]), ROWS, { document });
+    expect(leaderPaths(auto.svg as SVGSVGElement)).toEqual([]);
+    expect(DOT_GROUPS(auto.svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement));
+    expect(DOT_GROUPS(pinned.svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement) + 1);
+  });
+
+  it("on a categorical axis, where no leader can be drawn, only a PINNED callout keeps the fallback dot", () => {
+    const spec = (points: unknown[]) =>
+      ({
+        title: "T", chartType: "bar", xAxisType: "categorical", data: "d.csv",
+        annotations: { points },
+      }) as unknown as ChartSpec;
+    const rows = rowsOf([{ time: "a", series: "s", value: "1" }, { time: "b", series: "s", value: "2" }]);
+    const bare = renderChart(spec([{ x: "a", y: 1, label: "One" }]), rows, DIMS);
+    const auto = renderChart(spec([{ x: "a", y: 1, label: "One", connector: true }]), rows, DIMS);
+    const pinned = renderChart(spec([{ x: "a", y: 1, label: "One", connector: true, dy: 20 }]), rows, DIMS);
+    expect(DOT_GROUPS(auto.svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement));
+    expect(DOT_GROUPS(pinned.svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement) + 1);
   });
 });

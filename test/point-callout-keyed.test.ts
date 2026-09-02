@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { substituteRowTokens } from "../src/spec/annotations";
 import { renderChart, renderFigure } from "../src/engine/index";
+import { MARK_POINT_R } from "../src/engine/theme";
 import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -284,9 +285,19 @@ describe("annotations.points[].point — resolution", () => {
   });
 
   it("a connector follows the resolved point", () => {
-    const { svg } = renderChart(withPoints([{ point: "2019", label: "C", connector: true }]), ROWS, { width: 720, height: 400, document });
-    expect(svg.querySelector('g[aria-label="arrow"] path')).not.toBeNull();
-    expect(labelAt(svg as SVGSVGElement, "C")).not.toBeNull();
+    // Pinned with an explicit dy on purpose: an AUTO-placed connector callout that sits at its
+    // default 12px offset draws no leader (see point-callout-placement.test.ts), and 2019 is the
+    // x-domain's left endpoint, so an unpinned one would only draw a leader because the frame-edge
+    // flip moved it. This test is about the leader LANDING on the row `point:` resolved.
+    const { svg } = renderChart(withPoints([{ point: "2019", label: "C", connector: true, dy: 20 }]), ROWS, { width: 720, height: 400, document });
+    const d = svg.querySelector('g[aria-label="arrow"] path')?.getAttribute("d");
+    expect(d).toBeTruthy();
+    const at = labelAt(svg as SVGSVGElement, "C");
+    expect(at).not.toBeNull();
+    // Last coordinate pair of the shaft: it stops MARK_POINT_R + 2 short of the point's centre.
+    const pairs = Array.from(d!.matchAll(/(-?[\d.]+),(-?[\d.]+)/g));
+    const end = pairs[pairs.length - 1]!;
+    expect(Math.hypot(Number(end[1]) - at!.x, Number(end[2]) - at!.y)).toBeCloseTo(MARK_POINT_R + 2, 6);
   });
 
   it("on a faceted scatter, renders the callout only in the pane holding the row", () => {
