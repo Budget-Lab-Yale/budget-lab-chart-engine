@@ -963,6 +963,13 @@ hovered pane included. The other five classes are untouched — whichever of the
 guide, the hover dots and the axis-label echo a given chart type draws, it still draws, as does the
 hit area behind them, matching `chrome.tooltip`'s contract.
 
+The card root itself (the element the events above dispatch from) also carries structural classes:
+`figure-card` (every mount, standalone and figure), `chart-<chartType>` (standalone mounts only,
+e.g. `chart-scatter`), and `x-<xAxisType>` (every mount — `x-numeric`, `x-temporal`, `x-quarterly`,
+or `x-categorical`, from `spec.xAxisType`). The x-axis-title breathing-room CSS
+(`.x-numeric .figure-x-axis-title`) is keyed to `x-numeric`, not to any chart type, so it applies
+uniformly to a numeric-x histogram, scatter, or line and their faceted figures alike.
+
 #### Two acceptance criteria this deliberately does not ship
 
 Issue #30 also asked for CONFIG-SPEC to publish a **stable-hooks list**, and for a stable hook's

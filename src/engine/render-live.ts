@@ -822,7 +822,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   const tooltipContainer = opts.tooltipContainer ?? doc.body;
 
   const card = doc.createElement("div");
-  card.className = `figure-card chart-${spec.chartType}`;
+  // x-<xAxisType>: keys axis-shape-dependent CSS (e.g. the x-axis-title breathing-room fix,
+  // styles.ts) to the axis type rather than the chart type — see .x-numeric there for why.
+  card.className = `figure-card chart-${spec.chartType} x-${spec.xAxisType}`;
 
   // onHover: forwarded into attachBandCrosshair below as the crosshair's own notifier — see
   // BandCrosshairOptions.onHover. Fires the host callback then the bubbling `tbl-hover` event,
@@ -2417,7 +2419,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const tooltipContainer = opts.tooltipContainer ?? doc.body;
 
   const card = doc.createElement("div");
-  card.className = "figure-card";
+  // x-<xAxisType>: same axis-keyed class as mountChart's card — see the comment there. A faceted
+  // scatter never carried the chart-type class this replaces, so this is a fix, not just a rename.
+  card.className = `figure-card x-${spec.xAxisType}`;
   // onHover: same notifier shape as mountChart's, forwarded per pane through wireFigureSvg's ctx.
   const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
   // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — see
