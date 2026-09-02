@@ -836,8 +836,12 @@ function assemblePaneResult(
 
   // Row-token VALUES for point-callout labels, computed HERE (the rows and the x formatter are
   // here) and applied by assemblePlot in one pass together with `{value}`, whose y-tick fallback
-  // formatter lives there. `{x}` reads as the hover card shows it — the adapter's tooltip format,
-  // or the `x_labels` display name of a category — so a label and its tooltip never disagree.
+  // formatter lives there. `{x}` is the AXIS-print form: the adapter's `tooltipXFormat` for a
+  // number or Date, else the `x_labels` display name of a category. That is NOT always what the
+  // hover card shows — the scatter card formats x with toLocaleString (maximumFractionDigits: 2,
+  // and grouped), so the same row renders unrounded and ungrouped here (2.593569308310415, 2000)
+  // and rounded and grouped there (2.59, 2,000). The axis form is what CONFIG-SPEC promises, and
+  // it is what makes a callout read like the tick it sits under.
   // `{series}` reads the `series_labels` name, which may name the implicit single series too
   // (SINGLE_SERIES_KEY = ""); unmapped, that nameless series and a blank point_label cell are
   // `undefined`, which leaves the token literal rather than printing nothing.
