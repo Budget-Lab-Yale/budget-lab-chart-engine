@@ -4,6 +4,114 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] - 2026-09-02
+
+### Added
+- `annotations.points[].point` — **`scatter` only**: key a callout to ONE observation by its
+  `columns.point_label` cell instead of copying that row's x and y into the spec. Exactly one of
+  `x` / `point` is required; `point` excludes `y` and `series`, because the row supplies both. The
+  value must match exactly one row's RAW `point_label` cell across the whole dataset — zero or several
+  matches fail validation with a message naming the count, never a silent first match, because the
+  motivating chart had two rows sharing an exact x and series. A keyed row that would not be drawn
+  is refused too, rather than the callout vanishing: a blank value cell, a series dropped by
+  `series_order`, a shape outside `shape_order`, a blank facet cell, a pane excluded by `pane_order`,
+  or a `facet` that disagrees with the row's own. On a faceted chart the callout appears only in the
+  pane holding its row; `facet:` is not needed and, if given, must agree. Matching is against the raw
+  column, so a `point_label` that duplicates the series column (which the hover header dedupes to
+  nothing) still keys. (#37)
+- Row tokens in a point callout's `label`: `{point_label}`, `{x}` and `{series}` fill from the
+  callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
+  formatted the way the hover card formats x (`tooltip_x_format`, or `x_labels` on a categorical
+  axis); `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
+  pass, so a data cell that happens to contain `{value}` is text, not a token. A token that cannot be
+  resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
+- Point-callout labels that would sit on each other now move apart. Callouts without an explicit
+  `dx`/`dy` whose estimated label boxes overlap are swept apart vertically, top to bottom, each
+  cleared of every near label above it, and kept inside the frame; a callout with an explicit `dx`
+  or `dy` is pinned where the author put it and the others clear it. A callout that collides with
+  nothing keeps exactly today's offset, which is what keeps every published figure byte-identical.
+  The connector follows the placed label. Placement is one-dimensional, vertical only, like the
+  x-axis stagger; it runs under the same conditions as the stagger and the connectors (a numeric or
+  temporal axis domain and known width/height). (#37)
+- `tooltip_x_label` / `tooltip_y_label` — **`scatter` only**: name the hover card's x and y rows
+  when the axis titles are the wrong words for a tooltip (an abbreviated axis title, or a unit the
+  card should spell out). Each falls back to the matching axis title, and that falls back to the
+  literal `x` / `Value` as before. The axis titles themselves are untouched. Rejected on every other
+  chart type, where a card row is labelled by its series rather than by an axis. Hover-only — a PNG
+  export has no hover state. (#35)
+
+### Fixed
+- **A faceted stacked bar in tooltip mode keeps its cross-pane band echo.** A stack whose hover is
+  the card (a diverging stack with its net dot, or `barStack.hover: "tooltip"`) dropped ALL
+  coordination with its sibling panes: the gate that suppresses value pills on a card pane also
+  withheld the `onResolve` forward that drives the other panes, so hovering one pane left the rest
+  dark. The pills half of coordination is what tooltip mode drops; the band echo is independent of
+  it. The pane now forwards its hover and its siblings draw an echo-only shade (`echoOnly` on the
+  secondary band cursor, the stacked analogue of the dumbbell's `markerless` branch) — no pills, no
+  category-name pill, no axis echo — and the hovered pane's own echo stays blank because its card
+  and highlight already mark the band. A pinned legend series' own pills stand on every pane
+  through the hover, exactly as a standalone chart in this mode leaves them; suppressing them exists
+  only so the pills cursor can draw its replacement, and the echo draws none. At default settings;
+  `small_multiples.coordinated_cursor: false` keeps the card with no echo and `chrome.tooltip: false`
+  keeps the echo with no card. Hover-only — nothing here reaches the PNG. (#32)
+- **The x-axis title no longer collides with the tick labels on a numeric axis.** The 8px correction
+  was keyed to `.chart-scatter`, so a histogram (numeric axis, not a scatter) never received it and a
+  faceted scatter did not either, because the figure card carried no chart-type class at all. The
+  cause was the axis type: a numeric x-adapter reserves 22px below the frame against the temporal
+  adapter's 38px. Both card roots now carry `x-<xAxisType>` and the rule is keyed to `x-numeric`.
+  Categorical, temporal and quarterly axes are unchanged. The PNG export positions the title with its
+  own arithmetic, already looser than the screen on every axis type, and did not change. (#34)
+- **Annotation stagger and connector geometry now measure against the drawn axis, not the data.**
+  `assemblePlot` estimated label pixel positions from the data's x extent, which is not what the axis
+  spans when `histogram.domain`, `anchorAtZero` or a widened domain is in play — and binned rows carry
+  no numeric x at all, so on a histogram the stagger never ran and overlapping `annotations.xAxis`
+  labels overprinted. The resolved axis domain is now passed in its place (`xExtent` → `xAxisDomain`
+  on the `assemblePlot` option; a `Date`-valued temporal-histogram domain is converted to epoch ms).
+  (#36)
+
+### Docs
+- `CONFIG-SPEC.md`: the `annotations.points` row is rewritten for `x | point`, the row tokens and
+  auto-placement, with a new "Row tokens" paragraph and a worked scatter example keyed to
+  observations; the `barStack.hover` row and the small-multiples paragraph state that a card pane
+  coordinates a band echo and leaves a pinned series' pills standing; the `tooltip_x_label` /
+  `tooltip_y_label` row; and a paragraph under the class table documenting `figure-card`,
+  `chart-<chartType>` and `x-<xAxisType>` on the card roots.
+- Four pre-existing `CONFIG-SPEC.md` claims corrected. Two were made false by this release and
+  narrowed to match: the `x_labels` row said a coordinated small-multiples pane replaces its card
+  with the in-place cursor (a dumbbell and a stacked pane in tooltip mode keep theirs), and the
+  `series_patterns` notes said no coordinated pane draws a card. Two were already false: "`bands` /
+  `points` are not facet-scoped" (`points` take `facet`, and `filterAnnotationsByFacet` has scoped
+  them), and "`annotations.points` cannot be keyed" meant legend-keyed and now says `legend: true`,
+  since `point:` is a key of a different kind.
+
+### Upgrading
+
+A repin re-renders every published figure at once — here is what a maintainer will see change:
+
+- **Charts where the axis domain differs from the data extent re-lay out their annotations.** Four
+  classes, none present in any golden fixture: a histogram with `annotations.xAxis` or band labels
+  (labels that overprinted now stagger); a histogram with `annotations.points[].connector: true`
+  (previously drew a plain dot because the connector gate was never satisfied, now draws the arrow);
+  an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
+  `anchorAtZero` chart with connector callouts (previously drew no leader line at all). Every other
+  chart renders byte-identically. (#36)
+- **Point callouts that overlap at their default offsets now move apart, unconditionally.** A chart
+  with two or more `annotations.points` without `dx`/`dy` whose labels currently sit on each other
+  re-lays out on repin. **No published spec is affected**, established by parsing every authored
+  spec: two figures carry a single unpinned callout each (a lone callout never collides) and the one
+  figure with several callouts pins all of them. No golden fixture carries `annotations.points`, so
+  this guarantee rests on the exact-equality tests in the engine, not on the golden suite. (#37)
+- **Every published histogram and faceted scatter gains 8px between its x-axis title and its tick
+  labels.** Screen only; the PNG export is unchanged. (#34)
+- **A faceted stacked bar whose hover is the card now also shades the hovered category on its
+  sibling panes** — at default settings; `small_multiples.coordinated_cursor: false` keeps the card
+  alone and `chrome.tooltip: false` keeps the echo alone. Hover-only. (#32)
+- **Every card root now carries an `x-<xAxisType>` class** alongside `figure-card`; a host stylesheet
+  keying on the exact class string will see the new token. `chart-<chartType>` stays on the standalone
+  card. (#34)
+- **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
+  current — re-run its vendoring step at repin.
+
 ## [1.13.0] - 2026-08-25
 
 ### Added
