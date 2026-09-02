@@ -464,6 +464,9 @@ export function assemblePlot({
   const LABEL_ROW_H = 13;
   const LABEL_GAP = 6;
   const LABEL_CHAR_PX = 6.2; // ~annotation font advance
+  // Lateral offset a point-callout label takes when the frame edge flips it off centre — the same
+  // magnitude the xAxis/yAxis marker labels use for their own side placement (section 6a).
+  const LABEL_FLIP_DX = 6;
   const staggerDy = new Map<string, number>();
   if (xAxisDomain && xAxisDomain[1] > xAxisDomain[0] && width != null) {
     const innerW = width - effMarginLeft - effMarginRight;
@@ -918,10 +921,17 @@ export function assemblePlot({
   //     geometry as the stagger above — getBBox would make live, PNG and SSR disagree. A box that
   //     collides with nothing gets NO entry here, so it takes exactly today's default below and
   //     every existing chart renders byte-identically.
+  //
+  //     A movable label is also FLIPPED to the inside of its point when the centred box would cross
+  //     an inner frame edge: `2025b (2025a–2026…` ran off the right of the frame in the 1.14.0
+  //     visual review. The flip is decided here, before the vertical sweep, because it changes the
+  //     box's horizontal extent and therefore which labels are near enough to collide — one
+  //     estimate has to feed both or the sweep separates the wrong pair.
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
   const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -28 : -6);
   const autoDy = new Map<number, number>();
+  const autoDx = new Map<number, number>();
   if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
     const boxes: CalloutBox[] = [];
     const boxIdx: number[] = [];
@@ -933,12 +943,22 @@ export function assemblePlot({
       const xn = typeof mx === "number" ? mx : mx.getTime();
       const px = effMarginLeft + ((xn - xAxisDomain[0]) / (xAxisDomain[1] - xAxisDomain[0])) * innerWForPx;
       const py = TBL_MARGIN_TOP + ((yDomain[1] - (p.y as number)) / (yDomain[1] - yDomain[0])) * innerHForPx;
-      const dx = p.dx != null ? p.dx : 0;
+      const fixed = p.dx != null || p.dy != null;
       const text = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
       const lines = text.split("\n");
       const w = Math.max(...lines.map((l) => l.length)) * LABEL_CHAR_PX;
+      // Flip a movable label whose CENTRED box leaves the frame on one side: anchor it away from
+      // that edge, LABEL_FLIP_DX clear of the point. A box that overruns BOTH edges is wider than
+      // the frame, so no anchor fits and the centred default is kept rather than made worse.
+      let dx = p.dx ?? 0;
+      if (!fixed) {
+        const overRight = px + w / 2 > effMarginLeft + innerWForPx;
+        const overLeft = px - w / 2 < effMarginLeft;
+        if (overRight !== overLeft) dx = overRight ? -LABEL_FLIP_DX : LABEL_FLIP_DX;
+        if (dx !== 0) autoDx.set(i, dx);
+      }
       const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;
-      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed: p.dx != null || p.dy != null });
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed });
       boxIdx.push(i);
       boxPy.push(py);
     });
@@ -969,8 +989,10 @@ export function assemblePlot({
     const pColor = resolveColorOr(p.color, TBL.color.heading);
     // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
     // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28). An auto-placed
-    // label (6b) overrides the default; an explicit dy always wins.
-    const dx = p.dx != null ? p.dx : 0;
+    // label (6b) overrides the default; an explicit dx/dy always wins. `autoDx` carries the frame
+    // -edge flip and holds an entry ONLY for a flipped label, so an unflipped one takes the same
+    // 0 it always did — and `anchor` reads the flip straight off dx, as it does an author's.
+    const dx = p.dx != null ? p.dx : (autoDx.get(pi) ?? 0);
     const dy = autoDy.get(pi) ?? defaultDy(p);
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so

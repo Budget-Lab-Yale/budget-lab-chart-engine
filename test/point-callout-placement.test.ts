@@ -6,6 +6,7 @@
 // export and SSR agree. Its "no collision ⇒ input returned unchanged" property is what keeps every
 // pre-existing golden byte-identical — the goldens themselves are the other half of that proof.
 import { describe, it, expect } from "vitest";
+import { parse as parseYaml } from "yaml";
 import { placePointCallouts, type CalloutBox } from "../src/engine/callout-placement";
 import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
@@ -243,6 +244,12 @@ const ROWS = rowsOf([
   { x: "2.2850", y: "-0.130", g: "Recent", period: "2026a" },
   { x: "0.5", y: "-1.5", g: "Earlier", period: "2001" },
   { x: "3.5", y: "1.5", g: "Earlier", period: "2009" },
+  // Interior and isolated: the byte-identity gate needs a point whose CENTRED label sits wholly
+  // inside the frame, which the two rows above (the x-domain's own endpoints, so px lands exactly
+  // on an inner edge) cannot provide. MID shares 2009's y and sits ~145px to its left — clear of
+  // 2009's centred label box, inside its flipped one.
+  { x: "2.845", y: "1.5", g: "Earlier", period: "MID" },
+  { x: "1.5", y: "0.4", g: "Earlier", period: "LONE" },
 ]);
 
 const withPoints = (points: unknown[]): ChartSpec => ({ ...SCORECARD, annotations: { points } }) as unknown as ChartSpec;
@@ -330,8 +337,10 @@ describe("annotations.points — rendered auto-placement", () => {
   it("a callout that collides with nothing keeps today's default offset exactly", () => {
     // The default is 6px up; pinning it with an explicit `dy: 6` must land on the same pixel. (Not
     // compared against the dot's cy: Plot adds its half-pixel crisp-edge offset to text, not dots.)
-    const auto = renderChart(withPoints([{ point: "2001", label: "Lonely" }, { point: "2009", label: "Far" }]), ROWS, { width: 720, height: 400, document });
-    const pinned = renderChart(withPoints([{ point: "2001", label: "Lonely", dy: 6 }]), ROWS, { width: 720, height: 400, document });
+    // Both points are interior: a callout on an x-domain ENDPOINT sits exactly on an inner frame
+    // edge, so half its label is outside and the edge flip (below) claims it.
+    const auto = renderChart(withPoints([{ point: "LONE", label: "Lonely" }, { point: "MID", label: "Far" }]), ROWS, { width: 720, height: 400, document });
+    const pinned = renderChart(withPoints([{ point: "LONE", label: "Lonely", dy: 6 }]), ROWS, { width: 720, height: 400, document });
     const a = labelBoxes(auto.svg as SVGSVGElement, ["Lonely"])[0]!;
     const p = labelBoxes(pinned.svg as SVGSVGElement, ["Lonely"])[0]!;
     expect(a.y).toBe(p.y);
@@ -383,5 +392,201 @@ describe("annotations.points — rendered auto-placement", () => {
     expect(svg.querySelectorAll('g[aria-label="arrow"] path').length).toBe(2);
     const boxes = labelBoxes(svg as SVGSVGElement, ["2025b", "2025b*"]);
     expect(boxesOverlap(boxes[0]!, boxes[1]!)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rendered — the horizontal flip at the frame edges, and explicit line breaks
+// ---------------------------------------------------------------------------
+
+// The inner plot frame at 720x400 (TBL_MARGIN_LEFT 44, TBL_MARGIN_RIGHT 16). Plot adds a half-pixel
+// crisp-edge offset to text, so the edge assertions carry a 1px tolerance.
+const FRAME_LEFT = 44;
+const FRAME_RIGHT = 720 - 16;
+// 28 chars — the unreadable label from the 1.14.0 visual review, wide enough (~174px) that a
+// centred box at either frame edge hangs well outside it.
+const LONG = "2026a at x=2.285011857607663";
+
+/** One callout label's anchor (null is Plot's omitted default, "middle") and the absolute box that
+ *  anchor puts it in — the estimate the flip decision is made on. */
+function anchoredBox(svg: SVGSVGElement, label: string): { anchor: string | null; x: number; y: number; x0: number; x1: number } {
+  const el = Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "") === label);
+  expect(el, label).toBeDefined();
+  const anchor = (el!.parentElement as Element).getAttribute("text-anchor");
+  const { x, y } = absPos(el!);
+  const w = label.length * LABEL_CHAR_PX;
+  const x0 = anchor === "end" ? x - w : anchor === "start" ? x : x - w / 2;
+  return { anchor, x, y, x0, x1: x0 + w };
+}
+
+/** The start point of the first arrow's path — the end the label is anchored at. */
+function arrowStart(svg: SVGSVGElement): { x: number; y: number } {
+  const d = svg.querySelector('g[aria-label="arrow"] path')!.getAttribute("d") ?? "";
+  const m = /^M\s*(-?[\d.]+)[ ,]+(-?[\d.]+)/.exec(d.trim());
+  expect(m, d).not.toBeNull();
+  return { x: Number(m![1]), y: Number(m![2]) };
+}
+
+describe("annotations.points — labels that would leave the frame flip to the inside", () => {
+  it("a long auto-placed label at the right edge is anchored end and drawn 6px LEFT of its point", () => {
+    const { svg } = renderChart(withPoints([{ point: "2009", label: LONG }]), ROWS, { width: 720, height: 400, document });
+    // The pinned render carries dx: 0, so its x IS the point's px — the flip's own offset is the
+    // difference between the two.
+    const pinned = renderChart(withPoints([{ point: "2009", label: LONG, dy: 6 }]), ROWS, { width: 720, height: 400, document });
+    const b = anchoredBox(svg as SVGSVGElement, LONG);
+    expect(b.anchor).toBe("end");
+    expect(b.x1).toBeLessThanOrEqual(FRAME_RIGHT + 1);
+    expect(b.x).toBeCloseTo(anchoredBox(pinned.svg as SVGSVGElement, LONG).x - 6, 6);
+  });
+
+  it("runs on a temporal axis too, where the last point also sits on the inner right edge", () => {
+    const spec = {
+      title: "T", chartType: "line", xAxisType: "temporal", data: "d.csv",
+      annotations: { points: [{ x: "2021-12-01", series: "a", label: LONG }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([
+      { time: "2021-01-01", series: "a", value: "1" },
+      { time: "2021-06-15", series: "a", value: "2" },
+      { time: "2021-12-01", series: "a", value: "3" },
+    ]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    const b = anchoredBox(svg as SVGSVGElement, LONG);
+    expect(b.anchor).toBe("end");
+    expect(b.x1).toBeLessThanOrEqual(FRAME_RIGHT + 1);
+  });
+
+  it("is gated off on a categorical x-axis, which has no numeric domain to measure px against", () => {
+    const spec = {
+      title: "T", chartType: "bar", xAxisType: "categorical", data: "d.csv",
+      annotations: { points: [{ x: "b", y: 1, label: LONG }] },
+    } as unknown as ChartSpec;
+    const rows = rowsOf([{ time: "a", series: "s", value: "1" }, { time: "b", series: "s", value: "2" }]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBeNull();
+  });
+
+  it("the same label centred would have crossed the right edge (the test above is not vacuous)", () => {
+    // Pinned by an explicit dy, so the flip never looks at it: it keeps the middle anchor and
+    // hangs outside the frame exactly as it did before this change.
+    const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, dy: 6 }]), ROWS, { width: 720, height: 400, document });
+    const b = anchoredBox(svg as SVGSVGElement, LONG);
+    expect(b.anchor).toBeNull();
+    expect(b.x1).toBeGreaterThan(FRAME_RIGHT + 1);
+  });
+
+  it("mirrors at the left edge: anchored start and drawn to the RIGHT of its point", () => {
+    const { svg } = renderChart(withPoints([{ point: "2001", label: LONG }]), ROWS, { width: 720, height: 400, document });
+    const b = anchoredBox(svg as SVGSVGElement, LONG);
+    expect(b.anchor).toBe("start");
+    expect(b.x0).toBeGreaterThanOrEqual(FRAME_LEFT - 1);
+  });
+
+  it("a label that overruns BOTH edges keeps the middle anchor — no anchor fits, so nothing moves", () => {
+    // ~1215px wide against a 660px frame, centred on an interior point: it crosses the left and
+    // the right edge at once, so a flip could only make it worse.
+    const tooWide = LONG.repeat(7);
+    const { svg } = renderChart(withPoints([{ point: "MID", label: tooWide }]), ROWS, { width: 720, height: 400, document });
+    expect(anchoredBox(svg as SVGSVGElement, tooWide).anchor).toBeNull();
+  });
+
+  it("a label that fits keeps the middle anchor and the identical position (byte-identity gate)", () => {
+    const auto = renderChart(withPoints([{ point: "MID", label: "Fits" }]), ROWS, { width: 720, height: 400, document });
+    // `dx: 0` pins the callout at the same middle anchor and the same default dy, so a flip is the
+    // only thing that could separate the two renders.
+    const pinned = renderChart(withPoints([{ point: "MID", label: "Fits", dx: 0 }]), ROWS, { width: 720, height: 400, document });
+    const a = anchoredBox(auto.svg as SVGSVGElement, "Fits");
+    const p = anchoredBox(pinned.svg as SVGSVGElement, "Fits");
+    expect(a.anchor).toBeNull();
+    expect(p.anchor).toBeNull();
+    expect(a.x).toBe(p.x);
+    expect(a.y).toBe(p.y);
+  });
+
+  it("the vertical sweep sees the FLIPPED box: a neighbour clear of the centred label collides with the flipped one", () => {
+    const { svg } = renderChart(
+      withPoints([{ point: "2009", label: LONG }, { point: "MID", label: "Mid" }]),
+      ROWS,
+      { width: 720, height: 400, document },
+    );
+    const long = anchoredBox(svg as SVGSVGElement, LONG);
+    const mid = anchoredBox(svg as SVGSVGElement, "Mid");
+    // The flip put LONG's box over MID's, so placement had to separate them vertically.
+    expect(long.x0).toBeLessThan(mid.x1);
+    expect(Math.abs(long.y - mid.y)).toBeGreaterThanOrEqual(LABEL_ROW_H - 1e-6);
+  });
+
+  it("without the flip those two labels share a row (the collision is the flip's own doing)", () => {
+    const { svg } = renderChart(
+      withPoints([{ point: "2009", label: LONG, dy: 6 }, { point: "MID", label: "Mid", dy: 6 }]),
+      ROWS,
+      { width: 720, height: 400, document },
+    );
+    const long = anchoredBox(svg as SVGSVGElement, LONG);
+    const mid = anchoredBox(svg as SVGSVGElement, "Mid");
+    expect(long.x0).toBeGreaterThan(mid.x1);
+    expect(long.y).toBe(mid.y);
+  });
+
+  it("the connector's label coordinate follows the flip", () => {
+    const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, connector: true }]), ROWS, { width: 720, height: 400, document });
+    const b = anchoredBox(svg as SVGSVGElement, LONG);
+    expect(b.anchor).toBe("end");
+    // The arrow starts at the label's anchor, which the flip moved to the left of the point.
+    expect(arrowStart(svg as SVGSVGElement).x).toBeLessThan(FRAME_RIGHT);
+  });
+
+  it("is gated off with the rest of placement when the render has no width/height", () => {
+    const { svg } = renderChart(withPoints([{ point: "2009", label: LONG }]), ROWS, { document });
+    expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBeNull();
+  });
+});
+
+describe("annotations.points — an explicit newline is a hard line break", () => {
+  const lines = (svg: SVGSVGElement, first: string): string[] => {
+    const el = Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "").startsWith(first))!;
+    const tspans = Array.from(el.querySelectorAll("tspan"));
+    return tspans.length ? tspans.map((t) => t.textContent ?? "") : [el.textContent ?? ""];
+  };
+
+  it("survives maxWidth wrapping, which used to destroy it", () => {
+    const { svg } = renderChart(withPoints([{ point: "MID", label: "brk one\nbrk two", maxWidth: 200 }]), ROWS, { width: 720, height: 400, document });
+    expect(lines(svg as SVGSVGElement, "brk one")).toEqual(["brk one", "brk two"]);
+  });
+
+  it("is honoured with no maxWidth, as before", () => {
+    const { svg } = renderChart(withPoints([{ point: "MID", label: "brk one\nbrk two" }]), ROWS, { width: 720, height: 400, document });
+    expect(lines(svg as SVGSVGElement, "brk one")).toEqual(["brk one", "brk two"]);
+  });
+
+  it("each segment still wraps at word boundaries within maxWidth", () => {
+    const { svg } = renderChart(withPoints([{ point: "MID", label: "alpha beta\ngamma", maxWidth: 10 }]), ROWS, { width: 720, height: 400, document });
+    expect(lines(svg as SVGSVGElement, "alpha")).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("reaches the renderer as a real newline from both YAML spellings an author would use", () => {
+    // The break has to survive the spec file, not just the API: a double-quoted "\n" and a literal
+    // block scalar are the two ways a figure author writes one.
+    const parsed = parseYaml('dq: "line one\\nline two"\nblock: |-\n  line one\n  line two\n') as Record<string, string>;
+    expect(parsed.dq).toBe("line one\nline two");
+    expect(parsed.block).toBe("line one\nline two");
+    for (const label of [parsed.dq!, parsed.block!]) {
+      const { svg } = renderChart(withPoints([{ point: "MID", label, maxWidth: 200 }]), ROWS, { width: 720, height: 400, document });
+      expect(lines(svg as SVGSVGElement, "line one")).toEqual(["line one", "line two"]);
+    }
+  });
+
+  it("the placement box counts the lines the text actually draws", () => {
+    // Two two-line labels on points 0.01 apart in y: they must clear each other by TWO rows, which
+    // they only do if 6b's box saw both hard-broken lines that 6c drew.
+    const { svg } = renderChart(
+      withPoints([{ point: "2025b", label: "one\ntwo", maxWidth: 200 }, { point: "2025b*", label: "three\nfour", maxWidth: 200 }]),
+      ROWS,
+      { width: 720, height: 400, document },
+    );
+    const a = Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "").startsWith("one"))!;
+    const b = Array.from(svg.querySelectorAll("text")).find((t) => (t.textContent ?? "").startsWith("three"))!;
+    expect(a.querySelectorAll("tspan").length).toBe(2);
+    expect(b.querySelectorAll("tspan").length).toBe(2);
+    expect(Math.abs(absPos(a).y - absPos(b).y)).toBeGreaterThanOrEqual(2 * LABEL_ROW_H - 1e-6);
   });
 });

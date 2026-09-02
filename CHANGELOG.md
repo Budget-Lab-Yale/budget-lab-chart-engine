@@ -35,10 +35,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the frame deliberately overflows the bottom, since the top of the column wins; a callout with an
   explicit `dx` or `dy` is pinned where the author put it and the others clear it. A callout that
   collides with nothing keeps exactly today's offset, which is what keeps every published figure
-  byte-identical. The connector follows the placed label. Placement is one-dimensional, vertical
-  only, like the x-axis stagger; it runs under the same conditions as the connectors (a numeric or
-  temporal axis domain and a known width AND height — the stagger itself needs only the width, so a
-  height-less render staggers axis labels but does not place callouts). (#37)
+  byte-identical. The connector follows the placed label. An auto-placed label whose estimated box
+  would cross the frame's left or right edge is also flipped to the inside of its point — anchored
+  away from the edge and offset 6px clear of it — because the visual review found callouts cut off
+  at the right edge of the frame; the flipped box is what the vertical sweep then works from, so the
+  flip decides which labels collide. A label that fits keeps the centred anchor and offset it always
+  had, one whose width overruns both edges stays centred (no side fits), and a pinned label is never
+  flipped. Note this does move an auto-placed label sitting on the x-domain's own endpoint, whose
+  centred box always half-hangs outside the frame. An explicit `\n` in a `label` is now a hard line
+  break even when `maxWidth` is set — the wrapper split on all whitespace, so setting `maxWidth`
+  silently destroyed authored breaks; each line now wraps at word boundaries on its own. Placement
+  is otherwise one-dimensional, vertical only, like the x-axis stagger; it runs under the same
+  conditions as the connectors (a numeric or temporal axis domain and a known width AND height —
+  the stagger itself needs only the width, so a height-less render staggers axis labels but does not
+  place callouts). (#37)
 - `tooltip_x_label` / `tooltip_y_label` — **`scatter` only**: name the hover card's x and y rows
   when the axis titles are the wrong words for a tooltip (an abbreviated axis title, or a unit the
   card should spell out). Each falls back to the matching axis title, and that falls back to the

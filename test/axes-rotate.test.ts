@@ -27,6 +27,15 @@ describe("wrapToWidth (gutter label wrapping)", () => {
     expect(wrapToWidth("Supercalifragilistic", 10)).toBe("Supercalifragilistic");
   });
 
+  it("treats an explicit newline as a hard break and wraps each line on its own", () => {
+    // The /\s+/ split counted a newline as one more space, so a point-callout label authored with
+    // "\n" kept its breaks only while `maxWidth` was unset and lost them the moment it was set.
+    expect(wrapToWidth("line one\nline two", 200)).toBe("line one\nline two");
+    expect(wrapToWidth("alpha beta\ngamma", 10)).toBe("alpha\nbeta\ngamma");
+    expect(wrapToWidth("a\n\nb", 200)).toBe("a\n\nb");
+    expect(labelLineCount("line one\nline two", 200)).toBe(2);
+  });
+
   it("labelLineCount counts the wrapped lines", () => {
     expect(labelLineCount("Health care", 200)).toBe(1);
     expect(labelLineCount("Food and beverages purchased for off-premises consumption", 150)).toBeGreaterThan(1);
