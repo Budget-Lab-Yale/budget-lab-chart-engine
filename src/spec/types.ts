@@ -786,6 +786,15 @@ export interface ChartSpec {
    *  `point_label` tokens. Other chart types use the series name as a ROW label against a value, so
    *  suppressing it there would leave unlabelled numbers — validation rejects it. Default true. */
   tooltip_series_name?: boolean;
+  /** Scatter only: override the x-value row's label in the hover card. Falls back to `x_axis_title`,
+   *  and to the literal "x" when that too is absent. An axis title is written to span the plot; a
+   *  card row label is read in a narrow floating card, so a long title makes an oversized card —
+   *  this lets the two diverge without touching the axis. Validation rejects it on other chart
+   *  types, whose cards label rows by SERIES, not by axis. */
+  tooltip_x_label?: string;
+  /** Scatter only: override the y-value row's label in the hover card. Falls back to `y_axis_title`,
+   *  and to the literal "Value" when that too is absent. See `tooltip_x_label`. */
+  tooltip_y_label?: string;
   /** Turn engine hover chrome OFF, for a consumer drawing its own. Switching a piece off rather
    *  than hiding it in CSS is what makes the PNG export agree — the export re-renders from the
    *  spec, so a stylesheet never reached it.

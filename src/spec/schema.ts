@@ -396,6 +396,10 @@ export const CHART_SPEC_SCHEMA = {
     // A d3 timeFormat pattern. Only the emptiness is structural; "is this axis date-based?" is a
     // cross-field question, so it lives in validate.ts.
     tooltip_x_format: { type: "string", minLength: 1 },
+    // Scatter-only row-label overrides for the hover card. Only the emptiness is structural;
+    // "is this chartType scatter?" is a cross-field question, so it lives in validate.ts.
+    tooltip_x_label: { type: "string", minLength: 1 },
+    tooltip_y_label: { type: "string", minLength: 1 },
 
     // Axes
     xAxisType: { type: "string", enum: ["numeric", "temporal", "quarterly", "categorical"] },
