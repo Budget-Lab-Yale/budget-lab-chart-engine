@@ -498,6 +498,15 @@ describe("annotations.points — labels that would leave the frame flip to the i
     expect(anchoredBox(svg as SVGSVGElement, nearlyFrameWide).anchor).toBeNull();
   });
 
+  it("and the mirror: a left-side label whose flip would run off the CANVAS stays centred", () => {
+    // The same ~694px label on the LEFTmost point. Centred it crosses the frame edge into the
+    // gutter, so the left threshold asks for a flip; anchored start it would end at 744px, past the
+    // 720px canvas. Same expression, opposite direction.
+    const nearlyFrameWide = LONG.repeat(4);
+    const { svg } = renderChart(withPoints([{ point: "2001", label: nearlyFrameWide }]), ROWS, { width: 720, height: 400, document });
+    expect(anchoredBox(svg as SVGSVGElement, nearlyFrameWide).anchor).toBeNull();
+  });
+
   it("mirrors at the left edge: anchored start and drawn to the RIGHT of its point", () => {
     const { svg } = renderChart(withPoints([{ point: "2001", label: LONG }]), ROWS, { width: 720, height: 400, document });
     const b = anchoredBox(svg as SVGSVGElement, LONG);

@@ -23,7 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
   rounded to at most two decimals and never grouped on a numeric axis (`2.593569308310415` reads
   `2.59`, `2000` reads `2000`, a year reads `2021`) — ungrouped like the numeric axis ticks, and
-  identical to the scatter hover card's x row, so nothing on the chart disagrees about the number;
+  identical to the scatter hover card's x row, so a callout and a scatter card never disagree;
   `tooltip_x_format` on a
   temporal or quarterly one, `x_labels` on a categorical one;
   `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
@@ -130,9 +130,11 @@ A repin re-renders every published figure at once — here is what a maintainer 
 - **An unpinned point callout near a horizontal edge now flips to the inside of its point.** This is
   a separate condition from the collision above, and the "no published spec is affected" finding
   there does NOT cover it: a LONE unpinned callout flips too, whenever its centred label would run
-  off the canvas on the right or cross the frame edge into the y-tick-label gutter on the left. Two
-  published figures carry a single unpinned callout each and should be eyeballed on repin. A callout
-  whose label fits is untouched, and a pinned (`dx`/`dy`) callout never flips. (#37)
+  off the canvas on the right or cross the frame edge into the y-tick-label gutter on the left.
+  **No published callout moves**, established by rendering both figures that carry an unpinned
+  callout before and after the change — `etr-vintages` ("Projected") and `price-waterfall`
+  ("Apply ηs", "50% passthrough") — and finding identical label positions and text-anchors. A
+  callout whose label fits is untouched, and a pinned (`dx`/`dy`) callout never flips. (#37)
 - **The scatter hover card's x row loses its thousands separator**: it read `2,000` and now reads
   `2000`, because the card and the new `{x}` callout token share one formatter and a numeric x is
   most often a year or an index, which the axis ticks have always printed ungrouped. Rounding to two

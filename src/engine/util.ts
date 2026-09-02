@@ -31,11 +31,13 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
 
 /** The one x formatter for a NUMERIC x: at most two decimals, NEVER grouped. Both the scatter hover
  *  card's x row (`scatterPointHoverOptions`, render-live.ts) and the `{x}` row token in a
- *  point-callout label (`xTokenFor`, index.ts) call this, so a callout, the card and the axis ticks
- *  all read the same `2021` / `2.29`. Keep it one function: the callout token used to reuse the AXIS
- *  format instead (`${+v}`), which put `2025a: -0.` and `x=2.285011857607663` on the frame — a raw
- *  float is not a label. Temporal/quarterly x keeps `tooltip_x_format` and categorical x keeps its
- *  `x_labels` name; neither is a number to round.
+ *  point-callout label (`xTokenFor`, index.ts) call this, so a callout and a scatter card never
+ *  disagree about the number. Only the GROUPING is shared with the axis ticks: the numeric
+ *  crosshair header is the adapter's unrounded `${+v}`, so a `{x}` callout on a numeric-axis LINE
+ *  chart rounds where that chart's own card does not. Keep it one function: the token used to reuse
+ *  the AXIS format instead (`${+v}`), which put `2025a: -0.` and `x=2.285011857607663` on the
+ *  frame — a raw float is not a label. Temporal/quarterly x keeps `tooltip_x_format` and a
+ *  category keeps its `x_labels` name; neither is a number to round.
  *
  *  Two things here are load-bearing, both found by review:
  *  - `useGrouping: false`, because a numeric x is most often a year or an index and the axis ticks

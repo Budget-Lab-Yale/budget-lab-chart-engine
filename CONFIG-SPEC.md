@@ -237,7 +237,7 @@ parse as a number). A `label` without the token is unaffected.
 `y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x rounded to **at most two
 decimals and never grouped** on a numeric axis (`2.593569308310415` reads `2.59`, `2000` reads
 `2000`, a year reads `2021`) — ungrouped like the numeric axis ticks, and identical to the scatter
-hover card's x row, so nothing on the chart disagrees about the number; the tooltip date format (`tooltip_x_format`,
+hover card's x row, so a callout and a scatter card never disagree; the tooltip date format (`tooltip_x_format`,
 default `%b %Y`) on a temporal or quarterly
 axis, the `x_labels` name of a category. `{series}` is that row's
 display name (`series_labels`, else the raw key). A plain `x` + `y` callout fills `{x}` from its own
