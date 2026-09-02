@@ -536,7 +536,14 @@ body {
      --tbl-gridline is. One token so the two cannot drift apart. */
   --tbl-tooltip-rule: rgba(200, 205, 215, 0.7);
   border: 1px solid var(--tbl-tooltip-rule);
-  white-space: nowrap;
+  /* WRAPS, and max-width below is the width it wraps AT. nowrap here contradicted that cap: the
+     box stopped at 320px and the un-wrappable line ran out THROUGH the border, so a row whose
+     label is longer than the card can be lost its value off the right edge -- measured on a
+     scatter whose rows fall back to the axis titles, where 2.59 was painted outside the card and
+     clipped (#41). The label-to-value separator is a non-breaking space for the other half of
+     this: see LABEL_VALUE_GAP in crosshair.ts, without which the value drops onto its own line.
+     No backticks in this comment: the whole stylesheet is one template literal. */
+  white-space: normal;
   z-index: 9999;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -552,6 +559,12 @@ body {
 .tbl-tooltip-value { font-weight: var(--tw-bold); }
 .tbl-tooltip-row {
   display: flex;
+  /* center, NOT flex-start, now that a row can be two lines tall (#41): the swatch keys the
+     whole row, so it belongs against the row's middle -- which is what the LEGEND already
+     does with its own multi-line labels, and the card's key and the legend's are one
+     drawing. flex-start was the alternative considered and rejected from the render: it puts
+     the swatch on the label's first line but also lifts it about a pixel on every
+     SINGLE-line row of every published chart, for nothing. */
   align-items: center;
   gap: 6px;
   margin-bottom: 2px;

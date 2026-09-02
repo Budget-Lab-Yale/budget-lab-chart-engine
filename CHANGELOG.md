@@ -45,6 +45,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   export has no hover state. (#35)
 
 ### Fixed
+- **The hover card wraps a row label longer than the card instead of clipping it.** `.tbl-tooltip`
+  set `white-space: nowrap` *and* `max-width: 320px`, which contradict: the box stopped at 320px and
+  the un-wrappable line ran out through the right border, so the row's value — the one thing a
+  reader hovers for — was painted outside the card and cut off. Reported on a `scatter` whose card
+  rows fall back to the axis titles (`tooltip_x_label` / `tooltip_y_label` absent), but it hit any
+  card with a long series name, category name or overlay label. The card now wraps at the same
+  320px, and every row's value is joined to its label by a non-breaking space so a wrap can never
+  leave the number alone on a line. Pre-existing since the card was introduced. Hover-only: the
+  card is live-DOM CSS and a PNG export has no card, so no exported or published image changes.
+  (#41)
 - **A faceted stacked bar in tooltip mode keeps its cross-pane band echo.** A stack whose hover is
   the card (a diverging stack with its net dot, or `barStack.hover: "tooltip"`) dropped ALL
   coordination with its sibling panes: the gate that suppresses value pills on a card pane also
@@ -122,6 +132,12 @@ A repin re-renders every published figure at once — here is what a maintainer 
 - **Every chart card root now carries an `x-<xAxisType>` class** alongside `figure-card`; a host stylesheet
   keying on the exact class string will see the new token. `chart-<chartType>` stays on the standalone
   card. (#34)
+- **Every published chart's hover card now wraps a label longer than the card**, where before the
+  line ran out through the border and the value was clipped. A card with a long series name,
+  category name, overlay label or (on a `scatter`) axis title grows taller rather than losing its
+  number off the edge; the value stays on its label's last line. Hover-only, with no exported or
+  published image changes — but the on-screen card looks different for every such chart starting
+  now, with no spec change on anyone's part. (#41)
 - **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
   current — re-run its vendoring step at repin.
 
