@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { validateSpec } from "../src/spec/validate";
+import { buildExportSvg } from "../src/embed/export-png";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -66,6 +67,25 @@ describe("tooltip_x_label / tooltip_y_label", () => {
     expect(rowLabels(svg, 0)).toEqual([`${SPEC.x_axis_title}:`, `${SPEC.y_axis_title}:`]);
   });
 
+  it("overrides only the field that is set, leaving the other on its axis-title fallback", () => {
+    const spec = { ...SPEC, tooltip_x_label: "Debt change" } as unknown as ChartSpec;
+    const svg = canvas(mount(spec, ROWS));
+    expect(rowLabels(svg, 0)).toEqual(["Debt change:", `${SPEC.y_axis_title}:`]);
+  });
+
+  it("falls all the way through to the literal x/Value when neither the override nor the axis title is set", () => {
+    // The terminal link of the three-tier `??` chain: no tooltip_x_label/tooltip_y_label AND no
+    // x_axis_title/y_axis_title. Reading the fallback chain in render-live.ts is not the same as a
+    // mounted-and-hovered assertion — this is the case none of the other tests exercise.
+    const spec = {
+      chartType: "scatter",
+      xAxisType: "numeric",
+      columns: { x: "x", value: "y" },
+    } as unknown as ChartSpec;
+    const svg = canvas(mount(spec, ROWS));
+    expect(rowLabels(svg, 0)).toEqual(["x:", "Value:"]);
+  });
+
   it("does not leak into the axis title element — the axis is untouched", () => {
     const spec = {
       ...SPEC,
@@ -77,6 +97,26 @@ describe("tooltip_x_label / tooltip_y_label", () => {
     const yAxisTitleEl = card.querySelector(".figure-y-axis-title");
     expect(xAxisTitleEl?.textContent).toBe(SPEC.x_axis_title);
     expect(yAxisTitleEl?.textContent).toBe(SPEC.y_axis_title);
+  });
+});
+
+describe("tooltip_x_label / tooltip_y_label in the PNG export", () => {
+  it("does not appear — CONFIG-SPEC says hover-only, and a PNG has no hover", () => {
+    // The claim is only as good as this assertion: the export re-renders from the spec, so a
+    // channel wired into the render rather than the hover would silently show up here. Mirrors
+    // test/scatter-point-label.test.ts's identical check for columns.point_label.
+    const spec = {
+      ...SPEC,
+      title: "Exported",
+      tooltip_x_label: "Debt change",
+      tooltip_y_label: "Reduction",
+    } as unknown as ChartSpec;
+    const svg = buildExportSvg(spec, ROWS);
+    // Positive control: without it, an export that rendered nothing would pass the absence checks.
+    expect(svg.textContent).toContain("Exported");
+    expect(svg.querySelectorAll("text").length).toBeGreaterThan(1);
+    expect(svg.textContent).not.toContain("Debt change");
+    expect(svg.textContent).not.toContain("Reduction");
   });
 });
 
