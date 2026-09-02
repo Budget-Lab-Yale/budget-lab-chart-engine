@@ -540,7 +540,8 @@ function assemblePaneResult(
   cols: ResolvedColumns,
   data: PreparedRow[],
 ): PaneResult {
-  // Series order + colors. When series_order is set it acts as both filter and order.
+  // Series order + colors. When series_order is set it acts as both filter and order. Mirrored by
+  // validateChartData's keyed-callout "drawn nowhere" rules (src/spec/validate.ts) — change both.
   const seriesNames =
     spec.series_order && spec.series_order.length
       ? spec.series_order.filter((s) => data.some((r) => r.series === s))
@@ -886,7 +887,9 @@ function assemblePaneResult(
 
   // Point charts: the shape-encoding channel. Distinct shape values in spec.shape_order (filter +
   // order) else data-encounter order; `shapeIsSeries` flags the redundant case (shape column ==
-  // series column) so the symbol scale + legend collapse to a single combined group.
+  // series column) so the symbol scale + legend collapse to a single combined group. This domain is
+  // an inclusion filter, mirrored by validateChartData's keyed-callout "drawn nowhere" rules
+  // (src/spec/validate.ts) — change both.
   const hasShape = cols.shape != null;
   const shapeNames = hasShape
     ? spec.shape_order && spec.shape_order.length

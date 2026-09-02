@@ -21,18 +21,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   nothing) still keys. (#37)
 - Row tokens in a point callout's `label`: `{point_label}`, `{x}` and `{series}` fill from the
   callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
-  formatted the way the hover card formats x (`tooltip_x_format`, or `x_labels` on a categorical
-  axis); `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
+  formatted the way the AXIS prints x: the plain number on a numeric axis (unrounded and ungrouped,
+  so a scatter card showing `2.59` for the same row leaves `{x}` at `2.593569308310415`),
+  `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a categorical one;
+  `{series}` honours `series_labels`. `{value}` is unchanged. All four are substituted in one
   pass, so a data cell that happens to contain `{value}` is text, not a token. A token that cannot be
   resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
 - Point-callout labels that would sit on each other now move apart. Callouts without an explicit
   `dx`/`dy` whose estimated label boxes overlap are swept apart vertically, top to bottom, each
-  cleared of every near label above it, and kept inside the frame; a callout with an explicit `dx`
-  or `dy` is pinned where the author put it and the others clear it. A callout that collides with
-  nothing keeps exactly today's offset, which is what keeps every published figure byte-identical.
-  The connector follows the placed label. Placement is one-dimensional, vertical only, like the
-  x-axis stagger; it runs under the same conditions as the stagger and the connectors (a numeric or
-  temporal axis domain and known width/height). (#37)
+  cleared of every near label above it, and clamped to the frame — except that a stack taller than
+  the frame deliberately overflows the bottom, since the top of the column wins; a callout with an
+  explicit `dx` or `dy` is pinned where the author put it and the others clear it. A callout that
+  collides with nothing keeps exactly today's offset, which is what keeps every published figure
+  byte-identical. The connector follows the placed label. Placement is one-dimensional, vertical
+  only, like the x-axis stagger; it runs under the same conditions as the connectors (a numeric or
+  temporal axis domain and a known width AND height — the stagger itself needs only the width, so a
+  height-less render staggers axis labels but does not place callouts). (#37)
 - `tooltip_x_label` / `tooltip_y_label` — **`scatter` only**: name the hover card's x and y rows
   when the axis titles are the wrong words for a tooltip (an abbreviated axis title, or a unit the
   card should spell out). Each falls back to the matching axis title, and that falls back to the
@@ -63,7 +67,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   own arithmetic, already looser than the screen on every axis type, and did not change. (#34)
 - **Annotation stagger and connector geometry now measure against the drawn axis, not the data.**
   `assemblePlot` estimated label pixel positions from the data's x extent, which is not what the axis
-  spans when `histogram.domain`, `anchorAtZero` or a widened domain is in play — and binned rows carry
+  spans when a histogram's bin-edge span (`histogram.domain`, else the computed outer bin edges) or
+  `anchorAtZero` is in play — and binned rows carry
   no numeric x at all, so on a histogram the stagger never ran and overlapping `annotations.xAxis`
   labels overprinted. The resolved axis domain is now passed in its place (`xExtent` → `xAxisDomain`
   on the `assemblePlot` option; a `Date`-valued temporal-histogram domain is converted to epoch ms).
@@ -79,10 +84,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Four pre-existing `CONFIG-SPEC.md` claims corrected. Two were made false by this release and
   narrowed to match: the `x_labels` row said a coordinated small-multiples pane replaces its card
   with the in-place cursor (a dumbbell and a stacked pane in tooltip mode keep theirs), and the
-  `series_patterns` notes said no coordinated pane draws a card. Two were already false: "`bands` /
+  `series_patterns` notes said no coordinated pane draws a card. One was already false: "`bands` /
   `points` are not facet-scoped" (`points` take `facet`, and `filterAnnotationsByFacet` has scoped
-  them), and "`annotations.points` cannot be keyed" meant legend-keyed and now says `legend: true`,
-  since `point:` is a key of a different kind.
+  them). One was ambiguous once `point:` existed: "`annotations.points` cannot be keyed" meant
+  legend-keyed and now says `legend: true`, since `point:` is a key of a different kind.
 
 ### Upgrading
 
@@ -93,8 +98,16 @@ A repin re-renders every published figure at once — here is what a maintainer 
   (labels that overprinted now stagger); a histogram with `annotations.points[].connector: true`
   (previously drew a plain dot because the connector gate was never satisfied, now draws the arrow);
   an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
-  `anchorAtZero` chart with connector callouts (previously drew no leader line at all). Every other
-  chart renders byte-identically. (#36)
+  `anchorAtZero` chart with connector callouts (previously drew no leader line at all). **One
+  published figure falls in the first class** — the deficit-management scorecard's
+  `deviation-distribution` histogram (`histogram.domain: [-1, 2.25]`, four labelled
+  `annotations.xAxis` markers), whose "2026a" (x = 0.5013) and "2025a" (x = 0.6222) labels sit about
+  24 px apart at width 720 against about 31 px of text and overprint today; that overprinting is the
+  defect being fixed, and "2025a" drops to the second stagger row on repin. The archive's only two
+  `anchorAtZero` uses are both `anchorAtZero: false`, and a non-anchored numeric axis's domain is
+  exactly the data extent (`[d3.min, d3.max]` of the parsed x), so every other numeric chart renders
+  byte-identically — as does every temporal, quarterly and categorical chart, which fall back to the
+  data extent exactly as before. (#36)
 - **Point callouts that overlap at their default offsets now move apart, unconditionally.** A chart
   with two or more `annotations.points` without `dx`/`dy` whose labels currently sit on each other
   re-lays out on repin. **No published spec is affected**, established by parsing every authored
@@ -106,7 +119,7 @@ A repin re-renders every published figure at once — here is what a maintainer 
 - **A faceted stacked bar whose hover is the card now also shades the hovered category on its
   sibling panes** — at default settings; `small_multiples.coordinated_cursor: false` keeps the card
   alone and `chrome.tooltip: false` keeps the echo alone. Hover-only. (#32)
-- **Every card root now carries an `x-<xAxisType>` class** alongside `figure-card`; a host stylesheet
+- **Every chart card root now carries an `x-<xAxisType>` class** alongside `figure-card`; a host stylesheet
   keying on the exact class string will see the new token. `chart-<chartType>` stays on the standalone
   card. (#34)
 - **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being

@@ -219,7 +219,7 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 | `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. On **horizontal bar** charts with a numeric `x`, an `xAxis` marker now renders as a vertical rule on the value axis (previously silently ignored). |
 | `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?, legend?, rug?}`. |
-| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x \| point, label, y?, series?, value_format?, color?, dx?, dy?, connector?, maxWidth?, facet?}`; `label` plus exactly one of `x` / `point` required. `point` (scatter only) names the `columns.point_label` cell of exactly **one** row, which supplies the callout's `x` and `y` — zero or several matching rows are validation errors, never a silent first match — and excludes `y` and `series`. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `label` may carry `{value}` and the row tokens `{point_label}` / `{x}` / `{series}` (below). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. Callouts **without** `dx`/`dy` are auto-placed: labels that would sit on each other are pushed apart vertically; an explicit `dx` or `dy` pins that label exactly where it says, and the auto-placed ones avoid it. A label that collides with nothing keeps the default offset. Like the annotation stagger and connector leaders, placement needs a numeric or temporal x-axis and the rendered width and height. |
+| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x \| point, label, y?, series?, value_format?, color?, dx?, dy?, connector?, maxWidth?, facet?}`; `label` plus exactly one of `x` / `point` required. `point` (scatter only) names the `columns.point_label` cell of exactly **one** row, which supplies the callout's `x` and `y` — zero or several matching rows are validation errors, never a silent first match — and excludes `y` and `series`. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `label` may carry `{value}` and the row tokens `{point_label}` / `{x}` / `{series}` (below). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. Callouts **without** `dx`/`dy` are auto-placed: labels that would sit on each other are pushed apart vertically; an explicit `dx` or `dy` pins that label exactly where it says, and the auto-placed ones avoid it. A label that collides with nothing keeps the default offset. Pushed labels are clamped to the frame, except that a column of labels taller than the frame overflows the bottom — the top of the column wins. Like the connector leaders, placement needs a numeric or temporal x-axis and both the rendered width and height (the annotation stagger needs only the width). |
 
 Marker/label `color` is a named color or `"#hex"`; the label color matches its line. When
 `color` is omitted, both `xAxis` and `yAxis` reference lines default to the dim annotation
@@ -234,9 +234,12 @@ parse as a number). A `label` without the token is unaffected.
 
 **Row tokens (`points` only).** A callout `label` may also carry `{point_label}`, `{x}` and
 `{series}`, filled from the row the callout is keyed to (`point:`) or snapped to (`series` without
-`y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x as the hover card formats
-it (a plain number on a numeric axis, the tooltip date format on a temporal one, the `x_labels`
-name of a category), `{series}` its
+`y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x as the **axis** prints
+it — the plain number on a numeric axis (unrounded and ungrouped, so a cell of
+`2.593569308310415` prints in full and `2000` prints as `2000`), the tooltip date format
+(`tooltip_x_format`, default `%b %Y`) on a temporal or quarterly one, the `x_labels` name of a
+category. This is not always what the hover card shows: a scatter card rounds x to two decimals
+and groups thousands, so the same row reads `2.59` there. `{series}` is that row's
 display name (`series_labels`, else the raw key). A plain `x` + `y` callout fills `{x}` from its own
 `x` and `{series}` from its own `series` when given. A token with nothing to fill it stays literal
 in the rendered text — a chart without `columns.point_label` or without a series column leaves
@@ -981,8 +984,9 @@ hit area behind them, matching `chrome.tooltip`'s contract.
 
 The card root itself (the element the events above dispatch from) also carries structural classes:
 `figure-card` (every mount, standalone and figure), `chart-<chartType>` (standalone mounts only,
-e.g. `chart-scatter`), and `x-<xAxisType>` (every mount — `x-numeric`, `x-temporal`, `x-quarterly`,
-or `x-categorical`, from `spec.xAxisType`). The x-axis-title breathing-room CSS
+e.g. `chart-scatter`), and `x-<xAxisType>` (every **chart** mount — `x-numeric`, `x-temporal`,
+`x-quarterly`, or `x-categorical`, from `spec.xAxisType`; a table mount has no x axis and carries
+`figure-card` alone). The x-axis-title breathing-room CSS
 (`.x-numeric .figure-x-axis-title`) is keyed to `x-numeric`, not to any chart type, so it applies
 uniformly to a numeric-x histogram, scatter, or line and their faceted figures alike.
 

@@ -114,7 +114,9 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
       sweep(-1);
     }
     // Top overflow: the top wins — pin the highest involved label to `lo` and sweep down, letting a
-    // stack taller than the frame overflow the bottom in reading order.
+    // stack taller than the frame overflow the bottom. The sweep preserves the CURRENT visual order,
+    // which the bottom-overflow pass above may already have shuffled relative to spec order, so once
+    // a column overflows the frame no input-order guarantee survives — only "no collisions left".
     for (let g = 0; g < col.length; g++) {
       const high = extreme(-1);
       if (high == null || ys[high]! >= o.lo) break;

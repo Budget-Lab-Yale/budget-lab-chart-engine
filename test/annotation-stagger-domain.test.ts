@@ -80,7 +80,12 @@ describe("histogram: colliding xAxis labels auto-stagger", () => {
       annotations: { xAxis: [{ x: "-0.90", label: "Left" }, { x: "2.20", label: "Right" }] },
     } as unknown as ChartSpec;
     const { svg } = renderChart(far, raw, { width: 728, height: 400, document });
-    expect(rowDy(findText(svg, /^Left$/))).toBe(rowDy(findText(svg, /^Right$/)));
+    const left = findText(svg, /^Left$/);
+    const right = findText(svg, /^Right$/);
+    // Without these, two MISSING labels make the control pass on NaN toBe NaN (Object.is).
+    expect(left).toBeDefined();
+    expect(right).toBeDefined();
+    expect(rowDy(left)).toBe(rowDy(right));
   });
 });
 

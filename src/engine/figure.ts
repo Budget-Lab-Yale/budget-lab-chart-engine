@@ -511,7 +511,9 @@ export function renderFigure(
   const effHeight = opts.height ?? autoHeight;
 
   // 1. Partition + order panes. Distinct facet values in data-encounter order, then reorder +
-  //    filter by pane_order when set (pane_order names the included panes, in order).
+  //    filter by pane_order when set (pane_order names the included panes, in order). A blank facet
+  //    cell is not a pane. Both drops are mirrored by validateChartData's keyed-callout "drawn
+  //    nowhere" rules (src/spec/validate.ts) — change both.
   const encounterOrder: string[] = [];
   const seen = new Set<string>();
   for (const r of rows) {

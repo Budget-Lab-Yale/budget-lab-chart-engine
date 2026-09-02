@@ -354,6 +354,24 @@ describe("annotations.points — row tokens in the rendered label", () => {
     expect(text(svg as SVGSVGElement, /@/)).toBe("2025b* @ 2.32 (Recent era)");
   });
 
+  it("{x} on a numeric axis is the plain number the AXIS prints, not the hover card's rounded form", () => {
+    // The scatter card formats x with toLocaleString({ maximumFractionDigits: 2 }) — "2.59",
+    // "2,000" — but the token goes through the axis's own tooltipXFormat (`${+v}`), so it is
+    // unrounded and ungrouped. CONFIG-SPEC's row-token paragraph promises the axis form; a test
+    // using a short x like "2.32" cannot tell the two apart.
+    const rows = rowsOf([
+      { x: "2.593569308310415", y: "-0.12", g: "Recent", period: "2025a" },
+      { x: "2000", y: "0.80", g: "Earlier", period: "2019" },
+    ]);
+    const spec = withPoints([
+      { point: "2025a", label: "a={x}" },
+      { point: "2019", label: "b={x}" },
+    ]);
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(text(svg as SVGSVGElement, /^a=/)).toBe("a=2.593569308310415");
+    expect(text(svg as SVGSVGElement, /^b=/)).toBe("b=2000");
+  });
+
   it("{series} falls back to the raw key when no series_labels entry exists", () => {
     const { svg } = renderChart(withPoints([{ point: "2019", label: "S={series}" }]), ROWS, { width: 720, height: 400, document });
     expect(text(svg as SVGSVGElement, /^S=/)).toBe("S=Earlier");
