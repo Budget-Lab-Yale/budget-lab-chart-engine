@@ -45,8 +45,10 @@
 // table row in the diff, which someone has to consciously approve.
 //
 // THE TWO MECHANISMS THAT DECIDE THE `card` COLUMN (see crosshair.ts, spec/bar-stack.ts):
-//   1. `emitOnly` — a coordinated small-multiples pane builds no card (`const tip = emitOnly ? null
-//      : getSharedTooltip(...)`, then `if (emitOnly) return;`). The secondary cursor draws an
+//   1. `emitOnly` — a small-multiples pane wired `emitOnly` builds no card (`const tip = emitOnly ?
+//      null : getSharedTooltip(...)`, then `if (emitOnly) return;`). Coordination alone does not
+//      decide it: a `dumbbell` pane and a net-dot `stacked` pane coordinate WITHOUT `emitOnly`, so
+//      they keep their cards (see those rows). Where the flag is set, the secondary cursor draws an
 //      in-place guide/dot/pill/band echo instead. `coordinated_cursor` defaults to ON, so this is
 //      the default for a multi-pane figure. Everything wired BELOW that `return` is invisible on a
 //      default multi-pane figure; `onHover`, ten lines above it, fires either way — which is how
@@ -399,8 +401,12 @@ const EXPECTED: Record<string, Cell> = {
   "line (categorical x) · 2-pane":        { card: false, cardRows: [],                        pills: true,  guide: true,  dot: true,  region: false, axisLabel: true  },
   "dotplot · standalone":                 { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
   "dotplot · 2-pane":                     { card: false, cardRows: [],                        pills: true,  guide: false, dot: true,  region: true,  axisLabel: true  },
-  // Dumbbell: the one type that keeps its card in a default pane (render-live's "NOT emitOnly"),
-  // so its coordinated cursor is a pure cross-pane band echo with no pills of its own.
+  // Dumbbell: coordinated in a default pane and STILL carrying its card — render-live passes
+  // `onResolve` without `emitOnly`, so the card survives and the pane still drives the others —
+  // which makes its coordinated cursor a pure cross-pane band echo with no pills of its own. Since
+  // issue #32 it shares that treatment with the `stacked (with a negative)` rows above, so it is
+  // no longer the only type that does; those two are the whole of the exception, and both of their
+  // rows in the sibling-echo table below say so.
   "dumbbell · standalone":                { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
   "dumbbell · 2-pane":                    { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
   // Temporal line / area / histogram: a card standalone, none in a default pane. (These card
