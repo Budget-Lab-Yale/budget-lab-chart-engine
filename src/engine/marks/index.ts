@@ -38,6 +38,11 @@ export interface PreparedRow {
    *  card's header. Encodes nothing — it names the observation. Absent ⇒ no point-label channel,
    *  and empty ⇒ this row contributes no token. */
   _pointLabel?: string;
+  /** Scatter: the RAW `columns.point_label` cell, the key an `annotations.points[].point` callout
+   *  matches. Kept apart from `_pointLabel` because resolveColumns NULLS a point_label that repeats
+   *  the series/shape column (a hover-header dedupe), and a keyed callout must still find its row
+   *  then. Present iff `columns.point_label` is configured. */
+  _pointKey?: string;
   /** Horizontal sectioned bars: the row's section value (from columns.section). Drives the
    *  section-ordered category band + section headers. Absent ⇒ no sections. */
   _section?: string;

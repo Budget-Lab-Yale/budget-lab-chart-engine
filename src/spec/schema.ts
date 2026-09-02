@@ -92,9 +92,13 @@ const POINT_CALLOUT_ARRAY = {
   items: {
     type: "object",
     additionalProperties: false,
-    required: ["x", "label"],
+    // `x` is NOT required here: a callout may be keyed by `point` instead. The exactly-one-of rule
+    // is a cross-field check in validate.ts (pointCalloutSpecErrors), where the message can name
+    // the index and the values.
+    required: ["label"],
     properties: {
       x: { type: "string" },
+      point: { type: "string", minLength: 1 },
       y: { type: "number" },
       series: { type: "string" },
       label: { type: "string" },

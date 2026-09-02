@@ -219,7 +219,7 @@ A single `annotations:` block holds all four annotation kinds. (The legacy `xAxi
 | `annotations.xAxis` | array | **Vertical** reference lines. Each `{x, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `x` required. `style` is `dashed` (default) \| `solid`. Two label controls: **`labelSide`** = which *side of the line* (`left`\|`middle`\|`right`, default right); **`labelPosition`** = *where along the line* relative to the x-axis (`top` default, auto-staggered \| `middle` \| `bottom`). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. On **horizontal bar** charts with a numeric `x`, an `xAxis` marker now renders as a vertical rule on the value axis (previously silently ignored). |
 | `annotations.yAxis` | array | **Horizontal** reference lines. Each `{y, label?, value_format?, style?, color?, strokeWidth?, labelSide?, labelPosition?, labelDx?, labelDy?, facet?}`; `y` required. Two label controls (the axes swap vs. xAxis): **`labelSide`** = which *side of the line* (`top` default \| `middle` \| `bottom`); **`labelPosition`** = *where along the line* (`left` \| `middle` \| `right`, default right). `labelDx`/`labelDy` are px nudges — **`+labelDx` = right, `+labelDy` = up**. |
 | `annotations.bands` | array | **Shaded** vertical x-regions. Each `{start, end, label?, color?, legend?, rug?}`. |
-| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x, label, y?, series?, value_format?, color?, dx?, dy?, connector?}`; `x` + `label` required. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. |
+| `annotations.points` | array | **Callouts** at a data coordinate. Each `{x \| point, label, y?, series?, value_format?, color?, dx?, dy?, connector?, maxWidth?, facet?}`; `label` plus exactly one of `x` / `point` required. `point` (scatter only) names the `columns.point_label` cell of exactly **one** row, which supplies the callout's `x` and `y` — zero or several matching rows are validation errors, never a silent first match — and excludes `y` and `series`. Omit `y` and give `series` to snap to that series' value at `x` (the cumulative stack top on area charts). `label` may carry `{value}` and the row tokens `{point_label}` / `{x}` / `{series}` (below). `connector: true` draws a leader arrow from the label to the point. `dx`/`dy` nudge the label — **`+dx` = right, `+dy` = up**. Callouts **without** `dx`/`dy` are auto-placed: labels that would sit on each other are pushed apart vertically; an explicit `dx` or `dy` pins that label exactly where it says, and the auto-placed ones avoid it. A label that collides with nothing keeps the default offset. Like the annotation stagger and connector leaders, placement needs a numeric or temporal x-axis and the rendered width and height. |
 
 Marker/label `color` is a named color or `"#hex"`; the label color matches its line. When
 `color` is omitted, both `xAxis` and `yAxis` reference lines default to the dim annotation
@@ -232,9 +232,19 @@ callout's resolved value). `value_format` controls the substitution: `{decimals?
 value-axis tick format (`yAxis`/`points`) or the raw `x` string (`xAxis`, or any `x` that doesn't
 parse as a number). A `label` without the token is unaffected.
 
+**Row tokens (`points` only).** A callout `label` may also carry `{point_label}`, `{x}` and
+`{series}`, filled from the row the callout is keyed to (`point:`) or snapped to (`series` without
+`y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x as the hover card formats
+it (a plain number on a numeric axis, the tooltip date format on a temporal one, the `x_labels`
+name of a category), `{series}` its
+display name (`series_labels`, else the raw key). A plain `x` + `y` callout fills `{x}` from its own
+`x` and `{series}` from its own `series` when given. A token with nothing to fill it stays literal
+in the rendered text — a chart without `columns.point_label` or without a series column leaves
+`{point_label}` / `{series}` as written — and `{value}` works alongside them.
+
 **`facet` (small multiples only).** Scope an `xAxis`/`yAxis` marker to the pane whose facet value
 equals `facet`; omit to render in every pane (unchanged default). Ignored on a non-faceted chart.
-`bands`/`points` are not facet-scoped.
+`points` take `facet` the same way. `bands` are not facet-scoped.
 
 ### Keying annotations in the legend (`legend: true`)
 
@@ -279,8 +289,9 @@ where the reader sweeps the crosshair to read values, so hovering them would fli
 on and off as the pointer crossed each region. The rug is the hoverable key.
 
 A chart with **one** series and keyed annotations gets a legend built from those rows alone — which
-is the case the feature was built for. `annotations.points` cannot be keyed: a callout *is* its
-label, and moving it loses the coordinate it points at.
+is the case the feature was built for. `annotations.points` cannot take `legend: true`: a callout
+*is* its label, and moving it into the legend loses the coordinate it points at. (A callout's own
+`point:` key is a different thing — it names the data row the callout sits on; see the table above.)
 
 ```yaml
 annotations:
@@ -1339,6 +1350,20 @@ annotations:
     - { start: "2026-04-01", end: "2026-12-31", label: "Assumes no further changes" }
   points:
     - { x: "2025-04-11", series: Section 232, label: "Peak", connector: true, dx: -16 }
+data: data.csv
+```
+
+**Scatter with callouts keyed to observations:**
+
+```yaml
+chartType: scatter
+title: "Deficit reduction vs. debt trajectory"
+xAxisType: numeric
+columns: { x: debt_change_pp, value: deficit_reduction_pct_gdp, series: era, point_label: period }
+annotations:
+  points:
+    - { point: "2025b", label: "{point_label}", connector: true }
+    - { point: "2026a", label: "{point_label}: {value}", value_format: { suffix: "% of GDP", decimals: 1 } }
 data: data.csv
 ```
 

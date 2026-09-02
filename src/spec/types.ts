@@ -137,11 +137,17 @@ export interface YAxisPolicy {
   markers?: YAxisMarker[];
 }
 
-/** A callout pointing at a data coordinate. `y` may be omitted when `series` is given (the label
- *  snaps to that series' value at `x`; for a stacked area, the cumulative top through that series).
+/** A callout pointing at a data coordinate. Anchored EITHER by `x` (with `y`, or `series` to snap
+ *  to that series' value at `x` — for a stacked area, the cumulative top through that series) OR by
+ *  `point`, the `columns.point_label` cell of exactly one row, which then supplies x and y.
  *  `dx`/`dy` nudge the label from the point; `connector` draws a short leader line to it. */
 export interface PointCallout {
-  x: string;
+  /** Data x of the point. Exactly one of `x` / `point` is required (validated). */
+  x?: string;
+  /** Scatter only: the `columns.point_label` cell of the ONE row this callout labels. Zero or
+   *  several matching rows are validation errors — never a silent first match — because the
+   *  motivating chart had two rows sharing an exact x and series. Excludes `y` and `series`. */
+  point?: string;
   y?: number;
   series?: string;
   /** May contain a literal `{value}` token, replaced with this callout's resolved `y` (the

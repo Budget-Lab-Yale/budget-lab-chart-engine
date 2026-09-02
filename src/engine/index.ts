@@ -5,7 +5,7 @@
 // This is the tracker's buildLineChart, generalized: data prep + axis computation are
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
-import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { ChartSpec, PointCallout, ValueAffixes } from "../spec/types";
 import type { RenderHooks } from "../spec/hooks";
 import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
@@ -32,7 +32,7 @@ import { binValues, computeThresholds, temporalThresholds, normalizeBinned } fro
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { assemblePlot, withTickLabelHook } from "./assemble-plot";
+import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
 import { resolveValueAffixes, isTruthyFlag } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
@@ -385,6 +385,9 @@ export function renderPane(
       if (cols.shape) row._shape = r[cols.shape] ?? "";
       // Verbatim: this names an observation, so it is not a number to format or a key to look up.
       if (cols.point_label) row._pointLabel = r[cols.point_label] ?? "";
+      // The RAW cell, read past the resolver's series/shape dedupe, so a `point:` callout keyed to
+      // such a column still finds its row. Same exact-match contract as validateChartData.
+      if (spec.columns?.point_label) row._pointKey = r[spec.columns.point_label] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
       // Waterfall step kind (delta/total/skip).
       if (cols.kind) row._kind = r[cols.kind] ?? "";
@@ -574,18 +577,41 @@ function assemblePaneResult(
   // paneFacetValue (single chart) returns `ann` unchanged (byte-identical).
   const ann = filterAnnotationsByFacet(resolveAnnotations(spec), opts.paneFacetValue);
 
-  // Point callouts: resolve a y for any callout that gives a `series` but omits `y` — snap to that
+  // Point callouts. A `point:` callout takes BOTH coordinates from the one row whose raw
+  // `columns.point_label` cell equals it (validateChartData guaranteed exactly one across all rows).
+  // No match in THIS pane's rows ⇒ dropped here: on a faceted chart the row lives in exactly one
+  // pane, and a callout without `facet:` reaches every pane, so this drop is what makes it appear
+  // only where its observation is. `x` is the raw string because markerToX re-parses it.
+  // Otherwise resolve a y for any callout that gives a `series` but omits `y` — snap to that
   // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
   // band; otherwise the series' own value. Rows are matched at x by the raw time / numeric key.
   const stackedChart = spec.chartType === "area" || spec.chartType === "stacked";
   const seriesRank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
-  const resolvedPoints = ann.points.map((p) => {
-    if (Number.isFinite(p.y as number) || !p.series) return p;
+  const resolvedPoints: PointCallout[] = [];
+  // The single row each entry of `resolvedPoints` came from, by index — undefined for an explicit
+  // x+y callout and for the stacked cumulative snap (a sum has no row). Read by the row-token
+  // substitution below, which has to wait for xOpts (the `{x}` formatter lives there).
+  const pointRows: Array<PreparedRow | undefined> = [];
+  for (const p of ann.points) {
+    if (p.point != null) {
+      const row = dataInScope.find((r) => r._pointKey === p.point);
+      if (!row || !Number.isFinite(row._y as number)) continue;
+      resolvedPoints.push({ ...p, x: row.time, y: row._y as number });
+      pointRows.push(row);
+      continue;
+    }
+    if (Number.isFinite(p.y as number) || !p.series) {
+      resolvedPoints.push(p);
+      pointRows.push(undefined);
+      continue;
+    }
     const atX = dataInScope.filter((r) => r.time === p.x || String(r._xn ?? "") === p.x);
     const targetRank = seriesRank.get(p.series);
-    if (targetRank == null) return p;
     let y: number | undefined;
-    if (stackedChart) {
+    let snapped: PreparedRow | undefined;
+    if (targetRank == null) {
+      // unknown series: the callout stays as written (no y ⇒ assemblePlot draws nothing)
+    } else if (stackedChart) {
       let sum = 0;
       let found = false;
       for (const r of atX) {
@@ -598,10 +624,14 @@ function assemblePaneResult(
       if (found) y = sum;
     } else {
       const row = atX.find((r) => r.series === p.series);
-      if (row && Number.isFinite(row._y as number)) y = row._y as number;
+      if (row && Number.isFinite(row._y as number)) {
+        y = row._y as number;
+        snapped = row;
+      }
     }
-    return y != null ? { ...p, y } : p;
-  });
+    resolvedPoints.push(y != null ? { ...p, y } : p);
+    pointRows.push(snapped);
+  }
 
   // Numeric extent of the parsed x values (numeric/temporal axes only; categorical → undefined).
   // Computed HERE, above the y-extent block, because the `column` overlay fold a few lines down
@@ -803,6 +833,38 @@ function assemblePaneResult(
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
 
+  // Row-token VALUES for point-callout labels, computed HERE (the rows and the x formatter are
+  // here) and applied by assemblePlot in one pass together with `{value}`, whose y-tick fallback
+  // formatter lives there. `{x}` reads as the hover card shows it — the adapter's tooltip format,
+  // or the `x_labels` display name of a category — so a label and its tooltip never disagree.
+  // `{series}` reads the `series_labels` name, which may name the implicit single series too
+  // (SINGLE_SERIES_KEY = ""); unmapped, that nameless series and a blank point_label cell are
+  // `undefined`, which leaves the token literal rather than printing nothing.
+  // Own-property lookups: a data key like "toString" must fall through to the raw key, not to
+  // Object.prototype (the publish boundary rebuilds these maps as ordinary objects).
+  const own = (m: Record<string, string> | undefined, k: string): string | undefined =>
+    m && Object.prototype.hasOwnProperty.call(m, k) ? m[k] : undefined;
+  const seriesLabelFor = (key: string | undefined): string | undefined =>
+    key == null ? undefined : (own(spec.series_labels, key) ?? (key || undefined));
+  const xTokenFor = (x: string | undefined): string | undefined => {
+    if (x == null) return undefined;
+    const mx = xOpts.markerToX({ x });
+    if (typeof mx === "string") return own(spec.x_labels, mx) ?? x;
+    const n = typeof mx === "number" ? mx : mx instanceof Date ? mx.getTime() : NaN;
+    return Number.isFinite(n) && xOpts.tooltipXFormat ? xOpts.tooltipXFormat(n) : x;
+  };
+  const pointsForPlot: ResolvedPointCallout[] = resolvedPoints.map((p, i) => {
+    const row = pointRows[i];
+    return {
+      ...p,
+      rowTokens: {
+        point_label: row?._pointKey || undefined,
+        x: xTokenFor(p.x),
+        series: seriesLabelFor(row?.series ?? p.series),
+      },
+    };
+  });
+
   // The resolved x-axis domain as a numeric span, for anything that maps px <-> data against the
   // DRAWN axis: annotation-label stagger geometry and point-callout connectors (assemblePlot), and
   // overlay `domain: "axis"` cropping below. The numeric adapter always supplies a domain (it fits
@@ -958,7 +1020,7 @@ function assemblePaneResult(
     seriesNames,
     colors,
     spec,
-    points: resolvedPoints,
+    points: pointsForPlot,
     ...(xAxisDomain ? { xAxisDomain } : {}),
     width: opts.width,
     height: opts.height,

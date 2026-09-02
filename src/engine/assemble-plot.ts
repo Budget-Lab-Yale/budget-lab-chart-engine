@@ -20,6 +20,7 @@ import {
   X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
+import { placePointCallouts, type CalloutBox } from "./callout-placement";
 import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
@@ -27,7 +28,9 @@ import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
-  substituteValueToken,
+  substituteRowTokens,
+  formatAnnotationValue,
+  type RowTokenValues,
   xMarkerLabel,
   yMarkerLabel,
 } from "../spec/annotations";
@@ -216,6 +219,14 @@ function labelsInside(
   );
 }
 
+/** A point callout as index.ts hands it to assemblePlot: coordinates resolved, plus the display
+ *  strings its `{point_label}` / `{x}` / `{series}` tokens read. The VALUES are computed where the
+ *  rows are; the substitution happens here, in one pass with `{value}`, so a data cell that happens
+ *  to contain "{value}" is never re-expanded by a second pass. */
+export interface ResolvedPointCallout extends PointCallout {
+  rowTokens?: RowTokenValues;
+}
+
 export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
@@ -226,9 +237,10 @@ export interface AssembleOptions {
   seriesNames: string[];
   colors: Map<string, string>;
   spec: ChartSpec;
-  /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
-   *  present, used instead of spec.annotations.points so the snap values render. */
-  points?: PointCallout[];
+  /** Point callouts with any series-snap / `point:` coordinates already resolved and the row-token
+   *  VALUES attached (index.ts has the data). When present, used instead of spec.annotations.points
+   *  so the resolved coordinates render. */
+  points?: ResolvedPointCallout[];
   /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
    *  the marks are actually DRAWN in, so px estimates match what a reader sees. Falls back to the
    *  data extent only where the adapter supplies no explicit domain (temporal/quarterly
@@ -419,11 +431,13 @@ export function assemblePlot({
 
   // Substitute a `{value}` token in yAxis/xAxis/points labels with the annotation's own
   // coordinate value (per-annotation `value_format`, else the chart's y-tick format) BEFORE
-  // anything below reads `.label` — both the auto-stagger geometry (which estimates label px
-  // width from `label.length`) and the drawn text must see the SAME (substituted) string, or
-  // the stagger would size its collision boxes from the short literal token instead of the
-  // (usually longer) rendered number. Labels without the token are returned unchanged, so
-  // charts that don't use it get byte-identical output.
+  // anything below reads `.label` — both the auto-stagger / placement geometry (which estimates
+  // label px width from `label.length`) and the drawn text must see the SAME (substituted) string,
+  // or the geometry would size its collision boxes from the short literal token instead of the
+  // (usually longer) rendered text. Point callouts also take their row tokens here, in the same
+  // single pass. Labels without a token are returned unchanged, so charts that don't use one get
+  // byte-identical output. `{value}` is formatted only when the authored label asks for it, so the
+  // tick-label hook is not invoked for labels that never show a value.
   const yTickFallbackFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
     axis: "y",
     ticks: yTicks,
@@ -433,11 +447,14 @@ export function assemblePlot({
     m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
   const xAxisAnn = ann.xAxis.map((m) => (m.label ? { ...m, label: xMarkerLabel(m) } : m));
-  const pointsAnn = (points ?? ann.points).map((p) =>
-    Number.isFinite(p.y as number)
-      ? { ...p, label: substituteValueToken(p.label, p.y as number, p.value_format, yTickFallbackFmt) }
-      : p,
-  );
+  const pointsAnn = (points ?? ann.points).map((p: ResolvedPointCallout) => {
+    const value =
+      Number.isFinite(p.y as number) && p.label.includes("{value}")
+        ? formatAnnotationValue(p.y as number, p.value_format, yTickFallbackFmt)
+        : undefined;
+    const label = substituteRowTokens(p.label, { ...p.rowTokens, value });
+    return label === p.label ? p : { ...p, label };
+  });
 
   // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
   // label's px position/width and greedily push overlapping labels onto stacked rows so they don't
@@ -893,23 +910,68 @@ export function assemblePlot({
     }
   });
 
+  // 6b. Point-callout auto-placement. A callout with NO explicit dx/dy is movable: its label box is
+  //     estimated at the default offset (width from the longest line, one LABEL_ROW_H per line,
+  //     anchored like the drawn text) and colliding movable boxes are spread apart vertically; a callout with
+  //     an explicit dx or dy is pinned and the others route around it. Same preconditions as the
+  //     connector below (numeric axis domain, known width/height) and the same estimate-based
+  //     geometry as the stagger above — getBBox would make live, PNG and SSR disagree. A box that
+  //     collides with nothing gets NO entry here, so it takes exactly today's default below and
+  //     every existing chart renders byte-identically.
+  const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
+  const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
+  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -28 : -6);
+  const autoDy = new Map<number, number>();
+  if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
+    const boxes: CalloutBox[] = [];
+    const boxIdx: number[] = [];
+    const boxPy: number[] = [];
+    pointsAnn.forEach((p, i) => {
+      if (p.x == null || !Number.isFinite(p.y as number)) return;
+      const mx = xOpts.markerToX({ x: p.x });
+      if (mx == null || typeof mx === "string") return;
+      const xn = typeof mx === "number" ? mx : mx.getTime();
+      const px = effMarginLeft + ((xn - xAxisDomain[0]) / (xAxisDomain[1] - xAxisDomain[0])) * innerWForPx;
+      const py = TBL_MARGIN_TOP + ((yDomain[1] - (p.y as number)) / (yDomain[1] - yDomain[0])) * innerHForPx;
+      const dx = p.dx != null ? p.dx : 0;
+      const text = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
+      const lines = text.split("\n");
+      const w = Math.max(...lines.map((l) => l.length)) * LABEL_CHAR_PX;
+      const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed: p.dx != null || p.dy != null });
+      boxIdx.push(i);
+      boxPy.push(py);
+    });
+    const ys = placePointCallouts(boxes, {
+      gap: LABEL_GAP,
+      lo: TBL_MARGIN_TOP + LABEL_ROW_H / 2,
+      hi: TBL_MARGIN_TOP + innerHForPx - LABEL_ROW_H / 2,
+    });
+    ys.forEach((y, k) => {
+      if (y !== boxes[k]!.y) autoDy.set(boxIdx[k]!, y - boxPy[k]!);
+    });
+  }
+
   // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
   //     (series-snap). With connector, draw a leader arrow from the label to the point — the label
   //     offset (dx/dy px) is converted to a second data coordinate via the x/y extents so the arrow
   //     lands exactly on the point. The arrowhead marks the point (no separate dot).
-  const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
-  const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  for (const p of pointsAnn) {
+  for (let pi = 0; pi < pointsAnn.length; pi++) {
+    const p = pointsAnn[pi]!;
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
     // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
+    // A `point:` callout arrives with `x` filled in by index.ts (or was dropped there); one that
+    // reaches this loop without `x` has no anchor and draws nothing.
+    if (p.x == null) continue;
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
     const pColor = resolveColorOr(p.color, TBL.color.heading);
     // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
-    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28).
+    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28). An auto-placed
+    // label (6b) overrides the default; an explicit dy always wins.
     const dx = p.dx != null ? p.dx : 0;
-    const dy = p.dy != null ? -p.dy : p.connector ? -28 : -6;
+    const dy = autoDy.get(pi) ?? defaultDy(p);
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
