@@ -9,8 +9,9 @@
 // scatter whose card rows fall back to the axis titles (`tooltip_x_label` absent, the #35 fallback),
 // but it hit any card with a long series name, category name or overlay label.
 //
-// The fix is `white-space: normal` plus a NON-BREAKING space between every label span and its value
-// span. Without the nbsp, wrapping trades clipping for a worse read: the label fills the line and
+// The fix is `white-space: normal` plus `overflow-wrap: anywhere` (a label with no space or hyphen
+// offers normal wrapping no break opportunity at all, so it clipped exactly as before), plus a
+// NON-BREAKING space between every label span and its value span. Without the nbsp, wrapping trades clipping for a worse read: the label fills the line and
 // the value drops onto one of its own, so "…(percentage points)" and "2.59" no longer look like one
 // statement. There are seven separate emission sites in crosshair.ts (scatter x/y, series rows,
 // two Total rows, the cumulative-area Total, overlay rows); `rowSeparators` below is applied to
@@ -91,6 +92,24 @@ describe("the card's CSS wraps instead of clipping (#41)", () => {
     // The defect itself: nowrap plus a max-width means the text leaves the box rather than wrapping
     // inside it, and the row's value is the part that lands outside.
     expect(tooltipRuleBlock()).not.toMatch(/white-space:\s*nowrap/);
+  });
+
+  it(".tbl-tooltip sets overflow-wrap: anywhere, so ONE long unbroken label also wraps", () => {
+    // `white-space: normal` alone only breaks at an existing space or hyphen. A label with
+    // neither -- a bare identifier, a URL, an unhyphenated compound -- offers no break
+    // opportunity, so it still ran out through the border and clipped, which is the very failure
+    // this task exists to remove, reached by one word instead of a long phrase. Measured before
+    // this declaration at 164.59px past the card's content edge on a 63-character axis title,
+    // and at 0 with it (see wrap-after-long-word.png).
+    expect(tooltipRuleBlock()).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it(".tbl-tooltip does not settle for overflow-wrap: break-word", () => {
+    // `anywhere` over `break-word` deliberately: only `anywhere` lets the mid-word break
+    // opportunities count toward min-content, so the card is sized from the width it can actually
+    // wrap to. The two narrow control cards stay 205px and 115px either way (measured), so this
+    // costs nothing on a card that already fits.
+    expect(tooltipRuleBlock()).not.toMatch(/overflow-wrap:\s*break-word/);
   });
 
   it(".tbl-tooltip keeps max-width: 320px — that is the width it wraps AT", () => {

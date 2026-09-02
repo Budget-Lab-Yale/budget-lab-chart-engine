@@ -536,14 +536,29 @@ body {
      --tbl-gridline is. One token so the two cannot drift apart. */
   --tbl-tooltip-rule: rgba(200, 205, 215, 0.7);
   border: 1px solid var(--tbl-tooltip-rule);
-  /* WRAPS, and max-width below is the width it wraps AT. nowrap here contradicted that cap: the
-     box stopped at 320px and the un-wrappable line ran out THROUGH the border, so a row whose
-     label is longer than the card can be lost its value off the right edge -- measured on a
-     scatter whose rows fall back to the axis titles, where 2.59 was painted outside the card and
-     clipped (#41). The label-to-value separator is a non-breaking space for the other half of
-     this: see LABEL_VALUE_GAP in crosshair.ts, without which the value drops onto its own line.
+  /* The card WRAPS its rows, and max-width below is the width it wraps AT. These two declarations
+     are one fix and neither works alone (#41).
+
+     white-space was nowrap, which contradicted the cap: the box stopped at 320px while the line
+     did not, so it ran out through the right border and the row's value was painted outside the
+     card and clipped. A scatter card falling back to its axis titles lost the 2.59 it existed to
+     report.
+
+     overflow-wrap covers the case white-space alone does not. Normal wrapping only breaks at an
+     existing space or hyphen, so ONE long unbroken label -- a bare identifier, a URL, an
+     unhyphenated compound -- offers no break opportunity and clips exactly as before. anywhere,
+     not break-word: only anywhere lets those mid-word opportunities count toward min-content, so
+     the card is sized from the width it can actually wrap to. The table cells further down
+     (td.is-text, td.is-wrap, th.tbl-table-stub.is-wrap) deliberately use break-word instead --
+     they are sized by table layout against column_width/stub_min_width, where shrinking
+     min-content to one character is the wrong answer. Do not harmonise the two.
+
+     The label-to-value separator is the other half of this: a non-breaking space, so a wrap never
+     strands the number on a line without its label. See LABEL_VALUE_GAP in crosshair.ts.
+
      No backticks in this comment: the whole stylesheet is one template literal. */
   white-space: normal;
+  overflow-wrap: anywhere;
   z-index: 9999;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
   -webkit-backdrop-filter: blur(20px) saturate(160%);

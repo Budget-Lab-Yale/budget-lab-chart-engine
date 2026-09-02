@@ -51,8 +51,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   reader hovers for — was painted outside the card and cut off. Reported on a `scatter` whose card
   rows fall back to the axis titles (`tooltip_x_label` / `tooltip_y_label` absent), but it hit any
   card with a long series name, category name or overlay label. The card now wraps at the same
-  320px, and every row's value is joined to its label by a non-breaking space so a wrap can never
-  leave the number alone on a line. Pre-existing since the card was introduced. Hover-only: the
+  320px — a label with no space or hyphen to break at is broken mid-word rather than left to run
+  out through the border — and every row's value is joined to its label by a non-breaking space
+  so a wrap can never leave the number alone on a line. Pre-existing since the card was introduced. Hover-only: the
   card is live-DOM CSS and a PNG export has no card, so no exported or published image changes.
   (#41)
 - **A faceted stacked bar in tooltip mode keeps its cross-pane band echo.** A stack whose hover is
