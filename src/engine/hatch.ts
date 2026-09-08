@@ -80,11 +80,19 @@ export const HATCH_GLYPH_BAND = 6;
 export const HATCH_GLYPH_BAND_CROSSED = 4;
 
 /** One band of a glyph. A rect for the axis-aligned characters, which must land on integer
- *  coordinates to stay crisp; a line for the diagonals, which cannot be crisp anyway and are
- *  clipped to the box by its viewport. */
+ *  coordinates to stay crisp; a POLYGON for the diagonals, already trimmed to the box.
+ *
+ *  The diagonals were a stroked `line`, relying on the glyph's `<svg>` viewport to clip the ends
+ *  and flanks that a 6px-wide stripe throws outside a 14px box. That held for the live legend and
+ *  broke in the PNG export, where `iconSvgGroup` (engine/icon.ts) moves the shapes out of that
+ *  `<svg>` into a bare `<g>` — and a `<g>` does not clip. The `/` key rendered as a tilted
+ *  parallelogram spilling across the legend row. Carrying the trimmed geometry instead makes the
+ *  shape correct in ANY container, which is the same reasoning `hatchPattern` records below for
+ *  using a band rect rather than a stroked line inside a `<pattern>` tile. The polygon is the exact
+ *  intersection of the stroke with the box, so what the live legend draws is unchanged. */
 export type HatchGlyphShape =
   | { kind: "rect"; x: number; y: number; width: number; height: number }
-  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number };
+  | { kind: "polygon"; points: Array<[number, number]> };
 
 /** The bands making up a character's glyph, in a HATCH_GLYPH_BOX-square box. Every band passes
  *  through the centre — that is what "one centred instance" means, and it is what the reader's eye
@@ -97,11 +105,20 @@ export function hatchGlyphShapes(char: HatchChar): HatchGlyphShape[] {
     ({ kind: "rect", x: inset(band), y: 0, width: band, height: box });
   const horizontal = (band: number): HatchGlyphShape =>
     ({ kind: "rect", x: 0, y: inset(band), width: box, height: band });
+  // A `band`-wide stripe at 45 degrees meets each axis `band / sqrt(2)` from where its centre line
+  // does, so its edges are the lines `x + y = box -/+ e` (ascending) or `y - x = -/+ e`
+  // (descending). Intersected with the box each gives a hexagon: the two corners the stripe passes
+  // through, plus where its edges cross the sides. Butt caps fall exactly on those corners, so this
+  // is the stroke's own outline trimmed to the box, not an approximation of it.
   /** Ascending left-to-right: SVG y grows downward, so it starts at the BOTTOM-left. */
-  const ascending = (band: number): HatchGlyphShape =>
-    ({ kind: "line", x1: 0, y1: box, x2: box, y2: 0, width: band });
-  const descending = (band: number): HatchGlyphShape =>
-    ({ kind: "line", x1: 0, y1: 0, x2: box, y2: box, width: band });
+  const ascending = (band: number): HatchGlyphShape => {
+    const e = band * Math.SQRT1_2;
+    return { kind: "polygon", points: [[0, box - e], [box - e, 0], [box, 0], [box, e], [e, box], [0, box]] };
+  };
+  const descending = (band: number): HatchGlyphShape => {
+    const e = band * Math.SQRT1_2;
+    return { kind: "polygon", points: [[0, 0], [e, 0], [box, box - e], [box, box], [box - e, box], [0, e]] };
+  };
 
   const wide = HATCH_GLYPH_BAND;
   const thin = HATCH_GLYPH_BAND_CROSSED;

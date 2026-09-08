@@ -26,7 +26,7 @@ import {
   type IconSpec,
 } from "../src/engine/icon";
 import { swatchWidthFor, SWATCH_OUTLINE, MARK_POINT_R } from "../src/engine/theme";
-import { resolveHatch, HATCH_GLYPH_BOX } from "../src/engine/hatch";
+import { resolveHatch, HATCH_GLYPH_BOX, HATCH_CHARS } from "../src/engine/hatch";
 import { tokens } from "../src/theme/tokens";
 
 const COLOR = "#0072B2";
@@ -104,10 +104,12 @@ describe("one box for every shape", () => {
 describe("one geometry, two emitters", () => {
   /** Geometry only — colours and radii included, hosting attributes excluded. */
   const geometryOf = (svg: Element) =>
-    [...svg.querySelectorAll("rect, line, circle, path")].map((el) =>
+    [...svg.querySelectorAll("rect, line, circle, path, polygon")].map((el) =>
       [
         el.tagName.toLowerCase(),
-        ...["x", "y", "width", "height", "rx", "x1", "y1", "x2", "y2", "cx", "cy", "r", "d", "transform", "stroke-width", "stroke-dasharray", "style"].map(
+        // `points` is listed because the diagonal hatch bands are polygons: without it this
+        // comparison would match two shapes that differ in the only attribute they carry.
+        ...["x", "y", "width", "height", "rx", "x1", "y1", "x2", "y2", "cx", "cy", "r", "d", "points", "transform", "stroke-width", "stroke-dasharray", "style"].map(
           (a) => `${a}=${el.getAttribute(a) ?? ""}`,
         ),
       ].join("|"),
@@ -118,6 +120,41 @@ describe("one geometry, two emitters", () => {
       const fromMarkup = new DOMParser().parseFromString(iconSvgMarkup(icon), "text/html").querySelector("svg")!;
       const fromDom = iconSvgGroup(document, icon)!;
       expect(geometryOf(fromMarkup), `${name}`).toEqual(geometryOf(fromDom));
+    }
+  });
+
+  it("keeps every exported hatch key inside the box WITHOUT relying on a clipping viewport", () => {
+    // The defect, found downstream in a real PNG (interactives-staging, taxes-at-the-top, engine
+    // 1.12.0): a `series_patterns: '/'` key rendered in the download as a tilted parallelogram
+    // spilling past its swatch and past the legend row, beside three clean squares. On screen it
+    // was correct. `iconSvgGroup` builds the clipping `<svg>` and then moves the shapes OUT of it
+    // into a bare `<g>` — and a `<g>` does not clip — while the diagonal bands were stroked lines
+    // drawn corner to corner at 6px wide, which overflow a 14px box at both ends and both flanks.
+    // So the geometry must be inside the box on its own, with no viewport to save it.
+    for (const char of HATCH_CHARS) {
+      const icon: IconSpec = { shape: "rect", color: "#58A3E7", hatch: resolveHatch(char, "#58A3E7") };
+      const g = iconSvgGroup(document, icon)!;
+      expect(g.tagName.toLowerCase(), `${char}: still unwrapped into a <g>`).toBe("g");
+      // Nothing stroked: a stroke straddles its geometry and would reach outside even if the path
+      // itself fitted. The axis-aligned bands are rects, the diagonals filled polygons.
+      expect(g.querySelectorAll("line").length, `${char}: a stroked band cannot be clipped here`).toBe(0);
+      const coords: number[] = [];
+      for (const el of g.querySelectorAll("polygon")) {
+        for (const pair of (el.getAttribute("points") ?? "").trim().split(/\s+/)) {
+          const [x, y] = pair.split(",").map(Number);
+          coords.push(x!, y!);
+        }
+      }
+      for (const el of g.querySelectorAll("rect")) {
+        const x = Number(el.getAttribute("x"));
+        const y = Number(el.getAttribute("y"));
+        coords.push(x, y, x + Number(el.getAttribute("width")), y + Number(el.getAttribute("height")));
+      }
+      expect(coords.length, `${char}: no geometry found to check`).toBeGreaterThan(0);
+      for (const v of coords) {
+        expect(v, `${char}: geometry at ${v} escapes the ${ICON_BOX}px box`).toBeGreaterThanOrEqual(0);
+        expect(v, `${char}: geometry at ${v} escapes the ${ICON_BOX}px box`).toBeLessThanOrEqual(ICON_BOX);
+      }
     }
   });
 
@@ -277,7 +314,8 @@ describe("each shape draws what it says", () => {
     expect(shapes).toHaveLength(3);
     expect(shapes[0]!.kind === "rect" && shapes[0]!.fill).toBe("#58A3E7");
     for (const s of shapes.slice(1)) {
-      expect(s.kind === "line" ? s.stroke : s.kind === "rect" ? s.fill : "").toBe(hatch.stroke);
+      // A diagonal band is a filled polygon now, an axis-aligned one still a rect; neither is stroked.
+      expect(s.kind === "line" ? s.stroke : s.kind === "rect" || s.kind === "polygon" ? s.fill : "").toBe(hatch.stroke);
     }
   });
 

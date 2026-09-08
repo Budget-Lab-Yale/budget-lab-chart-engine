@@ -56,7 +56,7 @@ describe("the legend swatch", () => {
     const parent = document.createElement("div");
     renderLegend(parent, items);
     const svg = parent.querySelector('[data-series="lostToBehavior"] .tbl-legend-swatch svg')!;
-    const shapes = [...svg.querySelectorAll("rect, line")];
+    const shapes = [...svg.querySelectorAll("rect, line, polygon")];
     expect(shapes[0]!.getAttribute("style")).toContain(GROUND);
     expect(shapes[1]!.getAttribute("style")).toContain(defaultHatchStroke(GROUND));
   });

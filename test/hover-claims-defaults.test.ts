@@ -466,9 +466,11 @@ describe("series_patterns and \"the hover tooltip\"", () => {
     hoverFirstMark(m.svgs[0]!, BAR_MARK);
     expect(cardShown()).toBe(true);
     // The textured row is a ground rect PLUS the hatch band; the untextured one is a bare rect.
+    // A diagonal band is a filled polygon (it carries geometry already trimmed to the box, so it
+    // needs no clipping viewport — see hatch.ts), never a stroked line.
     const paneUp = swatch("Up");
-    expect(paneUp).toContain("<line");
-    expect(swatch("Down")).not.toContain("<line");
+    expect(paneUp).toContain("<polygon");
+    expect(swatch("Down")).not.toContain("<polygon");
 
     // Same spec standalone: the card is the same singleton element, so read the pane's markup
     // first (above) and compare after the second mount replaces its contents.

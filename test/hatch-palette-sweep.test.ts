@@ -112,7 +112,7 @@ describe(`every character over every palette colour (${MATRIX.length} combinatio
       expect(glyph, `${char} over ${name}: no glyph in the key`).not.toBeNull();
       expect(glyph.getAttribute("viewBox")).toBe(`0 0 ${HATCH_GLYPH_BOX} ${HATCH_GLYPH_BOX}`);
 
-      const [ground, ...bands] = [...glyph.querySelectorAll("rect, line")];
+      const [ground, ...bands] = [...glyph.querySelectorAll("rect, line, polygon")];
       expect(ground!.getAttribute("style"), `${char} over ${name} glyph ground`).toContain(hex);
       expect(bands).toHaveLength(hatchGlyphShapes(char).length);
       for (const b of bands) {

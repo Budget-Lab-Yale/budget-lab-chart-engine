@@ -199,7 +199,8 @@ export type IconPrimitive =
   | { kind: "rect"; x: number; y: number; width: number; height: number; rx?: number; fill: string; stroke?: string; strokeWidth?: number }
   | { kind: "line"; x1: number; y1: number; x2: number; y2: number; stroke: string; strokeWidth: number; dasharray?: string }
   | { kind: "circle"; cx: number; cy: number; r: number; fill: string; stroke?: string; strokeWidth?: number }
-  | { kind: "path"; d: string; transform: string; fill: string; stroke?: string; strokeWidth?: number };
+  | { kind: "path"; d: string; transform: string; fill: string; stroke?: string; strokeWidth?: number }
+  | { kind: "polygon"; points: Array<[number, number]>; fill: string };
 
 /** The width an icon occupies. `ICON_BOX`, except a banded chip, which needs one band per colour. */
 export function iconWidth(icon: IconSpec): number {
@@ -322,7 +323,9 @@ export function iconShapes(icon: IconSpec): IconPrimitive[] {
       const bands = hatchGlyphShapes(char).map((s): IconPrimitive =>
         s.kind === "rect"
           ? { kind: "rect", x: s.x, y: s.y, width: s.width, height: s.height, fill: stroke }
-          : { kind: "line", x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, stroke, strokeWidth: s.width },
+          // A diagonal arrives pre-trimmed to the box (hatch.ts), so it needs no clipping viewport
+          // and is therefore safe in `iconSvgGroup`'s bare `<g>` as well as in a nested `<svg>`.
+          : { kind: "polygon", points: s.points, fill: stroke },
       );
       return [{ ...ground, fill: icon.hatch.ground }, ...bands];
     }
@@ -392,6 +395,11 @@ function attrsOf(s: IconPrimitive): Array<[string, string]> {
         ["transform", s.transform],
         ...(s.strokeWidth != null ? ([["stroke-width", String(s.strokeWidth)]] as Array<[string, string]>) : []),
         ["style", style(s.fill, s.stroke)],
+      ];
+    case "polygon":
+      return [
+        ["points", s.points.map(([x, y]) => `${x},${y}`).join(" ")],
+        ["style", style(s.fill)],
       ];
   }
 }

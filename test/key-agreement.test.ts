@@ -42,7 +42,7 @@ const fingerprint = (icon: IconSpec) =>
 
 /** The same, read back out of rendered SVG — so it compares what was DRAWN, not what was intended. */
 function drawnFingerprint(svg: Element): string {
-  return [...svg.querySelectorAll("rect, line, circle, path")]
+  return [...svg.querySelectorAll("rect, line, circle, path, polygon")]
     .map((el) => {
       const style = el.getAttribute("style") ?? "";
       const fill = /fill:\s*([^;]+)/.exec(style)?.[1];
@@ -476,7 +476,7 @@ describe("a chart with NO legend still keys its tooltip", () => {
     expect(ground.getAttribute("style")).toContain("fill:#58A3E7");
 
     // TEXTURE: the glyph's bands, in the band colour derived from that ground.
-    const bands = [...key!.querySelectorAll("rect, line, path")].slice(1);
+    const bands = [...key!.querySelectorAll("rect, line, path, polygon")].slice(1);
     expect(bands.length).toBeGreaterThan(0);
     expect(bands.map((b) => b.getAttribute("style")).join(" ")).toContain(defaultHatchStroke("#58A3E7"));
 

@@ -21,9 +21,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   nothing) still keys. (#37)
 - Row tokens in a point callout's `label`: `{point_label}`, `{x}` and `{series}` fill from the
   callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
-  rounded to at most two decimals and never grouped on a numeric axis (`2.593569308310415` reads
-  `2.59`, `2000` reads `2000`, a year reads `2021`) — ungrouped like the numeric axis ticks, and
-  identical to the scatter hover card's x row, so a callout and a scatter card never disagree;
+  rounded to at most two decimals and grouped on a numeric axis (`2.593569308310415` reads `2.59`,
+  `1234567.891` reads `1,234,567.89`) — grouped as the numeric axis ticks are, and identical to both
+  the scatter hover card's x row and the crosshair header, so nothing on the chart disagrees;
   `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a categorical one; `{series}`
   honours `series_labels`. `{value}` is unchanged. All four are substituted in one pass, so a
   data cell that happens to contain `{value}` is text, not a token. A token that cannot be
@@ -78,6 +78,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   to a small dot and an auto-placed one now draws nothing. (#42)
 
 ### Fixed
+- **A diagonal texture's legend key no longer overflows its swatch in the PNG export.** Found
+  downstream in a real download (`interactives-staging`, taxes-at-the-top distribution card, engine
+  1.12.0 as vendored): a `series_patterns: '/'` key rasterised as a tilted parallelogram spilling
+  past its swatch box and past the legend row, beside three clean square swatches, while the same
+  key was correct on screen. `iconSvgGroup` (`src/engine/icon.ts`) builds the glyph's clipping
+  `<svg>` viewport and then moves the shapes OUT of it into a bare `<g>` for the export to
+  position — and a `<g>` does not clip. The diagonals were stroked lines drawn corner to corner at
+  6px wide, which overflow a 14px box at both ends and along both flanks, and `hatch.ts` said so
+  outright: they "are clipped to the box by its viewport". Only `/`, `\` and `x` were affected; the
+  axis-aligned `|`, `-`, `+` are rects sized exactly to the box. The diagonal band is now a polygon
+  carrying the trimmed geometry — the exact intersection of that stroke with the box, so the live
+  legend is unchanged — which is correct in any container and needs no viewport. This follows the
+  precedent `hatchPattern` already records for using a band rect rather than a stroked line inside a
+  `<pattern>` tile. It also closes the gap that hid it: the diagonals were the one shape
+  `test/icon-fits-box.test.ts` filtered out of its clipping check, and the line test it left them to
+  asserted only that endpoints were inside the box, on the assumption that a line "may be TRIMMED at
+  the frame". As polygons they are measured with every other shape, and a new test asserts the
+  exported group carries no stroked band and no geometry outside the box.
+- **A bare `YYYY` cell on a temporal axis landed a year early in any negative-offset zone.**
+  `parseDate` (`src/spec/parse-time.ts`) special-cased `YYYY-MM-DD` to local midnight and fell
+  through to `new Date(s)` for everything else, which reads a bare year as an ISO year anchored at
+  **UTC** midnight. The engine then formats in local time, so `new Date("1952")` is 31 December
+  1951 at 19:00 in ET and `getFullYear()` returns 1951: every point, every tick label and the axis
+  domain itself slid back one year, silently and consistently enough to look right. A bare year is
+  the natural spelling for an annual series, and this is what makes `xAxisType: temporal` its
+  correct home — see the numeric-grouping note under Upgrading. The fix is the same local-midnight
+  construction the `YYYY-MM-DD` branch already used, so both spellings now agree to the millisecond
+  and a column mixing them no longer splits. Covered by a test that moves the process timezone; the
+  suite pins `TZ=UTC`, where the two parses agree and the bug is invisible. A low four-digit year is
+  handled explicitly too: the multi-argument `Date` constructor maps years 0-99 into 1900-1999, so
+  `"0050"` would otherwise have come back as 1950. That correction is applied in **one** helper
+  shared by all three parsers, because the `YYYY-MM-DD` and `YYYYQ#` branches had the same defect
+  already — fixing only the bare year would have put `"0050"` and `"0050-06-15"` 1900 years apart.
+  **`validateChartData` now accepts a bare `YYYY` as a temporal cell**, which it did not: it
+  required `YYYY-MM-DD` and rejected every row with `expected YYYY-MM-DD, got "1952"`. Parsing the
+  cell correctly was useless while validation refused it — the recommended annual-series migration
+  could not have passed the publish path. The error now names both accepted forms.
 - **The hover card wraps a row label longer than the card instead of clipping it.** `.tbl-tooltip`
   set `white-space: nowrap` *and* `max-width: 320px`, which contradict: the box stopped at 320px and
   the un-wrappable line ran out through the right border, so the row's value — the one thing a
@@ -181,11 +218,28 @@ A repin re-renders every published figure at once — here is what a maintainer 
   published) and whose four pinned callouts will change appearance on the next render — expected. No
   golden fixture carries a `connector` either (`grep -l connector test/fixtures/*.yaml` is empty), so
   this change is invisible to the golden suite and rests on the tests in the engine. (#42)
-- **The scatter hover card's x row loses its thousands separator**: it read `2,000` and now reads
-  `2000`, because the card and the new `{x}` callout token share one formatter and a numeric x is
-  most often a year or an index, which the axis ticks have always printed ungrouped. Rounding to two
-  decimals is unchanged. Hover-only — no rendered SVG or PNG changes for a chart without an `{x}`
-  callout. (#37)
+- **Every numeric x axis gains a thousands separator, and its crosshair header now rounds.** One
+  grouping rule (`formatNumericX` / `formatNumericTick`, `src/engine/util.ts`) now serves the axis
+  tick labels, the crosshair header, the scatter hover card's x row and the `{x}` callout token, so
+  a tick and a hover reading can no longer disagree. Two changes fall out of it: a numeric tick over
+  999 reads `1,234,567` where it read `1234567`, which is a **rendered SVG and PNG** change; and the
+  numeric crosshair header rounds to two decimals, where it printed the raw value
+  (`x=2.285011857607663` now reads `2.29`), which is hover-only.
+  **Two published figures move, and both must be migrated in the same repin.** Reading all eight
+  archive specs that use `xAxisType: numeric`, six have no |x| over 911 and are untouched
+  (`ces-qcew-benchmark-revisions/final-v-prelim` and `/regressions` at 911,
+  `ai-fiscal/revenue-vs-factor-income` at 633, `ai-fiscal/revenue-vs-pretax-income` at 547,
+  `deficit-management-scorecard/deviation-distribution` at 1.96 and `/scorecard-scatter` at 3.29).
+  The other two are annual series on a numeric axis — `ai-fiscal/gdp-growth-history` (1952-2036) and
+  `ai-fiscal/labor-share-history` (1947-2026) — whose tick labels would read `1,950 1,960 …`.
+  **Change both to `xAxisType: temporal`**, which needs no data edit: a bare `YYYY` cell now parses
+  as that year's 1 January and validates (below), and `tblTemporalXAxis` renders a year-cadence span
+  as bare `%Y` labels — the same `1950 1960 …` decades those two charts show today. Their axis
+  *markup* and bottom margin still change, because a temporal axis is drawn by text marks rather
+  than `tblXAxis`; their labels do not. Grouping is right for a measured quantity and wrong for a
+  year, and the fix is the axis type rather than a magnitude carve-out in the formatter. No golden
+  fixture uses a numeric x at all (`xAxisType` in `test/fixtures` is only `categorical` and
+  `temporal`), so the golden suite is silent on this and it rests on the engine's own tests. (#37, #42)
 - **Every published histogram and faceted scatter gains 8px between its x-axis title and its tick
   labels.** Screen only; the PNG export is unchanged. (#34)
 - **A faceted stacked bar whose hover is the card now also shades the hovered category on its

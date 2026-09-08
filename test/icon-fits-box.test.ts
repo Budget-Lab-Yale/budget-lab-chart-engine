@@ -100,6 +100,12 @@ function primMarkup(s: IconPrimitive): string {
       return `<path d="${s.d}" transform="${s.transform}" stroke-width="${s.strokeWidth ?? 0}"/>`;
     case "line":
       return `<line x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke-width="${s.strokeWidth}"/>`;
+    case "polygon":
+      // The diagonal hatch bands. They used to be `line`s, which the closed-shape test below
+      // FILTERS OUT — so the one shape that overflowed its box in the PNG export was the one shape
+      // excluded from the check that would have caught it. As pre-trimmed polygons they are now
+      // measured with everything else.
+      return `<polygon points="${s.points.map(([x, y]) => `${x},${y}`).join(" ")}" stroke-width="0"/>`;
   }
 }
 
