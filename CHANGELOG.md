@@ -78,6 +78,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   to a small dot and an auto-placed one now draws nothing. (#42)
 
 ### Fixed
+- **A multi-line point callout is clamped to the frame by its whole height, not by one row.** The
+  clamp bounds were computed once, from half of a single row, and applied to every label — so a
+  callout wrapped by `maxWidth` or broken by an explicit `\n` (both new in this release) had its
+  centre pulled to 6.5px inside the frame while its half-height was 13px or more, leaving the rest
+  hanging outside. `placePointCallouts` now takes the frame edges and insets each label by its own
+  half-height. The pass that pins an overrunning label also picks the label that most overruns **its
+  own** limit rather than the lowest one in the column, since with per-box limits a tall label can
+  be outside the frame while a shorter one below it is still inside. A one-row callout clamps
+  exactly where it did before, so no single-line figure moves. Found by review. (#42)
 - **A diagonal texture's legend key no longer overflows its swatch in the PNG export.** Found
   downstream in a real download (`interactives-staging`, taxes-at-the-top distribution card, engine
   1.12.0 as vendored): a `series_patterns: '/'` key rasterised as a tilted parallelogram spilling

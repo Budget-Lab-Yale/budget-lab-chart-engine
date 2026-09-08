@@ -63,9 +63,14 @@ function clearBy(from: number, need: number, dir: 1 | -1): number {
 export interface PlacementOpts {
   /** Horizontal slack: two boxes this close count as sharing a column (assemble-plot's LABEL_GAP). */
   gap: number;
-  /** Range for the centres of MOVED labels — the plot's inner height, inset half a row. */
-  lo: number;
-  hi: number;
+  /** The plot frame's top and bottom edge in px. A moved label is held inside them by its OWN
+   *  half-height, so the guarantee is that the BOX stays in the frame rather than its centre. These
+   *  used to be pre-inset centre bounds, computed once from half of ONE row: a label wrapped by
+   *  `maxWidth`, or broken by an explicit line break, is taller than that, so its centre was
+   *  clamped 6.5px from the edge while its half-height was 13px or more, and it hung outside the
+   *  frame by half of every extra row — contradicting the clamp CONFIG-SPEC promises. */
+  top: number;
+  bottom: number;
 }
 
 /**
@@ -101,6 +106,10 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
   const collide = (i: number, j: number): boolean =>
     near(boxes[i]!, boxes[j]!) && Math.abs(ys[i]! - ys[j]!) < clearance(boxes[i]!, boxes[j]!);
   const fixed = boxes.map((_, i) => i).filter((i) => boxes[i]!.fixed);
+  // Per-box centre limits: a taller label owes the frame more room. Equal for every one-row box, so
+  // a chart of single-line callouts clamps exactly where it did before these became box-specific.
+  const loOf = (b: CalloutBox): number => o.top + b.h / 2;
+  const hiOf = (b: CalloutBox): number => o.bottom - b.h / 2;
   const disks = boxes.map((b) => b.disk).filter((d): d is CalloutDisk => d != null);
 
   // Columns: union-find over the movable boxes on horizontal nearness alone (A near B, B near C
@@ -173,20 +182,29 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
       return moved;
     };
     if (!sweep(1)) continue;
-    const extreme = (dir: 1 | -1): number | null => {
+    // The involved movable box that most overruns its OWN limit in `dir`, or null if none does.
+    // Not simply the lowest/highest label: limits are per-box now, so a tall box can overrun while a
+    // shorter one below it is still inside the frame, and picking by position alone would stop at the
+    // shorter one and leave the tall one hanging out.
+    const worst = (dir: 1 | -1): number | null => {
       let best: number | null = null;
+      let bestOver = 0;
       for (const i of involved) {
         if (boxes[i]!.fixed) continue;
-        if (best == null || dir * (ys[i]! - ys[best]!) > 0) best = i;
+        const over = dir * (ys[i]! - (dir === 1 ? hiOf(boxes[i]!) : loOf(boxes[i]!)));
+        if (over > 0 && (best == null || over > bestOver)) {
+          best = i;
+          bestOver = over;
+        }
       }
       return best;
     };
     // Bottom overflow: pin the lowest involved label to `hi` and sweep up; each pin is permanent
     // (an upward sweep only raises labels), so at most one iteration per label.
     for (let g = 0; g < col.length; g++) {
-      const low = extreme(1);
-      if (low == null || ys[low]! <= o.hi) break;
-      ys[low] = o.hi;
+      const low = worst(1);
+      if (low == null) break;
+      ys[low] = hiOf(boxes[low]!);
       sweep(-1);
     }
     // Top overflow: the top wins — pin the highest involved label to `lo` and sweep down, letting a
@@ -194,9 +212,9 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
     // which the bottom-overflow pass above may already have shuffled relative to spec order, so once
     // a column overflows the frame no input-order guarantee survives — only "no collisions left".
     for (let g = 0; g < col.length; g++) {
-      const high = extreme(-1);
-      if (high == null || ys[high]! >= o.lo) break;
-      ys[high] = o.lo;
+      const high = worst(-1);
+      if (high == null) break;
+      ys[high] = loOf(boxes[high]!);
       sweep(1);
     }
   }

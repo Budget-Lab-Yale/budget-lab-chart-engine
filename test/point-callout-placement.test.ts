@@ -14,7 +14,13 @@ import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
 const ROW_H = 13;
-const OPTS = { gap: 6, lo: 30, hi: 330 };
+// `top`/`bottom` are the FRAME edges; placePointCallouts insets each label by its own half-height.
+// They are written as the values that give a ONE-ROW box the centre range [30, 330] every
+// expectation below is stated against, so a taller box gets a correspondingly tighter range.
+const OPTS = { gap: 6, top: 30 - ROW_H / 2, bottom: 330 + ROW_H / 2 };
+/** The centre limits a single-row box gets — what `LO`/`HI` used to mean. */
+const LO = OPTS.top + ROW_H / 2;
+const HI = OPTS.bottom - ROW_H / 2;
 const box = (x0: number, y: number, w = 40, fixed = false, h = 13): CalloutBox => ({ x0, x1: x0 + w, y, h, fixed });
 
 describe("placePointCallouts (pure helper)", () => {
@@ -41,7 +47,7 @@ describe("placePointCallouts (pure helper)", () => {
   });
 
   it("a lone label near the frame edge is not clamped — nothing collided, so nothing moves", () => {
-    const a = box(100, OPTS.lo - 10);
+    const a = box(100, LO - 10);
     expect(placePointCallouts([a], OPTS)).toEqual([a.y]);
     expect(placePointCallouts([a, box(400, 200)], OPTS)).toEqual([a.y, 200]);
   });
@@ -74,7 +80,7 @@ describe("placePointCallouts (pure helper)", () => {
     const sorted = [...ys].sort((p, q) => p - q);
     expect(sorted[1]! - sorted[0]!).toBeGreaterThanOrEqual(ROW_H);
     expect(sorted[2]! - sorted[1]!).toBeGreaterThanOrEqual(ROW_H);
-    expect(Math.max(...ys)).toBeLessThanOrEqual(OPTS.hi);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(HI);
   });
 
   it("a movable between two fixed labels ends clear of BOTH, not bounced from one onto the other", () => {
@@ -99,10 +105,10 @@ describe("placePointCallouts (pure helper)", () => {
   });
 
   it("a movable on a fixed label at the frame top moves below it, into the frame", () => {
-    const fixedAtTop = box(100, OPTS.lo, 40, true);
-    const ys = placePointCallouts([fixedAtTop, box(100, OPTS.lo)], OPTS);
-    expect(ys[0]).toBe(OPTS.lo);
-    expect(ys[1]).toBe(OPTS.lo + ROW_H);
+    const fixedAtTop = box(100, LO, 40, true);
+    const ys = placePointCallouts([fixedAtTop, box(100, LO)], OPTS);
+    expect(ys[0]).toBe(LO);
+    expect(ys[1]).toBe(LO + ROW_H);
   });
 
   it("clearing a fixed label never drops a movable onto another movable (fixed boxes are sweep obstacles)", () => {
@@ -126,17 +132,39 @@ describe("placePointCallouts (pure helper)", () => {
       box(45, 50), box(90, 100), box(135, 150), box(180, 200), box(200, 325),
     ];
     const ys = placePointCallouts(boxes, OPTS);
-    expect(Math.max(...ys)).toBeLessThanOrEqual(OPTS.hi);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(HI);
     for (const k of [4, 5, 6, 7, 8]) expect(ys[k]).toBe(boxes[k]!.y);
     const stack = [ys[0]!, ys[1]!, ys[2]!, ys[3]!].sort((p, q) => p - q);
     for (let k = 1; k < 4; k++) expect(stack[k]! - stack[k - 1]!).toBeGreaterThanOrEqual(ROW_H - 1e-9);
   });
 
+  it("clamps a MULTI-LINE label by its own height, not by half of one row", () => {
+    // The clamp reserved half of ONE row for every box, so a two-line label (from `maxWidth`
+    // wrapping or an explicit line break, both new in 1.14.0) had its CENTRE pulled to 6.5px
+    // inside the frame while its half-height was 13px — leaving 6.5px of it outside, against a
+    // documented guarantee that a pushed label is clamped to the frame.
+    const tall = (x0: number, y: number) => box(x0, y, 40, false, 2 * ROW_H);
+    const ys = placePointCallouts([tall(100, HI + 4), tall(100, HI + 20)], OPTS);
+    for (const [k, y] of ys.entries()) {
+      const half = 2 * ROW_H / 2;
+      expect(y + half, `box ${k} bottom escapes the frame`).toBeLessThanOrEqual(OPTS.bottom + 1e-9);
+    }
+    // And the mirror at the top edge.
+    const up = placePointCallouts([tall(100, LO - 20), tall(100, LO - 4)], OPTS);
+    for (const [k, y] of up.entries()) {
+      expect(y - ROW_H, `box ${k} top escapes the frame`).toBeGreaterThanOrEqual(OPTS.top - 1e-9);
+    }
+    // Non-vacuity: a one-row box in the same position still clamps to the OLD limit exactly, so
+    // this fix moved nothing for single-line callouts.
+    const short = placePointCallouts([box(100, HI - 2), box(100, HI + 1)], OPTS);
+    expect(Math.max(...short)).toBe(HI);
+  });
+
   it("a colliding group is clamped into [lo, hi]", () => {
-    const ys = placePointCallouts([box(100, OPTS.hi - 2), box(100, OPTS.hi + 1)], OPTS);
-    expect(Math.max(...ys)).toBeLessThanOrEqual(OPTS.hi);
-    const top = placePointCallouts([box(100, OPTS.lo - 5), box(100, OPTS.lo - 1)], OPTS);
-    expect(Math.min(...top)).toBeGreaterThanOrEqual(OPTS.lo);
+    const ys = placePointCallouts([box(100, HI - 2), box(100, HI + 1)], OPTS);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(HI);
+    const top = placePointCallouts([box(100, LO - 5), box(100, LO - 1)], OPTS);
+    expect(Math.min(...top)).toBeGreaterThanOrEqual(LO);
   });
 
   it("collision is transitive: A–B and B–C form one group even when A and C are clear", () => {
@@ -150,7 +178,7 @@ describe("placePointCallouts (pure helper)", () => {
     const ys = placePointCallouts([209, 259, 242, 227, 209].map((y) => box(100, y)), OPTS);
     const sorted = [...ys].sort((p, q) => p - q);
     for (let k = 1; k < sorted.length; k++) expect(sorted[k]! - sorted[k - 1]!).toBeGreaterThanOrEqual(ROW_H - 1e-9);
-    expect(Math.max(...ys)).toBeLessThanOrEqual(OPTS.hi);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(HI);
   });
 
   it("labels that share a column but never overlap horizontally do not push each other", () => {
@@ -276,7 +304,7 @@ describe("placePointCallouts — seeded property check", () => {
       for (let i = 0; i < count; i++) {
         const x0 = Math.floor(next() * 300);
         const x1 = x0 + 30 + Math.floor(next() * 30);
-        const y = OPTS.lo - 20 + next() * (OPTS.hi - OPTS.lo + 40);
+        const y = LO - 20 + next() * (HI - LO + 40);
         const b: CalloutBox = { x0, x1, y, h: next() < 0.3 ? 26 : 13, fixed: next() < 0.25 };
         // Most boxes carry their point's marker disk, 12px below the label as the connector default
         // puts it; the rest have none, so both branches of the disk rule are exercised.

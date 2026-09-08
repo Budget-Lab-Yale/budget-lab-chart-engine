@@ -991,10 +991,14 @@ export function assemblePlot({
       boxIdx.push(i);
       boxPy.push(py);
     });
+    // The FRAME, not pre-inset centre bounds: placePointCallouts insets each label by its own
+    // half-height, so a `maxWidth`-wrapped or explicitly line-broken label is held in by its
+    // full height rather than by half of one row.
+    // A one-row box clamps exactly where it did before.
     const ys = placePointCallouts(boxes, {
       gap: LABEL_GAP,
-      lo: TBL_MARGIN_TOP + LABEL_ROW_H / 2,
-      hi: TBL_MARGIN_TOP + innerHForPx - LABEL_ROW_H / 2,
+      top: TBL_MARGIN_TOP,
+      bottom: TBL_MARGIN_TOP + innerHForPx,
     });
     ys.forEach((y, k) => {
       if (y !== boxes[k]!.y) autoDy.set(boxIdx[k]!, y - boxPy[k]!);
