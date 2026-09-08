@@ -837,7 +837,7 @@ function assemblePaneResult(
   // Row-token VALUES for point-callout labels, computed HERE (the rows and the x formatter are
   // here) and applied by assemblePlot in one pass together with `{value}`, whose y-tick fallback
   // formatter lives there. `{x}` on a numeric axis goes through `formatNumericX` (util.ts) — see
-  // its docstring for why ungrouped and why the explicit "en-US" locale. Temporal and quarterly x
+  // its docstring for the grouping rule and the explicit "en-US" locale. Temporal and quarterly x
   // still take the adapter's date format (`tooltip_x_format`) and a category still takes its
   // `x_labels` display name; neither is a number to round.
   // `{series}` reads the `series_labels` name, which may name the implicit single series too

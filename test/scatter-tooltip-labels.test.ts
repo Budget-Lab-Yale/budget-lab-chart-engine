@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { validateSpec } from "../src/spec/validate";
 import { buildExportSvg } from "../src/embed/export-png";
-import { formatNumericX } from "../src/engine/util";
+import { formatNumericX, formatNumericTick } from "../src/engine/util";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -166,15 +166,19 @@ describe("the scatter card's x value formatting", () => {
     return [...tip.querySelectorAll(".tbl-tooltip-row .tbl-tooltip-value")].map((el) => el.textContent ?? "");
   }
 
-  it("rounds to two decimals and does NOT group thousands, matching the axis ticks", () => {
-    // The card and the `{x}` callout token share `formatNumericX`. It groups nothing on purpose: a
-    // numeric x is most often a year or an index and the axis ticks are ungrouped for that reason,
-    // so a card reading `2,000` under a `2000` tick is the divergence, not the fix.
-    const rows = rowsOf([{ x: "2.593569308310415", y: "10" }, { x: "2000", y: "20" }, { x: "2021", y: "30" }]);
+  it("rounds to two decimals and groups thousands, matching the axis ticks", () => {
+    // The card, the crosshair header and the `{x}` callout token all share `formatNumericX`, and it
+    // shares its grouping rule with `formatNumericTick`. Grouping is ON: a separator is right for a
+    // measured quantity, and the years that once argued against it belong on a temporal axis now.
+    const rows = rowsOf([
+      { x: "2.593569308310415", y: "10" },
+      { x: "2000", y: "20" },
+      { x: "1234567.891", y: "30" },
+    ]);
     const svg = canvas(mount(SPEC, rows));
     expect(rowValues(svg, 0)[0]).toBe("2.59");
-    expect(rowValues(svg, 1)[0]).toBe("2000");
-    expect(rowValues(svg, 2)[0]).toBe("2021");
+    expect(rowValues(svg, 1)[0]).toBe("2,000");
+    expect(rowValues(svg, 2)[0]).toBe("1,234,567.89");
   });
 
   it("is locale-fixed: the same string on any host, because the token it shares is drawn into the SVG", () => {
@@ -182,8 +186,31 @@ describe("the scatter card's x value formatting", () => {
     // and the PNG export. Asserting the formatter directly is the only way to pin the locale
     // argument itself — a card assertion passes on an en-US test runner either way.
     expect(formatNumericX(2.593569308310415)).toBe("2.59");
-    expect(formatNumericX(2000)).toBe("2000");
-    expect(formatNumericX(-1234.5678)).toBe("-1234.57");
-    expect(formatNumericX(1e6)).toBe("1000000");
+    expect(formatNumericX(2000)).toBe("2,000");
+    expect(formatNumericX(-1234.5678)).toBe("-1,234.57");
+    expect(formatNumericX(1e6)).toBe("1,000,000");
+    // The tick formatter shares the grouping and keeps full precision, so a narrow domain's ticks
+    // do not collapse into a row of identical labels.
+    expect(formatNumericTick(1e6)).toBe("1,000,000");
+    expect(formatNumericTick(0.005)).toBe("0.005");
+    expect(formatNumericTick(2.593569308310415)).toBe("2.593569308310415");
+    expect(formatNumericX(0.005)).toBe("0.01");
+  });
+
+  it("never loses a tick value to the 20-decimal cap, and prints zero as zero", () => {
+    // Intl clamps maximumFractionDigits at 20, so a tick below 1e-20 formats as "0" and a whole
+    // narrow axis would print one label repeatedly — the duplicate-label failure the tick
+    // formatter's full precision exists to prevent. It falls back to the plain form instead.
+    expect(formatNumericTick(1e-21)).toBe("1e-21");
+    expect(formatNumericTick(2e-21)).toBe("2e-21");
+    expect(formatNumericTick(1e-21)).not.toBe(formatNumericTick(2e-21));
+    // At the cap it still round-trips, so the grouped form is kept.
+    expect(formatNumericTick(1e-20)).toBe("0.00000000000000000001");
+    // Negative zero: `Object.is(-0, 0)` is false and toLocaleString gives "-0", where the plain
+    // form these surfaces used to print gave "0". A domain crossing zero can produce one.
+    expect(formatNumericTick(-0)).toBe("0");
+    expect(formatNumericX(-0)).toBe("0");
+    expect(formatNumericTick(0)).toBe("0");
+    expect(formatNumericX(0)).toBe("0");
   });
 });

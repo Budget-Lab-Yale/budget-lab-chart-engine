@@ -140,7 +140,27 @@ describe("makeXAdapter tooltip x-format override", () => {
       { _xn: 2020 },
       { _xn: 2022 },
     ]);
-    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2021"))).toBe("2021");
+    // Grouped, because a numeric axis is not where a year belongs — `2,021` here is the signal to
+    // move an annual series to `xAxisType: temporal`, which parses and labels a bare `YYYY`.
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2021"))).toBe("2,021");
+  });
+});
+
+describe("makeXAdapter('numeric') hover formatting", () => {
+  const data = [{ _xn: 0 }, { _xn: 1234567.891 }];
+
+  it("rounds the crosshair header to two decimals, so all three hover surfaces agree", () => {
+    // The defect this closes: the header printed the adapter's raw `${+v}`, so a numeric-axis line
+    // chart put `x=2.285011857607663` in its card while the scatter card and the `{x}` callout
+    // token — both already on `formatNumericX` — read `2.29`.
+    const opts = makeXAdapter("numeric").buildXOpts(data);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2.285011857607663"))).toBe("2.29");
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1234567.891"))).toBe("1,234,567.89");
+  });
+
+  it("rounds and groups a histogram's bin-edge header the same way", () => {
+    const hist = makeXAdapter("numeric", undefined, [0, 2e6]).buildXOpts([{ _xn: 1 }]);
+    expect(hist.tooltipXFormat!(hist.tooltipXParse!("1234567.891"))).toBe("1,234,567.89");
   });
 });
 

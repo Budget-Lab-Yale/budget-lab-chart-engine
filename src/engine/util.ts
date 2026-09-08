@@ -29,26 +29,47 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
   return `${negative ? "-" : ""}${affixes.prefix}${magnitude}${affixes.suffix}`;
 }
 
-/** The one x formatter for a NUMERIC x: at most two decimals, NEVER grouped. Both the scatter hover
- *  card's x row (`scatterPointHoverOptions`, render-live.ts) and the `{x}` row token in a
- *  point-callout label (`xTokenFor`, index.ts) call this, so a callout and a scatter card never
- *  disagree about the number. Only the GROUPING is shared with the axis ticks: the numeric
- *  crosshair header is the adapter's unrounded `${+v}`, so a `{x}` callout on a numeric-axis LINE
- *  chart rounds where that chart's own card does not. Keep it one function: the token used to reuse
- *  the AXIS format instead (`${+v}`), which put `2025a: -0.` and `x=2.285011857607663` on the
- *  frame — a raw float is not a label. Temporal/quarterly x keeps `tooltip_x_format` and a
- *  category keeps its `x_labels` name; neither is a number to round.
+/** Grouping for EVERY numeric-x surface — the axis ticks, the crosshair header, the scatter hover
+ *  card's x row and the `{x}` row token in a point-callout label. A thousands separator is right for
+ *  a measured quantity (`1,234,567` beats `1234567`), and the reason it was once switched off has
+ *  gone away: years no longer arrive on a numeric axis. A bare `YYYY` now parses correctly on a
+ *  TEMPORAL axis (`parseDate`, spec/parse-time.ts — it used to slide back a year in any
+ *  negative-offset zone), and `tblTemporalXAxis` renders a year-cadence span as bare `%Y` labels,
+ *  so `xAxisType: temporal` is where an annual series belongs. Ungrouping every numeric x to keep
+ *  `2021` from reading `2,021` was a workaround for putting years in the wrong place.
  *
- *  Two things here are load-bearing, both found by review:
- *  - `useGrouping: false`, because a numeric x is most often a year or an index and the axis ticks
- *    are ungrouped for that reason (`x-adapter.ts`): a callout reading `2,021` under a tick reading
- *    `2021` is the defect, not the fix. Rounding the raw float was the whole reported problem.
- *  - the EXPLICIT `"en-US"` locale, because this string is drawn into the SVG and into the PNG
- *    export, and rendered output must not depend on the rendering machine. `toLocaleString()` with
- *    no locale yields `2,59` on a de-DE host. No other rendered text uses a locale formatter
- *    (`marks/stacked.ts` says so explicitly) and this one must not become the exception. */
+ *  The EXPLICIT `"en-US"` is load-bearing, found by review: these strings are drawn into the SVG and
+ *  into the PNG export, and rendered output must not depend on the rendering machine —
+ *  `toLocaleString()` with no locale yields `2,59` on a de-DE host. `marks/stacked.ts` states that
+ *  no-locale rule for the codebase; the two formatters below are its only sanctioned exceptions. */
+const NUMERIC_X_LOCALE = "en-US";
+
+/** The x formatter for the three numeric-x HOVER surfaces: the crosshair header, the scatter card's
+ *  x row, and the `{x}` row token. At most two decimals, grouped. All three call this, so nothing a
+ *  reader can hover disagrees about the number — the raw float that once put `2025a: -0.` and
+ *  `x=2.285011857607663` on the frame is rounded once, in one place. Temporal and quarterly x keep
+ *  `tooltip_x_format`, and a category keeps its `x_labels` name; neither is a number to round. */
 export function formatNumericX(v: number): string {
-  return v.toLocaleString("en-US", { maximumFractionDigits: 2, useGrouping: false });
+  // `Object.is(-0, 0)` is false and `(-0).toLocaleString()` is "-0", where the plain `${+v}` these
+  // surfaces used to print gave "0". A d3 domain that crosses zero can hand us a negative zero.
+  if (v === 0) return "0";
+  return v.toLocaleString(NUMERIC_X_LOCALE, { maximumFractionDigits: 2, useGrouping: true });
+}
+
+/** The x formatter for numeric AXIS TICK labels. The same grouping as the hover surfaces and
+ *  deliberately NOT the same rounding: d3 chooses the tick values, so they are already short and
+ *  exact, and clamping them to two decimals would print a repeated `0.00` across any axis whose
+ *  domain is narrower than about 0.05. So a tick and a hover reading always agree on grouping and
+ *  may differ in precision — the honest split, because a tick is a chosen round number while a
+ *  hover reading is whatever the data says. */
+export function formatNumericTick(v: number): string {
+  if (v === 0) return "0"; // as above, and it keeps a zero tick reading "0" rather than "-0"
+  const s = v.toLocaleString(NUMERIC_X_LOCALE, { maximumFractionDigits: 20, useGrouping: true });
+  // `maximumFractionDigits` is capped at 20 by Intl, so a tick below 1e-20 formats as "0" and a
+  // whole narrow-domain axis would print one label repeatedly — precisely the failure this
+  // formatter's full precision exists to avoid. Fall back to the plain form (what the axis printed
+  // before grouping) whenever formatting would not round-trip; grouping is meaningless down there.
+  return Number(s.replace(/,/g, "")) === v ? s : `${v}`;
 }
 
 /** Apply the `valueLabel` hook to one in-mark label's text. `rendered` is the engine's own

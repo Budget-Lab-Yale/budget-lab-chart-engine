@@ -816,6 +816,11 @@ export function validateSpec(spec: unknown): ValidationResult {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A bare year is a valid temporal cell: it is the natural spelling for an annual series, and
+ *  `parseDate` reads it as local 1 January. Without this, moving an annual chart from
+ *  `xAxisType: numeric` to `temporal` — which is what the engine now recommends, since a numeric
+ *  axis groups thousands and would print `1,950` — failed validation on every row. */
+const YEAR_RE = /^\d{4}$/;
 const QUARTER_RE = /^\d{4}Q[1-4]$/;
 
 /** Returns an error string if `value` doesn't parse under `xAxisType`, else null. */
@@ -826,7 +831,9 @@ function timeParseError(xAxisType: XAxisType, value: string): string | null {
       : `expected a number, got ${JSON.stringify(value)}`;
   }
   if (xAxisType === "temporal") {
-    if (!DATE_RE.test(value)) return `expected YYYY-MM-DD, got ${JSON.stringify(value)}`;
+    if (!DATE_RE.test(value) && !YEAR_RE.test(value)) {
+      return `expected YYYY-MM-DD or YYYY, got ${JSON.stringify(value)}`;
+    }
     return Number.isNaN(+new Date(value)) ? `invalid date ${JSON.stringify(value)}` : null;
   }
   if (xAxisType === "quarterly") {

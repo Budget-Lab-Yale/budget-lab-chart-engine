@@ -235,9 +235,13 @@ parse as a number). A `label` without the token is unaffected.
 **Row tokens (`points` only).** A callout `label` may also carry `{point_label}`, `{x}` and
 `{series}`, filled from the row the callout is keyed to (`point:`) or snapped to (`series` without
 `y`): `{point_label}` is that row's `columns.point_label` cell, `{x}` its x rounded to **at most two
-decimals and never grouped** on a numeric axis (`2.593569308310415` reads `2.59`, `2000` reads
-`2000`, a year reads `2021`) — ungrouped like the numeric axis ticks, and identical to the scatter
-hover card's x row, so a callout and a scatter card never disagree; the tooltip date format
+decimals, with a thousands separator** on a numeric axis (`2.593569308310415` reads `2.59`,
+`1234567.891` reads `1,234,567.89`) — grouped exactly as the numeric axis ticks are, and identical
+to both the scatter hover card's x row and the crosshair header, so nothing on the chart disagrees
+about the number. A numeric axis is no longer where a year belongs: give an annual series
+`xAxisType: temporal` with bare `YYYY` cells and its axis reads `1950 1960 …` (a numeric axis would
+print `2,021`). The tick labels keep full precision while these three round to two decimals, because
+a tick is a value d3 chose and a hover reading is whatever the data says; the tooltip date format
 (`tooltip_x_format`, default `%b %Y` on temporal, `YYYYQ#` on quarterly), the `x_labels` name of a
 category. `{series}` is that row's display name (`series_labels`, else the raw key). A plain `x` +
 `y` callout fills `{x}` from its own `x` and `{series}` from its own `series` when given. A token
@@ -1310,7 +1314,7 @@ the engine expects `time`, `series`, `value`.
 
 | role | content |
 |---|---|
-| x (`time`) | x-value. Must parse per `xAxisType`: integer for `numeric`, `YYYY-MM-DD` for `temporal`, `YYYYQ#` for `quarterly`, any string for `categorical`. |
+| x (`time`) | x-value. Must parse per `xAxisType`: a number for `numeric`; `YYYY-MM-DD` **or a bare `YYYY`** for `temporal` (a bare year is read as that year's 1 January, and is the right spelling for an annual series — see the note under `annotations.points` row tokens on why an annual series belongs on a temporal axis rather than a numeric one); `YYYYQ#` for `quarterly`; any string for `categorical`. |
 | series | Series identifier; each distinct value is a separate line/segment/band. Omit the column for a single-series chart. |
 | value | Numeric y-value. May be empty for missing observations. |
 

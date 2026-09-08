@@ -6,6 +6,7 @@ import { d3 } from "./vendor";
 import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis, bandLabelMarginBottom, type BandLabelMode } from "./axes";
 import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseXValue, parseDate, parseQuarter, formatQuarter } from "../spec/parse-time";
+import { formatNumericX, formatNumericTick } from "./util";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
 
 type Mark = unknown;
@@ -92,13 +93,13 @@ export function makeXAdapter(
             marginBottom: 22 + bottomGutter,
             xPlotOpts: { type: "linear", label: null, axis: null, domain: histogramDomain },
             axisMarks: tblXAxis(
-              { xTickFormat: (d: unknown) => `${+(d as number)}` },
+              { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)) },
               faceted ? X_AXIS_LABEL_CLASS : undefined,
               bottomGutter,
             ),
             markerToX: (m) => +m.x,
             tooltipXParse: (v) => +v,
-            tooltipXFormat: (v) => `${+v}`,
+            tooltipXFormat: (v) => formatNumericX(+v),
           };
         }
         const xMax = d3.max(data, (d: any) => d._xn) as number;
@@ -111,18 +112,21 @@ export function makeXAdapter(
         return {
           marginBottom: 22 + bottomGutter,
           xPlotOpts: { label: null, axis: null, domain: [xMin, xMax] },
-          // Plain numeric tick labels with NO thousands separator — years (1960, 2030) and
-          // index axes read better ungrouped than "1,960".
+          // Tick labels: grouped, full precision. `formatNumericTick` and `formatNumericX` (util.ts)
+          // share one grouping rule, so a tick and any hover reading never disagree about a number;
+          // they differ only in rounding, because a tick is a value d3 chose and a hover reading is
+          // arbitrary data. Years are no longer a special case here — a bare `YYYY` belongs on a
+          // TEMPORAL axis, which parses and labels it correctly (see `parseDate`).
           axisMarks: tblXAxis(
-            { xTickFormat: (d: unknown) => `${+(d as number)}` },
+            { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)) },
             faceted ? X_AXIS_LABEL_CLASS : undefined,
             bottomGutter,
           ),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
-          // Match the axis label exactly (plain number, no thousands separator) — numeric x is
-          // most often a year or an index, so a bare value reads correctly in both.
-          tooltipXFormat: (v) => `${+v}`,
+          // The crosshair header rounds to two decimals, exactly as the scatter card and the `{x}`
+          // token do: all three go through `formatNumericX`, so the three hover surfaces agree.
+          tooltipXFormat: (v) => formatNumericX(+v),
         };
       },
     };

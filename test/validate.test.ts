@@ -1084,6 +1084,24 @@ describe("validateChartData (cross-reference + CSV format)", () => {
     expect(validateChartData(spec, rows)).toEqual({ valid: true, errors: [] });
   });
 
+  it("accepts a bare YYYY as a temporal cell — the annual-series spelling", () => {
+    // Without this, the migration the engine recommends for an annual chart (numeric -> temporal,
+    // because a numeric axis now groups thousands and would print `1,950`) failed validation on
+    // EVERY row: `expected YYYY-MM-DD, got "1952"`. Caught in review, not by the suite.
+    const rows: TidyRow[] = [
+      { time: "1952", series: "a", value: "1" },
+      { time: "1953", series: "a", value: "2" },
+    ];
+    expect(validateChartData(VALID, rows)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("still rejects a partial or malformed date, and names both accepted forms", () => {
+    const r = validateChartData(VALID, [{ time: "195", series: "a", value: "1" }]);
+    expect(r.valid).toBe(false);
+    expect(r.errors.join("\n")).toMatch(/expected YYYY-MM-DD or YYYY/);
+    expect(validateChartData(VALID, [{ time: "1952-07", series: "a", value: "1" }]).valid).toBe(false);
+  });
+
   it("flags a time value that doesn't parse under xAxisType", () => {
     const r = validateChartData(VALID, [{ time: "2021/01/01", series: "a", value: "1" }]);
     expect(r.valid).toBe(false);
