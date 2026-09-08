@@ -97,8 +97,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   6px wide, which overflow a 14px box at both ends and along both flanks, and `hatch.ts` said so
   outright: they "are clipped to the box by its viewport". Only `/`, `\` and `x` were affected; the
   axis-aligned `|`, `-`, `+` are rects sized exactly to the box. The diagonal band is now a polygon
-  carrying the trimmed geometry — the exact intersection of that stroke with the box, so the live
-  legend is unchanged — which is correct in any container and needs no viewport. This follows the
+  carrying the trimmed geometry — the exact intersection of that stroke with the box, so the region
+  the live legend draws is unchanged — which is correct in any container and needs no viewport.
+  Geometric identity is derived, not measured: a polygon fill and a clipped stroke take different
+  rasteriser paths and may differ in edge antialiasing, and no before/after screenshot was
+  compared, so the live key is "the same shape", not certified pixel-for-pixel. This follows the
   precedent `hatchPattern` already records for using a band rect rather than a stroked line inside a
   `<pattern>` tile. It also closes the gap that hid it: the diagonals were the one shape
   `test/icon-fits-box.test.ts` filtered out of its clipping check, and the line test it left them to
@@ -191,9 +194,11 @@ A repin re-renders every published figure at once — here is what a maintainer 
   rules under Changed);
   an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
   `anchorAtZero` chart with connector callouts (previously drew no leader line at all; now draws one
-  whenever the callout is pinned or the vertical sweep moved its label). **One
-  published figure falls in the first class** — the deficit-management scorecard's
-  `deviation-distribution` histogram (`histogram.domain: [-1, 2.25]`, four labelled
+  whenever the callout is pinned or the vertical sweep moved its label). **One chart in the sibling
+  archive falls in the first class, and it is NOT yet published** — the deficit-management
+  scorecard's `deviation-distribution` histogram, which lives under the untracked
+  `charts/trackers/` tree (`git ls-files` does not know it), so nothing published moves here;
+  it will pick this up whenever that tracker is committed. The chart (`histogram.domain: [-1, 2.25]`, four labelled
   `annotations.xAxis` markers), whose "2026a" (x = 0.5013) and "2025a" (x = 0.6222) labels sit about
   24 px apart at width 720 against about 31 px of text and overprint today; that overprinting is the
   defect being fixed, and "2025a" drops to the second stagger row on repin. The archive's only two
@@ -233,14 +238,18 @@ A repin re-renders every published figure at once — here is what a maintainer 
   a tick and a hover reading can no longer disagree. Two changes fall out of it: a numeric tick over
   999 reads `1,234,567` where it read `1234567`, which is a **rendered SVG and PNG** change; and the
   numeric crosshair header rounds to two decimals, where it printed the raw value
-  (`x=2.285011857607663` now reads `2.29`), which is hover-only.
-  **Two published figures move, and both must be migrated in the same repin.** Reading all eight
-  archive specs that use `xAxisType: numeric`, six have no |x| over 911 and are untouched
+  (`x=2.285011857607663` now reads `2.29`), which is hover-only. A histogram's bin-range header is
+  pinned to the same locale for the same reason (`histogram-label.ts`); it followed the host's,
+  so on a de-DE machine it read `1.234,5` under a `1,234.5` tick. Identical on an en-US host.
+  **Two published figures move, and both must be migrated in the same repin.** The sibling archive
+  has **six tracked** specs on `xAxisType: numeric`. Four have no |x| over 911 and are untouched
   (`ces-qcew-benchmark-revisions/final-v-prelim` and `/regressions` at 911,
-  `ai-fiscal/revenue-vs-factor-income` at 633, `ai-fiscal/revenue-vs-pretax-income` at 547,
-  `deficit-management-scorecard/deviation-distribution` at 1.96 and `/scorecard-scatter` at 3.29).
-  The other two are annual series on a numeric axis — `ai-fiscal/gdp-growth-history` (1952-2036) and
+  `ai-fiscal/revenue-vs-factor-income` at 633, `ai-fiscal/revenue-vs-pretax-income` at 547). The
+  other two are annual series on a numeric axis — `ai-fiscal/gdp-growth-history` (1952-2036) and
   `ai-fiscal/labor-share-history` (1947-2026) — whose tick labels would read `1,950 1,960 …`.
+  (Two further numeric-x specs sit under the untracked `charts/trackers/` tree —
+  `deficit-management-scorecard/deviation-distribution` at 1.96 and `/scorecard-scatter` at 3.29 —
+  and are unpublished; neither would gain a separator anyway.)
   **Change both to `xAxisType: temporal`**, which needs no data edit: a bare `YYYY` cell now parses
   as that year's 1 January and validates (below), and `tblTemporalXAxis` renders a year-cadence span
   as bare `%Y` labels — the same `1950 1960 …` decades those two charts show today. Their axis

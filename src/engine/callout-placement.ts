@@ -48,8 +48,9 @@ function clearOfDisk(b: CalloutBox, y: number, d: CalloutDisk, dir: 1 | -1): num
  * that demanded it. Unadjusted that is not a rounding nit but an infinite loop — the push assigns
  * the value the label already holds, the collision test still reports an overlap, and the sweep
  * re-arms on a push that moved nothing (it hung the suite as a crashed worker, with no failing
- * assertion to read). One step to the next representable double settles it; the cap bounds the
- * walk. In every case where the plain sum already measures wide enough this returns it UNCHANGED,
+ * assertion to read). One step of `EPSILON * max(|t|, 1)` settles it in practice — that is a
+ * relative nudge of a couple of ULPs at plot coordinates, not literally `nextUp`, and the cap
+ * bounds the walk. In every case where the plain sum already measures wide enough this returns it UNCHANGED,
  * so no position that previously settled moves by even one bit.
  */
 function clearBy(from: number, need: number, dir: 1 | -1): number {

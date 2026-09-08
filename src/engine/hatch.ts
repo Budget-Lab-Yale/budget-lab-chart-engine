@@ -89,7 +89,10 @@ export const HATCH_GLYPH_BAND_CROSSED = 4;
  *  parallelogram spilling across the legend row. Carrying the trimmed geometry instead makes the
  *  shape correct in ANY container, which is the same reasoning `hatchPattern` records below for
  *  using a band rect rather than a stroked line inside a `<pattern>` tile. The polygon is the exact
- *  intersection of the stroke with the box, so what the live legend draws is unchanged. */
+ *  intersection of the stroke with the box, so the live legend's drawn REGION is unchanged. Not
+ *  asserted as pixel-identical: filling a polygon and stroking-then-clipping a line are different
+ *  rasteriser paths and may differ in antialiasing at the edges. Nothing compares a before and
+ *  after screenshot, so treat "same shape" as the claim and no more. */
 export type HatchGlyphShape =
   | { kind: "rect"; x: number; y: number; width: number; height: number }
   | { kind: "polygon"; points: Array<[number, number]> };
@@ -187,8 +190,12 @@ export function hatchSvgPattern(
   // A BAND RECT, not a stroked line. A <pattern> tile clips to its own bounds, so a line centred on
   // the tile edge loses the half that falls outside — it does not wrap into the neighbouring tile.
   // Measured: a `stroke-width: 7` line on x=0 renders 17.5% coverage, where an explicit 7px rect
-  // renders 43.3%. Every consumer — the marks, the export and the legend/tooltip glyph — is built
-  // from this one emitter, so the band weight cannot differ between a swatch and the mark it names.
+  // renders 43.3%. This emitter serves the MARKS (live and export) — NOT the legend/tooltip key,
+  // which is `hatchGlyphShapes` above and carries its own weights: HATCH_STROKE 7 / CROSSED 4 here
+  // against HATCH_GLYPH_BAND 6 / CROSSED 4 there, because a 14px key and a filled area want
+  // different band weights to read. An earlier version of this comment claimed one emitter fed
+  // every consumer and that a swatch could not differ from its mark; both were false, and the
+  // maintenance trap is real — changing HATCH_STROKE moves the marks and leaves the keys behind.
   const w = hatchStrokeWidth(char);
   const band = (width: number, height: number) => {
     const el = doc.createElementNS(SVG_NS, "rect");

@@ -1314,7 +1314,7 @@ the engine expects `time`, `series`, `value`.
 
 | role | content |
 |---|---|
-| x (`time`) | x-value. Must parse per `xAxisType`: a number for `numeric`; `YYYY-MM-DD` **or a bare `YYYY`** for `temporal` (a bare year is read as that year's 1 January, and is the right spelling for an annual series — see the note under `annotations.points` row tokens on why an annual series belongs on a temporal axis rather than a numeric one); `YYYYQ#` for `quarterly`; any string for `categorical`. |
+| x (`time`) | x-value. Must parse per `xAxisType`: a number for `numeric`; `YYYY-MM-DD` **or a bare `YYYY`** for `temporal` (a bare year is read as that year's 1 January, and is the right spelling for an annual series — see the note under `annotations.points` row tokens on why an annual series belongs on a temporal axis rather than a numeric one); `YYYYQ#` for `quarterly`; any **non-empty** string for `categorical` (a blank or whitespace-only cell is a validation error, not an unnamed category). |
 | series | Series identifier; each distinct value is a separate line/segment/band. Omit the column for a single-series chart. |
 | value | Numeric y-value. May be empty for missing observations. |
 

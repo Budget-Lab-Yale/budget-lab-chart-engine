@@ -26,7 +26,13 @@ export interface BinLabelOpts {
 function formatNumericEdge(v: number, decimals: number | undefined): string {
   const n = +v;
   if (!Number.isFinite(n)) return String(v);
-  return n.toLocaleString(undefined,
+  // Locale pinned, like `formatNumericX` (util.ts) and for a sharper reason than machine
+  // independence: the numeric x axis this header sits above is en-US-pinned because its ticks are
+  // drawn into the SVG, so a host-locale header read `1.234,5` under a `1,234.5` tick. Disagreeing
+  // with the axis beside it is worse than either convention. At the default precision this now
+  // matches `formatNumericX` exactly — same rounding, same grouping; `bin_label.decimals` is the
+  // author asking for something else on purpose.
+  return n.toLocaleString("en-US",
     decimals != null
       ? { minimumFractionDigits: decimals, maximumFractionDigits: decimals }
       : { maximumFractionDigits: 2 });
