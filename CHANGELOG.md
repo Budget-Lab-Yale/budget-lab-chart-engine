@@ -65,9 +65,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the callout's colour with **no arrowhead**, where it was a `Plot.arrow` with a 6px head; and it
   stops **6.6px from the point's centre** — the scatter marker's 4.6px radius plus 2 — where the old
   4px inset ended it *inside* the marker, so the line ran under the dot. And an **auto-placed**
-  callout draws the leader only when its label was actually moved off that default (the vertical
-  sweep pushed it, or the frame-edge flip did): at 12px the label's own proximity says which point
-  it belongs to, and the line was a few px of ink between two things already touching. A callout
+  callout draws the leader only when the vertical sweep actually **pushed** its label off that
+  default: at 12px the label's own proximity says which point it belongs to, and the line was a few
+  px of ink between two things already touching. A purely lateral frame-edge flip does **not** earn
+  one — it leaves the label hugging its point, where the leader is a ~7px stub that reads as noise.
+  A label the sweep pushes now also clears every callout's marker, coming to rest no closer than
+  that same 6.6px to any callout's point, so a pushed label's leader is always longer than its end
+  gap and is therefore always drawn; a label still at its default is exempt, which is what keeps a
+  lone callout byte-identical. A callout
   with an explicit `dx` or `dy` **always** draws it — the author asked for the connector and said
   where the label goes. The default WITHOUT a connector is unchanged at 6px. Where no leader can be
   drawn (a categorical x-axis, or a render with no width/height) a pinned callout still falls back
@@ -140,7 +145,7 @@ A repin re-renders every published figure at once — here is what a maintainer 
   rules under Changed);
   an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
   `anchorAtZero` chart with connector callouts (previously drew no leader line at all; now draws one
-  whenever the callout is pinned or its label was moved). **One
+  whenever the callout is pinned or the vertical sweep moved its label). **One
   published figure falls in the first class** — the deficit-management scorecard's
   `deviation-distribution` histogram (`histogram.domain: [-1, 2.25]`, four labelled
   `annotations.xAxis` markers), whose "2026a" (x = 0.5013) and "2025a" (x = 0.6222) labels sit about
@@ -167,7 +172,8 @@ A repin re-renders every published figure at once — here is what a maintainer 
 - **Every `connector: true` point callout re-lays out.** Its label moves 16px closer to its point
   (12px above instead of 28), its leader loses the arrowhead and now stops 6.6px from the point's
   centre instead of 4px, and an auto-placed callout loses the leader altogether unless the vertical
-  sweep or the frame-edge flip moved its label. **No committed published figure carries a
+  sweep pushed its label (a lateral frame-edge flip alone does not earn one). A pushed label is also
+  held clear of every callout's marker, so it can no longer come to rest on the dot it names. **No committed published figure carries a
   `connector`**, established by grepping every `chart.yaml` under `budget-lab-charts/charts`: the
   only hit is `trackers/deficit-management-scorecard/scorecard-scatter`, which is untracked in that
   repo (not published) and whose four pinned callouts will change appearance on the next render —

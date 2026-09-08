@@ -984,7 +984,10 @@ export function assemblePlot({
         if (dx !== 0) autoDx.set(i, dx);
       }
       const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;
-      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed });
+      // `disk` is the callout's own point: no MOVED label may come to rest on any callout's marker.
+      // One row's push (LABEL_ROW_H) is more than the 12px connector default, so without this a
+      // swept label landed on its own dot and its leader shaft — shorter than the gap — vanished.
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed, disk: { x: px, y: py, r: LEADER_END_INSET } });
       boxIdx.push(i);
       boxPy.push(py);
     });
@@ -1024,15 +1027,16 @@ export function assemblePlot({
     const dy = autoDy.get(pi) ?? defaultDy(p);
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
     // A leader is drawn when the author POSITIONED the label (an explicit dx or dy — they asked for
-    // the connector and said where the label goes) or when auto-placement MOVED it off its default.
-    // A label still sitting 12px above its own point needs no line: at that distance the leader was
-    // ~5px of ink between two things already touching, which is what the 1.14.0 visual review
-    // objected to. `autoDy` / `autoDx` receive an entry ONLY for a callout the vertical sweep or the
-    // frame-edge flip actually changed (6b guards both `.set` calls behind an inequality), so
-    // membership in either map IS "moved from the default" — the byte-identity guarantee and this
-    // gate are the same fact. A fixed callout never enters either map, so the `dx`/`dy` test above
-    // is not redundant.
-    const leader = p.connector && (p.dx != null || p.dy != null || autoDy.has(pi) || autoDx.has(pi));
+    // the connector and said where the label goes) or when the vertical sweep pushed the label off
+    // its default. A label still sitting 12px above its own point needs no line: at that distance
+    // the leader was ~5px of ink between two things already touching, which is what the 1.14.0
+    // visual review objected to. `autoDy` receives an entry ONLY for a callout the sweep actually
+    // moved (6b guards the `.set` behind an inequality), so membership IS "moved vertically" — the
+    // byte-identity guarantee and this gate are the same fact. `autoDx` is deliberately NOT part of
+    // it: the frame-edge flip shifts a label 6px sideways and leaves it hugging its point, where a
+    // leader is a ~7px stub that reads as noise. A fixed callout never enters `autoDy`, so the
+    // `dx`/`dy` test is not redundant.
+    const leader = p.connector && (p.dx != null || p.dy != null || autoDy.has(pi));
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
     if (leader && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {

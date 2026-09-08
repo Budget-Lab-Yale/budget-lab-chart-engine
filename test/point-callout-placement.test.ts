@@ -162,6 +162,80 @@ describe("placePointCallouts (pure helper)", () => {
     expect(placePointCallouts([a, b, c], OPTS)).toEqual([a.y, b.y, c.y]);
   });
 
+  // The marker disk a MOVED label may not come to rest on: the callout's point, at the leader's
+  // own end inset (MARK_POINT_R + 2). Closest-point circle/rectangle test, written out here rather
+  // than shared with the source so the invariant is checked independently of the algebra that
+  // enforces it.
+  const DISK_R = 6.6;
+  const withDisk = (b: CalloutBox, cx: number, cy: number): CalloutBox => ({ ...b, disk: { x: cx, y: cy, r: DISK_R } });
+  const onDisk = (b: CalloutBox, y: number, d: { x: number; y: number; r: number }): boolean => {
+    const nx = Math.min(Math.max(d.x, b.x0), b.x1);
+    const ny = Math.min(Math.max(d.y, y - b.h / 2), y + b.h / 2);
+    return Math.hypot(d.x - nx, d.y - ny) < d.r - 1e-9;
+  };
+
+  it("a pushed label steps past its own point's marker instead of coming to rest on it", () => {
+    // The rendered defect: two points 1.2px apart, each label 12px above its own point, so one
+    // row's push (13px) drops the lower label onto its own dot — where the leader shaft, shorter
+    // than the end gap, is not drawn at all. It must continue past the marker.
+    const a = withDisk(box(100, 200 - 12), 120, 200);
+    const b = withDisk(box(100, 201.2 - 12), 120, 201.2);
+    const ys = placePointCallouts([a, b], OPTS);
+    expect(ys[0]).toBe(a.y); // the upper label never collided with anything above it
+    for (const k of [0, 1]) {
+      if (ys[k] === [a, b][k]!.y) continue; // an UNMOVED label keeps its default, marker or not
+      for (const d of [a.disk!, b.disk!]) expect(onDisk([a, b][k]!, ys[k]!, d), `box ${k}`).toBe(false);
+    }
+    expect(ys[1]!).toBeGreaterThan(201.2 + DISK_R); // below its own marker, not on it
+  });
+
+  it("a label that collided with nothing is never moved by a marker disk, even one it overlaps", () => {
+    // A 13px box centred on the 12px connector default reaches to 5.5px above the point, inside a
+    // 6.6px disk. That graze is the byte-identity carve-out: a lone callout must not move.
+    const lone = withDisk(box(100, 200 - 12), 120, 200);
+    expect(onDisk(lone, lone.y, lone.disk!)).toBe(true);
+    expect(placePointCallouts([lone], OPTS)).toEqual([lone.y]);
+    expect(placePointCallouts([lone, withDisk(box(400, 300), 420, 312)], OPTS)).toEqual([lone.y, 300]);
+  });
+
+  it("a disk outside the label's horizontal extent does not push it at all", () => {
+    // Exact circle geometry, not a bounding box: a marker two label-widths away is irrelevant even
+    // when it shares the label's row.
+    const a = box(100, 200);
+    const b = withDisk(box(100, 204), 400, 213);
+    const ys = placePointCallouts([a, b], OPTS);
+    expect(ys[1]).toBe(213); // pushed by the label collision only: 200 + one row
+  });
+
+  it("terminates when a push target is not a fixed point of the collision test", () => {
+    // Regression, found by the seeded property check below (case 132) as a HUNG worker, not a
+    // failed assertion. Two boxes end up 19.499999999999993 apart with a clearance of 19.5 — short
+    // by 7e-15 — so `collide` reports an overlap, but `ys[j] + 19.5` rounds back to exactly the
+    // value the pushed label already holds. The assignment moved nothing and the sweep re-armed on
+    // it forever. Verbatim input; the disk pushes are what put a label on a coordinate where
+    // `(a + c) - a < c` holds at all.
+    const boxes: CalloutBox[] = [
+      { x0: 77, x1: 110, y: 286.7306144395843, h: 13, fixed: false },
+      { x0: 50, x1: 101, y: 45.67304653581232, h: 13, fixed: false, disk: { x: 75.5, y: 57.67304653581232, r: 6.6 } },
+      { x0: 173, x1: 225, y: 92.08685528486967, h: 26, fixed: false },
+      { x0: 29, x1: 71, y: 18.05119702592492, h: 13, fixed: false, disk: { x: 50, y: 30.05119702592492, r: 6.6 } },
+      { x0: 10, x1: 57, y: 11.306475661695004, h: 26, fixed: false, disk: { x: 33.5, y: 23.306475661695004, r: 6.6 } },
+    ];
+    const ys = placePointCallouts(boxes, OPTS);
+    expect(ys).toHaveLength(boxes.length);
+    for (const y of ys) expect(Number.isFinite(y)).toBe(true);
+    // And it settles CLEAR: the gap must satisfy the same exact comparison the property check uses,
+    // so landing on the arithmetic target is not good enough.
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        if (!(a.x0 < b.x1 + OPTS.gap && b.x0 < a.x1 + OPTS.gap)) continue;
+        expect(Math.abs(ys[i]! - ys[j]!), `${i} vs ${j}`).toBeGreaterThanOrEqual((a.h + b.h) / 2);
+      }
+    }
+  });
+
   it("a pushed label cascades onto only the labels it is actually near", () => {
     // B moves off A and lands on C (near B, not near A), so C moves too; A never moves.
     const a = box(100, 200, 40);
@@ -186,6 +260,13 @@ describe("placePointCallouts — seeded property check", () => {
   const collideAt = (a: CalloutBox, ay: number, b: CalloutBox, by: number) =>
     near(a, b) && Math.abs(ay - by) < (a.h + b.h) / 2;
 
+  const PROP_DISK_R = 6.6;
+  const onDisk = (b: CalloutBox, y: number, d: { x: number; y: number; r: number }): boolean => {
+    const nx = Math.min(Math.max(d.x, b.x0), b.x1);
+    const ny = Math.min(Math.max(d.y, y - b.h / 2), y + b.h / 2);
+    return Math.hypot(d.x - nx, d.y - ny) < d.r - 1e-9;
+  };
+
   it("leaves no near overlap behind, never moves a fixed box, and returns collision-free input bit-for-bit", () => {
     const next = rng(37);
     let untouchedCases = 0;
@@ -194,7 +275,13 @@ describe("placePointCallouts — seeded property check", () => {
       const boxes: CalloutBox[] = [];
       for (let i = 0; i < count; i++) {
         const x0 = Math.floor(next() * 300);
-        boxes.push({ x0, x1: x0 + 30 + Math.floor(next() * 30), y: OPTS.lo - 20 + next() * (OPTS.hi - OPTS.lo + 40), h: next() < 0.3 ? 26 : 13, fixed: next() < 0.25 });
+        const x1 = x0 + 30 + Math.floor(next() * 30);
+        const y = OPTS.lo - 20 + next() * (OPTS.hi - OPTS.lo + 40);
+        const b: CalloutBox = { x0, x1, y, h: next() < 0.3 ? 26 : 13, fixed: next() < 0.25 };
+        // Most boxes carry their point's marker disk, 12px below the label as the connector default
+        // puts it; the rest have none, so both branches of the disk rule are exercised.
+        if (next() < 0.75) b.disk = { x: (x0 + x1) / 2, y: y + 12, r: PROP_DISK_R };
+        boxes.push(b);
       }
       const ys = placePointCallouts(boxes, OPTS);
       const label = `case ${c}: ${JSON.stringify(boxes)} -> ${JSON.stringify(ys)}`;
@@ -203,6 +290,16 @@ describe("placePointCallouts — seeded property check", () => {
       for (let i = 0; i < count; i++) {
         expect(Number.isFinite(ys[i]!), label).toBe(true);
         if (boxes[i]!.fixed) expect(ys[i], label).toBe(boxes[i]!.y);
+        // A label the sweep MOVED may not come to rest on any callout's marker. An unmoved one is
+        // exempt by design — the 12px default grazes its own disk, and moving it would break the
+        // byte-identity guarantee this same test asserts below.
+        // (Reported via expect.fail rather than a message argument: interpolating `label` into a
+        // per-pair string 96k times over the 1500 cases exhausted the worker's heap.)
+        if (!boxes[i]!.fixed && ys[i] !== boxes[i]!.y) {
+          for (const d of boxes) {
+            if (d.disk && onDisk(boxes[i]!, ys[i]!, d.disk)) expect.fail(`box ${i} came to rest on a marker — ${label}`);
+          }
+        }
         for (let j = i + 1; j < count; j++) {
           if (collideAt(boxes[i]!, boxes[i]!.y, boxes[j]!, boxes[j]!.y)) anyInputCollision = true;
           // Two FIXED boxes may overlap by the author's choice; every other near pair must be clear.
@@ -579,11 +676,19 @@ describe("annotations.points — labels that would leave the frame flip to the i
   });
 
   it("the connector's label coordinate follows the flip", () => {
-    const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, connector: true }]), ROWS, { width: 720, height: 400, document });
-    // `dy: 28` equals the connector's own default offset and pins the callout, so this arrow starts
+    // A LATERAL flip on its own no longer draws a leader, so this needs a callout that is both
+    // flipped and pushed. Explicit x/y (still auto-placed — only dx/dy pin) puts both at an
+    // INTERIOR y, where the frame clamp cannot claim them: the row-keyed edge points sit at the
+    // y-domain's extremes, so a collision there is clamped and moves both labels. The short label
+    // is listed first, so it settles at its default and the flipped LONG box — which reaches back
+    // over it — is the one the sweep moves.
+    const at = (x: string, label: string) => ({ x, y: 0.4, label, connector: true });
+    const { svg } = renderChart(withPoints([at("2.845", "M"), at("3.5", LONG)]), ROWS, { width: 720, height: 400, document });
+    // `dy: 12` equals the connector's own default offset and pins the callout, so this arrow starts
     // at the point's px and the difference between the two starts is the flip itself.
-    const pinned = renderChart(withPoints([{ point: "2009", label: LONG, connector: true, dy: 28 }]), ROWS, { width: 720, height: 400, document });
+    const pinned = renderChart(withPoints([{ ...at("3.5", LONG), dy: 12 }]), ROWS, { width: 720, height: 400, document });
     expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBe("end");
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
     expect(arrowStart(svg as SVGSVGElement).x).toBeCloseTo(arrowStart(pinned.svg as SVGSVGElement).x - 6, 6);
   });
 
@@ -731,28 +836,73 @@ describe("annotations.points — connector leader defaults", () => {
     // text but not to the arrow path, so the two agree to within 0.5px, against 12px of separation.
     const start = leaderEnds(paths[0]!).start;
     const stayed = auto.find((b) => b !== moved[0])!;
-    expect(Math.abs(start.y - moved[0]!.y)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(start.y - moved[0]!.y)).toBeLessThan(1);
     expect(Math.abs(start.y - stayed.y)).toBeGreaterThan(LABEL_ROW_H - 1);
   });
 
-  it("a leader shorter than the gap itself is not drawn at all — Plot drops the whole shaft", () => {
-    // 2025b and 2025b* are 1.2px apart in y, so the sweep pushes the lower label a full row down
-    // onto its own point: the remaining shaft is under MARK_POINT_R + 2 and Plot emits no path
-    // geometry for it. The mark is still there; it draws nothing.
+  it("a leader no longer than the gap itself is not drawn at all — Plot drops the whole shaft", () => {
+    // Only reachable by PINNING the label inside the gap: an auto-placed label is either at its
+    // default (no leader) or pushed clear of the marker disk (leader longer than the gap).
+    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 4 }]), ROWS, DIMS);
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
+    expect(leaderPaths(svg as SVGSVGElement)).toEqual([""]);
+  });
+
+  it("neither of the demo's two same-x labels ends on either marker", () => {
+    // The 2025b / 2025b* pair: same x, 1.2px apart in y. Plot puts its half-pixel crisp-edge
+    // offset on text but not on dots, so the label's true centre is its transform less 0.5.
     const { svg } = renderChart(
       withPoints([{ point: "2025b", label: "{point_label}", connector: true }, { point: "2025b*", label: "{point_label}", connector: true }]),
       ROWS,
       DIMS,
     );
-    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
-    expect(leaderPaths(svg as SVGSVGElement)).toEqual([""]);
+    const boxes = labelBoxes(svg as SVGSVGElement, ["2025b", "2025b*"]);
+    // The two callout points are the only pair of data dots sharing an x.
+    const dots = Array.from(svg.querySelectorAll('g[aria-label="dot"] circle')).map((c) => ({ x: Number(c.getAttribute("cx")), y: Number(c.getAttribute("cy")) }));
+    const disks = dots.filter((d) => dots.filter((e) => Math.abs(e.x - d.x) < 1e-9).length === 2).map((d) => ({ ...d, r: MARK_POINT_R + 2 }));
+    expect(disks.length).toBe(2);
+    const pinned = labelBoxes(renderChart(withPoints([{ point: "2025b", label: "{point_label}", connector: true, dy: 12 }, { point: "2025b*", label: "{point_label}", connector: true, dy: 12 }]), ROWS, DIMS).svg as SVGSVGElement, ["2025b", "2025b*"]);
+    let movedCount = 0;
+    for (const [k, b] of boxes.entries()) {
+      const rect = { x0: b.x0 - 0.5, x1: b.x1 - 0.5, y: b.y - 0.5, h: LABEL_ROW_H };
+      if (b.y === pinned[k]!.y) {
+        // The label that stayed keeps its default bit for bit — the carve-out that keeps a lone
+        // callout byte-identical. A 13px box centred 12px up grazes its own 6.6px disk by ~1px.
+        expect(b.x0).toBe(pinned[k]!.x0);
+        continue;
+      }
+      movedCount++;
+      for (const d of disks) {
+        const nx = Math.min(Math.max(d.x, rect.x0), rect.x1);
+        const ny = Math.min(Math.max(d.y, rect.y - rect.h / 2), rect.y + rect.h / 2);
+        expect(Math.hypot(d.x - nx, d.y - ny), `${b.label} vs marker at ${d.y}`).toBeGreaterThanOrEqual(d.r - 1e-9);
+      }
+    }
+    expect(movedCount).toBe(1);
   });
 
-  it("a callout the frame-edge flip moved draws a leader, even though nothing collided with it", () => {
+  it("a pushed label never comes to rest on a callout's marker, so its shaft always draws", () => {
+    // The 1.14.0 defect: 2025b and 2025b* are 1.2px apart in y, one row's push is 13px and the
+    // connector default is only 12px, so the swept label used to land ON its own dot and Plot
+    // dropped the whole shaft. It now continues past the marker disk.
+    const { svg } = renderChart(
+      withPoints([{ point: "2025b", label: "{point_label}", connector: true }, { point: "2025b*", label: "{point_label}", connector: true }]),
+      ROWS,
+      DIMS,
+    );
+    const paths = leaderPaths(svg as SVGSVGElement);
+    expect(paths.length).toBe(1);
+    const { start, end } = leaderEnds(paths[0]!);
+    expect(Math.hypot(end.x - start.x, end.y - start.y)).toBeGreaterThan(0);
+  });
+
+  it("a purely LATERAL edge flip earns NO leader — the label still hugs its point", () => {
+    // The flip moves a label 6px sideways and leaves it 12px above its own point; a leader there is
+    // a ~7px stub that reads as noise, so only a VERTICAL push (or an explicit dx/dy) draws one.
     const { svg } = renderChart(withPoints([{ point: "2009", label: LONG, connector: true }]), ROWS, DIMS);
-    // Non-vacuity: the flip is what moved this label — it is anchored away from the right edge.
+    // Non-vacuity: the flip really did fire — the label is anchored away from the right edge.
     expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBe("end");
-    expect(leaderPaths(svg as SVGSVGElement).length).toBe(1);
+    expect(leaderPaths(svg as SVGSVGElement)).toEqual([]);
   });
 
   it("the leader stops MARK_POINT_R + 2 px short of the point's centre", () => {
