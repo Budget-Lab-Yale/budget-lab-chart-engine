@@ -56,6 +56,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   chart type, where a card row is labelled by its series rather than by an axis. Hover-only — a PNG
   export has no hover state. (#35)
 
+### Changed
+- **A point callout's connector is now a short, plain, headless leader that stops short of the
+  marker.** Three defaults moved together, from the 1.14.0 visual review ("these are pretty weird
+  and far from the points … the end of the connector also touches the point"). A callout with
+  `connector: true` now sits **12px above its point instead of 28**; the leader is a plain line in
+  the callout's colour with **no arrowhead**, where it was a `Plot.arrow` with a 6px head; and it
+  stops **6.6px from the point's centre** — the scatter marker's 4.6px radius plus 2 — where the old
+  4px inset ended it *inside* the marker, so the line ran under the dot. And an **auto-placed**
+  callout draws the leader only when the vertical sweep actually **pushed** its label off that
+  default: at 12px the label's own proximity says which point it belongs to, and the line was a few
+  px of ink between two things already touching. A purely lateral frame-edge flip does **not** earn
+  one — it leaves the label hugging its point, where the leader is a ~7px stub that reads as noise.
+  A label the sweep pushes now also clears every callout's marker, coming to rest no closer than
+  that same 6.6px to any callout's point, so a pushed label's leader is always longer than its end
+  gap and is therefore always drawn; a label still at its default is exempt, which is what keeps a
+  lone callout byte-identical. A callout
+  with an explicit `dx` or `dy` **always** draws it — the author asked for the connector and said
+  where the label goes. The default WITHOUT a connector is unchanged at 6px. Where no leader can be
+  drawn (a categorical x-axis, or a render with no width/height) a pinned callout still falls back
+  to a small dot and an auto-placed one now draws nothing. (#42)
+
 ### Fixed
 - **The hover card wraps a row label longer than the card instead of clipping it.** `.tbl-tooltip`
   set `white-space: nowrap` *and* `max-width: 320px`, which contradict: the box stopped at 320px and
@@ -120,9 +141,11 @@ A repin re-renders every published figure at once — here is what a maintainer 
 - **Charts where the axis domain differs from the data extent re-lay out their annotations.** Four
   classes, none present in any golden fixture: a histogram with `annotations.xAxis` or band labels
   (labels that overprinted now stagger); a histogram with `annotations.points[].connector: true`
-  (previously drew a plain dot because the connector gate was never satisfied, now draws the arrow);
+  (previously drew a plain dot because the connector gate was never satisfied, now takes the leader
+  rules under Changed);
   an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
-  `anchorAtZero` chart with connector callouts (previously drew no leader line at all). **One
+  `anchorAtZero` chart with connector callouts (previously drew no leader line at all; now draws one
+  whenever the callout is pinned or the vertical sweep moved its label). **One
   published figure falls in the first class** — the deficit-management scorecard's
   `deviation-distribution` histogram (`histogram.domain: [-1, 2.25]`, four labelled
   `annotations.xAxis` markers), whose "2026a" (x = 0.5013) and "2025a" (x = 0.6222) labels sit about
@@ -147,6 +170,17 @@ A repin re-renders every published figure at once — here is what a maintainer 
   ("(no step in original)", on a categorical axis where the flip is gated off) — and finding
   identical label positions and text-anchors. A callout whose label fits is untouched, and a
   pinned (`dx`/`dy`) callout never flips. (#37)
+- **Every `connector: true` point callout re-lays out.** Its label moves 16px closer to its point
+  (12px above instead of 28), its leader loses the arrowhead and now stops 6.6px from the point's
+  centre instead of 4px, and an auto-placed callout loses the leader altogether unless the vertical
+  sweep pushed its label (a lateral frame-edge flip alone does not earn one). A pushed label is also
+  held clear of every callout's marker, so it can no longer come to rest on the dot it names. **No
+  committed published figure carries a `connector`**, established by grepping every `chart.yaml`
+  under `budget-lab-charts/charts`: the only hit is
+  `trackers/deficit-management-scorecard/scorecard-scatter`, which is untracked in that repo (not
+  published) and whose four pinned callouts will change appearance on the next render — expected. No
+  golden fixture carries a `connector` either (`grep -l connector test/fixtures/*.yaml` is empty), so
+  this change is invisible to the golden suite and rests on the tests in the engine. (#42)
 - **The scatter hover card's x row loses its thousands separator**: it read `2,000` and now reads
   `2000`, because the card and the new `{x}` callout token share one formatter and a numeric x is
   most often a year or an index, which the axis ticks have always printed ungrouped. Rounding to two

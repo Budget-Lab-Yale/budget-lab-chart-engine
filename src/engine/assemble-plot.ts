@@ -4,7 +4,7 @@
 // line overlay — then returns the SVG with margin metadata stamped on for the
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
-import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
+import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, MARK_POINT_R } from "./theme";
 import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
@@ -467,6 +467,18 @@ export function assemblePlot({
   // Lateral offset a point-callout label takes when the frame edge flips it off centre — the same
   // magnitude the xAxis/yAxis marker labels use for their own side placement (section 6a).
   const LABEL_FLIP_DX = 6;
+  // A callout that draws a connector sits 12px above its point, not the 28 it used to: the 1.14.0
+  // visual review read labels that far out as floating free of any point, and the research
+  // consensus (ggrepel, cartographic leader-line practice) is a label CLOSE to its point with a
+  // short leader only when something pushed it away. The no-connector default (6, below) is
+  // deliberately untouched — two published figures render on it.
+  const LABEL_CONNECTOR_DY = 12;
+  // The leader stops MARK_POINT_R + 2 px short of the point CENTRE, so 2px of white separates its
+  // end from the scatter marker's outline. The old `insetEnd: 4` was SHORTER than the 4.6px marker
+  // radius, so the line ended underneath the dot and read as touching it. One inset for every chart
+  // type, including those with no marker at the point (a line vertex): there the leader simply
+  // stops a hair short of the vertex, which reads the same.
+  const LEADER_END_INSET = MARK_POINT_R + 2;
   const staggerDy = new Map<string, number>();
   if (xAxisDomain && xAxisDomain[1] > xAxisDomain[0] && width != null) {
     const innerW = width - effMarginLeft - effMarginRight;
@@ -935,7 +947,7 @@ export function assemblePlot({
   //     than merely leaving the frame.
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -28 : -6);
+  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -LABEL_CONNECTOR_DY : -6);
   const autoDy = new Map<number, number>();
   const autoDx = new Map<number, number>();
   if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
@@ -972,7 +984,10 @@ export function assemblePlot({
         if (dx !== 0) autoDx.set(i, dx);
       }
       const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;
-      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed });
+      // `disk` is the callout's own point: no MOVED label may come to rest on any callout's marker.
+      // One row's push (LABEL_ROW_H) is more than the 12px connector default, so without this a
+      // swept label landed on its own dot and its leader shaft — shorter than the gap — vanished.
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed, disk: { x: px, y: py, r: LEADER_END_INSET } });
       boxIdx.push(i);
       boxPy.push(py);
     });
@@ -987,9 +1002,11 @@ export function assemblePlot({
   }
 
   // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
-  //     (series-snap). With connector, draw a leader arrow from the label to the point — the label
-  //     offset (dx/dy px) is converted to a second data coordinate via the x/y extents so the arrow
-  //     lands exactly on the point. The arrowhead marks the point (no separate dot).
+  //     (series-snap). With connector, draw a plain leader LINE from the label to the point — the
+  //     label offset (dx/dy px) is converted to a second data coordinate via the x/y extents so
+  //     the leader aims exactly at the point, then stops `LEADER_END_INSET` short of its centre.
+  //     No arrowhead: at these offsets the head was most of the mark, and the label's own
+  //     proximity already says which point is meant.
   for (let pi = 0; pi < pointsAnn.length; pi++) {
     const p = pointsAnn[pi]!;
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
@@ -1001,17 +1018,28 @@ export function assemblePlot({
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
     const pColor = resolveColorOr(p.color, TBL.color.heading);
-    // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
-    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28). An auto-placed
-    // label (6b) overrides the default; an explicit dx/dy always wins. `autoDx` carries the frame
+    // Default offset is slightly larger when a connector is drawn, so the leader has room. dy is
+    // + = UP, so negate the user's value for SVG (defaults are already SVG-up: -6 / -12). An
+    // auto-placed label (6b) overrides the default; an explicit dx/dy always wins. `autoDx` carries the frame
     // -edge flip and holds an entry ONLY for a flipped label, so an unflipped one takes the same
     // 0 it always did — and `anchor` reads the flip straight off dx, as it does an author's.
     const dx = p.dx != null ? p.dx : (autoDx.get(pi) ?? 0);
     const dy = autoDy.get(pi) ?? defaultDy(p);
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
+    // A leader is drawn when the author POSITIONED the label (an explicit dx or dy — they asked for
+    // the connector and said where the label goes) or when the vertical sweep pushed the label off
+    // its default. A label still sitting 12px above its own point needs no line: at that distance
+    // the leader was ~5px of ink between two things already touching, which is what the 1.14.0
+    // visual review objected to. `autoDy` receives an entry ONLY for a callout the sweep actually
+    // moved (6b guards the `.set` behind an inequality), so membership IS "moved vertically" — the
+    // byte-identity guarantee and this gate are the same fact. `autoDx` is deliberately NOT part of
+    // it: the frame-edge flip shifts a label 6px sideways and leaves it hugging its point, where a
+    // leader is a ~7px stub that reads as noise. A fixed callout never enters `autoDy`, so the
+    // `dx`/`dy` test is not redundant.
+    const leader = p.connector && (p.dx != null || p.dy != null || autoDy.has(pi));
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
-    if (p.connector && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
+    if (leader && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
       // Label position in DATA space: shift the point by the px offset using the per-px data deltas.
       const dppx = (xAxisDomain[1] - xAxisDomain[0]) / innerWForPx;
       const dppy = (yDomain[1] - yDomain[0]) / innerHForPx;
@@ -1027,11 +1055,14 @@ export function assemblePlot({
           y2: "y2",
           stroke: pColor,
           strokeWidth: 1,
-          headLength: 6,
-          insetEnd: 4, // stop just short of the point
+          // `Plot.arrow` with no head rather than `Plot.link`: only the arrow mark carries
+          // `insetEnd`, and the inset is the whole point of the gap. At headLength 0 Plot's arrow
+          // renderer emits the bare `M x1,y1 L x2,y2` shaft and skips the head segment entirely.
+          headLength: 0,
+          insetEnd: LEADER_END_INSET, // stop clear of the marker's outline, not inside it
         }),
       );
-    } else if (p.connector) {
+    } else if (leader) {
       marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
     }
     // Optional word-wrap to a max px width (Plot renders the "\n"s as multiple lines).
