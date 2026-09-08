@@ -597,7 +597,10 @@ function assemblePaneResult(
     if (p.point != null) {
       const row = dataInScope.find((r) => r._pointKey === p.point);
       if (!row || !Number.isFinite(row._y as number)) continue;
-      resolvedPoints.push({ ...p, x: row.time, y: row._y as number });
+      // `series` rides along so the label can take its series' colour by default (assemblePlot).
+      // Validation forbids an AUTHORED `series` beside `point:`; this is the resolved row's own,
+      // set after that check, and nothing downstream re-snaps on it.
+      resolvedPoints.push({ ...p, x: row.time, y: row._y as number, series: row.series });
       pointRows.push(row);
       continue;
     }

@@ -318,14 +318,19 @@ describe("placePointCallouts — seeded property check", () => {
       for (let i = 0; i < count; i++) {
         expect(Number.isFinite(ys[i]!), label).toBe(true);
         if (boxes[i]!.fixed) expect(ys[i], label).toBe(boxes[i]!.y);
-        // A label the sweep MOVED may not come to rest on any callout's marker. An unmoved one is
-        // exempt by design — the 12px default grazes its own disk, and moving it would break the
-        // byte-identity guarantee this same test asserts below.
+        // No movable label comes to rest on ANOTHER callout's marker, moved or not — a label parked
+        // on a different labelled point cannot be read. Its OWN marker is exempt only while it sits
+        // at its default (the 12px default grazes it, and enforcing it there would move every lone
+        // callout). A FIXED label is the author's placement and is never swept.
         // (Reported via expect.fail rather than a message argument: interpolating `label` into a
         // per-pair string 96k times over the 1500 cases exhausted the worker's heap.)
-        if (!boxes[i]!.fixed && ys[i] !== boxes[i]!.y) {
-          for (const d of boxes) {
-            if (d.disk && onDisk(boxes[i]!, ys[i]!, d.disk)) expect.fail(`box ${i} came to rest on a marker — ${label}`);
+        if (!boxes[i]!.fixed) {
+          for (const [j, o] of boxes.entries()) {
+            if (!o.disk) continue;
+            if (j === i && ys[i] === boxes[i]!.y) continue;
+            if (onDisk(boxes[i]!, ys[i]!, o.disk)) {
+              expect.fail(`box ${i} came to rest on ${j === i ? "its own" : `box ${j}'s`} marker — ${label}`);
+            }
           }
         }
         for (let j = i + 1; j < count; j++) {
@@ -335,7 +340,13 @@ describe("placePointCallouts — seeded property check", () => {
           expect(collideAt(boxes[i]!, ys[i]!, boxes[j]!, ys[j]!), label).toBe(false);
         }
       }
-      if (!anyInputCollision) {
+      // Identity holds when nothing asked any label to move: no box collision AND no label parked
+      // on another callout's marker. The second clause is what the other-marker rule cost this
+      // guarantee — it is narrower than "no collision" now, deliberately.
+      const anyForeignDisk = boxes.some(
+        (b, i) => !b.fixed && boxes.some((o, j) => j !== i && o.disk != null && onDisk(b, b.y, o.disk)),
+      );
+      if (!anyInputCollision && !anyForeignDisk) {
         untouchedCases++;
         expect(ys, label).toEqual(boxes.map((b) => b.y));
       }
@@ -516,10 +527,11 @@ describe("annotations.points — rendered auto-placement", () => {
     );
     const boxes = labelBoxes(svg as SVGSVGElement, ["2025b", "2025b*"]);
     expect(boxesOverlap(boxes[0]!, boxes[1]!)).toBe(false);
-    // The sweep settles the upper label where it already was and pushes only the lower one, so
-    // exactly ONE of the pair is off its default and exactly one leader mark is emitted — see
-    // "connector leader defaults" below for the rule and for the leader that follows the move.
-    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
+    // The sweep pushes the lower label just clear of the marker (13.6px), which is not far enough
+    // for a shaft to fit outside the label's own text — so NO leader here. The leader that does
+    // follow a moved label is covered under "connector leader defaults", on the four-callout case
+    // where one label travels 26.6px.
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(0);
   });
 });
 
@@ -712,12 +724,19 @@ describe("annotations.points — labels that would leave the frame flip to the i
     // over it — is the one the sweep moves.
     const at = (x: string, label: string) => ({ x, y: 0.4, label, connector: true });
     const { svg } = renderChart(withPoints([at("2.845", "M"), at("3.5", LONG)]), ROWS, { width: 720, height: 400, document });
-    // `dy: 12` equals the connector's own default offset and pins the callout, so this arrow starts
-    // at the point's px and the difference between the two starts is the flip itself.
-    const pinned = renderChart(withPoints([{ ...at("3.5", LONG), dy: 12 }]), ROWS, { width: 720, height: 400, document });
-    expect(anchoredBox(svg as SVGSVGElement, LONG).anchor).toBe("end");
+    const box = anchoredBox(svg as SVGSVGElement, LONG);
+    expect(box.anchor).toBe("end");
     expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
-    expect(arrowStart(svg as SVGSVGElement).x).toBeCloseTo(arrowStart(pinned.svg as SVGSVGElement).x - 6, 6);
+    // The shaft leaves the label at the edge FACING the point, and the flip is what decided which
+    // edge that is: anchored "end", the box's right edge sits at the anchor, so the start lands
+    // within a couple of px of `x1` rather than at the box's centre. Compared against the label's
+    // own box, not against a `dy`-pinned render — pinning at the 12px default now draws no leader
+    // at all, so there is nothing there to compare with.
+    const s = arrowStart(svg as SVGSVGElement);
+    expect(Math.abs(s.x - box.x1)).toBeLessThanOrEqual(3);
+    // Non-vacuity: the box's centre is far from where the shaft starts, so this would fail if the
+    // leader still began at the anchor-as-centre.
+    expect(Math.abs(s.x - (box.x0 + box.x1) / 2)).toBeGreaterThan(LABEL_CHAR_PX);
   });
 
   it("is gated off with the rest of placement when the render has no width/height", () => {
@@ -835,45 +854,77 @@ describe("annotations.points — connector leader defaults", () => {
     expect(DOT_GROUPS(svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement));
   });
 
-  it("the same callout pinned at that very offset DOES draw a leader — the author asked for it", () => {
-    const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 12 }]), ROWS, DIMS);
-    expect(leaderPaths(svg as SVGSVGElement).length).toBe(1);
+  it("a pinned callout at that same 12px offset has no room for a leader either", () => {
+    // The leader starts at the label's EDGE now, not at its anchor, so a one-row label needs about
+    // 19px of offset before a shaft fits between its own text (half a row plus 2) and the marker
+    // gap (6.6). At the 12px default there is nothing left to draw — and drawing it anyway is what
+    // ran a line up through the label's own text. Pinned further out it appears.
+    const tight = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 12 }]), ROWS, DIMS);
+    expect(leaderPaths(tight.svg as SVGSVGElement)).toEqual([]);
+    const roomy = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 30 }]), ROWS, DIMS);
+    expect(leaderPaths(roomy.svg as SVGSVGElement).length).toBe(1);
   });
 
-  // Two callouts at one x whose points are 12px apart vertically (0.1 in y is 12px on this
-  // 400px-high render). Their default labels are 12px apart too, one row's clearance is 13, so the
-  // LOWER label is pushed down 1px and the upper one keeps its default exactly.
-  const PAIR = [
-    { x: "2.3211", y: -0.05, label: "UP", connector: true },
-    { x: "2.3211", y: -0.15, label: "DOWN", connector: true },
-  ];
-
-  it("a callout the vertical sweep pushed off its default draws a leader — and only that one", () => {
-    const { svg } = renderChart(withPoints(PAIR), ROWS, DIMS);
-    const pinned = renderChart(withPoints(PAIR.map((c) => ({ ...c, dy: 12 }))), ROWS, DIMS);
-    const auto = labelBoxes(svg as SVGSVGElement, ["UP", "DOWN"]);
-    const atDefault = labelBoxes(pinned.svg as SVGSVGElement, ["UP", "DOWN"]);
-    const moved = auto.filter((b, k) => Math.abs(b.y - atDefault[k]!.y) > 1e-9);
-    // Exactly one of the pair left its default, so exactly one leader is drawn: the label that
-    // stayed is still 12px above its own point and needs no line.
-    expect(moved.map((m) => m.label)).toEqual(["DOWN"]);
+  it("a callout the sweep pushed FAR draws a leader; one pushed only clear of its marker does not", () => {
+    // Four keyed callouts, all colliding. Measured on this fixture: 2025a and 2026a keep their
+    // 11.5px default (no leader by the gate), 2025b* is pushed 13.6px — just clear of the marker
+    // disk, which still leaves nothing after the label's 8.5 and the marker's 6.6 — and 2025b is
+    // pushed 26.6px, leaving ~11px of visible shaft. Clearing the dot and earning a leader are
+    // therefore DIFFERENT thresholds, and exactly one leader is drawn.
+    const four = ["2025a", "2025b", "2025b*", "2026a"].map((k) => ({ point: k, label: k, connector: true }));
+    const { svg } = renderChart(withPoints(four), ROWS, DIMS);
     const paths = leaderPaths(svg as SVGSVGElement);
     expect(paths.length).toBe(1);
-    // And it starts at the label the sweep MOVED, not at the one that stayed — that is what the
-    // leader "following" the placed label means. Plot adds its half-pixel crisp-edge offset to
-    // text but not to the arrow path, so the two agree to within 0.5px, against 12px of separation.
-    const start = leaderEnds(paths[0]!).start;
-    const stayed = auto.find((b) => b !== moved[0])!;
-    expect(Math.abs(start.y - moved[0]!.y)).toBeLessThan(1);
-    expect(Math.abs(start.y - stayed.y)).toBeGreaterThan(LABEL_ROW_H - 1);
+    // And it belongs to the label that travelled furthest, starting OUTSIDE that label's own text
+    // box — which is the whole point of the change. Plot adds a half-pixel crisp-edge offset to
+    // text but not to the arrow path, hence the tolerance.
+    const b = labelBoxes(svg as SVGSVGElement, ["2025b"])[0]!;
+    const { start: s, end: e } = leaderEnds(paths[0]!);
+    expect(Math.abs(s.y - b.y)).toBeGreaterThanOrEqual(LABEL_ROW_H / 2);
+    expect(e.y).toBeLessThan(s.y); // this label was pushed BELOW its point, so the shaft runs up
   });
 
-  it("a leader no longer than the gap itself is not drawn at all — Plot drops the whole shaft", () => {
-    // Only reachable by PINNING the label inside the gap: an auto-placed label is either at its
-    // default (no leader) or pushed clear of the marker disk (leader longer than the gap).
+  it("draws a shaft from exactly 15.1px of offset — the two insets added together", () => {
+    // The documented threshold, gated rather than asserted in prose: half a 13px row plus 2 at the
+    // label, plus MARK_POINT_R + 2 at the marker. One px below it nothing is drawn; one px above it
+    // a (hairline) shaft is. An earlier draft of the docs claimed ~19px, which was the figure for a
+    // COMFORTABLE shaft, not for the code's actual cut-off.
+    const threshold = LABEL_ROW_H / 2 + 2 + (MARK_POINT_R + 2);
+    expect(threshold).toBeCloseTo(15.1, 10);
+    const below = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 15 }]), ROWS, DIMS);
+    expect(leaderPaths(below.svg as SVGSVGElement)).toEqual([]);
+    const above = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 16 }]), ROWS, DIMS);
+    expect(leaderPaths(above.svg as SVGSVGElement).length).toBe(1);
+  });
+
+  it("a PINNED label is never swept, so it may sit over another callout's marker", () => {
+    // The marker-clearance rule reaches auto-placed labels only: a `dx`/`dy` box is `fixed` and is
+    // excluded from every placement column, so it is never tested against a disk. That is the same
+    // exemption pinning already carries for the frame-edge flip and the frame clamp, and CONFIG-SPEC
+    // says so — this gates it. Pinned straight down onto the neighbouring callout's point.
+    const pinned = withPoints([
+      { point: "2025b", label: "2025b", dy: -12 },
+      { point: "2025b*", label: "2025b*", dy: -12 },
+    ]);
+    const a = labelBoxes(renderChart(pinned, ROWS, DIMS).svg as SVGSVGElement, ["2025b", "2025b*"]);
+    // Both sit exactly where `dy: -12` puts them: 12px BELOW their own points, which on this
+    // fixture (the two points are 1.2px apart) lands each label across the other's marker.
+    const solo = labelBoxes(
+      renderChart(withPoints([{ point: "2025b", label: "2025b", dy: -12 }]), ROWS, DIMS).svg as SVGSVGElement,
+      ["2025b"],
+    );
+    expect(a[0]!.y).toBe(solo[0]!.y);
+    expect(Math.abs(a[0]!.y - a[1]!.y)).toBeLessThan(LABEL_ROW_H);
+  });
+
+  it("a leader with no room is not emitted at all — no mark, not an empty path", () => {
+    // It used to be pushed regardless and Plot dropped its geometry, leaving an empty `d`. The mark
+    // is now never created, and the categorical dot fallback must not stand in for it: that
+    // fallback is for an axis with no pixel geometry, not for a label touching its own point.
     const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dy: 4 }]), ROWS, DIMS);
-    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(1);
-    expect(leaderPaths(svg as SVGSVGElement)).toEqual([""]);
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(0);
+    const bare = renderChart(withPoints([{ point: "LONE", label: "Lonely" }]), ROWS, DIMS);
+    expect(DOT_GROUPS(svg as SVGSVGElement)).toBe(DOT_GROUPS(bare.svg as SVGSVGElement));
   });
 
   it("neither of the demo's two same-x labels ends on either marker", () => {
@@ -909,19 +960,18 @@ describe("annotations.points — connector leader defaults", () => {
     expect(movedCount).toBe(1);
   });
 
-  it("a pushed label never comes to rest on a callout's marker, so its shaft always draws", () => {
-    // The 1.14.0 defect: 2025b and 2025b* are 1.2px apart in y, one row's push is 13px and the
-    // connector default is only 12px, so the swept label used to land ON its own dot and Plot
-    // dropped the whole shaft. It now continues past the marker disk.
+  it("a label pushed only just clear of its marker is still too close to earn a shaft", () => {
+    // The two same-x callouts are 1.2px apart, so the sweep moves the lower label only far enough
+    // to clear the marker disk — 13.6px measured. That is past the dot (the 1.14.0 defect, where it
+    // landed ON it) but not far enough for a shaft: 13.6 less the label's 8.5 and the marker's 6.6
+    // is negative. Nothing is drawn, rather than a line through the label.
     const { svg } = renderChart(
       withPoints([{ point: "2025b", label: "{point_label}", connector: true }, { point: "2025b*", label: "{point_label}", connector: true }]),
       ROWS,
       DIMS,
     );
-    const paths = leaderPaths(svg as SVGSVGElement);
-    expect(paths.length).toBe(1);
-    const { start, end } = leaderEnds(paths[0]!);
-    expect(Math.hypot(end.x - start.x, end.y - start.y)).toBeGreaterThan(0);
+    expect(leaderPaths(svg as SVGSVGElement)).toEqual([]);
+    expect(svg.querySelectorAll('g[aria-label="arrow"]').length).toBe(0);
   });
 
   it("a purely LATERAL edge flip earns NO leader — the label still hugs its point", () => {
@@ -933,20 +983,23 @@ describe("annotations.points — connector leader defaults", () => {
     expect(leaderPaths(svg as SVGSVGElement)).toEqual([]);
   });
 
-  it("the leader stops MARK_POINT_R + 2 px short of the point's centre", () => {
-    // dx: 0, dy: 30 pins the label straight above the point, so the leader is vertical and the
-    // point's own centre is exactly 30px below the leader's start.
+  it("gives up half a row plus 2 at the label and MARK_POINT_R + 2 at the point", () => {
+    // dx: 0, dy: 30 pins the label straight above the point, so the whole 30px is vertical and the
+    // shaft is what survives both insets. Asserting the LENGTH pins both ends at once; the old
+    // form reconstructed the point from the shaft's start, which only held while the shaft began
+    // at the label's anchor.
     const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dx: 0, dy: 30 }]), ROWS, DIMS);
     const { start, end } = leaderEnds(leaderPaths(svg as SVGSVGElement)[0]!);
-    const centre = { x: start.x, y: start.y + 30 };
-    expect(Math.hypot(centre.x - end.x, centre.y - end.y)).toBeCloseTo(MARK_POINT_R + 2, 6);
+    const expected = 30 - (LABEL_ROW_H / 2 + 2) - (MARK_POINT_R + 2);
+    expect(Math.hypot(end.x - start.x, end.y - start.y)).toBeCloseTo(expected, 6);
   });
 
-  it("the gap is measured along the leader, so a horizontal leader gets the same 2px of white", () => {
+  it("owes nothing horizontally when dx anchors the box by the edge facing the point", () => {
+    // With an explicit dx the label is anchored BY that edge, so the shaft starts 2px out rather
+    // than half a box in: 40px of offset less 2 at the label and 6.6 at the marker.
     const { svg } = renderChart(withPoints([{ point: "LONE", label: "Lonely", connector: true, dx: -40, dy: 0 }]), ROWS, DIMS);
     const { start, end } = leaderEnds(leaderPaths(svg as SVGSVGElement)[0]!);
-    const centre = { x: start.x + 40, y: start.y };
-    expect(Math.hypot(centre.x - end.x, centre.y - end.y)).toBeCloseTo(MARK_POINT_R + 2, 6);
+    expect(Math.hypot(end.x - start.x, end.y - start.y)).toBeCloseTo(40 - 2 - (MARK_POINT_R + 2), 6);
   });
 
   it("the leader is a plain two-point line in the callout's colour, with no arrowhead geometry", () => {

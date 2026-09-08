@@ -137,6 +137,18 @@ export function makeXAdapter(
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
+        // An ANNUAL series — every point on 1 January — is identified by its year alone, so the
+        // month in the card is noise: `Jan 1950` under an axis reading `1950`. The axis already
+        // collapses a year-cadence span to a bare `%Y` (`tblTemporalXAxis`), and this stops the
+        // card disagreeing with it. Tested on the DATA, deliberately NOT on the tick cadence: a
+        // MONTHLY series across eighty years also gets decade ticks, and there the month is the
+        // only thing that tells two adjacent points apart. An explicit `tooltip_x_format` wins.
+        const annualData =
+          data.length > 0 &&
+          data.every((d: any) => {
+            const t = d._xd as unknown;
+            return t instanceof Date && t.getMonth() === 0 && t.getDate() === 1;
+          });
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
         let xDomain: [Date, Date];
         if (histogramDomain) {
@@ -160,7 +172,7 @@ export function makeXAdapter(
           // which is wrong only when the data is finer than the ticks (a daily series has every
           // point in a month sharing one label), hence spec.tooltip_x_format.
           tooltipXParse: (v) => +parseDate(v),
-          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? "%b %Y")(new Date(v)),
+          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? (annualData ? "%Y" : "%b %Y"))(new Date(v)),
         };
       },
     };

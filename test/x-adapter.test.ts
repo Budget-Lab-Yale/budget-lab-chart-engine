@@ -125,6 +125,30 @@ describe("makeXAdapter tooltip x-format override", () => {
     expect(opts.tooltipXFormat!(opts.tooltipXParse!("2022-01-01"))).toBe("2022-01-01");
   });
 
+  it("temporal: an ANNUAL series defaults to a bare year, not a month and year", () => {
+    // Every point on 1 January ⇒ the year alone identifies it, and the axis already prints a bare
+    // `%Y` for a year-cadence span, so `Jan 1950` in the card disagreed with `1950` on the frame.
+    const annual = [{ _xd: new Date(1947, 0, 1) }, { _xd: new Date(2026, 0, 1) }];
+    const opts = makeXAdapter("temporal").buildXOpts(annual);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950"))).toBe("1950");
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950-01-01"))).toBe("1950");
+  });
+
+  it("temporal: a MONTHLY series keeps the month, even across a decade-tick span", () => {
+    // The test is on the DATA, not the tick cadence: an eighty-year monthly series also gets decade
+    // ticks, and there the month is the only thing telling two adjacent points apart. Dropping it
+    // would make every point in a year share one card header.
+    const monthly = [{ _xd: new Date(1947, 0, 1) }, { _xd: new Date(1947, 1, 1) }, { _xd: new Date(2026, 0, 1) }];
+    const opts = makeXAdapter("temporal").buildXOpts(monthly);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950-02-01"))).toBe("Feb 1950");
+  });
+
+  it("temporal: an explicit tooltip_x_format still wins on an annual series", () => {
+    const annual = [{ _xd: new Date(1947, 0, 1) }, { _xd: new Date(2026, 0, 1) }];
+    const opts = makeXAdapter("temporal", undefined, undefined, "%b %Y").buildXOpts(annual);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950"))).toBe("Jan 1950");
+  });
+
   it("quarterly: formats as YYYYQ# when no pattern is given", () => {
     const opts = makeXAdapter("quarterly").buildXOpts(quarterlyData);
     expect(opts.tooltipXFormat!(opts.tooltipXParse!("2026Q3"))).toBe("2026Q3");

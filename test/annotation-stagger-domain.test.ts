@@ -122,6 +122,9 @@ describe("anchorAtZero: a connector's px offset is taken in the drawn coordinate
       /translate\(\s*([-\d.]+)/.exec(label?.getAttribute("transform") ?? "")?.[1] ?? Number.NaN,
     );
     expect(Number.isFinite(pointX)).toBe(true);
-    expect(pointX - Number(start![1])).toBeCloseTo(40, 1);
+    // 40px of offset less the 2px the shaft now gives up at the label's edge: with an explicit dx
+    // the box is anchored BY the edge facing the point, so it owes only that gap horizontally. The
+    // subject here is that the 40 is taken in the DRAWN space (anchorAtZero), not the exact inset.
+    expect(pointX - Number(start![1])).toBeCloseTo(38, 1);
   });
 });

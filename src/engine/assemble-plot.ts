@@ -1021,7 +1021,12 @@ export function assemblePlot({
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
-    const pColor = resolveColorOr(p.color, TBL.color.heading);
+    // A callout that belongs to a series takes that series' colour, so the label reads as part of
+    // the data it names rather than as detached chrome; an explicit `color:` still wins. A plain
+    // `x` + `y` callout has no series to inherit from and keeps the neutral heading colour. This is
+    // the same map the marks are painted from, so a label cannot disagree with its own point.
+    const pSeriesColor = p.series != null ? colors.get(p.series) : undefined;
+    const pColor = resolveColorOr(p.color, pSeriesColor ?? TBL.color.heading);
     // Default offset is slightly larger when a connector is drawn, so the leader has room. dy is
     // + = UP, so negate the user's value for SVG (defaults are already SVG-up: -6 / -12). An
     // auto-placed label (6b) overrides the default; an explicit dx/dy always wins. `autoDx` carries the frame
@@ -1041,6 +1046,21 @@ export function assemblePlot({
     // leader is a ~7px stub that reads as noise. A fixed callout never enters `autoDy`, so the
     // `dx`/`dy` test is not redundant.
     const leader = p.connector && (p.dx != null || p.dy != null || autoDy.has(pi));
+    // Optional word-wrap to a max px width (Plot renders the "\n"s as multiple lines).
+    // Hoisted above the leader so the leader can measure the label box it must start clear of.
+    const labelText = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
+    // Where the leader leaves the LABEL, from the label's anchor. The anchor is the box's
+    // vertical CENTRE, so a leader drawn from it ran up through the label's own text — on a
+    // wrapped label, through every row of it. With `dx === 0` the box straddles the anchor and
+    // the leader is vertical, so it owes half the box height; with an explicit or flipped `dx`
+    // the box is anchored BY the edge facing the point (`left` in 6b), so it owes nothing
+    // horizontally. Plus 2px of air, mirroring the gap left at the marker end.
+    const leaderStartInset = (dx === 0 ? (labelText.split("\n").length * LABEL_ROW_H) / 2 : 0) + 2;
+    // No room between the label's edge and the marker's ⇒ no shaft. Drawn as nothing, NOT as
+    // the dot below: that fallback is for an axis with no pixel geometry, where a pinned
+    // callout still needs its point marked. Here the label already touches its point, and a
+    // dot under it is the redundant mark the 1.14.0 review rejected.
+    const leaderFits = Math.hypot(dx, dy) - leaderStartInset - LEADER_END_INSET > 0;
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
     if (leader && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
@@ -1051,26 +1071,27 @@ export function assemblePlot({
       const labelN = baseN + dx * dppx;
       const labelX = typeof px === "number" ? labelN : new Date(labelN);
       const labelY = py - dy * dppy;
-      marks.push(
-        Plot.arrow([{ x1: labelX, y1: labelY, x2: px, y2: py }], {
-          x1: "x1",
-          y1: "y1",
-          x2: "x2",
-          y2: "y2",
-          stroke: pColor,
-          strokeWidth: 1,
-          // `Plot.arrow` with no head rather than `Plot.link`: only the arrow mark carries
-          // `insetEnd`, and the inset is the whole point of the gap. At headLength 0 Plot's arrow
-          // renderer emits the bare `M x1,y1 L x2,y2` shaft and skips the head segment entirely.
-          headLength: 0,
-          insetEnd: LEADER_END_INSET, // stop clear of the marker's outline, not inside it
-        }),
-      );
+      if (leaderFits) {
+        marks.push(
+          Plot.arrow([{ x1: labelX, y1: labelY, x2: px, y2: py }], {
+            x1: "x1",
+            y1: "y1",
+            x2: "x2",
+            y2: "y2",
+            stroke: pColor,
+            strokeWidth: 1,
+            // `Plot.arrow` with no head rather than `Plot.link`: only the arrow mark carries
+            // `insetEnd`, and the inset is the whole point of the gap. At headLength 0 Plot's arrow
+            // renderer emits the bare `M x1,y1 L x2,y2` shaft and skips the head segment entirely.
+            headLength: 0,
+            insetStart: leaderStartInset, // start clear of the label's own text
+            insetEnd: LEADER_END_INSET, // stop clear of the marker's outline, not inside it
+          }),
+        );
+      }
     } else if (leader) {
       marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
     }
-    // Optional word-wrap to a max px width (Plot renders the "\n"s as multiple lines).
-    const labelText = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
     marks.push(
       Plot.text([{ x: px, y: py, t: labelText }], {
         x: "x",

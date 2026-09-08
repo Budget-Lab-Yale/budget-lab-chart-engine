@@ -81,12 +81,13 @@ export interface PlacementOpts {
  * byte-identically to before this existed. That is also why a lone label near the frame edge is
  * NOT clamped: the clamp considers only labels that took part in a collision.
  *
- * A label that HAS left its default additionally clears every callout's marker disk (`box.disk`),
- * continuing past the marker in the sweep direction. That constraint deliberately does not apply
- * while a label sits at its input y: a 13px-tall box centred on the 12px connector default grazes
- * its own 6.6px disk by about a pixel, so enforcing it there would move every lone callout and
- * break the byte-identity guarantee above. It applies the moment something pushes the label, which
- * is when the label would otherwise cross the marker rather than graze it.
+ * Every label clears every OTHER callout's marker disk (`box.disk`), moved or not, continuing past
+ * the marker in the sweep direction: a label parked on a different labelled point cannot be read.
+ * A label's OWN marker is exempt while the label sits at its input y — a 13px-tall box centred on
+ * the 12px connector default grazes its own 6.6px disk by about a pixel, so enforcing it there
+ * would move every lone callout and break the byte-identity guarantee above — and binds the moment
+ * something pushes it, which is when the label would cross the marker rather than graze it. A lone
+ * callout therefore still cannot move: there is no other marker for it to clear.
  *
  * Within each column of horizontally-near movable boxes, labels are settled by a sweep in the
  * current visual order: each label is pushed (down, or up in the mirror sweep) until it collides
@@ -111,7 +112,11 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
   // a chart of single-line callouts clamps exactly where it did before these became box-specific.
   const loOf = (b: CalloutBox): number => o.top + b.h / 2;
   const hiOf = (b: CalloutBox): number => o.bottom - b.h / 2;
-  const disks = boxes.map((b) => b.disk).filter((d): d is CalloutDisk => d != null);
+  // Owner-tagged: a label's OWN marker is exempt while the label sits at its default, but ANOTHER
+  // callout's marker never is (see the sweep below).
+  const disks = boxes
+    .map((b, i) => ({ owner: i, d: b.disk }))
+    .filter((e): e is { owner: number; d: CalloutDisk } => e.d != null);
 
   // Columns: union-find over the movable boxes on horizontal nearness alone (A near B, B near C
   // joins A and C), so a whole stack is swept together even when its ends never touch.
@@ -162,21 +167,26 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
             involved.add(j);
             moved = again = true;
           }
-          // Re-read after the label pushes above: a label only owes the markers a berth once it has
-          // left its default. Every push here is monotone in `dir` and lands on one of a finite set
-          // of obstacle-determined positions, so the loop cannot cycle.
-          if (ys[i] !== boxes[i]!.y) {
-            for (const d of disks) {
-              const clear = clearOfDisk(boxes[i]!, ys[i]!, d, dir);
-              // The `<= 0` arm is a termination guard, not a nicety: `d.y + dir * need` can come
-              // back a float hair SHORT of clearing the disk it was solved for, and re-solving it
-              // to the same number forever is an infinite loop (it hung the suite once). Every
-              // accepted push is therefore strictly monotone in `dir`.
-              if (clear == null || dir * (clear - ys[i]!) <= 0) continue;
-              ys[i] = clear;
-              involved.add(i);
-              moved = again = true;
-            }
+          // Re-read after the label pushes above. Every push here is monotone in `dir` and lands on
+          // one of a finite set of obstacle-determined positions, so the loop cannot cycle.
+          for (const { owner, d } of disks) {
+            // A label's OWN marker is exempt WHILE THE LABEL IS STILL AT ITS DEFAULT: a one-row box
+            // centred on the 12px connector default grazes its own 6.6px disk by about a pixel, and
+            // enforcing it there would move every lone callout and break the byte-identity
+            // guarantee above. ANOTHER callout's marker is never exempt, at any offset — a label
+            // parked on top of a different labelled point is unreadable, and reading it as "which
+            // of these two labels belongs to this dot?" is exactly the confusion reported on the
+            // 1.14.0 demo. A lone callout has no other marker to clear, so it still cannot move.
+            if (owner === i && ys[i] === boxes[i]!.y) continue;
+            const clear = clearOfDisk(boxes[i]!, ys[i]!, d, dir);
+            // The `<= 0` arm is a termination guard, not a nicety: `d.y + dir * need` can come
+            // back a float hair SHORT of clearing the disk it was solved for, and re-solving it
+            // to the same number forever is an infinite loop (it hung the suite once). Every
+            // accepted push is therefore strictly monotone in `dir`.
+            if (clear == null || dir * (clear - ys[i]!) <= 0) continue;
+            ys[i] = clear;
+            involved.add(i);
+            moved = again = true;
           }
         }
       }

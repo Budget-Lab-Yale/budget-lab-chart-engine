@@ -77,7 +77,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   drawn (a categorical x-axis, or a render with no width/height) a pinned callout still falls back
   to a small dot and an auto-placed one now draws nothing. (#42)
 
+### Changed
+- **A point callout's label takes its series' colour by default.** It was a flat neutral
+  (`TBL.color.heading`) whatever the callout pointed at, so a label read as chrome detached from the
+  data rather than as a note ON that series. A callout keyed by `point:` now takes the colour of the
+  row it matched, and one snapped by `series:` the colour of that series — the same map the marks
+  are painted from, so a label cannot disagree with its own dot. An explicit `color:` still wins,
+  and a plain `x` + `y` callout has no series to inherit from and keeps the neutral. **No published
+  figure moves:** every callout in the archive sets `color` explicitly (`etr-vintages` and
+  `price-waterfall` at `#6D6D6D`, the untracked scorecard at violet).
+- **An annual temporal series' hover card reads a bare year.** The card defaulted to `%b %Y`, so an
+  annual series showed `Jan 1950` under an axis reading `1950` — the axis already collapses a
+  year-cadence span to a bare `%Y`. The default is now `%Y` when every x cell falls on 1 January.
+  Tested on the DATA and deliberately not on the tick cadence: a monthly series across eighty years
+  also draws decade ticks, and there the month is the only thing separating adjacent points. An
+  explicit `tooltip_x_format` still wins. **No published figure moves** — all twelve tracked
+  temporal specs are daily or monthly.
+
 ### Fixed
+- **An auto-placed callout label no longer parks on another labelled point.** Only a MOVED label
+  cleared the markers; a label sitting at its default was exempt, so on the 1.14.0 demo "2025a" came
+  to rest squarely on a different callout's dot — leaving the reader to guess which of two labels
+  belonged to it. Every AUTO-PLACED label now clears every other callout's marker, whether or not
+  anything else moved it. A **pinned** label (`dx`/`dy`) is not swept at all, here as for the flip
+  and the frame clamp, so it still sits exactly where the author put it. A label's own marker
+  stays exempt while it sits at its default, which is what keeps a lone callout byte-identical, and
+  binds the moment anything pushes it. **No published figure moves:** the two tracked callouts are
+  each alone on their chart (no other marker to clear) and the untracked scorecard's four are all
+  pinned, and pinned labels are never swept.
+- **A connector leader no longer runs up through its own label's text.** It started at the label's
+  ANCHOR, which is the box's vertical centre, so on a wrapped or line-broken label the shaft was
+  drawn through every row of it — reported as looking terrible on the 1.14.0 demo. It now starts at
+  the label's edge: half the box height plus 2px with no `dx`, or just the 2px when an explicit or
+  flipped `dx` anchors the box by the edge facing the point. Where the two insets leave no room the
+  leader is **not drawn at all**, rather than emitted as an invisible or text-crossing line — the
+  label is already touching its point, the same reasoning that gives a callout at its default no
+  leader. The threshold is the two insets added together — **15.1px** for a one-row label — so
+  **clearing the marker and earning a leader are now different thresholds**: a label the sweep
+  pushes just clear of a dot (13.6px on the demo fixture) shows none, while one pushed 26.6px shows
+  an 11px shaft. A `connector: true` pinned closer than 15.1px draws no line at all, and one pinned
+  just past it draws a hairline. No tracked published figure carries a
+  `connector`, so nothing published moves.
 - **A multi-line point callout is clamped to the frame by its whole height, not by one row.** The
   clamp bounds were computed once, from half of a single row, and applied to every label — so a
   callout wrapped by `maxWidth` or broken by an explicit `\n` (both new in this release) had its

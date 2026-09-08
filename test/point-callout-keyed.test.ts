@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { substituteRowTokens } from "../src/spec/annotations";
 import { renderChart, renderFigure } from "../src/engine/index";
-import { MARK_POINT_R } from "../src/engine/theme";
+import { MARK_POINT_R, TBL } from "../src/engine/theme";
 import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -350,6 +350,53 @@ describe("substituteRowTokens (pure helper)", () => {
   it("leaves {value} literal when no value string is supplied, and fills it in the same pass when one is", () => {
     expect(substituteRowTokens("{point_label}: {value}", { point_label: "A" })).toBe("A: {value}");
     expect(substituteRowTokens("{point_label} = {value}", { point_label: "Fc {value}", value: "12" })).toBe("Fc {value} = 12");
+  });
+});
+
+describe("annotations.points — the label takes its series' colour", () => {
+  /** The resolved fill of a mark's text/shape, wherever Plot hung it. */
+  const fillOf = (el: Element | null): string | null => {
+    let n: Element | null = el;
+    while (n && n.tagName.toLowerCase() !== "svg") {
+      const f = n.getAttribute("fill") ?? /(?:^|;)\s*fill:\s*([^;]+)/.exec(n.getAttribute("style") ?? "")?.[1];
+      if (f && f !== "none") return f.trim();
+      n = n.parentElement;
+    }
+    return null;
+  };
+  const textEl = (svg: SVGSVGElement, s: string) =>
+    Array.from(svg.querySelectorAll("text")).find((t) => t.textContent === s) ?? null;
+
+  it("defaults to the colour of the series the keyed row belongs to", () => {
+    // A callout is about a data point, so it reads as part of that series rather than as detached
+    // chrome. Checked without matching a dot by position (which would need the scales): the label's
+    // fill must be one the chart actually paints a dot with, and must NOT be the neutral it used to
+    // default to. Both fail if the default is still one flat colour for every callout.
+    const { svg } = renderChart(withPoints([{ point: "2025b", label: "2025b" }]), ROWS, { width: 720, height: 400, document });
+    const fill = fillOf(textEl(svg as SVGSVGElement, "2025b"));
+    expect(fill).toBeTruthy();
+    expect(fill).not.toBe(TBL.color.heading);
+    const dotFills = new Set(
+      Array.from(svg.querySelectorAll('g[aria-label="dot"] circle')).map((c) => fillOf(c)),
+    );
+    expect(dotFills.has(fill)).toBe(true);
+  });
+
+  it("an explicit color still wins", () => {
+    const { svg } = renderChart(withPoints([{ point: "2025b", label: "2025b", color: "violet" }]), ROWS, { width: 720, height: 400, document });
+    const labelFill = fillOf(textEl(svg as SVGSVGElement, "2025b"));
+    const dotFill = fillOf(svg.querySelector('g[aria-label="dot"] circle'));
+    expect(labelFill).not.toBe(dotFill);
+  });
+
+  it("a plain x + y callout has no series to inherit from and stays neutral", () => {
+    // Nothing says which series it refers to, so guessing would be worse than the neutral it had.
+    const spec = { ...BASE, annotations: { points: [{ x: "2.32", y: -1.5, label: "loose" }] } } as unknown as ChartSpec;
+    const { svg } = renderChart(spec, ROWS, { width: 720, height: 400, document });
+    const labelFill = fillOf(textEl(svg as SVGSVGElement, "loose"));
+    const dotFill = fillOf(svg.querySelector('g[aria-label="dot"] circle'));
+    expect(labelFill).toBeTruthy();
+    expect(labelFill).not.toBe(dotFill);
   });
 });
 
