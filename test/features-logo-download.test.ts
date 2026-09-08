@@ -63,7 +63,7 @@ describe("buildExportSvg — composition", () => {
     expect(svg.textContent).toContain("Test Source");
   });
 
-  it("uses a fixed 1000x750 (4:3) frame, matching AILMT", () => {
+  it("uses a fixed 1000x750 (4:3) frame", () => {
     const svg = buildExportSvg(SPEC, ROWS);
     expect(svg.getAttribute("width")).toBe("1000");
     expect(svg.getAttribute("height")).toBe("750");

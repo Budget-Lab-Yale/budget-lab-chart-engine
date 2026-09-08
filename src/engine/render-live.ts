@@ -10,13 +10,19 @@ import type { NetMode } from "../spec/bar-stack.js";
 import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
 import {
+  LEGEND_COLUMN_WIDTH,
+  LEGEND_GAP,
+  legendSeriesCount,
+  orderForRightLegend,
+  resolveLegendPosition,
+} from "./legend-layout.js";
+import {
   parseTitleTokens,
   resolveActiveOptionColor,
   resolveSelections,
   resolveTitleText,
 } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
-import type { LegendItem } from "./index.js";
 import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
@@ -232,50 +238,11 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
 // (outerContainerWidth − LEGEND_COLUMN_WIDTH − LEGEND_GAP) so the ResizeObserver observes
 // the OUTER card (stable), not the canvas box (which would shrink as the legend takes space →
 // feedback loop).
-const LEGEND_COLUMN_WIDTH = 160;
-const LEGEND_GAP = 16;
 
 // When the card is too narrow to fit both the chart floor and the legend column, fall back to
 // the top legend so the chart remains usable.
 const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGEND_GAP;
 
-/**
- * Resolve the effective legend position for this chart.
- *
- * Rule (per Style-Guide §8.2/§8.3):
- *   - Explicit `spec.legendPosition` wins over the defaults below — but NOT over `legend: false`
- *     (handled first), nor over the narrow-card fallback applied by the caller. A
- *     small_multiples figure never reaches here, and the PNG export always draws a top legend.
- *   - Otherwise: "right" when chartType === "stacked" AND (seriesCount >= 5 OR the chart is
- *     diverging — any row with _y < 0); "top" otherwise.
- *
- * The fallback to "top" when the card is too narrow is enforced in mountChart (not here),
- * after the card width is known.
- */
-function resolveLegendPosition(
-  spec: ChartSpec,
-  seriesCount: number,
-  rows: TidyRow[],
-): "top" | "right" {
-  // `legend: false` suppresses the legend entirely (buildLegendItems returns null), so no
-  // right column must ever be reserved — treat the layout as top (whose slot stays empty and
-  // takes no space) regardless of an explicit legendPosition or the stacked defaults below.
-  if (spec.legend === false) return "top";
-  if (spec.legendPosition === "top" || spec.legendPosition === "right") {
-    return spec.legendPosition;
-  }
-  if (spec.chartType === "stacked") {
-    if (seriesCount >= 5) return "right";
-    // Diverging: any row with a negative value.
-    const valueCol = resolveColumns(spec, rows).value;
-    const isDiverging = rows.some((r) => {
-      const v = typeof r._y === "number" ? r._y : Number(r[valueCol]);
-      return Number.isFinite(v) && v < 0;
-    });
-    if (isDiverging) return "right";
-  }
-  return "top";
-}
 
 type OverlayEl = HTMLElement & { _ro?: ResizeObserver };
 
@@ -844,7 +811,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // resize draw() loop, so the control + its state survive the engine's own re-renders.
   const selections = resolveSelections(spec, opts.selections);
 
-  // Color accent feed (AILMT parity — charts.js L556-562): a single-series chart driven by a
+  // Color accent feed: a single-series chart driven by a
   // colored title selector adopts the active option's resolved color as its line color, so it
   // matches the selector's tinted label. `requestAccentRedraw` is assigned once `draw` exists
   // below (forward reference — only invoked later, from a user's selection, by which point the
@@ -914,30 +881,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let currentLegendHandle: LegendHandle | null = null;
   let currentSeriesNames: string[] = [];
 
-  /**
-   * Order legendItems for the right-legend column to match the VISUAL top→bottom stack:
-   *   - When the engine supplies `legendVisualOrder` (stacked charts), series rows follow
-   *     that order ([positives reversed] ++ [negatives in declaration order]).
-   *   - Otherwise fall back to REVERSED declaration order (top-of-stack first).
-   *   - extra rows (e.g. the interactive Total pseudo-series) are appended at the END in
-   *     original relative order.
-   */
-  function orderForRightLegend(items: LegendItem[], visualOrder?: string[]): LegendItem[] {
-    const series = items.filter((i) => !i.nonInteractive && !i.isExtra);
-    const extras = items.filter((i) => i.nonInteractive || i.isExtra);
-    let orderedSeries: LegendItem[];
-    if (visualOrder && visualOrder.length) {
-      const bySeries = new Map(series.map((i) => [i.series, i]));
-      orderedSeries = visualOrder
-        .map((s) => bySeries.get(s))
-        .filter((i): i is LegendItem => i != null);
-      // Append any series not named in visualOrder (defensive), preserving their order.
-      for (const i of series) if (!visualOrder.includes(i.series)) orderedSeries.push(i);
-    } else {
-      orderedSeries = [...series].reverse();
-    }
-    return [...orderedSeries, ...extras];
-  }
 
   const draw = (
     outerWidth: number,
@@ -953,7 +896,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
 
-    // Color accent feed (AILMT parity): resolve the active title-selector option's color (raw
+    // Color accent feed: resolve the active title-selector option's color (raw
     // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
     // it up immediately. renderChart only applies it when the chart resolves to exactly one
     // series (engine/index.ts) — a multi-series chart's palette/series_colors stay untouched.
@@ -1536,7 +1479,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   try {
     const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
     const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: prelimHooks });
-    prelimSeriesCount = (prelim.legendItems ?? []).filter((i) => !i.nonInteractive && !i.isExtra).length;
+    prelimSeriesCount = legendSeriesCount(prelim.legendItems ?? []);
   } catch {
     // Ignore — draw() will surface the error.
   }
@@ -1632,7 +1575,7 @@ export interface TitleSelectorWiring {
   seriesColors?: Record<string, string>;
   /** Called after a selection's shared-state update + host callback + CustomEvent have all
    *  fired — mountChart's hook to re-render the chart body so a single-series chart's line
-   *  adopts the newly-active option's color (AILMT parity; see engine/index.ts
+   *  adopts the newly-active option's color (see engine/index.ts
    *  RenderOptions.accentColor). mountFigure (small multiples) omits this: the label still
    *  tints, but the per-pane grid isn't re-rendered — each pane is one facet's chart body, not a
    *  single accent target, and this port does not touch figure.ts. */

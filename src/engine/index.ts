@@ -112,11 +112,11 @@ export interface RenderOptions {
    *  chart, or a faceted chart's figure orchestrator omitting it) → every marker renders,
    *  unchanged from today. */
   paneFacetValue?: string;
-  /** Inline title-selector color accent (AILMT parity — charts.js L556-562): an already-resolved
+  /** Inline title-selector color accent: an already-resolved
    *  CSS color (run through `palette.resolveColor` by the caller) applied as the sole series'
    *  color WHEN the chart resolves to exactly one series (after `series_order` filtering). A
-   *  multi-series chart ignores this — its distinct palette/`series_colors` stay untouched, matching
-   *  the tracker's single-line-only accent-feed. render-live.ts recomputes this from the active
+   *  multi-series chart ignores this — its distinct palette/`series_colors` stay untouched, because
+   *  one accent colour can only stand for one line. render-live.ts recomputes this from the active
    *  title-selector option on every selection change and re-renders; export-png.ts resolves it
    *  once from `selections` for a static export. Absent (the common case — no title_selectors, or
    *  a multi-series chart) ⇒ byte-identical to before this field existed. */

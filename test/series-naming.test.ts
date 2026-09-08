@@ -219,25 +219,24 @@ describe("documented interactions of series_legend", () => {
     expect(legendLabels(c).length).toBeGreaterThan(0);
   });
 
-  it("draws the exported legend above the chart even when the live one is on the right", () => {
+  it("draws the exported legend on the right too, where the live one is on the right", () => {
+    // This test asserted the OPPOSITE until 1.14.0: the export composed its legend into the top
+    // chrome whatever the live card did, because `legendPosition` was resolved inside
+    // render-live.ts and the export never saw it. Nothing anywhere recorded a reason for the two
+    // to differ, and a reader who arranged a chart on screen got a different layout in the
+    // download. The decision now lives in engine/legend-layout.ts and both paths call it.
     const live = mountRows(stacked({}), stackedRows);
     expect(!!live.querySelector(".figure-body--legend-right")).toBe(true);
-    // Same spec through the export: the legend is composed into the top chrome, so no right column
-    // exists to find. Asserted on the ORDER — the legend text sits above the plot.
     const svg = buildExportSvg(stacked({}), stackedRows);
     const texts = Array.from(svg.querySelectorAll("text"));
     const legendIdx = texts.findIndex((t) => (t.textContent ?? "").trim() === "A");
     expect(legendIdx).toBeGreaterThanOrEqual(0);
     // Position within the frame, not order among <text> nodes: the axis labels are placed by
-    // transform and carry no `y`, so there is nothing to compare against that way. A top legend
-    // sits in the upper-left chrome; a right column would be far across and vertically centred.
-    const legendY = Number(texts[legendIdx]!.getAttribute("y"));
+    // transform and carry no `y`, so there is nothing to compare against that way.
     const legendX = Number(texts[legendIdx]!.getAttribute("x"));
     const w = Number(svg.getAttribute("width"));
-    const h = Number(svg.getAttribute("height"));
-    expect([legendX, legendY, w, h].every(Number.isFinite)).toBe(true);
-    expect(legendY).toBeLessThan(h / 2);
-    expect(legendX).toBeLessThan(w / 2);
+    expect([legendX, w].every(Number.isFinite)).toBe(true);
+    expect(legendX).toBeGreaterThan(w / 2);
   });
 
   it("dims the other marks when one of SEVERAL rows is selected", () => {

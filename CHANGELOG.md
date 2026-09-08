@@ -95,6 +95,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   temporal specs are daily or monthly.
 
 ### Fixed
+- **The PNG export puts the legend where the live card puts it.** A stacked chart with five or more
+  series — or a diverging one — lays its legend in a right-hand column on screen, and the download
+  drew it above the chart regardless. `legendPosition` was resolved inside `render-live.ts`, so the
+  export never saw it; `export-png.ts` contained no reference to it at all. Reported from a real
+  download. Nothing recorded a reason for the two to differ, and a test had recorded the
+  divergence as behaviour, which is why it survived.
+  The fix is a third module, `src/engine/legend-layout.ts`, holding the position rule, the column
+  width and gap, the series count the rule is defined on, and the top-to-bottom ordering — imported
+  by BOTH paths, so they cannot drift again. It could not simply be imported from `render-live.ts`:
+  that module imports `exportChartPng` for its download button, so the reverse import would be a
+  runtime cycle. The export now reserves 160px plus a 16px gap, renders the chart into what remains,
+  stacks the legend rows beside the plot in the same visual order the live column uses, wraps a
+  label too long for the column, and puts a shape legend below the colour rows in the same column.
+  A `small_multiples` figure keeps its top legend, as it does live.
 - **An auto-placed callout label no longer parks on another labelled point.** Only a MOVED label
   cleared the markers; a label sitting at its default was exempt, so on the 1.14.0 demo "2025a" came
   to rest squarely on a different callout's dot — leaving the reader to guess which of two labels
@@ -272,6 +286,14 @@ A repin re-renders every published figure at once — here is what a maintainer 
   published) and whose four pinned callouts will change appearance on the next render — expected. No
   golden fixture carries a `connector` either (`grep -l connector test/fixtures/*.yaml` is empty), so
   this change is invisible to the golden suite and rests on the tests in the engine. (#42)
+- **No published figure changes.** The right-hand PNG legend reaches only a STANDALONE chart, and
+  the archive has none that qualifies: parsing all 40 tracked `chart.yaml` files, no spec sets
+  `legendPosition`, and every stacked spec declares `small_multiples` — a figure has only a top
+  legend slot, in the export as on screen. So there are zero stacked non-figure specs, and nothing
+  published takes the new path. (An earlier draft of this note named `ai-fiscal/revenue-by-income-type`
+  and `/revenue-by-instrument` as changing; both are small multiples, so neither does. The scan
+  behind that claim filtered on chart type, series count and sign without applying the figure gate
+  that decides whether the position rule runs at all.)
 - **Every numeric x axis gains a thousands separator, and its crosshair header now rounds.** One
   grouping rule (`formatNumericX` / `formatNumericTick`, `src/engine/util.ts`) now serves the axis
   tick labels, the crosshair header, the scatter hover card's x row and the `{x}` callout token, so
