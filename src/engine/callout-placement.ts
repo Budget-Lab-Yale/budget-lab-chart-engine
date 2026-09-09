@@ -13,6 +13,11 @@ export interface CalloutBox {
   h: number;
   /** An explicit `dx` or `dy` pins the label: it keeps `y` exactly and the others route around it. */
   fixed: boolean;
+  /** This callout draws a leader once it leaves its default, so a DISPLACED position has to leave
+   *  room for a visible shaft between the label's edge and the marker's — not merely clear the
+   *  marker. Without it the search would park a label 13px out, clear of the dot and still too
+   *  close to draw the line that says which dot it names. */
+  wantsLeader?: boolean;
   /** The callout's own point, as a disk no MOVED label may come to rest on: the marker radius plus
    *  the leader's end gap. Every box's disk constrains every moved label, its own included — a
    *  label pushed one row down from the 12px connector default would otherwise land ON its point,
@@ -72,6 +77,10 @@ export interface PlacementOpts {
    *  frame by half of every extra row — contradicting the clamp CONFIG-SPEC promises. */
   top: number;
   bottom: number;
+  /** Px a displaced leader-drawing label owes BEYOND half its own height, so a shaft is actually
+   *  visible: the gap at the label's edge, the gap at the marker, and a minimum shaft. Supplied by
+   *  assemble-plot, which owns those constants. Absent ⇒ the marker radius alone. */
+  leaderClearance?: number;
 }
 
 /**
@@ -99,7 +108,7 @@ export interface PlacementOpts {
  * label then sits above `lo`, the top wins — it is pinned to `lo` and the column swept downward,
  * overflowing the bottom when a stack is taller than the frame.
  */
-export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): number[] {
+function sweepPlace(boxes: CalloutBox[], o: PlacementOpts): number[] {
   const n = boxes.length;
   const ys = boxes.map((b) => b.y);
   const near = (a: CalloutBox, b: CalloutBox): boolean => a.x0 < b.x1 + o.gap && b.x0 < a.x1 + o.gap;
@@ -230,4 +239,298 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
     }
   }
   return ys;
+}
+
+// ---------------------------------------------------------------------------
+// Connector-minimising placement
+// ---------------------------------------------------------------------------
+
+/** Above this many movable callouts the subset search is abandoned for the sweep: the search is
+ *  3^n in the number of movable labels, and no real chart is near this. */
+const MAX_SEARCH_CALLOUTS = 9;
+
+/**
+ * How far a DISPLACED label's centre must sit from its own point.
+ *
+ * Clearing the marker is not enough for a callout that draws a leader: the shaft gives up room at
+ * the label's edge and again at the marker, so a label parked just clear of the dot has nothing
+ * left to draw with — which is how a moved label ended up with no line to say which dot it named.
+ */
+function displacedNeed(b: CalloutBox, o: PlacementOpts): number {
+  const marker = b.disk ? b.disk.r : 0;
+  const leader = b.wantsLeader ? (o.leaderClearance ?? marker) : marker;
+  return b.h / 2 + Math.max(marker, leader);
+}
+
+/**
+ * The position closest to `from` in direction `dir` at which box `i` is clear of every obstacle and
+ * every marker, or null if the frame runs out first.
+ *
+ * Same monotone push the sweep uses, run for ONE label against an already-settled arrangement:
+ * every accepted step advances strictly in `dir` (see `clearBy`), and the obstacles do not move,
+ * so it terminates.
+ */
+function settle(
+  i: number,
+  from: number,
+  dir: 1 | -1,
+  boxes: CalloutBox[],
+  ys: number[],
+  obstacles: number[],
+  o: PlacementOpts,
+): number | null {
+  const b = boxes[i]!;
+  const clearance = (a: CalloutBox, c: CalloutBox): number => (a.h + c.h) / 2;
+  const near = (a: CalloutBox, c: CalloutBox): boolean => a.x0 < c.x1 + o.gap && c.x0 < a.x1 + o.gap;
+  let y = from;
+  for (let guard = 0; guard < 4 * (boxes.length + 2); guard++) {
+    let advanced = false;
+    for (const j of obstacles) {
+      if (j === i || !near(b, boxes[j]!)) continue;
+      if (Math.abs(y - ys[j]!) >= clearance(b, boxes[j]!)) continue;
+      const target = clearBy(ys[j]!, clearance(b, boxes[j]!), dir);
+      if (dir * (target - y) > 0) {
+        y = target;
+        advanced = true;
+      }
+    }
+    for (const [j, other] of boxes.entries()) {
+      if (!other.disk) continue;
+      // Its OWN marker is handled by `from` already being `displacedNeed` away; a foreign one is
+      // never exempt, at any offset.
+      const clear = clearOfDisk(b, y, other.disk, dir);
+      if (clear != null && dir * (clear - y) > 0 && (j !== i || Math.abs(y - other.disk.y) < displacedNeed(b, o))) {
+        y = clear;
+        advanced = true;
+      }
+    }
+    if (!advanced) break;
+  }
+  if (y - b.h / 2 < o.top - 1e-9 || y + b.h / 2 > o.bottom + 1e-9) return null;
+  return y;
+}
+
+/** Does the segment a→b touch the axis-aligned rectangle? Liang-Barsky clip, so a shaft that only
+ *  grazes a corner counts and one that passes outside does not. */
+function segmentHitsRect(
+  ax: number, ay: number, bx: number, by: number,
+  x0: number, y0: number, x1: number, y1: number,
+): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  for (const [p, q] of [[-dx, ax - x0], [dx, x1 - ax], [-dy, ay - y0], [dy, y1 - ay]] as Array<[number, number]>) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+  }
+  return t0 <= t1;
+}
+
+/**
+ * Where a label's leader starts horizontally. The shaft runs from the label's anchor to the point,
+ * and the anchor is the box's own centre only when the label is centred on its point; an explicit
+ * or flipped `dx` anchors the box BY the edge facing the point, which is what makes the shaft
+ * slanted rather than vertical.
+ */
+function anchorX(b: CalloutBox, px: number): number {
+  const mid = (b.x0 + b.x1) / 2;
+  if (Math.abs(mid - px) < 0.5) return px;
+  return b.x0 > px ? b.x0 : b.x1;
+}
+
+/**
+ * How many labels the drawn leaders cross, over a WHOLE arrangement.
+ *
+ * Scored once every label has its final position, and over every leader that is actually drawn —
+ * each displaced leader-drawing label, plus every PINNED one, which draws unconditionally. Scoring
+ * incrementally as labels were placed missed two whole classes: an earlier-placed label's shaft
+ * crossing a later-placed one, and a pinned label's shaft crossing anything the search moved.
+ *
+ * The shaft is the real segment from the label's anchor to just short of the marker, not a vertical
+ * line at the point's x — for a flipped or pinned label those differ by the `dx` offset, and since
+ * crossings are the first ranking key even a six-pixel discrepancy can pick a worse arrangement.
+ *
+ * A COUNT rather than a veto, because with several callouts sharing nearly one x no arrangement can
+ * avoid every crossing: whichever label is kept sits in the upward corridor, and a second label
+ * sent the same way sits in the first's. Treated as a hard constraint the search finds nothing at
+ * all and falls back to the sweep, which is worse on both counts. Ranked ahead of the connector
+ * count because a line drawn through text is a rendering defect, where an extra connector is only
+ * noise — and the paint order (assemble-plot pushes callout labels last) keeps the residue legible.
+ */
+function arrangementCrossings(
+  boxes: CalloutBox[],
+  ys: number[],
+  drawsLeader: boolean[],
+  o: PlacementOpts,
+): number {
+  let crossings = 0;
+  for (const [i, b] of boxes.entries()) {
+    if (!drawsLeader[i] || !b.disk) continue;
+    const px = b.disk.x;
+    const ax = anchorX(b, px);
+    const ay = ys[i]!;
+    // The shaft assemble-plot actually draws: from the label's anchor toward the point, inset at
+    // the label end and again at the marker. Modelled along the REAL direction, not vertically —
+    // a pinned `dx: 16, dy: 12` leader is a diagonal that a vertical-only model skipped entirely,
+    // so its crossings never reached the ranking.
+    const vx = px - ax;
+    const vy = b.disk.y - ay;
+    const len = Math.hypot(vx, vy);
+    if (len <= 0) continue;
+    const startInset = (Math.abs(ax - px) < 0.5 ? b.h / 2 : 0) + 2;
+    // The render-time fit gate, mirrored: a shaft with nothing left between the two insets is not
+    // drawn, so scoring its corridor would let a line that does not exist move labels around.
+    if (len - startInset - b.disk.r <= 0) continue;
+    const ux = vx / len;
+    const uy = vy / len;
+    const sx = ax + ux * startInset;
+    const sy = ay + uy * startInset;
+    const ex = px - ux * b.disk.r;
+    const ey = b.disk.y - uy * b.disk.r;
+    for (const [j, other] of boxes.entries()) {
+      if (j === i) continue;
+      if (segmentHitsRect(sx, sy, ex, ey, other.x0, ys[j]! - other.h / 2, other.x1, ys[j]! + other.h / 2)) {
+        crossings++;
+      }
+    }
+  }
+  return crossings;
+}
+
+/**
+ * Place the callouts so that as FEW of them as possible need a connector.
+ *
+ * A label sitting at its default offset needs no leader — its proximity says which point it belongs
+ * to — so every label kept at its default is one line saved. The sweep this replaces went the other
+ * way: it pushed labels in ONE direction on a collision, cascading, which maximised the number
+ * displaced and therefore the number of lines. On the motivating chart it moved both of two close
+ * callouts and drew two short leaders where lifting one clear and leaving the other alone draws one.
+ *
+ * Each label gets one of three treatments — keep at its default, lift ABOVE its point, or drop
+ * BELOW it — and the whole assignment is searched. Direction has to be part of the search, not a
+ * per-label preference: where several callouts share nearly one x, a lifted label's leader runs
+ * down through whatever sits between it and its point, so the only arrangements that work send
+ * some labels up and others down. An assignment is FEASIBLE when the kept labels hold their
+ * defaults clear of each other and of every marker, and each displaced label settles clear of
+ * everything with room for a visible shaft. A leader crossing another label does NOT make an
+ * assignment infeasible — with several callouts near one x nothing can avoid every crossing, so it
+ * is scored instead (see `arrangementCrossings`) and the paint order keeps the residue legible.
+ *
+ * Ranked by: fewest crossings, then fewest CONNECTORS (a displaced label with no leader costs no
+ * line, so it is the one moved by preference), then fewest labels moved at all, then least total
+ * movement, then the earliest assignment in a fixed enumeration — which puts "up" before "down", so
+ * a tie lifts the label and runs its leader downward. Determinism matters as much as quality: the
+ * live HTML, the PNG export and SSR must all agree, so nothing here may depend on iteration order
+ * of a map or on floating-point luck.
+ *
+ * 3^n in the movable count, which is a handful on a real chart; past `MAX_SEARCH_CALLOUTS` it
+ * defers to the sweep, as it does when no assignment at all is feasible.
+ */
+export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): number[] {
+  const movable = boxes.map((_, i) => i).filter((i) => !boxes[i]!.fixed);
+  const fixed = boxes.map((_, i) => i).filter((i) => boxes[i]!.fixed);
+  if (movable.length === 0) return boxes.map((b) => b.y);
+  if (movable.length > MAX_SEARCH_CALLOUTS) return sweepPlace(boxes, o);
+
+  const clearance = (a: CalloutBox, c: CalloutBox): number => (a.h + c.h) / 2;
+  const near = (a: CalloutBox, c: CalloutBox): boolean => a.x0 < c.x1 + o.gap && c.x0 < a.x1 + o.gap;
+  const onForeignMarker = (i: number, y: number): boolean =>
+    boxes.some((other, j) => j !== i && other.disk != null && clearOfDisk(boxes[i]!, y, other.disk, 1) != null);
+
+  // Whether a label's DEFAULT overlaps another movable label's default — "took part in a collision"
+  // in the sense the frame clamp has always used. A label that did must end up inside the frame
+  // whether the search moves it or keeps it; one that did not keeps its default untouched even off
+  // the edge, which is the carve-out that leaves a lone callout byte-identical.
+  const collidesAtDefault = boxes.map((b, i) =>
+    !b.fixed &&
+    boxes.some((c, j) => j !== i && !c.fixed && near(b, c) && Math.abs(b.y - c.y) < clearance(b, c)),
+  );
+  const insideFrame = (i: number, y: number): boolean =>
+    y - boxes[i]!.h / 2 >= o.top - 1e-9 && y + boxes[i]!.h / 2 <= o.bottom + 1e-9;
+
+  /** 0 = keep at default, 1 = lift above the point, 2 = drop below it. */
+  const attempt = (assign: number[]): { ys: number[]; connectors: number; moved: number; cost: number; crossings: number } | null => {
+    const ys = boxes.map((b) => b.y);
+    const keep = movable.filter((_, k) => assign[k] === 0);
+    for (const i of keep) {
+      if (onForeignMarker(i, ys[i]!)) return null;
+      if (collidesAtDefault[i] && !insideFrame(i, ys[i]!)) return null;
+    }
+    for (let a = 0; a < keep.length; a++) {
+      for (let b = a + 1; b < keep.length; b++) {
+        const i = keep[a]!, j = keep[b]!;
+        if (near(boxes[i]!, boxes[j]!) && Math.abs(ys[i]! - ys[j]!) < clearance(boxes[i]!, boxes[j]!)) return null;
+      }
+      for (const j of fixed) {
+        const i = keep[a]!;
+        if (near(boxes[i]!, boxes[j]!) && Math.abs(ys[i]! - ys[j]!) < clearance(boxes[i]!, boxes[j]!)) return null;
+      }
+    }
+    const placed = [...fixed, ...keep];
+    const drawsLeader = boxes.map((b) => b.fixed && b.wantsLeader === true);
+    let cost = 0;
+    let connectors = 0;
+    let moved = 0;
+    for (const [k, i] of movable.entries()) {
+      if (assign[k] === 0) continue;
+      const dir: 1 | -1 = assign[k] === 1 ? -1 : 1;
+      const point = boxes[i]!.disk?.y ?? boxes[i]!.y;
+      const need = displacedNeed(boxes[i]!, o);
+      const y = settle(i, point + dir * need, dir, boxes, ys, placed, o);
+      if (y == null) return null;
+      ys[i] = y;
+      cost += Math.abs(y - boxes[i]!.y);
+      // CONNECTORS, not displaced labels: moving a label that draws no leader costs no line, so
+      // counting it would tie a connector-bearing move against a free one and let the tie-break
+      // draw a line that the other choice would not have drawn at all.
+      moved++;
+      if (boxes[i]!.wantsLeader) {
+        connectors++;
+        drawsLeader[i] = true;
+      }
+      placed.push(i);
+    }
+    return { ys, connectors, moved, cost, crossings: arrangementCrossings(boxes, ys, drawsLeader, o) };
+  };
+
+  const n = movable.length;
+  let best: { ys: number[]; connectors: number; moved: number; cost: number; crossings: number } | null = null;
+  const total = 3 ** n;
+  for (let code = 0; code < total; code++) {
+    const assign: number[] = [];
+    let c = code;
+    for (let k = 0; k < n; k++) {
+      assign.push(c % 3);
+      c = Math.floor(c / 3);
+    }
+    const got = attempt(assign);
+    if (!got) continue;
+    // Fewest shafts drawn through text, then fewest connectors, then fewest labels moved at all,
+    // then least total movement. `moved` earns its place below `connectors`: a label that draws no
+    // leader costs no line to move, but a label sitting AT its point still reads better than one
+    // shifted away from it, so among arrangements that draw the same lines the one that disturbs
+    // fewest labels wins. Without it the search happily moved leader-less labels to save a pixel of
+    // total displacement. The first assignment to reach a score keeps it, and "up" precedes "down"
+    // in the enumeration, so a tie lifts the label and runs its leader downward.
+    const better =
+      best == null ||
+      got.crossings < best.crossings ||
+      (got.crossings === best.crossings &&
+        (got.connectors < best.connectors ||
+          (got.connectors === best.connectors &&
+            (got.moved < best.moved || (got.moved === best.moved && got.cost < best.cost - 1e-9)))));
+    if (better) best = got;
+  }
+  return best ? best.ys : sweepPlace(boxes, o);
 }

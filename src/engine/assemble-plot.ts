@@ -479,6 +479,12 @@ export function assemblePlot({
   // type, including those with no marker at the point (a line vertex): there the leader simply
   // stops a hair short of the vertex, which reads the same.
   const LEADER_END_INSET = MARK_POINT_R + 2;
+  /** Shortest shaft worth drawing. A leader is there to say WHICH point a label names; a hairline
+   *  does not, so placement puts a displaced leader-drawing label far enough out to earn this. */
+  const LEADER_MIN_SHAFT = 4;
+  /** What a displaced leader-drawing label owes BEYOND half its own height: the gap at the label's
+   *  edge, the gap at the marker, and a shaft long enough to read. */
+  const LEADER_CLEARANCE = 2 + LEADER_END_INSET + LEADER_MIN_SHAFT;
   const staggerDy = new Map<string, number>();
   if (xAxisDomain && xAxisDomain[1] > xAxisDomain[0] && width != null) {
     const innerW = width - effMarginLeft - effMarginRight;
@@ -987,7 +993,7 @@ export function assemblePlot({
       // `disk` is the callout's own point: no MOVED label may come to rest on any callout's marker.
       // One row's push (LABEL_ROW_H) is more than the 12px connector default, so without this a
       // swept label landed on its own dot and its leader shaft — shorter than the gap — vanished.
-      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed, disk: { x: px, y: py, r: LEADER_END_INSET } });
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed, wantsLeader: p.connector === true, disk: { x: px, y: py, r: LEADER_END_INSET } });
       boxIdx.push(i);
       boxPy.push(py);
     });
@@ -999,6 +1005,7 @@ export function assemblePlot({
       gap: LABEL_GAP,
       top: TBL_MARGIN_TOP,
       bottom: TBL_MARGIN_TOP + innerHForPx,
+      leaderClearance: LEADER_CLEARANCE,
     });
     ys.forEach((y, k) => {
       if (y !== boxes[k]!.y) autoDy.set(boxIdx[k]!, y - boxPy[k]!);
@@ -1092,7 +1099,11 @@ export function assemblePlot({
     } else if (leader) {
       marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
     }
-    marks.push(
+    // Into `labelMarks`, not `marks`: these are pushed after every line and rect (see the
+    // declaration), so a LATER callout's leader cannot paint over an EARLIER callout's text.
+    // Pushed inline, callout N+1's shaft was drawn on top of callout N's label and the white
+    // halo could not rescue it — the module's own rule, which point callouts were not using.
+    labelMarks.push(
       Plot.text([{ x: px, y: py, t: labelText }], {
         x: "x",
         y: "y",

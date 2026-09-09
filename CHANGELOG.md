@@ -78,6 +78,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   to a small dot and an auto-placed one now draws nothing. (#42)
 
 ### Changed
+- **Auto-placement now minimises connectors instead of cascading.** Placement was a
+  one-directional sweep: every label started above its point and a collision pushed the lower one
+  DOWN, past its own point, cascading into whatever was below. That maximised the number of labels
+  displaced, and a displaced label is exactly what earns a leader — so the algorithm's shape biased
+  toward more lines, not fewer. Reported from the 1.14.0 demo: two close callouts both moved and
+  both drew short leaders where lifting one clear and leaving the other alone draws one.
+  Each label now takes one of three treatments — keep at its default, lift above its point, or drop
+  below it — and the whole assignment is searched, ranked by fewest leaders crossing another label,
+  then fewest connectors, then least movement, with a tie lifting the label so its leader runs
+  down. Direction has to be part of the search rather than a per-label preference: where several
+  callouts share nearly one x, the only workable arrangements send some up and others down, which a
+  greedy choice cannot reach. Crossings are a ranked COST, not a veto — with four callouts inside
+  ~70px of one x no arrangement avoids every crossing, and treating it as a hard constraint made the
+  search fail into the old sweep, which was worse on both counts. A displaced leader-drawing label
+  is also placed far enough out to carry a *visible* shaft, so a moved label is not left clear of its
+  dot but too close to draw the line that says which dot it names — that holds for arrangements the
+  search finds, NOT for the sweep it falls back to past nine auto-placed callouts or when no
+  assignment is feasible, which resolves overlaps without consulting the shaft geometry at all. The search is 3^n in the
+  movable count — a handful on a real chart — and defers to the sweep past nine, or when no
+  assignment is feasible. On the demo's four keyed callouts: two labels now sit at their points with
+  no line at all, where the sweep moved all but one and left one of those unconnected.
 - **A point callout's label takes its series' colour by default.** It was a flat neutral
   (`TBL.color.heading`) whatever the callout pointed at, so a label read as chrome detached from the
   data rather than as a note ON that series. A callout keyed by `point:` now takes the colour of the
@@ -95,6 +116,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   temporal specs are daily or monthly.
 
 ### Fixed
+- **A callout's leader no longer paints over another callout's label.** `assemble-plot.ts` collects
+  annotation text in `labelMarks` and pushes it after every line and rect, precisely because Plot
+  paints in array order and "the white halo can't rescue text drawn under a later stroke" — its own
+  comment. Point callouts were the one annotation not using that bucket: the label went into `marks`
+  inline, inside the per-callout loop, so callout N+1's shaft was drawn after callout N's label and
+  straight through it. Reported as illegible on the demo. Placement minimises crossings but cannot
+  always reach zero, so the paint order is what keeps the text readable — and the halo has been
+  there all along waiting to do its job. **Rendered output changes for any chart with a point
+  callout.** SVG element order changes on all of them, the label moving later in the array. PIXELS
+  change in three cases: wherever a leader previously crossed a label — that is the defect, and
+  removing those stroke pixels from the text is the fix — and wherever a callout label overlaps a
+  pane title or an `annotations.xAxis` / `yAxis` / `bands` label, both of which the callout now
+  paints OVER rather than under (those marks were already queued in `labelMarks`, so the callout
+  moving into the same bucket puts it last).
+  **The archive's two tracked callouts are unaffected, verified by rendering rather than argued:**
+  `etr-vintages` ("Projected") and `price-waterfall` (`maxWidth`-wrapped to "(no step in" /
+  "original)", facet-scoped) were rendered and every other `<text>` in the figure measured against
+  them — neither callout's box intersects any other text, so nothing can paint over or under
+  anything and the pixels are identical. Only their serialised element order differs. No golden
+  covers `annotations.points`, so the suite is silent on all of it.
+- **Placement's second ranking key counts connectors, not displaced labels.** A displaced callout
+  with no `connector` draws no line, so counting it tied a move that costs a leader against one that
+  costs nothing and let the tie-break pick the expensive one. Caught in review before release.
+  Crossings are also scored once the whole arrangement is settled, over every leader actually drawn
+  — including pinned ones — where scoring them as labels were placed missed an earlier label's shaft
+  crossing a later one, and missed pinned shafts entirely. And the shaft is modelled as the real
+  slanted segment from the label's anchor to the marker rather than a vertical line at the point's
+  x, which differ by the `dx` offset on a flipped or pinned label; since crossings are the FIRST
+  ranking key, that discrepancy could pick a worse arrangement.
 - **The PNG export puts the legend where the live card puts it.** A stacked chart with five or more
   series — or a diverging one — lays its legend in a right-hand column on screen, and the download
   drew it above the chart regardless. `legendPosition` was resolved inside `render-live.ts`, so the
