@@ -28,16 +28,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   honours `series_labels`. `{value}` is unchanged. All four are substituted in one pass, so a
   data cell that happens to contain `{value}` is text, not a token. A token that cannot be
   resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
-- Point-callout labels that would sit on each other now move apart. Callouts without an explicit
-  `dx`/`dy` whose estimated label boxes overlap are swept apart vertically, top to bottom, each
-  cleared of every near label above it, and clamped to the frame — except that a stack taller than
-  the frame deliberately overflows the bottom, since the top of the column wins; a callout with an
+- Point-callout labels that would sit on each other now move apart, and placement chooses HOW so
+  that as few connectors are drawn as possible. Each auto-placed callout takes one of three
+  treatments — keep its default offset, lift above its point, or drop below it — and the whole
+  arrangement is chosen by: fewest leaders crossing another label, then fewest connectors (a
+  displaced label with no `connector` costs no line, so it is the one moved by preference), then
+  fewest labels moved at all, then least total movement. A tie lifts the label so its leader runs
+  downward. So a label that can sit beside its point does, and needs no line; a label that must move
+  goes far enough to carry a *visible* shaft rather than merely clear of the dot. A callout with an
   explicit `dx` or `dy` is pinned where the author put it and the others clear it. A callout that
-  collides with nothing keeps exactly today's offset, which is what keeps every published figure
-  byte-identical. The connector follows the placed label. An auto-placed label that would run off one
-  side is also flipped, anchored away from that side and offset 6px to the inside of its point,
-  because the visual review found callouts cut off at the right of the frame; the flipped box is what
-  the vertical sweep then works from, so the flip decides which labels collide. The thresholds are
+  collides with nothing, and sits on no other callout's marker, keeps exactly today's offset — which
+  is what keeps every published figure byte-identical. Pushed labels are clamped to the frame by
+  their full height, except that a stack taller than the frame overflows the bottom, the top of the
+  column winning. Past nine auto-placed callouts on one chart, or where no arrangement satisfies the
+  constraints, placement falls back to a simple downward sweep that resolves overlaps without
+  consulting the shaft geometry. An auto-placed label that would run off one side is also flipped,
+  anchored away from that side and offset 6px to the inside of its point, because the visual review
+  found callouts cut off at the right of the frame; the flipped box is what placement then works
+  from, so the flip decides which labels collide. The thresholds are
   asymmetric: the CANVAS edge on the right, where the margin is empty and only a truncated label is a
   problem, and the FRAME edge on the left, where the margin holds the y-axis tick labels. A label
   that fits keeps the centred anchor and offset it always had; one that overruns both limits, or
@@ -64,7 +72,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the callout's colour with **no arrowhead**, where it was a `Plot.arrow` with a 6px head; and it
   stops **6.6px from the point's centre** — the scatter marker's 4.6px radius plus 2 — where the old
   4px inset ended it *inside* the marker, so the line ran under the dot. And an **auto-placed**
-  callout draws the leader only when the vertical sweep actually **pushed** its label off that
+  callout draws the leader only when placement actually **moved** its label off that
   default: at 12px the label's own proximity says which point it belongs to, and the line was a few
   px of ink between two things already touching. A purely lateral frame-edge flip does **not** earn
   one — it leaves the label hugging its point, where the leader is a ~7px stub that reads as noise.
@@ -78,27 +86,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   to a small dot and an auto-placed one now draws nothing. (#42)
 
 ### Changed
-- **Auto-placement now minimises connectors instead of cascading.** Placement was a
-  one-directional sweep: every label started above its point and a collision pushed the lower one
-  DOWN, past its own point, cascading into whatever was below. That maximised the number of labels
-  displaced, and a displaced label is exactly what earns a leader — so the algorithm's shape biased
-  toward more lines, not fewer. Reported from the 1.14.0 demo: two close callouts both moved and
-  both drew short leaders where lifting one clear and leaving the other alone draws one.
-  Each label now takes one of three treatments — keep at its default, lift above its point, or drop
-  below it — and the whole assignment is searched, ranked by fewest leaders crossing another label,
-  then fewest connectors, then least movement, with a tie lifting the label so its leader runs
-  down. Direction has to be part of the search rather than a per-label preference: where several
-  callouts share nearly one x, the only workable arrangements send some up and others down, which a
-  greedy choice cannot reach. Crossings are a ranked COST, not a veto — with four callouts inside
-  ~70px of one x no arrangement avoids every crossing, and treating it as a hard constraint made the
-  search fail into the old sweep, which was worse on both counts. A displaced leader-drawing label
-  is also placed far enough out to carry a *visible* shaft, so a moved label is not left clear of its
-  dot but too close to draw the line that says which dot it names — that holds for arrangements the
-  search finds, NOT for the sweep it falls back to past nine auto-placed callouts or when no
-  assignment is feasible, which resolves overlaps without consulting the shaft geometry at all. The search is 3^n in the
-  movable count — a handful on a real chart — and defers to the sweep past nine, or when no
-  assignment is feasible. On the demo's four keyed callouts: two labels now sit at their points with
-  no line at all, where the sweep moved all but one and left one of those unconnected.
+- **Callout placement was rewritten twice within this release.** The first implementation swept
+  colliding labels in one direction, which maximised the number displaced and therefore the number
+  of leaders; a stakeholder review of the demo caught it before release ("2025a should obviously be
+  above, with a longer line straight down… is there a way to minimize connectors?"). The shipped
+  behaviour is the connector-minimising search described under Added; the sweep survives only as the
+  fallback named there. Recorded because the intermediate behaviour appears in this file's own git
+  history and in three rounds of review notes, not because any release ever had it.
 - **A point callout's label takes its series' colour by default.** It was a flat neutral
   (`TBL.color.heading`) whatever the callout pointed at, so a label read as chrome detached from the
   data rather than as a note ON that series. A callout keyed by `point:` now takes the colour of the
@@ -298,7 +292,7 @@ A repin re-renders every published figure at once — here is what a maintainer 
   rules under Changed);
   an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
   `anchorAtZero` chart with connector callouts (previously drew no leader line at all; now draws one
-  whenever the callout is pinned or the vertical sweep moved its label). **One chart in the sibling
+  whenever the callout is pinned or placement moved its label). **One chart in the sibling
   archive falls in the first class, and it is NOT yet published** — the deficit-management
   scorecard's `deviation-distribution` histogram, which lives under the untracked
   `charts/trackers/` tree (`git ls-files` does not know it), so nothing published moves here;
