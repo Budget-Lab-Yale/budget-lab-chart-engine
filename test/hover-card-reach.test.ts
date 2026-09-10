@@ -30,6 +30,7 @@ import {
   mockRect1to1, mountHover as mount, cardShown, coordShown, hoverFirstMark,
   BAR_MARK as BAR, HIST_MARK as HIST, DOT_MARK, PLOT_MIDDLE,
 } from "./helpers/hover-harness";
+import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -287,6 +288,218 @@ describe("dumbbell — card standalone AND in a default pane", () => {
     hoverFirstMark(m.svgs[0]!, DOT_MARK);
     expect(cardShown()).toBe(true);
     expect(m.calls()).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A faceted STACK that hovers with the card keeps the cross-pane band echo (issue #32) — the same
+// split the dumbbell above has: the hovered pane draws its own card + highlight, the OTHER panes
+// shade the same category. Before the fix, `coord = useCoord && !useTooltip` dropped the whole
+// coordination for these panes, so a two-pane stack echoed nothing.
+//
+// The first case is at DEFAULT settings (a diverging stack's net dot makes `resolveHoverMode`
+// return "tooltip" on its own). The `barStack.hover: "tooltip"` cases below are DIAL cases, marked
+// as such per this file's rule, and paired with a no-dial control that must still get pills.
+//
+// What each pane draws is asserted by CLASS, not just by the group's opacity: `.tbl-coord-region`
+// is the shaded band, `.tbl-coord-pill` the per-series value pill. The echo draws the first and
+// never the second — a pill on a card pane would be the doubled read-out the tooltip mode exists
+// to avoid.
+// ---------------------------------------------------------------------------
+
+describe("faceted stack with the hover card — card on the hovered pane, band echo on the others", () => {
+  /** Hover the CENTRE of the first bar rect, in the pane's own user space. `hoverFirstMark` fixes
+   *  clientY at the pane's mid-height, which resolves no category on a HORIZONTAL bar (categories
+   *  are on Y there). Ancestor translates are accumulated because a faceted pane's marks can sit
+   *  in a translated group. */
+  const hoverBandCentre = (svg: SVGSVGElement): void => {
+    const mark = svg.querySelector<SVGRectElement>(BAR)!;
+    let dx = 0;
+    let dy = 0;
+    for (let el: Element | null = mark.parentElement; el && el !== svg; el = el.parentElement) {
+      const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(el.getAttribute("transform") ?? "");
+      if (m) { dx += +m[1]!; dy += +m[2]!; }
+    }
+    const cx = dx + parseFloat(mark.getAttribute("x")!) + parseFloat(mark.getAttribute("width")!) / 2;
+    const cy = dy + parseFloat(mark.getAttribute("y")!) + parseFloat(mark.getAttribute("height")!) / 2;
+    svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: cx, clientY: cy, bubbles: true }),
+    );
+  };
+
+  const leave = (svg: SVGSVGElement): void => {
+    svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+  };
+
+  const stackSpec = (extra: Record<string, unknown> = {}): ChartSpec =>
+    spec({
+      chartType: "stacked", xAxisType: "categorical", series_order: ["Up", "Down"],
+      data: "d.csv", ...facetCols(), ...sm, ...extra,
+    });
+
+  const count = (svg: SVGSVGElement, sel: string): number => svg.querySelectorAll(`g.tbl-coord ${sel}`).length;
+
+  it("diverging 2-pane at DEFAULTS: card on pane 0, echo region on pane 1, no pills anywhere", () => {
+    const m = mount(stackSpec(), twoPane([["Up", 6, 5], ["Down", -4, -2]]), true);
+    expect(m.svgs.length).toBe(2);
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBeGreaterThan(0);
+    // The other pane shades the same category...
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    expect(count(m.svgs[1]!, ".tbl-coord-region")).toBe(1);
+    // ...and the hovered pane's coordinated group stays blank: its own primary crosshair already
+    // draws the highlight rect, so a second shade would read as a darker band on that pane alone.
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+    expect(count(m.svgs[0]!, "rect")).toBe(0);
+    // 0.12 is `showHighlight`'s shown state (0 is hidden) — proof the shade the echo skips here is
+    // the one the primary crosshair drew, not a missing one.
+    expect(m.svgs[0]!.querySelector<SVGElement>(".tbl-band-crosshair-hl")!.getAttribute("opacity")).toBe("0.12");
+    // No value pills on either pane — the card is the read-out.
+    for (const svg of m.svgs) expect(count(svg, ".tbl-coord-pill")).toBe(0);
+  });
+
+  it("DIAL barStack.hover \"tooltip\" on an all-positive stack: same split", () => {
+    const m = mount(
+      stackSpec({ barStack: { hover: "tooltip", netDisplay: "none" } }),
+      twoPane([["Up", 6, 5], ["Down", 4, 2]]),
+      true,
+    );
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    expect(count(m.svgs[1]!, ".tbl-coord-region")).toBe(1);
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+    for (const svg of m.svgs) expect(count(svg, ".tbl-coord-pill")).toBe(0);
+  });
+
+  it("DIAL, horizontal orientation: the echoed pane shades the category ROW", () => {
+    const m = mount(
+      stackSpec({ orientation: "horizontal", barStack: { hover: "tooltip", netDisplay: "none" } }),
+      twoPane([["Up", 6, 5], ["Down", 4, 2]]),
+      true,
+    );
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    expect(count(m.svgs[1]!, ".tbl-coord-region")).toBe(1);
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+    for (const svg of m.svgs) expect(count(svg, ".tbl-coord-pill")).toBe(0);
+  });
+
+  it("DIAL: pointer-leave clears the echo on the other pane", () => {
+    const m = mount(
+      stackSpec({ barStack: { hover: "tooltip", netDisplay: "none" } }),
+      twoPane([["Up", 6, 5], ["Down", 4, 2]]),
+      true,
+    );
+    hoverBandCentre(m.svgs[0]!);
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    leave(m.svgs[0]!);
+    expect(coordShown(m.svgs[1]!)).toBe(false);
+    expect(count(m.svgs[1]!, "rect")).toBe(0);
+  });
+
+  // The two halves answer to their own switches — the CONFIG-SPEC sentences that say so are only as
+  // true as these two cases.
+  it("DIAL + coordinated_cursor: false — the card survives, the echo does not", () => {
+    const m = mount(
+      stackSpec({
+        barStack: { hover: "tooltip", netDisplay: "none" },
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      twoPane([["Up", 6, 5], ["Down", 4, 2]]),
+      true,
+    );
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(true);
+    // No secondary cursor was attached at all, so there is no group to be blank.
+    for (const svg of m.svgs) expect(svg.querySelector("g.tbl-coord")).toBeNull();
+  });
+
+  it("DIAL + chrome.tooltip: false — the echo survives, the card does not", () => {
+    const m = mount(
+      stackSpec({ barStack: { hover: "tooltip", netDisplay: "none" }, chrome: { tooltip: false } }),
+      twoPane([["Up", 6, 5], ["Down", 4, 2]]),
+      true,
+    );
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(false);
+    expect(m.calls()).toBe(0);
+    // `onResolve` runs ahead of the card, so hit-testing and the echo are untouched by the switch.
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    expect(count(m.svgs[1]!, ".tbl-coord-region")).toBe(1);
+    expect(m.svgs[0]!.querySelector<SVGElement>(".tbl-band-crosshair-hl")!.getAttribute("opacity")).toBe("0.12");
+  });
+
+  // The paired control for the two DIAL cases: without the tooltip hover mode, a 2-pane stack is
+  // still the pills figure it always was — the echo carries the numbers instead of a card. Asserted
+  // by the same pill class, so "no pills" above cannot pass because the selector stopped matching.
+  it("no-dial control: an all-positive 2-pane stack still gets pills on BOTH panes and no card", () => {
+    const m = mount(stackSpec(), twoPane([["Up", 6, 5], ["Down", 4, 2]]), true);
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(false);
+    for (const svg of m.svgs) {
+      expect(coordShown(svg)).toBe(true);
+      expect(count(svg, ".tbl-coord-pill")).toBeGreaterThan(0);
+    }
+  });
+
+  // The LEGEND-highlight pills (`.tbl-hl-pills`, a legend gesture) are a different renderer from
+  // the cursor's `.tbl-coord-pill` above, and the figure bus suppresses the hovered category in
+  // them (`emit` → `setSuppressedCategory`) so they don't double up with the cursor's own pill.
+  // In tooltip mode the cursor draws NO pill to double up with, so there is nothing to suppress:
+  // the standalone chart in the same mode passes no `onResolve` at all and never suppresses
+  // ("Legend-highlight pills stay in BOTH modes", render-live.ts's mountChart branch). Before the
+  // fix, giving these panes an `onResolve` reached the suppression for the first time and made a
+  // pinned series' pill vanish from the hovered category on every pane, replaced by nothing.
+  const hlTexts = (svg: SVGSVGElement): string[] =>
+    Array.from(svg.querySelectorAll("g.tbl-hl-pills text")).map((t) => t.textContent ?? "");
+  const pinSeries = (m: { container: HTMLElement }, series: string): void => {
+    m.container
+      .querySelector<HTMLElement>(`.tbl-legend-item[data-series="${series}"]`)!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  };
+
+  it("DEFAULTS + a pinned legend series: the hover leaves the pinned pills alone on BOTH panes", () => {
+    const m = mount(stackSpec(), twoPane([["Up", 6, 5], ["Down", -4, -2]]), true);
+    pinSeries(m, "Up");
+    // One pill per category, on every pane — the pinned state, before any band hover.
+    const before = m.svgs.map(hlTexts);
+    for (const t of before) expect(t.length).toBe(2);
+
+    hoverBandCentre(m.svgs[0]!);
+
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    // The sibling keeps the pinned series' value for the hovered category: the echo is a shade
+    // with no numbers, so suppressing the only read-out there would lose it outright.
+    expect(hlTexts(m.svgs[1]!)).toEqual(before[1]!);
+    // And so does the hovered pane, matching the standalone chart in this mode. The card is an
+    // additional read-out, not a replacement drawn in the pill's place.
+    expect(hlTexts(m.svgs[0]!)).toEqual(before[0]!);
+  });
+
+  // The paired control: in the PILLS mode the suppression is still wanted and still happens —
+  // proof the fix is scoped to the card panes and did not disable the mechanism figure-wide.
+  it("no-dial control: the pills mode still suppresses the hovered category's pinned pill", () => {
+    const m = mount(stackSpec(), twoPane([["Up", 6, 5], ["Down", 4, 2]]), true);
+    pinSeries(m, "Up");
+    for (const svg of m.svgs) expect(hlTexts(svg).length).toBe(2);
+
+    hoverBandCentre(m.svgs[0]!);
+
+    // The cursor's own pill takes the suppressed one's place, on every pane.
+    for (const svg of m.svgs) {
+      expect(hlTexts(svg).length).toBe(1);
+      expect(count(svg, ".tbl-coord-pill")).toBeGreaterThan(0);
+    }
   });
 });
 

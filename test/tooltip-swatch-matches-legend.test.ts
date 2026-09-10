@@ -37,7 +37,7 @@ function swatchSvg(html: string): SVGElement | null {
 
 /** Every drawn element as `tag:style`, in order — the drawing, independent of attribute spelling. */
 function drawing(svg: Element): string[] {
-  return [...svg.querySelectorAll("rect, line, circle, path")].map(
+  return [...svg.querySelectorAll("rect, line, circle, path, polygon")].map(
     (s) => `${s.tagName.toLowerCase()}:${s.getAttribute("style")}`,
   );
 }

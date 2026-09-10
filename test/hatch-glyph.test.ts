@@ -29,10 +29,39 @@ function coversCentre(s: HatchGlyphShape): boolean {
   if (s.kind === "rect") {
     return s.x <= C && s.x + s.width >= C && s.y <= C && s.y + s.height >= C;
   }
-  // A line covers the centre when the centre lies on it (all glyph lines are corner-to-corner).
-  const midX = (s.x1 + s.x2) / 2;
-  const midY = (s.y1 + s.y2) / 2;
-  return Math.abs(midX - C) < 0.001 && Math.abs(midY - C) < 0.001;
+  return contains(s.points, C, C);
+}
+
+/** Ray-casting point-in-polygon, so a diagonal band is tested as the area it actually is. */
+function contains(pts: Array<[number, number]>, px: number, py: number): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i]!;
+    const [xj, yj] = pts[j]!;
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * The band width a diagonal polygon encodes, recovered from its AREA so the same formula works for
+ * both leans. Trimming a `band`-wide 45-degree stripe to the box cuts two opposite corners, each a
+ * right triangle with legs `box - e` where `e = band / sqrt(2)`, so the hexagon's area is
+ * `box^2 - (box - e)^2`. Inverting that gives `e`, and the width follows. Deliberately derived
+ * here rather than read off a vertex: a per-vertex formula depends on which corners were cut, which
+ * is exactly the detail a regression would change.
+ */
+function bandWidthOf(s: Extract<HatchGlyphShape, { kind: "polygon" }>): number {
+  const pts = s.points;
+  let twiceArea = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i]!;
+    const [xj, yj] = pts[j]!;
+    twiceArea += xj * yi - xi * yj;
+  }
+  const area = Math.abs(twiceArea) / 2;
+  const box = HATCH_GLYPH_BOX;
+  return (box - Math.sqrt(box * box - area)) * Math.SQRT2;
 }
 
 describe("the glyph box", () => {
@@ -100,37 +129,67 @@ describe("the straight characters are pixel-crisp", () => {
 });
 
 describe("the diagonal characters lean as their glyph depicts", () => {
-  const line = (char: "/" | "\\" | "x", i = 0) =>
-    hatchGlyphShapes(char)[i] as Extract<HatchGlyphShape, { kind: "line" }>;
+  const poly = (char: "/" | "\\" | "x", i = 0) =>
+    hatchGlyphShapes(char)[i] as Extract<HatchGlyphShape, { kind: "polygon" }>;
+  const B = HATCH_GLYPH_BOX;
+
+  // The diagonals are polygons, not stroked lines, and that is the whole fix: a `band`-wide stripe
+  // at 45 degrees overflows a 14px box at both ends and along both flanks, and the glyph used to
+  // rely on its `<svg>` viewport to trim it. The PNG export's `iconSvgGroup` unwraps that viewport
+  // into a bare `<g>`, which does not clip, so the `/` key rendered as a parallelogram spilling
+  // across the legend row. Carrying the trimmed shape makes it correct in any container.
+  it("stays inside the box, which a stroked diagonal did not", () => {
+    for (const char of ["/", "\\", "x"] as const) {
+      for (const s of hatchGlyphShapes(char)) {
+        expect(s.kind, `char ${char}`).toBe("polygon");
+        for (const [x, y] of (s as Extract<HatchGlyphShape, { kind: "polygon" }>).points) {
+          expect(x, `char ${char}: x outside the box`).toBeGreaterThanOrEqual(0);
+          expect(x, `char ${char}: x outside the box`).toBeLessThanOrEqual(B);
+          expect(y, `char ${char}: y outside the box`).toBeGreaterThanOrEqual(0);
+          expect(y, `char ${char}: y outside the box`).toBeLessThanOrEqual(B);
+        }
+      }
+    }
+  });
 
   it("runs `/` corner to corner ASCENDING left to right", () => {
-    const l = line("/");
-    // SVG y grows downward, so ascending means y1 > y2.
-    expect(l.x1).toBeLessThan(l.x2);
-    expect(l.y1).toBeGreaterThan(l.y2);
-    expect(l.width).toBe(HATCH_GLYPH_BAND);
+    // SVG y grows downward, so ascending passes through the bottom-left and top-right corners.
+    const s = poly("/");
+    expect(contains(s.points, 0.5, B - 0.5)).toBe(true);
+    expect(contains(s.points, B - 0.5, 0.5)).toBe(true);
+    // ...and not through the other two, or it would not lean.
+    expect(contains(s.points, 0.5, 0.5)).toBe(false);
+    expect(contains(s.points, B - 0.5, B - 0.5)).toBe(false);
+    expect(bandWidthOf(s)).toBeCloseTo(HATCH_GLYPH_BAND, 10);
   });
 
-  it("runs `\\` corner to corner DESCENDING left to right", () => {
-    const l = line("\\");
-    expect(l.x1).toBeLessThan(l.x2);
-    expect(l.y1).toBeLessThan(l.y2);
+  it("runs `\` corner to corner DESCENDING left to right", () => {
+    const s = poly("\\");
+    expect(contains(s.points, 0.5, 0.5)).toBe(true);
+    expect(contains(s.points, B - 0.5, B - 0.5)).toBe(true);
+    expect(contains(s.points, 0.5, B - 0.5)).toBe(false);
+    expect(contains(s.points, B - 0.5, 0.5)).toBe(false);
+    expect(bandWidthOf(s)).toBeCloseTo(HATCH_GLYPH_BAND, 10);
   });
 
-  it("spans the full box on both diagonals, so the band reaches the corners", () => {
+  it("reaches every side of the box, so the band spans it rather than sitting in the middle", () => {
     for (const char of ["/", "\\"] as const) {
-      const l = line(char);
-      expect(Math.abs(l.x2 - l.x1)).toBe(HATCH_GLYPH_BOX);
-      expect(Math.abs(l.y2 - l.y1)).toBe(HATCH_GLYPH_BOX);
+      const xs = poly(char).points.map(([x]) => x);
+      const ys = poly(char).points.map(([, y]) => y);
+      expect(Math.min(...xs), `char ${char}`).toBe(0);
+      expect(Math.max(...xs), `char ${char}`).toBe(B);
+      expect(Math.min(...ys), `char ${char}`).toBe(0);
+      expect(Math.max(...ys), `char ${char}`).toBe(B);
     }
   });
 
   it("superimposes both diagonals for `x`, at the narrower crossed weight", () => {
-    const a = line("x", 0);
-    const b = line("x", 1);
-    expect(a.width).toBe(HATCH_GLYPH_BAND_CROSSED);
-    expect(b.width).toBe(HATCH_GLYPH_BAND_CROSSED);
+    const a = poly("x", 0);
+    const b = poly("x", 1);
+    expect(bandWidthOf(a)).toBeCloseTo(HATCH_GLYPH_BAND_CROSSED, 10);
+    expect(bandWidthOf(b)).toBeCloseTo(HATCH_GLYPH_BAND_CROSSED, 10);
     // One ascends, one descends — an x, not a doubled stroke.
-    expect(Math.sign(a.y2 - a.y1)).toBe(-Math.sign(b.y2 - b.y1));
+    expect(contains(a.points, 0.5, B - 0.5)).toBe(true);
+    expect(contains(b.points, 0.5, 0.5)).toBe(true);
   });
 });

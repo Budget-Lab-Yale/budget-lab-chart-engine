@@ -137,11 +137,17 @@ export interface YAxisPolicy {
   markers?: YAxisMarker[];
 }
 
-/** A callout pointing at a data coordinate. `y` may be omitted when `series` is given (the label
- *  snaps to that series' value at `x`; for a stacked area, the cumulative top through that series).
+/** A callout pointing at a data coordinate. Anchored EITHER by `x` (with `y`, or `series` to snap
+ *  to that series' value at `x` — for a stacked area, the cumulative top through that series) OR by
+ *  `point`, the `columns.point_label` cell of exactly one row, which then supplies x and y.
  *  `dx`/`dy` nudge the label from the point; `connector` draws a short leader line to it. */
 export interface PointCallout {
-  x: string;
+  /** Data x of the point. Exactly one of `x` / `point` is required (validated). */
+  x?: string;
+  /** Scatter only: the `columns.point_label` cell of the ONE row this callout labels. Zero or
+   *  several matching rows are validation errors — never a silent first match — because the
+   *  motivating chart had two rows sharing an exact x and series. Excludes `y` and `series`. */
+  point?: string;
   y?: number;
   series?: string;
   /** May contain a literal `{value}` token, replaced with this callout's resolved `y` (the
@@ -786,6 +792,15 @@ export interface ChartSpec {
    *  `point_label` tokens. Other chart types use the series name as a ROW label against a value, so
    *  suppressing it there would leave unlabelled numbers — validation rejects it. Default true. */
   tooltip_series_name?: boolean;
+  /** Scatter only: override the x-value row's label in the hover card. Falls back to `x_axis_title`,
+   *  and to the literal "x" when that too is absent. An axis title is written to span the plot; a
+   *  card row label is read in a narrow floating card, so a long title makes an oversized card —
+   *  this lets the two diverge without touching the axis. Validation rejects it on other chart
+   *  types, whose cards label rows by SERIES, not by axis. */
+  tooltip_x_label?: string;
+  /** Scatter only: override the y-value row's label in the hover card. Falls back to `y_axis_title`,
+   *  and to the literal "Value" when that too is absent. See `tooltip_x_label`. */
+  tooltip_y_label?: string;
   /** Turn engine hover chrome OFF, for a consumer drawing its own. Switching a piece off rather
    *  than hiding it in CSS is what makes the PNG export agree — the export re-renders from the
    *  spec, so a stylesheet never reached it.

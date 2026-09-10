@@ -18,6 +18,7 @@ import {
 } from "../src/engine/crosshair";
 import { recolourIcons, type IconSpec } from "../src/engine/icon";
 import { resolveHatch } from "../src/engine/hatch";
+import { formatNumericX } from "../src/engine/util";
 import { formatBinLabel } from "../src/engine/histogram-label";
 import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
@@ -120,6 +121,18 @@ describe("formatBinLabel (numeric)", () => {
 
   it("thousands separators", () => {
     expect(formatBinLabel(1000, 25000, N)).toBe("1,000 – 25,000");
+  });
+
+  it("agrees with the numeric x axis at default precision, on any host locale", () => {
+    // The bin header sits directly under a numeric x axis whose ticks are en-US-pinned (they are
+    // drawn into the SVG). This formatter followed the HOST locale, so a de-DE reader saw
+    // `1.234,5` under a `1,234.5` tick. Asserting agreement with the shared formatter is the check
+    // that survives a change to either side. NOTE it catches a rounding or grouping divergence but
+    // NOT the locale itself: this runner is en-US, where `toLocaleString(undefined)` and
+    // `toLocaleString("en-US")` agree, so only reading the argument settles that half.
+    for (const v of [1234.5, 1234567.891, 2.593569308310415, 0, 911, -1234.5678]) {
+      expect(formatBinLabel(v, v, N), `edge ${v}`).toBe(`${formatNumericX(v)} – ${formatNumericX(v)}`);
+    }
   });
 });
 

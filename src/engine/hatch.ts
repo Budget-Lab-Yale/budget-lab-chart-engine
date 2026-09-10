@@ -80,11 +80,22 @@ export const HATCH_GLYPH_BAND = 6;
 export const HATCH_GLYPH_BAND_CROSSED = 4;
 
 /** One band of a glyph. A rect for the axis-aligned characters, which must land on integer
- *  coordinates to stay crisp; a line for the diagonals, which cannot be crisp anyway and are
- *  clipped to the box by its viewport. */
+ *  coordinates to stay crisp; a POLYGON for the diagonals, already trimmed to the box.
+ *
+ *  The diagonals were a stroked `line`, relying on the glyph's `<svg>` viewport to clip the ends
+ *  and flanks that a 6px-wide stripe throws outside a 14px box. That held for the live legend and
+ *  broke in the PNG export, where `iconSvgGroup` (engine/icon.ts) moves the shapes out of that
+ *  `<svg>` into a bare `<g>` — and a `<g>` does not clip. The `/` key rendered as a tilted
+ *  parallelogram spilling across the legend row. Carrying the trimmed geometry instead makes the
+ *  shape correct in ANY container, which is the same reasoning `hatchPattern` records below for
+ *  using a band rect rather than a stroked line inside a `<pattern>` tile. The polygon is the exact
+ *  intersection of the stroke with the box, so the live legend's drawn REGION is unchanged. Not
+ *  asserted as pixel-identical: filling a polygon and stroking-then-clipping a line are different
+ *  rasteriser paths and may differ in antialiasing at the edges. Nothing compares a before and
+ *  after screenshot, so treat "same shape" as the claim and no more. */
 export type HatchGlyphShape =
   | { kind: "rect"; x: number; y: number; width: number; height: number }
-  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number };
+  | { kind: "polygon"; points: Array<[number, number]> };
 
 /** The bands making up a character's glyph, in a HATCH_GLYPH_BOX-square box. Every band passes
  *  through the centre — that is what "one centred instance" means, and it is what the reader's eye
@@ -97,11 +108,20 @@ export function hatchGlyphShapes(char: HatchChar): HatchGlyphShape[] {
     ({ kind: "rect", x: inset(band), y: 0, width: band, height: box });
   const horizontal = (band: number): HatchGlyphShape =>
     ({ kind: "rect", x: 0, y: inset(band), width: box, height: band });
+  // A `band`-wide stripe at 45 degrees meets each axis `band / sqrt(2)` from where its centre line
+  // does, so its edges are the lines `x + y = box -/+ e` (ascending) or `y - x = -/+ e`
+  // (descending). Intersected with the box each gives a hexagon: the two corners the stripe passes
+  // through, plus where its edges cross the sides. Butt caps fall exactly on those corners, so this
+  // is the stroke's own outline trimmed to the box, not an approximation of it.
   /** Ascending left-to-right: SVG y grows downward, so it starts at the BOTTOM-left. */
-  const ascending = (band: number): HatchGlyphShape =>
-    ({ kind: "line", x1: 0, y1: box, x2: box, y2: 0, width: band });
-  const descending = (band: number): HatchGlyphShape =>
-    ({ kind: "line", x1: 0, y1: 0, x2: box, y2: box, width: band });
+  const ascending = (band: number): HatchGlyphShape => {
+    const e = band * Math.SQRT1_2;
+    return { kind: "polygon", points: [[0, box - e], [box - e, 0], [box, 0], [box, e], [e, box], [0, box]] };
+  };
+  const descending = (band: number): HatchGlyphShape => {
+    const e = band * Math.SQRT1_2;
+    return { kind: "polygon", points: [[0, 0], [e, 0], [box, box - e], [box, box], [box - e, box], [0, e]] };
+  };
 
   const wide = HATCH_GLYPH_BAND;
   const thin = HATCH_GLYPH_BAND_CROSSED;
@@ -170,8 +190,12 @@ export function hatchSvgPattern(
   // A BAND RECT, not a stroked line. A <pattern> tile clips to its own bounds, so a line centred on
   // the tile edge loses the half that falls outside — it does not wrap into the neighbouring tile.
   // Measured: a `stroke-width: 7` line on x=0 renders 17.5% coverage, where an explicit 7px rect
-  // renders 43.3%. Every consumer — the marks, the export and the legend/tooltip glyph — is built
-  // from this one emitter, so the band weight cannot differ between a swatch and the mark it names.
+  // renders 43.3%. This emitter serves the MARKS (live and export) — NOT the legend/tooltip key,
+  // which is `hatchGlyphShapes` above and carries its own weights: HATCH_STROKE 7 / CROSSED 4 here
+  // against HATCH_GLYPH_BAND 6 / CROSSED 4 there, because a 14px key and a filled area want
+  // different band weights to read. An earlier version of this comment claimed one emitter fed
+  // every consumer and that a swatch could not differ from its mark; both were false, and the
+  // maintenance trap is real — changing HATCH_STROKE moves the marks and leaves the keys behind.
   const w = hatchStrokeWidth(char);
   const band = (width: number, height: number) => {
     const el = doc.createElementNS(SVG_NS, "rect");

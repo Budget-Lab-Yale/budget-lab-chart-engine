@@ -431,12 +431,21 @@ export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axi
 /** Greedily word-wrap a label into as many lines as needed so each line's estimated width is
  *  ≤ `maxPx` (a single over-long word still gets its own line). Returns the lines joined by "\n"
  *  (Plot renders that as multi-line text). A label that already fits returns unchanged (no "\n"),
- *  so callers that only sometimes wrap stay byte-identical for the labels that don't. */
+ *  so callers that only sometimes wrap stay byte-identical for the labels that don't.
+ *
+ *  An explicit "\n" in `label` is a HARD break: each line wraps on its own and the breaks are
+ *  rejoined. The single /\s+/ split treated a newline as one more space, so a point-callout label
+ *  authored with "\n" kept its breaks only while `maxWidth` was unset and silently lost them the
+ *  moment it was set. A label with no "\n" never enters that branch, which is what keeps every
+ *  other caller (category axis labels, the left gutter) byte-identical. */
 export function wrapToWidth(
   label: string,
   maxPx: number,
   fontSize: number = TBL.size.axis,
 ): string {
+  if (label.includes("\n")) {
+    return label.split("\n").map((seg) => wrapToWidth(seg, maxPx, fontSize)).join("\n");
+  }
   const words = label.split(/\s+/).filter(Boolean);
   if (words.length <= 1) return label;
   const lines: string[] = [];

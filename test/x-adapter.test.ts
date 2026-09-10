@@ -125,6 +125,30 @@ describe("makeXAdapter tooltip x-format override", () => {
     expect(opts.tooltipXFormat!(opts.tooltipXParse!("2022-01-01"))).toBe("2022-01-01");
   });
 
+  it("temporal: an ANNUAL series defaults to a bare year, not a month and year", () => {
+    // Every point on 1 January ⇒ the year alone identifies it, and the axis already prints a bare
+    // `%Y` for a year-cadence span, so `Jan 1950` in the card disagreed with `1950` on the frame.
+    const annual = [{ _xd: new Date(1947, 0, 1) }, { _xd: new Date(2026, 0, 1) }];
+    const opts = makeXAdapter("temporal").buildXOpts(annual);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950"))).toBe("1950");
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950-01-01"))).toBe("1950");
+  });
+
+  it("temporal: a MONTHLY series keeps the month, even across a decade-tick span", () => {
+    // The test is on the DATA, not the tick cadence: an eighty-year monthly series also gets decade
+    // ticks, and there the month is the only thing telling two adjacent points apart. Dropping it
+    // would make every point in a year share one card header.
+    const monthly = [{ _xd: new Date(1947, 0, 1) }, { _xd: new Date(1947, 1, 1) }, { _xd: new Date(2026, 0, 1) }];
+    const opts = makeXAdapter("temporal").buildXOpts(monthly);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950-02-01"))).toBe("Feb 1950");
+  });
+
+  it("temporal: an explicit tooltip_x_format still wins on an annual series", () => {
+    const annual = [{ _xd: new Date(1947, 0, 1) }, { _xd: new Date(2026, 0, 1) }];
+    const opts = makeXAdapter("temporal", undefined, undefined, "%b %Y").buildXOpts(annual);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1950"))).toBe("Jan 1950");
+  });
+
   it("quarterly: formats as YYYYQ# when no pattern is given", () => {
     const opts = makeXAdapter("quarterly").buildXOpts(quarterlyData);
     expect(opts.tooltipXFormat!(opts.tooltipXParse!("2026Q3"))).toBe("2026Q3");
@@ -140,7 +164,27 @@ describe("makeXAdapter tooltip x-format override", () => {
       { _xn: 2020 },
       { _xn: 2022 },
     ]);
-    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2021"))).toBe("2021");
+    // Grouped, because a numeric axis is not where a year belongs — `2,021` here is the signal to
+    // move an annual series to `xAxisType: temporal`, which parses and labels a bare `YYYY`.
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2021"))).toBe("2,021");
+  });
+});
+
+describe("makeXAdapter('numeric') hover formatting", () => {
+  const data = [{ _xn: 0 }, { _xn: 1234567.891 }];
+
+  it("rounds the crosshair header to two decimals, so all three hover surfaces agree", () => {
+    // The defect this closes: the header printed the adapter's raw `${+v}`, so a numeric-axis line
+    // chart put `x=2.285011857607663` in its card while the scatter card and the `{x}` callout
+    // token — both already on `formatNumericX` — read `2.29`.
+    const opts = makeXAdapter("numeric").buildXOpts(data);
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("2.285011857607663"))).toBe("2.29");
+    expect(opts.tooltipXFormat!(opts.tooltipXParse!("1234567.891"))).toBe("1,234,567.89");
+  });
+
+  it("rounds and groups a histogram's bin-edge header the same way", () => {
+    const hist = makeXAdapter("numeric", undefined, [0, 2e6]).buildXOpts([{ _xn: 1 }]);
+    expect(hist.tooltipXFormat!(hist.tooltipXParse!("1234567.891"))).toBe("1,234,567.89");
   });
 });
 

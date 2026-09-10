@@ -26,10 +26,17 @@ prompts (see the `gpt-review` skill). Add to it when a bug or a review reveals a
   strict CSP. The `overlays[].fun` grammar is *parsed and interpreted* (`src/spec/expr.ts`); it is
   never evaluated. (Plot's vendored DSV code contains a textual `new Function` the engine never
   reaches — do not "fix" it, and do not cite it as precedent.)
-- **Rendered output must stay byte-identical for every pre-existing spec.** Golden SVG tests enforce
-  this. A repin re-renders the entire published archive, so an unconditional behaviour change alters
-  already-published figures at once. **A moved golden means something fires that should be gated —
-  diagnose it; never re-record to make the suite pass.**
+- **Rendered output must stay byte-identical for every pre-existing spec, except by a named
+  exception.** Golden SVG tests enforce it. A repin re-renders the entire published archive, so an
+  unconditional behaviour change alters already-published figures at once. **A moved golden means
+  something fires that should be gated — diagnose it; never re-record to make the suite pass.**
+  A defect fix may change rendered output, and some have, but only when all three hold: every
+  affected published figure is found by reading the archive's **specs** (not by regexing rendered
+  text — read that way, a scan named two colour keys as callout labels and put them in a changelog);
+  each is named under **Upgrading** with what moves and why; and **no golden is re-recorded**, so
+  either the change is gated or the goldens provably never covered it. A waiver granted without that
+  archive scan is not a waiver — that is the gap that left the 1.14.0 axis-domain waiver correct in
+  substance but unverified in process.
 - **`CONFIG-SPEC.md` is vendored verbatim by `budget-lab-charts` and gated in its CI.** A statement in
   it that the code does not honour is a real defect shipped to figure authors, not a docs nit. Five
   false claims were found in it during 1.12.0, several added in good faith by describing what someone

@@ -5,7 +5,7 @@
 // This is the tracker's buildLineChart, generalized: data prep + axis computation are
 // chart-type agnostic here; the type-specific marks come from the marks/ registry, and
 // the Plot is composed by assemblePlot.
-import type { ChartSpec, ValueAffixes } from "../spec/types";
+import type { ChartSpec, PointCallout, ValueAffixes } from "../spec/types";
 import type { RenderHooks } from "../spec/hooks";
 import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
@@ -25,16 +25,16 @@ import {
 } from "./scales";
 import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
-import { makeXAdapter } from "./x-adapter";
+import { makeXAdapter, numericAxisDomain } from "./x-adapter";
 import type { XAdapter } from "./x-adapter";
 import { parseDate } from "../spec/parse-time";
 import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { assemblePlot, withTickLabelHook } from "./assemble-plot";
+import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
-import { resolveValueAffixes, isTruthyFlag } from "./util";
+import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
@@ -112,11 +112,11 @@ export interface RenderOptions {
    *  chart, or a faceted chart's figure orchestrator omitting it) → every marker renders,
    *  unchanged from today. */
   paneFacetValue?: string;
-  /** Inline title-selector color accent (AILMT parity — charts.js L556-562): an already-resolved
+  /** Inline title-selector color accent: an already-resolved
    *  CSS color (run through `palette.resolveColor` by the caller) applied as the sole series'
    *  color WHEN the chart resolves to exactly one series (after `series_order` filtering). A
-   *  multi-series chart ignores this — its distinct palette/`series_colors` stay untouched, matching
-   *  the tracker's single-line-only accent-feed. render-live.ts recomputes this from the active
+   *  multi-series chart ignores this — its distinct palette/`series_colors` stay untouched, because
+   *  one accent colour can only stand for one line. render-live.ts recomputes this from the active
    *  title-selector option on every selection change and re-renders; export-png.ts resolves it
    *  once from `selections` for a static export. Absent (the common case — no title_selectors, or
    *  a multi-series chart) ⇒ byte-identical to before this field existed. */
@@ -385,6 +385,9 @@ export function renderPane(
       if (cols.shape) row._shape = r[cols.shape] ?? "";
       // Verbatim: this names an observation, so it is not a number to format or a key to look up.
       if (cols.point_label) row._pointLabel = r[cols.point_label] ?? "";
+      // The RAW cell, read past the resolver's series/shape dedupe, so a `point:` callout keyed to
+      // such a column still finds its row. Same exact-match contract as validateChartData.
+      if (spec.columns?.point_label) row._pointKey = r[spec.columns.point_label] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
       // Waterfall step kind (delta/total/skip).
       if (cols.kind) row._kind = r[cols.kind] ?? "";
@@ -537,7 +540,8 @@ function assemblePaneResult(
   cols: ResolvedColumns,
   data: PreparedRow[],
 ): PaneResult {
-  // Series order + colors. When series_order is set it acts as both filter and order.
+  // Series order + colors. When series_order is set it acts as both filter and order. Mirrored by
+  // validateChartData's keyed-callout "drawn nowhere" rules (src/spec/validate.ts) — change both.
   const seriesNames =
     spec.series_order && spec.series_order.length
       ? spec.series_order.filter((s) => data.some((r) => r.series === s))
@@ -574,18 +578,44 @@ function assemblePaneResult(
   // paneFacetValue (single chart) returns `ann` unchanged (byte-identical).
   const ann = filterAnnotationsByFacet(resolveAnnotations(spec), opts.paneFacetValue);
 
-  // Point callouts: resolve a y for any callout that gives a `series` but omits `y` — snap to that
+  // Point callouts. A `point:` callout takes BOTH coordinates from the one row whose raw
+  // `columns.point_label` cell equals it (validateChartData guaranteed exactly one across all rows).
+  // No match in THIS pane's rows ⇒ dropped here: on a faceted chart the row lives in exactly one
+  // pane, and a callout without `facet:` reaches every pane, so this drop is what makes it appear
+  // only where its observation is. `x` is the raw string because markerToX re-parses it.
+  // Otherwise resolve a y for any callout that gives a `series` but omits `y` — snap to that
   // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
   // band; otherwise the series' own value. Rows are matched at x by the raw time / numeric key.
   const stackedChart = spec.chartType === "area" || spec.chartType === "stacked";
   const seriesRank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
-  const resolvedPoints = ann.points.map((p) => {
-    if (Number.isFinite(p.y as number) || !p.series) return p;
+  const resolvedPoints: PointCallout[] = [];
+  // The single row each entry of `resolvedPoints` came from, by index — undefined for an explicit
+  // x+y callout and for the stacked cumulative snap (a sum has no row). Read by the row-token
+  // substitution below, which has to wait for xOpts (the `{x}` formatter lives there).
+  const pointRows: Array<PreparedRow | undefined> = [];
+  for (const p of ann.points) {
+    if (p.point != null) {
+      const row = dataInScope.find((r) => r._pointKey === p.point);
+      if (!row || !Number.isFinite(row._y as number)) continue;
+      // `series` rides along so the label can take its series' colour by default (assemblePlot).
+      // Validation forbids an AUTHORED `series` beside `point:`; this is the resolved row's own,
+      // set after that check, and nothing downstream re-snaps on it.
+      resolvedPoints.push({ ...p, x: row.time, y: row._y as number, series: row.series });
+      pointRows.push(row);
+      continue;
+    }
+    if (Number.isFinite(p.y as number) || !p.series) {
+      resolvedPoints.push(p);
+      pointRows.push(undefined);
+      continue;
+    }
     const atX = dataInScope.filter((r) => r.time === p.x || String(r._xn ?? "") === p.x);
     const targetRank = seriesRank.get(p.series);
-    if (targetRank == null) return p;
     let y: number | undefined;
-    if (stackedChart) {
+    let snapped: PreparedRow | undefined;
+    if (targetRank == null) {
+      // unknown series: the callout stays as written (no y ⇒ assemblePlot draws nothing)
+    } else if (stackedChart) {
       let sum = 0;
       let found = false;
       for (const r of atX) {
@@ -598,16 +628,20 @@ function assemblePaneResult(
       if (found) y = sum;
     } else {
       const row = atX.find((r) => r.series === p.series);
-      if (row && Number.isFinite(row._y as number)) y = row._y as number;
+      if (row && Number.isFinite(row._y as number)) {
+        y = row._y as number;
+        snapped = row;
+      }
     }
-    return y != null ? { ...p, y } : p;
-  });
+    resolvedPoints.push(y != null ? { ...p, y } : p);
+    pointRows.push(snapped);
+  }
 
-  // Numeric extent of the parsed x values — lets assemblePlot estimate label px positions for
-  // annotation-label collision avoidance (numeric/temporal axes only; categorical → undefined).
+  // Numeric extent of the parsed x values (numeric/temporal axes only; categorical → undefined).
   // Computed HERE, above the y-extent block, because the `column` overlay fold a few lines down
   // needs it to crop by the entry's `domain` (see below) — xOpts, which the draw-time overlay
-  // resolution prefers, is not built until much later.
+  // resolution prefers, is not built until much later. Everything that measures against the DRAWN
+  // axis reads `xAxisDomain` instead (built once xOpts exists); this is only its fallback.
   const xExtentVals = dataInScope
     .map((r) =>
       adapter.xField === "_xd" ? r._xd?.getTime() : adapter.xField === "_xn" ? r._xn : undefined,
@@ -802,6 +836,51 @@ function assemblePaneResult(
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
   if (opts.marginBottom != null) xOpts.marginBottom = opts.marginBottom;
+
+  // Row-token VALUES for point-callout labels, computed HERE (the rows and the x formatter are
+  // here) and applied by assemblePlot in one pass together with `{value}`, whose y-tick fallback
+  // formatter lives there. `{x}` on a numeric axis goes through `formatNumericX` (util.ts) — see
+  // its docstring for the grouping rule and the explicit "en-US" locale. Temporal and quarterly x
+  // still take the adapter's date format (`tooltip_x_format`) and a category still takes its
+  // `x_labels` display name; neither is a number to round.
+  // `{series}` reads the `series_labels` name, which may name the implicit single series too
+  // (SINGLE_SERIES_KEY = ""); unmapped, that nameless series and a blank point_label cell are
+  // `undefined`, which leaves the token literal rather than printing nothing.
+  // Own-property lookups: a data key like "toString" must fall through to the raw key, not to
+  // Object.prototype (the publish boundary rebuilds these maps as ordinary objects).
+  const own = (m: Record<string, string> | undefined, k: string): string | undefined =>
+    m && Object.prototype.hasOwnProperty.call(m, k) ? m[k] : undefined;
+  const seriesLabelFor = (key: string | undefined): string | undefined =>
+    key == null ? undefined : (own(spec.series_labels, key) ?? (key || undefined));
+  const xTokenFor = (x: string | undefined): string | undefined => {
+    if (x == null) return undefined;
+    const mx = xOpts.markerToX({ x });
+    if (typeof mx === "string") return own(spec.x_labels, mx) ?? x;
+    if (typeof mx === "number") return Number.isFinite(mx) ? formatNumericX(mx) : x;
+    const n = mx instanceof Date ? mx.getTime() : NaN;
+    return Number.isFinite(n) && xOpts.tooltipXFormat ? xOpts.tooltipXFormat(n) : x;
+  };
+  const pointsForPlot: ResolvedPointCallout[] = resolvedPoints.map((p, i) => {
+    const row = pointRows[i];
+    return {
+      ...p,
+      rowTokens: {
+        point_label: row?._pointKey || undefined,
+        x: xTokenFor(p.x),
+        series: seriesLabelFor(row?.series ?? p.series),
+      },
+    };
+  });
+
+  // The resolved x-axis domain as a numeric span, for anything that maps px <-> data against the
+  // DRAWN axis: annotation-label stagger geometry and point-callout connectors (assemblePlot), and
+  // overlay `domain: "axis"` cropping below. The numeric adapter always supplies a domain (it fits
+  // the data, or anchors at zero); a histogram's is the bin-edge span (Dates on a temporal axis —
+  // convert); temporal/quarterly non-histogram adapters supply none and Plot infers the data
+  // extent, so `xExtent` is the honest fallback there. The categorical band domain is a list of
+  // categories, not a span — never a candidate.
+  const xAxisDomain = numericAxisDomain(xOpts.xPlotOpts?.domain) ?? xExtent;
+
   const valueAffixes = resolveValueAffixes(spec);
 
   // Approximate inner plot dimensions for bar-builder label-suppression logic.
@@ -814,7 +893,9 @@ function assemblePaneResult(
 
   // Point charts: the shape-encoding channel. Distinct shape values in spec.shape_order (filter +
   // order) else data-encounter order; `shapeIsSeries` flags the redundant case (shape column ==
-  // series column) so the symbol scale + legend collapse to a single combined group.
+  // series column) so the symbol scale + legend collapse to a single combined group. This domain is
+  // an inclusion filter, mirrored by validateChartData's keyed-callout "drawn nowhere" rules
+  // (src/spec/validate.ts) — change both.
   const hasShape = cols.shape != null;
   const shapeNames = hasShape
     ? spec.shape_order && spec.shape_order.length
@@ -900,14 +981,13 @@ function assemblePaneResult(
   let overlayTooltips: OverlayTooltipLine[] = [];
   if (spec.overlays?.length && adapter.xField !== "_xc") {
     // `domain: "axis"` means the resolved x-scale domain when the adapter supplies one (numeric axes
-    // do), else the data extent — the widest honest answer available.
-    const axisDomain = (xOpts.xPlotOpts?.domain as [number, number] | undefined) ?? xExtent;
+    // do), else the data extent — the widest honest answer available. See `xAxisDomain` above.
     const resolvedOverlays = resolveOverlays(spec, dataInScope, {
       xField: adapter.xField as "_xn" | "_xd",
       colors,
       seriesNames,
       legendActive: spec.legend !== false,
-      ...(axisDomain ? { xDomain: axisDomain } : {}),
+      ...(xAxisDomain ? { xDomain: xAxisDomain } : {}),
     }).filter((o) => overlayDrawsInPane(o.facet, opts.paneFacetValue));
     overlayTooltips = overlayTooltipLines(spec.overlays, resolvedOverlays);
     // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
@@ -931,7 +1011,7 @@ function assemblePaneResult(
         xField: adapter.xField as "_xn" | "_xd",
         ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
         // The visible frame, so a label anchors on the part of the line that is on screen.
-        ...(axisDomain ? { xDomain: axisDomain } : {}),
+        ...(xAxisDomain ? { xDomain: xAxisDomain } : {}),
         yDomain,
         plotWidth,
         plotHeight,
@@ -949,8 +1029,8 @@ function assemblePaneResult(
     seriesNames,
     colors,
     spec,
-    points: resolvedPoints,
-    ...(xExtent ? { xExtent } : {}),
+    points: pointsForPlot,
+    ...(xAxisDomain ? { xAxisDomain } : {}),
     width: opts.width,
     height: opts.height,
     marginRight: opts.marginRight,

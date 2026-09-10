@@ -81,6 +81,44 @@ function pointLabelChartTypeError(spec: {
   return `columns.point_label is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)})`;
 }
 
+/** `annotations.points[].point` keys a callout to ONE observation by its `columns.point_label` cell,
+ *  which then supplies the callout's x and y. Spec-only rules (the exactly-one-match rule needs the
+ *  rows and lives in validateChartData): a callout is anchored by exactly one of `x` / `point`; a
+ *  keyed callout may carry neither `y` nor `series` (the row supplies both, and a stale copy would
+ *  silently disagree with it); and `point` needs `columns.point_label`, which is scatter-only, so it
+ *  is too. Every callout is checked and every message names its index — a spec that gets one wrong
+ *  usually gets several wrong the same way, and one error per re-run is a slow way to find out. */
+function pointCalloutSpecErrors(spec: {
+  chartType?: unknown;
+  columns?: { point_label?: unknown };
+  annotations?: { points?: Array<{ x?: unknown; point?: unknown; y?: unknown; series?: unknown }> };
+}): string[] {
+  const errors: string[] = [];
+  (spec.annotations?.points ?? []).forEach((p, i) => {
+    const at = `annotations.points[${i}]`;
+    const hasX = p.x !== undefined;
+    const hasPoint = p.point !== undefined;
+    if (hasX && hasPoint) {
+      errors.push(`${at}: give exactly one of x / point, not both (x: ${JSON.stringify(p.x)}, point: ${JSON.stringify(p.point)})`);
+    } else if (!hasX && !hasPoint) {
+      errors.push(`${at}: give exactly one of x / point — a callout needs an anchor`);
+    }
+    if (!hasPoint) return;
+    if (p.y !== undefined) {
+      errors.push(`${at}: point ${JSON.stringify(p.point)} supplies y from the matched row — remove y: ${JSON.stringify(p.y)}`);
+    }
+    if (p.series !== undefined) {
+      errors.push(`${at}: point ${JSON.stringify(p.point)} supplies series from the matched row — remove series: ${JSON.stringify(p.series)}`);
+    }
+    if (spec.chartType !== "scatter") {
+      errors.push(`${at}.point is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — it matches columns.point_label, which is scatter-only`);
+    } else if (!spec.columns?.point_label) {
+      errors.push(`${at}.point needs columns.point_label — it names the column whose cell ${JSON.stringify(p.point)} must match`);
+    }
+  });
+  return errors;
+}
+
 /** `tooltip_series_name` suppresses the series token in the SCATTER card's header, which is the only
  *  card where the series name is a header naming one hovered point. Everywhere else the series name
  *  is a ROW label against a value — a line or bar card without it is a list of unlabelled numbers —
@@ -98,6 +136,26 @@ function tooltipSeriesNameChartTypeError(spec: {
   if (spec.tooltip_series_name === undefined) return null;
   if (spec.chartType === "scatter") return null;
   return `tooltip_series_name is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the series name labels a tooltip ROW, not the header`;
+}
+
+/** `tooltip_x_label` / `tooltip_y_label` rename the SCATTER card's two value-row labels, which are
+ *  otherwise the axis titles. Every other chart type's card labels its rows by SERIES, not by axis
+ *  (a line/bar card has one row per series, not one row per axis) — an axis-title override has
+ *  nothing to attach to there, so it is rejected rather than silently ignored. Matches the
+ *  `tooltip_series_name` / `point_label` gates above. */
+function tooltipAxisLabelChartTypeError(spec: {
+  chartType?: unknown;
+  tooltip_x_label?: unknown;
+  tooltip_y_label?: unknown;
+}): string | null {
+  if (spec.chartType === "scatter") return null;
+  // PRESENCE, not value: matches the sibling gates — accepting either field as a no-op elsewhere
+  // would contradict the documented "rejected elsewhere" and leave an author believing it is wired.
+  const field = spec.tooltip_x_label !== undefined ? "tooltip_x_label"
+    : spec.tooltip_y_label !== undefined ? "tooltip_y_label"
+    : null;
+  if (!field) return null;
+  return `${field} is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the card's rows are labelled by series, not by axis`;
 }
 
 /** Dumbbell cross-field constraint: like bars, the categorical axis is declared via
@@ -679,8 +737,16 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (axisErr) return { valid: false, errors: [axisErr] };
   const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
   if (plErr) return { valid: false, errors: [plErr] };
+  const pcErrors = pointCalloutSpecErrors(
+    spec as { chartType?: unknown; columns?: { point_label?: unknown }; annotations?: { points?: [] } },
+  );
+  if (pcErrors.length) return { valid: false, errors: pcErrors };
   const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
   if (tsnErr) return { valid: false, errors: [tsnErr] };
+  const talErr = tooltipAxisLabelChartTypeError(
+    spec as { chartType?: unknown; tooltip_x_label?: unknown; tooltip_y_label?: unknown },
+  );
+  if (talErr) return { valid: false, errors: [talErr] };
   const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (dbErr) return { valid: false, errors: [dbErr] };
   const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
@@ -750,6 +816,11 @@ export function validateSpec(spec: unknown): ValidationResult {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A bare year is a valid temporal cell: it is the natural spelling for an annual series, and
+ *  `parseDate` reads it as local 1 January. Without this, moving an annual chart from
+ *  `xAxisType: numeric` to `temporal` — which is what the engine now recommends, since a numeric
+ *  axis groups thousands and would print `1,950` — failed validation on every row. */
+const YEAR_RE = /^\d{4}$/;
 const QUARTER_RE = /^\d{4}Q[1-4]$/;
 
 /** Returns an error string if `value` doesn't parse under `xAxisType`, else null. */
@@ -760,7 +831,9 @@ function timeParseError(xAxisType: XAxisType, value: string): string | null {
       : `expected a number, got ${JSON.stringify(value)}`;
   }
   if (xAxisType === "temporal") {
-    if (!DATE_RE.test(value)) return `expected YYYY-MM-DD, got ${JSON.stringify(value)}`;
+    if (!DATE_RE.test(value) && !YEAR_RE.test(value)) {
+      return `expected YYYY-MM-DD or YYYY, got ${JSON.stringify(value)}`;
+    }
     return Number.isNaN(+new Date(value)) ? `invalid date ${JSON.stringify(value)}` : null;
   }
   if (xAxisType === "quarterly") {
@@ -910,6 +983,70 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
       );
     }
+  }
+
+  // A `point:` callout must match EXACTLY one row's raw `columns.point_label` cell, across every row
+  // (a faceted chart's match lives in one pane; the pane drop happens at render). Zero matches is a
+  // typo; several is the case the key exists to prevent — the motivating chart had two rows sharing
+  // an exact x AND series ("2025b" / "2025b*"), which a first-match would have silently merged.
+  // Matched on the RAW column, like the `point_label` role check above: the resolver nulls a
+  // point_label that repeats the series column for the hover header only. Skipped when that column
+  // is missing — the role check has already reported it, and every callout would otherwise
+  // re-report the same absence as "no match".
+  // The one matched row must also carry a numeric value — an empty value cell is legal data (the
+  // per-row check below allows it) but gives the callout no y — and must be a row the figure DRAWS:
+  // `series_order` and the shape domain are inclusion filters (buildPointMarks draws no dot for a
+  // row outside either — the inferred shape domain omits a blank cell, index.ts), the callout's own
+  // `facet:` keeps it out of every pane but that one (where its row is absent), and a blank facet
+  // cell or one `small_multiples.pane_order` omits is not a rendered pane (figure.ts). In each case
+  // the label would point at an observation that is not drawn — or not be drawn itself — without a
+  // word, and the row "supplies x and y" is the documented contract. Mirrors the overlays[].facet
+  // check below.
+  if (rawPointLabel && columns.has(rawPointLabel)) {
+    (spec.annotations?.points ?? []).forEach((p, i) => {
+      if (p.point == null) return;
+      const matched = rows.filter((r) => ((r[rawPointLabel] as string | undefined) ?? "") === p.point);
+      const n = matched.length;
+      if (n === 0) {
+        errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches no row — no row's ${JSON.stringify(rawPointLabel)} cell equals it (exact match, case- and whitespace-sensitive)`);
+      } else if (n > 1) {
+        errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches ${n} rows — a keyed callout must name exactly one; disambiguate the ${JSON.stringify(rawPointLabel)} cells or anchor the callout by x and y`);
+      } else {
+        const row = matched[0] as TidyRow;
+        // Blank exactly as the engine reads it (`valRaw === ""` gives `_y: null`, index.ts); a
+        // whitespace-only cell parses to 0 there and draws. Non-numeric cells are already reported
+        // once per row below, so only blankness is this callout's own error.
+        const valRaw = (row[cols.value] as string | undefined) ?? "";
+        if (columns.has(cols.value) && valRaw === "") {
+          errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.value)} cell is empty — the callout takes its y from that cell`);
+        }
+        if (cols.series && columns.has(cols.series) && spec.series_order?.length) {
+          const s = (row[cols.series] as string | undefined) ?? "";
+          if (!spec.series_order.includes(s)) {
+            errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.series)} is ${JSON.stringify(s)}, which series_order excludes — the callout would be drawn nowhere`);
+          }
+        }
+        if (cols.shape && columns.has(cols.shape) && cols.shape !== cols.series) {
+          const s = (row[cols.shape] as string | undefined) ?? "";
+          const order = spec.shape_order?.length ? spec.shape_order : null;
+          if (order ? !order.includes(s) : s === "") {
+            errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.shape)} is ${JSON.stringify(s)}, which ${order ? "shape_order excludes" : "is blank and so outside the shape domain"} — that observation is never drawn`);
+          }
+        }
+        if (cols.facet && columns.has(cols.facet) && spec.small_multiples) {
+          const rowFacet = (row[cols.facet] as string | undefined) ?? "";
+          if (rowFacet === "") {
+            errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.facet)} cell is blank — a blank facet is not a pane, so the row is never rendered`);
+          } else if (p.facet != null && p.facet !== rowFacet) {
+            errors.push(`annotations.points[${i}].facet ${JSON.stringify(p.facet)} disagrees with the matched row's ${JSON.stringify(cols.facet)} ${JSON.stringify(rowFacet)} — a keyed callout renders in its row's pane; drop facet or fix it`);
+          }
+          const paneOrder = spec.small_multiples.pane_order;
+          if (rowFacet !== "" && paneOrder && paneOrder.length && !paneOrder.includes(rowFacet)) {
+            errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row in pane ${JSON.stringify(rowFacet)}, which small_multiples.pane_order excludes — that pane is never rendered, so the callout would be drawn nowhere`);
+          }
+        }
+      }
+    });
   }
 
   // CI columns are required only because confidence_bands asks for them.

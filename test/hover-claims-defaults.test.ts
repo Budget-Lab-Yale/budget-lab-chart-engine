@@ -440,6 +440,46 @@ describe("series_patterns and \"the hover tooltip\"", () => {
     expect(coordShown(m.svgs[0]!)).toBe(true);
     expect(cardShown()).toBe(false);
   });
+
+  // The carve-out the notes state in a parenthetical: a net-dot stack keeps its card in a PANE too
+  // (its coordinated cursor is a band echo only — issue #32), so unlike the faceted area above it
+  // DOES have a card there for the texture to key. Nothing gated that sentence; the swatch markup
+  // is compared against the standalone chart's, because "just as the standalone one does" is the
+  // half of the claim a mere "a line exists" assertion would leave open.
+  it("2-pane net-dot stack with textures: the pane's card keys the texture, as the standalone does", () => {
+    const TEXTURED = { series_patterns: { Up: "/" } };
+    const stack = (faceted: boolean): ChartSpec =>
+      spec({
+        chartType: "stacked", xAxisType: "categorical", series_order: ["Up", "Down"], ...TEXTURED,
+        ...(faceted ? { data: "d.csv", ...facetCols, ...sm } : {}),
+      });
+    /** The `<svg>` markup of the shown card's swatch for one series row, keyed by its label. */
+    const swatch = (series: string): string => {
+      const row = [...document.body.querySelectorAll(".tbl-tooltip .tbl-tooltip-row")].find(
+        (r) => r.querySelector(".tbl-tooltip-label")?.textContent === `${series}:`,
+      );
+      return row!.querySelector(".tbl-tooltip-swatch svg")!.innerHTML;
+    };
+
+    const m = mountHover(stack(true), twoPane([["Up", 6, 5], ["Down", -4, -2]]), true);
+    expect(m.svgs.length).toBe(2);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardShown()).toBe(true);
+    // The textured row is a ground rect PLUS the hatch band; the untextured one is a bare rect.
+    // A diagonal band is a filled polygon (it carries geometry already trimmed to the box, so it
+    // needs no clipping viewport — see hatch.ts), never a stroked line.
+    const paneUp = swatch("Up");
+    expect(paneUp).toContain("<polygon");
+    expect(swatch("Down")).not.toContain("<polygon");
+
+    // Same spec standalone: the card is the same singleton element, so read the pane's markup
+    // first (above) and compare after the second mount replaces its contents.
+    document.body.innerHTML = "";
+    const s = mountHover(stack(false), catRows([["Up", 6, 5], ["Down", -4, -2]]));
+    hoverFirstMark(s.svgs[0]!, BAR_MARK);
+    expect(cardShown()).toBe(true);
+    expect(swatch("Up")).toBe(paneUp);
+  });
 });
 
 // ---------------------------------------------------------------------------

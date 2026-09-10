@@ -54,7 +54,7 @@ body {
   margin-bottom: 28px;
   /* Query container so narrow-width rules (e.g. stacking the download buttons) respond to
      the CHART CARD's own width, not the page viewport — correct for an embed of any size,
-     unlike AILMT's viewport media query (which keyed on its full sidebar+main layout). */
+     unlike a viewport media query, which would key on the host page's layout instead. */
   container-type: inline-size;
 }
 .figure-card:last-child { margin-bottom: 0; }
@@ -307,9 +307,11 @@ body {
   color: var(--tbl-text-axis);
   text-align: center;
 }
-/* Scatter's numeric x-axis labels sit tighter to the frame than the temporal axis the default
-   was tuned for, so give the x-axis title a little more breathing room. */
-.chart-scatter .figure-x-axis-title {
+/* A numeric x-axis reserves less room below its tick labels than the two-row temporal axis the
+   default margin was tuned for (x-adapter.ts: 22px vs 38px), so its title would sit on the tick
+   row. Keyed to the AXIS type via the card's x-<xAxisType> class — not the chart type — so a
+   histogram, a scatter, a numeric-x line and their faceted figures all get the same gap. */
+.x-numeric .figure-x-axis-title {
   margin-top: 8px;
 }
 .figure-y-axis-title {
@@ -534,7 +536,29 @@ body {
      --tbl-gridline is. One token so the two cannot drift apart. */
   --tbl-tooltip-rule: rgba(200, 205, 215, 0.7);
   border: 1px solid var(--tbl-tooltip-rule);
-  white-space: nowrap;
+  /* The card WRAPS its rows, and max-width below is the width it wraps AT. These two declarations
+     are one fix and neither works alone (#41).
+
+     white-space was nowrap, which contradicted the cap: the box stopped at 320px while the line
+     did not, so it ran out through the right border and the row's value was painted outside the
+     card and clipped. A scatter card falling back to its axis titles lost the 2.59 it existed to
+     report.
+
+     overflow-wrap covers the case white-space alone does not. Normal wrapping only breaks at an
+     existing space or hyphen, so ONE long unbroken label -- a bare identifier, a URL, an
+     unhyphenated compound -- offers no break opportunity and clips exactly as before. anywhere,
+     not break-word: only anywhere lets those mid-word opportunities count toward min-content, so
+     the card is sized from the width it can actually wrap to. The table cells further down
+     (td.is-text, td.is-wrap, th.tbl-table-stub.is-wrap) deliberately use break-word instead --
+     they are sized by table layout against column_width/stub_min_width, where shrinking
+     min-content to one character is the wrong answer. Do not harmonise the two.
+
+     The label-to-value separator is the other half of this: a non-breaking space, so a wrap never
+     strands the number on a line without its label. See LABEL_VALUE_GAP in crosshair.ts.
+
+     No backticks in this comment: the whole stylesheet is one template literal. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   z-index: 9999;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -550,6 +574,12 @@ body {
 .tbl-tooltip-value { font-weight: var(--tw-bold); }
 .tbl-tooltip-row {
   display: flex;
+  /* center, NOT flex-start, now that a row can be two lines tall (#41): the swatch keys the
+     whole row, so it belongs against the row's middle -- which is what the LEGEND already
+     does with its own multi-line labels, and the card's key and the legend's are one
+     drawing. flex-start was the alternative considered and rejected from the render: it puts
+     the swatch on the label's first line but also lifts it about a pixel on every
+     SINGLE-line row of every published chart, for nothing. */
   align-items: center;
   gap: 6px;
   margin-bottom: 2px;
@@ -682,8 +712,7 @@ body {
 /* =========================================================================
  * Responsive — stack the Data/Image buttons when the chart card itself is narrow.
  * Container query (keyed on the card width), so it's correct regardless of the embed's
- * page context. ~520px ≈ AILMT's chart-area width when it stacked (880px viewport − 280px
- * sidebar − gaps/padding).
+ * page context.
  * ========================================================================= */
 @container (max-width: 520px) {
   .figure-downloads { flex-direction: column; }

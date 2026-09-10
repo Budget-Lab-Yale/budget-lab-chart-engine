@@ -13,6 +13,13 @@ import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
 import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWidth } from "../engine/icon.js";
 import {
+  LEGEND_COLUMN_WIDTH,
+  LEGEND_GAP,
+  legendSeriesCount,
+  orderForRightLegend,
+  resolveLegendPosition,
+} from "../engine/legend-layout.js";
+import {
   W,
   H,
   MARGIN,
@@ -183,16 +190,133 @@ function drawLegend(
   return y;
 }
 
+/**
+ * wrapText, plus a hard break for a single token wider than the column. `wrapText` only breaks
+ * BEFORE a word, so a label that is one long token — an identifier, a URL — came back as one
+ * over-wide line and ran past the column and the frame edge.
+ */
+function wrapToColumn(text: string, font: string, maxWidth: number): string[] {
+  const out: string[] = [];
+  for (const line of wrapText(text, font, maxWidth)) {
+    if (measureText(line, font) <= maxWidth) {
+      out.push(line);
+      continue;
+    }
+    let cur = "";
+    for (const ch of line) {
+      if (cur && measureText(cur + ch, font) > maxWidth) {
+        out.push(cur);
+        cur = ch;
+      } else {
+        cur += ch;
+      }
+    }
+    if (cur) out.push(cur);
+  }
+  return out.length ? out : [""];
+}
+
+/**
+ * Draw a legend as a vertical COLUMN of rows, for the right-hand layout. Returns the baseline
+ * below the last row.
+ *
+ * `root === null` MEASURES without drawing, returning the same baseline. The caller needs the
+ * column's height before it can choose the chart's height, and a separate measuring routine would
+ * be free to drift from the drawing one — a tall legend would then be laid over the note and source,
+ * or off the bottom of the frame, exactly the class of bug the two-pass layout is meant to avoid.
+ *
+ * The horizontal `drawLegend` above flows items left to right and wraps at the frame; this one
+ * gives each item its own row and wraps a long LABEL inside the column instead. Both draw their
+ * swatch from `iconSvgGroup`, the same call the live legend makes, so a key cannot differ between
+ * the two layouts or between the screen and the download.
+ */
+function drawLegendColumn(
+  root: SVGSVGElement | null,
+  items: readonly LegendItem[],
+  x: number,
+  firstBaseline: number,
+  leadingTitle?: string,
+  hooks?: RenderHooks,
+  /** Resolved `legendKey` markup per row, shared between the measure and draw passes. The column is
+   *  laid out twice — once to measure its height, once to draw it — and without this the hook fired
+   *  twice per row where the live legend fires it once. A hook is documented as static, but one that
+   *  is stateful or non-deterministic would see a different call count here, and could even return
+   *  markup whose measured and drawn forms disagree. `buildExportSvg` already strips `afterRender`
+   *  from its metadata pre-render for the same reason. */
+  customCache?: Map<LegendItem, string | null>,
+): number {
+  const legendFont = `${W_BODY} 13px ${FONT}`;
+  const GAP = 6;
+  const ROW_GAP = 8;
+  const LINE_H = 16;
+  let y = firstBaseline;
+
+  // The group heading a dual-encoding chart carries ("Colour", "Shape"): without it the exported
+  // column loses the labels that say which dimension each block of rows stands for.
+  if (leadingTitle) {
+    if (root) root.appendChild(textEl(x, y, leadingTitle, { size: 12, weight: W_SEMI, fill: AXIS }));
+    y += LINE_H + 2;
+  }
+
+  for (const item of items) {
+    const icon = iconFromLegendItem(item);
+    const swatchW = iconWidth(icon);
+    let custom: string | null;
+    if (customCache?.has(item)) {
+      custom = customCache.get(item) ?? null;
+    } else {
+      custom = item.series != null && hooks?.legendKey
+        ? hooks.legendKey({
+            series: item.series,
+            label: item.label,
+            color: item.color,
+            medium: "svg",
+            rendered: legendRowMarkupSvg(icon, item.label),
+          })
+        : null;
+      customCache?.set(item, custom);
+    }
+    if (custom != null) {
+      if (root) {
+        const g = document.createElementNS(SVG_NS, "g");
+        g.setAttribute("transform", `translate(${x},${y - 4 - ICON_BOX / 2})`);
+        g.setAttribute("color", NAVY);
+        g.innerHTML = custom;
+        root.appendChild(g);
+      }
+      y += LINE_H + ROW_GAP;
+      continue;
+    }
+    const lines = wrapToColumn(item.label, legendFont, LEGEND_COLUMN_WIDTH - swatchW - GAP);
+    if (root) {
+      const drawing = iconSvgGroup(document, icon);
+      if (drawing) {
+        drawing.setAttribute("transform", `translate(${x},${y - 4 - ICON_BOX / 2})`);
+        drawing.setAttribute("color", NAVY);
+        root.appendChild(drawing);
+      }
+      drawLines(root, lines, x + swatchW + GAP, y, LINE_H, { size: 13, weight: W_BODY, fill: BODY });
+    }
+    // Advance past this row: the extra lines it wrapped onto, then a line's height and the gap.
+    // Computed here rather than taken from `drawLines`' return, which is the LAST line's baseline —
+    // for a single-line label that is the baseline we started at, so using it advanced each row by
+    // the gap alone and thirty rows overlapped each other inside 8px apiece. One expression, used
+    // whether we drew or only measured, so the two passes cannot disagree.
+    y += (lines.length - 1) * LINE_H + LINE_H + ROW_GAP;
+  }
+  return y;
+}
+
 // ---------------------------------------------------------------------------
 // buildExportSvg
 // ---------------------------------------------------------------------------
 
 /**
  * Build a self-contained export SVG for the given chart spec and data rows.
- * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame, matching
- * the AILMT export. The chart fills the height left after the title/subtitle/legend chrome.
- * NOTE: the eyebrow is intentionally NOT drawn in the export (matches AILMT — the figure
- * number belongs to the publication context, not the standalone image).
+ * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame. The chart
+ * fills the height left after the title/subtitle/legend chrome.
+ * NOTE: the eyebrow is intentionally NOT drawn in the export — the figure number belongs to
+ * the publication context, not to the standalone image.
  *
  * `selections` (active title-selector option ids, from the live mount) resolves any `{token}`
  * in the title to the ACTIVE option's label; omitted, tokens resolve with the spec defaults.
@@ -234,7 +358,7 @@ export function buildExportSvg(
   const note = spec.note ?? "";
   const source = spec.source ?? "";
 
-  // Color accent feed (AILMT parity): resolve the same accent color the live single-chart mount
+  // Color accent feed: resolve the same accent color the live single-chart mount
   // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
   // `renderFigure` (small multiples) also receives it, so a faceted chart's per-pane bars adopt the
   // active option's accent in the export just as they do live (see mountFigure in render-live.ts).
@@ -249,8 +373,25 @@ export function buildExportSvg(
   // --- top chrome: title (+ logo), subtitle ---
   let cursor = composeTopChrome(document, root, { title, subtitle, width: W });
 
+  // Legend POSITION, from the same decision the live card makes (engine/legend-layout.ts). The
+  // export never consulted it, so a stacked chart with five or more series — or a diverging one —
+  // showed its legend beside the chart on screen and above it in the download. A small_multiples
+  // figure keeps the top layout: its legend is figure-level, and the live path never puts that in a
+  // column either. The frame is a fixed 1000px, so the live path's narrow-card fallback to "top"
+  // cannot apply here.
+  // `legendItems || shapeLegendItems.length` mirrors render-live.ts's own gate. Testing only
+  // `legendItems` missed a chart whose ONLY visible legend is the shape legend — `series_legend:
+  // false`, or a lone scatter series, leaves `buildLegendItems` null while the shape rows remain —
+  // so live laid it out on the right and the export drew it above a full-width plot: the very
+  // divergence this file's legend work exists to remove.
+  const rightLegend =
+    !isFigure &&
+    (legendItems.length > 0 || shapeLegendItems.length > 0) &&
+    resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right";
+  const chartW = rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+
   // --- legend(s) + y-axis title (chart-specific chrome) ---
-  if (legendItems.length) {
+  if (legendItems.length && !rightLegend) {
     cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks);
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
@@ -262,11 +403,13 @@ export function buildExportSvg(
       markerShape: "point" as const,
       markerSymbol: s.markerSymbol,
     }));
-    cursor = drawLegend(root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined);
+    if (!rightLegend) {
+      cursor = drawLegend(root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined);
+    }
   }
   // Y-axis title: a left-aligned caption just above the plot (coexists with the units subtitle).
   if (yAxisTitle) {
-    cursor = drawLines(root, wrapText(yAxisTitle, `${W_SEMI} 12px ${FONT}`, INNER_W), MARGIN, cursor + 18, 16, {
+    cursor = drawLines(root, wrapText(yAxisTitle, `${W_SEMI} 12px ${FONT}`, chartW), MARGIN, cursor + 18, 16, {
       size: 12,
       weight: W_SEMI,
       fill: AXIS,
@@ -288,8 +431,45 @@ export function buildExportSvg(
     contentHeight = isSingleHorizontalBar
       ? horizontalBarChartHeight(spec, rows)
       : Math.max(160, H - chartTop - bottomH);
+    // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
+    // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
+    // title, note and source, and then off the frame. Measure it first (same routine that draws
+    // it, so the two cannot drift) and let the chart region be at least that tall; `H_eff` below
+    // grows the frame to match. Nothing published takes this path today, so the arithmetic is here
+    // to keep a future many-series chart honest rather than to fix a current figure.
+    const colItems = rightLegend
+      ? orderForRightLegend(legendItems, (meta as { legendVisualOrder?: string[] }).legendVisualOrder)
+      : [];
+    const shapeColItems: LegendItem[] = rightLegend && hasShapeLegend
+      ? (shapeLegendItems.map((s) => ({
+          label: s.label,
+          color: SHAPE_LEGEND_COLOR,
+          dashed: false,
+          markerShape: "point" as const,
+          markerSymbol: s.markerSymbol,
+        })) as unknown as LegendItem[])
+      : [];
+    // One cache across BOTH passes, so a `legendKey` hook is invoked once per row rather than once
+    // to measure and again to draw. A group heading only means something when there are two groups
+    // AND rows above it, so an empty colour group takes none.
+    const legendKeyCache = new Map<LegendItem, string | null>();
+    const colTitle = hasShapeLegend && colItems.length ? colorLegendTitle : undefined;
+    if (rightLegend) {
+      const COL_TOP_PAD = 12;
+      let measured = COL_TOP_PAD;
+      if (colItems.length) {
+        measured = drawLegendColumn(null, colItems, 0, COL_TOP_PAD, colTitle, opts.hooks, legendKeyCache);
+      }
+      if (shapeColItems.length) {
+        measured = drawLegendColumn(
+          null, shapeColItems, 0, colItems.length ? measured + 8 : COL_TOP_PAD,
+          shapeLegendTitle || undefined, undefined, legendKeyCache,
+        );
+      }
+      contentHeight = Math.max(contentHeight, Math.ceil(measured));
+    }
     const { svg: chartSvg } = renderChart(spec, rows, {
-      width: INNER_W,
+      width: chartW,
       height: contentHeight,
       hooks: opts.hooks,
       phase: "export",
@@ -297,9 +477,25 @@ export function buildExportSvg(
     });
     chartSvg.setAttribute("x", String(MARGIN));
     chartSvg.setAttribute("y", String(chartTop));
-    chartSvg.setAttribute("width", String(INNER_W));
+    chartSvg.setAttribute("width", String(chartW));
     chartSvg.setAttribute("height", String(contentHeight));
     root.appendChild(chartSvg);
+    if (rightLegend) {
+      // Beside the plot, ordered top-to-bottom as the stack reads (orderForRightLegend) — the same
+      // ordering the live column uses. A dual-encoding chart keeps its group headings here, as the
+      // top layout does, and its shape rows follow the colour rows in the same column.
+      const colX = MARGIN + chartW + LEGEND_GAP;
+      const COL_TOP = chartTop + 12;
+      const colY = colItems.length
+        ? drawLegendColumn(root, colItems, colX, COL_TOP, colTitle, opts.hooks, legendKeyCache)
+        : COL_TOP;
+      if (shapeColItems.length) {
+        drawLegendColumn(
+          root, shapeColItems, colX, colItems.length ? colY + 8 : COL_TOP,
+          shapeLegendTitle || undefined, undefined, legendKeyCache,
+        );
+      }
+    }
   } else {
     // BOTH modes are per-pane compositions: lay the N mini-SVGs into a (cols × rows) grid,
     // each with a pane-title text above it. (Shared mode forces one y-domain across panes and
@@ -398,7 +594,13 @@ export function buildExportSvg(
   // single row of panes) doesn't leave a big band of whitespace below. Single horizontal bar/
   // stacked charts do the same (their row count can outgrow the 750 frame); every other single
   // chart keeps the fixed 4:3 frame.
-  const H_eff = isFigure || isSingleHorizontalBar ? Math.round(chartTop + contentHeight + bottomH) : H;
+  // A right-hand legend taller than the plot grows the frame too, for the same reason a
+  // horizontal bar chart does: the content genuinely needs the room, and clipping it would
+  // silently drop legend rows from the download.
+  const H_eff =
+    isFigure || isSingleHorizontalBar || chartTop + contentHeight + bottomH > H
+      ? Math.round(chartTop + contentHeight + bottomH)
+      : H;
   if (H_eff !== H) {
     root.setAttribute("height", String(H_eff));
     bgRect.setAttribute("height", String(H_eff));
@@ -408,7 +610,10 @@ export function buildExportSvg(
   let by = chartTop + contentHeight;
   if (xAxisTitle) {
     by += 14;
-    root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
+    // Centred on the PLOT, not the frame: a right-hand legend takes 176px off the right, so the
+    // frame's centre is 88px right of the plot's and the title sat visibly off-axis.
+    const titleX = rightLegend ? MARGIN + chartW / 2 : W / 2;
+    root.appendChild(textEl(titleX, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
   }
   composeBottomChrome(document, root, by, { note, source, width: W });
 

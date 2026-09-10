@@ -4,6 +4,384 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] - 2026-09-10
+
+### Added
+- `annotations.points[].point` — **`scatter` only**: key a callout to ONE observation by its
+  `columns.point_label` cell instead of copying that row's x and y into the spec. Exactly one of
+  `x` / `point` is required; `point` excludes `y` and `series`, because the row supplies both. The
+  value must match exactly one row's RAW `point_label` cell across the whole dataset — zero or several
+  matches fail validation with a message naming the count, never a silent first match, because the
+  motivating chart had two rows sharing an exact x and series. A keyed row that would not be drawn
+  is refused too, rather than the callout vanishing: a blank value cell, a series dropped by
+  `series_order`, a shape outside `shape_order`, a blank facet cell, a pane excluded by `pane_order`,
+  or a `facet` that disagrees with the row's own. On a faceted chart the callout appears only in the
+  pane holding its row; `facet:` is not needed and, if given, must agree. Matching is against the raw
+  column, so a `point_label` that duplicates the series column (which the hover header dedupes to
+  nothing) still keys. (#37)
+- Row tokens in a point callout's `label`: `{point_label}`, `{x}` and `{series}` fill from the
+  callout's row — the row `point:` matched, or the row a `series` callout snapped to. `{x}` is
+  rounded to at most two decimals and grouped on a numeric axis (`2.593569308310415` reads `2.59`,
+  `1234567.891` reads `1,234,567.89`) — grouped as the numeric axis ticks are, and identical to both
+  the scatter hover card's x row and the crosshair header, so nothing on the chart disagrees;
+  `tooltip_x_format` on a temporal or quarterly one, `x_labels` on a categorical one; `{series}`
+  honours `series_labels`. `{value}` is unchanged. All four are substituted in one pass, so a
+  data cell that happens to contain `{value}` is text, not a token. A token that cannot be
+  resolved — a blank `point_label` cell, the nameless single series — stays literal. (#37)
+- Point-callout labels that would sit on each other now move apart, and placement chooses HOW so
+  that as few connectors are drawn as possible. Each auto-placed callout takes one of three
+  treatments — keep its default offset, lift above its point, or drop below it — and the whole
+  arrangement is chosen by: fewest leaders crossing another label, then fewest connectors (a
+  displaced label with no `connector` costs no line, so it is the one moved by preference), then
+  fewest labels moved at all, then least total movement. A tie lifts the label so its leader runs
+  downward. So a label that can sit beside its point does, and needs no line; a label that must move
+  goes far enough to carry a *visible* shaft rather than merely clear of the dot. A callout with an
+  explicit `dx` or `dy` is pinned where the author put it and the others clear it. A callout that
+  collides with nothing, and sits on no other callout's marker, keeps exactly today's offset — which
+  is what keeps every published figure byte-identical. Pushed labels are clamped to the frame by
+  their full height, except that a stack taller than the frame overflows the bottom, the top of the
+  column winning. Past nine auto-placed callouts on one chart, or where no arrangement satisfies the
+  constraints, placement falls back to a simple downward sweep that resolves overlaps without
+  consulting the shaft geometry. An auto-placed label that would run off one side is also flipped,
+  anchored away from that side and offset 6px to the inside of its point, because the visual review
+  found callouts cut off at the right of the frame; the flipped box is what placement then works
+  from, so the flip decides which labels collide. The thresholds are
+  asymmetric: the CANVAS edge on the right, where the margin is empty and only a truncated label is a
+  problem, and the FRAME edge on the left, where the margin holds the y-axis tick labels. A label
+  that fits keeps the centred anchor and offset it always had; one that overruns both limits, or
+  whose flip would overrun the opposite limit, stays centred because no side fits; a pinned label is
+  never flipped. An explicit `\n` in a `label` is now a hard line
+  break even when `maxWidth` is set — the wrapper split on all whitespace, so setting `maxWidth`
+  silently destroyed authored breaks; each line now wraps at word boundaries on its own. Placement
+  is otherwise one-dimensional, vertical only, like the x-axis stagger; it runs under the same
+  conditions as the connectors (a numeric or temporal axis domain and a known width AND height —
+  the stagger itself needs only the width, so a height-less render staggers axis labels but does not
+  place callouts). (#37)
+- `tooltip_x_label` / `tooltip_y_label` — **`scatter` only**: name the hover card's x and y rows
+  when the axis titles are the wrong words for a tooltip (an abbreviated axis title, or a unit the
+  card should spell out). Each falls back to the matching axis title, and that falls back to the
+  literal `x` / `Value` as before. The axis titles themselves are untouched. Rejected on every other
+  chart type, where a card row is labelled by its series rather than by an axis. Hover-only — a PNG
+  export has no hover state. (#35)
+
+### Changed
+- **A point callout's connector is now a short, plain, headless leader that stops short of the
+  marker.** Three defaults moved together, from the 1.14.0 visual review ("these are pretty weird
+  and far from the points … the end of the connector also touches the point"). A callout with
+  `connector: true` now sits **12px above its point instead of 28**; the leader is a plain line in
+  the callout's colour with **no arrowhead**, where it was a `Plot.arrow` with a 6px head; and it
+  stops **6.6px from the point's centre** — the scatter marker's 4.6px radius plus 2 — where the old
+  4px inset ended it *inside* the marker, so the line ran under the dot. And an **auto-placed**
+  callout draws the leader only when placement actually **moved** its label off that
+  default: at 12px the label's own proximity says which point it belongs to, and the line was a few
+  px of ink between two things already touching. A purely lateral frame-edge flip does **not** earn
+  one — it leaves the label hugging its point, where the leader is a ~7px stub that reads as noise.
+  A label placement moves now also clears every callout's marker, coming to rest no closer than
+  that same 6.6px to any callout's point; a label still at its default is exempt, which is what
+  keeps a lone callout byte-identical. Placement additionally puts a moved leader-drawing label far
+  enough out for a *visible* shaft — though only for arrangements the search finds, not for the
+  sweep it falls back to. A callout with an explicit `dx` or `dy` asks for the connector and says
+  where the label goes, so its leader is drawn **whenever there is room for one**: pinned closer
+  than the 15.1px threshold below, there is no shaft to draw and none appears. The default WITHOUT
+  a connector is unchanged at 6px. Where no leader can be drawn (a categorical x-axis, or a render
+  with no width/height) a pinned callout still falls back to a small dot and an auto-placed one
+  now draws nothing. (#42)
+
+- **Callout placement was rewritten twice within this release.** The first implementation swept
+  colliding labels in one direction, which maximised the number displaced and therefore the number
+  of leaders; a stakeholder review of the demo caught it before release ("2025a should obviously be
+  above, with a longer line straight down… is there a way to minimize connectors?"). The shipped
+  behaviour is the connector-minimising search described under Added; the sweep survives only as the
+  fallback named there. Recorded because the intermediate behaviour appears in this file's own git
+  history and in three rounds of review notes, not because any release ever had it.
+- **A point callout's label takes its series' colour by default.** It was a flat neutral
+  (`TBL.color.heading`) whatever the callout pointed at, so a label read as chrome detached from the
+  data rather than as a note ON that series. A callout keyed by `point:` now takes the colour of the
+  row it matched, and one snapped by `series:` the colour of that series — the same map the marks
+  are painted from, so a label cannot disagree with its own dot. An explicit `color:` still wins,
+  and a plain `x` + `y` callout has no series to inherit from and keeps the neutral. **No published
+  figure moves:** every callout in the archive sets `color` explicitly (`etr-vintages` and
+  `price-waterfall` at `#6D6D6D`, the untracked scorecard at violet).
+- **An annual temporal series' hover card reads a bare year.** The card defaulted to `%b %Y`, so an
+  annual series showed `Jan 1950` under an axis reading `1950` — the axis already collapses a
+  year-cadence span to a bare `%Y`. The default is now `%Y` when every x cell falls on 1 January.
+  Tested on the DATA and deliberately not on the tick cadence: a monthly series across eighty years
+  also draws decade ticks, and there the month is the only thing separating adjacent points. An
+  explicit `tooltip_x_format` still wins. **No published figure moves** — all twelve tracked
+  temporal specs are daily or monthly.
+
+### Fixed
+- **A callout's leader no longer paints over another callout's label.** `assemble-plot.ts` collects
+  annotation text in `labelMarks` and pushes it after every line and rect, precisely because Plot
+  paints in array order and "the white halo can't rescue text drawn under a later stroke" — its own
+  comment. Point callouts were the one annotation not using that bucket: the label went into `marks`
+  inline, inside the per-callout loop, so callout N+1's shaft was drawn after callout N's label and
+  straight through it. Reported as illegible on the demo. Placement minimises crossings but cannot
+  always reach zero, so the paint order is what keeps the text readable — and the halo has been
+  there all along waiting to do its job. **Rendered output changes for any chart with a point
+  callout.** SVG element order changes on all of them, the label moving later in the array. PIXELS
+  change in three cases: wherever a leader previously crossed a label — that is the defect, and
+  removing those stroke pixels from the text is the fix — and wherever a callout label overlaps a
+  pane title or an `annotations.xAxis` / `yAxis` / `bands` label, both of which the callout now
+  paints OVER rather than under (those marks were already queued in `labelMarks`, so the callout
+  moving into the same bucket puts it last).
+  **The archive's two tracked callouts are unaffected, verified by rendering rather than argued:**
+  `etr-vintages` ("Projected") and `price-waterfall` (`maxWidth`-wrapped to "(no step in" /
+  "original)", facet-scoped) were rendered and every other `<text>` in the figure measured against
+  them — neither callout's box intersects any other text, so nothing can paint over or under
+  anything and the pixels are identical. Only their serialised element order differs. No golden
+  covers `annotations.points`, so the suite is silent on all of it.
+- **Placement's second ranking key counts connectors, not displaced labels.** A displaced callout
+  with no `connector` draws no line, so counting it tied a move that costs a leader against one that
+  costs nothing and let the tie-break pick the expensive one. Caught in review before release.
+  Crossings are also scored once the whole arrangement is settled, over every leader actually drawn
+  — including pinned ones — where scoring them as labels were placed missed an earlier label's shaft
+  crossing a later one, and missed pinned shafts entirely. And the shaft is modelled as the real
+  slanted segment from the label's anchor to the marker rather than a vertical line at the point's
+  x, which differ by the `dx` offset on a flipped or pinned label; since crossings are the FIRST
+  ranking key, that discrepancy could pick a worse arrangement.
+- **The PNG export puts the legend where the live card puts it.** A stacked chart with five or more
+  series — or a diverging one — lays its legend in a right-hand column on screen, and the download
+  drew it above the chart regardless. `legendPosition` was resolved inside `render-live.ts`, so the
+  export never saw it; `export-png.ts` contained no reference to it at all. Reported from a real
+  download. Nothing recorded a reason for the two to differ, and a test had recorded the
+  divergence as behaviour, which is why it survived.
+  The fix is a third module, `src/engine/legend-layout.ts`, holding the position rule, the column
+  width and gap, the series count the rule is defined on, and the top-to-bottom ordering — imported
+  by BOTH paths, so they cannot drift again. It could not simply be imported from `render-live.ts`:
+  that module imports `exportChartPng` for its download button, so the reverse import would be a
+  runtime cycle. The export now reserves 160px plus a 16px gap, renders the chart into what remains,
+  stacks the legend rows beside the plot in the same visual order the live column uses, wraps a
+  label too long for the column, and puts a shape legend below the colour rows in the same column.
+  A `small_multiples` figure keeps its top legend, as it does live.
+- **An auto-placed callout label no longer parks on another labelled point.** Only a MOVED label
+  cleared the markers; a label sitting at its default was exempt, so on the 1.14.0 demo "2025a" came
+  to rest squarely on a different callout's dot — leaving the reader to guess which of two labels
+  belonged to it. Every AUTO-PLACED label now clears every other callout's marker, whether or not
+  anything else moved it. A **pinned** label (`dx`/`dy`) is not swept at all, here as for the flip
+  and the frame clamp, so it still sits exactly where the author put it. A label's own marker
+  stays exempt while it sits at its default, which is what keeps a lone callout byte-identical, and
+  binds the moment anything pushes it. **No published figure moves:** the two tracked callouts are
+  each alone on their chart (no other marker to clear) and the untracked scorecard's four are all
+  pinned, and pinned labels are never swept.
+- **A connector leader no longer runs up through its own label's text.** It started at the label's
+  ANCHOR, which is the box's vertical centre, so on a wrapped or line-broken label the shaft was
+  drawn through every row of it — reported as looking terrible on the 1.14.0 demo. It now starts at
+  the label's edge: half the box height plus 2px with no `dx`, or just the 2px when an explicit or
+  flipped `dx` anchors the box by the edge facing the point. Where the two insets leave no room the
+  leader is **not drawn at all**, rather than emitted as an invisible or text-crossing line — the
+  label is already touching its point, the same reasoning that gives a callout at its default no
+  leader. The threshold is the two insets added together — **15.1px** for a one-row label — so
+  **clearing the marker and earning a leader are now different thresholds**: a label the sweep
+  pushes just clear of a dot (13.6px on the demo fixture) shows none, while one pushed 26.6px shows
+  an 11px shaft. A `connector: true` pinned closer than 15.1px draws no line at all, and one pinned
+  just past it draws a hairline. No tracked published figure carries a
+  `connector`, so nothing published moves.
+- **A multi-line point callout is clamped to the frame by its whole height, not by one row.** The
+  clamp bounds were computed once, from half of a single row, and applied to every label — so a
+  callout wrapped by `maxWidth` or broken by an explicit `\n` (both new in this release) had its
+  centre pulled to 6.5px inside the frame while its half-height was 13px or more, leaving the rest
+  hanging outside. `placePointCallouts` now takes the frame edges and insets each label by its own
+  half-height. The pass that pins an overrunning label also picks the label that most overruns **its
+  own** limit rather than the lowest one in the column, since with per-box limits a tall label can
+  be outside the frame while a shorter one below it is still inside. A one-row callout clamps
+  exactly where it did before, so no single-line figure moves. Found by review. (#42)
+- **A diagonal texture's legend key no longer overflows its swatch in the PNG export.** Found
+  downstream in a real download (`interactives-staging`, taxes-at-the-top distribution card, engine
+  1.12.0 as vendored): a `series_patterns: '/'` key rasterised as a tilted parallelogram spilling
+  past its swatch box and past the legend row, beside three clean square swatches, while the same
+  key was correct on screen. `iconSvgGroup` (`src/engine/icon.ts`) builds the glyph's clipping
+  `<svg>` viewport and then moves the shapes OUT of it into a bare `<g>` for the export to
+  position — and a `<g>` does not clip. The diagonals were stroked lines drawn corner to corner at
+  6px wide, which overflow a 14px box at both ends and along both flanks, and `hatch.ts` said so
+  outright: they "are clipped to the box by its viewport". Only `/`, `\` and `x` were affected; the
+  axis-aligned `|`, `-`, `+` are rects sized exactly to the box. The diagonal band is now a polygon
+  carrying the trimmed geometry — the exact intersection of that stroke with the box, so the region
+  the live legend draws is unchanged — which is correct in any container and needs no viewport.
+  Geometric identity is derived, not measured: a polygon fill and a clipped stroke take different
+  rasteriser paths and may differ in edge antialiasing, and no before/after screenshot was
+  compared, so the live key is "the same shape", not certified pixel-for-pixel. This follows the
+  precedent `hatchPattern` already records for using a band rect rather than a stroked line inside a
+  `<pattern>` tile. It also closes the gap that hid it: the diagonals were the one shape
+  `test/icon-fits-box.test.ts` filtered out of its clipping check, and the line test it left them to
+  asserted only that endpoints were inside the box, on the assumption that a line "may be TRIMMED at
+  the frame". As polygons they are measured with every other shape, and a new test asserts the
+  exported group carries no stroked band and no geometry outside the box.
+- **A bare `YYYY` cell on a temporal axis landed a year early in any negative-offset zone.**
+  `parseDate` (`src/spec/parse-time.ts`) special-cased `YYYY-MM-DD` to local midnight and fell
+  through to `new Date(s)` for everything else, which reads a bare year as an ISO year anchored at
+  **UTC** midnight. The engine then formats in local time, so `new Date("1952")` is 31 December
+  1951 at 19:00 in ET and `getFullYear()` returns 1951: every point, every tick label and the axis
+  domain itself slid back one year, silently and consistently enough to look right. A bare year is
+  the natural spelling for an annual series, and this is what makes `xAxisType: temporal` its
+  correct home — see the numeric-grouping note under Upgrading. The fix is the same local-midnight
+  construction the `YYYY-MM-DD` branch already used, so both spellings now agree to the millisecond
+  and a column mixing them no longer splits. Covered by a test that moves the process timezone; the
+  suite pins `TZ=UTC`, where the two parses agree and the bug is invisible. A low four-digit year is
+  handled explicitly too: the multi-argument `Date` constructor maps years 0-99 into 1900-1999, so
+  `"0050"` would otherwise have come back as 1950. That correction is applied in **one** helper
+  shared by all three parsers, because the `YYYY-MM-DD` and `YYYYQ#` branches had the same defect
+  already — fixing only the bare year would have put `"0050"` and `"0050-06-15"` 1900 years apart.
+  **`validateChartData` now accepts a bare `YYYY` as a temporal cell**, which it did not: it
+  required `YYYY-MM-DD` and rejected every row with `expected YYYY-MM-DD, got "1952"`. Parsing the
+  cell correctly was useless while validation refused it — the recommended annual-series migration
+  could not have passed the publish path. The error now names both accepted forms.
+- **The hover card wraps a row label longer than the card instead of clipping it.** `.tbl-tooltip`
+  set `white-space: nowrap` *and* `max-width: 320px`, which contradict: the box stopped at 320px and
+  the un-wrappable line ran out through the right border, so the row's value — the one thing a
+  reader hovers for — was painted outside the card and cut off. Reported on a `scatter` whose card
+  rows fall back to the axis titles (`tooltip_x_label` / `tooltip_y_label` absent), but it hit any
+  card with a long series name, category name or overlay label. The card now wraps at the same
+  320px — a label with no space or hyphen to break at is broken mid-word rather than left to run
+  out through the border — and every row's value is joined to its label by a non-breaking space
+  so a wrap does not separate them. Pre-existing since the card was introduced. Hover-only: the
+  card is live-DOM CSS and a PNG export has no card, so no exported or published image changes.
+  (#41)
+- **A faceted stacked bar in tooltip mode keeps its cross-pane band echo.** A stack whose hover is
+  the card (a diverging stack with its net dot, or `barStack.hover: "tooltip"`) dropped ALL
+  coordination with its sibling panes: the gate that suppresses value pills on a card pane also
+  withheld the `onResolve` forward that drives the other panes, so hovering one pane left the rest
+  dark. The pills half of coordination is what tooltip mode drops; the band echo is independent of
+  it. The pane now forwards its hover and its siblings draw an echo-only shade (`echoOnly` on the
+  secondary band cursor, the stacked analogue of the dumbbell's `markerless` branch) — no pills, no
+  category-name pill, no axis echo — and the hovered pane's own echo stays blank because its card
+  and highlight already mark the band. A pinned legend series' own pills stand on every pane
+  through the hover, exactly as a standalone chart in this mode leaves them; suppressing them exists
+  only so the pills cursor can draw its replacement, and the echo draws none. At default settings;
+  `small_multiples.coordinated_cursor: false` keeps the card with no echo and `chrome.tooltip: false`
+  keeps the echo with no card. Hover-only — nothing here reaches the PNG. (#32)
+- **The x-axis title no longer collides with the tick labels on a numeric axis.** The 8px correction
+  was keyed to `.chart-scatter`, so a histogram (numeric axis, not a scatter) never received it and a
+  faceted scatter did not either, because the figure card carried no chart-type class at all. The
+  cause was the axis type: a numeric x-adapter reserves 22px below the frame against the temporal
+  adapter's 38px. Both card roots now carry `x-<xAxisType>` and the rule is keyed to `x-numeric`.
+  Categorical, temporal and quarterly axes are unchanged. The PNG export positions the title with its
+  own arithmetic, already looser than the screen on every axis type, and did not change. (#34)
+- **Annotation stagger and connector geometry now measure against the drawn axis, not the data.**
+  `assemblePlot` estimated label pixel positions from the data's x extent, which is not what the axis
+  spans when a histogram's bin-edge span (`histogram.domain`, else the computed outer bin edges) or
+  `anchorAtZero` is in play — and binned rows carry
+  no numeric x at all, so on a histogram the stagger never ran and overlapping `annotations.xAxis`
+  labels overprinted. The resolved axis domain is now passed in its place (`xExtent` → `xAxisDomain`
+  on the `assemblePlot` option; a `Date`-valued temporal-histogram domain is converted to epoch ms).
+  (#36)
+
+### Docs
+- `CONFIG-SPEC.md`: the `annotations.points` row is rewritten for `x | point`, the row tokens and
+  auto-placement, with a new "Row tokens" paragraph and a worked scatter example keyed to
+  observations; the `barStack.hover` row and the small-multiples paragraph state that a card pane
+  coordinates a band echo and leaves a pinned series' pills standing; the `tooltip_x_label` /
+  `tooltip_y_label` row, now also noting the pre-1.14.0 clipping the wrap fix replaces; the
+  `chrome.tooltip` row's new paragraph on the card's 320px wrap; and a paragraph under the class
+  table documenting `figure-card`, `chart-<chartType>` and `x-<xAxisType>` on the card roots.
+- Four pre-existing `CONFIG-SPEC.md` claims corrected. Two were made false by this release and
+  narrowed to match: the `x_labels` row said a coordinated small-multiples pane replaces its card
+  with the in-place cursor (a dumbbell and a stacked pane in tooltip mode keep theirs), and the
+  `series_patterns` notes said no coordinated pane draws a card. One was already false: "`bands` /
+  `points` are not facet-scoped" (`points` take `facet`, and `filterAnnotationsByFacet` has scoped
+  them). One was ambiguous once `point:` existed: "`annotations.points` cannot be keyed" meant
+  legend-keyed and now says `legend: true`, since `point:` is a key of a different kind.
+
+### Upgrading
+
+A repin re-renders every published figure at once — here is what a maintainer will see change:
+
+- **Charts where the axis domain differs from the data extent re-lay out their annotations.** Four
+  classes, none present in any golden fixture: a histogram with `annotations.xAxis` or band labels
+  (labels that overprinted now stagger); a histogram with `annotations.points[].connector: true`
+  (previously drew a plain dot because the connector gate was never satisfied, now takes the leader
+  rules under Changed);
+  an `anchorAtZero` chart with annotation labels (label x now matches the marker's drawn x); and an
+  `anchorAtZero` chart with connector callouts (previously drew no leader line at all; now draws one
+  whenever the callout is pinned or placement moved its label). **One chart in the sibling
+  archive falls in the first class, and it is NOT yet published** — the deficit-management
+  scorecard's `deviation-distribution` histogram, which lives under the untracked
+  `charts/trackers/` tree (`git ls-files` does not know it), so nothing published moves here;
+  it will pick this up whenever that tracker is committed. The chart (`histogram.domain: [-1, 2.25]`, four labelled
+  `annotations.xAxis` markers), whose "2026a" (x = 0.5013) and "2025a" (x = 0.6222) labels sit about
+  24 px apart at width 720 against about 31 px of text and overprint today; that overprinting is the
+  defect being fixed, and "2025a" drops to the second stagger row on repin. The archive's only two
+  `anchorAtZero` uses are both `anchorAtZero: false`, and a non-anchored numeric axis's domain is
+  exactly the data extent (`[d3.min, d3.max]` of the parsed x), so every other numeric chart renders
+  byte-identically — as does every temporal, quarterly and categorical chart, which fall back to the
+  data extent exactly as before. (#36)
+- **Point callouts that overlap at their default offsets now move apart, unconditionally.** A chart
+  with two or more `annotations.points` without `dx`/`dy` whose labels currently sit on each other
+  re-lays out on repin. **No published spec is affected**, established by parsing every authored
+  spec: two figures carry a single unpinned callout each (a lone callout never collides) and the one
+  figure with several callouts pins all of them. No golden fixture carries `annotations.points`, so
+  this guarantee rests on the exact-equality tests in the engine, not on the golden suite. (#37)
+- **An unpinned point callout near a horizontal edge now flips to the inside of its point.** This is
+  a separate condition from the collision above, and the "no published spec is affected" finding
+  there does NOT cover it: a LONE unpinned callout flips too, whenever its centred label would run
+  off the canvas on the right or cross the frame edge into the y-tick-label gutter on the left.
+  **No published callout moves**, established by rendering both figures that carry an unpinned
+  callout before and after the change — `etr-vintages` ("Projected") and `price-waterfall`
+  ("(no step in original)", on a categorical axis where the flip is gated off) — and finding
+  identical label positions and text-anchors. A callout whose label fits is untouched, and a
+  pinned (`dx`/`dy`) callout never flips. (#37)
+- **Every `connector: true` point callout re-lays out.** Its label moves 16px closer to its point
+  (12px above instead of 28), its leader loses the arrowhead and now stops 6.6px from the point's
+  centre instead of 4px, and an auto-placed callout loses the leader altogether unless placement
+  moved its label (a lateral frame-edge flip alone does not earn one). A moved label is also
+  held clear of every callout's marker, so it can no longer come to rest on the dot it names. **No
+  committed published figure carries a `connector`**, established by grepping every `chart.yaml`
+  under `budget-lab-charts/charts`: the only hit is
+  `trackers/deficit-management-scorecard/scorecard-scatter`, which is untracked in that repo (not
+  published) and whose four pinned callouts will change appearance on the next render — expected. No
+  golden fixture carries a `connector` either (`grep -l connector test/fixtures/*.yaml` is empty), so
+  this change is invisible to the golden suite and rests on the tests in the engine. (#42)
+- **No published figure changes.** The right-hand PNG legend reaches only a STANDALONE chart, and
+  the archive has none that qualifies: parsing all 40 tracked `chart.yaml` files, no spec sets
+  `legendPosition`, and every stacked spec declares `small_multiples` — a figure has only a top
+  legend slot, in the export as on screen. So there are zero stacked non-figure specs, and nothing
+  published takes the new path. (An earlier draft of this note named `ai-fiscal/revenue-by-income-type`
+  and `/revenue-by-instrument` as changing; both are small multiples, so neither does. The scan
+  behind that claim filtered on chart type, series count and sign without applying the figure gate
+  that decides whether the position rule runs at all.)
+- **Every numeric x axis gains a thousands separator, and its crosshair header now rounds.** One
+  grouping rule (`formatNumericX` / `formatNumericTick`, `src/engine/util.ts`) now serves the axis
+  tick labels, the crosshair header, the scatter hover card's x row and the `{x}` callout token, so
+  a tick and a hover reading can no longer disagree. Two changes fall out of it: a numeric tick over
+  999 reads `1,234,567` where it read `1234567`, which is a **rendered SVG and PNG** change; and the
+  numeric crosshair header rounds to two decimals, where it printed the raw value
+  (`x=2.285011857607663` now reads `2.29`), which is hover-only. A histogram's bin-range header is
+  pinned to the same locale for the same reason (`histogram-label.ts`); it followed the host's,
+  so on a de-DE machine it read `1.234,5` under a `1,234.5` tick. Identical on an en-US host.
+  **Two published figures move, and both must be migrated in the same repin.** The sibling archive
+  has **six tracked** specs on `xAxisType: numeric`. Four have no |x| over 911 and are untouched
+  (`ces-qcew-benchmark-revisions/final-v-prelim` and `/regressions` at 911,
+  `ai-fiscal/revenue-vs-factor-income` at 633, `ai-fiscal/revenue-vs-pretax-income` at 547). The
+  other two are annual series on a numeric axis — `ai-fiscal/gdp-growth-history` (1952-2036) and
+  `ai-fiscal/labor-share-history` (1947-2026) — whose tick labels would read `1,950 1,960 …`.
+  (Two further numeric-x specs sit under the untracked `charts/trackers/` tree —
+  `deficit-management-scorecard/deviation-distribution` at 1.96 and `/scorecard-scatter` at 3.29 —
+  and are unpublished; neither would gain a separator anyway.)
+  **Change both to `xAxisType: temporal`**, which needs no data edit: a bare `YYYY` cell now parses
+  as that year's 1 January and validates (below), and `tblTemporalXAxis` renders a year-cadence span
+  as bare `%Y` labels — the same `1950 1960 …` decades those two charts show today. Their axis
+  *markup* and bottom margin still change, because a temporal axis is drawn by text marks rather
+  than `tblXAxis`; their labels do not. Grouping is right for a measured quantity and wrong for a
+  year, and the fix is the axis type rather than a magnitude carve-out in the formatter. No golden
+  fixture uses a numeric x at all (`xAxisType` in `test/fixtures` is only `categorical` and
+  `temporal`), so the golden suite is silent on this and it rests on the engine's own tests. (#37, #42)
+- **Every published histogram and faceted scatter gains 8px between its x-axis title and its tick
+  labels.** Screen only; the PNG export is unchanged. (#34)
+- **A faceted stacked bar whose hover is the card now also shades the hovered category on its
+  sibling panes** — at default settings; `small_multiples.coordinated_cursor: false` keeps the card
+  alone and `chrome.tooltip: false` keeps the echo alone. Hover-only. (#32)
+- **Every chart card root now carries an `x-<xAxisType>` class** alongside `figure-card`; a host stylesheet
+  keying on the exact class string will see the new token. `chart-<chartType>` stays on the standalone
+  card. (#34)
+- **Every published chart's hover card now wraps a label longer than the card**, where before the
+  line ran out through the border and the value was clipped. A card with a long series name,
+  category name, overlay label or (on a `scatter`) axis title grows taller rather than losing its
+  number off the edge; the value stays on its label's last line. Hover-only, with no exported or
+  published image changes — but the on-screen card looks different for every such chart starting
+  now, with no spec change on anyone's part. (#41)
+- **`CONFIG-SPEC.md` changed.** `budget-lab-charts` vendors it verbatim and gates CI on it being
+  current — re-run its vendoring step at repin.
+
 ## [1.13.0] - 2026-08-25
 
 ### Added

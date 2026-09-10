@@ -4,7 +4,7 @@
 // line overlay — then returns the SVG with margin metadata stamped on for the
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
-import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
+import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, MARK_POINT_R } from "./theme";
 import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
@@ -20,6 +20,7 @@ import {
   X_BAND_CLASS,
 } from "./facet-chrome";
 import { domainBounds, makeTickFormatter } from "./scales";
+import { placePointCallouts, type CalloutBox } from "./callout-placement";
 import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
@@ -27,7 +28,9 @@ import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
-  substituteValueToken,
+  substituteRowTokens,
+  formatAnnotationValue,
+  type RowTokenValues,
   xMarkerLabel,
   yMarkerLabel,
 } from "../spec/annotations";
@@ -216,6 +219,14 @@ function labelsInside(
   );
 }
 
+/** A point callout as index.ts hands it to assemblePlot: coordinates resolved, plus the display
+ *  strings its `{point_label}` / `{x}` / `{series}` tokens read. The VALUES are computed where the
+ *  rows are; the substitution happens here, in one pass with `{value}`, so a data cell that happens
+ *  to contain "{value}" is never re-expanded by a second pass. */
+export interface ResolvedPointCallout extends PointCallout {
+  rowTokens?: RowTokenValues;
+}
+
 export interface AssembleOptions {
   layers: MarkLayers;
   yDomain: [number, number];
@@ -226,12 +237,17 @@ export interface AssembleOptions {
   seriesNames: string[];
   colors: Map<string, string>;
   spec: ChartSpec;
-  /** Point callouts with any series-snap `y` already resolved (index.ts has the data). When
-   *  present, used instead of spec.annotations.points so the snap values render. */
-  points?: PointCallout[];
-  /** Numeric extent [min,max] of the parsed x values (ms for dates) — used to estimate label px
-   *  positions for annotation-label collision avoidance. Absent → no auto-stagger. */
-  xExtent?: [number, number];
+  /** Point callouts with any series-snap / `point:` coordinates already resolved and the row-token
+   *  VALUES attached (index.ts has the data). When present, used instead of spec.annotations.points
+   *  so the resolved coordinates render. */
+  points?: ResolvedPointCallout[];
+  /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
+   *  the marks are actually DRAWN in, so px estimates match what a reader sees. Falls back to the
+   *  data extent only where the adapter supplies no explicit domain (temporal/quarterly
+   *  non-histogram, where Plot infers the domain from the data). Used to estimate label px
+   *  positions for annotation-label collision avoidance and to convert a point callout's px
+   *  connector offset back to data space. Absent → no auto-stagger, no connector leader. */
+  xAxisDomain?: [number, number];
   width?: number;
   height?: number;
   marginRight?: number;
@@ -336,7 +352,7 @@ export function assemblePlot({
   colors,
   spec,
   points,
-  xExtent,
+  xAxisDomain,
   width,
   height,
   marginRight,
@@ -415,11 +431,13 @@ export function assemblePlot({
 
   // Substitute a `{value}` token in yAxis/xAxis/points labels with the annotation's own
   // coordinate value (per-annotation `value_format`, else the chart's y-tick format) BEFORE
-  // anything below reads `.label` — both the auto-stagger geometry (which estimates label px
-  // width from `label.length`) and the drawn text must see the SAME (substituted) string, or
-  // the stagger would size its collision boxes from the short literal token instead of the
-  // (usually longer) rendered number. Labels without the token are returned unchanged, so
-  // charts that don't use it get byte-identical output.
+  // anything below reads `.label` — both the auto-stagger / placement geometry (which estimates
+  // label px width from `label.length`) and the drawn text must see the SAME (substituted) string,
+  // or the geometry would size its collision boxes from the short literal token instead of the
+  // (usually longer) rendered text. Point callouts also take their row tokens here, in the same
+  // single pass. Labels without a token are returned unchanged, so charts that don't use one get
+  // byte-identical output. `{value}` is formatted only when the authored label asks for it, so the
+  // tick-label hook is not invoked for labels that never show a value.
   const yTickFallbackFmt = withTickLabelHook(makeTickFormatter(yTicks, valueAffixes), hooks, {
     axis: "y",
     ticks: yTicks,
@@ -429,11 +447,14 @@ export function assemblePlot({
     m.label ? { ...m, label: yMarkerLabel(m, yTickFallbackFmt) } : m,
   );
   const xAxisAnn = ann.xAxis.map((m) => (m.label ? { ...m, label: xMarkerLabel(m) } : m));
-  const pointsAnn = (points ?? ann.points).map((p) =>
-    Number.isFinite(p.y as number)
-      ? { ...p, label: substituteValueToken(p.label, p.y as number, p.value_format, yTickFallbackFmt) }
-      : p,
-  );
+  const pointsAnn = (points ?? ann.points).map((p: ResolvedPointCallout) => {
+    const value =
+      Number.isFinite(p.y as number) && p.label.includes("{value}")
+        ? formatAnnotationValue(p.y as number, p.value_format, yTickFallbackFmt)
+        : undefined;
+    const label = substituteRowTokens(p.label, { ...p.rowTokens, value });
+    return label === p.label ? p : { ...p, label };
+  });
 
   // Auto-stagger for top-anchored annotation labels (vertical-marker + band labels): estimate each
   // label's px position/width and greedily push overlapping labels onto stacked rows so they don't
@@ -443,13 +464,34 @@ export function assemblePlot({
   const LABEL_ROW_H = 13;
   const LABEL_GAP = 6;
   const LABEL_CHAR_PX = 6.2; // ~annotation font advance
+  // Lateral offset a point-callout label takes when the frame edge flips it off centre — the same
+  // magnitude the xAxis/yAxis marker labels use for their own side placement (section 6a).
+  const LABEL_FLIP_DX = 6;
+  // A callout that draws a connector sits 12px above its point, not the 28 it used to: the 1.14.0
+  // visual review read labels that far out as floating free of any point, and the research
+  // consensus (ggrepel, cartographic leader-line practice) is a label CLOSE to its point with a
+  // short leader only when something pushed it away. The no-connector default (6, below) is
+  // deliberately untouched — two published figures render on it.
+  const LABEL_CONNECTOR_DY = 12;
+  // The leader stops MARK_POINT_R + 2 px short of the point CENTRE, so 2px of white separates its
+  // end from the scatter marker's outline. The old `insetEnd: 4` was SHORTER than the 4.6px marker
+  // radius, so the line ended underneath the dot and read as touching it. One inset for every chart
+  // type, including those with no marker at the point (a line vertex): there the leader simply
+  // stops a hair short of the vertex, which reads the same.
+  const LEADER_END_INSET = MARK_POINT_R + 2;
+  /** Shortest shaft worth drawing. A leader is there to say WHICH point a label names; a hairline
+   *  does not, so placement puts a displaced leader-drawing label far enough out to earn this. */
+  const LEADER_MIN_SHAFT = 4;
+  /** What a displaced leader-drawing label owes BEYOND half its own height: the gap at the label's
+   *  edge, the gap at the marker, and a shaft long enough to read. */
+  const LEADER_CLEARANCE = 2 + LEADER_END_INSET + LEADER_MIN_SHAFT;
   const staggerDy = new Map<string, number>();
-  if (xExtent && xExtent[1] > xExtent[0] && width != null) {
+  if (xAxisDomain && xAxisDomain[1] > xAxisDomain[0] && width != null) {
     const innerW = width - effMarginLeft - effMarginRight;
     const toPx = (v: number | Date | string | null): number | null => {
       if (v == null || typeof v === "string") return null;
       const n = typeof v === "number" ? v : v.getTime();
-      return effMarginLeft + ((n - xExtent[0]) / (xExtent[1] - xExtent[0])) * innerW;
+      return effMarginLeft + ((n - xAxisDomain[0]) / (xAxisDomain[1] - xAxisDomain[0])) * innerW;
     };
     type Iv = [number, number];
     // Two labels in the same stagger row collide when their px spans come within LABEL_GAP.
@@ -889,52 +931,179 @@ export function assemblePlot({
     }
   });
 
-  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
-  //     (series-snap). With connector, draw a leader arrow from the label to the point — the label
-  //     offset (dx/dy px) is converted to a second data coordinate via the x/y extents so the arrow
-  //     lands exactly on the point. The arrowhead marks the point (no separate dot).
+  // 6b. Point-callout auto-placement. A callout with NO explicit dx/dy is movable: its label box is
+  //     estimated at the default offset (width from the longest line, one LABEL_ROW_H per line,
+  //     anchored like the drawn text) and colliding movable boxes are spread apart vertically; a callout with
+  //     an explicit dx or dy is pinned and the others route around it. Same preconditions as the
+  //     connector below (numeric axis domain, known width/height) and the same estimate-based
+  //     geometry as the stagger above — getBBox would make live, PNG and SSR disagree. A box that
+  //     collides with nothing gets NO entry here, so it takes exactly today's default below and
+  //     every existing chart renders byte-identically.
+  //
+  //     A movable label is also FLIPPED to the inside of its point when the centred box would run
+  //     off one side: `2025b (2025a–2026…` was cut off at the right in the 1.14.0 visual review. The
+  //     flip is decided here, before the vertical sweep, because it changes the box's horizontal
+  //     extent and therefore which labels are near enough to collide — one estimate has to feed
+  //     both or the sweep separates the wrong pair.
+  //
+  //     The two thresholds are deliberately ASYMMETRIC. On the right it is the CANVAS edge: the
+  //     right margin is empty, so a label may overhang the frame harmlessly and only a label past
+  //     the canvas is actually truncated. On the left it is the inner FRAME edge, because the left
+  //     margin is the y-tick-label gutter — an overhang there collides with the tick labels rather
+  //     than merely leaving the frame.
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  for (const p of pointsAnn) {
+  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -LABEL_CONNECTOR_DY : -6);
+  const autoDy = new Map<number, number>();
+  const autoDx = new Map<number, number>();
+  if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
+    const boxes: CalloutBox[] = [];
+    const boxIdx: number[] = [];
+    const boxPy: number[] = [];
+    pointsAnn.forEach((p, i) => {
+      if (p.x == null || !Number.isFinite(p.y as number)) return;
+      const mx = xOpts.markerToX({ x: p.x });
+      if (mx == null || typeof mx === "string") return;
+      const xn = typeof mx === "number" ? mx : mx.getTime();
+      const px = effMarginLeft + ((xn - xAxisDomain[0]) / (xAxisDomain[1] - xAxisDomain[0])) * innerWForPx;
+      const py = TBL_MARGIN_TOP + ((yDomain[1] - (p.y as number)) / (yDomain[1] - yDomain[0])) * innerHForPx;
+      const fixed = p.dx != null || p.dy != null;
+      const text = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
+      const lines = text.split("\n");
+      const w = Math.max(...lines.map((l) => l.length)) * LABEL_CHAR_PX;
+      // Flip a movable label that runs off ONE side: anchor it away from that side,
+      // LABEL_FLIP_DX to the inside of its point. Two ways to decline: a box that overruns both
+      // limits is wider than the space available, and a flipped box that would overrun the
+      // OPPOSITE limit has only traded which end is cut off (a label nearly as wide as the frame
+      // at the right edge lands past the left gutter once flipped). Both keep the centred default.
+      const rightLimit = effMarginLeft + innerWForPx + effMarginRight; // the canvas edge (= width)
+      const leftLimit = effMarginLeft; // the inner frame edge — the y-tick-label gutter starts here
+      let dx = p.dx ?? 0;
+      if (!fixed) {
+        const overRight = px + w / 2 > rightLimit;
+        const overLeft = px - w / 2 < leftLimit;
+        if (overRight !== overLeft) {
+          const flipped = overRight ? -LABEL_FLIP_DX : LABEL_FLIP_DX;
+          const fLeft = flipped < 0 ? px + flipped - w : px + flipped;
+          if (fLeft >= leftLimit && fLeft + w <= rightLimit) dx = flipped;
+        }
+        if (dx !== 0) autoDx.set(i, dx);
+      }
+      const left = dx < 0 ? px + dx - w : dx > 0 ? px + dx : px - w / 2;
+      // `disk` is the callout's own point: no MOVED label may come to rest on any callout's marker.
+      // One row's push (LABEL_ROW_H) is more than the 12px connector default, so without this a
+      // swept label landed on its own dot and its leader shaft — shorter than the gap — vanished.
+      boxes.push({ x0: left, x1: left + w, y: py + defaultDy(p), h: lines.length * LABEL_ROW_H, fixed, wantsLeader: p.connector === true, disk: { x: px, y: py, r: LEADER_END_INSET } });
+      boxIdx.push(i);
+      boxPy.push(py);
+    });
+    // The FRAME, not pre-inset centre bounds: placePointCallouts insets each label by its own
+    // half-height, so a `maxWidth`-wrapped or explicitly line-broken label is held in by its
+    // full height rather than by half of one row.
+    // A one-row box clamps exactly where it did before.
+    const ys = placePointCallouts(boxes, {
+      gap: LABEL_GAP,
+      top: TBL_MARGIN_TOP,
+      bottom: TBL_MARGIN_TOP + innerHForPx,
+      leaderClearance: LEADER_CLEARANCE,
+    });
+    ys.forEach((y, k) => {
+      if (y !== boxes[k]!.y) autoDy.set(boxIdx[k]!, y - boxPy[k]!);
+    });
+  }
+
+  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
+  //     (series-snap). With connector, draw a plain leader LINE from the label to the point — the
+  //     label offset (dx/dy px) is converted to a second data coordinate via the x/y extents so
+  //     the leader aims exactly at the point, then stops `LEADER_END_INSET` short of its centre.
+  //     No arrowhead: at these offsets the head was most of the mark, and the label's own
+  //     proximity already says which point is meant.
+  for (let pi = 0; pi < pointsAnn.length; pi++) {
+    const p = pointsAnn[pi]!;
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
     // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
+    // A `point:` callout arrives with `x` filled in by index.ts (or was dropped there); one that
+    // reaches this loop without `x` has no anchor and draws nothing.
+    if (p.x == null) continue;
     const px = xOpts.markerToX({ x: p.x });
     if (px == null || !Number.isFinite(p.y as number)) continue;
     const py = p.y as number;
-    const pColor = resolveColorOr(p.color, TBL.color.heading);
-    // Default offset is larger when a connector is drawn, so the leader is visible. dy is + = UP,
-    // so negate the user's value for SVG (defaults are already SVG-up: -6 / -28).
-    const dx = p.dx != null ? p.dx : 0;
-    const dy = p.dy != null ? -p.dy : p.connector ? -28 : -6;
+    // A callout that belongs to a series takes that series' colour, so the label reads as part of
+    // the data it names rather than as detached chrome; an explicit `color:` still wins. A plain
+    // `x` + `y` callout has no series to inherit from and keeps the neutral heading colour. This is
+    // the same map the marks are painted from, so a label cannot disagree with its own point.
+    const pSeriesColor = p.series != null ? colors.get(p.series) : undefined;
+    const pColor = resolveColorOr(p.color, pSeriesColor ?? TBL.color.heading);
+    // Default offset is slightly larger when a connector is drawn, so the leader has room. dy is
+    // + = UP, so negate the user's value for SVG (defaults are already SVG-up: -6 / -12). An
+    // auto-placed label (6b) overrides the default; an explicit dx/dy always wins. `autoDx` carries the frame
+    // -edge flip and holds an entry ONLY for a flipped label, so an unflipped one takes the same
+    // 0 it always did — and `anchor` reads the flip straight off dx, as it does an author's.
+    const dx = p.dx != null ? p.dx : (autoDx.get(pi) ?? 0);
+    const dy = autoDy.get(pi) ?? defaultDy(p);
     const anchor = dx < 0 ? "end" : dx > 0 ? "start" : "middle";
-    // A pixel-offset leader needs a numeric x extent; the band (categorical) scale has none, so a
-    // category-anchored callout falls back to the simple dot (or no marker).
-    if (p.connector && typeof px !== "string" && xExtent != null && xExtent[1] > xExtent[0] && innerWForPx != null && innerHForPx != null) {
+    // A leader is drawn when the author POSITIONED the label (an explicit dx or dy — they asked for
+    // the connector and said where the label goes) or when the vertical sweep pushed the label off
+    // its default. A label still sitting 12px above its own point needs no line: at that distance
+    // the leader was ~5px of ink between two things already touching, which is what the 1.14.0
+    // visual review objected to. `autoDy` receives an entry ONLY for a callout the sweep actually
+    // moved (6b guards the `.set` behind an inequality), so membership IS "moved vertically" — the
+    // byte-identity guarantee and this gate are the same fact. `autoDx` is deliberately NOT part of
+    // it: the frame-edge flip shifts a label 6px sideways and leaves it hugging its point, where a
+    // leader is a ~7px stub that reads as noise. A fixed callout never enters `autoDy`, so the
+    // `dx`/`dy` test is not redundant.
+    const leader = p.connector && (p.dx != null || p.dy != null || autoDy.has(pi));
+    // Optional word-wrap to a max px width (Plot renders the "\n"s as multiple lines).
+    // Hoisted above the leader so the leader can measure the label box it must start clear of.
+    const labelText = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
+    // Where the leader leaves the LABEL, from the label's anchor. The anchor is the box's
+    // vertical CENTRE, so a leader drawn from it ran up through the label's own text — on a
+    // wrapped label, through every row of it. With `dx === 0` the box straddles the anchor and
+    // the leader is vertical, so it owes half the box height; with an explicit or flipped `dx`
+    // the box is anchored BY the edge facing the point (`left` in 6b), so it owes nothing
+    // horizontally. Plus 2px of air, mirroring the gap left at the marker end.
+    const leaderStartInset = (dx === 0 ? (labelText.split("\n").length * LABEL_ROW_H) / 2 : 0) + 2;
+    // No room between the label's edge and the marker's ⇒ no shaft. Drawn as nothing, NOT as
+    // the dot below: that fallback is for an axis with no pixel geometry, where a pinned
+    // callout still needs its point marked. Here the label already touches its point, and a
+    // dot under it is the redundant mark the 1.14.0 review rejected.
+    const leaderFits = Math.hypot(dx, dy) - leaderStartInset - LEADER_END_INSET > 0;
+    // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
+    // a category-anchored callout falls back to the simple dot (or no marker).
+    if (leader && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
       // Label position in DATA space: shift the point by the px offset using the per-px data deltas.
-      const dppx = (xExtent[1] - xExtent[0]) / innerWForPx;
+      const dppx = (xAxisDomain[1] - xAxisDomain[0]) / innerWForPx;
       const dppy = (yDomain[1] - yDomain[0]) / innerHForPx;
       const baseN = typeof px === "number" ? px : px.getTime();
       const labelN = baseN + dx * dppx;
       const labelX = typeof px === "number" ? labelN : new Date(labelN);
       const labelY = py - dy * dppy;
-      marks.push(
-        Plot.arrow([{ x1: labelX, y1: labelY, x2: px, y2: py }], {
-          x1: "x1",
-          y1: "y1",
-          x2: "x2",
-          y2: "y2",
-          stroke: pColor,
-          strokeWidth: 1,
-          headLength: 6,
-          insetEnd: 4, // stop just short of the point
-        }),
-      );
-    } else if (p.connector) {
+      if (leaderFits) {
+        marks.push(
+          Plot.arrow([{ x1: labelX, y1: labelY, x2: px, y2: py }], {
+            x1: "x1",
+            y1: "y1",
+            x2: "x2",
+            y2: "y2",
+            stroke: pColor,
+            strokeWidth: 1,
+            // `Plot.arrow` with no head rather than `Plot.link`: only the arrow mark carries
+            // `insetEnd`, and the inset is the whole point of the gap. At headLength 0 Plot's arrow
+            // renderer emits the bare `M x1,y1 L x2,y2` shaft and skips the head segment entirely.
+            headLength: 0,
+            insetStart: leaderStartInset, // start clear of the label's own text
+            insetEnd: LEADER_END_INSET, // stop clear of the marker's outline, not inside it
+          }),
+        );
+      }
+    } else if (leader) {
       marks.push(Plot.dot([{ x: px, y: py }], { x: "x", y: "y", r: 3, fill: pColor }));
     }
-    // Optional word-wrap to a max px width (Plot renders the "\n"s as multiple lines).
-    const labelText = p.maxWidth != null ? wrapToWidth(p.label, p.maxWidth, TBL.size.annotation) : p.label;
-    marks.push(
+    // Into `labelMarks`, not `marks`: these are pushed after every line and rect (see the
+    // declaration), so a LATER callout's leader cannot paint over an EARLIER callout's text.
+    // Pushed inline, callout N+1's shaft was drawn on top of callout N's label and the white
+    // halo could not rescue it — the module's own rule, which point callouts were not using.
+    labelMarks.push(
       Plot.text([{ x: px, y: py, t: labelText }], {
         x: "x",
         y: "y",

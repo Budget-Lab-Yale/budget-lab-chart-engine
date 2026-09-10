@@ -7,7 +7,7 @@
 // SVG legend chip (which is drawn here from scratch).
 import { describe, it, expect } from "vitest";
 import { buildExportSvg } from "../src/embed/export-png";
-import { defaultHatchStroke } from "../src/engine/hatch";
+import { defaultHatchStroke, HATCH_GLYPH_BOX } from "../src/engine/hatch";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -41,7 +41,7 @@ describe("the PNG export", () => {
     // patch of the chart body's tiling, which at chip size would show an edge and no direction.
     const band = defaultHatchStroke("#58A3E7");
     const glyph = [...svg.querySelectorAll("g[transform]")].find((g) => {
-      const shapes = [...g.querySelectorAll("rect, line")];
+      const shapes = [...g.querySelectorAll("rect, line, polygon")];
       return (
         shapes.length === 2 &&
         (shapes[0]!.getAttribute("style") ?? "").includes("#58A3E7") &&
@@ -49,10 +49,35 @@ describe("the PNG export", () => {
       );
     });
     expect(glyph, "no hatch glyph found in the exported legend").toBeTruthy();
-    // `/` is a diagonal, so its band is a line — and it ascends left to right.
-    const line = glyph!.querySelector("line")!;
-    expect(+line.getAttribute("x1")!).toBeLessThan(+line.getAttribute("x2")!);
-    expect(+line.getAttribute("y1")!).toBeGreaterThan(+line.getAttribute("y2")!);
+    // `/` is a diagonal, so its band is a filled polygon carrying geometry already trimmed to the
+    // box. It must NOT be a stroked line: the export unwraps the glyph's clipping viewport into a
+    // bare `<g>`, so a 6px stroke drawn corner to corner spilled across the legend row.
+    expect(glyph!.querySelector("line"), "a stroked band cannot be clipped in the export").toBeNull();
+    const pts = (glyph!.querySelector("polygon")!.getAttribute("points") ?? "")
+      .trim()
+      .split(/\s+/)
+      .map((pair) => pair.split(",").map(Number) as [number, number]);
+    // Every vertex inside the 14px box, with no viewport to trim it.
+    for (const [x, y] of pts) {
+      for (const v of [x, y]) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(HATCH_GLYPH_BOX);
+      }
+    }
+    // Ascending left to right: SVG y grows downward, so the band covers the bottom-left and
+    // top-right corners and not the other two.
+    const covers = (px: number, py: number) => {
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi, yi] = pts[i]!;
+        const [xj, yj] = pts[j]!;
+        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    };
+    expect(covers(0.5, HATCH_GLYPH_BOX - 0.5), "bottom-left").toBe(true);
+    expect(covers(HATCH_GLYPH_BOX - 0.5, 0.5), "top-right").toBe(true);
+    expect(covers(0.5, 0.5), "top-left must be ground").toBe(false);
   });
 
   it("defines every pattern the chart body references", () => {

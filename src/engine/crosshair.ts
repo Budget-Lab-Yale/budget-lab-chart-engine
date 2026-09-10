@@ -23,6 +23,22 @@ import type { TooltipHookCtx } from "../spec/hooks";
 
 type Row = Record<string, unknown>;
 
+/** The separator between a card row's LABEL span and its VALUE span: a NON-BREAKING space.
+ *
+ *  `.tbl-tooltip` wraps at its 320px `max-width` (it used to `nowrap` and clip the overflow
+ *  instead -- see the rule in styles.ts, #41). A PLAIN space here is a break opportunity, so a
+ *  label longer than one line filled that line and the number it labels dropped onto a line of its
+ *  own -- "...(percentage points)" above a lone "2.59", which reads as two statements rather than
+ *  one. Written as the escape rather than the character so it is greppable and cannot be mistaken
+ *  for the plain space it replaced, and as a text node rather than `&nbsp;` so the markup carries
+ *  no HTML-only entity.
+ *
+ *  Every row builder in this file reads this constant -- there are seven emission sites (the
+ *  scatter card's x and y rows, the shared series row, the band card's two Total variants, the
+ *  cumulative-area Total, and the overlay rows) and they drifted apart on smaller things than
+ *  this. Gated by test/card-wrap.test.ts. */
+const LABEL_VALUE_GAP = "\u00a0";
+
 export interface CrosshairOptions {
   rows: Row[];
   xField?: string;
@@ -257,7 +273,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       // The Total of a cumulative stack names no series, so it draws no key — but it still occupies
       // the box, or its label hangs left of every row above it. `shape: "none"` IS that empty box.
       const blank = seriesSwatchHtml({ shape: "none" });
-      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
+      html += `<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">${blank}<span><span class="tbl-tooltip-label">Total:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(yFormat(total))}</span></span></div>`;
     }
     // `overlays[].tooltip: true` lines LAST — a fitted or asserted line is a third kind of claim,
     // after the observed series and the total OF those series, and its own separator rule says so.
@@ -511,7 +527,7 @@ export function overlayTooltipRows(
     const cls =
       "tbl-tooltip-row tbl-tooltip-row--overlay" + (i === 0 ? " tbl-tooltip-row--overlay-first" : "");
     html +=
-      `<div class="${cls}">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(name)}:</span> ` +
+      `<div class="${cls}">${swatch}<span><span class="tbl-tooltip-label">${escapeHtml(name)}:</span>${LABEL_VALUE_GAP}` +
       `<span class="tbl-tooltip-value">${escapeHtml(yFormat(v))}</span></span></div>`;
   });
   return html;
@@ -567,7 +583,7 @@ function tooltipSeriesRowHtml(
 ): string {
   const display = (opts.seriesLabels && opts.seriesLabels[series]) || series;
   const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
-  const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span> `;
+  const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span>${LABEL_VALUE_GAP}`;
   return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
 }
 
@@ -1137,14 +1153,14 @@ export function buildBandTooltipHtml(
       // Keys the net-dot marker, so it draws the SAME icon the legend's "Total" row draws — a
       // colourless `dot`, which icon.ts resolves to the white disc with the black ring.
       const totalSwatch = seriesSwatchHtml(iconFromLegendItem({ markerShape: "dot" }));
-      totalRowHtml = `<div class="${rowClasses}">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="${rowClasses}">${totalSwatch}<span><span class="tbl-tooltip-label">Total:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     } else {
       // No real swatch (no dot on the chart) — but an EMPTY spacer with the SAME class as a real
       // swatch, so the label still sits at the swatch+gap indent every series row uses. Before
       // this the text row emitted no swatch element at all and sat flush left, one swatch-plus-gap
       // short of every row above it.
       const spacer = `<span class="tbl-tooltip-swatch" aria-hidden="true"></span>`;
-      totalRowHtml = `<div class="${rowClasses}">${spacer}<span><span class="tbl-tooltip-label">Total:</span> <span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
+      totalRowHtml = `<div class="${rowClasses}">${spacer}<span><span class="tbl-tooltip-label">Total:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(fmt(total))}</span></span></div>`;
     }
   }
 
@@ -2747,6 +2763,12 @@ export interface SecondaryBandOptions {
   /** `chrome.valuePills: false` — suppress only the per-series value pills; the shaded band region
    *  and the accented category label still render. Default true. */
   showPills?: boolean;
+  /** Echo-only mode, for a pane that draws its OWN hover card + highlight (a stacked pane under
+   *  `barStack.hover: "tooltip"`): shade the hovered category's band on the OTHER panes and draw
+   *  nothing else — no pills, no category-name pill — and stay blank on the active (hovered) pane,
+   *  whose primary crosshair already highlights it. The stacked analogue of
+   *  `CategoricalLineOptions.markerless`. */
+  echoOnly?: boolean;
 }
 
 /** A rendered bar rect's geometry + series, for one category. */
@@ -2924,6 +2946,60 @@ export function attachSecondaryBandCursor(
     }
   };
 
+  /** The shaded band for `category` — a rect in viewBox coords — plus that band's centre on the
+   *  category axis (which the active pane's category highlight is placed on). ONE computation for
+   *  both the pills path and `echoOnly`: a figure can show a card pane beside an echo pane, so the
+   *  two must shade identically, and a second copy of this geometry is how they would drift.
+   *  Returns null when the category has no rendered band in this pane. */
+  const bandRegion = (
+    category: string,
+  ): { x: number; y: number; w: number; h: number; centre: number } | null => {
+    if (horizontal) {
+      const { bands } = readCategoryBandsH(svgEl, {
+        rows: opts.rows,
+        isFaceted: opts.isFaceted,
+        categories: opts.categories,
+      } as BandCrosshairOptions);
+      const idx = bands.findIndex((b) => b.category === category);
+      if (idx < 0) return null;
+      // EQUAL-height row for every category: use the UNIFORM band step (centred on each category),
+      // not the neighbour-midpoint widening — otherwise categories at a section boundary (whose
+      // neighbour is a spacer-gap away) get a taller strip than the rest.
+      const centers = bands.map((bb) => (bb.yMin + bb.yMax) / 2);
+      let step = Infinity;
+      for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
+      if (!Number.isFinite(step)) step = bands[idx]!.yMax - bands[idx]!.yMin + 8;
+      const c = centers[idx]!;
+      const yMin = Math.max(mt, c - step / 2);
+      const yMax = Math.min(mt + plotH, c + step / 2);
+      // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
+      // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
+      const x0 = opts.regionFromLeftEdge ? 0 : ml;
+      // Cover the pane's full width (incl. the right margin) and, for non-last panes, bridge the
+      // inter-pane grid gap (SVG overflow is visible) so the row reads as one continuous strip.
+      const x1 = W + (opts.regionExtendRight ?? 0);
+      return { x: x0, y: yMin, w: x1 - x0, h: yMax - yMin, centre: c };
+    }
+    // Vertical: the region spans the full band STEP (widened to the midpoints between clusters),
+    // matching the hovered pane's highlight, so the shaded column reads the same across panes. It
+    // stops at the baseline (plotH), NOT down through the x-axis label — standalone and faceted match.
+    const bands = readCategoryBands(svgEl, {
+      rows: opts.rows,
+      isFaceted: opts.isFaceted,
+      categories: opts.categories,
+    } as BandCrosshairOptions);
+    const idx = bands.findIndex((b) => b.category === category);
+    if (idx < 0) return null;
+    const wide = widenBandsToMidpoints(bands.map((b) => ({ min: b.xMin, max: b.xMax })), ml, W - mr)[idx]!;
+    return {
+      x: wide.min,
+      y: mt,
+      w: wide.max - wide.min,
+      h: plotH,
+      centre: (bands[idx]!.xMin + bands[idx]!.xMax) / 2,
+    };
+  };
+
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
     restoreAccent();
@@ -2931,38 +3007,29 @@ export function attachSecondaryBandCursor(
       g.setAttribute("opacity", "0");
       return;
     }
+    if (opts.echoOnly) {
+      // Blank on the ACTIVE (hovered) pane: its own primary crosshair already draws that pane's
+      // highlight rect and its card, so shading here too would read as a darker band on one pane.
+      const echo = active ? null : bandRegion(category);
+      if (!echo) {
+        g.setAttribute("opacity", "0");
+        return;
+      }
+      addCoordRegion(g, doc, echo.x, echo.w, echo.y, echo.h);
+      g.setAttribute("opacity", "1");
+      return;
+    }
     if (horizontal) {
       // Horizontal bars: categories on Y. Shade the category ROW (a full-width strip widened to
       // the band midpoints) and place a value pill at each bar's tip (to the right of a positive
       // bar's end, left of a negative one). No x-axis category highlight (categories are on Y).
-      const { bands: rawH } = readCategoryBandsH(svgEl, {
-        rows: opts.rows,
-        isFaceted: opts.isFaceted,
-        categories: opts.categories,
-      } as BandCrosshairOptions);
-      const idx = rawH.findIndex((b) => b.category === category);
+      const region = bandRegion(category);
       const vals = valByCat.get(category);
-      if (idx < 0 || !vals) {
+      if (!region || !vals) {
         g.setAttribute("opacity", "0");
         return;
       }
-      // EQUAL-height row for every category: use the UNIFORM band step (centred on each category),
-      // not the neighbour-midpoint widening — otherwise categories at a section boundary (whose
-      // neighbour is a spacer-gap away) get a taller strip than the rest.
-      const centers = rawH.map((bb) => (bb.yMin + bb.yMax) / 2);
-      let step = Infinity;
-      for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
-      if (!Number.isFinite(step)) step = rawH[idx]!.yMax - rawH[idx]!.yMin + 8;
-      const c = centers[idx]!;
-      const regYmin = Math.max(mt, c - step / 2);
-      const regYmax = Math.min(mt + plotH, c + step / 2);
-      // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
-      // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
-      const regX0 = opts.regionFromLeftEdge ? 0 : ml;
-      // Cover the pane's full width (incl. the right margin) and, for non-last panes, bridge the
-      // inter-pane grid gap (SVG overflow is visible) so the row reads as one continuous strip.
-      const regX1 = W + (opts.regionExtendRight ?? 0);
-      addCoordRegion(g, doc, regX0, regX1 - regX0, regYmin, regYmax - regYmin);
+      addCoordRegion(g, doc, region.x, region.w, region.y, region.h);
       const weight = active ? 700 : 600;
       // Pill color: prefer the bar's ACTUAL rendered fill (so a category_colors/bar_color/mono/
       // highlight-dimmed bar gets a matching pill), falling back to the series' legend color.
@@ -3011,32 +3078,22 @@ export function attachSecondaryBandCursor(
       g.setAttribute("opacity", "1");
       return;
     }
-    const raw = readCategoryBands(svgEl, {
-      rows: opts.rows,
-      isFaceted: opts.isFaceted,
-      categories: opts.categories,
-    } as BandCrosshairOptions);
-    const idx = raw.findIndex((b) => b.category === category);
+    const region = bandRegion(category);
     const vals = valByCat.get(category);
     // Waterfall shades EVERY step (incl. total/skip, which carry no `_y`); every other chart keeps
     // the "no values → no hover" behavior.
-    if (idx < 0 || (!vals && !opts.waterfall)) {
+    if (!region || (!vals && !opts.waterfall)) {
       g.setAttribute("opacity", "0");
       return;
     }
-    // Region spans the full band STEP (widened to the midpoints between clusters), matching the
-    // hovered pane's highlight, so the shaded column reads the same across panes. It stops at the
-    // baseline (plotH), NOT down through the x-axis label — standalone and faceted vertical match.
-    const wide = widenBandsToMidpoints(raw.map((b) => ({ min: b.xMin, max: b.xMax })), ml, W - mr)[idx]!;
-    addCoordRegion(g, doc, wide.min, wide.max - wide.min, mt, plotH);
+    addCoordRegion(g, doc, region.x, region.w, region.y, region.h);
     const weight = active ? 700 : 600;
     if (active) {
       // Highlight the current category on the x-axis row, matching the axis labels' layout
       // (single / wrapped two lines / rotated 45°), centered on the bar band.
       const ys = axisRows.get();
       if (ys.length) {
-        const rawCenter = (raw[idx]!.xMin + raw[idx]!.xMax) / 2;
-        addCoordCategoryHighlight(g, doc, svgEl, mt + plotH, rawCenter, category, detectBandLabelMode(svgEl, mt + plotH), ys);
+        addCoordCategoryHighlight(g, doc, svgEl, mt + plotH, region.centre, category, detectBandLabelMode(svgEl, mt + plotH), ys);
       }
     }
     const valid = (rectsByCat.get(category) ?? [])
@@ -3925,9 +3982,9 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       if (p.pointLabel) tokens.push(p.pointLabel);
       const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
       let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;
-      html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span> <span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
+      html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.xLabel ?? "x")}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(xFormat(p.x))}</span></span></div>`;
       if (p.y != null && Number.isFinite(p.y)) {
-        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span> <span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
+        html += `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(opts.yLabel ?? "y")}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(yFormat(p.y))}</span></span></div>`;
       }
       // Scoped to the hovered point: a pooled fit / `fun` / abline applies to every point, a
       // per-series fit only to its own series. The header already names that series, so the rows

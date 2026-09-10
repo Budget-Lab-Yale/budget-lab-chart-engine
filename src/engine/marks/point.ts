@@ -50,6 +50,9 @@ export function buildPointMarks(
   // Two things drop a row, and both are legal author input, not errors:
   //   - a blank value (mirrored by `defined` in dotOpts below, kept there for Plot's own filtering)
   //   - a shape value the author left out of `shape_order`, hence out of the symbol domain
+  // Both are mirrored by validateChartData's keyed-callout "drawn nowhere" rules
+  // (src/spec/validate.ts), which refuse a `point:` callout keyed to a row this filter drops —
+  // change both.
   const symbolDomain = symbolScaleOpts ? new Set(symbolScaleOpts.domain) : null;
   const rendered = data.filter(
     (d) => Number.isFinite(d._y) && (!symbolDomain || symbolDomain.has(d._shape ?? "")),

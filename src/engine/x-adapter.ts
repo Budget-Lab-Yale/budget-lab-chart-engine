@@ -6,6 +6,7 @@ import { d3 } from "./vendor";
 import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis, bandLabelMarginBottom, type BandLabelMode } from "./axes";
 import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseXValue, parseDate, parseQuarter, formatQuarter } from "../spec/parse-time";
+import { formatNumericX, formatNumericTick } from "./util";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
 
 type Mark = unknown;
@@ -61,6 +62,18 @@ const temporalMarginBottom = (xDomain: [Date, Date]): number => {
   return allJanuary ? 22 : 38;
 };
 
+/** Reads an `XOpts.xPlotOpts.domain` as a numeric span, for callers that map px <-> data against
+ *  the DRAWN axis. Numbers pass through; Dates (a temporal histogram's bin-edge span) become epoch
+ *  ms; anything else is not a span — notably the categorical adapter's `domain`, which is the list
+ *  of category strings — and returns undefined so the caller falls back to the data extent. */
+export function numericAxisDomain(domain: unknown): [number, number] | undefined {
+  if (!Array.isArray(domain) || domain.length !== 2) return undefined;
+  const lo = domain[0] instanceof Date ? domain[0].getTime() : domain[0];
+  const hi = domain[1] instanceof Date ? domain[1].getTime() : domain[1];
+  // Number.isFinite does NOT coerce, so a category string fails here rather than becoming NaN.
+  return Number.isFinite(lo) && Number.isFinite(hi) ? [lo as number, hi as number] : undefined;
+}
+
 export function makeXAdapter(
   xType: XAxisType,
   xAxisPolicy?: XAxisPolicy,
@@ -80,13 +93,13 @@ export function makeXAdapter(
             marginBottom: 22 + bottomGutter,
             xPlotOpts: { type: "linear", label: null, axis: null, domain: histogramDomain },
             axisMarks: tblXAxis(
-              { xTickFormat: (d: unknown) => `${+(d as number)}` },
+              { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)) },
               faceted ? X_AXIS_LABEL_CLASS : undefined,
               bottomGutter,
             ),
             markerToX: (m) => +m.x,
             tooltipXParse: (v) => +v,
-            tooltipXFormat: (v) => `${+v}`,
+            tooltipXFormat: (v) => formatNumericX(+v),
           };
         }
         const xMax = d3.max(data, (d: any) => d._xn) as number;
@@ -99,18 +112,21 @@ export function makeXAdapter(
         return {
           marginBottom: 22 + bottomGutter,
           xPlotOpts: { label: null, axis: null, domain: [xMin, xMax] },
-          // Plain numeric tick labels with NO thousands separator — years (1960, 2030) and
-          // index axes read better ungrouped than "1,960".
+          // Tick labels: grouped, full precision. `formatNumericTick` and `formatNumericX` (util.ts)
+          // share one grouping rule, so a tick and any hover reading never disagree about a number;
+          // they differ only in rounding, because a tick is a value d3 chose and a hover reading is
+          // arbitrary data. Years are no longer a special case here — a bare `YYYY` belongs on a
+          // TEMPORAL axis, which parses and labels it correctly (see `parseDate`).
           axisMarks: tblXAxis(
-            { xTickFormat: (d: unknown) => `${+(d as number)}` },
+            { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)) },
             faceted ? X_AXIS_LABEL_CLASS : undefined,
             bottomGutter,
           ),
           markerToX: (m) => +m.x,
           tooltipXParse: (v) => +v,
-          // Match the axis label exactly (plain number, no thousands separator) — numeric x is
-          // most often a year or an index, so a bare value reads correctly in both.
-          tooltipXFormat: (v) => `${+v}`,
+          // The crosshair header rounds to two decimals, exactly as the scatter card and the `{x}`
+          // token do: all three go through `formatNumericX`, so the three hover surfaces agree.
+          tooltipXFormat: (v) => formatNumericX(+v),
         };
       },
     };
@@ -121,6 +137,18 @@ export function makeXAdapter(
       xField: "_xd",
       validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
+        // An ANNUAL series — every point on 1 January — is identified by its year alone, so the
+        // month in the card is noise: `Jan 1950` under an axis reading `1950`. The axis already
+        // collapses a year-cadence span to a bare `%Y` (`tblTemporalXAxis`), and this stops the
+        // card disagreeing with it. Tested on the DATA, deliberately NOT on the tick cadence: a
+        // MONTHLY series across eighty years also gets decade ticks, and there the month is the
+        // only thing that tells two adjacent points apart. An explicit `tooltip_x_format` wins.
+        const annualData =
+          data.length > 0 &&
+          data.every((d: any) => {
+            const t = d._xd as unknown;
+            return t instanceof Date && t.getMonth() === 0 && t.getDate() === 1;
+          });
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
         let xDomain: [Date, Date];
         if (histogramDomain) {
@@ -144,7 +172,7 @@ export function makeXAdapter(
           // which is wrong only when the data is finer than the ticks (a daily series has every
           // point in a month sharing one label), hence spec.tooltip_x_format.
           tooltipXParse: (v) => +parseDate(v),
-          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? "%b %Y")(new Date(v)),
+          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? (annualData ? "%Y" : "%b %Y"))(new Date(v)),
         };
       },
     };

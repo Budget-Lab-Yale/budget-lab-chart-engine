@@ -13,18 +13,43 @@
 
 import type { XAxisType } from "./types";
 
-/** `YYYY-MM-DD` → Date (local midnight). Falls back to Date() for anything else. */
+/** Local midnight on a given calendar date. `new Date(y, m, d)` maps years 0-99 into 1900-1999 —
+ *  the constructor's legacy two-digit window — so `new Date(50, 5, 15)` is 15 June 1950, not year
+ *  50. `setFullYear` is the documented escape and is a no-op for every year above 99. Both spellings
+ *  `parseDate` accepts route through here so they cannot diverge: correcting only the bare-year
+ *  branch would have made `"0050"` and `"0050-06-15"` land 1900 years apart. */
+function atLocalMidnight(year: number, month: number, day: number): Date {
+  const d = new Date(year, month, day);
+  d.setFullYear(year, month, day);
+  return d;
+}
+
+/** `YYYY-MM-DD`, or a bare `YYYY` → Date at local midnight (a bare year is its January 1st).
+ *  Falls back to `Date()` for anything else.
+ *
+ *  BOTH explicit branches exist for one reason: `new Date(s)` reads both forms as **UTC**, and the
+ *  engine formats in local time, so in a negative-offset zone the instant slides backwards — for a
+ *  bare year, by a whole year. `new Date("1952")` is 1951-12-31T19:00 in ET, whose `getFullYear()`
+ *  is 1951, so an annual series on a temporal axis silently labelled and positioned every point one
+ *  year early. A bare year is the natural spelling for an annual series and is what makes
+ *  `xAxisType: temporal` its right home: `tblTemporalXAxis` (engine/axes.ts) collapses a
+ *  year-cadence span to bare `%Y` labels. See `formatNumericX` (engine/util.ts), which groups
+ *  thousands precisely BECAUSE a numeric axis is no longer where years belong. */
 export function parseDate(s: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) return new Date(+(m[1] as string), +(m[2] as string) - 1, +(m[3] as string));
+  if (m) return atLocalMidnight(+(m[1] as string), +(m[2] as string) - 1, +(m[3] as string));
+  const y = /^(\d{4})$/.exec(s);
+  if (y) return atLocalMidnight(+(y[1] as string), 0, 1);
   return new Date(s);
 }
 
-/** `YYYYQ#` → Date at the first day of the quarter, or null if it doesn't match. */
+/** `YYYYQ#` → Date at the first day of the quarter, or null if it doesn't match. Shares
+ *  `atLocalMidnight` with `parseDate` because it shared the same defect: a bare `new Date(y, m, 1)`
+ *  put `"0050Q1"` in 1950. */
 export function parseQuarter(s: string): Date | null {
   const m = /^(\d{4})Q(\d)$/.exec(s);
   if (!m) return null;
-  return new Date(+(m[1] as string), (+(m[2] as string) - 1) * 3, 1);
+  return atLocalMidnight(+(m[1] as string), (+(m[2] as string) - 1) * 3, 1);
 }
 
 /** Date → `YYYYQ#`. */
