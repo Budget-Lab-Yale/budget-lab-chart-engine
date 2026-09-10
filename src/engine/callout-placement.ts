@@ -459,6 +459,30 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
   const insideFrame = (i: number, y: number): boolean =>
     y - boxes[i]!.h / 2 >= o.top - 1e-9 && y + boxes[i]!.h / 2 <= o.bottom + 1e-9;
 
+  // A label with nothing to resolve MUST NOT move, at any score. CONFIG-SPEC promises that a callout
+  // colliding with nothing and sitting on no other callout's marker keeps exactly its default
+  // offset, and the byte-identity invariant rests on that promise — but ranking crossings first let
+  // the search move such a label anyway, purely to stop a PINNED callout's leader crossing it, which
+  // falsified the promise for a chart nobody had touched. Forcing them kept keeps both properties:
+  // the search still chooses freely among the labels that DO have something to resolve, and it
+  // prunes the enumeration at the same time. The cost is accepting that crossing, which the paint
+  // order and the label halo already make legible.
+  // NB this counts an overlap with a PINNED label too, where `collidesAtDefault` above deliberately
+  // does not. `collidesAtDefault` answers "did this label take part in a collision", for the frame
+  // clamp; this one answers "has this label any reason to move at all". Conflating them wedged the
+  // search: a movable label overlapping only a pinned one was marked `mustKeep`, `attempt` then
+  // refused to KEEP it (the kept-vs-fixed check fails), the prefilter refused to MOVE it, no
+  // assignment was feasible, and the whole chart fell through to the sweep — losing the crossing,
+  // connector and visible-shaft guarantees on a chart the search could have placed.
+  const overlapsAnyAtDefault = boxes.map(
+    (b, i) =>
+      !b.fixed &&
+      boxes.some((c, j) => j !== i && near(b, c) && Math.abs(b.y - c.y) < clearance(b, c)),
+  );
+  const mustKeep = boxes.map(
+    (b, i) => !b.fixed && !overlapsAnyAtDefault[i] && !onForeignMarker(i, b.y),
+  );
+
   /** 0 = keep at default, 1 = lift above the point, 2 = drop below it. */
   const attempt = (assign: number[]): { ys: number[]; connectors: number; moved: number; cost: number; crossings: number } | null => {
     const ys = boxes.map((b) => b.y);
@@ -514,6 +538,15 @@ export function placePointCallouts(boxes: CalloutBox[], o: PlacementOpts): numbe
       assign.push(c % 3);
       c = Math.floor(c / 3);
     }
+    // Reject up front any assignment that displaces a label with no reason to move.
+    let movesAnUntouchable = false;
+    for (const [k, i] of movable.entries()) {
+      if (assign[k] !== 0 && mustKeep[i]) {
+        movesAnUntouchable = true;
+        break;
+      }
+    }
+    if (movesAnUntouchable) continue;
     const got = attempt(assign);
     if (!got) continue;
     // Fewest shafts drawn through text, then fewest connectors, then fewest labels moved at all,

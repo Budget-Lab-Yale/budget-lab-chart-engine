@@ -169,6 +169,58 @@ describe("placePointCallouts (pure helper)", () => {
     expect(Math.min(...top)).toBeGreaterThanOrEqual(LO);
   });
 
+  it("routes a label overlapping only a PINNED one through the search, not the sweep fallback", () => {
+    // The regression the `mustKeep` guard introduced. `collidesAtDefault` excludes fixed boxes — it
+    // answers a different question, for the frame clamp — so a movable label overlapping only a
+    // PINNED label looked like it had nothing to resolve. `attempt` then refused to KEEP it (the
+    // kept-vs-fixed check fails) while the prefilter refused to MOVE it: no assignment was feasible,
+    // `best` stayed null, and the whole chart fell through to `sweepPlace`, which guarantees none of
+    // the crossing, connector or visible-shaft properties the search exists to enforce.
+    //
+    // Neither box carries a disk under the other's label, so `onForeignMarker` is false and the
+    // overlap with the pinned label is the ONLY reason to move — precisely the wedged case.
+    // What separates the two code paths observably: the search clears a displaced leader-drawing
+    // label by `h/2 + leaderClearance`, leaving a visible shaft; the sweep clears it by the marker
+    // radius alone and can park the label right against its own point.
+    const pinned = box(100, 200, 40, true);
+    const movable: CalloutBox = {
+      ...box(100, 206, 40),
+      wantsLeader: true,
+      disk: { x: 120, y: 206, r: MARK_POINT_R },
+    };
+    const ys = placePointCallouts([pinned, movable], { ...OPTS, leaderClearance: 12.6 });
+    expect(ys[0]).toBe(pinned.y); // the pinned label never moves
+    // It cleared the pinned label...
+    expect(Math.abs(ys[1]! - pinned.y)).toBeGreaterThanOrEqual((pinned.h + movable.h) / 2 - 1e-9);
+    // ...and did so with enough room for a leader that is actually visible, which is the property
+    // only the search enforces. Under the sweep this assertion fails.
+    expect(Math.abs(ys[1]! - movable.disk!.y)).toBeGreaterThanOrEqual(movable.h / 2 + 12.6 - 1e-9);
+  });
+
+  it("never moves a label that collides with nothing, even to clear a pinned leader's path", () => {
+    // The byte-identity hole review found: a PINNED connector's long leader crosses a second label
+    // that overlaps nothing and sits on no marker. Moving that second label scores zero crossings,
+    // so ranking crossings first made the search move it — falsifying CONFIG-SPEC's promise that a
+    // callout colliding with nothing keeps exactly its default offset, on a chart nobody touched.
+    // The crossing is accepted instead; the paint order and the halo keep the text legible.
+    // The geometry has to be built carefully or the test passes either way — two earlier drafts did.
+    // The pinned shaft runs from its anchor (300, 60) to its point (150, 260), crossing x = 225 as
+    // it passes y = 160. The free label is NARROW (220..230) and sits there, so it is crossed at its
+    // default — and its one available move, ~13px down to clear its own marker, carries it to a band
+    // the shaft has already swept past (x 201..211). So moving it really does score zero crossings,
+    // which is what tempted the search. A wide box fails to reproduce this: the shaft sweeps only
+    // ~14px of x across a 13px move, so every candidate position still crosses a 50px-wide label.
+    const pinned = {
+      ...box(300, 60, 40, true),
+      wantsLeader: true,
+      disk: { x: 150, y: 260, r: 6.6 },
+    };
+    const free = { ...box(220, 160, 10), wantsLeader: false, disk: { x: 225, y: 172, r: 6.6 } };
+    const ys = placePointCallouts([pinned, free], { ...OPTS, leaderClearance: 12.6 });
+    expect(ys[0]).toBe(pinned.y); // pinned never moves
+    expect(ys[1]).toBe(free.y); // and neither does the label with nothing to resolve
+  });
+
   it("moves the label that draws NO leader, so a colliding pair costs zero connectors", () => {
     // The second ranking key counts CONNECTORS, not displaced labels. With a colliding
     // `connector: true` / `connector: false` pair, either single move resolves the overlap — but
