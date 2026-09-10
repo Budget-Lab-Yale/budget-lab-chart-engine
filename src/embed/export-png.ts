@@ -237,6 +237,13 @@ function drawLegendColumn(
   firstBaseline: number,
   leadingTitle?: string,
   hooks?: RenderHooks,
+  /** Resolved `legendKey` markup per row, shared between the measure and draw passes. The column is
+   *  laid out twice — once to measure its height, once to draw it — and without this the hook fired
+   *  twice per row where the live legend fires it once. A hook is documented as static, but one that
+   *  is stateful or non-deterministic would see a different call count here, and could even return
+   *  markup whose measured and drawn forms disagree. `buildExportSvg` already strips `afterRender`
+   *  from its metadata pre-render for the same reason. */
+  customCache?: Map<LegendItem, string | null>,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
   const GAP = 6;
@@ -254,15 +261,21 @@ function drawLegendColumn(
   for (const item of items) {
     const icon = iconFromLegendItem(item);
     const swatchW = iconWidth(icon);
-    const custom = item.series != null && hooks?.legendKey
-      ? hooks.legendKey({
-          series: item.series,
-          label: item.label,
-          color: item.color,
-          medium: "svg",
-          rendered: legendRowMarkupSvg(icon, item.label),
-        })
-      : null;
+    let custom: string | null;
+    if (customCache?.has(item)) {
+      custom = customCache.get(item) ?? null;
+    } else {
+      custom = item.series != null && hooks?.legendKey
+        ? hooks.legendKey({
+            series: item.series,
+            label: item.label,
+            color: item.color,
+            medium: "svg",
+            rendered: legendRowMarkupSvg(icon, item.label),
+          })
+        : null;
+      customCache?.set(item, custom);
+    }
     if (custom != null) {
       if (root) {
         const g = document.createElementNS(SVG_NS, "g");
@@ -366,8 +379,14 @@ export function buildExportSvg(
   // figure keeps the top layout: its legend is figure-level, and the live path never puts that in a
   // column either. The frame is a fixed 1000px, so the live path's narrow-card fallback to "top"
   // cannot apply here.
+  // `legendItems || shapeLegendItems.length` mirrors render-live.ts's own gate. Testing only
+  // `legendItems` missed a chart whose ONLY visible legend is the shape legend — `series_legend:
+  // false`, or a lone scatter series, leaves `buildLegendItems` null while the shape rows remain —
+  // so live laid it out on the right and the export drew it above a full-width plot: the very
+  // divergence this file's legend work exists to remove.
   const rightLegend =
-    !isFigure && legendItems.length > 0 &&
+    !isFigure &&
+    (legendItems.length > 0 || shapeLegendItems.length > 0) &&
     resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right";
   const chartW = rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 
@@ -430,11 +449,22 @@ export function buildExportSvg(
           markerSymbol: s.markerSymbol,
         })) as unknown as LegendItem[])
       : [];
+    // One cache across BOTH passes, so a `legendKey` hook is invoked once per row rather than once
+    // to measure and again to draw. A group heading only means something when there are two groups
+    // AND rows above it, so an empty colour group takes none.
+    const legendKeyCache = new Map<LegendItem, string | null>();
+    const colTitle = hasShapeLegend && colItems.length ? colorLegendTitle : undefined;
     if (rightLegend) {
       const COL_TOP_PAD = 12;
-      let measured = drawLegendColumn(null, colItems, 0, COL_TOP_PAD, hasShapeLegend ? colorLegendTitle : undefined);
+      let measured = COL_TOP_PAD;
+      if (colItems.length) {
+        measured = drawLegendColumn(null, colItems, 0, COL_TOP_PAD, colTitle, opts.hooks, legendKeyCache);
+      }
       if (shapeColItems.length) {
-        measured = drawLegendColumn(null, shapeColItems, 0, measured + 8, shapeLegendTitle || undefined);
+        measured = drawLegendColumn(
+          null, shapeColItems, 0, colItems.length ? measured + 8 : COL_TOP_PAD,
+          shapeLegendTitle || undefined, undefined, legendKeyCache,
+        );
       }
       contentHeight = Math.max(contentHeight, Math.ceil(measured));
     }
@@ -455,11 +485,15 @@ export function buildExportSvg(
       // ordering the live column uses. A dual-encoding chart keeps its group headings here, as the
       // top layout does, and its shape rows follow the colour rows in the same column.
       const colX = MARGIN + chartW + LEGEND_GAP;
-      const colY = drawLegendColumn(
-        root, colItems, colX, chartTop + 12, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks,
-      );
+      const COL_TOP = chartTop + 12;
+      const colY = colItems.length
+        ? drawLegendColumn(root, colItems, colX, COL_TOP, colTitle, opts.hooks, legendKeyCache)
+        : COL_TOP;
       if (shapeColItems.length) {
-        drawLegendColumn(root, shapeColItems, colX, colY + 8, shapeLegendTitle || undefined);
+        drawLegendColumn(
+          root, shapeColItems, colX, colItems.length ? colY + 8 : COL_TOP,
+          shapeLegendTitle || undefined, undefined, legendKeyCache,
+        );
       }
     }
   } else {
@@ -576,7 +610,10 @@ export function buildExportSvg(
   let by = chartTop + contentHeight;
   if (xAxisTitle) {
     by += 14;
-    root.appendChild(textEl(W / 2, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
+    // Centred on the PLOT, not the frame: a right-hand legend takes 176px off the right, so the
+    // frame's centre is 88px right of the plot's and the title sat visibly off-axis.
+    const titleX = rightLegend ? MARGIN + chartW / 2 : W / 2;
+    root.appendChild(textEl(titleX, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
   }
   composeBottomChrome(document, root, by, { note, source, width: W });
 

@@ -76,14 +76,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   default: at 12px the label's own proximity says which point it belongs to, and the line was a few
   px of ink between two things already touching. A purely lateral frame-edge flip does **not** earn
   one — it leaves the label hugging its point, where the leader is a ~7px stub that reads as noise.
-  A label the sweep pushes now also clears every callout's marker, coming to rest no closer than
-  that same 6.6px to any callout's point, so a pushed label's leader is always longer than its end
-  gap and is therefore always drawn; a label still at its default is exempt, which is what keeps a
-  lone callout byte-identical. A callout
-  with an explicit `dx` or `dy` **always** draws it — the author asked for the connector and said
-  where the label goes. The default WITHOUT a connector is unchanged at 6px. Where no leader can be
-  drawn (a categorical x-axis, or a render with no width/height) a pinned callout still falls back
-  to a small dot and an auto-placed one now draws nothing. (#42)
+  A label placement moves now also clears every callout's marker, coming to rest no closer than
+  that same 6.6px to any callout's point; a label still at its default is exempt, which is what
+  keeps a lone callout byte-identical. Placement additionally puts a moved leader-drawing label far
+  enough out for a *visible* shaft — though only for arrangements the search finds, not for the
+  sweep it falls back to. A callout with an explicit `dx` or `dy` asks for the connector and says
+  where the label goes, so its leader is drawn **whenever there is room for one**: pinned closer
+  than the 15.1px threshold below, there is no shaft to draw and none appears. The default WITHOUT
+  a connector is unchanged at 6px. Where no leader can be drawn (a categorical x-axis, or a render
+  with no width/height) a pinned callout still falls back to a small dot and an auto-placed one
+  now draws nothing. (#42)
 
 ### Changed
 - **Callout placement was rewritten twice within this release.** The first implementation swept
@@ -321,8 +323,8 @@ A repin re-renders every published figure at once — here is what a maintainer 
   pinned (`dx`/`dy`) callout never flips. (#37)
 - **Every `connector: true` point callout re-lays out.** Its label moves 16px closer to its point
   (12px above instead of 28), its leader loses the arrowhead and now stops 6.6px from the point's
-  centre instead of 4px, and an auto-placed callout loses the leader altogether unless the vertical
-  sweep pushed its label (a lateral frame-edge flip alone does not earn one). A pushed label is also
+  centre instead of 4px, and an auto-placed callout loses the leader altogether unless placement
+  moved its label (a lateral frame-edge flip alone does not earn one). A moved label is also
   held clear of every callout's marker, so it can no longer come to rest on the dot it names. **No
   committed published figure carries a `connector`**, established by grepping every `chart.yaml`
   under `budget-lab-charts/charts`: the only hit is

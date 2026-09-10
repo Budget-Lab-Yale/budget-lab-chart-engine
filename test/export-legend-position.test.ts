@@ -143,6 +143,66 @@ describe("the PNG export honours the live legend position", () => {
     for (const n of pieces) expect(Number(n.getAttribute("x"))).toBeLessThan(colRight);
   });
 
+  it("takes the right layout when the ONLY visible legend is the shape legend", () => {
+    // render-live gates on `legendItems || shapeLegendItems.length`; the export tested only
+    // `legendItems`, so a chart whose colour legend is suppressed but whose SHAPE legend remains
+    // got a right-hand legend live and a top legend in the download — the divergence this file
+    // exists to prevent, through a narrower door.
+    const spec = {
+      chartType: "scatter", title: "T", xAxisType: "numeric",
+      columns: { x: "x", value: "v", shape: "s" },
+      series_legend: false, legendPosition: "right", data: "d.csv",
+    } as unknown as ChartSpec;
+    const rows = rowsOf([
+      { x: "1", v: "1", s: "circle" },
+      { x: "2", v: "2", s: "square" },
+      { x: "3", v: "3", s: "triangle" },
+    ]);
+    const root = buildExportSvg(spec, rows);
+    const chart = chartSvgOf(root);
+    expect(Number(chart.getAttribute("width"))).toBe(INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP);
+    // Non-vacuity: the shape rows really are the only legend, and they are in the column.
+    const xs = legendLabelXs(root, ["circle", "square", "triangle"]);
+    expect(xs.length).toBeGreaterThan(0);
+    for (const x of xs) expect(x).toBeGreaterThan(INNER_W - LEGEND_COLUMN_WIDTH);
+  });
+
+  it("centres the x-axis title over the PLOT, not the frame, when a column is reserved", () => {
+    // The plot loses 176px on the right, so the frame's centre is 88px right of the plot's and the
+    // title sat visibly off-axis.
+    const spec = stackedSpec({ x_axis_title: "Measure" });
+    const rows = stackRows(4, true);
+    const root = buildExportSvg(spec, rows);
+    const chartW = Number(chartSvgOf(root).getAttribute("width"));
+    const title = Array.from(root.querySelectorAll("text")).find((n) => (n.textContent ?? "").trim() === "Measure");
+    expect(title, "x-axis title not found").toBeDefined();
+    expect(Number(title!.getAttribute("x"))).toBeCloseTo(MARGIN + chartW / 2, 6);
+    // And a TOP-legend chart still centres on the frame, so nothing else moved.
+    const plain = buildExportSvg(stackedSpec({ x_axis_title: "Measure" }), stackRows(3));
+    const plainTitle = Array.from(plain.querySelectorAll("text")).find((n) => (n.textContent ?? "").trim() === "Measure");
+    expect(Number(plainTitle!.getAttribute("x"))).toBeCloseTo(INNER_W / 2 + MARGIN, 6);
+  });
+
+  it("invokes a legendKey hook once per row, not once per layout pass", () => {
+    // The column is laid out twice — measured, then drawn — so without a shared cache the hook
+    // fired twice per row where the live legend fires it once. A hook is documented as static, but
+    // a stateful one would see a different call count, and could return markup whose measured and
+    // drawn forms disagree.
+    const calls: string[] = [];
+    const spec = stackedSpec();
+    const rows = stackRows(4, true);
+    buildExportSvg(spec, rows, {
+      hooks: {
+        legendKey: (ctx: { series?: string; rendered: string }) => {
+          calls.push(ctx.series ?? "?");
+          return ctx.rendered;
+        },
+      } as never,
+    });
+    expect(calls.length).toBeGreaterThan(0); // non-vacuity: the hook really ran
+    expect(new Set(calls).size).toBe(calls.length); // each series exactly once
+  });
+
   it("keeps the full width and a TOP legend for a small, all-positive stack", () => {
     // The control: nothing about this chart asks for a column, so the export must be unchanged —
     // this is what keeps every published figure but the two named under Upgrading byte-identical.
