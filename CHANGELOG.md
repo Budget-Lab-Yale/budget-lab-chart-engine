@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.14.0] - 2026-09-02
+## [1.14.0] - 2026-09-10
 
 ### Added
 - `annotations.points[].point` — **`scatter` only**: key a callout to ONE observation by its
@@ -87,7 +87,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   with no width/height) a pinned callout still falls back to a small dot and an auto-placed one
   now draws nothing. (#42)
 
-### Changed
 - **Callout placement was rewritten twice within this release.** The first implementation swept
   colliding labels in one direction, which maximised the number displaced and therefore the number
   of leaders; a stakeholder review of the demo caught it before release ("2025a should obviously be
