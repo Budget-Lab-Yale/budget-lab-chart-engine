@@ -417,36 +417,47 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   // An open-ended span needs room below the last date to fade out, as horizontal reserves G.fade.
   const tail = events.some((e) => e.ongoing) ? G.fade : 0;
 
-  // Left-region budget, in order: the tick column takes what its widest tick needs; the rule's
-  // fixed gaps are next; of what is left, the sub-track band may take whatever the dates do not
-  // need at their natural width, and never less than half (compressing its pitch, bars floored at
-  // V_MIN_BAR and gaps at V_MIN_TRACK_GAP, to get there); the dates take the rest and wrap to it.
-  // A layout whose natural left region is inside the cap is untouched. Only a band that is still
-  // too wide at the floors can push past the cap.
-  const geometry = (tickW: number) => {
+  // The widest single word of any date: the gutter never goes narrower, so dates wrap only between
+  // words. Only a word wider than the whole cap is hard-broken.
+  const cap = V_LEFT_SHARE * inp.width;
+  const wordMax = Math.max(0, ...events.flatMap((e) => e.dateText.split(/\s+/).filter(Boolean).map((w) => textW("date", w))));
+  const dateMin = Math.min(wordMax, cap);
+
+  // Left-region budget inside the cap, by priority: the rule's fixed gaps; the dates' longest word;
+  // the sub-track band (compressing its pitch, bars floored at V_MIN_BAR and gaps at
+  // V_MIN_TRACK_GAP); the tick column, which is omitted (not squeezed) when it does not fit in what
+  // remains; then the dates widen toward their natural width, wrapping between words to what they
+  // get. A layout whose natural left region is inside the cap is untouched. When the longest word
+  // plus the band at its floors exceeds the cap, the cap yields and the text column narrows.
+  const geometry = (tickNeed: number) => {
     const rightOf = (w: number): number => Math.max(G.dotR, nSub ? w / 2 : 0) + G.vLabelGap;
-    const free = V_LEFT_SHARE * inp.width - tickW - G.vRuleGap - rightOf(G.spanH);
-    const bandTarget = Math.max(free / 2, free - dateNat);
+    const free = cap - G.vRuleGap - rightOf(G.spanH);
+    const bandRoom = free - dateMin;
     let barW: number = G.spanH;
     let gap: number = G.subTrackGap;
-    if (Math.max(G.dotR, bandOf(barW, gap)) > bandTarget) {
-      const s = Math.max(0, bandTarget) / bandOf(barW, gap);
+    if (Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
+      const s = Math.max(0, bandRoom) / bandOf(barW, gap);
       barW = G.spanH * s;
       gap = G.subTrackGap * s;
       if (gap < V_MIN_TRACK_GAP) {
         gap = V_MIN_TRACK_GAP;
-        barW = (Math.max(0, bandTarget) - (nSub - 1) * gap) / (nSub - 0.5);
+        barW = (Math.max(0, bandRoom) - (nSub - 1) * gap) / (nSub - 0.5);
       }
       barW = Math.max(V_MIN_BAR, barW);
     }
     const band = Math.max(G.dotR, bandOf(barW, gap));
-    const dateW = Math.min(dateNat, Math.max(0, free - band));
+    let rest = bandRoom - band;
+    const tickW = tickNeed > 0 && tickNeed <= rest ? tickNeed : 0;
+    rest -= tickW;
+    const dateW = dateMin + Math.min(Math.max(0, rest), dateNat - dateMin);
     const dateRight = tickW + dateW;
     const ruleX = dateRight + G.vRuleGap + band;
     const textX = ruleX + Math.max(G.dotR, nSub ? barW / 2 : 0) + G.vLabelGap;
     const colW = Math.max(0, inp.width - textX);
     const blocks = new Map(events.map((e) => [e.id, buildBlock(e, colW, false, colW)]));
-    // A date wider than the gutter wraps (bold-aware) and hard-breaks inside it.
+    // A date wider than the gutter wraps between words (bold-aware). The gutter holds the longest
+    // word, so hardBreak fires only for a word wider than the whole cap; its 1e-6 slack absorbs the
+    // round trip through dateW / BOLD_FACTOR, which must never split a word that exactly fits.
     const dates = new Map(
       events.map((e) => [
         e.id,
@@ -454,30 +465,31 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
           ? [e.dateText]
           : wrapToWidth(e.dateText, dateW / BOLD_FACTOR, LINE_STYLE.date.size)
               .split("\n")
-              .flatMap((ln) => hardBreak(ln, dateW, (s) => textW("date", s))),
+              .flatMap((ln) => hardBreak(ln, dateW + 1e-6, (s) => textW("date", s))),
       ]),
     );
     const rowHOf = (e: LayoutEvent): number =>
       Math.max((blocks.get(e.id) as TextBlock).h, (dates.get(e.id) as string[]).length * LINE_STYLE.date.lineH);
     const stacked = events.reduce((s, e) => s + rowHOf(e), 0) + G.vLabelGap * Math.max(0, events.length - 1);
     const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stacked);
-    return { dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L };
+    return { tickW, dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
   // first (count from the tickless axis length) and the column is sized to the widest of them.
   let ticks: Date[] = [];
   let tickFmt: ((d: Date) => string) | null = null;
-  let tickW = 0;
+  let tickNeed = 0;
   const probe = inp.axis ? positioner(events, inp.spacing, 0, 1).scale : null;
   if (probe) {
     const n = Math.max(2, Math.floor(geometry(0).L / 80));
     ticks = probe.ticks(n);
     tickFmt = probe.tickFormat(n);
     const fmt = tickFmt;
-    if (ticks.length) tickW = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
+    if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L } = geometry(tickW);
+  const { tickW, dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L } = geometry(tickNeed);
+  if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 
   const out: TimelineLayout = {

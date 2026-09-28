@@ -412,20 +412,42 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
     for (let i = 1; i < l.labels.length; i++) expect(l.labels[i]!.box.y0).toBeGreaterThanOrEqual(l.labels[i - 1]!.box.y1);
     for (const lab of l.labels) for (const ln of lab.lines) expect(ln.y).toBeLessThanOrEqual(lab.box.y1);
   };
+  // Dates wrap only between words: each event's date lines, read in order, are exactly its
+  // dateText's whitespace-separated words, with no word split across lines.
+  const wholeWords = (l: TimelineLayout, events: LayoutEvent[]) => {
+    for (const lab of l.labels) {
+      const src = events.find((e) => e.id === lab.id)!.dateText.split(/\s+/).filter(Boolean);
+      const got = lab.lines.filter((ln) => ln.role === "date").flatMap((ln) => ln.text.split(/\s+/).filter(Boolean));
+      expect(got).toEqual(src);
+    }
+  };
+  const sixSeptembers = () => Array.from({ length: 6 }, (_, i) =>
+    ev(`2026-0${i + 1}-01`, `Event ${i} title`, { dateText: "September 30, 2026" }));
 
-  it("wraps long dates inside a capped gutter, keeping every label in the frame", () => {
-    const events = Array.from({ length: 6 }, (_, i) =>
-      ev(`2026-0${i + 1}-01`, `Event ${i} title`, { dateText: "September 30, 2026" }));
+  it("wraps long dates between words inside a capped gutter, keeping every label in the frame", () => {
+    const events = sixSeptembers();
     const l = v(events, { width: W, axis: true });
     expect(allFinite(l)).toBe(true);
     inFrame(l);
+    wholeWords(l, events);
     const textX = l.labels[0]!.box.x0;
     expect(textX).toBeLessThanOrEqual(0.45 * W + 1e-9); // the whole left region, rule and gaps included
     const dates = dateLines(l);
     expect(dates.length).toBeGreaterThan(events.length); // the dates did wrap
     expect(dates.every((d) => d.anchor === "end" && d.x <= leftmostMark(l))).toBe(true);
-    const tickRight = Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
-    expect(Math.min(...dates.map(dateLeft))).toBeGreaterThan(tickRight);
+    // Month ticks ("February") do not fit beside a whole-word date gutter at 280: they are omitted
+    // rather than breaking the dates mid-word.
+    expect(l.ticks).toEqual([]);
+  });
+
+  it("omits the vertical tick column only when it does not fit", () => {
+    for (const width of [W, 360]) {
+      const l = v(FIG7(), { width, axis: true });
+      expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+      const tickRight = Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+      expect(Math.min(...dateLines(l).map(dateLeft))).toBeGreaterThan(tickRight);
+      expect(l.labels[0]!.box.x0).toBeLessThanOrEqual(0.45 * width + 1e-9);
+    }
   });
 
   it("compresses a crowded sub-track band instead of pushing text off-canvas", () => {
@@ -435,6 +457,9 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
     expect(allFinite(l)).toBe(true);
     expect(l.spans).toHaveLength(20);
     inFrame(l);
+    // Each year range is one word: it stays whole, and the cap yields instead.
+    wholeWords(l, spans);
+    expect(dateLines(l)).toHaveLength(20);
     for (const s of l.spans) {
       expect(s.x).toBeGreaterThanOrEqual(0);
       expect(s.w).toBeGreaterThanOrEqual(3);
