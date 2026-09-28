@@ -41,6 +41,12 @@ export const LINE_STYLE: Record<LineRole, { size: number; lineH: number; bold: b
   description: { size: 11, lineH: 14, bold: false, muted: true },
 };
 
+/** Lane-name type in the horizontal lanes gutter. */
+export const LANE_SIZE = 12;
+export const LANE_LINE_H = 15;
+/** The lanes gutter never takes more than this share of the width, however long a lane name is. */
+const LANE_GUTTER_MAX_SHARE = 0.3;
+
 /** estimateLabelWidth is calibrated on regular weight; bold Figtree advances ~8% wider. */
 const BOLD_FACTOR = 1.08;
 
@@ -81,7 +87,9 @@ export interface PlacedSpan { id: number; category: string; x: number; y: number
 export interface PlacedStem { id: number; category: string; points: Array<[number, number]> }
 export interface PlacedRule { x1: number; y1: number; x2: number; y2: number }
 export interface PlacedTick { x: number; y: number; text: string; anchor: "start" | "middle" | "end" }
-export interface PlacedLaneLabel { text: string; x: number; y: number }
+/** A lane name in the left gutter, right-aligned at `x`. `text` is the full name; `lines` is it
+ *  wrapped to the gutter. `y` is the first line's baseline; each further line is `LANE_LINE_H` lower. */
+export interface PlacedLaneLabel { text: string; lines: string[]; x: number; y: number; anchor: "end" }
 
 export interface TimelineLayout {
   orientation: "horizontal" | "vertical";
@@ -112,12 +120,12 @@ interface TextBlock { roles: LineRole[]; texts: string[]; w: number; h: number }
 /** Split a line wider than `framePx` into character chunks that each fit. wrapToWidth leaves a
  *  single over-long word whole, which is right up to the frame (the box widens to the word), but a
  *  word wider than the whole frame could otherwise only be clamped off one edge or the other. */
-function hardBreak(role: LineRole, line: string, framePx: number): string[] {
-  if (textW(role, line) <= framePx) return [line];
+function hardBreak(line: string, framePx: number, measure: (s: string) => number): string[] {
+  if (measure(line) <= framePx) return [line];
   const out: string[] = [];
   let cur = "";
   for (const ch of line) {
-    if (cur && textW(role, cur + ch) > framePx) {
+    if (cur && measure(cur + ch) > framePx) {
       out.push(cur);
       cur = "";
     }
@@ -135,7 +143,7 @@ function buildBlock(e: LayoutEvent, maxPx: number, withDate: boolean, framePx: n
   const push = (role: LineRole, text: string | null): void => {
     if (!text) return;
     for (const wrapped of wrapToWidth(text, wrapPx, LINE_STYLE[role].size).split("\n")) {
-      for (const line of hardBreak(role, wrapped, framePx)) {
+      for (const line of hardBreak(wrapped, framePx, (s) => textW(role, s))) {
         roles.push(role);
         texts.push(line);
       }
@@ -197,7 +205,7 @@ function assignSubTracks(spans: LayoutEvent[]): Map<number, number> {
 type Side = "above" | "below";
 
 function assignRows(
-  items: Array<{ id: number; x0: number; x1: number }>,
+  items: Array<{ id: number; x0: number; x1: number; aboveOnly: boolean }>,
   maxRows: number,
   sides: Side[],
 ): { placed: Map<number, { side: Side; row: number }>; fits: boolean } {
@@ -210,8 +218,9 @@ function assignRows(
     return end === undefined || end + TL_GEOM.colGap <= x0;
   };
   for (const it of items) {
-    const pref: Side = sides.length === 1 ? (sides[0] as Side) : prev === "above" ? "below" : "above";
-    const order: Side[] = sides.length === 1 ? [pref] : [pref, pref === "above" ? "below" : "above"];
+    const allowed: Side[] = it.aboveOnly ? ["above"] : sides;
+    const pref: Side = allowed.length === 1 ? (allowed[0] as Side) : prev === "above" ? "below" : "above";
+    const order: Side[] = allowed.length === 1 ? [pref] : [pref, pref === "above" ? "below" : "above"];
     let got: { side: Side; row: number } | null = null;
     for (const side of order) {
       for (let r = 0; r < maxRows && !got; r++) if (clear(side, r, it.x0)) got = { side, row: r };
@@ -244,10 +253,21 @@ function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle"): Pla
 
 function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
   const G = TL_GEOM;
-  const events = [...inp.events].sort(byTime);
+  // In lanes mode an event outside every lane is not drawn, so it is dropped here: `order` must list
+  // exactly the drawn events, and an undrawn event must not stretch the scale.
+  const laneKeys = inp.lanes ? new Set(inp.lanes.map((l) => l.key)) : null;
+  const events = inp.events.filter((e) => !laneKeys || laneKeys.has(e.category)).sort(byTime);
   const gutter = inp.lanes
-    ? Math.max(0, ...inp.lanes.map((l) => estimateLabelWidth(l.label, 12))) + G.laneGutterPad
+    ? Math.min(
+        Math.max(0, ...inp.lanes.map((l) => estimateLabelWidth(l.label, LANE_SIZE))) + G.laneGutterPad,
+        inp.width * LANE_GUTTER_MAX_SHARE,
+      )
     : 0;
+  const laneTextPx = Math.max(0, gutter - G.laneGutterPad);
+  const laneLines = (label: string): string[] =>
+    wrapToWidth(label, laneTextPx, LANE_SIZE)
+      .split("\n")
+      .flatMap((l) => hardBreak(l, laneTextPx, (s) => estimateLabelWidth(s, LANE_SIZE)));
   const framePx = Math.max(0, inp.width - gutter);
   const blocks = new Map(events.map((e) => [e.id, buildBlock(e, inp.labelWidth, true, framePx)]));
   // Inset each end of the range by half the widest centred label anchored at that end's date, so an
@@ -288,8 +308,14 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
     const sub = assignSubTracks(track.events.filter(isSpan));
     const nSub = sub.size ? Math.max(...sub.values()) + 1 : 0;
     const sides: Side[] = inp.lanes ? ["above"] : ["above", "below"];
+    // A span on an outer sub-track labels above only: below, its stem would have to cross the
+    // inner sub-tracks' bars to reach it.
     const { placed, fits } = assignRows(
-      track.events.map((e) => ({ id: e.id, ...(extent.get(e.id) as { x0: number; x1: number }) })),
+      track.events.map((e) => ({
+        id: e.id,
+        ...(extent.get(e.id) as { x0: number; x1: number }),
+        aboveOnly: (sub.get(e.id) ?? 0) > 0,
+      })),
       inp.maxRows,
       sides,
     );
@@ -301,7 +327,13 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
     const ruleY = cursor + rowsOn("above") * rowH + clearAbove;
 
     out.rules.push({ x1: gutter, y1: ruleY, x2: inp.width, y2: ruleY });
-    if (track.label !== null) out.laneLabels.push({ text: track.label, x: gutter - G.laneGutterPad / 2, y: ruleY + 4 });
+    if (track.label !== null) {
+      const lines = laneLines(track.label);
+      out.laneLabels.push({
+        text: track.label, lines, x: gutter - G.laneGutterPad / 2,
+        y: ruleY + 4 - ((lines.length - 1) * LANE_LINE_H) / 2, anchor: "end",
+      });
+    }
 
     for (const e of track.events) {
       const x = pos(e.start);

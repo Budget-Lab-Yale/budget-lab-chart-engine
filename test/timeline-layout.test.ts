@@ -16,7 +16,16 @@ const base = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}): Time
 });
 const overlaps = (a: { x0: number; x1: number; y0: number; y1: number }, b: typeof a): boolean =>
   a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-const noNaN = (l: TimelineLayout): boolean => !/NaN/.test(JSON.stringify(l));
+// Walks every value: JSON.stringify writes NaN and ±Infinity as null, so a regex over the JSON
+// could never see them.
+const allFinite = (v: unknown): boolean =>
+  typeof v === "number"
+    ? Number.isFinite(v)
+    : Array.isArray(v)
+      ? v.every(allFinite)
+      : v !== null && typeof v === "object"
+        ? Object.values(v).every(allFinite)
+        : true;
 const labelOf = (l: TimelineLayout, id: number) => l.labels.find((x) => x.id === id)!;
 const ruleY = (l: TimelineLayout): number => l.rules[0]!.y1;
 
@@ -63,6 +72,20 @@ describe("horizontal layout", () => {
       const m = l.markers.find((mk) => mk.id === s.id)!;
       expect(s.points[0]![0]).toBeCloseTo(m.cx, 6);
     }
+  });
+
+  it("clamps a box that would cross the frame, leaving its stem on the date", () => {
+    // 2094 is not the edge date, so the range inset does not protect its wide label: centred, it
+    // would run past 400. The clamp must move the box left while the stem stays at the marker.
+    const wide = ev("2094", "A fairly wide label near the right edge");
+    const l = layoutTimeline(base([ev("2000", "z"), wide, ev("2095", "y")], { width: 400 }));
+    const box = labelOf(l, wide.id).box;
+    const cx = l.markers.find((m) => m.id === wide.id)!.cx;
+    expect(box.x0).toBeLessThan(cx - (box.x1 - box.x0) / 2);
+    expect(box.x0).toBeGreaterThanOrEqual(0);
+    expect(box.x1).toBeLessThanOrEqual(400);
+    const stem = l.stems.find((s) => s.id === wide.id)!;
+    for (const [x] of stem.points) expect(x).toBeCloseTo(cx, 6);
   });
 
   it("falls back to the other side when the preferred side is full", () => {
@@ -145,7 +168,7 @@ describe("horizontal layout", () => {
 
   it("handles a single event without NaN, centred", () => {
     const l = layoutTimeline(base([ev("2026", "Only")]));
-    expect(noNaN(l)).toBe(true);
+    expect(allFinite(l)).toBe(true);
     expect(l.markers[0]!.cx).toBeCloseTo(450, 0);
   });
 
@@ -157,7 +180,7 @@ describe("horizontal layout", () => {
 
   it("widens a box to an unbreakable word, inside the frame", () => {
     const l = layoutTimeline(base([ev("2026", "Supercalifragilisticexpialidociously-long-unbroken-token"), ev("2090", "z")], { width: 320 }));
-    expect(noNaN(l)).toBe(true);
+    expect(allFinite(l)).toBe(true);
     for (const lab of l.labels) { expect(lab.box.x0).toBeGreaterThanOrEqual(0); expect(lab.box.x1).toBeLessThanOrEqual(320); }
   });
 
@@ -180,5 +203,50 @@ describe("horizontal layout", () => {
     const withAxis = layoutTimeline(base(FIG7(), { axis: true }));
     expect(withAxis.ticks.length).toBeGreaterThanOrEqual(2);
     expect(withAxis.height).toBeGreaterThan(layoutTimeline(base(FIG7())).height);
+  });
+
+  it("labels an outer sub-track span above, its stem rising from its own bar", () => {
+    // b is second in date order, so alternation alone would send it below, where its stem would
+    // hang off a's bar on sub-track 0.
+    const a = ev("2020", "a", { endStr: "2030" });
+    const b = ev("2021", "b", { endStr: "2035" });
+    const l = layoutTimeline(base([a, b, ev("2090", "z")]));
+    const spanA = l.spans.find((s) => s.id === a.id)!;
+    const spanB = l.spans.find((s) => s.id === b.id)!;
+    expect(spanB.y).toBeLessThan(spanA.y); // b is on sub-track 1, outward (up) from the rule
+    expect(labelOf(l, b.id).box.y1).toBeLessThanOrEqual(ruleY(l));
+    const stem = l.stems.find((s) => s.id === b.id)!;
+    expect(stem.points[0]![1]).toBe(spanB.y);
+    expect(stem.points[1]![1]).toBe(labelOf(l, b.id).box.y1);
+  });
+
+  it("caps the lanes gutter at 30% of the width and wraps a long lane name", () => {
+    const name = "A lane name that is fifty characters long, really.";
+    expect(name).toHaveLength(50);
+    const e = [ev("2026", "p1", { category: "long" }), ev("2030", "s1", { category: "short" })];
+    const l = layoutTimeline(base(e, { width: 280, lanes: [{ key: "long", label: name }, { key: "short", label: "S" }] }));
+    expect(allFinite(l)).toBe(true);
+    for (const r of l.rules) {
+      expect(r.x1).toBeLessThanOrEqual(0.3 * 280 + 1e-6);
+      expect(r.x1).toBeLessThan(r.x2);
+    }
+    for (const lab of l.labels) {
+      expect(lab.box.x0).toBeGreaterThanOrEqual(0);
+      expect(lab.box.x1).toBeLessThanOrEqual(280);
+    }
+    const long = l.laneLabels[0]!;
+    expect(long.text).toBe(name);
+    expect(long.lines.length).toBeGreaterThan(1);
+    expect(long.anchor).toBe("end");
+  });
+
+  it("drops an event outside every lane from order and from every mark", () => {
+    const stray = ev("2099", "not in any lane", { category: "other" });
+    const e = [ev("2026", "p1", { category: "policy" }), stray, ev("2030", "c1", { category: "cohort" })];
+    const l = layoutTimeline(base(e, { lanes: [{ key: "policy", label: "Policy" }, { key: "cohort", label: "Cohort" }] }));
+    expect(l.order).toEqual([e[0]!.id, e[2]!.id]);
+    for (const list of [l.labels, l.markers, l.spans, l.stems]) expect(list.some((x) => x.id === stray.id)).toBe(false);
+    // The stray 2099 date must not stretch the scale: the latest drawn event sits at the right end.
+    expect(l.markers.find((m) => m.id === e[2]!.id)!.cx).toBeGreaterThan(800);
   });
 });
