@@ -355,7 +355,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell", "timeline"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -373,6 +373,10 @@ export const CHART_SPEC_SCHEMA = {
         kind: { type: "string" },
         x0: { type: "string" },
         x1: { type: "string" },
+        end: { type: "string" },
+        label: { type: "string" },
+        description: { type: "string" },
+        date_label: { type: "string" },
       },
     },
 
@@ -537,6 +541,19 @@ export const CHART_SPEC_SCHEMA = {
             decimals: { type: "integer", minimum: 0, maximum: 10 },
           },
         },
+      },
+    },
+    timeline: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        spacing: { type: "string", enum: ["proportional", "even"] },
+        lanes: { type: "boolean" },
+        axis: { type: "boolean" },
+        date_format: { type: "string", minLength: 1 },
+        label_width: { type: "number", minimum: 60, maximum: 400 },
+        max_rows: { type: "integer", minimum: 1, maximum: 6 },
+        auto_vertical: { type: "boolean" },
       },
     },
     // Dumbbell (connected dot plot). Categorical axis via xAxisType; orientation flips it.

@@ -725,6 +725,66 @@ function rugBoundOrder(xAxisType: XAxisType, value: string): number {
   return Number(value.slice(0, 4)) * 4 + Number(value[5]); // quarterly: YYYYQ#
 }
 
+/** Top-level fields a timeline honours. Every CHART_SPEC_SCHEMA property is in exactly one of
+ *  these two lists — test/timeline-spec.test.ts enforces it, so a field added to the schema later
+ *  must be classified here rather than silently accepted and ignored on a timeline. */
+export const TIMELINE_ALLOWED_FIELDS: readonly string[] = [
+  "chartType", "columns", "title", "subtitle", "source", "note", "x_axis_title", "xAxisType",
+  "series_order", "series_colors", "series_labels", "color_legend_title", "projected_field",
+  "orientation", "legendPosition", "legend", "series_legend", "data", "tags", "timeline",
+];
+
+export const TIMELINE_REJECTED_FIELDS: readonly string[] = [
+  "title_selectors", "value_prefix", "value_suffix", "x_axis_ticks", "y_axis_title",
+  "tooltip_decimals", "tooltip_series_name", "tooltip_x_format", "tooltip_x_label", "tooltip_y_label",
+  "xAxisPolicy", "yAxisPolicy", "annotations", "series_patterns", "bar_color", "category_colors",
+  "series_styles", "section_order", "section_labels", "x_order", "category_order", "x_labels",
+  "shape_order", "shape_labels", "shape_legend_title", "confidence_bands", "overlays", "shading",
+  "rug", "points", "projected_style", "valueLabels", "barStack", "waterfall", "histogram",
+  "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "value_format",
+  "highlightSeries", "chrome", "small_multiples",
+];
+
+const TIMELINE_ONLY_COLUMNS = ["end", "label", "description", "date_label"] as const;
+const TIMELINE_REJECTED_COLUMNS = ["value", "facet", "shape", "point_label", "section", "kind", "x0", "x1", "category"] as const;
+
+/** Timeline cross-field rules, plus the reverse direction: the timeline-only column roles and the
+ *  `timeline:` block are errors on every other chart type. Off a timeline this can only fire on a
+ *  field that did not exist before 1.15.0, so no existing spec changes validity. */
+function timelineSpecErrors(spec: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const cols = (spec.columns ?? {}) as Record<string, unknown>;
+  if (spec.chartType !== "timeline") {
+    for (const c of TIMELINE_ONLY_COLUMNS) {
+      if (cols[c] != null) errors.push(`columns.${c} is only valid on chartType "timeline"`);
+    }
+    if (spec.timeline != null) errors.push(`the timeline block is only valid on chartType "timeline"`);
+    return errors;
+  }
+  if (spec.xAxisType !== "temporal") {
+    errors.push(`chartType "timeline" requires xAxisType "temporal" (got ${JSON.stringify(spec.xAxisType)})`);
+  }
+  for (const f of TIMELINE_REJECTED_FIELDS) {
+    if (spec[f] !== undefined) errors.push(`${f} is not supported on chartType "timeline"`);
+  }
+  for (const c of TIMELINE_REJECTED_COLUMNS) {
+    if (cols[c] != null) errors.push(`columns.${c} is not supported on chartType "timeline"`);
+  }
+  const tl = (spec.timeline ?? {}) as { axis?: boolean; spacing?: string; lanes?: boolean };
+  if (tl.axis === true && tl.spacing === "even") {
+    errors.push(
+      `timeline.axis cannot be used with timeline.spacing "even": ticks would imply proportional gaps between evenly spaced events`,
+    );
+  }
+  if (spec.orientation === "vertical" && tl.lanes === true) {
+    errors.push(`timeline.lanes is horizontal only (got orientation "vertical")`);
+  }
+  if (spec.x_axis_title !== undefined && tl.axis !== true) {
+    errors.push(`x_axis_title on a timeline requires timeline.axis: true (there is no axis to caption)`);
+  }
+  return errors;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -733,6 +793,10 @@ export function validateSpec(spec: unknown): ValidationResult {
     const errors = (validateStructural.errors ?? []).map(formatAjvError);
     return { valid: false, errors };
   }
+  // First, so a timeline's rejected fields report as such instead of tripping a chart-type rule
+  // further down with a less specific message (e.g. tooltip_x_format's axis check).
+  const tlErrors = timelineSpecErrors(spec as unknown as Record<string, unknown>);
+  if (tlErrors.length) return { valid: false, errors: tlErrors };
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
   const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
