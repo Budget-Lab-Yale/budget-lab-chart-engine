@@ -148,11 +148,14 @@ describe("timeline render", () => {
     expect(q(res.svg, "circle.tbl-timeline-marker")[0]!.getAttribute("stroke")).toBeTruthy();
   });
 
-  it("draws ticks only with axis: true, at the axis type size", () => {
+  it("draws ticks only with axis: true, at the axis type size and ink", () => {
     expect(q(r().svg, ".tbl-timeline-tick")).toHaveLength(0);
     const ticks = q(r({ timeline: { axis: true } }).svg, ".tbl-timeline-tick");
     expect(ticks.length).toBeGreaterThanOrEqual(2);
-    for (const t of ticks) expect(t.getAttribute("font-size")).toBe(String(TBL.size.axis));
+    for (const t of ticks) {
+      expect(t.getAttribute("font-size")).toBe(String(TBL.size.axis));
+      expect(t.getAttribute("fill")).toBe(TBL.color.axis);
+    }
   });
 
   it("renders the authored orientation unless told otherwise, and reports it", () => {

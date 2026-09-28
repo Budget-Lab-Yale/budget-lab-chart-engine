@@ -200,11 +200,12 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     });
     chrome.append(t);
   }
-  // TBL.size.axis is the size the vertical layout reserved the tick column at. Ink per spec §5.6.
+  // TBL.size.axis is the size the vertical layout reserved the tick column at; text_axis ink as
+  // every other chart's tick labels (annotation_dim text would fail WCAG contrast).
   for (const k of layout.ticks) {
     const t = el("text", {
       class: "tbl-timeline-tick", x: r2(k.x), y: r2(k.y), "text-anchor": k.anchor, "font-size": TBL.size.axis,
-      fill: TBL.color.annotationDim,
+      fill: TBL.color.axis,
     });
     t.textContent = k.text;
     chrome.append(t);
