@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { layoutTimeline, TL_GEOM, LANE_SIZE, LANE_LINE_H, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
+import { estimateLabelWidth } from "../src/engine/axes";
+import { TBL } from "../src/engine/theme";
 
 let nextId = 0;
 function ev(start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}): LayoutEvent {
@@ -284,5 +286,106 @@ describe("horizontal layout", () => {
     for (const list of [l.labels, l.markers, l.spans, l.stems]) expect(list.some((x) => x.id === stray.id)).toBe(false);
     // The stray 2099 date must not stretch the scale: the latest drawn event sits at the right end.
     expect(l.markers.find((m) => m.id === e[2]!.id)!.cx).toBeGreaterThan(800);
+  });
+});
+
+describe("vertical layout", () => {
+  const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
+    layoutTimeline(base(events, { orientation: "vertical", width: 360, ...o }));
+  const datesOf = (l: TimelineLayout) => l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"));
+
+  it("runs oldest at top, one rule, dates right-aligned in a left gutter", () => {
+    const l = v(FIG7());
+    const ys = l.order.map((id) => l.markers.find((m) => m.id === id)!.cy);
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+    expect(l.rules).toHaveLength(1);
+    const dates = datesOf(l);
+    expect(dates.every((d) => d.anchor === "end" && d.x < l.rules[0]!.x1)).toBe(true);
+    const titles = l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "title"));
+    expect(titles.every((t) => t.anchor === "start" && t.x > l.rules[0]!.x1)).toBe(true);
+  });
+
+  it("is at least 400px tall and grows with a dense cluster instead of overlapping", () => {
+    expect(v(FIG7()).height).toBeGreaterThanOrEqual(400);
+    // Thirty events in one January against a far 2030 event: proportionally they would all sit in
+    // the top few px, so only the sweep keeps them apart. The last label wraps, so it hangs below
+    // the end of the axis and the height must grow to hold it.
+    const dense = Array.from({ length: 30 }, (_, i) => ev(`2026-01-${String(i + 1).padStart(2, "0")}`, `Event ${i} with a title that wraps onto a second line`));
+    const l = v([...dense, ev("2030", "far, with a title long enough to wrap onto a second line")]);
+    expect(l.height).toBeGreaterThan(400);
+    const boxes = l.labels.map((x) => x.box);
+    for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.y0).toBeGreaterThanOrEqual(boxes[i - 1]!.y1);
+    for (const b of boxes) expect(b.y1).toBeLessThanOrEqual(l.height);
+  });
+
+  it("draws an elbow leader only for a displaced label", () => {
+    const b = ev("2026-01-02", "b, pushed down by a");
+    const l = v([ev("2026", "a"), b, ev("2090", "far")]);
+    expect(l.stems.map((s) => s.id)).toEqual([b.id]);
+    const pts = l.stems[0]!.points;
+    expect(pts).toHaveLength(3);
+    const m = l.markers.find((mk) => mk.id === b.id)!;
+    const date = labelOf(l, b.id).lines.find((ln) => ln.role === "date")!;
+    // Leaves beside the marker, drops parallel to the rule, turns into the label's first line.
+    expect(pts[0]![1]).toBeCloseTo(m.cy, 6);
+    expect(pts[0]![0]).toBeGreaterThan(m.cx + TL_GEOM.dotR);
+    expect(pts[1]![0]).toBe(pts[0]![0]);
+    expect(pts[1]![1]).toBe(pts[2]![1]);
+    expect(pts[2]![1]).toBeGreaterThan(pts[0]![1]);
+    expect(pts[2]![1]).toBeLessThan(date.y);
+    expect(pts[2]![0]).toBeGreaterThan(pts[1]![0]);
+    expect(pts[2]![0]).toBeLessThan(labelOf(l, b.id).box.x0);
+  });
+
+  it("fades an ongoing span downward to the bottom, at least a fade long", () => {
+    const l = v([ev("2020", "a"), ev("2022", "b", { ongoing: true })]);
+    expect(l.spans[0]!.fade).toBe("down");
+    expect(l.spans[0]!.y + l.spans[0]!.h).toBeCloseTo(l.height - TL_GEOM.vPad, 6);
+    // b starts on the last date: the bar still needs room to fade.
+    expect(l.spans[0]!.h).toBeGreaterThanOrEqual(TL_GEOM.fade);
+  });
+
+  it("widens the gutter for span sub-tracks so dates never sit on a bar", () => {
+    const one = v([ev("2020", "a", { endStr: "2030" }), ev("2040", "b")]);
+    const two = v([ev("2020", "a", { endStr: "2030" }), ev("2025", "c", { endStr: "2035" }), ev("2040", "b")]);
+    expect(two.rules[0]!.x1).toBeGreaterThan(one.rules[0]!.x1);
+    const leftmostBar = Math.min(...two.spans.map((s) => s.x));
+    expect(leftmostBar).toBeLessThan(two.rules[0]!.x1 - TL_GEOM.spanH); // c really is left of the rule
+    expect(Math.max(...datesOf(two).map((d) => d.x))).toBeLessThanOrEqual(leftmostBar);
+  });
+
+  it("reserves a tick column left of the dates, sized to the widest tick, with axis:true", () => {
+    const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+    // Date text is bold (~8% wider than the estimator's regular-weight calibration).
+    const dateLeft = (l: TimelineLayout) => Math.min(...datesOf(l).map((d) => d.x - estimateLabelWidth(d.text, 13) * 1.08));
+    expect(v(FIG7()).ticks).toEqual([]);
+    // Month-scale ticks ("October") are wider than a year's: a fixed-width column would collide.
+    const months = Array.from({ length: 12 }, (_, i) =>
+      ev(`2026-${String(i + 1).padStart(2, "0")}-01`, `m${i}`, { dateText: `Mon ${i + 1}, 2026` }));
+    for (const l of [v(FIG7(), { axis: true }), v(months, { axis: true })]) {
+      expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+      expect(l.ticks.every((t) => t.anchor === "start" && t.x >= 0)).toBe(true);
+      expect(dateLeft(l)).toBeGreaterThan(tickRight(l));
+    }
+  });
+
+  it("always fits and has no NaN for a single event", () => {
+    const l = v([ev("2026", "Only")]);
+    expect(l.fits).toBe(true);
+    expect(allFinite(l)).toBe(true);
+    expect(l.height).toBeGreaterThanOrEqual(400);
+  });
+
+  it("is deterministic regardless of input order and ignores lanes", () => {
+    const e = [
+      ev("2020", "a", { endStr: "2030" }), ev("2025", "c", { endStr: "2035" }), ev("2030", "tie one"),
+      ev("2030", "tie two"), ev("2031", "open", { ongoing: true }), ev("2040", "b"),
+    ];
+    const fwd = v(e, { axis: true });
+    const rev = v([...e].reverse(), { axis: true });
+    expect(JSON.stringify(rev)).toBe(JSON.stringify(fwd));
+    expect(fwd.order).toEqual(e.map((x) => x.id));
+    const laned = v(e, { axis: true, lanes: [{ key: "x", label: "X" }] });
+    expect(JSON.stringify(laned)).toBe(JSON.stringify(fwd));
   });
 });

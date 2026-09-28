@@ -9,6 +9,7 @@
 // into a row past `maxRows` and reports `fits: false`. Overflow never drops a label.
 import { d3 } from "./vendor";
 import { estimateLabelWidth, wrapToWidth } from "./axes";
+import { TBL } from "./theme";
 
 export const TL_GEOM = {
   dotR: 4.5,
@@ -389,7 +390,108 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
   return out;
 }
 
+/** Gap between the vertical tick column and the date gutter. */
+const V_TICK_GAP = 8;
+
+/** Vertical: time top → bottom. Left to right: [tick column] → date gutter (right-aligned) →
+ *  span sub-tracks → rule → one text column. No left/right alternation: it would halve the text
+ *  column on a phone. Labels sit at their date and a downward sweep pushes each below the one
+ *  before; the axis length is chosen so the whole stack fits, which keeps pushes local. Lanes do
+ *  not apply (they collapse to one track), so every event is drawn. */
+function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
+  const G = TL_GEOM;
+  const events = [...inp.events].sort(byTime);
+  const sub = assignSubTracks(events.filter(isSpan));
+  const nSub = sub.size ? Math.max(...sub.values()) + 1 : 0;
+  const dateW = Math.max(G.vDateGutterMin, ...events.map((e) => textW("date", e.dateText)));
+  // Sub-tracks stack leftward from the rule; the gutter widens by their width so a date never
+  // sits on a bar (the outermost bar's left edge is at least vRuleGap right of the dates).
+  const barHalf = nSub ? G.spanH / 2 + (nSub - 1) * (G.spanH + G.subTrackGap) : 0;
+  // An open-ended span needs room below the last date to fade out, as horizontal reserves G.fade.
+  const tail = events.some((e) => e.ongoing) ? G.fade : 0;
+
+  const geometry = (tickW: number) => {
+    const dateRight = tickW + dateW;
+    const ruleX = dateRight + G.vRuleGap + Math.max(G.dotR, barHalf);
+    const textX = ruleX + Math.max(G.dotR, nSub ? G.spanH / 2 : 0) + G.vLabelGap;
+    const colW = Math.max(60, inp.width - textX);
+    const blocks = new Map(events.map((e) => [e.id, buildBlock(e, colW, false, colW)]));
+    const rowHOf = (e: LayoutEvent): number => Math.max((blocks.get(e.id) as TextBlock).h, LINE_STYLE.date.lineH);
+    const stacked = events.reduce((s, e) => s + rowHOf(e), 0) + G.vLabelGap * Math.max(0, events.length - 1);
+    const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stacked);
+    return { dateRight, ruleX, textX, blocks, rowHOf, L };
+  };
+
+  // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
+  // first (count from the tickless axis length) and the column is sized to the widest of them.
+  let ticks: Date[] = [];
+  let tickFmt: ((d: Date) => string) | null = null;
+  let tickW = 0;
+  const probe = inp.axis ? positioner(events, inp.spacing, 0, 1).scale : null;
+  if (probe) {
+    const n = Math.max(2, Math.floor(geometry(0).L / 80));
+    ticks = probe.ticks(n);
+    tickFmt = probe.tickFormat(n);
+    const fmt = tickFmt;
+    if (ticks.length) tickW = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
+  }
+  const { dateRight, ruleX, textX, blocks, rowHOf, L } = geometry(tickW);
+  const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
+
+  const out: TimelineLayout = {
+    orientation: "vertical", width: inp.width, height: 0, fits: true, order: events.map((e) => e.id),
+    rules: [], markers: [], spans: [], labels: [], stems: [], ticks: [], laneLabels: [],
+  };
+
+  let prevBottom = -Infinity;
+  const tops = new Map<number, number>();
+  for (const e of events) {
+    const desired = pos(e.start) - LINE_STYLE.date.lineH / 2;
+    const top = Math.max(desired, prevBottom + G.vLabelGap, 0);
+    tops.set(e.id, top);
+    prevBottom = top + rowHOf(e);
+  }
+  const height = Math.ceil(Math.max(G.vPad + L + tail + G.vPad, prevBottom + G.vPad));
+
+  for (const e of events) {
+    const y = pos(e.start);
+    const top = tops.get(e.id) as number;
+    const block = blocks.get(e.id) as TextBlock;
+    if (isSpan(e)) {
+      const k = sub.get(e.id) as number;
+      const ye = e.ongoing ? height - G.vPad : pos(e.end as Date);
+      out.spans.push({
+        id: e.id, category: e.category, x: ruleX - G.spanH / 2 - k * (G.spanH + G.subTrackGap), y,
+        w: G.spanH, h: Math.max(G.minSpanPx, ye - y), projected: e.projected, fade: e.ongoing ? "down" : null,
+      });
+    } else {
+      out.markers.push({ id: e.id, category: e.category, cx: ruleX, cy: y, projected: e.projected });
+    }
+    const box: Box = { x0: textX, y0: top, x1: textX + block.w, y1: top + rowHOf(e) };
+    const lines: PlacedLine[] = [
+      { role: "date", text: e.dateText, x: dateRight, y: top + LINE_STYLE.date.size, anchor: "end" },
+      ...placeLines(block, box, "start"),
+    ];
+    out.labels.push({ id: e.id, category: e.category, box, lines });
+    // A label pushed off its date gets an elbow: out beside the marker (right of the rule, clear of
+    // every sub-track bar), down parallel to the rule, then into the label's first line. Leaders in
+    // a pushed cluster share the vertical leg instead of fanning into a smear.
+    const labelMid = top + LINE_STYLE.date.lineH / 2;
+    if (labelMid - y > 0.5) {
+      const xLeg = ruleX + G.dotR + 2;
+      out.stems.push({ id: e.id, category: e.category, points: [[xLeg, y], [xLeg, labelMid], [textX - 4, labelMid]] });
+    }
+  }
+
+  out.rules.push({ x1: ruleX, y1: G.vPad, x2: ruleX, y2: height - G.vPad });
+  if (scale && tickFmt) {
+    const fmt = tickFmt;
+    out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
+  }
+  out.height = height;
+  return out;
+}
+
 export function layoutTimeline(inp: TimelineLayoutInput): TimelineLayout {
-  if (inp.orientation === "vertical") throw new Error("vertical layout: Task 4");
-  return layoutHorizontal(inp);
+  return inp.orientation === "vertical" ? layoutVertical(inp) : layoutHorizontal(inp);
 }
