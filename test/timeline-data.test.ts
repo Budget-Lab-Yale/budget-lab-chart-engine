@@ -32,6 +32,9 @@ describe("parseEndCell", () => {
     ["2030-06-01", { kind: "date", value: "2030-06-01" }],
     ["soon", { kind: "invalid", raw: "soon" }],
     ["2030-6-1", { kind: "invalid", raw: "2030-6-1" }],
+    ["2026-13-01", { kind: "invalid", raw: "2026-13-01" }],
+    ["2026-02-30", { kind: "invalid", raw: "2026-02-30" }],
+    ["2024-02-29", { kind: "date", value: "2024-02-29" }],
   ])("%j", (raw, expected) => {
     expect(parseEndCell(raw)).toEqual(expected);
   });
@@ -78,6 +81,18 @@ describe("timelineDataErrors", () => {
   });
   it("reports a blank label", () => {
     expect(timelineDataErrors(spec, [{ ...ok, title: "  " }]).join("\n")).toMatch(/row 1: columns\.label .*is blank/);
+  });
+  it("reports an impossible month as a start date", () => {
+    expect(timelineDataErrors(spec, [{ ...ok, date: "2026-13-01" }]).join("\n")).toMatch(/row 1: columns\.x .*invalid date "2026-13-01"/);
+  });
+  it("reports an impossible day as a start date", () => {
+    expect(timelineDataErrors(spec, [{ ...ok, date: "2026-02-30" }]).join("\n")).toMatch(/row 1: columns\.x .*invalid date "2026-02-30"/);
+  });
+  it("reports an impossible calendar date as an end", () => {
+    expect(timelineDataErrors(spec, [{ ...ok, end: "2026-13-01" }]).join("\n")).toMatch(/row 1: columns\.end .*"2026-13-01".*blank, a date, or "ongoing"/);
+  });
+  it("accepts a valid leap day", () => {
+    expect(timelineDataErrors(spec, [{ ...ok, date: "2024-02-29" }])).toEqual([]);
   });
   it("is what validateChartData returns for a timeline", () => {
     expect(validateChartData(spec, [{ ...ok, title: "" }]).valid).toBe(false);

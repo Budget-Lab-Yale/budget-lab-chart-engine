@@ -1005,28 +1005,34 @@ function validateHistogramData(
   return { valid: errors.length === 0, errors };
 }
 
-/** series_order / series_colors / series_labels keys must name categories present in the data — the
- *  same rule and wording the shared path applies below (`checkSeries` in `validateChartData`), so a
- *  timeline reports an unknown key with the same vocabulary as every other chart type. */
+/** Unknown-key error for one series_* field, in the ONE wording every chart type uses — shared by
+ *  the normal path's series/shape/etc. cross-reference below and by `validateTimelineKeys`, so
+ *  neither can hold a second (drifting) copy of the message. Returns 0 or 1 error, spreadable into
+ *  a caller's `errors` array. */
+function unknownSeriesKeyErrors(
+  seriesSeen: Set<string>,
+  named: string[] | Record<string, unknown> | undefined,
+  source: string,
+): string[] {
+  if (!named) return [];
+  const keys = Array.isArray(named) ? named : Object.keys(named);
+  const unknown = keys.filter((k) => !seriesSeen.has(k));
+  if (!unknown.length) return [];
+  const knownSeries = JSON.stringify([...seriesSeen].sort());
+  return [`${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`];
+}
+
+/** series_order / series_colors / series_labels keys must name categories present in the data —
+ *  see `unknownSeriesKeyErrors`. */
 function validateTimelineKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
   const cols = timelineColumns(spec, rows);
   const seriesSeen = new Set<string>();
   for (const r of rows) seriesSeen.add(cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY);
-  const knownSeries = JSON.stringify([...seriesSeen].sort());
-  const errors: string[] = [];
-  const checkSeries = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
-    if (!named) return;
-    const keys = Array.isArray(named) ? named : Object.keys(named);
-    const unknown = keys.filter((k) => !seriesSeen.has(k));
-    if (unknown.length) {
-      errors.push(
-        `${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`,
-      );
-    }
-  };
-  checkSeries(spec.series_order, "series_order");
-  checkSeries(spec.series_colors, "series_colors");
-  checkSeries(spec.series_labels, "series_labels");
+  const errors = [
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"),
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"),
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"),
+  ];
   return { valid: errors.length === 0, errors };
 }
 
@@ -1216,21 +1222,11 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // Only when the column is absent: with a series column present, "" names nothing and IS a mistake.
   if (!cols.series) seriesSeen.add(SINGLE_SERIES_KEY);
   const knownSeries = JSON.stringify([...seriesSeen].sort());
-  const checkSeries = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
-    if (!named) return;
-    const keys = Array.isArray(named) ? named : Object.keys(named);
-    const unknown = keys.filter((k) => !seriesSeen.has(k));
-    if (unknown.length) {
-      errors.push(
-        `${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`,
-      );
-    }
-  };
-  checkSeries(spec.series_order, "series_order");
-  checkSeries(spec.series_colors, "series_colors");
-  checkSeries(spec.series_patterns, "series_patterns");
-  checkSeries(spec.series_styles, "series_styles");
-  checkSeries(spec.series_labels, "series_labels");
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_patterns, "series_patterns"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_styles, "series_styles"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"));
 
   // Cross-reference: every config-named shape value must appear in the shape column's data.
   if (cols.shape) {

@@ -40,11 +40,26 @@ export type EndCell =
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const YEAR_RE = /^\d{4}$/;
 
+/** True when a string already matching DATE_RE or YEAR_RE names a REAL calendar date. `parseDate`
+ *  (via `new Date(y, m, d)`) silently ROLLS an out-of-range month/day into the next month/year
+ *  (`2026-13-01` becomes 2027-01-01; `2026-02-30` becomes 2026-03-02), so it never throws or
+ *  returns an invalid Date for these — the only way to catch it is to round-trip the parsed Date's
+ *  fields back against what was asked for. A bare YYYY (YEAR_RE) is always 1 January and always
+ *  real, so it short-circuits true without parsing. */
+function isRealCalendarDate(s: string): boolean {
+  if (YEAR_RE.test(s)) return true;
+  const y = +s.slice(0, 4);
+  const mo = +s.slice(5, 7);
+  const d = +s.slice(8, 10);
+  const parsed = parseDate(s);
+  return parsed.getFullYear() === y && parsed.getMonth() === mo - 1 && parsed.getDate() === d;
+}
+
 export function parseEndCell(raw: string): EndCell {
   const s = raw.trim();
   if (s === "") return { kind: "none" };
   if (s.toLowerCase() === "ongoing") return { kind: "ongoing" };
-  if ((DATE_RE.test(s) || YEAR_RE.test(s)) && !Number.isNaN(+parseDate(s))) return { kind: "date", value: s };
+  if ((DATE_RE.test(s) || YEAR_RE.test(s)) && isRealCalendarDate(s)) return { kind: "date", value: s };
   return { kind: "invalid", raw: s };
 }
 
@@ -115,6 +130,10 @@ export function timelineDataErrors(
     const x = String(r[cols.x] ?? "").trim();
     if (!DATE_RE.test(x) && !YEAR_RE.test(x)) {
       errors.push(`row ${n}: columns.x (${JSON.stringify(cols.x)}): expected YYYY-MM-DD or YYYY, got ${JSON.stringify(x)}`);
+      return;
+    }
+    if (!isRealCalendarDate(x)) {
+      errors.push(`row ${n}: columns.x (${JSON.stringify(cols.x)}): invalid date ${JSON.stringify(x)}`);
       return;
     }
     const label = String(r[cols.label] ?? "");
