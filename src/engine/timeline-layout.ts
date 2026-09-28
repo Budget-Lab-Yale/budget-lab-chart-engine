@@ -88,7 +88,9 @@ export interface PlacedStem { id: number; category: string; points: Array<[numbe
 export interface PlacedRule { x1: number; y1: number; x2: number; y2: number }
 export interface PlacedTick { x: number; y: number; text: string; anchor: "start" | "middle" | "end" }
 /** A lane name in the left gutter, right-aligned at `x`. `text` is the full name; `lines` is it
- *  wrapped to the gutter. `y` is the first line's baseline; each further line is `LANE_LINE_H` lower. */
+ *  wrapped to the gutter. `y` is the first line's baseline; each further line is `LANE_LINE_H` lower.
+ *  Each line's box is [baseline - LANE_SIZE, baseline + LANE_LINE_H - LANE_SIZE], and the whole
+ *  block lies inside its lane's vertical extent. */
 export interface PlacedLaneLabel { text: string; lines: string[]; x: number; y: number; anchor: "end" }
 
 export interface TimelineLayout {
@@ -327,12 +329,14 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
     const ruleY = cursor + rowsOn("above") * rowH + clearAbove;
 
     out.rules.push({ x1: gutter, y1: ruleY, x2: inp.width, y2: ruleY });
+    // A lane name is centred on its rule but never starts above the lane's top; whatever it then
+    // extends below the rule is reserved in the lane's bottom (below), so it cannot clip or collide.
+    let nameBottom = -Infinity;
     if (track.label !== null) {
       const lines = laneLines(track.label);
-      out.laneLabels.push({
-        text: track.label, lines, x: gutter - G.laneGutterPad / 2,
-        y: ruleY + 4 - ((lines.length - 1) * LANE_LINE_H) / 2, anchor: "end",
-      });
+      const y = Math.max(ruleY + 4 - ((lines.length - 1) * LANE_LINE_H) / 2, cursor + LANE_SIZE);
+      nameBottom = y + (lines.length - 1) * LANE_LINE_H + (LANE_LINE_H - LANE_SIZE);
+      out.laneLabels.push({ text: track.label, lines, x: gutter - G.laneGutterPad / 2, y, anchor: "end" });
     }
 
     for (const e of track.events) {
@@ -366,7 +370,7 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
       });
     }
     cursor = inp.lanes
-      ? ruleY + Math.max(G.dotR, G.spanH / 2) + G.laneGap
+      ? Math.max(ruleY + Math.max(G.dotR, G.spanH / 2) + G.laneGap, nameBottom + G.rowGap)
       : ruleY + clearBelow + rowsOn("below") * rowH;
   }
 

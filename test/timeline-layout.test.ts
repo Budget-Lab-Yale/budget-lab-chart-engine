@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layoutTimeline, TL_GEOM, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
+import { layoutTimeline, TL_GEOM, LANE_SIZE, LANE_LINE_H, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
 
 let nextId = 0;
@@ -238,6 +238,42 @@ describe("horizontal layout", () => {
     expect(long.text).toBe(name);
     expect(long.lines.length).toBeGreaterThan(1);
     expect(long.anchor).toBe("end");
+  });
+
+  describe("lane-name block is reserved inside its lane", () => {
+    const name = "A lane name that is fifty characters long, really.";
+    // Line top = baseline - font size (as event labels place lines); line bottom = baseline plus a
+    // 0.3-line descent, deliberately looser than the layout's own 3px.
+    const top = (ll: { y: number }) => ll.y - LANE_SIZE;
+    const bottom = (ll: { y: number; lines: string[] }) => ll.y + (ll.lines.length - 1) * LANE_LINE_H + LANE_LINE_H * 0.3;
+    const lanesOf = (first: string, second: string) => [{ key: "a", label: first }, { key: "b", label: second }];
+    const evs = () => [ev("2026", "a1", { category: "a" }), ev("2030", "b1", { category: "b" })];
+
+    it("keeps a long LAST lane name inside the layout height", () => {
+      const l = layoutTimeline(base(evs(), { width: 280, lanes: lanesOf("A", name) }));
+      const ll = l.laneLabels[1]!;
+      expect(ll.lines.length).toBeGreaterThan(3);
+      expect(bottom(ll)).toBeLessThanOrEqual(l.height);
+      for (const x of l.laneLabels) expect(top(x)).toBeGreaterThanOrEqual(0);
+    });
+
+    it("ends a long FIRST lane name above the next lane's labels and rule", () => {
+      const e = evs();
+      const l = layoutTimeline(base(e, { width: 280, lanes: lanesOf(name, "B") }));
+      const ll = l.laneLabels[0]!;
+      expect(top(ll)).toBeGreaterThanOrEqual(0);
+      const nextLabelTop = Math.min(...l.labels.filter((x) => x.category === "b").map((x) => x.box.y0));
+      expect(bottom(ll)).toBeLessThanOrEqual(Math.min(nextLabelTop, l.rules[1]!.y1));
+    });
+
+    it("leaves single-line lane names where they were", () => {
+      const e = [ev("2026", "p1", { category: "policy" }), ev("2030", "c1", { category: "cohort" }), ev("2040", "p2", { category: "policy" })];
+      const l = layoutTimeline(base(e, { lanes: [{ key: "policy", label: "Policy" }, { key: "cohort", label: "Cohort" }] }));
+      // Values recorded from the layout before lane-name blocks were reserved.
+      expect(l.rules.map((r) => r.y1)).toEqual([49.5, 119.5]);
+      expect(l.laneLabels.map((x) => x.y)).toEqual([53.5, 123.5]);
+      expect(l.height).toBe(140);
+    });
   });
 
   it("drops an event outside every lane from order and from every mark", () => {
