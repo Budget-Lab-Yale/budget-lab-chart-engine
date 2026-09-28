@@ -389,3 +389,84 @@ describe("vertical layout", () => {
     expect(JSON.stringify(laned)).toBe(JSON.stringify(fwd));
   });
 });
+
+describe("vertical layout at narrow widths (left region capped at 45%)", () => {
+  const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
+    layoutTimeline(base(events, { orientation: "vertical", ...o }));
+  const W = 280;
+  const dateLines = (l: TimelineLayout) => l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"));
+  // Bold date text: the estimator is calibrated on regular weight, bold runs ~8% wider.
+  const dateLeft = (d: { x: number; text: string }) => d.x - estimateLabelWidth(d.text, 13) * 1.08;
+  const leftmostMark = (l: TimelineLayout) => Math.min(l.rules[0]!.x1, ...l.spans.map((s) => s.x));
+  const inFrame = (l: TimelineLayout) => {
+    for (const lab of l.labels) {
+      expect(lab.box.x0).toBeGreaterThanOrEqual(0);
+      expect(lab.box.x1).toBeLessThanOrEqual(W + 1e-9);
+      for (const ln of lab.lines) {
+        expect(ln.x).toBeGreaterThanOrEqual(0);
+        expect(ln.x).toBeLessThanOrEqual(W);
+      }
+    }
+    for (const d of dateLines(l)) expect(dateLeft(d)).toBeGreaterThanOrEqual(-1e-9);
+    // Rows still stack: a wrapped date is part of its row, so the next row starts below it.
+    for (let i = 1; i < l.labels.length; i++) expect(l.labels[i]!.box.y0).toBeGreaterThanOrEqual(l.labels[i - 1]!.box.y1);
+    for (const lab of l.labels) for (const ln of lab.lines) expect(ln.y).toBeLessThanOrEqual(lab.box.y1);
+  };
+
+  it("wraps long dates inside a capped gutter, keeping every label in the frame", () => {
+    const events = Array.from({ length: 6 }, (_, i) =>
+      ev(`2026-0${i + 1}-01`, `Event ${i} title`, { dateText: "September 30, 2026" }));
+    const l = v(events, { width: W, axis: true });
+    expect(allFinite(l)).toBe(true);
+    inFrame(l);
+    const textX = l.labels[0]!.box.x0;
+    expect(textX).toBeLessThanOrEqual(0.45 * W + 1e-9); // the whole left region, rule and gaps included
+    const dates = dateLines(l);
+    expect(dates.length).toBeGreaterThan(events.length); // the dates did wrap
+    expect(dates.every((d) => d.anchor === "end" && d.x <= leftmostMark(l))).toBe(true);
+    const tickRight = Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+    expect(Math.min(...dates.map(dateLeft))).toBeGreaterThan(tickRight);
+  });
+
+  it("compresses a crowded sub-track band instead of pushing text off-canvas", () => {
+    const spans = Array.from({ length: 20 }, (_, i) =>
+      ev(`${1990 + i}`, `Span ${i}`, { endStr: `${2030 + i}`, dateText: `${1990 + i}–${2030 + i}` }));
+    const l = v(spans, { width: W });
+    expect(allFinite(l)).toBe(true);
+    expect(l.spans).toHaveLength(20);
+    inFrame(l);
+    for (const s of l.spans) {
+      expect(s.x).toBeGreaterThanOrEqual(0);
+      expect(s.w).toBeGreaterThanOrEqual(3);
+    }
+    // Twenty distinct sub-tracks, none overlapping another.
+    const xs = [...new Set(l.spans.map((s) => s.x))].sort((a, b) => a - b);
+    expect(xs).toHaveLength(20);
+    for (let i = 1; i < xs.length; i++) expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(l.spans[0]!.w + 1 - 1e-9);
+    expect(Math.max(...dateLines(l).map((d) => d.x))).toBeLessThanOrEqual(leftmostMark(l));
+  });
+
+  it("leaves layouts that fit under the cap exactly as they were", () => {
+    // Values recorded from the layout before the cap (commit 0d9dca0).
+    const digest = (l: TimelineLayout) => ({
+      rule: l.rules[0], height: l.height,
+      boxes: l.labels.map((x) => [x.box.x0, x.box.y0, x.box.x1, x.box.y1]),
+      lines: l.labels.map((x) => x.lines.map((ln) => [ln.x, ln.y, ln.text])),
+      spans: l.spans.map((s) => [s.x, s.y, s.w, s.h]), ticks: l.ticks.map((t) => [t.x, t.y, t.text]),
+    });
+    const close = (a: unknown, b: unknown): void => {
+      if (typeof b === "number") expect(a as number).toBeCloseTo(b, 9);
+      else if (b !== null && typeof b === "object") {
+        expect(Object.keys(a as object)).toEqual(Object.keys(b));
+        for (const k of Object.keys(b)) close((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]);
+      } else expect(a).toBe(b);
+    };
+    const at360 = (e: LayoutEvent[], axis = false) => v(e, { width: 360, axis });
+    close(digest(at360(FIG7())), JSON.parse(String.raw`{"rule":{"x1":72.5,"y1":8,"x2":72.5,"y2":400},"height":408,"boxes":[[87,0,172.8,16],[87,26,344.40000000000003,56],[87,161.38909610348387,232.20000000000002,177.38909610348387],[87,187.38909610348387,219,203.38909610348387],[87,384,219,400]],"lines":[[[56,13,"2026"],[87,12,"Policy begins"]],[[56,39,"2030"],[87,38,"First cohort born under fully phased-in"],[87,53,"policy"]],[[56,174.38909610348387,"2055"],[87,173.38909610348387,"Annual projection ends"]],[[56,200.38909610348387,"2057"],[87,199.38909610348387,"That cohort turns 27"]],[[56,397,"2095"],[87,396,"That cohort turns 65"]]],"spans":[],"ticks":[]}`));
+    close(digest(at360(FIG7(), true)), JSON.parse(String.raw`{"rule":{"x1":103.6,"y1":8,"x2":103.6,"y2":400},"height":408,"boxes":[[118.1,0,203.9,16],[118.1,26,309.5,56],[118.1,161.38909610348387,263.3,177.38909610348387],[118.1,187.38909610348387,250.1,203.38909610348387],[118.1,384,250.1,400]],"lines":[[[87.1,13,"2026"],[118.1,12,"Policy begins"]],[[87.1,39,"2030"],[118.1,38,"First cohort born under fully"],[118.1,53,"phased-in policy"]],[[87.1,174.38909610348387,"2055"],[118.1,173.38909610348387,"Annual projection ends"]],[[87.1,200.38909610348387,"2057"],[118.1,199.38909610348387,"That cohort turns 27"]],[[87.1,397,"2095"],[118.1,396,"That cohort turns 65"]]],"spans":[],"ticks":[[0,89.90619792079994,"2040"],[0,201.211649869058,"2060"],[0,312.5171018173161,"2080"]]}`));
+    close(
+      digest(at360([ev("2020", "a", { endStr: "2030" }), ev("2025", "c", { endStr: "2035" }), ev("2040", "b")])),
+      JSON.parse(String.raw`{"rule":{"x1":82,"y1":8,"x2":82,"y2":400},"height":408,"boxes":[[96.5,0,103.1,16],[96.5,96.0394250513347,103.1,112.0394250513347],[96.5,384,103.1,400]],"lines":[[[56,13,"2020"],[96.5,12,"a"]],[[56,109.0394250513347,"2025"],[96.5,108.0394250513347,"c"]],[[56,397,"2040"],[96.5,396,"b"]]],"spans":[[78,8,8,192.02628336755646],[68,104.0394250513347,8,191.97371663244348]],"ticks":[]}`),
+    );
+  });
+});

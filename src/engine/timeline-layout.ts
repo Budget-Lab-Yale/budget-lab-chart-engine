@@ -392,6 +392,12 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
 
 /** Gap between the vertical tick column and the date gutter. */
 const V_TICK_GAP = 8;
+/** Everything left of the vertical text column (ticks, dates, sub-tracks, rule) takes at most this
+ *  share of the width, so the text column keeps at least 55% at the 280px live floor. */
+const V_LEFT_SHARE = 0.45;
+/** Floors for a compressed vertical sub-track band. */
+const V_MIN_BAR = 3;
+const V_MIN_TRACK_GAP = 1;
 
 /** Vertical: time top → bottom. Left to right: [tick column] → date gutter (right-aligned) →
  *  span sub-tracks → rule → one text column. No left/right alternation: it would halve the text
@@ -403,23 +409,59 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   const events = [...inp.events].sort(byTime);
   const sub = assignSubTracks(events.filter(isSpan));
   const nSub = sub.size ? Math.max(...sub.values()) + 1 : 0;
-  const dateW = Math.max(G.vDateGutterMin, ...events.map((e) => textW("date", e.dateText)));
-  // Sub-tracks stack leftward from the rule; the gutter widens by their width so a date never
-  // sits on a bar (the outermost bar's left edge is at least vRuleGap right of the dates).
-  const barHalf = nSub ? G.spanH / 2 + (nSub - 1) * (G.spanH + G.subTrackGap) : 0;
+  const dateNat = Math.max(G.vDateGutterMin, ...events.map((e) => textW("date", e.dateText)));
+  // Sub-tracks stack leftward from the rule, bar width `w` at pitch `w + g`; `bandOf` is the rule
+  // to the outermost bar's left edge. The gutter widens by it so a date never sits on a bar (that
+  // edge is at least vRuleGap right of the dates).
+  const bandOf = (w: number, g: number): number => (nSub ? w / 2 + (nSub - 1) * (w + g) : 0);
   // An open-ended span needs room below the last date to fade out, as horizontal reserves G.fade.
   const tail = events.some((e) => e.ongoing) ? G.fade : 0;
 
+  // Left-region budget, in order: the tick column takes what its widest tick needs; the rule's
+  // fixed gaps are next; of what is left, the sub-track band may take whatever the dates do not
+  // need at their natural width, and never less than half (compressing its pitch, bars floored at
+  // V_MIN_BAR and gaps at V_MIN_TRACK_GAP, to get there); the dates take the rest and wrap to it.
+  // A layout whose natural left region is inside the cap is untouched. Only a band that is still
+  // too wide at the floors can push past the cap.
   const geometry = (tickW: number) => {
+    const rightOf = (w: number): number => Math.max(G.dotR, nSub ? w / 2 : 0) + G.vLabelGap;
+    const free = V_LEFT_SHARE * inp.width - tickW - G.vRuleGap - rightOf(G.spanH);
+    const bandTarget = Math.max(free / 2, free - dateNat);
+    let barW: number = G.spanH;
+    let gap: number = G.subTrackGap;
+    if (Math.max(G.dotR, bandOf(barW, gap)) > bandTarget) {
+      const s = Math.max(0, bandTarget) / bandOf(barW, gap);
+      barW = G.spanH * s;
+      gap = G.subTrackGap * s;
+      if (gap < V_MIN_TRACK_GAP) {
+        gap = V_MIN_TRACK_GAP;
+        barW = (Math.max(0, bandTarget) - (nSub - 1) * gap) / (nSub - 0.5);
+      }
+      barW = Math.max(V_MIN_BAR, barW);
+    }
+    const band = Math.max(G.dotR, bandOf(barW, gap));
+    const dateW = Math.min(dateNat, Math.max(0, free - band));
     const dateRight = tickW + dateW;
-    const ruleX = dateRight + G.vRuleGap + Math.max(G.dotR, barHalf);
-    const textX = ruleX + Math.max(G.dotR, nSub ? G.spanH / 2 : 0) + G.vLabelGap;
-    const colW = Math.max(60, inp.width - textX);
+    const ruleX = dateRight + G.vRuleGap + band;
+    const textX = ruleX + Math.max(G.dotR, nSub ? barW / 2 : 0) + G.vLabelGap;
+    const colW = Math.max(0, inp.width - textX);
     const blocks = new Map(events.map((e) => [e.id, buildBlock(e, colW, false, colW)]));
-    const rowHOf = (e: LayoutEvent): number => Math.max((blocks.get(e.id) as TextBlock).h, LINE_STYLE.date.lineH);
+    // A date wider than the gutter wraps (bold-aware) and hard-breaks inside it.
+    const dates = new Map(
+      events.map((e) => [
+        e.id,
+        textW("date", e.dateText) <= dateW
+          ? [e.dateText]
+          : wrapToWidth(e.dateText, dateW / BOLD_FACTOR, LINE_STYLE.date.size)
+              .split("\n")
+              .flatMap((ln) => hardBreak(ln, dateW, (s) => textW("date", s))),
+      ]),
+    );
+    const rowHOf = (e: LayoutEvent): number =>
+      Math.max((blocks.get(e.id) as TextBlock).h, (dates.get(e.id) as string[]).length * LINE_STYLE.date.lineH);
     const stacked = events.reduce((s, e) => s + rowHOf(e), 0) + G.vLabelGap * Math.max(0, events.length - 1);
     const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stacked);
-    return { dateRight, ruleX, textX, blocks, rowHOf, L };
+    return { dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
@@ -435,7 +477,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const fmt = tickFmt;
     if (ticks.length) tickW = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { dateRight, ruleX, textX, blocks, rowHOf, L } = geometry(tickW);
+  const { dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L } = geometry(tickW);
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 
   const out: TimelineLayout = {
@@ -461,15 +503,17 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
       const k = sub.get(e.id) as number;
       const ye = e.ongoing ? height - G.vPad : pos(e.end as Date);
       out.spans.push({
-        id: e.id, category: e.category, x: ruleX - G.spanH / 2 - k * (G.spanH + G.subTrackGap), y,
-        w: G.spanH, h: Math.max(G.minSpanPx, ye - y), projected: e.projected, fade: e.ongoing ? "down" : null,
+        id: e.id, category: e.category, x: ruleX - barW / 2 - k * (barW + gap), y,
+        w: barW, h: Math.max(G.minSpanPx, ye - y), projected: e.projected, fade: e.ongoing ? "down" : null,
       });
     } else {
       out.markers.push({ id: e.id, category: e.category, cx: ruleX, cy: y, projected: e.projected });
     }
     const box: Box = { x0: textX, y0: top, x1: textX + block.w, y1: top + rowHOf(e) };
     const lines: PlacedLine[] = [
-      { role: "date", text: e.dateText, x: dateRight, y: top + LINE_STYLE.date.size, anchor: "end" },
+      ...(dates.get(e.id) as string[]).map((text, i): PlacedLine => ({
+        role: "date", text, x: dateRight, y: top + LINE_STYLE.date.size + i * LINE_STYLE.date.lineH, anchor: "end",
+      })),
       ...placeLines(block, box, "start"),
     ];
     out.labels.push({ id: e.id, category: e.category, box, lines });
