@@ -142,6 +142,10 @@ export interface RenderOptions {
    *  probe) — those callers omit `afterRender` from the hooks object they pass instead, so the hook
    *  never sees a discarded SVG (see the call sites in render-live.ts / export-png.ts). */
   phase?: "live" | "export";
+  /** Timeline only: render this orientation instead of the authored one. Set by the live mount's
+   *  auto-switch (resolveTimelineOrientation); absent everywhere else, so the PNG export and every
+   *  other caller render the authored orientation. */
+  timelineOrientation?: "horizontal" | "vertical";
 }
 
 export interface LegendItem {
@@ -248,6 +252,8 @@ export interface RenderResult {
    *  at least one segment was too thin for its in-bar number. render-live feeds it to
    *  resolveValuePills so the pill default cannot leave those segments with no number at all. */
   segmentLabelsDropped?: boolean;
+  /** Timeline only: the orientation actually rendered. */
+  timelineOrientation?: "horizontal" | "vertical";
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -1290,6 +1296,9 @@ export function renderChart(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): RenderResult {
+  // Timeline draws its own SVG (no Plot frame, no value axis): branch before renderPane so no
+  // existing chart type's path runs any timeline code.
+  if (spec.chartType === "timeline") return renderTimeline(spec, rows, opts);
   const pane = renderPane(spec, rows, opts);
   const { svg, seriesNames, colors, valueAffixes, dataInScope, layers } = pane;
 
@@ -1344,6 +1353,8 @@ import { renderFigure } from "./figure";
 import type { FigureRenderResult } from "./figure";
 export { renderFigure } from "./figure";
 export type { FigureRenderResult, FigurePane } from "./figure";
+// Timeline renderer: the same safe cycle — marks/timeline.ts imports buildColorMap back from here.
+import { renderTimeline } from "./marks/timeline";
 
 /** Top-level dispatcher: a `small_multiples` spec renders a multi-panel figure (renderFigure),
  *  everything else renders a single chart (renderChart). render-live/export switch to this in
