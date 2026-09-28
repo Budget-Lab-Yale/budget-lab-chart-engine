@@ -24,6 +24,7 @@ import type { TidyRow } from "../data/index";
 import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
 import { overlayKind, overlayPerSeries } from "./overlays";
 import type { Overlay } from "./types";
+import { timelineDataErrors, timelineColumns } from "./timeline";
 
 export interface ValidationResult {
   valid: boolean;
@@ -1004,6 +1005,31 @@ function validateHistogramData(
   return { valid: errors.length === 0, errors };
 }
 
+/** series_order / series_colors / series_labels keys must name categories present in the data — the
+ *  same rule and wording the shared path applies below (`checkSeries` in `validateChartData`), so a
+ *  timeline reports an unknown key with the same vocabulary as every other chart type. */
+function validateTimelineKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
+  const cols = timelineColumns(spec, rows);
+  const seriesSeen = new Set<string>();
+  for (const r of rows) seriesSeen.add(cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY);
+  const knownSeries = JSON.stringify([...seriesSeen].sort());
+  const errors: string[] = [];
+  const checkSeries = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
+    if (!named) return;
+    const keys = Array.isArray(named) ? named : Object.keys(named);
+    const unknown = keys.filter((k) => !seriesSeen.has(k));
+    if (unknown.length) {
+      errors.push(
+        `${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`,
+      );
+    }
+  };
+  checkSeries(spec.series_order, "series_order");
+  checkSeries(spec.series_colors, "series_colors");
+  checkSeries(spec.series_labels, "series_labels");
+  return { valid: errors.length === 0, errors };
+}
+
 /** Layers 2-3: cross-reference + CSV-format checks over the chart's data rows. Assumes the
  * spec already passed structural validation. */
 export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
@@ -1019,6 +1045,15 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // edge columns instead of a continuous x). Handle it separately, leaving the path below intact.
   if (spec.chartType === "histogram") {
     return validateHistogramData(spec, rows, cols, columns);
+  }
+
+  // Timeline has no value column and its own row contract (start / end / label). Its errors come
+  // from spec/timeline.ts; the key cross-reference below (series_order/series_colors/series_labels
+  // vs data) still applies.
+  if (spec.chartType === "timeline") {
+    const tlErrors = timelineDataErrors(spec, rows);
+    if (tlErrors.length) return { valid: false, errors: tlErrors };
+    return validateTimelineKeys(spec, rows);
   }
 
   // Required columns resolve from the `columns` role map (defaults x:"time", value:"value",
