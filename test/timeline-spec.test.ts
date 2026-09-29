@@ -19,7 +19,7 @@ describe("timeline — structural validation", () => {
       series_order: ["a"], series_colors: { a: "navy" }, series_labels: { a: "A" },
       projected_field: "p", legend: true, series_legend: true, legendPosition: "top",
       x_axis_title: "Year", subtitle: "s", note: "n", source: "src", tags: ["x"],
-      timeline: { spacing: "proportional", lanes: true, axis: true, date_format: "%Y", label_width: 150, max_rows: 2, auto_vertical: true },
+      timeline: { spacing: "proportional", lanes: true, axis: true, date_format: "%Y", label_width: 150, max_rows: 2, auto_vertical: true, vertical_lanes: "columns" },
     });
     expect(r).toEqual({ valid: true, errors: [] });
   });
@@ -47,8 +47,16 @@ describe("timeline — structural validation", () => {
     expect(errs({ ...TL, timeline: { axis: true, spacing: "even" } })).toMatch(/timeline\.axis cannot be used with timeline\.spacing "even"/);
   });
 
-  it("rejects lanes on a vertical timeline", () => {
-    expect(errs({ ...TL, orientation: "vertical", timeline: { lanes: true } })).toMatch(/timeline\.lanes is horizontal only/);
+  it("accepts lanes on a vertical timeline (D4)", () => {
+    expect(validateSpec({ ...TL, orientation: "vertical", timeline: { lanes: true } })).toEqual({ valid: true, errors: [] });
+  });
+
+  it("accepts vertical_lanes columns and single, rejects any other value", () => {
+    for (const v of ["columns", "single"]) {
+      expect(validateSpec({ ...TL, orientation: "vertical", timeline: { lanes: true, vertical_lanes: v } })).toEqual({ valid: true, errors: [] });
+    }
+    expect(validateSpec({ ...TL, timeline: { vertical_lanes: "stacked" } }).valid).toBe(false);
+    expect(validateSpec({ ...TL, timeline: { vertical_lanes: true } }).valid).toBe(false);
   });
 
   it("rejects x_axis_title without timeline.axis, accepts it with", () => {

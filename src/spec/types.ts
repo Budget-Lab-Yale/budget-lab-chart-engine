@@ -14,7 +14,8 @@ export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 export interface TimelineConfig {
   /** `proportional` (default): distance is elapsed time. `even`: every distinct date gets one slot. */
   spacing?: "proportional" | "even";
-  /** One track per category (horizontal only). Default false. */
+  /** One track per category. Horizontal: lanes stacked top to bottom. Vertical: see
+   *  `vertical_lanes`. Default false. */
   lanes?: boolean;
   /** Sparse date axis (proportional only). Default false. */
   axis?: boolean;
@@ -26,6 +27,10 @@ export interface TimelineConfig {
   max_rows?: number;
   /** Live only: render vertical when horizontal does not fit. Default true. */
   auto_vertical?: boolean;
+  /** With `lanes`, how a vertical render (authored or auto-switched) draws them. `columns`
+   *  (default): exactly two lanes draw as two side-by-side tracks, each named at the top; any other
+   *  lane count draws one track. `single`: always one track. */
+  vertical_lanes?: "columns" | "single";
 }
 
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */

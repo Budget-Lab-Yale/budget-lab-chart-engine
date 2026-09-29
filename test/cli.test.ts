@@ -152,6 +152,26 @@ describe("runValidate — timeline warnings", () => {
     expect(result.message).toMatch(/warning: horizontal layout needs more than 1 label rows per side at the 744px export width/);
   });
 
+  it("warns (exit 0) when an explicit vertical_lanes: columns meets three lanes (Ruling 25)", async () => {
+    const dir = join(tmpdir(), `cli-test-vertical-lanes-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, "date,label,kind\n2020,A,a\n2025,B,b\n2030,C,c\n", "utf8");
+    const spec = (vl: string) => [
+      "chartType: timeline", "title: T", "xAxisType: temporal", "orientation: vertical", "data: data.csv",
+      "columns: { x: date, label: label, series: kind }", `timeline: { lanes: true${vl} }`,
+    ].join("\n") + "\n";
+    writeFileSync(specPath, spec(", vertical_lanes: columns"), "utf8");
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).toMatch(/warning: timeline\.vertical_lanes "columns" draws lane columns only for exactly two lanes; with 3 lanes a vertical render draws one track/);
+    writeFileSync(specPath, spec(""), "utf8");
+    expect((await runValidate(specPath)).message).not.toMatch(/warning:/);
+  });
+
   it("does not warn for the same data with a top legend (fits at the full 920px width)", async () => {
     const result = await runValidate(TIMELINE_TOP_LEGEND_SPEC);
     expect(result.exitCode).toBe(0);

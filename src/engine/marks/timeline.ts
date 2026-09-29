@@ -79,13 +79,22 @@ interface Built {
   lanesOn: boolean;
 }
 
+/** Whether `timeline.lanes` draws lanes in this orientation (D3). Horizontal: always. Vertical
+ *  (authored or auto-switched): only as lane columns — exactly two lanes, unless
+ *  `vertical_lanes: "single"`; three or more lanes draw one track and the legend names them. The
+ *  one decision render, height, the export width and the warnings all share. */
+function lanesDrawn(spec: ChartSpec, laneCount: number, orientation: Orientation): boolean {
+  const cfg = resolveTimelineConfig(spec);
+  if (!cfg.lanes) return false;
+  return orientation === "horizontal" || (laneCount === 2 && cfg.verticalLanes === "columns");
+}
+
 /** The one place a spec + width + orientation becomes a layout, so render, height, the auto-switch
- *  and the warnings can never disagree about geometry. Lanes apply only to a horizontal render: an
- *  auto-switched (vertical) chart collapses them to one track. */
+ *  and the warnings can never disagree about geometry. */
 function build(spec: ChartSpec, rows: TidyRow[], width: number, orientation: Orientation): Built {
   const cfg = resolveTimelineConfig(spec);
   const { events, seriesNames } = prepareTimeline(spec, rows);
-  const lanesOn = cfg.lanes && orientation === "horizontal";
+  const lanesOn = lanesDrawn(spec, seriesNames.length, orientation);
   const labels = spec.series_labels ?? {};
   const layout = layoutTimeline({
     events, width, orientation, spacing: cfg.spacing,
@@ -114,9 +123,15 @@ export function timelineHeight(spec: ChartSpec, rows: TidyRow[], width: number, 
  *  AUTHORED orientation, because that is what the PNG draws (the auto-switch is live only). */
 export function timelineWarnings(spec: ChartSpec, rows: TidyRow[], exportWidth: number): string[] {
   const out: string[] = [];
-  const { events } = prepareTimeline(spec, rows);
+  const { events, seriesNames } = prepareTimeline(spec, rows);
   if (events.length > TIMELINE_EVENT_WARN_COUNT) {
     out.push(`timeline has ${events.length} events; more than ${TIMELINE_EVENT_WARN_COUNT} is hard to read — consider splitting it`);
+  }
+  // Ruling 25: an explicit "columns" that cannot apply renders one track rather than failing.
+  if (resolveTimelineConfig(spec).lanes && spec.timeline?.vertical_lanes === "columns" && seriesNames.length >= 3) {
+    out.push(
+      `timeline.vertical_lanes "columns" draws lane columns only for exactly two lanes; with ${seriesNames.length} lanes a vertical render draws one track`,
+    );
   }
   if ((spec.orientation ?? "horizontal") === "horizontal" && !build(spec, rows, exportWidth, "horizontal").layout.fits) {
     const n = resolveTimelineConfig(spec).maxRows;
@@ -141,9 +156,8 @@ export function timelineWarnings(spec: ChartSpec, rows: TidyRow[], exportWidth: 
  *  need to account for it either — matching `timelineWarnings`' own overflow check. */
 export function timelineExportChartWidth(spec: ChartSpec, rows: TidyRow[]): number {
   if (spec.legend === false) return INNER_W;
-  const cfg = resolveTimelineConfig(spec);
   const { seriesNames } = prepareTimeline(spec, rows);
-  const lanesOn = cfg.lanes && (spec.orientation ?? "horizontal") === "horizontal";
+  const lanesOn = lanesDrawn(spec, seriesNames.length, spec.orientation ?? "horizontal");
   const showRows =
     spec.series_legend === true || (spec.series_legend !== false && seriesNames.length > 1 && !lanesOn);
   const legendCount = showRows ? seriesNames.length : 0;
@@ -339,8 +353,9 @@ export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOpt
     series: name, label: seriesLabels[name] ?? name, color: colors.get(name), dashed: false,
     markerShape: "point", markerSymbol: "circle",
   }));
-  // Lanes name their categories in the gutter, so the legend's series rows default off there; an
-  // auto-switched (vertical) chart has no lanes, so its colours must be named by the legend.
+  // Drawn lanes name their categories (the horizontal gutter, or the vertical lane columns'
+  // headers), so the legend's series rows default off there (Ruling 26); a vertical render that
+  // draws one track instead must name its colours in the legend.
   const showRows =
     spec.series_legend === true || (spec.series_legend !== false && seriesNames.length > 1 && !lanesOn);
   const legendItems = spec.legend === false || !showRows ? null : seriesKeyRows;

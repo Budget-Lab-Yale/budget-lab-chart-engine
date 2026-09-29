@@ -554,6 +554,7 @@ export const CHART_SPEC_SCHEMA = {
         label_width: { type: "number", minimum: 60, maximum: 400 },
         max_rows: { type: "integer", minimum: 1, maximum: 6 },
         auto_vertical: { type: "boolean" },
+        vertical_lanes: { type: "string", enum: ["columns", "single"] },
       },
     },
     // Dumbbell (connected dot plot). Categorical axis via xAxisType; orientation flips it.

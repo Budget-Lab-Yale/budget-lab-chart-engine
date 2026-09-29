@@ -14,6 +14,7 @@ export interface ResolvedTimelineConfig {
   labelWidth: number;
   maxRows: number;
   autoVertical: boolean;
+  verticalLanes: "columns" | "single";
 }
 
 export const TIMELINE_EVENT_WARN_COUNT = 20;
@@ -28,6 +29,7 @@ export function resolveTimelineConfig(spec: ChartSpec): ResolvedTimelineConfig {
     labelWidth: t.label_width ?? 150,
     maxRows: t.max_rows ?? 2,
     autoVertical: t.auto_vertical ?? true,
+    verticalLanes: t.vertical_lanes ?? "columns",
   };
 }
 

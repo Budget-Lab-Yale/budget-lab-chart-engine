@@ -1124,7 +1124,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         });
       }
     } else if (spec.chartType === "timeline") {
-      // Lanes (horizontal) name the categories and the auto-switched vertical has none, so a
+      // Drawn lanes name the categories and a vertical render may draw one track instead, so a
       // timeline's legend comes and goes on a resize: drop the last draw's.
       legendSlot.replaceChildren();
     }

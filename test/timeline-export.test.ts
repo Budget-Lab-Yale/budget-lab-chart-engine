@@ -83,6 +83,32 @@ describe("timeline export — right-legend chart width (Ruling 17)", () => {
   });
 });
 
+describe("timeline export — authored vertical two-lane chart", () => {
+  const spec = { ...LEGEND_SPEC, orientation: "vertical", legendPosition: "right", timeline: { lanes: true } } as ChartSpec;
+
+  it("re-renders the lane columns: two vertical rules, both lane names, at the full width with no legend", () => {
+    // Lane names label the categories, so there are no legend rows and no right column to narrow it.
+    expect(timelineExportChartWidth(spec, LEGEND_ROWS)).toBe(INNER_W);
+    const svg = buildExportSvg(spec, LEGEND_ROWS);
+    const chart = svg.querySelector(`svg.${TIMELINE_CLASS}`)!;
+    expect(Number(chart.getAttribute("width"))).toBe(INNER_W);
+    const rules = [...chart.querySelectorAll("line.tbl-timeline-rule")];
+    expect(rules).toHaveLength(2);
+    for (const r of rules) expect(r.getAttribute("x1")).toBe(r.getAttribute("x2"));
+    expect([...chart.querySelectorAll(".tbl-timeline-lane-label")].map((t) => t.textContent)).toEqual(["alpha", "beta"]);
+    expect(svg.querySelectorAll(".tbl-legend-item, .figure-legend-slot--right")).toHaveLength(0);
+  });
+
+  it("narrows for the right legend when vertical_lanes: single brings the legend rows back", () => {
+    const single = { ...spec, timeline: { lanes: true, vertical_lanes: "single" } } as ChartSpec;
+    const w = timelineExportChartWidth(single, LEGEND_ROWS);
+    expect(w).toBeLessThan(INNER_W);
+    const chart = buildExportSvg(single, LEGEND_ROWS).querySelector(`svg.${TIMELINE_CLASS}`)!;
+    expect(Number(chart.getAttribute("width"))).toBe(w);
+    expect(chart.querySelectorAll("line.tbl-timeline-rule")).toHaveLength(1);
+  });
+});
+
 describe("timeline export — right legend taller than the timeline", () => {
   // Eight categories on a short one-row timeline: the legend column runs well past the chart.
   const kinds = ["a", "b", "c", "d", "e", "f", "g", "h"];

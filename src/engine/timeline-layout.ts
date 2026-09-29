@@ -79,7 +79,9 @@ export interface TimelineLayoutInput {
   width: number;
   orientation: "horizontal" | "vertical";
   spacing: "proportional" | "even";
-  /** Lane order and gutter labels, or null for one track. Horizontal only. */
+  /** Lane order and names, or null for one track. Horizontal: one lane per entry. Vertical:
+   *  exactly two entries draw as lane columns (layoutLaneColumns); any other value is ignored and
+   *  one track is drawn — the caller (marks/timeline.ts) decides when columns apply. */
   lanes: Array<{ key: string; label: string }> | null;
   axis: boolean;
   labelWidth: number;
@@ -94,11 +96,13 @@ export interface PlacedSpan { id: number; category: string; x: number; y: number
 export interface PlacedStem { id: number; category: string; points: Array<[number, number]> }
 export interface PlacedRule { x1: number; y1: number; x2: number; y2: number }
 export interface PlacedTick { x: number; y: number; text: string; anchor: "start" | "middle" | "end" }
-/** A lane name in the left gutter, right-aligned at `x`. `text` is the full name; `lines` is it
- *  wrapped to the gutter. `y` is the first line's baseline; each further line is `LANE_LINE_H` lower.
- *  Each line's box is [baseline - LANE_SIZE, baseline + LANE_LINE_H - LANE_SIZE], and the whole
- *  block lies inside its lane's vertical extent. */
-export interface PlacedLaneLabel { text: string; lines: string[]; x: number; y: number; anchor: "end" }
+/** A lane name. Horizontal: in the left gutter, right-aligned at `x`, the whole block inside its
+ *  lane's vertical extent. Vertical lane columns: at the top of its track on the lane's outer side —
+ *  lane 0's right-aligned (`end`) just left of its rule, lane 1's left-aligned (`start`) just right
+ *  of its rule. `text` is the full name; `lines` is it wrapped to the gutter or side. `y` is the
+ *  first line's baseline; each further line is `LANE_LINE_H` lower. Each line's box is
+ *  [baseline - LANE_SIZE, baseline + LANE_LINE_H - LANE_SIZE]. */
+export interface PlacedLaneLabel { text: string; lines: string[]; x: number; y: number; anchor: "start" | "end" }
 
 export interface TimelineLayout {
   orientation: "horizontal" | "vertical";
@@ -368,6 +372,13 @@ function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle" | "en
   });
 }
 
+/** A lane name wrapped to `px` between words; a word wider than `px` alone is split. */
+function laneNameLines(label: string, px: number): string[] {
+  return wrapToWidth(label, px, LANE_SIZE)
+    .split("\n")
+    .flatMap((l) => hardBreak(l, px, (s) => estimateLabelWidth(s, LANE_SIZE)));
+}
+
 function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): TimelineLayout {
   const G = TL_GEOM;
   // In lanes mode an event outside every lane is not drawn, so it is dropped here: `order` must list
@@ -381,10 +392,7 @@ function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): Ti
       )
     : 0;
   const laneTextPx = Math.max(0, gutter - G.laneGutterPad);
-  const laneLines = (label: string): string[] =>
-    wrapToWidth(label, laneTextPx, LANE_SIZE)
-      .split("\n")
-      .flatMap((l) => hardBreak(l, laneTextPx, (s) => estimateLabelWidth(s, LANE_SIZE)));
+  const laneLines = (label: string): string[] => laneNameLines(label, laneTextPx);
   const framePx = Math.max(0, inp.width - gutter);
   const blocks = new Map(events.map((e) => [e.id, buildBlock(e, inp.labelWidth, framePx)]));
   // Inset each end of the range by half the widest centred label anchored at that end's date, so an
@@ -588,13 +596,15 @@ const vStack = (blocks: TextBlock[]): number =>
  *  is centred on its item and a downward sweep pushes it below the block before; a column sweeps
  *  only its own blocks, so two columns never push each other. `displaced` marks a block the sweep
  *  moved off its item (it gets a leader), and `mid` is its first line's centre, where a leader
- *  enters. The first block is never pushed only because vPad (the axis's top inset) equals half the
- *  date line height: its desired top is then exactly 0, so the clamp to the top never moves it. */
-function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: TextBlock }>): VPlaced[] {
+ *  enters. No block starts above `minTop` (0, or the bottom of the lane-name header in lane
+ *  columns). The first block is never pushed only because the axis starts vPad below `minTop` and
+ *  vPad equals half the date line height: its desired top is then exactly `minTop`, so the clamp
+ *  never moves it. */
+function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: TextBlock }>, minTop = 0): VPlaced[] {
   const half = LINE_STYLE.date.lineH / 2;
   let prevBottom = -Infinity;
   return items.map(({ id, y, block }) => {
-    const top = Math.max(y - half, prevBottom + TL_GEOM.vLabelGap, 0);
+    const top = Math.max(y - half, prevBottom + TL_GEOM.vLabelGap, minTop);
     prevBottom = top + block.h;
     const [x0, x1] = col.anchor === "start" ? [col.x0, col.x0 + block.w] : [col.x1 - block.w, col.x1];
     const box: Box = { x0, y0: top, x1, y1: top + block.h };
@@ -602,11 +612,27 @@ function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: 
   });
 }
 
+/** The elbow leader joining a displaced vertical label to its item, on the side its label sits
+ *  (`s`: -1 left, +1 right of the item's rule). A leader in a pushed cluster shares one vertical leg,
+ *  2px outside the band (`band` is the rule to the outer edge of that side's outermost bar, at
+ *  least a marker radius), instead of fanning into a smear. It leaves from `start` — a span on an
+ *  outer sub-track leaves its own bar's outer edge, so it reads as that bar's, not a neighbour's —
+ *  or, for a point or a sub-track-0 span, 2px off the marker; runs out to the leg across any outer
+ *  bars, down parallel to the rule, and into the label's first line at `colEdge`. */
+function vLeader(
+  s: -1 | 1, rule: number, band: number, start: number | null, y: number, mid: number, colEdge: number,
+): Array<[number, number]> {
+  const leg = rule + s * band + s * 2;
+  const from = start ?? rule + s * TL_GEOM.dotR + s * 2;
+  return [...(from === leg ? [] : [[from, y] as [number, number]]), [leg, y], [leg, mid], [colEdge, mid]];
+}
+
 /** Vertical: time top → bottom, each event's label beside its item — one block of bold date line(s)
  *  above the title and description. Points and spans on the main rule (sub-track 0) label to the
  *  RIGHT of the track, left-aligned; spans on outer sub-tracks (k ≥ 1, stacked leftward from the
  *  rule) label to the LEFT, right-aligned, ending a label gap short of the band's leftmost bar. Each
- *  side sweeps on its own. Lanes do not apply (they collapse to one track), so every event is drawn.
+ *  side sweeps on its own. Exactly two lanes draw as lane columns (layoutLaneColumns); any other
+ *  `lanes` value is ignored here — one track, every event drawn.
  *
  *  Width budget, left to right: [tick column] → [left text column + gap, only when some span is on
  *  k ≥ 1; otherwise a V_EDGE pad] → span band → rule → marker half-width + gap → right text column.
@@ -628,6 +654,7 @@ function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: 
  *  frame edge), and the right column gets the rest of the width. The axis length is chosen so the
  *  taller side's whole stack fits, which keeps pushes local. */
 function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
+  if (inp.lanes?.length === 2) return layoutLaneColumns(inp, inp.lanes);
   const G = TL_GEOM;
   const W = inp.width;
   const events = [...inp.events].sort(byTime);
@@ -733,7 +760,6 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     rules: [], markers: [], spans: [], labels: [], stems: [], ticks: [], laneLabels: [],
   };
   const barX = (k: number): number => ruleX - barW / 2 - k * (barW + gap);
-  const bandLeft = ruleX - band;
   for (const e of events) {
     const y = pos(e.start);
     const k = kOf(e);
@@ -749,19 +775,174 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const p = placed.get(e.id) as VPlaced;
     out.labels.push({ id: e.id, category: e.category, box: p.box, lines: p.lines });
     if (!p.displaced) continue;
-    // A label pushed off its item gets an elbow on the item's own side, and leaders in a pushed
-    // cluster share the vertical leg instead of fanning into a smear. Right: out beside the marker
-    // (clear of the sub-track-0 bar), down parallel to the rule, into the label's first line.
-    // Left: out of the span's own bar's left edge, across any outer bars to a leg just left of the
-    // band, down, into the label's right end — so it reads as that bar's, not a neighbour's.
-    const points: Array<[number, number]> =
+    // Left labels (k ≥ 1) sit beyond the band; right labels have only the marker (or the
+    // sub-track-0 bar's half, never wider than it) between them and the rule.
+    const points =
       k > 0
-        ? [[barX(k), y], [bandLeft - 2, y], [bandLeft - 2, p.mid], [leftCol.x1 + 4, p.mid]]
-        : [[ruleX + G.dotR + 2, y], [ruleX + G.dotR + 2, p.mid], [rightCol.x0 - 4, p.mid]];
+        ? vLeader(-1, ruleX, band, barX(k), y, p.mid, leftCol.x1 + 4)
+        : vLeader(1, ruleX, G.dotR, null, y, p.mid, rightCol.x0 - 4);
     out.stems.push({ id: e.id, category: e.category, points });
   }
 
   out.rules.push({ x1: ruleX, y1: G.vPad, x2: ruleX, y2: height - G.vPad });
+  if (scale && tickFmt) {
+    const fmt = tickFmt;
+    out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
+  }
+  return out;
+}
+
+/** Lane columns: rule-to-rule distance between the two tracks. */
+const V_LANE_GAP = 32;
+/** Lane columns: a lane name ends (lane 0) or starts (lane 1) this far outside its rule. */
+const V_LANE_NAME_INSET = 6;
+
+/** Vertical with exactly two lanes (D3): two tracks near the centre, each named at the top on its
+ *  outer side. Lane 0's labels sit LEFT of its track, right-aligned; lane 1's RIGHT of its track,
+ *  left-aligned. Each lane's overlapping spans take sub-tracks stacked OUTWARD from its rule (lane 0
+ *  leftward, lane 1 rightward), so a lane's labels always sit on its outer side, beyond its band,
+ *  and the centre between the rules holds only the rules and their sub-track-0 marks. Each lane
+ *  sweeps its own labels (placeColumn); a lane with no events still gets its track and name. An
+ *  event outside both lanes is not drawn.
+ *
+ *  Width budget, left to right: [tick column] → lane 0 text column → gap → lane 0 band → rule 0 →
+ *  V_LANE_GAP → rule 1 → lane 1 band → gap → lane 1 text column. The two text columns get equal
+ *  widths — half of what the tick column, both bands and the fixed gaps leave — which keeps the
+ *  tracks centred in the space right of the tick column. Each column's FLOOR is the wider of the two
+ *  lanes' widest date unit (dates wrap only between words or after an en dash).
+ *   1. The tick column (Ruling 28) is drawn if it fits beside both columns at that floor, both
+ *      bands at their floors (bars V_MIN_BAR, gaps V_MIN_TRACK_GAP) and the fixed gaps; otherwise
+ *      it is omitted, and the x-axis title with it.
+ *   2. Both bands take their natural width, compressed together (one bar width for both lanes)
+ *      toward their floors only as far as it takes to leave each column its floor.
+ *   3. The columns split what remains equally; a date unit wider than its column is split by
+ *      hardBreakDate, so no label leaves the frame.
+ *  Lane names wrap to their side (the frame edge or tick column to 6px short of the rule) and the
+ *  taller name block is reserved at the top: labels start below it (placeColumn's min-top) and the
+ *  axis starts vPad below that. */
+function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string; label: string }>): TimelineLayout {
+  const G = TL_GEOM;
+  const W = inp.width;
+  const keys = lanes.map((l) => l.key);
+  const events = inp.events.filter((e) => keys.includes(e.category)).sort(byTime);
+  const laneEvs = keys.map((k) => events.filter((e) => e.category === k));
+  const laneIx = new Map(events.map((e) => [e.id, keys.indexOf(e.category)]));
+  const subs = laneEvs.map((evs) => assignSubTracks(evs.filter(isSpan)));
+  const nSubs = subs.map((s) => (s.size ? Math.max(...s.values()) + 1 : 0));
+  const kOf = (e: LayoutEvent): number => subs[laneIx.get(e.id) as number]!.get(e.id) ?? 0;
+  const tail = events.some((e) => e.ongoing) ? G.fade : 0;
+  const sideOf = (i: number): -1 | 1 => (i === 0 ? -1 : 1);
+
+  // Rule to the outer edge of a lane's outermost bar, at least a marker radius.
+  const bandOf = (n: number, w: number, g: number): number => Math.max(G.dotR, n ? w / 2 + (n - 1) * (w + g) : 0);
+  const word = Math.max(0, ...events.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u))));
+  const fixed = 2 * G.vLabelGap + V_LANE_GAP;
+  const tickRoom = W - 2 * word - fixed - nSubs.reduce((s, n) => s + bandOf(n, V_MIN_BAR, V_MIN_TRACK_GAP), 0);
+
+  // Step 2: one bar width and gap for both lanes. Bands are linear in (w, g) — (n - 0.5)w + (n - 1)g
+  // for a lane with spans — so the compressed bar solves directly, as layoutVertical's does.
+  const bars = (avail: number): { barW: number; gap: number } => {
+    const room = avail - fixed - 2 * word;
+    let barW: number = G.spanH;
+    let gap: number = G.subTrackGap;
+    if (nSubs.reduce((s, n) => s + bandOf(n, barW, gap), 0) <= room) return { barW, gap };
+    const spanned = nSubs.filter((n) => n > 0);
+    if (!spanned.length) return { barW, gap };
+    const roomBars = Math.max(0, room - (nSubs.length - spanned.length) * G.dotR);
+    const a = spanned.reduce((s, n) => s + (n - 0.5), 0);
+    const b = spanned.reduce((s, n) => s + (n - 1), 0);
+    const sc = roomBars / (a * barW + b * gap);
+    barW *= sc;
+    gap *= sc;
+    if (gap < V_MIN_TRACK_GAP) {
+      gap = V_MIN_TRACK_GAP;
+      barW = (roomBars - b * gap) / a;
+    }
+    return { barW: Math.max(V_MIN_BAR, barW), gap };
+  };
+
+  const geometry = (tickNeed: number) => {
+    const tickW = tickNeed > 0 && tickNeed <= tickRoom ? tickNeed : 0;
+    const { barW, gap } = bars(W - tickW);
+    const bands = nSubs.map((n) => bandOf(n, barW, gap));
+    const colW = Math.max(0, (W - tickW - fixed - bands[0]! - bands[1]!) / 2);
+    const rules = [tickW + colW + G.vLabelGap + bands[0]!];
+    rules.push(rules[0]! + V_LANE_GAP);
+    const cols: VColumn[] = [
+      { x0: tickW, x1: tickW + colW, anchor: "end" },
+      { x0: rules[1]! + bands[1]! + G.vLabelGap, x1: W, anchor: "start" },
+    ];
+    const names = [
+      laneNameLines(lanes[0]!.label, Math.max(0, rules[0]! - V_LANE_NAME_INSET - tickW)),
+      laneNameLines(lanes[1]!.label, Math.max(0, W - rules[1]! - V_LANE_NAME_INSET)),
+    ];
+    const top = Math.max(...names.map((n) => n.length)) * LANE_LINE_H + G.rowGap;
+    const blocks = new Map(events.map((e) => [e.id, vBlock(e, colW)]));
+    const L = Math.max(
+      G.minVerticalHeight - top - 2 * G.vPad - tail,
+      ...laneEvs.map((evs) => vStack(evs.map((e) => blocks.get(e.id) as TextBlock))),
+    );
+    return { tickW, barW, gap, bands, rules, cols, names, top, blocks, L };
+  };
+
+  // Ticks as layoutVertical chooses them: count from the tickless axis, column sized to the widest.
+  let ticks: Date[] = [];
+  let tickFmt: ((d: Date) => string) | null = null;
+  let tickNeed = 0;
+  const probe = inp.axis ? positioner(events, inp.spacing, 0, 1).scale : null;
+  if (probe) {
+    const n = Math.max(2, Math.floor(geometry(0).L / 80));
+    ticks = probe.ticks(n);
+    tickFmt = probe.tickFormat(n);
+    const fmt = tickFmt;
+    if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
+  }
+  const { tickW, barW, gap, bands, rules, cols, names, top, blocks, L } = geometry(tickNeed);
+  if (!tickW) ticks = [];
+  const y0 = top + G.vPad;
+  const { pos, scale } = positioner(events, inp.spacing, y0, y0 + L);
+
+  const placed = new Map(
+    laneEvs.flatMap((evs, i) =>
+      placeColumn(cols[i]!, evs.map((e) => ({ id: e.id, y: pos(e.start), block: blocks.get(e.id) as TextBlock })), top),
+    ).map((p) => [p.id, p]),
+  );
+  const bottom = Math.max(0, ...[...placed.values()].map((p) => p.box.y1));
+  const height = Math.ceil(Math.max(y0 + L + tail + G.vPad, bottom + G.vPad));
+
+  const out: TimelineLayout = {
+    orientation: "vertical", width: W, height, fits: true, order: events.map((e) => e.id),
+    rules: rules.map((x) => ({ x1: x, y1: y0, x2: x, y2: height - G.vPad })),
+    markers: [], spans: [], labels: [], stems: [], ticks: [],
+    laneLabels: lanes.map((l, i) => ({
+      text: l.label, lines: names[i]!, x: rules[i]! + sideOf(i) * V_LANE_NAME_INSET, y: LANE_SIZE,
+      anchor: i === 0 ? "end" : "start",
+    })),
+  };
+  // A bar's centre sits k pitches outward from its lane's rule.
+  const barX = (i: number, k: number): number => rules[i]! + sideOf(i) * k * (barW + gap) - barW / 2;
+  for (const e of events) {
+    const i = laneIx.get(e.id) as number;
+    const s = sideOf(i);
+    const y = pos(e.start);
+    const k = kOf(e);
+    if (isSpan(e)) {
+      const ye = e.ongoing ? height - G.vPad : pos(e.end as Date);
+      out.spans.push({
+        id: e.id, category: e.category, x: barX(i, k), y,
+        w: barW, h: Math.max(G.minSpanPx, ye - y), projected: e.projected, fade: e.ongoing ? "down" : null,
+      });
+    } else {
+      out.markers.push({ id: e.id, category: e.category, cx: rules[i]!, cy: y, projected: e.projected });
+    }
+    const p = placed.get(e.id) as VPlaced;
+    out.labels.push({ id: e.id, category: e.category, box: p.box, lines: p.lines });
+    if (!p.displaced) continue;
+    // An outer-sub-track span leaves its own bar's outer edge; anything on the rule leaves beside it.
+    const start = isSpan(e) && k > 0 ? barX(i, k) + (s < 0 ? 0 : barW) : null;
+    const colEdge = s < 0 ? cols[i]!.x1 + 4 : cols[i]!.x0 - 4;
+    out.stems.push({ id: e.id, category: e.category, points: vLeader(s, rules[i]!, bands[i]!, start, y, p.mid, colEdge) });
+  }
   if (scale && tickFmt) {
     const fmt = tickFmt;
     out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));

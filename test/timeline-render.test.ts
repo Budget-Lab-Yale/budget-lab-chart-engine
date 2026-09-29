@@ -189,10 +189,53 @@ describe("timeline render", () => {
     expect(r({ orientation: "vertical" }).timelineOrientation).toBe("vertical");
   });
 
-  it("collapses lanes and shows legend rows when rendered vertical from a lanes spec", () => {
-    const res = renderChart({ ...SPEC, timeline: { lanes: true } } as ChartSpec, ROWS, { width: 400, timelineOrientation: "vertical" });
-    expect(q(res.svg, ".tbl-timeline-lane-label")).toHaveLength(0);
-    expect(res.legendItems).toHaveLength(2);
+  describe("vertical lanes (D3)", () => {
+    const THREE = [...ROWS, { date: "2070", end: "", title: "A third category", detail: "", kind: "other", projected: "" }] as TidyRow[];
+    const vert = (s: Partial<ChartSpec>, rows = ROWS, width = 375) =>
+      renderChart({ ...SPEC, orientation: "vertical", ...s } as ChartSpec, rows, { width });
+    const rules = (svg: SVGSVGElement) => q(svg, "line.tbl-timeline-rule");
+
+    it("draws two lanes as two vertical tracks named by lane labels, with no legend series rows", () => {
+      const res = vert({ timeline: { lanes: true } });
+      expect(rules(res.svg)).toHaveLength(2);
+      for (const l of rules(res.svg)) expect(l.getAttribute("x1")).toBe(l.getAttribute("x2"));
+      const names = q(res.svg, ".tbl-timeline-lane-label");
+      expect(names.map((t) => [t.textContent, t.getAttribute("text-anchor")])).toEqual([["Policy", "end"], ["Cohort milestone", "start"]]);
+      expect(res.legendItems).toBeNull(); // Ruling 26: the lane names label the categories
+      expect(vert({ timeline: { lanes: true }, series_legend: true }).legendItems).toHaveLength(2);
+    });
+
+    it("styles a vertical lane name exactly as a horizontal one", () => {
+      const attrs = (t: Element) => ["class", "font-size", "font-weight", "fill"].map((a) => t.getAttribute(a));
+      const h = q(r({ timeline: { lanes: true } }).svg, ".tbl-timeline-lane-label")[0]!;
+      const v = q(vert({ timeline: { lanes: true } }).svg, ".tbl-timeline-lane-label")[0]!;
+      expect(attrs(v)).toEqual(attrs(h));
+    });
+
+    it("draws three or more lanes as one track, the legend naming the categories", () => {
+      for (const vl of [undefined, "columns"] as const) {
+        const res = vert({ series_order: ["policy", "cohort", "other"], timeline: { lanes: true, ...(vl ? { vertical_lanes: vl } : {}) } }, THREE);
+        expect(rules(res.svg)).toHaveLength(1);
+        expect(q(res.svg, ".tbl-timeline-lane-label")).toHaveLength(0);
+        expect(res.legendItems).toHaveLength(3);
+      }
+    });
+
+    it("draws two lanes as one track with vertical_lanes: single, legend rows on", () => {
+      const res = vert({ timeline: { lanes: true, vertical_lanes: "single" } });
+      expect(rules(res.svg)).toHaveLength(1);
+      expect(q(res.svg, ".tbl-timeline-lane-label")).toHaveLength(0);
+      expect(res.legendItems).toHaveLength(2);
+      // Exactly the single-track chart of the same spec without lanes.
+      expect(res.svg.outerHTML).toBe(vert({}).svg.outerHTML);
+    });
+
+    it("renders a lanes spec switched to vertical as lane columns too", () => {
+      const res = renderChart({ ...SPEC, timeline: { lanes: true } } as ChartSpec, ROWS, { width: 400, timelineOrientation: "vertical" });
+      expect(rules(res.svg)).toHaveLength(2);
+      expect(q(res.svg, ".tbl-timeline-lane-label")).toHaveLength(2);
+      expect(res.legendItems).toBeNull();
+    });
   });
 
   it("fires afterRender last with the SVG it returns", () => {
@@ -390,6 +433,19 @@ describe("timelineWarnings", () => {
     const w = timelineWarnings(SPEC, many, 920).join("\n");
     expect(w).toMatch(/21 events; more than 20 is hard to read/);
     expect(w).toMatch(/horizontal layout needs more than 2 label rows per side at the 920px export width/);
+  });
+  it("warns when an explicit vertical_lanes: columns meets three or more lanes (Ruling 25)", () => {
+    const three = [...ROWS, { date: "2070", end: "", title: "Third", detail: "", kind: "other", projected: "" }] as TidyRow[];
+    // Authored vertical, where the setting takes effect (and no horizontal overflow check runs).
+    const lanes = (t: Record<string, unknown>) => ({ ...SPEC, orientation: "vertical", series_order: undefined, timeline: { lanes: true, ...t } }) as ChartSpec;
+    const w = timelineWarnings(lanes({ vertical_lanes: "columns" }), three, 920);
+    expect(w).toEqual([
+      `timeline.vertical_lanes "columns" draws lane columns only for exactly two lanes; with 3 lanes a vertical render draws one track`,
+    ]);
+    // Not when the value is the default, or with two lanes, or without lanes.
+    expect(timelineWarnings(lanes({}), three, 920)).toEqual([]);
+    expect(timelineWarnings(lanes({ vertical_lanes: "columns" }), ROWS, 920)).toEqual([]);
+    expect(timelineWarnings({ ...SPEC, orientation: "vertical", series_order: undefined, timeline: { vertical_lanes: "columns" } } as ChartSpec, three, 920)).toEqual([]);
   });
   it("does not warn about horizontal overflow for an authored vertical", () => {
     const w = timelineWarnings({ ...SPEC, orientation: "vertical" } as ChartSpec, many, 920);

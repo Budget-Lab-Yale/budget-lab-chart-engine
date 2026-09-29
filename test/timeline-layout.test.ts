@@ -1064,3 +1064,256 @@ describe("vertical layout at narrow widths (side columns)", () => {
     expect(sawLeftWrap).toBe(true); // the sweep really reaches wrapping widths
   });
 });
+
+describe("vertical lane columns (exactly two lanes)", () => {
+  const LANES = [{ key: "a", label: "Legislation" }, { key: "b", label: "Implementation" }];
+  const vc = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
+    layoutTimeline(base(events, { orientation: "vertical", width: 375, lanes: LANES, ...o }));
+  const A = (start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}) => ev(start, title, { category: "a", ...o });
+  const B = (start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}) => ev(start, title, { category: "b", ...o });
+  // The mockup's two-lane data (scratchpad ab.html).
+  const TWO = () => [
+    A("2025-07-04", "Bill signed into law", { dateText: "Jul 4, 2025" }),
+    B("2026-01-01", "Rulemaking period", { endStr: "2027-12-31", dateText: "Jan 1, 2026 – Dec 31, 2027" }),
+    A("2027-06-01", "Technical corrections bill", { dateText: "Jun 1, 2027" }),
+    B("2028-01-01", "Credits take effect", { dateText: "Jan 1, 2028" }),
+    A("2033-01-01", "Scheduled sunset", { dateText: "Jan 1, 2033" }),
+  ];
+  const rx = (l: TimelineLayout, i: number): number => l.rules[i]!.x1;
+  const spanOf = (l: TimelineLayout, id: number) => l.spans.find((s) => s.id === id)!;
+  const markOf = (l: TimelineLayout, id: number) => l.markers.find((m) => m.id === id)!;
+  const laneOf = (l: TimelineLayout, cat: string) => l.labels.filter((x) => x.category === cat);
+  const nameBottom = (l: TimelineLayout): number =>
+    Math.max(...l.laneLabels.map((n) => n.y + (n.lines.length - 1) * LANE_LINE_H + (LANE_LINE_H - LANE_SIZE)));
+  const nameExtent = (n: TimelineLayout["laneLabels"][number]): [number, number] => {
+    const w = Math.max(...n.lines.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+    return n.anchor === "end" ? [n.x - w, n.x] : [n.x, n.x + w];
+  };
+  const lineExtent = (ln: { x: number; text: string; role: "date" | "title" | "description"; anchor: string }): [number, number] => {
+    const w = estimateLabelWidth(ln.text, LINE_STYLE[ln.role].size) * (ln.role === "date" ? 1.08 : 1);
+    return ln.anchor === "end" ? [ln.x - w, ln.x] : [ln.x, ln.x + w];
+  };
+  const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+
+  it("draws two vertical rules near the centre, each lane named at the top of its own track", () => {
+    const l = vc(TWO());
+    expect(l.orientation).toBe("vertical");
+    expect(l.rules).toHaveLength(2);
+    for (const r of l.rules) expect(r.x1).toBe(r.x2);
+    expect(rx(l, 0)).toBeLessThan(rx(l, 1));
+    expect(Math.abs((rx(l, 0) + rx(l, 1)) / 2 - 375 / 2)).toBeLessThan(375 * 0.1);
+    expect(l.laneLabels.map((n) => [n.text, n.anchor])).toEqual([["Legislation", "end"], ["Implementation", "start"]]);
+    // Each name heads its own track, on the lane's outer side.
+    expect(l.laneLabels[0]!.x).toBeLessThan(rx(l, 0));
+    expect(l.laneLabels[0]!.x).toBeGreaterThan(rx(l, 0) - 16);
+    expect(l.laneLabels[1]!.x).toBeGreaterThan(rx(l, 1));
+    expect(l.laneLabels[1]!.x).toBeLessThan(rx(l, 1) + 16);
+    // The header is reserved: no label or rule rides up into it.
+    for (const lab of l.labels) expect(lab.box.y0).toBeGreaterThanOrEqual(nameBottom(l));
+    for (const r of l.rules) expect(r.y1).toBeGreaterThan(nameBottom(l));
+    // Each lane's items sit on its own rule.
+    for (const m of l.markers) expect(m.cx).toBe(rx(l, m.category === "a" ? 0 : 1));
+    for (const s of l.spans) expect(s.x + s.w / 2).toBeCloseTo(rx(l, s.category === "a" ? 0 : 1), 9);
+    expect(l.height).toBeGreaterThanOrEqual(400);
+    expect(l.fits).toBe(true);
+    expect(allFinite(l)).toBe(true);
+  });
+
+  it("labels lane 0 on the left, right-aligned, and lane 1 on the right, each beyond its band", () => {
+    const l = vc(TWO());
+    const a = laneOf(l, "a"), b = laneOf(l, "b");
+    expect(a).toHaveLength(3);
+    expect(b).toHaveLength(2);
+    for (const lab of a) {
+      expect(lab.lines[0]!.role).toBe("date");
+      expect(lab.lines.every((ln) => ln.anchor === "end" && ln.x === lab.box.x1)).toBe(true);
+      expect(lab.box.x1).toBeLessThan(rx(l, 0) - TL_GEOM.dotR);
+    }
+    for (const lab of b) {
+      expect(lab.lines[0]!.role).toBe("date");
+      expect(lab.lines.every((ln) => ln.anchor === "start" && ln.x === lab.box.x0)).toBe(true);
+      expect(lab.box.x0).toBeGreaterThan(rx(l, 1) + TL_GEOM.dotR);
+      for (const s of l.spans.filter((x) => x.category === "b")) expect(lab.box.x0).toBeGreaterThan(s.x + s.w);
+    }
+    // Undisplaced: each block's date line is centred on its own item.
+    expect(l.stems).toEqual([]);
+    for (const m of l.markers) expect(l.labels.find((x) => x.id === m.id)!.box.y0 + 8).toBeCloseTo(m.cy, 6);
+  });
+
+  it("stacks each lane's overlapping spans outward and keeps their labels on the lane's outer side", () => {
+    const a1 = A("2020", "a1", { endStr: "2030" }), a2 = A("2025", "a2, outer", { endStr: "2035" });
+    const b1 = B("2020", "b1", { endStr: "2030" }), b2 = B("2025", "b2, outer", { endStr: "2035" });
+    const l = vc([a1, a2, b1, b2, A("2040", "end")]);
+    expect(spanOf(l, a1.id).x + spanOf(l, a1.id).w / 2).toBeCloseTo(rx(l, 0), 9);
+    expect(spanOf(l, b1.id).x + spanOf(l, b1.id).w / 2).toBeCloseTo(rx(l, 1), 9);
+    expect(spanOf(l, a2.id).x + spanOf(l, a2.id).w).toBeLessThan(spanOf(l, a1.id).x); // lane 0: leftward
+    expect(spanOf(l, b2.id).x).toBeGreaterThan(spanOf(l, b1.id).x + spanOf(l, b1.id).w); // lane 1: rightward
+    // Neither lane's bars cross the centre between the rules.
+    const aRight = Math.max(...l.spans.filter((s) => s.category === "a").map((s) => s.x + s.w));
+    const bLeft = Math.min(...l.spans.filter((s) => s.category === "b").map((s) => s.x));
+    expect(aRight).toBeLessThan(bLeft);
+    for (const lab of laneOf(l, "a")) expect(lab.box.x1).toBeLessThan(spanOf(l, a2.id).x);
+    for (const lab of laneOf(l, "b")) expect(lab.box.x0).toBeGreaterThan(spanOf(l, b2.id).x + spanOf(l, b2.id).w);
+  });
+
+  it("gives a lane with no events its track and name", () => {
+    const l = vc([A("2020", "only lane 0"), A("2030", "again")]);
+    expect(l.rules).toHaveLength(2);
+    expect(l.laneLabels.map((n) => n.text)).toEqual(["Legislation", "Implementation"]);
+    expect(l.labels.every((x) => x.box.x1 < rx(l, 0))).toBe(true);
+  });
+
+  it("drops an event outside both lanes, and is deterministic regardless of input order", () => {
+    const stray = ev("2029", "stray", { category: "z" });
+    const e = [...TWO(), stray, A("2031", "open", { ongoing: true })];
+    const l = vc(e, { axis: true });
+    expect(l.order).not.toContain(stray.id);
+    expect(l.labels.map((x) => x.id)).not.toContain(stray.id);
+    expect(JSON.stringify(vc([...e].reverse(), { axis: true }))).toBe(JSON.stringify(l));
+    // The open-ended span fades down to the bottom of its rule.
+    const open = l.spans.find((s) => s.fade === "down")!;
+    expect(open.y + open.h).toBeCloseTo(l.height - TL_GEOM.vPad, 6);
+    expect(l.rules[0]!.y2).toBeCloseTo(l.height - TL_GEOM.vPad, 6);
+  });
+
+  it("sweeps each lane on its own and leads a displaced label from its item's outer side", () => {
+    const a = A("2020-01-01", "a"), a2 = A("2020-01-03", "a2, pushed down by a");
+    const b = B("2020-01-01", "b"), b2 = B("2020-01-02", "b2, pushed down by b");
+    const l = vc([a, a2, b, b2, A("2090", "far")]);
+    expect(l.stems.map((s) => s.id).sort()).toEqual([a2.id, b2.id].sort());
+    // Side by side on the same date: neither lane pushes the other.
+    expect(labelOf(l, a.id).box.y0 + 8).toBeCloseTo(markOf(l, a.id).cy, 6);
+    expect(labelOf(l, b.id).box.y0 + 8).toBeCloseTo(markOf(l, b.id).cy, 6);
+    const left = l.stems.find((s) => s.id === a2.id)!.points;
+    const right = l.stems.find((s) => s.id === b2.id)!.points;
+    // Lane 0: out of the marker's LEFT side, down, into the right end of the label's first line.
+    expect(left).toHaveLength(3);
+    expect(left[0]).toEqual([rx(l, 0) - TL_GEOM.dotR - 2, markOf(l, a2.id).cy]);
+    expect(left[1]![0]).toBe(left[0]![0]);
+    expect(left[2]![1]).toBe(left[1]![1]);
+    expect(left[2]![0]).toBeLessThan(left[1]![0]);
+    expect(left[2]![0]).toBeGreaterThan(labelOf(l, a2.id).box.x1);
+    expect(left[2]![1]).toBeLessThan(labelOf(l, a2.id).lines[0]!.y);
+    // Lane 1: the mirror image, out of the marker's right side.
+    expect(right).toHaveLength(3);
+    expect(right[0]).toEqual([rx(l, 1) + TL_GEOM.dotR + 2, markOf(l, b2.id).cy]);
+    expect(right[2]![0]).toBeGreaterThan(right[1]![0]);
+    expect(right[2]![0]).toBeLessThan(labelOf(l, b2.id).box.x0);
+  });
+
+  it("leads a displaced point across its lane's outer bars to a leg beyond the band", () => {
+    const s0 = A("2020-01-01", "s0", { endStr: "2040" }), s1 = A("2020-01-01", "s1", { endStr: "2040" });
+    const p = A("2020-01-02", "p, pushed down");
+    const t0 = B("2020-01-01", "t0", { endStr: "2040" }), t1 = B("2020-01-01", "t1", { endStr: "2040" });
+    const q = B("2020-01-02", "q, pushed down");
+    const l = vc([s0, s1, p, t0, t1, q, A("2090", "far")]);
+    const pp = l.stems.find((s) => s.id === p.id)!.points;
+    expect(pp).toHaveLength(4);
+    expect(pp[0]).toEqual([rx(l, 0) - TL_GEOM.dotR - 2, markOf(l, p.id).cy]);
+    expect(pp[1]![0]).toBeLessThan(spanOf(l, s1.id).x); // past the outer bar
+    expect(pp[1]![0]).toBeGreaterThan(labelOf(l, p.id).box.x1);
+    expect(pp[3]![0]).toBeGreaterThan(labelOf(l, p.id).box.x1);
+    const qq = l.stems.find((s) => s.id === q.id)!.points;
+    expect(qq).toHaveLength(4);
+    expect(qq[1]![0]).toBeGreaterThan(spanOf(l, t1.id).x + spanOf(l, t1.id).w);
+    expect(qq[3]![0]).toBeLessThan(labelOf(l, q.id).box.x0);
+    // A displaced outer-sub-track span leaves its own bar's outer edge.
+    const s2 = A("2020-01-02", "s2, outer and pushed", { endStr: "2020-06-01" });
+    const l2 = vc([s0, s1, s2, A("2090", "far")]);
+    const sp = spanOf(l2, s2.id);
+    const pts = l2.stems.find((s) => s.id === s2.id)!.points;
+    expect(sp.x).toBeLessThan(spanOf(l2, s0.id).x);
+    expect(pts[0]).toEqual([sp.x, sp.y]);
+  });
+
+  it("keeps the tick column leftmost, outside lane 0's labels and name, with axis:true", () => {
+    const l = vc(TWO(), { axis: true });
+    expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(l.ticks.every((t) => t.x === 0 && t.anchor === "start")).toBe(true);
+    expect(Math.min(...l.labels.map((x) => x.box.x0))).toBeGreaterThan(tickRight(l));
+    expect(nameExtent(l.laneLabels[0]!)[0]).toBeGreaterThan(tickRight(l));
+    for (const t of l.ticks) expect(t.y - TBL.size.axis).toBeGreaterThan(nameBottom(l));
+    expect(vc(TWO()).ticks).toEqual([]);
+  });
+
+  it("wraps long lane names to their side and keeps every box in the frame at 280 and 375", () => {
+    const lanes = [
+      { key: "a", label: "Legislation enacted by the Congress" },
+      { key: "b", label: "Implementation by the Treasury Department" },
+    ];
+    const events = [
+      ...TWO(),
+      A("2026-03-01", "Overlapping authority", { endStr: "2030-01-01", dateText: "Mar 1, 2026 – Jan 1, 2030", description: "A description long enough to wrap onto more lines" }),
+      A("2026-04-01", "Another overlap", { endStr: "2029-01-01", dateText: "Apr 1, 2026 – Jan 1, 2029" }),
+      B("2026-06-01", "Guidance window", { endStr: "2029-06-01", dateText: "Jun 1, 2026 – Jun 1, 2029" }),
+      B("2030-01-01", "Open-ended credit", { ongoing: true, dateText: "Jan 1, 2030 –" }),
+    ];
+    for (const width of [280, 375]) {
+      for (const axis of [false, true]) {
+        const l = vc(events, { width, lanes, axis });
+        expect(allFinite(l)).toBe(true);
+        expect(l.laneLabels.every((n) => n.lines.length >= 2)).toBe(true);
+        for (const n of l.laneLabels) {
+          const [x0, x1] = nameExtent(n);
+          expect(x0).toBeGreaterThanOrEqual(-1e-6);
+          expect(x1).toBeLessThanOrEqual(width + 1e-6);
+        }
+        expect(nameExtent(l.laneLabels[0]!)[1]).toBeLessThan(rx(l, 0));
+        expect(nameExtent(l.laneLabels[1]!)[0]).toBeGreaterThan(rx(l, 1));
+        for (const lab of l.labels) {
+          expect(lab.box.x0).toBeGreaterThanOrEqual(-1e-6);
+          expect(lab.box.x1).toBeLessThanOrEqual(width + 1e-6);
+          expect(lab.box.y0).toBeGreaterThanOrEqual(nameBottom(l));
+          expect(lab.box.y1).toBeLessThanOrEqual(l.height);
+          for (const ln of lab.lines) {
+            const [x0, x1] = lineExtent(ln);
+            expect(x0).toBeGreaterThanOrEqual(-1e-6);
+            expect(x1).toBeLessThanOrEqual(width + 1e-6);
+          }
+        }
+        for (const cat of ["a", "b"]) {
+          const side = laneOf(l, cat);
+          for (let i = 1; i < side.length; i++) expect(side[i]!.box.y0).toBeGreaterThanOrEqual(side[i - 1]!.box.y1);
+        }
+        for (const s of l.spans) {
+          expect(s.x).toBeGreaterThanOrEqual(0);
+          expect(s.x + s.w).toBeLessThanOrEqual(width);
+        }
+        if (l.ticks.length) expect(Math.min(...l.labels.map((x) => x.box.x0))).toBeGreaterThan(tickRight(l));
+      }
+    }
+  });
+
+  it("compresses both lanes' crowded bands together rather than split a date word, at 280", () => {
+    const crowd = (mk: typeof A) => Array.from({ length: 8 }, (_, i) =>
+      mk(`2026-0${i + 1}-01`, `Event ${i}`, { endStr: "2030", dateText: "September 30, 2026" }));
+    const events = [...crowd(A), ...crowd(B)];
+    const l = vc(events, { width: 280 });
+    const widths = new Set(l.spans.map((s) => s.w));
+    expect(widths.size).toBe(1); // one bar width for both lanes
+    const w = [...widths][0]!;
+    expect(w).toBeLessThan(TL_GEOM.spanH);
+    expect(w).toBeGreaterThanOrEqual(3);
+    for (const s of l.spans) {
+      expect(s.x).toBeGreaterThanOrEqual(0);
+      expect(s.x + s.w).toBeLessThanOrEqual(280);
+    }
+    // Every date wrapped only between its words: "September" was never split.
+    for (const lab of l.labels) {
+      const got = lab.lines.filter((ln) => ln.role === "date").flatMap((ln) => ln.text.split(/\s+/));
+      expect(got).toEqual(["September", "30,", "2026"]);
+      expect(lab.box.x0).toBeGreaterThanOrEqual(-1e-6);
+      expect(lab.box.x1).toBeLessThanOrEqual(280 + 1e-6);
+    }
+  });
+
+  it("draws one track for one lane or three lanes, exactly as with no lanes", () => {
+    const e = [...TWO(), ev("2030", "c", { category: "c" })];
+    const none = layoutTimeline(base(e, { orientation: "vertical", width: 375 }));
+    const three = vc(e, { lanes: [...LANES, { key: "c", label: "C" }] });
+    const one = vc(e, { lanes: [LANES[0]!] });
+    expect(none.rules).toHaveLength(1);
+    expect(JSON.stringify(three)).toBe(JSON.stringify(none));
+    expect(JSON.stringify(one)).toBe(JSON.stringify(none));
+  });
+});

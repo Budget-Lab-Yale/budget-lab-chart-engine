@@ -12,12 +12,12 @@ describe("resolveTimelineConfig", () => {
   it("applies every default", () => {
     expect(resolveTimelineConfig(TL)).toEqual({
       spacing: "proportional", lanes: false, axis: false, dateFormat: null,
-      labelWidth: 150, maxRows: 2, autoVertical: true,
+      labelWidth: 150, maxRows: 2, autoVertical: true, verticalLanes: "columns",
     });
   });
   it("keeps authored values", () => {
-    const c = resolveTimelineConfig({ ...TL, timeline: { spacing: "even", max_rows: 3, auto_vertical: false, date_format: "%b %Y" } });
-    expect(c).toMatchObject({ spacing: "even", maxRows: 3, autoVertical: false, dateFormat: "%b %Y" });
+    const c = resolveTimelineConfig({ ...TL, timeline: { spacing: "even", max_rows: 3, auto_vertical: false, date_format: "%b %Y", vertical_lanes: "single" } });
+    expect(c).toMatchObject({ spacing: "even", maxRows: 3, autoVertical: false, dateFormat: "%b %Y", verticalLanes: "single" });
   });
 });
 

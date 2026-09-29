@@ -132,11 +132,26 @@ describe("timeline live mount", () => {
     expect(orientationOf(svgOf(host))).toBe("horizontal");
   });
 
-  it("clears the legend when a resize brings the lanes back", async () => {
-    // Switched vertical: lanes collapse, so the legend names the colours; back at desktop width the
-    // lane gutter names them and the legend's series rows must go, not linger from the last draw.
+  it("renders a two-lane chart switched to vertical as lane columns, the lane names replacing the legend", async () => {
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
     const host = mountAt(340, { ...CAT_SPEC, timeline: { lanes: true } } as ChartSpec, CAT_ROWS);
+    const svg = svgOf(host);
+    expect(orientationOf(svg)).toBe("vertical");
+    expect(svg.querySelectorAll(".tbl-timeline-rule")).toHaveLength(2);
+    expect([...svg.querySelectorAll(".tbl-timeline-lane-label")].map((t) => t.textContent)).toEqual(["policy", "cohort"]);
+    expect(host.querySelectorAll(".tbl-legend-item")).toHaveLength(0);
+    await resizeTo(host, 900);
+    expect(orientationOf(svgOf(host))).toBe("horizontal");
+    expect(svgOf(host).querySelectorAll(".tbl-timeline-lane-label")).toHaveLength(2);
+  });
+
+  // The legend tests below opt the two lanes into one vertical track (vertical_lanes: single), so
+  // the switch to vertical really brings the legend's series rows in and out.
+  it("clears the legend when a resize brings the lanes back", async () => {
+    // Switched vertical onto one track, the legend names the colours; back at desktop width the
+    // lane gutter names them and the legend's series rows must go, not linger from the last draw.
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const host = mountAt(340, { ...CAT_SPEC, timeline: { lanes: true, vertical_lanes: "single" } } as ChartSpec, CAT_ROWS);
     const slot = host.querySelector(".figure-legend-slot")!;
     expect(slot.querySelectorAll(".tbl-legend-item[data-series]")).toHaveLength(2);
     await resizeTo(host, 900);
@@ -163,7 +178,7 @@ describe("timeline live mount", () => {
     const onError = (e: ErrorEvent) => { errors.push(e.error ?? e.message); e.preventDefault(); };
     window.addEventListener("error", onError);
     try {
-      const spec = { ...CAT_SPEC, legendPosition: "right", timeline: { lanes: true } } as ChartSpec;
+      const spec = { ...CAT_SPEC, legendPosition: "right", timeline: { lanes: true, vertical_lanes: "single" } } as ChartSpec;
       const host = mountAt(900, spec, CAT_ROWS);
       expect(host.querySelectorAll(".tbl-legend-item")).toHaveLength(0);
       await resizeTo(host, 600);
@@ -183,7 +198,7 @@ describe("timeline live mount", () => {
     const onError = (e: ErrorEvent) => { errors.push(e.error ?? e.message); e.preventDefault(); };
     window.addEventListener("error", onError);
     try {
-      const spec = { ...CAT_SPEC, legendPosition: "right", timeline: { lanes: true } } as ChartSpec;
+      const spec = { ...CAT_SPEC, legendPosition: "right", timeline: { lanes: true, vertical_lanes: "single" } } as ChartSpec;
       const host = mountAt(900, spec, CAT_ROWS);
       const card = host.querySelector(".figure-card")!;
       const scroll = host.querySelector(".figure-canvas-scroll")!;

@@ -34,6 +34,10 @@ describe("timeline goldens", () => {
     const spec = { ...base, orientation: "vertical", columns: { x: "date", end: "end_date", series: "kind" }, projected_field: "projected" } as ChartSpec;
     await expect(renderChart(spec, SPANS, { width: 360 }).svg.outerHTML).toMatchFileSnapshot("./fixtures/timeline-vertical.golden.svg");
   });
+  it("vertical two-lane columns", async () => {
+    const spec = { ...base, orientation: "vertical", columns: { x: "date", end: "end_date", series: "kind" }, projected_field: "projected", timeline: { lanes: true } } as ChartSpec;
+    await expect(renderChart(spec, SPANS, { width: 375 }).svg.outerHTML).toMatchFileSnapshot("./fixtures/timeline-vertical-lanes.golden.svg");
+  });
   it("even spacing", async () => {
     const spec = { ...base, columns: { x: "date", series: "kind" }, timeline: { spacing: "even" } } as ChartSpec;
     await expect(renderChart(spec, FIG7, { width: 920 }).svg.outerHTML).toMatchFileSnapshot("./fixtures/timeline-even.golden.svg");

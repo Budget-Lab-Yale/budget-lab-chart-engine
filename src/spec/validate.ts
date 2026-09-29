@@ -773,14 +773,11 @@ function timelineSpecErrors(spec: Record<string, unknown>): string[] {
   for (const c of TIMELINE_REJECTED_COLUMNS) {
     if (cols[c] != null) errors.push(`columns.${c} is not supported on chartType "timeline"`);
   }
-  const tl = (spec.timeline ?? {}) as { axis?: boolean; spacing?: string; lanes?: boolean };
+  const tl = (spec.timeline ?? {}) as { axis?: boolean; spacing?: string };
   if (tl.axis === true && tl.spacing === "even") {
     errors.push(
       `timeline.axis cannot be used with timeline.spacing "even": ticks would imply proportional gaps between evenly spaced events`,
     );
-  }
-  if (spec.orientation === "vertical" && tl.lanes === true) {
-    errors.push(`timeline.lanes is horizontal only (got orientation "vertical")`);
   }
   if (spec.x_axis_title !== undefined && tl.axis !== true) {
     errors.push(`x_axis_title on a timeline requires timeline.axis: true (there is no axis to caption)`);
