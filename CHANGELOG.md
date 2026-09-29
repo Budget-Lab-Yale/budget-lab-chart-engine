@@ -4,6 +4,17 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] - 2026-09-29
+
+### Added
+- `chartType: timeline` — dated point, span and open-ended events along a rule, one CSV row per
+  event (`columns.end`, `columns.label`, `columns.description`, `columns.date_label`); proportional
+  or even spacing; optional lanes and date axis; horizontal or vertical, switching to vertical on
+  screen when narrow or crowded. Static (no hover); the PNG export keeps the authored orientation.
+  `tbl-chart validate` warns on more than 20 events or on label overflow at the export width. The
+  `timeline:` block and the new column roles are rejected on every other chart type, so no existing
+  spec changes. See CONFIG-SPEC "Timeline options".
+
 ## [1.14.0] - 2026-09-10
 
 ### Added
