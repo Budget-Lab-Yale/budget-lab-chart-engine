@@ -115,6 +115,26 @@ describe("timeline live mount", () => {
     expect(orientationOf(svg)).toBe("vertical");
   });
 
+  it("builds the right-legend column when a resize first gives a lanes timeline a legend", async () => {
+    // Horizontal with lanes at 900: no legend items, so no right column is built. At 600 the chart
+    // column is under 480, the timeline goes vertical, and the legend must appear beside it.
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const errors: unknown[] = [];
+    const onError = (e: ErrorEvent) => { errors.push(e.error ?? e.message); e.preventDefault(); };
+    window.addEventListener("error", onError);
+    try {
+      const spec = { ...CAT_SPEC, legendPosition: "right", timeline: { lanes: true } } as ChartSpec;
+      const host = mountAt(900, spec, CAT_ROWS);
+      expect(host.querySelectorAll(".tbl-legend-item")).toHaveLength(0);
+      await resizeTo(host, 600);
+      expect(errors).toEqual([]);
+      expect(orientationOf(svgOf(host))).toBe("vertical");
+      expect(host.querySelectorAll(".figure-legend-slot--right .tbl-legend-item[data-series]")).toHaveLength(2);
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+  });
+
   it("attaches no hover tooltip machinery", () => {
     const host = mountAt(900, CAT_SPEC, CAT_ROWS);
     // Every crosshair/band/histogram/categorical hit rect, the guide line, and the shared tooltip
@@ -129,6 +149,7 @@ describe("timeline live mount", () => {
     const events = (s: string) => [...svg.querySelectorAll(`[data-series="${s}"]`)];
     expect(events("cohort").length).toBeGreaterThan(0);
     host.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="policy"]')!.click();
+    expect(events("policy").length).toBeGreaterThan(0);
     events("cohort").forEach((el) => expect(el.classList.contains("tbl-dimmed")).toBe(true));
     events("policy").forEach((el) => expect(el.classList.contains("tbl-dimmed")).toBe(false));
   });

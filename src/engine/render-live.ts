@@ -1068,7 +1068,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
-        if (currentLegendPos !== "right") {
+        // A timeline can reach here already "right" with no wrapper built: an earlier draw
+        // (horizontal with lanes) had no legend items, so it recorded the position without one.
+        if (currentLegendPos !== "right" || (spec.chartType === "timeline" && !rightLegendSlot)) {
           // Move canvasScroll into the body wrapper.
           const bodyWrapper = doc.createElement("div");
           bodyWrapper.className = "figure-body--legend-right";
