@@ -1065,6 +1065,17 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       shapeTitle: shapeLegendTitle,
     };
     let legendHandle: LegendHandle | null = null;
+    // A timeline's legend can move to the top or vanish on a resize, so take down a right column
+    // this draw does not use; a later right-legend draw rebuilds it (the guard below).
+    if (spec.chartType === "timeline" && rightLegendSlot) {
+      const hasLegend = !!legendItems || !!(shapeLegendItems && shapeLegendItems.length);
+      if (legendPos !== "right" || !hasLegend) {
+        const bodyWrapper = rightLegendSlot.parentElement as HTMLElement;
+        card.insertBefore(canvasScroll, bodyWrapper);
+        bodyWrapper.remove();
+        rightLegendSlot = null;
+      }
+    }
     if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
@@ -1108,10 +1119,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         });
       }
     } else if (spec.chartType === "timeline") {
-      // A timeline's legend can come and go on a resize (lanes name the categories when horizontal;
-      // the auto-switched vertical has none, so the legend does), so drop the last draw's legend.
+      // Lanes (horizontal) name the categories and the auto-switched vertical has none, so a
+      // timeline's legend comes and goes on a resize: drop the last draw's.
       legendSlot.replaceChildren();
-      rightLegendSlot?.replaceChildren();
     }
 
     // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).

@@ -135,6 +135,50 @@ describe("timeline live mount", () => {
     }
   });
 
+  it("dismantles the right-legend column when a resize moves the legend to the top or drops it", async () => {
+    // 900 no legend -> 600 right column -> 340 top (card too narrow for the column) -> 600 right
+    // again -> 900 no legend. Each move must leave exactly the layout it names, never a leftover.
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const errors: unknown[] = [];
+    const onError = (e: ErrorEvent) => { errors.push(e.error ?? e.message); e.preventDefault(); };
+    window.addEventListener("error", onError);
+    try {
+      const spec = { ...CAT_SPEC, legendPosition: "right", timeline: { lanes: true } } as ChartSpec;
+      const host = mountAt(900, spec, CAT_ROWS);
+      const card = host.querySelector(".figure-card")!;
+      const scroll = host.querySelector(".figure-canvas-scroll")!;
+      const [prev, next] = [scroll.previousElementSibling, scroll.nextElementSibling];
+      const rightItems = () => host.querySelectorAll(".figure-legend-slot--right .tbl-legend-item[data-series]");
+      const topItems = () => host.querySelectorAll(".figure-legend-slot .tbl-legend-item[data-series]");
+      const inPlace = () => {
+        expect(scroll.parentElement).toBe(card);
+        expect(scroll.previousElementSibling).toBe(prev);
+        expect(scroll.nextElementSibling).toBe(next);
+      };
+
+      await resizeTo(host, 600);
+      expect(rightItems()).toHaveLength(2);
+      await resizeTo(host, 340);
+      expect(errors).toEqual([]);
+      expect(host.querySelectorAll(".figure-body--legend-right")).toHaveLength(0);
+      expect(topItems()).toHaveLength(2);
+      inPlace();
+      await resizeTo(host, 600);
+      expect(errors).toEqual([]);
+      expect(host.querySelectorAll(".figure-body--legend-right")).toHaveLength(1);
+      expect(rightItems()).toHaveLength(2);
+      expect(topItems()).toHaveLength(0);
+      await resizeTo(host, 900);
+      expect(errors).toEqual([]);
+      expect(orientationOf(svgOf(host))).toBe("horizontal");
+      expect(host.querySelectorAll(".figure-body--legend-right")).toHaveLength(0);
+      expect(host.querySelectorAll(".tbl-legend-item")).toHaveLength(0);
+      inPlace();
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+  });
+
   it("attaches no hover tooltip machinery", () => {
     const host = mountAt(900, CAT_SPEC, CAT_ROWS);
     // Every crosshair/band/histogram/categorical hit rect, the guide line, and the shared tooltip
