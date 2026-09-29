@@ -17,6 +17,14 @@ const EXAMPLE_SPEC = resolve(
   fileURLToPath(new URL("./fixtures/sample-chart/chart.yaml", import.meta.url)),
 );
 
+const TIMELINE_DENSE_SPEC = resolve(
+  fileURLToPath(new URL("./fixtures/timeline-dense/chart.yaml", import.meta.url)),
+);
+
+const TIMELINE_SMALL_SPEC = resolve(
+  fileURLToPath(new URL("./fixtures/timeline-small/chart.yaml", import.meta.url)),
+);
+
 // Stub live bundle — just needs to be a non-empty JS string.
 const STUB_BUNDLE = `var BudgetLabChart={mountChart:function(el,opts){el.innerHTML='<p>chart</p>';}};`;
 
@@ -103,6 +111,27 @@ describe("runValidate — series_order names missing series", () => {
     expect(result.exitCode).toBe(1);
     expect(result.message).toMatch(/series_order/);
     expect(result.message).toMatch(/missing-series/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validate: timeline warnings
+// ---------------------------------------------------------------------------
+
+describe("runValidate — timeline warnings", () => {
+  it("passes with warnings appended (exit 0)", async () => {
+    const result = await runValidate(TIMELINE_DENSE_SPEC);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).toMatch(/warning: timeline has 21 events/);
+    expect(result.message).toMatch(/warning: horizontal layout needs more than 2 label rows per side at the 920px export width/);
+  });
+
+  it("passes with no warnings for a small timeline (exit 0, no warning lines)", async () => {
+    const result = await runValidate(TIMELINE_SMALL_SPEC);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).not.toMatch(/warning:/);
   });
 });
 

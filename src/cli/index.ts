@@ -27,6 +27,8 @@ import { isTableSpec } from "./table-detect";
 import type { ChartSpec } from "../spec/types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
+import { timelineWarnings } from "../engine/marks/timeline";
+import { INNER_W } from "../embed/figure-chrome";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -186,9 +188,14 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
     seriesSet.add(cols.series ? (row[cols.series] ?? "") : "");
   }
 
+  // Non-fatal: a timeline can publish, but these make it hard to read or overflow in the PNG.
+  const warnings = typedSpec.chartType === "timeline" ? timelineWarnings(typedSpec, rows, INNER_W) : [];
   return {
     exitCode: 0,
-    message: `OK: ${absSpecPath} (${rows.length} rows, ${seriesSet.size} series)`,
+    message: [
+      `OK: ${absSpecPath} (${rows.length} rows, ${seriesSet.size} series)`,
+      ...warnings.map((w) => `${absSpecPath}: warning: ${w}`),
+    ].join("\n"),
   };
 }
 
