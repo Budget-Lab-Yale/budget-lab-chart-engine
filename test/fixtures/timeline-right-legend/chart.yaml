@@ -1,0 +1,9 @@
+chartType: timeline
+title: Right-legend timeline
+xAxisType: temporal
+legendPosition: right
+timeline:
+  spacing: even
+  max_rows: 1
+columns: { x: date, label: title, series: category }
+data: data.csv

@@ -24,6 +24,8 @@ import {
   layoutTimeline, TL_GEOM, LINE_STYLE, LANE_SIZE, LANE_LINE_H,
   type LayoutEvent, type TimelineLayout, type PlacedSpan,
 } from "../timeline-layout";
+import { resolveLegendPosition, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
+import { INNER_W } from "../../embed/figure-chrome";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 export const TIMELINE_CLASS = "tbl-timeline";
@@ -123,6 +125,30 @@ export function timelineWarnings(spec: ChartSpec, rows: TidyRow[], exportWidth: 
     );
   }
   return out;
+}
+
+/** The chart width the PNG export lays a timeline out at: `INNER_W`, minus the right-hand legend
+ *  column when the export shows one (`buildExportSvg` in embed/export-png.ts, `rightLegend` /
+ *  `chartW`). DOM-free by construction — a timeline's legend row count is fully determined by its
+ *  series count, `series_legend`/`legend`, and lane mode (mirrors the same decision
+ *  `renderTimeline` makes for its `legendItems`), so `tbl-chart validate` and the export can both
+ *  call this ONE function instead of computing the width two ways that only happen to agree
+ *  (Ruling 17 / task-8 fix round 1: a right-legend timeline overflowed `max_rows` in the PNG with
+ *  no validate warning, because validate always checked the full 920px).
+ *
+ *  Always the AUTHORED orientation: `buildExportSvg` never resolves the live auto-switch
+ *  (`resolveTimelineOrientation` only applies to a live mount), so lane mode here does not
+ *  need to account for it either — matching `timelineWarnings`' own overflow check. */
+export function timelineExportChartWidth(spec: ChartSpec, rows: TidyRow[]): number {
+  if (spec.legend === false) return INNER_W;
+  const cfg = resolveTimelineConfig(spec);
+  const { seriesNames } = prepareTimeline(spec, rows);
+  const lanesOn = cfg.lanes && (spec.orientation ?? "horizontal") === "horizontal";
+  const showRows =
+    spec.series_legend === true || (spec.series_legend !== false && seriesNames.length > 1 && !lanesOn);
+  const legendCount = showRows ? seriesNames.length : 0;
+  const rightLegend = legendCount > 0 && resolveLegendPosition(spec, legendCount, rows) === "right";
+  return rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 }
 
 /** Where an open-ended span's fade begins, as a share of the bar along its fade direction: the bar

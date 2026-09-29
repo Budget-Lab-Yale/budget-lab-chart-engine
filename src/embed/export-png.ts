@@ -8,7 +8,7 @@ import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
-import { timelineHeight } from "../engine/marks/timeline.js";
+import { timelineHeight, timelineExportChartWidth } from "../engine/marks/timeline.js";
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
@@ -386,10 +386,15 @@ export function buildExportSvg(
   // false`, or a lone scatter series, leaves `buildLegendItems` null while the shape rows remain —
   // so live laid it out on the right and the export drew it above a full-width plot: the very
   // divergence this file's legend work exists to remove.
+  // A timeline decides this the SAME way `tbl-chart validate` does — `timelineExportChartWidth`,
+  // no DOM render needed for the decision — rather than from this call's own rendered legend
+  // metadata, so the two can never drift back apart (Ruling 17 / task-8 fix round 1).
   const rightLegend =
     !isFigure &&
-    (legendItems.length > 0 || shapeLegendItems.length > 0) &&
-    resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right";
+    (isTimeline
+      ? timelineExportChartWidth(spec, rows) < INNER_W
+      : (legendItems.length > 0 || shapeLegendItems.length > 0) &&
+        resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right");
   const chartW = rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---

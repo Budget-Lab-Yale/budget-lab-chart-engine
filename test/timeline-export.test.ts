@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import { buildExportSvg } from "../src/embed/export-png";
-import { resolveTimelineOrientation } from "../src/engine/marks/timeline";
+import { resolveTimelineOrientation, timelineExportChartWidth, TIMELINE_CLASS } from "../src/engine/marks/timeline";
 import { INNER_W } from "../src/embed/figure-chrome";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -48,5 +48,36 @@ describe("timeline export", () => {
   it("grows the frame for a tall vertical timeline", () => {
     const svg = buildExportSvg({ ...SPEC, orientation: "vertical" } as ChartSpec, PACKED_ROWS);
     expect(Number(svg.getAttribute("height"))).toBeGreaterThan(750);
+  });
+});
+
+// Two alternating categories, so the legend actually shows rows (`lanes` defaults off, so a
+// >1-series timeline draws a legend by default) -- otherwise there is nothing to put in a column.
+const LEGEND_ROWS = Array.from({ length: 11 }, (_, i) => ({
+  date: `${2016 + i}-01-01`, title: "Event headline here", category: i % 2 === 0 ? "alpha" : "beta",
+})) as TidyRow[];
+const LEGEND_SPEC = {
+  chartType: "timeline", title: "T", xAxisType: "temporal", data: "d.csv",
+  timeline: { spacing: "even", max_rows: 1 },
+  columns: { x: "date", label: "title", series: "category" },
+} as ChartSpec;
+
+describe("timeline export — right-legend chart width (Ruling 17)", () => {
+  it("matches timelineExportChartWidth for a right-legend timeline (narrower than INNER_W)", () => {
+    const spec = { ...LEGEND_SPEC, legendPosition: "right" } as ChartSpec;
+    const expected = timelineExportChartWidth(spec, LEGEND_ROWS);
+    expect(expected).toBeLessThan(INNER_W);
+    const svg = buildExportSvg(spec, LEGEND_ROWS);
+    const chartSvg = svg.querySelector(`svg.${TIMELINE_CLASS}`)!;
+    expect(Number(chartSvg.getAttribute("width"))).toBe(expected);
+  });
+
+  it("matches timelineExportChartWidth for a top-legend timeline (the full INNER_W)", () => {
+    const spec = { ...LEGEND_SPEC, legendPosition: "top" } as ChartSpec;
+    const expected = timelineExportChartWidth(spec, LEGEND_ROWS);
+    expect(expected).toBe(INNER_W);
+    const svg = buildExportSvg(spec, LEGEND_ROWS);
+    const chartSvg = svg.querySelector(`svg.${TIMELINE_CLASS}`)!;
+    expect(Number(chartSvg.getAttribute("width"))).toBe(expected);
   });
 });
