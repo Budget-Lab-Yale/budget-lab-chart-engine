@@ -23,7 +23,7 @@ const ROWS: TidyRow[] = [
   { date: "2095", end: "", title: "That cohort turns 65", detail: "", kind: "cohort", projected: "" },
 ] as TidyRow[];
 const r = (s: Partial<ChartSpec> = {}, width = 900, rows = ROWS) => renderChart({ ...SPEC, ...s } as ChartSpec, rows, { width });
-const q = (svg: SVGSVGElement, sel: string) => [...svg.querySelectorAll(sel)];
+const q = (root: ParentNode, sel: string) => [...root.querySelectorAll(sel)];
 
 describe("timeline render", () => {
   it("draws one marker per point event and one bar per span", () => {
@@ -209,6 +209,45 @@ describe("timeline render", () => {
       expect(marker.getAttribute("fill")).toBe(bar.getAttribute("fill")); // same colour: the case at issue
       expect(bar.compareDocumentPosition(halo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(halo.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it("paints a projected point above a same-date span listed after it in the CSV", () => {
+    const rows = [
+      { date: "2026", end: "", title: "Projected point", detail: "", kind: "policy", projected: "1" },
+      { date: "2026", end: "2030", title: "Same-date span", detail: "", kind: "policy", projected: "" },
+      { date: "2040", end: "", title: "z", detail: "", kind: "cohort", projected: "" },
+    ] as TidyRow[];
+    for (const orientation of ["horizontal", "vertical"] as const) {
+      const { svg } = renderChart(SPEC, rows, { width: 700, timelineOrientation: orientation });
+      const bar = q(svg, "rect.tbl-timeline-span")[0]!;
+      const after = (x: Element) => Boolean(bar.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(after(q(svg, "circle.tbl-timeline-marker-halo")[0]!)).toBe(true);
+      expect(after(q(svg, "circle.tbl-timeline-marker")[0]!)).toBe(true);
+    }
+  });
+
+  it("paints in layers: stems, spans, markers, then the labelled list", () => {
+    const { svg } = r();
+    const layer = (cls: string) => svg.querySelector(`g.${cls}`)!;
+    const order = ["tbl-timeline-stems", "tbl-timeline-spans", "tbl-timeline-markers"].map(layer);
+    const list = svg.querySelector('g[role="list"]')!;
+    const seq = [...order, list];
+    for (let i = 1; i < seq.length; i++) {
+      expect(seq[i - 1]!.compareDocumentPosition(seq[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    for (const g of order) expect(g.getAttribute("aria-hidden")).toBe("true");
+    expect(q(layer("tbl-timeline-stems"), ".tbl-timeline-stem")).toHaveLength(q(svg, ".tbl-timeline-stem").length);
+    expect(q(layer("tbl-timeline-spans"), ".tbl-timeline-span")).toHaveLength(2);
+    expect(q(layer("tbl-timeline-markers"), ".tbl-timeline-marker")).toHaveLength(4);
+    // Every halo paints before every marker, so no halo can clip a neighbouring dot.
+    const markersG = q(layer("tbl-timeline-markers"), "circle").map((c) => c.getAttribute("class"));
+    expect(markersG).toEqual([...Array(4).fill("tbl-timeline-marker-halo"), ...Array(4).fill("tbl-timeline-marker")]);
+    // One listitem per event, each holding exactly that event's label.
+    const items = q(list, 'g[role="listitem"]');
+    expect(items).toHaveLength(6);
+    for (const it of items) {
+      expect([...it.children].map((c) => c.getAttribute("class"))).toEqual(["tbl-timeline-label"]);
     }
   });
 

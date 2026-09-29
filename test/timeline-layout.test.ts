@@ -280,7 +280,7 @@ describe("horizontal layout", () => {
     });
   });
 
-  describe("stems never cross another label", () => {
+  describe("stem clearance (a soft preference within max_rows)", () => {
     // Every [stem, other label] pair where the stem's x is inside the box (widened by the stem
     // clearance) and the stem's y-range overlaps it. Horizontal stems are vertical segments.
     const crossings = (l: TimelineLayout, gap = 3): Array<[number, number]> => {
@@ -307,36 +307,54 @@ describe("horizontal layout", () => {
     ];
     const LANES = [{ key: "law", label: "law" }, { key: "projection", label: "projection" }];
 
-    it("keeps an outer-row label's stem out of an inner-row box", () => {
-      // The golden: CTC's box sits in the row nearest the rule, and IRA's stem (outer row) rose
-      // straight through it.
-      const l = layoutTimeline(base(SPANS(), { width: 920, lanes: LANES }));
+    it("takes a free row on the other side rather than rise through an inner-row box", () => {
+      // c prefers above, where row 0 is taken by a's wide box and row 1 would put c's stem through
+      // it. Plain first-fit took above row 1; below row 0 is free and keeps the stem clear.
+      const a = ev("2000", "A first label that is wide enough to wrap onto two lines");
+      const b = ev("2003", "b");
+      const c = ev("2007", "c");
+      const l = layoutTimeline(base([a, b, c, ev("2100", "z")]));
       expect(crossings(l)).toEqual([]);
+      expect(labelOf(l, c.id).box.y0).toBeGreaterThanOrEqual(ruleY(l)); // below
+      expect(l.fits).toBe(true);
     });
 
     it("keeps a later inner-row box off an earlier outer-row stem", () => {
       // b cannot share row 0 with a, so it takes row 1; c then fits row 0 after a, where its wide
-      // box would cover b's stem.
+      // box would cover b's stem. Row 2 is free and clear.
       const a = ev("2000", "a"), b = ev("2003-01-01", "b"), c = ev("2010-07-01", "A much longer title for c that wraps");
       const l = layoutTimeline(base([a, b, c, ev("2100", "z")], { lanes: [{ key: "", label: "L" }], maxRows: 3 }));
       expect(crossings(l)).toEqual([]);
       expect(l.fits).toBe(true);
     });
 
-    it("gives up on two labels that cover each other's stems without growing the chart", () => {
-      // One lane (above only): at 2026/2030 each box reaches the other's stem, so no row order
-      // avoids a crossing. The layout reports fits:false (the auto-switch trigger) and takes one
-      // overflow row past the cap, rather than the repair pushing labels outward without end.
+    it("falls back to the plain first-fit row when no in-cap row keeps the stem clear", () => {
+      // The spans golden's law lane (labels above only): IRA's stem lies inside CTC's row-0 box, so
+      // every outer row crosses it. IRA takes plain first-fit's row 1 (its stem passes under CTC's
+      // label), and the layout still fits.
+      const events = SPANS();
+      const l = layoutTimeline(base(events, { width: 920, lanes: LANES }));
+      expect(l.fits).toBe(true);
+      expect(crossings(l)).toEqual([[events[2]!.id, events[1]!.id]]);
+      // Without lanes the same pair falls back the same way: both are outer-sub-track spans, so both
+      // label above only.
+      const one = SPANS();
+      const flat = layoutTimeline(base(one, { width: 920 }));
+      expect(flat.fits).toBe(true);
+      expect(crossings(flat)).toEqual([[one[2]!.id, one[1]!.id]]);
+      // Two labels that each cover the other's stem: the same fallback, and still fits.
       const lane = [{ key: "p", label: "Policy" }];
-      const mk = (second: string) => [
-        ev("2026", "Policy begins", { category: "p" }), ev(second, "First cohort born", { category: "p" }), ev("2095", "z", { category: "p" }),
-      ];
-      const stuck = layoutTimeline(base(mk("2030"), { lanes: lane }));
-      const clear = layoutTimeline(base(mk("2033"), { lanes: lane }));
-      expect(stuck.fits).toBe(false);
-      expect(clear.fits).toBe(true);
-      expect(crossings(clear)).toEqual([]);
-      expect(stuck.height).toBeLessThan(2 * clear.height);
+      const pair = layoutTimeline(base([
+        ev("2026", "Policy begins", { category: "p" }), ev("2030", "First cohort born", { category: "p" }), ev("2095", "z", { category: "p" }),
+      ], { lanes: lane }));
+      expect(pair.fits).toBe(true);
+      expect(crossings(pair)).toHaveLength(1);
+    });
+
+    it("keeps the reference image horizontal with lanes at 900px", () => {
+      const e = FIG7().map((x, i) => ({ ...x, category: i < 3 ? "policy" : "cohort" }));
+      const l = layoutTimeline(base(e, { lanes: [{ key: "policy", label: "Policy" }, { key: "cohort", label: "Cohort" }] }));
+      expect(l.fits).toBe(true);
     });
 
     it("holds across the existing fixtures", () => {
@@ -347,11 +365,18 @@ describe("horizontal layout", () => {
         layoutTimeline(base(FIG7(), { spacing: "even" })),
         layoutTimeline(base(dense, { width: 2000, maxRows: 4 })),
         layoutTimeline(base(dense, { width: 400, maxRows: 4 })),
-        layoutTimeline(base(SPANS(), { width: 920 })),
-        layoutTimeline(base(SPANS(), { width: 920, lanes: LANES })),
         layoutTimeline(base([ev("2020", "a", { endStr: "2030" }), ev("2025", "b", { endStr: "2035" }), ev("2031", "c", { endStr: "2040" })])),
       ];
-      for (const l of cases) expect(crossings(l)).toEqual([]);
+      cases.forEach((l, i) => expect([i, crossings(l)]).toEqual([i, []]));
+    });
+
+    it("lays out 300 monthly events in well under a second", () => {
+      const many = Array.from({ length: 300 }, (_, i) =>
+        ev(`${2000 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}-01`, `Event ${i}`));
+      const t0 = performance.now();
+      const l = layoutTimeline(base(many, { width: 900 }));
+      expect(performance.now() - t0).toBeLessThan(500);
+      expect(l.labels).toHaveLength(300);
     });
   });
 

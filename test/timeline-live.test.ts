@@ -12,13 +12,10 @@ const ROWS = [
   { date: "2055", title: "Projection ends" }, { date: "2095", title: "Cohort turns 65" },
 ] as TidyRow[];
 
-// Two categories, so the legend has series rows to pin. The second policy event is 2032, not 2030:
-// in lanes mode both policy labels sit above one rule, and at 2030 each box came within the stem
-// clearance of the other's stem, so no horizontal layout fits and the lanes tests' 900px
-// horizontal precondition would fail.
+// Two categories, so the legend has series rows to pin.
 const CAT_SPEC = { ...SPEC, columns: { x: "date", label: "title", series: "kind" }, series_order: ["policy", "cohort"] } as ChartSpec;
 const CAT_ROWS = [
-  { date: "2026", title: "Policy begins", kind: "policy" }, { date: "2032", title: "First cohort born", kind: "policy" },
+  { date: "2026", title: "Policy begins", kind: "policy" }, { date: "2030", title: "First cohort born", kind: "policy" },
   { date: "2055", title: "Projection ends", kind: "cohort" }, { date: "2095", title: "Cohort turns 65", kind: "cohort" },
 ] as TidyRow[];
 
@@ -92,6 +89,13 @@ describe("timeline live mount", () => {
     expect(orientationOf(svgOf(host))).toBe("vertical");
     expect(Number(svgOf(host).getAttribute("width"))).toBe(340);
     await resizeTo(host, 900);
+    expect(orientationOf(svgOf(host))).toBe("horizontal");
+  });
+
+  it("renders the lanes fixture horizontal at 900px", () => {
+    // 2026 and 2030 each cover the other's stem in the policy lane; stem clearance is only a
+    // preference, so this still fits and must not auto-switch to vertical.
+    const host = mountAt(900, { ...CAT_SPEC, timeline: { lanes: true } } as ChartSpec, CAT_ROWS);
     expect(orientationOf(svgOf(host))).toBe("horizontal");
   });
 

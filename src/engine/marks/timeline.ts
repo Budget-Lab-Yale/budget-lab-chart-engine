@@ -243,33 +243,29 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
   }
   svg.append(chrome);
 
+  // Painted in layers, as callout leaders are elsewhere in the engine: stems beneath everything, then
+  // span bars, then marker halos and markers (so a dot always paints over any bar, whatever the CSV
+  // order of a same-date point and span), then labels, whose white text halos keep the text readable
+  // where a stem passes beneath. The mark layers are aria-hidden; the list carries one listitem per
+  // event in chronological order. Every mark keeps data-series for the legend's dimming.
+  const stemsLayer = el("g", { class: "tbl-timeline-stems", "aria-hidden": "true" });
+  const spansLayer = el("g", { class: "tbl-timeline-spans", "aria-hidden": "true" });
+  const markersLayer = el("g", { class: "tbl-timeline-markers", "aria-hidden": "true" });
   const list = el("g", { role: "list", "aria-label": `Timeline, ${layout.order.length} events` });
   const stems = new Map(layout.stems.map((s) => [s.id, s]));
   const markers = new Map(layout.markers.map((m) => [m.id, m]));
   const spans = new Map(layout.spans.map((s) => [s.id, s]));
   const labels = new Map(layout.labels.map((l) => [l.id, l]));
+  const halos: SVGCircleElement[] = [];
+  const dots: SVGCircleElement[] = [];
 
   for (const id of layout.order) {
     const e = byId.get(id) as LayoutEvent;
     const color = colorOf(e.category);
     const series = e.category;
-    const item = el("g", {
-      role: "listitem",
-      "aria-label": `${e.dateText}: ${e.title}.${e.description ? ` ${e.description}` : ""}`,
-    });
-    const m = markers.get(id);
-    // A point marker sits in a background-colour halo so it stays visible on a same-colour span bar
-    // (the dot and an 8px bar are otherwise the same ink). Painted first in its event, so the stem is
-    // drawn over it and still meets the marker; the marker's own fill, ring and radius are unchanged.
-    if (m) {
-      item.append(el("circle", {
-        class: "tbl-timeline-marker-halo", "data-series": series, cx: r2(m.cx), cy: r2(m.cy),
-        r: TL_GEOM.dotR + markerStroke(m.projected) / 2 + MARKER_HALO, fill: tokens.structural.background,
-      }));
-    }
     const stem = stems.get(id);
     if (stem) {
-      item.append(el("polyline", {
+      stemsLayer.append(el("polyline", {
         class: "tbl-timeline-stem", "data-series": series, fill: "none", stroke: TBL.color.annotationDim, "stroke-width": 1,
         points: stem.points.map(([x, y]) => `${r2(x)},${r2(y)}`).join(" "),
       }));
@@ -278,7 +274,7 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     if (span) {
       const fade = fadeOf.get(id);
       const paint = fade ? `url(#${fade})` : color;
-      item.append(el("rect", {
+      spansLayer.append(el("rect", {
         class: "tbl-timeline-span", "data-series": series, x: r2(span.x), y: r2(span.y), width: r2(span.w), height: r2(span.h), rx: 2,
         // Projected: dashed outline over a light fill. An open-ended projected span fades both.
         ...(span.projected
@@ -286,14 +282,25 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
           : { fill: paint }),
       }));
     }
+    const m = markers.get(id);
     if (m) {
+      // A background-colour halo keeps a dot visible on a same-colour bar (otherwise the same ink).
+      // Every halo paints before every marker, so no halo can clip a neighbouring dot.
+      halos.push(el("circle", {
+        class: "tbl-timeline-marker-halo", "data-series": series, cx: r2(m.cx), cy: r2(m.cy),
+        r: TL_GEOM.dotR + markerStroke(m.projected) / 2 + MARKER_HALO, fill: tokens.structural.background,
+      }));
       // Projected: a white disc in a category-colour ring (spec §5.2). White, not a hole: the dot
       // sits on the rule, which would otherwise show through it.
-      item.append(el("circle", {
+      dots.push(el("circle", {
         class: "tbl-timeline-marker", "data-series": series, cx: r2(m.cx), cy: r2(m.cy), r: TL_GEOM.dotR,
         fill: m.projected ? tokens.structural.background : color, stroke: color, "stroke-width": markerStroke(m.projected),
       }));
     }
+    const item = el("g", {
+      role: "listitem",
+      "aria-label": `${e.dateText}: ${e.title}.${e.description ? ` ${e.description}` : ""}`,
+    });
     const lab = labels.get(id);
     if (lab) {
       const g = el("g", { class: "tbl-timeline-label", "data-series": series });
@@ -310,6 +317,8 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     }
     list.append(item);
   }
+  markersLayer.append(...halos, ...dots);
+  svg.append(stemsLayer, spansLayer, markersLayer);
   svg.append(list);
   return svg;
 }
