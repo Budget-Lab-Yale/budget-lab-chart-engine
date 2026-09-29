@@ -161,6 +161,25 @@ function dateWordUnits(text: string): string[] {
   return out;
 }
 
+/** Greedily wraps pre-split units the way `wrapToWidth` wraps words, but never re-splits a unit at
+ *  whitespace it contains (a glued "<word> –" from `dateWordUnits` must stay one piece): each unit
+ *  joins the current line if that still fits `maxPx`, else starts a new one. A unit wider than
+ *  `maxPx` alone still gets its own (over-wide) line — `hardBreak` is the caller's fallback for it. */
+function wrapUnits(units: string[], maxPx: number, size: number): string[] {
+  const lines: string[] = [];
+  let cur = "";
+  for (const u of units) {
+    const trial = cur ? `${cur} ${u}` : u;
+    if (!cur || estimateLabelWidth(trial, size) <= maxPx) cur = trial;
+    else {
+      lines.push(cur);
+      cur = u;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
 /** Date text wraps between words and after a spaced en dash ("<start> – <end>"), preferring the
  *  dash: a range too wide for one line breaks as "<start> –" / "<end>" (the dash stays on line 1,
  *  the leading space before the tail is dropped) before either date breaks inside itself, and each
@@ -172,15 +191,11 @@ function wrapDate(text: string, maxPx: number, size: number): string[] {
   // cannot parse one, which would fail the whole bundle).
   const pieces = text.split("–");
   const parts = pieces.map((s, i) => (i < pieces.length - 1 ? `${s}–` : s).trim()).filter(Boolean);
-  return parts.flatMap((part) => {
-    // The dash must stay glued to the end of its date's own last line, never wrap onto a line of
-    // its own: wrap the date text alone, then append " –" to the wrapped result's last line.
-    const hasDash = part.endsWith("–");
-    const body = hasDash ? part.slice(0, -1).trimEnd() : part;
-    const lines = wrapToWidth(body, maxPx, size).split("\n");
-    if (hasDash) lines[lines.length - 1] = `${lines[lines.length - 1]} –`;
-    return lines;
-  });
+  // Wrap each part as `dateWordUnits` — the same units the wordMax floor measures — rather than a
+  // raw string: gluing "<end word> –" into one unit before wrapping (not after) guarantees no
+  // emitted line exceeds maxPx unless that glued unit alone does, and reuses whatever separator
+  // (space or none) the author's own text had at that boundary instead of assuming one.
+  return parts.flatMap((part) => wrapUnits(dateWordUnits(part), maxPx, size));
 }
 
 /** Each line wraps to `maxPx`; a single word wider than that widens the box, up to `framePx`. */

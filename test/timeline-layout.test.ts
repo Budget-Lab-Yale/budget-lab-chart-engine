@@ -482,6 +482,46 @@ describe("horizontal layout", () => {
     expect(lines.length).toBeGreaterThan(1);
     expect(lines.join(" ")).toBe("September 30, 2017 through the end");
   });
+
+  it("wraps an unspaced date_label override at the dash with no space inserted", () => {
+    // Fix round 1: an authored override's own separator (none, here) must round-trip — wrapDate
+    // must not assume the spaced form and glue in a space that was never authored.
+    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
+    const l = layoutTimeline(base([e, ev("2030", "z")]));
+    expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
+      "Dec 22, 2017–", "Dec 31, 2025",
+    ]);
+    const short = ev("2017", "y", { endStr: "2025", dateText: "2017–2025" });
+    const s = layoutTimeline(base([short, ev("2030", "z")]));
+    expect(labelOf(s, short.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual(["2017–2025"]);
+  });
+
+  it("never isolates the dash on its own line or leaves a stray space, across a label_width sweep", () => {
+    // Fix round 1: wrapping the date body then appending " –" could emit a last line wider than
+    // maxPx, which a downstream hardBreak then chopped at an arbitrary character — sometimes right
+    // at the space before the dash. label_width 86-100 was the reported failing band.
+    const RANGE = () => [
+      ev("2017-12-22", "a", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" }),
+      ev("2034-01-01", "z", { dateText: "Jan 1, 2034" }),
+    ];
+    const OPEN = () => [ev("2040-06-01", "open", { ongoing: true, dateText: "2040 –" }), ev("2018", "a")];
+    const atomic = (line: string): boolean => (line.endsWith(" –") ? line.slice(0, -2) : line).indexOf(" ") < 0;
+    for (let labelWidth = 60; labelWidth <= 160; labelWidth++) {
+      for (const events of [RANGE(), OPEN()]) {
+        const l = layoutTimeline(base(events, { labelWidth }));
+        for (const d of l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"))) {
+          expect(d.text).not.toBe("–");
+          expect(d.text).not.toBe(" –");
+          expect(d.text.startsWith(" ")).toBe(false);
+          expect(d.text.endsWith(" ")).toBe(false);
+          // wrapDate's own maxPx budget is in regular-weight terms (no bold factor — see its
+          // doc comment), so compare on the same terms it wraps against.
+          const w = estimateLabelWidth(d.text, 13);
+          expect(w <= labelWidth + 1e-6 || atomic(d.text)).toBe(true);
+        }
+      }
+    }
+  });
 });
 
 describe("vertical layout", () => {
@@ -589,6 +629,14 @@ describe("vertical layout", () => {
     const l = v([e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
     expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
       "Dec 22, 2017 –", "Dec 31, 2025",
+    ]);
+  });
+
+  it("wraps an unspaced date_label override at the dash with no space inserted", () => {
+    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
+    const l = v([e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
+    expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
+      "Dec 22, 2017–", "Dec 31, 2025",
     ]);
   });
 
@@ -722,5 +770,34 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
       digest(at360([ev("2020", "a", { endStr: "2030" }), ev("2025", "c", { endStr: "2035" }), ev("2040", "b")])),
       JSON.parse(String.raw`{"rule":{"x1":82,"y1":8,"x2":82,"y2":400},"height":408,"boxes":[[96.5,0,103.1,16],[96.5,96.0394250513347,103.1,112.0394250513347],[96.5,384,103.1,400]],"lines":[[[56,13,"2020"],[96.5,12,"a"]],[[56,109.0394250513347,"2025"],[96.5,108.0394250513347,"c"]],[[56,397,"2040"],[96.5,396,"b"]]],"spans":[[78,8,8,192.02628336755646],[68,104.0394250513347,8,191.97371663244348]],"ticks":[]}`),
     );
+  });
+
+  it("never isolates the dash on its own line or leaves a stray space, across a width sweep", () => {
+    // Fix round 1: the same append-after-wrap bug hit the vertical gutter too, where the
+    // downstream hardBreak (fired when the appended line ran over dateW) could split "2017 –"
+    // right at its space. Sweeps both a plain two-date-range fixture and a 3-sub-track one, plus
+    // an open-ended range, since the reported failing widths depended on sub-track compression.
+    const RANGE = () => [
+      ev("2017-12-22", "a", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" }),
+      ev("2034-01-01", "z", { dateText: "Jan 1, 2034" }),
+    ];
+    const THREE_SUB = () => [
+      ev("2018-01-01", "a", { endStr: "2028", dateText: "Jan 1, 2018 – Jan 1, 2028" }),
+      ev("2018-01-05", "b", { endStr: "2029", dateText: "Jan 5, 2018 – Jan 1, 2029" }),
+      ev("2018-01-10", "c", { endStr: "2030", dateText: "Jan 10, 2018 – Jan 1, 2030" }),
+      ev("2040-06-01", "open", { ongoing: true, dateText: "2040 –" }),
+    ];
+    for (let width = 250; width <= 400; width++) {
+      for (const events of [RANGE(), THREE_SUB()]) {
+        const l = v(events, { width });
+        for (const d of dateLines(l)) {
+          expect(d.text).not.toBe("–");
+          expect(d.text).not.toBe(" –");
+          expect(d.text.startsWith(" ")).toBe(false);
+          expect(d.text.endsWith(" ")).toBe(false);
+          expect(dateLeft(d)).toBeGreaterThanOrEqual(-1e-6);
+        }
+      }
+    }
   });
 });
