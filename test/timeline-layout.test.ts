@@ -280,6 +280,81 @@ describe("horizontal layout", () => {
     });
   });
 
+  describe("stems never cross another label", () => {
+    // Every [stem, other label] pair where the stem's x is inside the box (widened by the stem
+    // clearance) and the stem's y-range overlaps it. Horizontal stems are vertical segments.
+    const crossings = (l: TimelineLayout, gap = 3): Array<[number, number]> => {
+      const out: Array<[number, number]> = [];
+      for (const s of l.stems) {
+        const x = s.points[0]![0];
+        const ys = s.points.map((p) => p[1]);
+        for (const lab of l.labels) {
+          if (lab.id === s.id) continue;
+          const b = lab.box;
+          if (x >= b.x0 - gap && x <= b.x1 + gap && Math.min(...ys) < b.y1 && Math.max(...ys) > b.y0) out.push([s.id, lab.id]);
+        }
+      }
+      return out;
+    };
+    // The spans golden fixture (test/fixtures/timeline-spans.csv) as prepareTimeline builds it.
+    const SPANS = () => [
+      ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025", category: "law" }),
+      ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021–Dec 31, 2021", category: "law" }),
+      ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022–", category: "law" }),
+      ev("2025-07-04", "OBBBA enacted", { dateText: "Jul 4, 2025", category: "law" }),
+      ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026–Dec 31, 2030", category: "projection", projected: true }),
+      ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034", category: "projection", projected: true }),
+    ];
+    const LANES = [{ key: "law", label: "law" }, { key: "projection", label: "projection" }];
+
+    it("keeps an outer-row label's stem out of an inner-row box", () => {
+      // The golden: CTC's box sits in the row nearest the rule, and IRA's stem (outer row) rose
+      // straight through it.
+      const l = layoutTimeline(base(SPANS(), { width: 920, lanes: LANES }));
+      expect(crossings(l)).toEqual([]);
+    });
+
+    it("keeps a later inner-row box off an earlier outer-row stem", () => {
+      // b cannot share row 0 with a, so it takes row 1; c then fits row 0 after a, where its wide
+      // box would cover b's stem.
+      const a = ev("2000", "a"), b = ev("2003-01-01", "b"), c = ev("2010-07-01", "A much longer title for c that wraps");
+      const l = layoutTimeline(base([a, b, c, ev("2100", "z")], { lanes: [{ key: "", label: "L" }], maxRows: 3 }));
+      expect(crossings(l)).toEqual([]);
+      expect(l.fits).toBe(true);
+    });
+
+    it("gives up on two labels that cover each other's stems without growing the chart", () => {
+      // One lane (above only): at 2026/2030 each box reaches the other's stem, so no row order
+      // avoids a crossing. The layout reports fits:false (the auto-switch trigger) and takes one
+      // overflow row past the cap, rather than the repair pushing labels outward without end.
+      const lane = [{ key: "p", label: "Policy" }];
+      const mk = (second: string) => [
+        ev("2026", "Policy begins", { category: "p" }), ev(second, "First cohort born", { category: "p" }), ev("2095", "z", { category: "p" }),
+      ];
+      const stuck = layoutTimeline(base(mk("2030"), { lanes: lane }));
+      const clear = layoutTimeline(base(mk("2033"), { lanes: lane }));
+      expect(stuck.fits).toBe(false);
+      expect(clear.fits).toBe(true);
+      expect(crossings(clear)).toEqual([]);
+      expect(stuck.height).toBeLessThan(2 * clear.height);
+    });
+
+    it("holds across the existing fixtures", () => {
+      const dense = Array.from({ length: 8 }, (_, i) => ev(`2026-0${i + 1}-01`, `Event number ${i}`));
+      const cases: TimelineLayout[] = [
+        layoutTimeline(base(FIG7())),
+        layoutTimeline(base(FIG7(), { width: 600 })),
+        layoutTimeline(base(FIG7(), { spacing: "even" })),
+        layoutTimeline(base(dense, { width: 2000, maxRows: 4 })),
+        layoutTimeline(base(dense, { width: 400, maxRows: 4 })),
+        layoutTimeline(base(SPANS(), { width: 920 })),
+        layoutTimeline(base(SPANS(), { width: 920, lanes: LANES })),
+        layoutTimeline(base([ev("2020", "a", { endStr: "2030" }), ev("2025", "b", { endStr: "2035" }), ev("2031", "c", { endStr: "2040" })])),
+      ];
+      for (const l of cases) expect(crossings(l)).toEqual([]);
+    });
+  });
+
   it("drops an event outside every lane from order and from every mark", () => {
     const stray = ev("2099", "not in any lane", { category: "other" });
     const e = [ev("2026", "p1", { category: "policy" }), stray, ev("2030", "c1", { category: "cohort" })];

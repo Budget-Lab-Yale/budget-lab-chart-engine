@@ -12,10 +12,13 @@ const ROWS = [
   { date: "2055", title: "Projection ends" }, { date: "2095", title: "Cohort turns 65" },
 ] as TidyRow[];
 
-// Two categories, so the legend has series rows to pin.
+// Two categories, so the legend has series rows to pin. The second policy event is 2032, not 2030:
+// in lanes mode both policy labels sit above one rule, and at 2030 each box came within the stem
+// clearance of the other's stem, so no horizontal layout fits and the lanes tests' 900px
+// horizontal precondition would fail.
 const CAT_SPEC = { ...SPEC, columns: { x: "date", label: "title", series: "kind" }, series_order: ["policy", "cohort"] } as ChartSpec;
 const CAT_ROWS = [
-  { date: "2026", title: "Policy begins", kind: "policy" }, { date: "2030", title: "First cohort born", kind: "policy" },
+  { date: "2026", title: "Policy begins", kind: "policy" }, { date: "2032", title: "First cohort born", kind: "policy" },
   { date: "2055", title: "Projection ends", kind: "cohort" }, { date: "2095", title: "Cohort turns 65", kind: "cohort" },
 ] as TidyRow[];
 

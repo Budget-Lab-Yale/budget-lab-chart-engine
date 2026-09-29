@@ -5,8 +5,9 @@
 //
 // Horizontal label rows are TimelineJS-style greedy first-fit in date order (ties: CSV order):
 // each event prefers the side opposite the previous event's, takes the nearest row on that side
-// whose last box ends a column-gap before it starts, else tries the other side, else overflows
-// into a row past `maxRows` and reports `fits: false`. Overflow never drops a label.
+// whose last box ends a column-gap before it starts and where no stem would cross another label
+// (see assignOnce), else tries the other side, else overflows into a row past `maxRows` and reports
+// `fits: false`. Overflow never drops a label.
 import { d3 } from "./vendor";
 import { estimateLabelWidth, wrapToWidth } from "./axes";
 import { TBL } from "./theme";
@@ -17,6 +18,8 @@ export const TL_GEOM = {
   subTrackGap: 2,
   rowGap: 8,
   colGap: 8,
+  /** Horizontal: a stem keeps at least this far from any other label box it would pass. */
+  stemClear: 3,
   stemGap: 6,
   fade: 24,
   laneGap: 16,
@@ -222,39 +225,94 @@ function assignSubTracks(spans: LayoutEvent[]): Map<number, number> {
 
 type Side = "above" | "below";
 
-function assignRows(
-  items: Array<{ id: number; x0: number; x1: number; aboveOnly: boolean }>,
+interface RowItem { id: number; x0: number; x1: number; stemX: number; aboveOnly: boolean }
+type Slot = { side: Side; row: number };
+/** Per item, per side: rows up to and including this one are ruled out (set by the repair pass). */
+type Forbid = Map<number, Partial<Record<Side, number>>>;
+
+/** One greedy pass. A slot is free when its row's last box ends a column-gap before this box starts
+ *  AND the stem clearance holds on that side: this item's stem crosses no box in a row nearer the
+ *  rule (a stem rises through every inner row), and this item's box covers no stem of an item already
+ *  in a row further out. Past `maxRows` it keeps searching outward on the preferred side, then the
+ *  other. `blocked` reports the first item that no row can take without its stem crossing an inner
+ *  box, with the inner box that blocks it; that item is placed beyond every row (crossing) so the
+ *  pass still completes. */
+function assignOnce(
+  items: RowItem[],
   maxRows: number,
   sides: Side[],
-): { placed: Map<number, { side: Side; row: number }>; fits: boolean } {
+  forbid: Forbid,
+): { placed: Map<number, Slot>; fits: boolean; blocked: { id: number } & Slot | null } {
+  const c = TL_GEOM.stemClear;
   const last: Record<Side, Array<number | undefined>> = { above: [], below: [] };
-  const placed = new Map<number, { side: Side; row: number }>();
+  const on: Record<Side, Array<RowItem & { row: number }>> = { above: [], below: [] };
+  const placed = new Map<number, Slot>();
   let prev: Side | null = null;
   let fits = true;
-  const clear = (side: Side, r: number, x0: number): boolean => {
+  let blocked: ({ id: number } & Slot) | null = null;
+  const covers = (x0: number, x1: number, x: number): boolean => x >= x0 - c && x <= x1 + c;
+  const floorOf = (it: RowItem, side: Side): number => forbid.get(it.id)?.[side] ?? -1;
+  const free = (it: RowItem, side: Side, r: number): boolean => {
+    if (r <= floorOf(it, side)) return false;
     const end = last[side][r];
-    return end === undefined || end + TL_GEOM.colGap <= x0;
+    if (end !== undefined && end + TL_GEOM.colGap > it.x0) return false;
+    return on[side].every((p) =>
+      p.row < r ? !covers(p.x0, p.x1, it.stemX) : p.row > r ? !covers(it.x0, it.x1, p.stemX) : true);
   };
+  // Beyond this row on a side, nothing is placed and nothing is forbidden, so only the stem rule can fail.
+  const outer = (it: RowItem, side: Side): number =>
+    Math.max(maxRows, floorOf(it, side) + 1, ...on[side].map((p) => p.row + 1));
   for (const it of items) {
     const allowed: Side[] = it.aboveOnly ? ["above"] : sides;
     const pref: Side = allowed.length === 1 ? (allowed[0] as Side) : prev === "above" ? "below" : "above";
     const order: Side[] = allowed.length === 1 ? [pref] : [pref, pref === "above" ? "below" : "above"];
-    let got: { side: Side; row: number } | null = null;
+    let got: Slot | null = null;
     for (const side of order) {
-      for (let r = 0; r < maxRows && !got; r++) if (clear(side, r, it.x0)) got = { side, row: r };
+      for (let r = 0; r < maxRows && !got; r++) if (free(it, side, r)) got = { side, row: r };
       if (got) break;
     }
     if (!got) {
       fits = false;
+      for (const side of order) {
+        for (let r = maxRows, top = outer(it, side); r <= top && !got; r++) if (free(it, side, r)) got = { side, row: r };
+        if (got) break;
+      }
+    }
+    if (!got) {
+      // Every row on every allowed side puts this stem through an inner box: overflow as the plain
+      // greedy rule would (first row past the cap whose last box has ended), crossing.
       let r = maxRows;
-      while (!clear(pref, r, it.x0)) r++;
+      while (last[pref][r] !== undefined && (last[pref][r] as number) + TL_GEOM.colGap > it.x0) r++;
       got = { side: pref, row: r };
+      const inner = on[pref].filter((p) => covers(p.x0, p.x1, it.stemX)).sort((a, b) => a.row - b.row || a.id - b.id)[0];
+      if (!blocked && inner) blocked = { id: inner.id, side: pref, row: inner.row };
     }
     last[got.side][got.row] = it.x1;
+    on[got.side].push({ ...it, row: got.row });
     prev = got.side;
     placed.set(it.id, got);
   }
-  return { placed, fits };
+  return { placed, fits, blocked };
+}
+
+/** Horizontal label rows: greedy first-fit (assignOnce) plus a bounded repair. When an item cannot
+ *  be placed without its stem crossing an inner-row box, the blocking box's item is ruled out of its
+ *  row (and every row nearer the rule) on that side and the pass re-runs, so the blocker moves outward
+ *  and the blocked item can take the inner row. The repair is kept only if it clears every crossing;
+ *  two labels that each cover the other's stem can never share a side, and pushing them outward
+ *  would only grow the chart, so the first pass (crossing, fits: false) stands. Deterministic: same
+ *  input order, same result. */
+function assignRows(items: RowItem[], maxRows: number, sides: Side[]): { placed: Map<number, Slot>; fits: boolean } {
+  const forbid: Forbid = new Map();
+  const first = assignOnce(items, maxRows, sides, forbid);
+  let res = first;
+  for (let i = 0; res.blocked && i < items.length * (maxRows + 2); i++) {
+    const { id, side, row } = res.blocked;
+    forbid.set(id, { ...forbid.get(id), [side]: row });
+    res = assignOnce(items, maxRows, sides, forbid);
+  }
+  const kept = res.blocked ? first : res;
+  return { placed: kept.placed, fits: kept.fits };
 }
 
 function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle"): PlacedLine[] {
@@ -332,6 +390,7 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
       track.events.map((e) => ({
         id: e.id,
         ...(extent.get(e.id) as { x0: number; x1: number }),
+        stemX: pos(e.start),
         aboveOnly: (sub.get(e.id) ?? 0) > 0,
       })),
       inp.maxRows,
