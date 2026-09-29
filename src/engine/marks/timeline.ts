@@ -246,8 +246,11 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
   // Painted in layers, as callout leaders are elsewhere in the engine: stems beneath everything, then
   // span bars, then marker halos and markers (so a dot always paints over any bar, whatever the CSV
   // order of a same-date point and span), then labels, whose white text halos keep the text readable
-  // where a stem passes beneath. The mark layers are aria-hidden; the list carries one listitem per
-  // event in chronological order. Every mark keeps data-series for the legend's dimming.
+  // where a stem passes beneath. Vertical only: the leaders paint above bars and markers (still below
+  // labels). They run beside the rule and never cross label text, and beneath, an outer sub-track
+  // span's leader would hide under the inner bar it crosses and read as that bar's. The mark layers
+  // are aria-hidden; the list carries one listitem per event in chronological order. Every mark keeps
+  // data-series for the legend's dimming.
   const stemsLayer = el("g", { class: "tbl-timeline-stems", "aria-hidden": "true" });
   const spansLayer = el("g", { class: "tbl-timeline-spans", "aria-hidden": "true" });
   const markersLayer = el("g", { class: "tbl-timeline-markers", "aria-hidden": "true" });
@@ -318,7 +321,8 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     list.append(item);
   }
   markersLayer.append(...halos, ...dots);
-  svg.append(stemsLayer, spansLayer, markersLayer);
+  if (layout.orientation === "vertical") svg.append(spansLayer, markersLayer, stemsLayer);
+  else svg.append(stemsLayer, spansLayer, markersLayer);
   svg.append(list);
   return svg;
 }

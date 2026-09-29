@@ -3,11 +3,12 @@
 // from the spec) and the jsdom goldens place every element identically — the rule
 // callout-placement.ts follows for the same reason.
 //
-// Horizontal label rows are TimelineJS-style greedy first-fit in date order (ties: CSV order):
-// each event prefers the side opposite the previous event's, takes the nearest row on that side
-// whose last box ends a column-gap before it starts (preferring, among those, a row where no stem
-// would cross another label: see assignRows), else tries the other side, else overflows into a row
-// past `maxRows` and reports `fits: false`. Overflow never drops a label.
+// Horizontal label rows are TimelineJS-style greedy first-fit in date order (ties: CSV order): each
+// event prefers the side opposite the previous event's. Within `maxRows` it takes the first free row
+// (preferred side outward, then the other) that keeps every stem clear of other labels, so a clear
+// row on the other side beats a crossing row on the preferred side; failing that, the first free row.
+// That preference is dropped for a track when it would not fit, so `fits` is always plain
+// first-fit's (see assignRows). Overflow rows past `maxRows` never drop a label.
 import { d3 } from "./vendor";
 import { estimateLabelWidth, wrapToWidth } from "./axes";
 import { TBL } from "./theme";
@@ -231,15 +232,15 @@ type Side = "above" | "below";
 interface RowItem { id: number; x0: number; x1: number; stemX: number; aboveOnly: boolean }
 type Slot = { side: Side; row: number };
 
-/** Spec §5.2 greedy first-fit, with stem clearance as a soft preference. Within `maxRows`, in the
- *  usual order (preferred side's rows outward, then the other side's), an item takes the first row
- *  that is plainly free (the row's last box ends a column-gap before this box starts) AND keeps the
- *  stems clear: its stem crosses no box in a row nearer the rule on that side (a stem rises through
- *  every inner row), and its box covers no stem of an item already further out. When no in-cap row
- *  keeps the stems clear, the plain first-fit row is taken and the stem passes under a label (labels
- *  paint above stems, in white halos). Overflow and `fits: false` happen only when plain first-fit
- *  finds no row within `maxRows`. One pass: O(items × rows × placed). */
-function assignRows(items: RowItem[], maxRows: number, sides: Side[]): { placed: Map<number, Slot>; fits: boolean } {
+/** One greedy pass of spec §5.2 first-fit. In the usual order (preferred side's rows outward, then
+ *  the other side's), an item takes the first row within `maxRows` that is plainly free (the row's
+ *  last box ends a column-gap before this box starts). With `keepStemsClear`, a plainly free row that
+ *  also keeps the stems clear is taken first: the item's stem crosses no box in a row nearer the rule
+ *  on that side (a stem rises through every inner row), and its box covers no stem of an item already
+ *  further out; failing that, the plain row (the stem passes under a label, which paints above stems
+ *  in a white halo). No in-cap row: overflow past `maxRows` and `fits: false`.
+ *  O(items × rows × placed). */
+function firstFit(items: RowItem[], maxRows: number, sides: Side[], keepStemsClear: boolean): { placed: Map<number, Slot>; fits: boolean } {
   const c = TL_GEOM.stemClear;
   const last: Record<Side, Array<number | undefined>> = { above: [], below: [] };
   const on: Record<Side, Array<{ row: number; x0: number; x1: number; stemX: number }>> = { above: [], below: [] };
@@ -262,7 +263,7 @@ function assignRows(items: RowItem[], maxRows: number, sides: Side[]): { placed:
     const pref: Side = allowed.length === 1 ? (allowed[0] as Side) : prev === "above" ? "below" : "above";
     const order: Side[] = allowed.length === 1 ? [pref] : [pref, pref === "above" ? "below" : "above"];
     let got =
-      firstIn(order, (side, r) => plain(it, side, r) && stemsClear(it, side, r)) ??
+      (keepStemsClear ? firstIn(order, (side, r) => plain(it, side, r) && stemsClear(it, side, r)) : null) ??
       firstIn(order, (side, r) => plain(it, side, r));
     if (!got) {
       fits = false;
@@ -278,6 +279,17 @@ function assignRows(items: RowItem[], maxRows: number, sides: Side[]): { placed:
   return { placed, fits };
 }
 
+/** Row assignment for one track. `fits` is exactly plain first-fit's: the stem-clearance preference
+ *  moves earlier labels, which can take a row a later label's plain first-fit needed, so it is used
+ *  only when plain first-fit fits AND the preferring pass also fits. Otherwise plain first-fit's rows
+ *  (and overflow rows) stand. `preferClearStems: false` is plain first-fit alone. */
+function assignRows(items: RowItem[], maxRows: number, sides: Side[], preferClearStems: boolean): { placed: Map<number, Slot>; fits: boolean } {
+  const plain = firstFit(items, maxRows, sides, false);
+  if (!preferClearStems || !plain.fits) return plain;
+  const soft = firstFit(items, maxRows, sides, true);
+  return soft.fits ? soft : plain;
+}
+
 function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle"): PlacedLine[] {
   const x = anchor === "middle" ? (box.x0 + box.x1) / 2 : box.x0;
   let top = box.y0;
@@ -290,7 +302,7 @@ function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle"): Pla
   });
 }
 
-function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
+function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): TimelineLayout {
   const G = TL_GEOM;
   // In lanes mode an event outside every lane is not drawn, so it is dropped here: `order` must list
   // exactly the drawn events, and an undrawn event must not stretch the scale.
@@ -358,6 +370,7 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
       })),
       inp.maxRows,
       sides,
+      preferClearStems,
     );
     if (!fits) out.fits = false;
     const rowsOn = (side: Side): number =>
@@ -612,4 +625,10 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
 
 export function layoutTimeline(inp: TimelineLayoutInput): TimelineLayout {
   return inp.orientation === "vertical" ? layoutVertical(inp) : layoutHorizontal(inp);
+}
+
+/** Internal, for tests: `fits` of the horizontal layout under plain §5.2 first-fit alone (no
+ *  stem-clearance preference), which `layoutTimeline`'s `fits` must always equal. */
+export function plainFirstFitFits(inp: TimelineLayoutInput): boolean {
+  return layoutHorizontal(inp, false).fits;
 }

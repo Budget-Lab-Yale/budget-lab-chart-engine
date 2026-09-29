@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layoutTimeline, TL_GEOM, LANE_SIZE, LANE_LINE_H, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
+import { layoutTimeline, plainFirstFitFits, TL_GEOM, LANE_SIZE, LANE_LINE_H, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
 import { estimateLabelWidth } from "../src/engine/axes";
 import { TBL } from "../src/engine/theme";
@@ -368,6 +368,51 @@ describe("horizontal layout", () => {
         layoutTimeline(base([ev("2020", "a", { endStr: "2030" }), ev("2025", "b", { endStr: "2035" }), ev("2031", "c", { endStr: "2040" })])),
       ];
       cases.forEach((l, i) => expect([i, crossings(l)]).toEqual([i, []]));
+    });
+
+    it("never lets the preference turn a plain first-fit that fits into fits: false", () => {
+      // The preference sent an early label to another row, and a later label's plain first-fit row
+      // was then taken: fits false (a live switch to vertical) where plain §5.2 first-fit fits.
+      const titles = ["Medium title", "A fairly wide title that wraps to two lines", "a", "A first label that is wide enough to wrap onto two lines"];
+      const years = [2000, 2008, 2009, 2013, 2018, 2019, 2027, 2100];
+      const inp = base(years.map((y, i) => ev(`${y}`, titles[i % titles.length]!)));
+      expect(layoutTimeline(inp).fits).toBe(true);
+      expect(plainFirstFitFits(inp)).toBe(true);
+    });
+
+    it("reports exactly plain first-fit's `fits` across a seeded batch of random layouts", () => {
+      // mulberry32: a fixed seed, so the batch is the same on every run.
+      let s = 0x9e3779b9;
+      const rnd = (): number => {
+        s = (s + 0x6d2b79f5) | 0;
+        let t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
+      const words = ["policy", "begins", "cohort", "tax", "credit", "expires", "a", "the", "phase-in", "fully", "trust", "fund"];
+      const mismatches: number[] = [];
+      const seen = new Set<boolean>();
+      for (let t = 0; t < 2000; t++) {
+        const n = 3 + Math.floor(rnd() * 14);
+        const lanesOn = rnd() < 0.3;
+        const events = Array.from({ length: n }, (_, i) => {
+          const y = 2000 + Math.floor(rnd() * 60);
+          const title = Array.from({ length: 1 + Math.floor(rnd() * 8) }, () => pick(words)).join(" ");
+          const endY = rnd() < 0.25 ? 2000 + Math.floor(rnd() * 60) : 0;
+          return ev(`${y}`, title, { category: lanesOn ? (i % 2 ? "a" : "b") : "", ...(endY > y ? { endStr: `${endY}` } : {}) });
+        });
+        const inp = base(events, {
+          maxRows: 1 + Math.floor(rnd() * 3),
+          width: pick([600, 900, 1200]),
+          lanes: lanesOn ? [{ key: "a", label: "A" }, { key: "b", label: "B" }] : null,
+        });
+        const fits = layoutTimeline(inp).fits;
+        seen.add(fits);
+        if (fits !== plainFirstFitFits(inp)) mismatches.push(t);
+      }
+      expect(mismatches).toEqual([]);
+      expect([...seen].sort()).toEqual([false, true]); // the batch exercises both outcomes
     });
 
     it("lays out 300 monthly events in well under a second", () => {

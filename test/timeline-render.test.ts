@@ -251,6 +251,17 @@ describe("timeline render", () => {
     }
   });
 
+  it("paints vertical leaders above spans and markers, still below the labels; horizontal stems stay beneath", () => {
+    // Vertical leaders run beside the rule and never cross label text, so they paint over the bars:
+    // beneath, an outer sub-track span's leader would hide under the inner bar it crosses.
+    const layerSeq = (svg: SVGSVGElement): string[] =>
+      [...svg.children].map((c) => c.getAttribute("class") ?? c.getAttribute("role") ?? c.tagName).filter((n) => n !== "defs" && n !== "tbl-timeline-chrome");
+    const vertical = renderChart(SPEC, ROWS, { width: 360, timelineOrientation: "vertical" }).svg;
+    expect(layerSeq(vertical)).toEqual(["tbl-timeline-spans", "tbl-timeline-markers", "tbl-timeline-stems", "list"]);
+    expect(q(vertical, "g.tbl-timeline-stems .tbl-timeline-stem").length).toBeGreaterThan(0);
+    expect(layerSeq(r().svg)).toEqual(["tbl-timeline-stems", "tbl-timeline-spans", "tbl-timeline-markers", "list"]);
+  });
+
   it("contains no NaN", () => {
     expect(/NaN/.test(r().svg.outerHTML)).toBe(false);
     expect(/NaN/.test(renderChart(SPEC, ROWS, { width: 320, timelineOrientation: "vertical" }).svg.outerHTML)).toBe(false);
