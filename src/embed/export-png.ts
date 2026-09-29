@@ -8,6 +8,7 @@ import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
+import { timelineHeight } from "../engine/marks/timeline.js";
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
@@ -330,6 +331,7 @@ export function buildExportSvg(
   const isFigure = spec.small_multiples != null;
   const isSingleHorizontalBar =
     !isFigure && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
+  const isTimeline = !isFigure && spec.chartType === "timeline";
 
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
@@ -430,7 +432,9 @@ export function buildExportSvg(
     // (growing the export frame with row count); everything else fills the fixed 750 frame.
     contentHeight = isSingleHorizontalBar
       ? horizontalBarChartHeight(spec, rows)
-      : Math.max(160, H - chartTop - bottomH);
+      : isTimeline
+        ? timelineHeight(spec, rows, chartW)
+        : Math.max(160, H - chartTop - bottomH);
     // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
     // title, note and source, and then off the frame. Measure it first (same routine that draws
@@ -598,7 +602,7 @@ export function buildExportSvg(
   // horizontal bar chart does: the content genuinely needs the room, and clipping it would
   // silently drop legend rows from the download.
   const H_eff =
-    isFigure || isSingleHorizontalBar || chartTop + contentHeight + bottomH > H
+    isFigure || isSingleHorizontalBar || isTimeline || chartTop + contentHeight + bottomH > H
       ? Math.round(chartTop + contentHeight + bottomH)
       : H;
   if (H_eff !== H) {
