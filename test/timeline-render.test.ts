@@ -176,6 +176,42 @@ describe("timeline render", () => {
     expect(seen).toBe(res.svg);
   });
 
+  it("rings every point marker in a background halo painted behind it", () => {
+    const { svg } = r();
+    const markers = q(svg, "circle.tbl-timeline-marker");
+    const halos = q(svg, "circle.tbl-timeline-marker-halo");
+    expect(halos).toHaveLength(markers.length);
+    for (const m of markers) {
+      const h = halos.find((x) => x.getAttribute("cx") === m.getAttribute("cx") && x.getAttribute("cy") === m.getAttribute("cy"))!;
+      expect(h).toBeDefined();
+      expect(h.getAttribute("fill")).toBe(tokens.structural.background);
+      expect(h.getAttribute("data-series")).toBe(m.getAttribute("data-series"));
+      // Behind the marker, and 1.5px beyond its stroked edge.
+      expect(h.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const edge = TL_GEOM.dotR + Number(m.getAttribute("stroke-width")) / 2;
+      expect(Number(h.getAttribute("r"))).toBeCloseTo(edge + 1.5, 6);
+      // The marker itself is unchanged.
+      expect(m.getAttribute("r")).toBe(String(TL_GEOM.dotR));
+    }
+  });
+
+  it("keeps a point on a same-colour span visible: its halo paints over the bar", () => {
+    const rows = [
+      { date: "2017", end: "2025", title: "Long law", detail: "", kind: "policy", projected: "" },
+      { date: "2021", end: "", title: "Point on it", detail: "", kind: "policy", projected: "" },
+      { date: "2030", end: "", title: "z", detail: "", kind: "cohort", projected: "" },
+    ] as TidyRow[];
+    for (const orientation of ["horizontal", "vertical"] as const) {
+      const { svg } = renderChart(SPEC, rows, { width: 700, timelineOrientation: orientation });
+      const bar = q(svg, "rect.tbl-timeline-span")[0]!;
+      const marker = q(svg, "circle.tbl-timeline-marker")[0]!;
+      const halo = q(svg, "circle.tbl-timeline-marker-halo")[0]!;
+      expect(marker.getAttribute("fill")).toBe(bar.getAttribute("fill")); // same colour: the case at issue
+      expect(bar.compareDocumentPosition(halo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(halo.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
   it("contains no NaN", () => {
     expect(/NaN/.test(r().svg.outerHTML)).toBe(false);
     expect(/NaN/.test(renderChart(SPEC, ROWS, { width: 320, timelineOrientation: "vertical" }).svg.outerHTML)).toBe(false);

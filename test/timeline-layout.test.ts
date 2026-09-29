@@ -271,10 +271,12 @@ describe("horizontal layout", () => {
     it("leaves single-line lane names where they were", () => {
       const e = [ev("2026", "p1", { category: "policy" }), ev("2030", "c1", { category: "cohort" }), ev("2040", "p2", { category: "policy" })];
       const l = layoutTimeline(base(e, { lanes: [{ key: "policy", label: "Policy" }, { key: "cohort", label: "Cohort" }] }));
-      // Values recorded from the layout before lane-name blocks were reserved.
-      expect(l.rules.map((r) => r.y1)).toEqual([49.5, 119.5]);
-      expect(l.laneLabels.map((x) => x.y)).toEqual([53.5, 123.5]);
-      expect(l.height).toBe(140);
+      // Values recorded from the layout before lane-name blocks were reserved, then shifted up
+      // uniformly by 4px when the unused band above the top row was trimmed (was 49.5/119.5,
+      // 53.5/123.5, 140).
+      expect(l.rules.map((r) => r.y1)).toEqual([45.5, 115.5]);
+      expect(l.laneLabels.map((x) => x.y)).toEqual([49.5, 119.5]);
+      expect(l.height).toBe(136);
     });
   });
 
@@ -286,6 +288,34 @@ describe("horizontal layout", () => {
     for (const list of [l.labels, l.markers, l.spans, l.stems]) expect(list.some((x) => x.id === stray.id)).toBe(false);
     // The stray 2099 date must not stretch the scale: the latest drawn event sits at the right end.
     expect(l.markers.find((m) => m.id === e[2]!.id)!.cx).toBeGreaterThan(800);
+  });
+
+  it("trims unused space above the topmost label to a small pad", () => {
+    // FIG7: the tallest box (2030, three lines) sits below the rule, so the uniform row pitch left a
+    // band above the one-line boxes on top. The chart's top now sits TL_GEOM.topPad above them.
+    const l = layoutTimeline(base(FIG7()));
+    expect(Math.min(...l.labels.map((x) => x.box.y0))).toBe(TL_GEOM.topPad);
+    const bottom = Math.max(...l.labels.map((x) => x.box.y1));
+    expect(l.height).toBe(Math.ceil(bottom + TL_GEOM.rowGap));
+    const lanes = layoutTimeline(base(FIG7().map((e, i) => ({ ...e, category: i < 3 ? "p" : "c" })), {
+      lanes: [{ key: "p", label: "Policy" }, { key: "c", label: "Cohort" }],
+    }));
+    const tops = [...lanes.labels.map((x) => x.box.y0), ...lanes.laneLabels.map((x) => x.y - LANE_SIZE)];
+    expect(Math.min(...tops)).toBe(TL_GEOM.topPad);
+  });
+
+  it("breaks a date range after the en dash before breaking inside a date", () => {
+    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
+    const l = layoutTimeline(base([e, ev("2030", "z")]));
+    expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
+      "Dec 22, 2017–", "Dec 31, 2025",
+    ]);
+    // A date with no dash still wraps between words, as before.
+    const plain = ev("2017-12-22", "x", { dateText: "September 30, 2017 through the end" });
+    const p = layoutTimeline(base([plain, ev("2030", "z")], { labelWidth: 80 }));
+    const lines = labelOf(p, plain.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join(" ")).toBe("September 30, 2017 through the end");
   });
 });
 
@@ -387,6 +417,36 @@ describe("vertical layout", () => {
     expect(fwd.order).toEqual(e.map((x) => x.id));
     const laned = v(e, { axis: true, lanes: [{ key: "x", label: "X" }] });
     expect(JSON.stringify(laned)).toBe(JSON.stringify(fwd));
+  });
+
+  it("breaks a date range after the en dash before breaking inside a date", () => {
+    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
+    const l = v([e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
+    expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
+      "Dec 22, 2017–", "Dec 31, 2025",
+    ]);
+  });
+
+  it("starts a displaced outer-sub-track span's leader at its own bar", () => {
+    const a = ev("2020-01-01", "a", { endStr: "2030" });
+    const c = ev("2020-01-05", "c, pushed down by a", { endStr: "2035" });
+    const l = v([a, c, ev("2090", "far")]);
+    const sa = l.spans.find((s) => s.id === a.id)!;
+    const sc = l.spans.find((s) => s.id === c.id)!;
+    expect(sc.x).toBeLessThan(sa.x); // c is on sub-track 1, left of a
+    const pts = l.stems.find((s) => s.id === c.id)!.points;
+    const xLeg = l.rules[0]!.x1 + TL_GEOM.dotR + 2;
+    // Out of c's own bar's right edge at its start, across to the leg beside the rule, down, in.
+    expect(pts[0]).toEqual([sc.x + sc.w, sc.y]);
+    expect(pts[1]).toEqual([xLeg, sc.y]);
+    expect(pts[2]![0]).toBe(xLeg);
+    expect(pts[3]![1]).toBe(pts[2]![1]);
+    expect(pts[3]![0]).toBeLessThan(labelOf(l, c.id).box.x0);
+    // A displaced sub-track-0 span keeps the leader that starts beside the rule.
+    const b = ev("2020-01-01", "b", { endStr: "2021" });
+    const d = ev("2021-01-01", "d, pushed down by b", { endStr: "2022" });
+    const l0 = v([ev("2020-01-01", "p"), b, d, ev("2090", "far")]);
+    for (const s of l0.stems) expect(s.points[0]![0]).toBe(l0.rules[0]!.x1 + TL_GEOM.dotR + 2);
   });
 });
 

@@ -165,6 +165,11 @@ function fadeId(color: string, dir: "right" | "down", start: number): string {
   return `tblfade-${color.replace(/[^a-zA-Z0-9]/g, "")}-${dir}-${Math.round(start * 1000)}`;
 }
 
+/** Marker ring width: a projected (hollow) marker carries the heavier ring. */
+const markerStroke = (projected: boolean): number => (projected ? 1.5 : 1);
+/** How far a marker's background halo extends beyond its stroked edge. */
+const MARKER_HALO = 1.5;
+
 function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colors: Map<string, string>): SVGSVGElement {
   const el = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] => {
     const n = doc.createElementNS(SVG_NS, tag) as SVGElementTagNameMap[K];
@@ -252,6 +257,16 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
       role: "listitem",
       "aria-label": `${e.dateText}: ${e.title}.${e.description ? ` ${e.description}` : ""}`,
     });
+    const m = markers.get(id);
+    // A point marker sits in a background-colour halo so it stays visible on a same-colour span bar
+    // (the dot and an 8px bar are otherwise the same ink). Painted first in its event, so the stem is
+    // drawn over it and still meets the marker; the marker's own fill, ring and radius are unchanged.
+    if (m) {
+      item.append(el("circle", {
+        class: "tbl-timeline-marker-halo", "data-series": series, cx: r2(m.cx), cy: r2(m.cy),
+        r: TL_GEOM.dotR + markerStroke(m.projected) / 2 + MARKER_HALO, fill: tokens.structural.background,
+      }));
+    }
     const stem = stems.get(id);
     if (stem) {
       item.append(el("polyline", {
@@ -271,13 +286,12 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
           : { fill: paint }),
       }));
     }
-    const m = markers.get(id);
     if (m) {
       // Projected: a white disc in a category-colour ring (spec §5.2). White, not a hole: the dot
       // sits on the rule, which would otherwise show through it.
       item.append(el("circle", {
         class: "tbl-timeline-marker", "data-series": series, cx: r2(m.cx), cy: r2(m.cy), r: TL_GEOM.dotR,
-        fill: m.projected ? tokens.structural.background : color, stroke: color, "stroke-width": m.projected ? 1.5 : 1,
+        fill: m.projected ? tokens.structural.background : color, stroke: color, "stroke-width": markerStroke(m.projected),
       }));
     }
     const lab = labels.get(id);

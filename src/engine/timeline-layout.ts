@@ -24,6 +24,9 @@ export const TL_GEOM = {
   axisH: 24,
   minVerticalHeight: 400,
   vPad: 8,
+  /** Horizontal: space kept above the topmost label box (or lane name) once the band the uniform row
+   *  pitch leaves above shorter top-row boxes is trimmed. */
+  topPad: 4,
   vRuleGap: 12,
   vLabelGap: 10,
   vDateGutterMin: 56,
@@ -138,6 +141,16 @@ function hardBreak(line: string, framePx: number, measure: (s: string) => number
   return out;
 }
 
+/** Date text wraps between words and after an en dash, preferring the dash: a range too wide for
+ *  one line breaks as "<start>–" / "<end>" before either date breaks inside itself, and each part
+ *  then wraps between words only if it still does not fit. `maxPx` is in estimateLabelWidth's
+ *  (regular-weight) terms, as wrapToWidth's is. */
+function wrapDate(text: string, maxPx: number, size: number): string[] {
+  if (estimateLabelWidth(text, size) <= maxPx) return [text];
+  const parts = text.split(/(?<=–)/).map((s) => s.trim()).filter(Boolean);
+  return parts.flatMap((part) => wrapToWidth(part, maxPx, size).split("\n"));
+}
+
 /** Each line wraps to `maxPx`; a single word wider than that widens the box, up to `framePx`. */
 function buildBlock(e: LayoutEvent, maxPx: number, withDate: boolean, framePx: number): TextBlock {
   const roles: LineRole[] = [];
@@ -145,7 +158,9 @@ function buildBlock(e: LayoutEvent, maxPx: number, withDate: boolean, framePx: n
   const wrapPx = Math.min(maxPx, framePx);
   const push = (role: LineRole, text: string | null): void => {
     if (!text) return;
-    for (const wrapped of wrapToWidth(text, wrapPx, LINE_STYLE[role].size).split("\n")) {
+    const size = LINE_STYLE[role].size;
+    const wrappedLines = role === "date" ? wrapDate(text, wrapPx, size) : wrapToWidth(text, wrapPx, size).split("\n");
+    for (const wrapped of wrappedLines) {
       for (const line of hardBreak(wrapped, framePx, (s) => textW(role, s))) {
         roles.push(role);
         texts.push(line);
@@ -382,6 +397,29 @@ function layoutHorizontal(inp: TimelineLayoutInput): TimelineLayout {
     out.ticks = scale.ticks(n).map((t) => ({ x: scale(t), y, text: fmt(t), anchor: "middle" as const }));
     cursor += G.axisH;
   }
+  // Rows share one pitch (the tallest box), so when the top row holds only shorter boxes a band is
+  // left above them. Trim it: shift everything up uniformly so the topmost box or lane name sits
+  // topPad below the top. Lanes stack downward, so this is the first lane's top.
+  const tops = [
+    ...out.labels.map((x) => x.box.y0),
+    ...out.laneLabels.map((x) => x.y - LANE_SIZE),
+    ...out.markers.map((m) => m.cy - G.dotR),
+    ...out.spans.map((s) => s.y),
+  ];
+  const shift = tops.length ? Math.max(0, Math.min(...tops) - G.topPad) : 0;
+  if (shift > 0) {
+    for (const r of out.rules) { r.y1 -= shift; r.y2 -= shift; }
+    for (const m of out.markers) m.cy -= shift;
+    for (const s of out.spans) s.y -= shift;
+    for (const s of out.stems) s.points = s.points.map(([x, y]): [number, number] => [x, y - shift]);
+    for (const lab of out.labels) {
+      lab.box = { ...lab.box, y0: lab.box.y0 - shift, y1: lab.box.y1 - shift };
+      for (const ln of lab.lines) ln.y -= shift;
+    }
+    for (const ll of out.laneLabels) ll.y -= shift;
+    for (const k of out.ticks) k.y -= shift;
+    cursor -= shift;
+  }
   out.height = Math.ceil(cursor);
   // Sort labels/markers/spans/stems into chronological order so DOM order = reading order.
   const rank = new Map(out.order.map((id, i) => [id, i]));
@@ -463,8 +501,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
         e.id,
         textW("date", e.dateText) <= dateW
           ? [e.dateText]
-          : wrapToWidth(e.dateText, dateW / BOLD_FACTOR, LINE_STYLE.date.size)
-              .split("\n")
+          : wrapDate(e.dateText, dateW / BOLD_FACTOR, LINE_STYLE.date.size)
               .flatMap((ln) => hardBreak(ln, dateW + 1e-6, (s) => textW("date", s))),
       ]),
     );
@@ -531,11 +568,14 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     out.labels.push({ id: e.id, category: e.category, box, lines });
     // A label pushed off its date gets an elbow: out beside the marker (right of the rule, clear of
     // every sub-track bar), down parallel to the rule, then into the label's first line. Leaders in
-    // a pushed cluster share the vertical leg instead of fanning into a smear.
+    // a pushed cluster share the vertical leg instead of fanning into a smear. A span on an outer
+    // sub-track starts its leader at its own bar's right edge, so it does not read as the inner bar's.
     const labelMid = top + LINE_STYLE.date.lineH / 2;
     if (labelMid - y > 0.5) {
       const xLeg = ruleX + G.dotR + 2;
-      out.stems.push({ id: e.id, category: e.category, points: [[xLeg, y], [xLeg, labelMid], [textX - 4, labelMid]] });
+      const k = isSpan(e) ? (sub.get(e.id) as number) : 0;
+      const from: Array<[number, number]> = k > 0 ? [[ruleX + barW / 2 - k * (barW + gap), y], [xLeg, y]] : [[xLeg, y]];
+      out.stems.push({ id: e.id, category: e.category, points: [...from, [xLeg, labelMid], [textX - 4, labelMid]] });
     }
   }
 
