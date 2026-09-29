@@ -37,6 +37,12 @@ describe("timeline — structural validation", () => {
     expect(validateSpec({ ...TL, timeline: { max_rows: 0 } }).valid).toBe(false);
   });
 
+  it("accepts label_width 400 and max_rows 6, rejects 401 and 7", () => {
+    expect(validateSpec({ ...TL, timeline: { label_width: 400, max_rows: 6 } })).toEqual({ valid: true, errors: [] });
+    expect(validateSpec({ ...TL, timeline: { label_width: 401 } }).valid).toBe(false);
+    expect(validateSpec({ ...TL, timeline: { max_rows: 7 } }).valid).toBe(false);
+  });
+
   it("rejects axis with even spacing", () => {
     expect(errs({ ...TL, timeline: { axis: true, spacing: "even" } })).toMatch(/timeline\.axis cannot be used with timeline\.spacing "even"/);
   });

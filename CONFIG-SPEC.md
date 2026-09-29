@@ -802,7 +802,7 @@ validation errors on every other chart type.
 |---|---|---|
 | `orientation` | enum | `horizontal` (default) \| `vertical` — oldest at top, bold dates right-aligned in a column left of the rule, text to its right; at least 400px tall, growing as the labels need. |
 | `timeline.spacing` | enum | `proportional` (default — distance along the rule is elapsed time) \| `even` (every distinct date, span ends included, gets an equal slot; use it when only the order matters). |
-| `timeline.lanes` | boolean | One track per category, stacked top to bottom in `series_order` and named in a left gutter; each lane's labels sit above it only. Long lane names wrap, and the gutter never takes more than 30% of the width. With lanes the legend's category rows default off, since the gutter names them; `series_legend: true` brings them back. **Horizontal only** — a validation error with `orientation: vertical`; a lanes timeline that switches to vertical on screen (see `auto_vertical`) draws one track and shows the category legend instead. Default false. |
+| `timeline.lanes` | boolean | One track per category, stacked top to bottom in `series_order` and named in a left gutter; each lane's labels sit above it only. Long lane names wrap, and the gutter never takes more than 30% of the width. With lanes the legend's category rows default off, since the gutter names them; `series_legend: true` brings them back. **Horizontal only** — a validation error with `orientation: vertical`; a lanes timeline that switches to vertical on screen (see `auto_vertical`) draws one track, and its legend shows category rows as a timeline without lanes would. Default false. |
 | `timeline.axis` | boolean | Adds sparse date ticks, at the axis tick size and colour; on a vertical timeline they sit in a column left of the dates. **On a vertical render too narrow to fit that column beside the dates, the ticks are omitted** — so an authored axis can disappear on a narrow screen. A validation error with `spacing: even`, where ticks would imply proportional gaps. `x_axis_title` is accepted on a timeline only with it. Default false. |
 | `timeline.date_format` | string | d3 `timeFormat` pattern for the bold date text. Default from the data: `%Y` when every date is 1 January, `%b %Y` when every date is the 1st of a month, otherwise `%b %-d, %Y`. A span reads `2031–2035` and an open-ended one `2040–`; a range too long for its line breaks after the en dash. `columns.date_label` overrides it row by row. |
 | `timeline.label_width` | number | The width, in px, that a horizontal label's text wraps to. 60–400. Default 150. |
@@ -826,9 +826,10 @@ need.
 
 **Vertical layout.** A label pushed down by the one before it is joined to its marker by an elbow
 leader. The region left of the text (tick column, dates and span sub-tracks) is held to 45% of the
-width where the dates' longest word allows: dates wrap between words or after a range's en dash, and
-a crowded band of sub-tracks narrows rather than pushing text off the chart. On screen a timeline
-renders at the card's own width on a phone, going vertical rather than scrolling.
+width where both the dates' longest word and the sub-tracks' minimum width allow: dates wrap between
+words or after a range's en dash, and a crowded band of sub-tracks narrows rather than pushing text
+off the chart. On screen a timeline renders at the card's own width down to 280px, going vertical
+rather than scrolling; a card narrower than that gets a 280px chart.
 
 **PNG export** always renders the authored orientation — it never switches to vertical — at the
 export's chart width (744px with a right-hand legend, the full 920px otherwise), and sizes the image

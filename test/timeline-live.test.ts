@@ -74,6 +74,12 @@ describe("timeline live mount", () => {
     expect(orientationOf(svg)).toBe("vertical");
   });
 
+  it("floors the live width at 280px: a narrower card renders a 280px chart", () => {
+    const svg = svgOf(mountAt(250));
+    expect(Number(svg.getAttribute("width"))).toBe(280);
+    expect(orientationOf(svg)).toBe("vertical");
+  });
+
   it("stays horizontal with auto_vertical: false", () => {
     const svg = svgOf(mountAt(340, { ...SPEC, timeline: { auto_vertical: false } } as ChartSpec));
     expect(Number(svg.getAttribute("width"))).toBe(340);

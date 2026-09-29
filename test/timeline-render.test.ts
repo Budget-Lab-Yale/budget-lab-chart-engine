@@ -78,6 +78,22 @@ describe("timeline render", () => {
     expect(text).not.toContain("Jan");
   });
 
+  it("formats dates with an authored timeline.date_format", () => {
+    const text = r({ timeline: { date_format: "%Y.%m" } }).svg.textContent!;
+    expect(text).toContain("2031.01–2035.01");
+    expect(text).toContain("2040.01–");
+    expect(text).not.toContain("2031–2035");
+  });
+
+  it("wraps horizontal labels at an authored timeline.label_width", () => {
+    const long = "A long event headline that wraps onto several lines at the default width";
+    const rows = [{ ...ROWS[0], title: long }, ...ROWS.slice(1)] as TidyRow[];
+    const linesOf = (s: Partial<ChartSpec>) =>
+      r(s, 900, rows).svg.querySelectorAll('g[role="listitem"]')[0]!.querySelectorAll("text").length;
+    expect(linesOf({ timeline: { label_width: 400 } })).toBeLessThan(linesOf({}));
+    expect(linesOf({})).toBe(linesOf({ timeline: { label_width: 150 } }));
+  });
+
   it("uses a date_label cell over the formatted date", () => {
     const rows = ROWS.map((x, i) => ({ ...x, dl: i === 0 ? "FY2026" : "" })) as TidyRow[];
     const text = r({ columns: { ...SPEC.columns, date_label: "dl" } }, 900, rows).svg.textContent!;
@@ -274,6 +290,10 @@ describe("resolveTimelineOrientation", () => {
     expect(resolveTimelineOrientation(SPEC, ROWS, 400)).toBe("vertical");
     const dense = Array.from({ length: 16 }, (_, i) => ({ date: `2026-${String((i % 12) + 1).padStart(2, "0")}-01`, end: "", title: `A reasonably long event title ${i}`, detail: "", kind: "policy", projected: "" })) as TidyRow[];
     expect(resolveTimelineOrientation(SPEC, dense, 700)).toBe("vertical");
+  });
+  it("switches on width alone at the 480px boundary", () => {
+    expect(resolveTimelineOrientation(SPEC, ROWS, 479)).toBe("vertical");
+    expect(resolveTimelineOrientation(SPEC, ROWS, 480)).toBe("horizontal");
   });
   it("never switches with auto_vertical: false, never leaves an authored vertical", () => {
     expect(resolveTimelineOrientation({ ...SPEC, timeline: { auto_vertical: false } } as ChartSpec, ROWS, 300)).toBe("horizontal");
