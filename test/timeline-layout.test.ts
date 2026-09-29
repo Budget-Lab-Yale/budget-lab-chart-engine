@@ -790,8 +790,26 @@ describe("vertical layout at narrow widths (side columns)", () => {
     }
   };
   // Six overlapping spans with long dates: sub-tracks 0-5, so five label on the left.
-  const sixSeptemberSpans = () => Array.from({ length: 6 }, (_, i) =>
-    ev(`2026-0${i + 1}-01`, `Event ${i} title`, { endStr: "2030", dateText: "September 30, 2026" }));
+  const sixSeptemberSpans = (dateText = "September 30, 2026") => Array.from({ length: 6 }, (_, i) =>
+    ev(`2026-0${i + 1}-01`, `Event ${i} title`, { endStr: "2030", dateText }));
+  // The spans golden's data (sub-tracks 0 and 1).
+  const SPANS = () => [
+    ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" }),
+    ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021 – Dec 31, 2021" }),
+    ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022 –" }),
+    ev("2025-07-04", "OBBBA enacted", { dateText: "Jul 4, 2025" }),
+    ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026 – Dec 31, 2030" }),
+    ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034" }),
+  ];
+  const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
+  // Ruling 28, from the documented floors: the left date-word floor (capped at 40%) plus its gap, or
+  // the edge pad; the band at 3px bars and 1px gaps; the marker half-width and gap; the right
+  // date-word floor. A tick column is drawn when it fits in what is left.
+  const tickRoom = (width: number, leftWord: number, nSub: number, rightWord: number): number =>
+    width - (leftWord ? Math.min(leftWord, 0.4 * width) + TL_GEOM.vLabelGap : 4)
+    - Math.max(TL_GEOM.dotR, nSub ? 1.5 + (nSub - 1) * 4 : 0) - (TL_GEOM.dotR + TL_GEOM.vLabelGap) - rightWord;
+  const tickCol = (l: TimelineLayout): number => Math.max(...l.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
+  const tickRightOf = (l: TimelineLayout): number => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
 
   it("wraps long dates between words in the capped left column, keeping every label in the frame", () => {
     const events = sixSeptemberSpans();
@@ -803,11 +821,13 @@ describe("vertical layout at narrow widths (side columns)", () => {
     expect(left).toHaveLength(5);
     // The left column is held to 40% of the width, and its dates wrapped to fit it.
     for (const lab of left) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(0.4 * W + 1e-6);
-    expect(left.every((x) => x.lines.filter((ln) => ln.role === "date").length === 2)).toBe(true);
+    expect(left.every((x) => x.lines.filter((ln) => ln.role === "date").length >= 2)).toBe(true);
     expect(Math.max(...left.map((x) => x.box.x1))).toBeLessThanOrEqual(leftmostMark(l));
-    // Month ticks do not fit beside the two text columns at 280: they are omitted rather than
-    // squeezing the right column or breaking dates mid-word.
-    expect(l.ticks).toEqual([]);
+    // The tick column is judged against the floors ("September" each side, the band at its
+    // floors), so the month ticks fit here, leftmost, outside the left labels.
+    expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(tickCol(l)).toBeLessThanOrEqual(tickRoom(W, bold("September"), 6, bold("September")));
+    expect(Math.min(...left.map((x) => x.box.x0))).toBeGreaterThan(tickRightOf(l));
   });
 
   it("omits the vertical tick column only when it does not fit", () => {
@@ -818,8 +838,23 @@ describe("vertical layout at narrow widths (side columns)", () => {
       expect(Math.min(...l.labels.flatMap((x) => x.lines.map((ln) => extent(ln)[0])))).toBeGreaterThan(tickRight);
       expect(l.rules[0]!.x1).toBeLessThanOrEqual(tickRight + 40);
     }
-    // The same six-span data that drops its ticks at 280 keeps them where there is room.
-    const wide = v(sixSeptemberSpans(), { width: 900, axis: true });
+    // The spans golden's data keeps its year ticks down to 280: each tick column fits beside the
+    // floors ("<year> –" each side, two sub-tracks).
+    for (const width of [343, 320, W]) {
+      const l = v(SPANS(), { width, axis: true });
+      expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+      expect(tickCol(l)).toBeLessThanOrEqual(tickRoom(width, bold("2021 –"), 2, bold("2017 –")));
+      expect(Math.min(...l.labels.flatMap((x) => x.lines.map((ln) => extent(ln)[0])))).toBeGreaterThan(tickRightOf(l));
+      inFrame(l, width);
+    }
+    // A date word too wide to leave any tick column room at 280 (less than the narrowest possible,
+    // a four-digit year plus its gap) omits the ticks; the same data keeps them at 900.
+    const late = sixSeptemberSpans("Late-September 30, 2026");
+    expect(tickRoom(W, bold("Late-September"), 6, bold("Late-September"))).toBeLessThan(estimateLabelWidth("2027", TBL.size.axis) + 8);
+    const narrow = v(late, { width: W, axis: true });
+    expect(narrow.ticks).toEqual([]);
+    inFrame(narrow);
+    const wide = v(sixSeptemberSpans("Late-September 30, 2026"), { width: 900, axis: true });
     expect(wide.ticks.length).toBeGreaterThanOrEqual(2);
     inFrame(wide, 900);
   });
@@ -893,17 +928,15 @@ describe("vertical layout at narrow widths (side columns)", () => {
     expect(labelOf(capped, cl.id).box.x1).toBeCloseTo(0.4 * 360, 9);
     expect(labelOf(capped, cl.id).lines.filter((ln) => ln.role === "title").length).toBeGreaterThan(1);
     expect(capped.rules[0]!.x1).toBeCloseTo(0.4 * 360 + gap + band, 9);
+    // With ticks, the tick column comes first and the left column starts where it ends.
+    const ticked = v([a, c, ev("2040", "b")], { width: 360, axis: true });
+    expect(ticked.ticks.length).toBeGreaterThanOrEqual(2);
+    const tw = tickCol(ticked);
+    expect(labelOf(ticked, c.id).box.x1).toBeCloseTo(tw + need, 9);
+    expect(ticked.rules[0]!.x1).toBeCloseTo(tw + need + gap + band, 9);
   });
 
   it("keeps every box inside the frame at 280 and 375", () => {
-    const SPANS = () => [
-      ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" }),
-      ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021 – Dec 31, 2021" }),
-      ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022 –" }),
-      ev("2025-07-04", "OBBBA enacted", { dateText: "Jul 4, 2025" }),
-      ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026 – Dec 31, 2030" }),
-      ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034" }),
-    ];
     const withDesc = () => FIG7().map((e) => ({ ...e, description: "A description long enough to wrap onto several lines in a narrow column" }));
     for (const width of [280, 375]) {
       for (const events of [FIG7(), withDesc(), SPANS(), sixSeptemberSpans()]) {
@@ -965,6 +998,28 @@ describe("vertical layout at narrow widths (side columns)", () => {
           expect(s.startsWith(" ")).toBe(false);
           expect(s.endsWith(" ")).toBe(false);
         }
+        inFrame(l, width);
+      }
+    }
+    // On the left the floor is capped at 40% of the width, so a left-side unit wider than that is
+    // split too rather than widening the left column past the frame (the track and the right
+    // column would follow it off the chart).
+    for (const dateText of [`${word} – 2035`, `${word}–2035`]) {
+      for (const width of [280, 320, 375]) {
+        const outer = ev("2020-01-02", "outer", { endStr: "2035", dateText });
+        const l = v([ev("2020", "inner", { endStr: "2030" }), outer, ev("2040", "z")], { width });
+        const lab = labelOf(l, outer.id);
+        expect(lab.box.x1).toBeLessThan(l.rules[0]!.x1); // on the left
+        expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(0.4 * width + 1e-6);
+        const d = lab.lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+        expect(d.length).toBeGreaterThan(2);
+        for (const s of d) {
+          expect(s).not.toBe("–");
+          expect(s).not.toBe(" –");
+          expect(s.startsWith(" ")).toBe(false);
+          expect(s.endsWith(" ")).toBe(false);
+        }
+        expect(l.rules[0]!.x1).toBeLessThan(width);
         inFrame(l, width);
       }
     }

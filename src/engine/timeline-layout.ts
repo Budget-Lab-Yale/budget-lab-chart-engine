@@ -610,17 +610,20 @@ function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: 
  *
  *  Width budget, left to right: [tick column] → [left text column + gap, only when some span is on
  *  k ≥ 1; otherwise a V_EDGE pad] → span band → rule → marker half-width + gap → right text column.
- *  Each side's NEED is its widest unwrapped line capped at V_SIDE_SHARE (40%) of the width, but
- *  never below its widest date unit (dates wrap only between words or after an en dash). Allocated
- *  in this priority:
- *   1. The left column takes its need.
- *   2. The band takes its natural width, compressed (bars floored at V_MIN_BAR, gaps at
- *      V_MIN_TRACK_GAP) as far as it takes to leave the right column its need.
- *   3. If the band at its floors still leaves the right column short, the left column yields, down
- *      to its widest date unit.
- *   4. The tick column is drawn only if the right column still gets its need beside it; otherwise it
- *      is omitted (not squeezed), and the x-axis title with it (amendment A8).
+ *  Each side's FLOOR is its widest date unit (dates wrap only between words or after an en dash),
+ *  on the left capped at V_SIDE_SHARE (40%) of the width; its NEED is its widest unwrapped line
+ *  capped at 40%, but never below its floor. Allocated in this priority:
+ *   1. The tick column is drawn if it fits beside the left floor, the band at its floors (bars
+ *      V_MIN_BAR, gaps V_MIN_TRACK_GAP), the right floor and the fixed gaps; otherwise it is omitted
+ *      (not squeezed), and the x-axis title with it (amendment A8).
+ *   2. In what remains, the left column takes its need.
+ *   3. The band takes its natural width, compressed toward its floors as far as it takes to leave
+ *      the right column its need.
+ *   4. If the band at its floors still leaves the right column short, the left column yields, down
+ *      to its floor.
  *   5. The right column gets everything that remains.
+ *  A left date unit wider than 40% is split by hardBreakDate, so the left column never pushes the
+ *  track off the frame; a right one is split to whatever the right column gets.
  *  With nothing on the left the track sits V_EDGE + a marker radius from the tick column (or the
  *  frame edge), and the right column gets the rest of the width. The axis length is chosen so the
  *  taller side's whole stack fits, which keeps pushes local. */
@@ -641,45 +644,58 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   const tail = events.some((e) => e.ongoing) ? G.fade : 0;
 
   const share = V_SIDE_SHARE * W;
-  const needOf = (evs: LayoutEvent[]): { need: number; word: number } => {
+  // `word` is the side's widest date unit (the floor below which a date would split mid-word) and
+  // `need` its widest unwrapped line, capped at `share`. On the left the floor is capped at `share`
+  // too, so the left column never passes 40% of the width: a wider unit there is split by
+  // hardBreakDate rather than pushing the track and the right column off the frame.
+  const needOf = (evs: LayoutEvent[], capWord: boolean): { need: number; word: number } => {
     if (!evs.length) return { need: 0, word: 0 };
-    const word = Math.max(0, ...evs.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u))));
+    const rawWord = Math.max(0, ...evs.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u))));
+    const word = capWord ? Math.min(share, rawWord) : rawWord;
     const widest = (role: LineRole, s: string | null): number[] => (s ? s.split("\n").map((x) => textW(role, x)) : []);
     const nat = Math.max(0, ...evs.flatMap((e) => [
       ...widest("date", e.dateText), ...widest("title", e.title), ...widest("description", e.description),
     ]));
     return { need: Math.max(word, Math.min(share, nat)), word };
   };
-  const leftNeed = needOf(left);
-  const rightNeed = needOf(right).need;
+  const leftNeed = needOf(left, true);
+  const rightNeeds = needOf(right, false);
+  const rightNeed = rightNeeds.need;
   const rightOf = (w: number): number => Math.max(G.dotR, nSub ? w / 2 : 0) + G.vLabelGap;
   const leftOf = (lw: number): number => (hasLeft ? lw + G.vLabelGap : V_EDGE);
 
-  // Steps 1-2: the band compresses to leave the right column its need beside the left's.
-  const bandRoom = W - leftOf(leftNeed.need) - rightNeed - rightOf(G.spanH);
-  let barW: number = G.spanH;
-  let gap: number = G.subTrackGap;
-  // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero).
-  if (nSub && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
-    const s = Math.max(0, bandRoom) / bandOf(barW, gap);
-    barW = G.spanH * s;
-    gap = G.subTrackGap * s;
-    if (gap < V_MIN_TRACK_GAP) {
-      gap = V_MIN_TRACK_GAP;
-      barW = (Math.max(0, bandRoom) - (nSub - 1) * gap) / (nSub - 0.5);
+  // Step 1: the tick column fits if it leaves room for the left column's date-word floor, the band
+  // at its floors, the right column's date-word floor and the fixed gaps.
+  const bandFloor = Math.max(G.dotR, bandOf(V_MIN_BAR, V_MIN_TRACK_GAP));
+  const tickRoom = W - leftOf(leftNeed.word) - bandFloor - rightOf(V_MIN_BAR) - rightNeeds.word;
+
+  // Steps 2-4, in what the tick column leaves (`avail`).
+  const allocate = (avail: number) => {
+    // The band compresses to leave the right column its need beside the left's.
+    const bandRoom = avail - leftOf(leftNeed.need) - rightNeed - rightOf(G.spanH);
+    let barW: number = G.spanH;
+    let gap: number = G.subTrackGap;
+    // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero).
+    if (nSub && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
+      const s = Math.max(0, bandRoom) / bandOf(barW, gap);
+      barW = G.spanH * s;
+      gap = G.subTrackGap * s;
+      if (gap < V_MIN_TRACK_GAP) {
+        gap = V_MIN_TRACK_GAP;
+        barW = (Math.max(0, bandRoom) - (nSub - 1) * gap) / (nSub - 0.5);
+      }
+      barW = Math.max(V_MIN_BAR, barW);
     }
-    barW = Math.max(V_MIN_BAR, barW);
-  }
-  const band = Math.max(G.dotR, bandOf(barW, gap));
-  const fixed = band + rightOf(barW);
-  // Step 3: the left column yields toward its widest date unit if the right is still short.
-  const short = rightNeed - (W - leftOf(leftNeed.need) - fixed);
-  const leftW = hasLeft ? Math.max(leftNeed.word, leftNeed.need - Math.max(0, short)) : 0;
-  // Step 4: what a tick column may take without costing the right column its need.
-  const tickRoom = W - leftOf(leftW) - fixed - rightNeed;
+    const band = Math.max(G.dotR, bandOf(barW, gap));
+    // The left column yields toward its date-word floor if the right is still short.
+    const short = rightNeed - (avail - leftOf(leftNeed.need) - band - rightOf(barW));
+    const leftW = hasLeft ? Math.max(leftNeed.word, leftNeed.need - Math.max(0, short)) : 0;
+    return { barW, gap, band, leftW };
+  };
 
   const geometry = (tickNeed: number) => {
     const tickW = tickNeed > 0 && tickNeed <= tickRoom ? tickNeed : 0;
+    const { barW, gap, band, leftW } = allocate(W - tickW);
     const ruleX = tickW + leftOf(leftW) + band;
     const leftCol: VColumn = { x0: tickW, x1: tickW + leftW, anchor: "end" };
     const rightCol: VColumn = { x0: ruleX + rightOf(barW), x1: W, anchor: "start" };
@@ -687,7 +703,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const blocks = new Map(events.map((e) => [e.id, vBlock(e, kOf(e) > 0 ? leftW : colR)]));
     const stackOf = (evs: LayoutEvent[]): number => vStack(evs.map((e) => blocks.get(e.id) as TextBlock));
     const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stackOf(left), stackOf(right));
-    return { tickW, ruleX, leftCol, rightCol, blocks, L };
+    return { tickW, ruleX, barW, gap, band, leftCol, rightCol, blocks, L };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
@@ -703,7 +719,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, ruleX, leftCol, rightCol, blocks, L } = geometry(tickNeed);
+  const { tickW, ruleX, barW, gap, band, leftCol, rightCol, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 

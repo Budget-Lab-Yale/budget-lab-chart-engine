@@ -104,13 +104,13 @@ describe("timeline live mount", () => {
   });
 
   it("shows the x-axis title only while the ticks are drawn, across resizes", async () => {
-    // Month ticks fit at 900 but not beside the two text columns of six overlapping spans on a
-    // 280px vertical render (A8).
+    // Ticks fit at 900, but on a 280px vertical render six overlapping spans with a date word this
+    // wide ("Late-September") leave the tick column no room beside the floors (A8, Ruling 28).
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
     const spec = {
       ...SPEC, columns: { x: "date", end: "end", label: "title", date_label: "dl" }, timeline: { axis: true }, x_axis_title: "Month",
     } as ChartSpec;
-    const rows = Array.from({ length: 6 }, (_, i) => ({ date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, dl: "September 30, 2026" })) as TidyRow[];
+    const rows = Array.from({ length: 6 }, (_, i) => ({ date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, dl: "Late-September 30, 2026" })) as TidyRow[];
     const host = mountAt(900, spec, rows);
     const titles = () => [...host.querySelectorAll(".figure-x-axis-title")].map((t) => t.textContent);
     const ticks = () => svgOf(host).querySelectorAll(".tbl-timeline-tick").length;

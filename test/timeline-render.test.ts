@@ -277,8 +277,9 @@ describe("timeline render", () => {
   });
 
   it("paints vertical leaders above spans and markers, still below the labels; horizontal stems stay beneath", () => {
-    // Vertical leaders run beside the rule and never cross label text, so they paint over the bars:
-    // beneath, an outer sub-track span's leader would hide under the inner bar it crosses.
+    // Vertical leaders run beside the track and never cross label text, so they paint over the bars:
+    // beneath, a left-side leader leaving an inner sub-track's bar would hide under the outer bars it
+    // crosses.
     const layerSeq = (svg: SVGSVGElement): string[] =>
       [...svg.children].map((c) => c.getAttribute("class") ?? c.getAttribute("role") ?? c.tagName).filter((n) => n !== "defs" && n !== "tbl-timeline-chrome");
     const vertical = renderChart(SPEC, ROWS, { width: 360, timelineOrientation: "vertical" }).svg;
@@ -323,11 +324,11 @@ describe("timeline render", () => {
     const wide = r(axis);
     expect(q(wide.svg, ".tbl-timeline-tick").length).toBeGreaterThanOrEqual(2);
     expect(wide.xAxisTitle).toBe("Year");
-    // Six overlapping spans open a left column; at 280 month ticks do not fit beside it and the
-    // right column (amendment A8): no ticks, no title.
+    // Six overlapping spans whose date word ("Late-September") is too wide on both sides at 280 to
+    // leave a tick column any room beside the floors (amendment A8, Ruling 28): no ticks, no title.
     const months = Array.from({ length: 6 }, (_, i) => ({
       date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, detail: "", kind: "policy", projected: "",
-      dl: "September 30, 2026",
+      dl: "Late-September 30, 2026",
     })) as TidyRow[];
     const narrow = renderChart(
       { ...SPEC, ...axis, columns: { ...SPEC.columns, date_label: "dl" } } as ChartSpec, months,
