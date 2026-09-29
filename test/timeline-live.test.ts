@@ -237,6 +237,14 @@ describe("timeline live mount", () => {
     events("policy").forEach((el) => expect(el.classList.contains("tbl-dimmed")).toBe(false));
   });
 
+  it("legend: false shows no legend items in a mounted card", () => {
+    const shown = mountAt(900, CAT_SPEC, CAT_ROWS);
+    expect(shown.querySelectorAll(".tbl-legend-item").length).toBeGreaterThan(0); // the default, for contrast
+    document.body.replaceChildren();
+    const host = mountAt(900, { ...CAT_SPEC, legend: false } as ChartSpec, CAT_ROWS);
+    expect(host.querySelectorAll(".tbl-legend-item")).toHaveLength(0);
+  });
+
   it("computeChartHeight returns the timeline's content height", () => {
     expect(computeChartHeight(SPEC, ROWS)).toBeLessThan(400);
     expect(computeChartHeight({ ...SPEC, orientation: "vertical" } as ChartSpec, ROWS)).toBeGreaterThanOrEqual(400);

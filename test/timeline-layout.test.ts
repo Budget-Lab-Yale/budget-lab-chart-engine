@@ -318,11 +318,11 @@ describe("horizontal layout", () => {
     };
     // The spans golden fixture (test/fixtures/timeline-spans.csv) as prepareTimeline builds it.
     const SPANS = () => [
-      ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025", category: "law" }),
-      ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021–Dec 31, 2021", category: "law" }),
-      ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022–", category: "law" }),
+      ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025", category: "law" }),
+      ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021 – Dec 31, 2021", category: "law" }),
+      ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022 –", category: "law" }),
       ev("2025-07-04", "OBBBA enacted", { dateText: "Jul 4, 2025", category: "law" }),
-      ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026–Dec 31, 2030", category: "projection", projected: true }),
+      ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026 – Dec 31, 2030", category: "projection", projected: true }),
       ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034", category: "projection", projected: true }),
     ];
     const LANES = [{ key: "law", label: "law" }, { key: "projection", label: "projection" }];
@@ -470,10 +470,10 @@ describe("horizontal layout", () => {
   });
 
   it("breaks a date range after the en dash before breaking inside a date", () => {
-    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
+    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" });
     const l = layoutTimeline(base([e, ev("2030", "z")]));
     expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
-      "Dec 22, 2017–", "Dec 31, 2025",
+      "Dec 22, 2017 –", "Dec 31, 2025",
     ]);
     // A date with no dash still wraps between words, as before.
     const plain = ev("2017-12-22", "x", { dateText: "September 30, 2017 through the end" });
@@ -585,10 +585,10 @@ describe("vertical layout", () => {
   });
 
   it("breaks a date range after the en dash before breaking inside a date", () => {
-    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
+    const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" });
     const l = v([e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
     expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
-      "Dec 22, 2017–", "Dec 31, 2025",
+      "Dec 22, 2017 –", "Dec 31, 2025",
     ]);
   });
 
@@ -677,17 +677,21 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
 
   it("compresses a crowded sub-track band instead of pushing text off-canvas", () => {
     const spans = Array.from({ length: 20 }, (_, i) =>
-      ev(`${1990 + i}`, `Span ${i}`, { endStr: `${2030 + i}`, dateText: `${1990 + i}–${2030 + i}` }));
+      ev(`${1990 + i}`, `Span ${i}`, { endStr: `${2030 + i}`, dateText: `${1990 + i} – ${2030 + i}` }));
     const l = v(spans, { width: W });
     expect(allFinite(l)).toBe(true);
     expect(l.spans).toHaveLength(20);
     inFrame(l);
-    // Each year range is one word: it stays whole, and the cap yields instead.
+    // The dash is now a real break point (D1's spaced range), so a crowded band no longer forces
+    // the whole range onto one line: it wraps there — "<start> –" then "<end>" — never mid-date,
+    // while the sub-track band still compresses to its floor rather than pushing anything off-canvas.
     wholeWords(l, spans);
-    expect(dateLines(l)).toHaveLength(20);
+    const dates = dateLines(l);
+    expect(dates).toHaveLength(40);
+    for (let i = 0; i < dates.length; i += 2) expect(dates[i]!.text.endsWith(" –")).toBe(true);
     for (const s of l.spans) {
       expect(s.x).toBeGreaterThanOrEqual(0);
-      expect(s.w).toBeGreaterThanOrEqual(3);
+      expect(s.w).toBeCloseTo(3, 6); // at the V_MIN_BAR floor
     }
     // Twenty distinct sub-tracks, none overlapping another.
     const xs = [...new Set(l.spans.map((s) => s.x))].sort((a, b) => a - b);

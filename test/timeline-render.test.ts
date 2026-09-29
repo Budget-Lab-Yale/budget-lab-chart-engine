@@ -73,16 +73,16 @@ describe("timeline render", () => {
   it("renders the derived year format and a span range", () => {
     const text = r().svg.textContent!;
     expect(text).toContain("2026");
-    expect(text).toContain("2031–2035");
-    expect(text).toContain("2040–");
+    expect(text).toContain("2031 – 2035");
+    expect(text).toContain("2040 –");
     expect(text).not.toContain("Jan");
   });
 
   it("formats dates with an authored timeline.date_format", () => {
     const text = r({ timeline: { date_format: "%Y.%m" } }).svg.textContent!;
-    expect(text).toContain("2031.01–2035.01");
-    expect(text).toContain("2040.01–");
-    expect(text).not.toContain("2031–2035");
+    expect(text).toContain("2031.01 – 2035.01");
+    expect(text).toContain("2040.01 –");
+    expect(text).not.toContain("2031 – 2035");
   });
 
   it("wraps horizontal labels at an authored timeline.label_width", () => {
@@ -135,6 +135,15 @@ describe("timeline render", () => {
   it("drops legend series rows with lanes, restores them with series_legend: true", () => {
     expect(r({ timeline: { lanes: true } }).legendItems).toBeNull();
     expect(r({ timeline: { lanes: true }, series_legend: true }).legendItems).toHaveLength(2);
+  });
+
+  it("legend: false suppresses legendItems entirely", () => {
+    expect(r().legendItems).toHaveLength(2); // the default, for contrast
+    expect(r({ legend: false }).legendItems).toBeNull();
+  });
+
+  it("series_legend: false drops the series rows with no lanes involved", () => {
+    expect(r({ series_legend: false }).legendItems).toBeNull();
   });
 
   it("draws one lane name per lane, in series_order", () => {

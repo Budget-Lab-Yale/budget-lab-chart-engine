@@ -61,7 +61,7 @@ export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: Lay
   const events = parsed.map((e): LayoutEvent => {
     const override = cell(e.r, cols.date_label).trim();
     const dateText =
-      override || (e.end ? `${fmt(e.start)}–${fmt(e.end)}` : e.ongoing ? `${fmt(e.start)}–` : fmt(e.start));
+      override || (e.end ? `${fmt(e.start)} – ${fmt(e.end)}` : e.ongoing ? `${fmt(e.start)} –` : fmt(e.start));
     const description = cell(e.r, cols.description).trim();
     return {
       id: e.id, start: e.start, end: e.end, ongoing: e.ongoing, category: e.category, dateText,

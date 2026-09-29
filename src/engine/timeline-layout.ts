@@ -146,9 +146,25 @@ function hardBreak(line: string, framePx: number, measure: (s: string) => number
   return out;
 }
 
-/** Date text wraps between words and after an en dash, preferring the dash: a range too wide for
- *  one line breaks as "<start>–" / "<end>" before either date breaks inside itself, and each part
- *  then wraps between words only if it still does not fit. `maxPx` is in estimateLabelWidth's
+/** `dateText` split into the units it may actually wrap between: whitespace-separated words, except
+ *  a lone "–" is never its own unit — it glues to the word before it, matching `wrapDate`'s
+ *  guarantee that the dash never starts a line of its own. A geometry that measured the raw
+ *  whitespace-split words here would think "<end>" alone sets the floor and let the gutter
+ *  compress past what "<start> –" needs, then fall through to `hardBreak`'s character-level split. */
+function dateWordUnits(text: string): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  for (const w of words) {
+    if (w === "–" && out.length) out[out.length - 1] = `${out[out.length - 1]} –`;
+    else out.push(w);
+  }
+  return out;
+}
+
+/** Date text wraps between words and after a spaced en dash ("<start> – <end>"), preferring the
+ *  dash: a range too wide for one line breaks as "<start> –" / "<end>" (the dash stays on line 1,
+ *  the leading space before the tail is dropped) before either date breaks inside itself, and each
+ *  part then wraps between words only if it still does not fit. `maxPx` is in estimateLabelWidth's
  *  (regular-weight) terms, as wrapToWidth's is. */
 function wrapDate(text: string, maxPx: number, size: number): string[] {
   if (estimateLabelWidth(text, size) <= maxPx) return [text];
@@ -156,7 +172,15 @@ function wrapDate(text: string, maxPx: number, size: number): string[] {
   // cannot parse one, which would fail the whole bundle).
   const pieces = text.split("–");
   const parts = pieces.map((s, i) => (i < pieces.length - 1 ? `${s}–` : s).trim()).filter(Boolean);
-  return parts.flatMap((part) => wrapToWidth(part, maxPx, size).split("\n"));
+  return parts.flatMap((part) => {
+    // The dash must stay glued to the end of its date's own last line, never wrap onto a line of
+    // its own: wrap the date text alone, then append " –" to the wrapped result's last line.
+    const hasDash = part.endsWith("–");
+    const body = hasDash ? part.slice(0, -1).trimEnd() : part;
+    const lines = wrapToWidth(body, maxPx, size).split("\n");
+    if (hasDash) lines[lines.length - 1] = `${lines[lines.length - 1]} –`;
+    return lines;
+  });
 }
 
 /** Each line wraps to `maxPx`; a single word wider than that widens the box, up to `framePx`. */
@@ -500,10 +524,11 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   // An open-ended span needs room below the last date to fade out, as horizontal reserves G.fade.
   const tail = events.some((e) => e.ongoing) ? G.fade : 0;
 
-  // The widest single word of any date: the gutter never goes narrower, so dates wrap only between
-  // words. Only a word wider than the whole cap is hard-broken.
+  // The widest single wrap unit of any date (a word, or a range's "<end word> –"): the gutter never
+  // goes narrower, so dates wrap only between units. Only a unit wider than the whole cap is
+  // hard-broken.
   const cap = V_LEFT_SHARE * inp.width;
-  const wordMax = Math.max(0, ...events.flatMap((e) => e.dateText.split(/\s+/).filter(Boolean).map((w) => textW("date", w))));
+  const wordMax = Math.max(0, ...events.flatMap((e) => dateWordUnits(e.dateText).map((w) => textW("date", w))));
   const dateMin = Math.min(wordMax, cap);
 
   // Left-region budget inside the cap, by priority: the rule's fixed gaps; the dates' longest word;
