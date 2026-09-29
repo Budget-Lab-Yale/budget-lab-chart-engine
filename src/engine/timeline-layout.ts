@@ -839,14 +839,17 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
   const fixed = 2 * G.vLabelGap + V_LANE_GAP;
   const tickRoom = W - 2 * word - fixed - nSubs.reduce((s, n) => s + bandOf(n, V_MIN_BAR, V_MIN_TRACK_GAP), 0);
 
-  // Step 2: one bar width and gap for both lanes. Bands are linear in (w, g) — (n - 0.5)w + (n - 1)g
-  // for a lane with spans — so the compressed bar solves directly, as layoutVertical's does.
+  // Step 2: one bar width and gap for both lanes, solved directly as layoutVertical's is. The solve
+  // must model `bandOf` exactly or a column lands below its floor and a date word splits. A lane
+  // with at most one sub-track has the fixed band dotR (half a bar, w/2 ≤ spanH/2, never exceeds
+  // it); a lane with n ≥ 2 has the linear band (n - 0.5)w + (n - 1)g, which at the floors (3px bars,
+  // 1px gaps) is already 5.5px, above dotR, so its max never binds.
   const bars = (avail: number): { barW: number; gap: number } => {
     const room = avail - fixed - 2 * word;
     let barW: number = G.spanH;
     let gap: number = G.subTrackGap;
     if (nSubs.reduce((s, n) => s + bandOf(n, barW, gap), 0) <= room) return { barW, gap };
-    const spanned = nSubs.filter((n) => n > 0);
+    const spanned = nSubs.filter((n) => n > 1);
     if (!spanned.length) return { barW, gap };
     const roomBars = Math.max(0, room - (nSubs.length - spanned.length) * G.dotR);
     const a = spanned.reduce((s, n) => s + (n - 0.5), 0);
@@ -938,8 +941,15 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const p = placed.get(e.id) as VPlaced;
     out.labels.push({ id: e.id, category: e.category, box: p.box, lines: p.lines });
     if (!p.displaced) continue;
-    // An outer-sub-track span leaves its own bar's outer edge; anything on the rule leaves beside it.
-    const start = isSpan(e) && k > 0 ? barX(i, k) + (s < 0 ? 0 : barW) : null;
+    // An outer-sub-track span leaves its own bar's outer edge. Anything on the rule leaves beside
+    // the marker, but no further out than the first outer bar's inner edge, so it never starts
+    // inside that bar (a compressed bar can reach under the marker: then from the marker's edge).
+    const start =
+      isSpan(e) && k > 0
+        ? barX(i, k) + (s < 0 ? 0 : barW)
+        : nSubs[i]! > 1
+          ? rules[i]! + s * Math.max(G.dotR, Math.min(G.dotR + 2, barW / 2 + gap))
+          : null;
     const colEdge = s < 0 ? cols[i]!.x1 + 4 : cols[i]!.x0 - 4;
     out.stems.push({ id: e.id, category: e.category, points: vLeader(s, rules[i]!, bands[i]!, start, y, p.mid, colEdge) });
   }

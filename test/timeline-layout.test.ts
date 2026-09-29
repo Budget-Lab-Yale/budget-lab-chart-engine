@@ -1209,12 +1209,17 @@ describe("vertical lane columns (exactly two lanes)", () => {
     const l = vc([s0, s1, p, t0, t1, q, A("2090", "far")]);
     const pp = l.stems.find((s) => s.id === p.id)!.points;
     expect(pp).toHaveLength(4);
-    expect(pp[0]).toEqual([rx(l, 0) - TL_GEOM.dotR - 2, markOf(l, p.id).cy]);
+    // It starts off the marker but not inside the outer bar: at most at that bar's inner edge.
+    expect(pp[0]![1]).toBe(markOf(l, p.id).cy);
+    expect(pp[0]![0]).toBeLessThan(rx(l, 0) - TL_GEOM.dotR);
+    expect(pp[0]![0]).toBeGreaterThanOrEqual(spanOf(l, s1.id).x + spanOf(l, s1.id).w);
     expect(pp[1]![0]).toBeLessThan(spanOf(l, s1.id).x); // past the outer bar
     expect(pp[1]![0]).toBeGreaterThan(labelOf(l, p.id).box.x1);
     expect(pp[3]![0]).toBeGreaterThan(labelOf(l, p.id).box.x1);
     const qq = l.stems.find((s) => s.id === q.id)!.points;
     expect(qq).toHaveLength(4);
+    expect(qq[0]![0]).toBeGreaterThan(rx(l, 1) + TL_GEOM.dotR);
+    expect(qq[0]![0]).toBeLessThanOrEqual(spanOf(l, t1.id).x);
     expect(qq[1]![0]).toBeGreaterThan(spanOf(l, t1.id).x + spanOf(l, t1.id).w);
     expect(qq[3]![0]).toBeLessThan(labelOf(l, q.id).box.x0);
     // A displaced outer-sub-track span leaves its own bar's outer edge.
@@ -1305,6 +1310,37 @@ describe("vertical lane columns (exactly two lanes)", () => {
       expect(lab.box.x0).toBeGreaterThanOrEqual(-1e-6);
       expect(lab.box.x1).toBeLessThanOrEqual(280 + 1e-6);
     }
+  });
+
+  it("meets both date-word floors when compressing asymmetric lanes, and whenever ticks are drawn (280-340)", () => {
+    // Lane 0 holds one span and a point (a band of one marker radius, not half a bar); lane 1 a
+    // crowd of overlapping spans. The compression must model lane 0's band exactly as drawn.
+    const D = "September 30, 2026";
+    const word = estimateLabelWidth("September", 13) * 1.08;
+    const bandFloor = (n: number) => Math.max(TL_GEOM.dotR, n ? 1.5 + (n - 1) * 4 : 0);
+    let sawCompressed = false;
+    for (const nb of [6, 8, 12]) {
+      const events = [
+        A("2026-01-01", "one span", { endStr: "2030", dateText: D }),
+        A("2027-01-01", "a point", { dateText: D }),
+        ...Array.from({ length: nb }, (_, i) =>
+          B(`2026-${String(i + 1).padStart(2, "0")}-01`, `Event ${i}`, { endStr: "2030", dateText: D })),
+      ];
+      for (let width = 280; width <= 340; width++) {
+        const floorsFit = width - (2 * TL_GEOM.vLabelGap + 32) - bandFloor(1) - bandFloor(nb) - 2 * word >= 0;
+        for (const axis of [false, true]) {
+          const l = vc(events, { width, axis });
+          if (l.ticks.length) expect(floorsFit).toBe(true);
+          if (l.spans.some((s) => s.w < TL_GEOM.spanH)) sawCompressed = true;
+          if (!floorsFit) continue;
+          for (const lab of l.labels) {
+            const got = lab.lines.filter((ln) => ln.role === "date").flatMap((ln) => ln.text.split(/\s+/));
+            expect(got, `nb=${nb} width=${width} axis=${axis}`).toEqual(["September", "30,", "2026"]);
+          }
+        }
+      }
+    }
+    expect(sawCompressed).toBe(true);
   });
 
   it("draws one track for one lane or three lanes, exactly as with no lanes", () => {
