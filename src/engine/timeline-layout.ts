@@ -27,14 +27,12 @@ export const TL_GEOM = {
   laneGutterPad: 12,
   axisH: 24,
   minVerticalHeight: 400,
-  /** Vertical axis inset, top and bottom. Must equal half the date line height (see layoutVertical's sweep). */
+  /** Vertical axis inset, top and bottom. Must equal half the date line height (see placeColumn). */
   vPad: 8,
   /** Horizontal: space kept above the topmost label box (or lane name) once the band the uniform row
    *  pitch leaves above shorter top-row boxes is trimmed. */
   topPad: 4,
-  vRuleGap: 12,
   vLabelGap: 10,
-  vDateGutterMin: 56,
   minSpanPx: 2,
   /** Live auto-switch: a chart narrower than this renders vertical regardless of fit. */
   autoVerticalMinWidth: 480,
@@ -149,7 +147,7 @@ function hardBreak(line: string, framePx: number, measure: (s: string) => number
 /** `dateText` split into the units it may actually wrap between: whitespace-separated words, except
  *  a lone "–" is never its own unit — it glues to the word before it, matching `wrapDate`'s
  *  guarantee that the dash never starts a line of its own. A geometry that measured the raw
- *  whitespace-split words here would think "<end>" alone sets the floor and let the gutter
+ *  whitespace-split words here would think "<end>" alone sets the floor and let a vertical column
  *  compress past what "<start> –" needs, then fall through to `hardBreak`'s character-level split. */
 function dateWordUnits(text: string): string[] {
   const words = text.split(/\s+/).filter(Boolean);
@@ -187,19 +185,43 @@ function wrapUnits(units: string[], maxPx: number, size: number): string[] {
  *  (regular-weight) terms, as wrapToWidth's is. */
 function wrapDate(text: string, maxPx: number, size: number): string[] {
   if (estimateLabelWidth(text, size) <= maxPx) return [text];
-  // Split on the dash and re-append it to every piece but the last (no lookbehind: Safari < 16.4
-  // cannot parse one, which would fail the whole bundle).
+  // Wrap each part as `dateWordUnits` — the same units a vertical column's whole-word floor
+  // measures — rather than a raw string: gluing "<end word> –" into one unit before wrapping (not
+  // after) guarantees no emitted line exceeds maxPx unless that glued unit alone does, and reuses
+  // whatever separator (space or none) the author's own text had at that boundary instead of
+  // assuming one.
+  return dateParts(text).flatMap((part) => wrapUnits(dateWordUnits(part), maxPx, size));
+}
+
+/** `text` split after each en dash, the dash kept on the piece before it and each piece trimmed:
+ *  the parts `wrapDate` wraps independently (no lookbehind: Safari < 16.4 cannot parse one, which
+ *  would fail the whole bundle). */
+function dateParts(text: string): string[] {
   const pieces = text.split("–");
-  const parts = pieces.map((s, i) => (i < pieces.length - 1 ? `${s}–` : s).trim()).filter(Boolean);
-  // Wrap each part as `dateWordUnits` — the same units the wordMax floor measures — rather than a
-  // raw string: gluing "<end word> –" into one unit before wrapping (not after) guarantees no
-  // emitted line exceeds maxPx unless that glued unit alone does, and reuses whatever separator
-  // (space or none) the author's own text had at that boundary instead of assuming one.
-  return parts.flatMap((part) => wrapUnits(dateWordUnits(part), maxPx, size));
+  return pieces.map((s, i) => (i < pieces.length - 1 ? `${s}–` : s).trim()).filter(Boolean);
+}
+
+/** Every unit `wrapDate` may put on a line of its own. */
+const dateUnits = (text: string): string[] => dateParts(text).flatMap(dateWordUnits);
+
+/** `hardBreak` for one date line, which is only ever over-wide as a single unit (see wrapUnits). A
+ *  trailing dash — glued " –" or an unspaced "–" — stays on the last chunk of its word, so no chunk
+ *  is a bare dash or starts or ends with a space. If the last chunk plus the dash is still too wide,
+ *  its final character moves down with the dash. */
+function hardBreakDate(line: string, framePx: number, measure: (s: string) => number): string[] {
+  if (measure(line) <= framePx) return [line];
+  const suffix = / ?–$/.exec(line)?.[0] ?? "";
+  const body = line.slice(0, line.length - suffix.length);
+  if (!suffix || !body) return hardBreak(line, framePx, measure);
+  const chunks = hardBreak(body, framePx, measure);
+  const last = chunks.pop() as string;
+  if (measure(last + suffix) <= framePx || last.length < 2) chunks.push(last + suffix);
+  else chunks.push(last.slice(0, -1), last.slice(-1) + suffix);
+  return chunks;
 }
 
 /** Each line wraps to `maxPx`; a single word wider than that widens the box, up to `framePx`. */
-function buildBlock(e: LayoutEvent, maxPx: number, withDate: boolean, framePx: number): TextBlock {
+function buildBlock(e: LayoutEvent, maxPx: number, framePx: number): TextBlock {
   const roles: LineRole[] = [];
   const texts: string[] = [];
   const wrapPx = Math.min(maxPx, framePx);
@@ -214,9 +236,13 @@ function buildBlock(e: LayoutEvent, maxPx: number, withDate: boolean, framePx: n
       }
     }
   };
-  if (withDate) push("date", e.dateText);
+  push("date", e.dateText);
   push("title", e.title);
   push("description", e.description);
+  return measureBlock(roles, texts);
+}
+
+function measureBlock(roles: LineRole[], texts: string[]): TextBlock {
   const w = Math.max(0, ...texts.map((t, i) => textW(roles[i] as LineRole, t)));
   const h = roles.reduce((s, r) => s + LINE_STYLE[r].lineH, 0);
   return { roles, texts, w, h };
@@ -330,8 +356,8 @@ function assignRows(items: RowItem[], maxRows: number, sides: Side[], preferClea
   return soft.fits ? soft : plain;
 }
 
-function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle"): PlacedLine[] {
-  const x = anchor === "middle" ? (box.x0 + box.x1) / 2 : box.x0;
+function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle" | "end"): PlacedLine[] {
+  const x = anchor === "middle" ? (box.x0 + box.x1) / 2 : anchor === "end" ? box.x1 : box.x0;
   let top = box.y0;
   return block.roles.map((role, i) => {
     const st = LINE_STYLE[role];
@@ -360,7 +386,7 @@ function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): Ti
       .split("\n")
       .flatMap((l) => hardBreak(l, laneTextPx, (s) => estimateLabelWidth(s, LANE_SIZE)));
   const framePx = Math.max(0, inp.width - gutter);
-  const blocks = new Map(events.map((e) => [e.id, buildBlock(e, inp.labelWidth, true, framePx)]));
+  const blocks = new Map(events.map((e) => [e.id, buildBlock(e, inp.labelWidth, framePx)]));
   // Inset each end of the range by half the widest centred label anchored at that end's date, so an
   // edge label is not clipped. Only point events count: span labels are start-anchored, and the
   // last date may be a span's END, where no label sits.
@@ -512,90 +538,156 @@ function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): Ti
   return out;
 }
 
-/** Gap between the vertical tick column and the date gutter. */
+/** Gap between the vertical tick column and whatever sits right of it. */
 const V_TICK_GAP = 8;
-/** Everything left of the vertical text column (ticks, dates, sub-tracks, rule) takes at most this
- *  share of the width, so the text column keeps at least 55% at the 280px live floor. */
-const V_LEFT_SHARE = 0.45;
+/** A vertical text column's natural width is capped at this share of the width (see layoutVertical). */
+const V_SIDE_SHARE = 0.4;
+/** Space left of the band when no left column sits there: keeps the marker's halo inside the frame. */
+const V_EDGE = 4;
 /** Floors for a compressed vertical sub-track band. */
 const V_MIN_BAR = 3;
 const V_MIN_TRACK_GAP = 1;
+/** Slack for a width that round-trips through BOLD_FACTOR: a date unit that exactly fits its
+ *  column must never be split. */
+const V_EPS = 1e-6;
 
-/** Vertical: time top → bottom. Left to right: [tick column] → date gutter (right-aligned) →
- *  span sub-tracks → rule → one text column. No left/right alternation: it would halve the text
- *  column on a phone. Labels sit at their date and a downward sweep pushes each below the one
- *  before; the axis length is chosen so the whole stack fits, which keeps pushes local. Lanes do
- *  not apply (they collapse to one track), so every event is drawn. */
+/** One side's column of vertical label blocks: left-aligned at `x0` ("start") or right-aligned
+ *  at `x1` ("end"). */
+interface VColumn { x0: number; x1: number; anchor: "start" | "end" }
+interface VPlaced { id: number; box: Box; lines: PlacedLine[]; mid: number; displaced: boolean }
+
+/** A vertical label block: bold date line(s), then the title, then the description, each wrapped to
+ *  `colW`. A date wraps only between `dateUnits` (bold-aware); `hardBreakDate` splits only a unit
+ *  wider than the whole column. */
+function vBlock(e: LayoutEvent, colW: number): TextBlock {
+  const roles: LineRole[] = [];
+  const texts: string[] = [];
+  const add = (role: LineRole, lines: string[]): void => {
+    for (const s of lines) { roles.push(role); texts.push(s); }
+  };
+  const frame = colW + V_EPS;
+  const dateW = (s: string): number => textW("date", s);
+  if (e.dateText) {
+    const wrapped = dateW(e.dateText) <= frame ? [e.dateText] : wrapDate(e.dateText, frame / BOLD_FACTOR, LINE_STYLE.date.size);
+    add("date", wrapped.flatMap((ln) => hardBreakDate(ln, frame, dateW)));
+  }
+  for (const role of ["title", "description"] as const) {
+    const text = role === "title" ? e.title : e.description;
+    if (!text) continue;
+    const lines = wrapToWidth(text, colW, LINE_STYLE[role].size).split("\n");
+    add(role, lines.flatMap((ln) => hardBreak(ln, colW, (s) => textW(role, s))));
+  }
+  return measureBlock(roles, texts);
+}
+
+/** Height of a column's blocks stacked with no slack: the shortest axis that can hold them. */
+const vStack = (blocks: TextBlock[]): number =>
+  blocks.reduce((s, b) => s + b.h, 0) + TL_GEOM.vLabelGap * Math.max(0, blocks.length - 1);
+
+/** Places one column's blocks, given in date order with each item's y. A block's first (date) line
+ *  is centred on its item and a downward sweep pushes it below the block before; a column sweeps
+ *  only its own blocks, so two columns never push each other. `displaced` marks a block the sweep
+ *  moved off its item (it gets a leader), and `mid` is its first line's centre, where a leader
+ *  enters. The first block is never pushed only because vPad (the axis's top inset) equals half the
+ *  date line height: its desired top is then exactly 0, so the clamp to the top never moves it. */
+function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: TextBlock }>): VPlaced[] {
+  const half = LINE_STYLE.date.lineH / 2;
+  let prevBottom = -Infinity;
+  return items.map(({ id, y, block }) => {
+    const top = Math.max(y - half, prevBottom + TL_GEOM.vLabelGap, 0);
+    prevBottom = top + block.h;
+    const [x0, x1] = col.anchor === "start" ? [col.x0, col.x0 + block.w] : [col.x1 - block.w, col.x1];
+    const box: Box = { x0, y0: top, x1, y1: top + block.h };
+    return { id, box, lines: placeLines(block, box, col.anchor), mid: top + half, displaced: top + half - y > 0.5 };
+  });
+}
+
+/** Vertical: time top → bottom, each event's label beside its item — one block of bold date line(s)
+ *  above the title and description. Points and spans on the main rule (sub-track 0) label to the
+ *  RIGHT of the track, left-aligned; spans on outer sub-tracks (k ≥ 1, stacked leftward from the
+ *  rule) label to the LEFT, right-aligned, ending a label gap short of the band's leftmost bar. Each
+ *  side sweeps on its own. Lanes do not apply (they collapse to one track), so every event is drawn.
+ *
+ *  Width budget, left to right: [tick column] → [left text column + gap, only when some span is on
+ *  k ≥ 1; otherwise a V_EDGE pad] → span band → rule → marker half-width + gap → right text column.
+ *  Each side's NEED is its widest unwrapped line capped at V_SIDE_SHARE (40%) of the width, but
+ *  never below its widest date unit (dates wrap only between words or after an en dash). Allocated
+ *  in this priority:
+ *   1. The left column takes its need.
+ *   2. The band takes its natural width, compressed (bars floored at V_MIN_BAR, gaps at
+ *      V_MIN_TRACK_GAP) as far as it takes to leave the right column its need.
+ *   3. If the band at its floors still leaves the right column short, the left column yields, down
+ *      to its widest date unit.
+ *   4. The tick column is drawn only if the right column still gets its need beside it; otherwise it
+ *      is omitted (not squeezed), and the x-axis title with it (amendment A8).
+ *   5. The right column gets everything that remains.
+ *  With nothing on the left the track sits V_EDGE + a marker radius from the tick column (or the
+ *  frame edge), and the right column gets the rest of the width. The axis length is chosen so the
+ *  taller side's whole stack fits, which keeps pushes local. */
 function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   const G = TL_GEOM;
+  const W = inp.width;
   const events = [...inp.events].sort(byTime);
   const sub = assignSubTracks(events.filter(isSpan));
   const nSub = sub.size ? Math.max(...sub.values()) + 1 : 0;
-  const dateNat = Math.max(G.vDateGutterMin, ...events.map((e) => textW("date", e.dateText)));
+  const kOf = (e: LayoutEvent): number => sub.get(e.id) ?? 0;
+  const left = events.filter((e) => kOf(e) > 0);
+  const right = events.filter((e) => kOf(e) === 0);
+  const hasLeft = left.length > 0;
   // Sub-tracks stack leftward from the rule, bar width `w` at pitch `w + g`; `bandOf` is the rule
-  // to the outermost bar's left edge. The gutter widens by it so a date never sits on a bar (that
-  // edge is at least vRuleGap right of the dates).
+  // to the outermost bar's left edge.
   const bandOf = (w: number, g: number): number => (nSub ? w / 2 + (nSub - 1) * (w + g) : 0);
   // An open-ended span needs room below the last date to fade out, as horizontal reserves G.fade.
   const tail = events.some((e) => e.ongoing) ? G.fade : 0;
 
-  // The widest single wrap unit of any date (a word, or a range's "<end word> –"): the gutter never
-  // goes narrower, so dates wrap only between units. Only a unit wider than the whole cap is
-  // hard-broken.
-  const cap = V_LEFT_SHARE * inp.width;
-  const wordMax = Math.max(0, ...events.flatMap((e) => dateWordUnits(e.dateText).map((w) => textW("date", w))));
-  const dateMin = Math.min(wordMax, cap);
+  const share = V_SIDE_SHARE * W;
+  const needOf = (evs: LayoutEvent[]): { need: number; word: number } => {
+    if (!evs.length) return { need: 0, word: 0 };
+    const word = Math.max(0, ...evs.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u))));
+    const widest = (role: LineRole, s: string | null): number[] => (s ? s.split("\n").map((x) => textW(role, x)) : []);
+    const nat = Math.max(0, ...evs.flatMap((e) => [
+      ...widest("date", e.dateText), ...widest("title", e.title), ...widest("description", e.description),
+    ]));
+    return { need: Math.max(word, Math.min(share, nat)), word };
+  };
+  const leftNeed = needOf(left);
+  const rightNeed = needOf(right).need;
+  const rightOf = (w: number): number => Math.max(G.dotR, nSub ? w / 2 : 0) + G.vLabelGap;
+  const leftOf = (lw: number): number => (hasLeft ? lw + G.vLabelGap : V_EDGE);
 
-  // Left-region budget inside the cap, by priority: the rule's fixed gaps; the dates' longest word;
-  // the sub-track band (compressing its pitch, bars floored at V_MIN_BAR and gaps at
-  // V_MIN_TRACK_GAP); the tick column, which is omitted (not squeezed) when it does not fit in what
-  // remains; then the dates widen toward their natural width, wrapping between words to what they
-  // get. A layout whose natural left region is inside the cap is untouched. When the longest word
-  // plus the band at its floors exceeds the cap, the cap yields and the text column narrows.
-  const geometry = (tickNeed: number) => {
-    const rightOf = (w: number): number => Math.max(G.dotR, nSub ? w / 2 : 0) + G.vLabelGap;
-    const free = cap - G.vRuleGap - rightOf(G.spanH);
-    const bandRoom = free - dateMin;
-    let barW: number = G.spanH;
-    let gap: number = G.subTrackGap;
-    // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero).
-    if (nSub && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
-      const s = Math.max(0, bandRoom) / bandOf(barW, gap);
-      barW = G.spanH * s;
-      gap = G.subTrackGap * s;
-      if (gap < V_MIN_TRACK_GAP) {
-        gap = V_MIN_TRACK_GAP;
-        barW = (Math.max(0, bandRoom) - (nSub - 1) * gap) / (nSub - 0.5);
-      }
-      barW = Math.max(V_MIN_BAR, barW);
+  // Steps 1-2: the band compresses to leave the right column its need beside the left's.
+  const bandRoom = W - leftOf(leftNeed.need) - rightNeed - rightOf(G.spanH);
+  let barW: number = G.spanH;
+  let gap: number = G.subTrackGap;
+  // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero).
+  if (nSub && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
+    const s = Math.max(0, bandRoom) / bandOf(barW, gap);
+    barW = G.spanH * s;
+    gap = G.subTrackGap * s;
+    if (gap < V_MIN_TRACK_GAP) {
+      gap = V_MIN_TRACK_GAP;
+      barW = (Math.max(0, bandRoom) - (nSub - 1) * gap) / (nSub - 0.5);
     }
-    const band = Math.max(G.dotR, bandOf(barW, gap));
-    let rest = bandRoom - band;
-    const tickW = tickNeed > 0 && tickNeed <= rest ? tickNeed : 0;
-    rest -= tickW;
-    const dateW = dateMin + Math.min(Math.max(0, rest), dateNat - dateMin);
-    const dateRight = tickW + dateW;
-    const ruleX = dateRight + G.vRuleGap + band;
-    const textX = ruleX + Math.max(G.dotR, nSub ? barW / 2 : 0) + G.vLabelGap;
-    const colW = Math.max(0, inp.width - textX);
-    const blocks = new Map(events.map((e) => [e.id, buildBlock(e, colW, false, colW)]));
-    // A date wider than the gutter wraps between words (bold-aware). The gutter holds the longest
-    // word, so hardBreak fires only for a word wider than the whole cap; its 1e-6 slack absorbs the
-    // round trip through dateW / BOLD_FACTOR, which must never split a word that exactly fits.
-    const dates = new Map(
-      events.map((e) => [
-        e.id,
-        textW("date", e.dateText) <= dateW
-          ? [e.dateText]
-          : wrapDate(e.dateText, dateW / BOLD_FACTOR, LINE_STYLE.date.size)
-              .flatMap((ln) => hardBreak(ln, dateW + 1e-6, (s) => textW("date", s))),
-      ]),
-    );
-    const rowHOf = (e: LayoutEvent): number =>
-      Math.max((blocks.get(e.id) as TextBlock).h, (dates.get(e.id) as string[]).length * LINE_STYLE.date.lineH);
-    const stacked = events.reduce((s, e) => s + rowHOf(e), 0) + G.vLabelGap * Math.max(0, events.length - 1);
-    const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stacked);
-    return { tickW, dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L };
+    barW = Math.max(V_MIN_BAR, barW);
+  }
+  const band = Math.max(G.dotR, bandOf(barW, gap));
+  const fixed = band + rightOf(barW);
+  // Step 3: the left column yields toward its widest date unit if the right is still short.
+  const short = rightNeed - (W - leftOf(leftNeed.need) - fixed);
+  const leftW = hasLeft ? Math.max(leftNeed.word, leftNeed.need - Math.max(0, short)) : 0;
+  // Step 4: what a tick column may take without costing the right column its need.
+  const tickRoom = W - leftOf(leftW) - fixed - rightNeed;
+
+  const geometry = (tickNeed: number) => {
+    const tickW = tickNeed > 0 && tickNeed <= tickRoom ? tickNeed : 0;
+    const ruleX = tickW + leftOf(leftW) + band;
+    const leftCol: VColumn = { x0: tickW, x1: tickW + leftW, anchor: "end" };
+    const rightCol: VColumn = { x0: ruleX + rightOf(barW), x1: W, anchor: "start" };
+    const colR = Math.max(0, W - rightCol.x0);
+    const blocks = new Map(events.map((e) => [e.id, vBlock(e, kOf(e) > 0 ? leftW : colR)]));
+    const stackOf = (evs: LayoutEvent[]): number => vStack(evs.map((e) => blocks.get(e.id) as TextBlock));
+    const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stackOf(left), stackOf(right));
+    return { tickW, ruleX, leftCol, rightCol, blocks, L };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
@@ -611,60 +703,46 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, dateRight, ruleX, textX, barW, gap, blocks, dates, rowHOf, L } = geometry(tickNeed);
+  const { tickW, ruleX, leftCol, rightCol, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 
+  const itemsOf = (evs: LayoutEvent[]) => evs.map((e) => ({ id: e.id, y: pos(e.start), block: blocks.get(e.id) as TextBlock }));
+  const placed = new Map([...placeColumn(leftCol, itemsOf(left)), ...placeColumn(rightCol, itemsOf(right))].map((p) => [p.id, p]));
+  const bottom = Math.max(0, ...[...placed.values()].map((p) => p.box.y1));
+  const height = Math.ceil(Math.max(G.vPad + L + tail + G.vPad, bottom + G.vPad));
+
   const out: TimelineLayout = {
-    orientation: "vertical", width: inp.width, height: 0, fits: true, order: events.map((e) => e.id),
+    orientation: "vertical", width: W, height, fits: true, order: events.map((e) => e.id),
     rules: [], markers: [], spans: [], labels: [], stems: [], ticks: [], laneLabels: [],
   };
-
-  let prevBottom = -Infinity;
-  const tops = new Map<number, number>();
-  for (const e of events) {
-    // The first label gets no leader only because vPad (the axis's top inset) equals half the date
-    // line height: its desired top is then exactly 0, so the clamp below never pushes it off its date.
-    const desired = pos(e.start) - LINE_STYLE.date.lineH / 2;
-    const top = Math.max(desired, prevBottom + G.vLabelGap, 0);
-    tops.set(e.id, top);
-    prevBottom = top + rowHOf(e);
-  }
-  const height = Math.ceil(Math.max(G.vPad + L + tail + G.vPad, prevBottom + G.vPad));
-
+  const barX = (k: number): number => ruleX - barW / 2 - k * (barW + gap);
+  const bandLeft = ruleX - band;
   for (const e of events) {
     const y = pos(e.start);
-    const top = tops.get(e.id) as number;
-    const block = blocks.get(e.id) as TextBlock;
+    const k = kOf(e);
     if (isSpan(e)) {
-      const k = sub.get(e.id) as number;
       const ye = e.ongoing ? height - G.vPad : pos(e.end as Date);
       out.spans.push({
-        id: e.id, category: e.category, x: ruleX - barW / 2 - k * (barW + gap), y,
+        id: e.id, category: e.category, x: barX(k), y,
         w: barW, h: Math.max(G.minSpanPx, ye - y), projected: e.projected, fade: e.ongoing ? "down" : null,
       });
     } else {
       out.markers.push({ id: e.id, category: e.category, cx: ruleX, cy: y, projected: e.projected });
     }
-    const box: Box = { x0: textX, y0: top, x1: textX + block.w, y1: top + rowHOf(e) };
-    const lines: PlacedLine[] = [
-      ...(dates.get(e.id) as string[]).map((text, i): PlacedLine => ({
-        role: "date", text, x: dateRight, y: top + LINE_STYLE.date.size + i * LINE_STYLE.date.lineH, anchor: "end",
-      })),
-      ...placeLines(block, box, "start"),
-    ];
-    out.labels.push({ id: e.id, category: e.category, box, lines });
-    // A label pushed off its date gets an elbow: out beside the marker (right of the rule, clear of
-    // every sub-track bar), down parallel to the rule, then into the label's first line. Leaders in
-    // a pushed cluster share the vertical leg instead of fanning into a smear. A span on an outer
-    // sub-track starts its leader at its own bar's right edge, so it does not read as the inner bar's.
-    const labelMid = top + LINE_STYLE.date.lineH / 2;
-    if (labelMid - y > 0.5) {
-      const xLeg = ruleX + G.dotR + 2;
-      const k = isSpan(e) ? (sub.get(e.id) as number) : 0;
-      const from: Array<[number, number]> = k > 0 ? [[ruleX + barW / 2 - k * (barW + gap), y], [xLeg, y]] : [[xLeg, y]];
-      out.stems.push({ id: e.id, category: e.category, points: [...from, [xLeg, labelMid], [textX - 4, labelMid]] });
-    }
+    const p = placed.get(e.id) as VPlaced;
+    out.labels.push({ id: e.id, category: e.category, box: p.box, lines: p.lines });
+    if (!p.displaced) continue;
+    // A label pushed off its item gets an elbow on the item's own side, and leaders in a pushed
+    // cluster share the vertical leg instead of fanning into a smear. Right: out beside the marker
+    // (clear of the sub-track-0 bar), down parallel to the rule, into the label's first line.
+    // Left: out of the span's own bar's left edge, across any outer bars to a leg just left of the
+    // band, down, into the label's right end — so it reads as that bar's, not a neighbour's.
+    const points: Array<[number, number]> =
+      k > 0
+        ? [[barX(k), y], [bandLeft - 2, y], [bandLeft - 2, p.mid], [leftCol.x1 + 4, p.mid]]
+        : [[ruleX + G.dotR + 2, y], [ruleX + G.dotR + 2, p.mid], [rightCol.x0 - 4, p.mid]];
+    out.stems.push({ id: e.id, category: e.category, points });
   }
 
   out.rules.push({ x1: ruleX, y1: G.vPad, x2: ruleX, y2: height - G.vPad });
@@ -672,7 +750,6 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const fmt = tickFmt;
     out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
   }
-  out.height = height;
   return out;
 }
 

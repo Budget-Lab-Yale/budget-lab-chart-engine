@@ -287,14 +287,46 @@ describe("timeline render", () => {
     expect(layerSeq(r().svg)).toEqual(["tbl-timeline-stems", "tbl-timeline-spans", "tbl-timeline-markers", "list"]);
   });
 
+  it("draws each vertical label beside its item: bold date first, outer-sub-track spans on the left", () => {
+    // "Overlap" runs inside the 2031-2035 phase-in, so it takes sub-track 1, left of the rule.
+    const rows = [...ROWS, { date: "2032", end: "2034", title: "Overlap", detail: "", kind: "cohort", projected: "" }] as TidyRow[];
+    const { svg } = renderChart(SPEC, rows, { width: 375, timelineOrientation: "vertical" });
+    const rule = svg.querySelector("line.tbl-timeline-rule")!;
+    const ruleX = Number(rule.getAttribute("x1"));
+    expect(rule.getAttribute("x2")).toBe(rule.getAttribute("x1"));
+    const bars = q(svg, "rect.tbl-timeline-span").map((s) => Number(s.getAttribute("x")));
+    const items = q(svg, 'g[role="listitem"]');
+    expect(items).toHaveLength(7);
+    for (const item of items) {
+      const texts = q(item, "text");
+      expect(texts[0]!.getAttribute("font-weight")).toBe("700"); // the date line leads the block
+      expect(texts[0]!.textContent!.length).toBeGreaterThan(0);
+      const onLeft = item.getAttribute("aria-label")!.includes("Overlap");
+      for (const t of texts) {
+        const x = Number(t.getAttribute("x"));
+        if (onLeft) {
+          expect(t.getAttribute("text-anchor")).toBe("end");
+          expect(x).toBeLessThan(Math.min(...bars));
+        } else {
+          expect(t.getAttribute("text-anchor")).toBe("start");
+          expect(x).toBeGreaterThan(ruleX + TL_GEOM.dotR);
+        }
+      }
+    }
+    // With nothing on an outer sub-track, the track sits at the left edge.
+    const plain = renderChart(SPEC, ROWS, { width: 375, timelineOrientation: "vertical" }).svg;
+    expect(Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"))).toBeLessThanOrEqual(40);
+  });
+
   it("drops the x-axis title with the ticks: drawn only when a render draws ticks", () => {
     const axis = { timeline: { axis: true }, x_axis_title: "Year" } as Partial<ChartSpec>;
     const wide = r(axis);
     expect(q(wide.svg, ".tbl-timeline-tick").length).toBeGreaterThanOrEqual(2);
     expect(wide.xAxisTitle).toBe("Year");
-    // Month ticks do not fit beside whole-word dates at 280 (amendment A8): no ticks, no title.
+    // Six overlapping spans open a left column; at 280 month ticks do not fit beside it and the
+    // right column (amendment A8): no ticks, no title.
     const months = Array.from({ length: 6 }, (_, i) => ({
-      date: `2026-0${i + 1}-01`, end: "", title: `Event ${i} title`, detail: "", kind: "policy", projected: "",
+      date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, detail: "", kind: "policy", projected: "",
       dl: "September 30, 2026",
     })) as TidyRow[];
     const narrow = renderChart(

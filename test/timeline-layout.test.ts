@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layoutTimeline, plainFirstFitFits, TL_GEOM, LANE_SIZE, LANE_LINE_H, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
+import { layoutTimeline, plainFirstFitFits, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
 import { estimateLabelWidth } from "../src/engine/axes";
 import { TBL } from "../src/engine/theme";
@@ -527,17 +527,28 @@ describe("horizontal layout", () => {
 describe("vertical layout", () => {
   const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
     layoutTimeline(base(events, { orientation: "vertical", width: 360, ...o }));
-  const datesOf = (l: TimelineLayout) => l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"));
+  const ruleX = (l: TimelineLayout): number => l.rules[0]!.x1;
+  const leftmostBar = (l: TimelineLayout): number => Math.min(...l.spans.map((s) => s.x));
+  const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+  const spanOf = (l: TimelineLayout, id: number) => l.spans.find((s) => s.id === id)!;
 
-  it("runs oldest at top, one rule, dates right-aligned in a left gutter", () => {
+  it("runs oldest at top, one rule, each label beside its item: bold date above the title, right of the rule", () => {
     const l = v(FIG7());
     const ys = l.order.map((id) => l.markers.find((m) => m.id === id)!.cy);
     expect([...ys].sort((a, b) => a - b)).toEqual(ys);
     expect(l.rules).toHaveLength(1);
-    const dates = datesOf(l);
-    expect(dates.every((d) => d.anchor === "end" && d.x < l.rules[0]!.x1)).toBe(true);
-    const titles = l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "title"));
-    expect(titles.every((t) => t.anchor === "start" && t.x > l.rules[0]!.x1)).toBe(true);
+    expect(l.labels).toHaveLength(5);
+    for (const lab of l.labels) {
+      // One block per event: its date line(s) first, then the title, all left-aligned at the box's
+      // left edge, which sits right of the rule and clear of the marker.
+      expect(lab.lines[0]!.role).toBe("date");
+      expect(lab.lines.every((ln) => ln.anchor === "start" && ln.x === lab.box.x0)).toBe(true);
+      expect(lab.box.x0).toBeGreaterThan(ruleX(l) + TL_GEOM.dotR);
+      const dateYs = lab.lines.filter((ln) => ln.role === "date").map((ln) => ln.y);
+      const titleYs = lab.lines.filter((ln) => ln.role === "title").map((ln) => ln.y);
+      expect(Math.max(...dateYs)).toBeLessThan(Math.min(...titleYs));
+      expect(lab.box.y1 - lab.box.y0).toBeCloseTo(lab.lines.reduce((s, ln) => s + ({ date: 16, title: 15, description: 14 })[ln.role], 0), 9);
+    }
   });
 
   it("is at least 400px tall and grows with a dense cluster instead of overlapping", () => {
@@ -580,19 +591,69 @@ describe("vertical layout", () => {
     expect(l.spans[0]!.h).toBeGreaterThanOrEqual(TL_GEOM.fade);
   });
 
-  it("widens the gutter for span sub-tracks so dates never sit on a bar", () => {
-    const one = v([ev("2020", "a", { endStr: "2030" }), ev("2040", "b")]);
-    const two = v([ev("2020", "a", { endStr: "2030" }), ev("2025", "c", { endStr: "2035" }), ev("2040", "b")]);
-    expect(two.rules[0]!.x1).toBeGreaterThan(one.rules[0]!.x1);
-    const leftmostBar = Math.min(...two.spans.map((s) => s.x));
-    expect(leftmostBar).toBeLessThan(two.rules[0]!.x1 - TL_GEOM.spanH); // c really is left of the rule
-    expect(Math.max(...datesOf(two).map((d) => d.x))).toBeLessThanOrEqual(leftmostBar);
+  it("labels an outer-sub-track span on the left, right-aligned, ending just left of the band", () => {
+    const a = ev("2020", "a", { endStr: "2030" });
+    const c = ev("2025", "c, on the outer sub-track", { endStr: "2035" });
+    const p = ev("2027", "a point on the rule");
+    const b = ev("2040", "b");
+    const l = v([a, c, p, b]);
+    expect(spanOf(l, c.id).x).toBeLessThan(spanOf(l, a.id).x); // c is on sub-track 1, left of the rule
+    const lab = labelOf(l, c.id);
+    expect(lab.lines[0]!.role).toBe("date");
+    expect(lab.lines.every((ln) => ln.anchor === "end" && ln.x === lab.box.x1)).toBe(true);
+    // The box ends a small gap short of the band's leftmost bar, never on it.
+    const gap = leftmostBar(l) - lab.box.x1;
+    expect(gap).toBeGreaterThan(0);
+    expect(gap).toBeLessThanOrEqual(TL_GEOM.vLabelGap + 1e-9);
+    expect(lab.box.x0).toBeGreaterThanOrEqual(0);
+    // Sub-track-0 spans and points label on the right.
+    for (const id of [a.id, p.id, b.id]) expect(labelOf(l, id).box.x0).toBeGreaterThan(ruleX(l) + TL_GEOM.dotR);
+    // The band widens the layout by the left column: without c the rule sits at the left edge.
+    expect(ruleX(v([a, p, b]))).toBeLessThan(ruleX(l));
   });
 
-  it("reserves a tick column left of the dates, sized to the widest tick, with axis:true", () => {
-    const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
-    // Date text is bold (~8% wider than the estimator's regular-weight calibration).
-    const dateLeft = (l: TimelineLayout) => Math.min(...datesOf(l).map((d) => d.x - estimateLabelWidth(d.text, 13) * 1.08));
+  it("keeps the track at the left edge when nothing labels left, and gives the right column the rest", () => {
+    // Wraps at every width tried, so its widest line fills the right column to within a word.
+    const long = Array.from({ length: 40 }, () => "word").join(" ");
+    for (const width of [280, 375, 900]) {
+      const plain = v([...FIG7(), ev("2060", long)], { width });
+      expect(ruleX(plain)).toBeLessThanOrEqual(40);
+      expect(Math.max(...plain.labels.map((x) => x.box.x1))).toBeGreaterThan(width - 40);
+      // Spans on the main rule only (sub-track 0) do not open a left column either.
+      const s0 = v([ev("2020", "a", { endStr: "2025" }), ev("2026", "b", { endStr: "2030" }), ev("2040", "c")], { width });
+      expect(ruleX(s0)).toBeLessThanOrEqual(40);
+      // With the tick column drawn, the track sits just right of it.
+      const axis = v(FIG7(), { width, axis: true });
+      expect(axis.ticks.length).toBeGreaterThanOrEqual(2);
+      expect(ruleX(axis)).toBeGreaterThan(tickRight(axis));
+      expect(ruleX(axis)).toBeLessThanOrEqual(tickRight(axis) + 40);
+    }
+  });
+
+  it("sweeps each side on its own: left labels never push right ones, nor the reverse", () => {
+    // a (sub-track 0, right) and c (sub-track 1, left) start two days apart: in one column c would be
+    // pushed below a's label. Beside each other, neither moves.
+    const a = ev("2020-01-01", "a", { endStr: "2030" });
+    const c = ev("2020-01-03", "c", { endStr: "2035" });
+    const far = ev("2090", "far");
+    const l = v([a, c, far]);
+    expect(l.stems).toEqual([]);
+    const la = labelOf(l, a.id).box, lc = labelOf(l, c.id).box;
+    expect(lc.y0 < la.y1 && la.y0 < lc.y1).toBe(true); // side by side, overlapping in y
+    // Each label's date line is centred on its own item.
+    expect(lc.y0 + 8).toBeCloseTo(spanOf(l, c.id).y, 6);
+    // A right-side neighbour pushed by a leaves c where it was, and vice versa.
+    const p = ev("2020-01-05", "p, pushed down by a");
+    const c2 = ev("2020-01-04", "c2, pushed down by c", { endStr: "2020-02-01" });
+    const both = v([a, c, p, c2, far]);
+    expect(both.stems.map((s) => s.id).sort()).toEqual([p.id, c2.id].sort());
+    expect(labelOf(both, a.id).box.y0 + 8).toBeCloseTo(spanOf(both, a.id).y, 6);
+    expect(labelOf(both, c.id).box.y0 + 8).toBeCloseTo(spanOf(both, c.id).y, 6);
+    expect(labelOf(both, p.id).box.y0).toBeGreaterThanOrEqual(labelOf(both, a.id).box.y1);
+    expect(labelOf(both, c2.id).box.y0).toBeGreaterThanOrEqual(labelOf(both, c.id).box.y1);
+  });
+
+  it("reserves a tick column left of every mark and label, sized to the widest tick, with axis:true", () => {
     expect(v(FIG7()).ticks).toEqual([]);
     // Month-scale ticks ("October") are wider than a year's: a fixed-width column would collide.
     const months = Array.from({ length: 12 }, (_, i) =>
@@ -600,8 +661,15 @@ describe("vertical layout", () => {
     for (const l of [v(FIG7(), { axis: true }), v(months, { axis: true })]) {
       expect(l.ticks.length).toBeGreaterThanOrEqual(2);
       expect(l.ticks.every((t) => t.anchor === "start" && t.x >= 0)).toBe(true);
-      expect(dateLeft(l)).toBeGreaterThan(tickRight(l));
+      expect(Math.min(...l.labels.map((x) => x.box.x0))).toBeGreaterThan(tickRight(l));
+      expect(ruleX(l) - TL_GEOM.dotR).toBeGreaterThan(tickRight(l));
     }
+    // With a left column the ticks stay leftmost, outside the left labels.
+    const a = ev("2020", "a", { endStr: "2030" });
+    const c = ev("2025", "c", { endStr: "2035" });
+    const l = v([a, c, ev("2040", "b")], { width: 600, axis: true });
+    expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(labelOf(l, c.id).box.x0).toBeGreaterThan(tickRight(l));
   });
 
   it("always fits and has no NaN for a single event", () => {
@@ -624,9 +692,14 @@ describe("vertical layout", () => {
     expect(JSON.stringify(laned)).toBe(JSON.stringify(fwd));
   });
 
+  // A range too wide for its column. At 360 the right column holds the whole range on one line,
+  // so the event sits on sub-track 1 (behind `outer`), where the left column is capped at 40%.
+  const outer = () => ev("2017-01-01", "outer", { endStr: "2030" });
+
   it("breaks a date range after the en dash before breaking inside a date", () => {
     const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" });
-    const l = v([e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
+    const l = v([outer(), e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
+    expect(labelOf(l, e.id).lines[0]!.anchor).toBe("end"); // on the left
     expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
       "Dec 22, 2017 –", "Dec 31, 2025",
     ]);
@@ -634,56 +707,78 @@ describe("vertical layout", () => {
 
   it("wraps an unspaced date_label override at the dash with no space inserted", () => {
     const e = ev("2017-12-22", "TCJA", { endStr: "2025-12-31", dateText: "Dec 22, 2017–Dec 31, 2025" });
-    const l = v([e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
+    const l = v([outer(), e, ev("2034", "z", { dateText: "Jan 1, 2034" })]);
     expect(labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text)).toEqual([
       "Dec 22, 2017–", "Dec 31, 2025",
     ]);
   });
 
-  it("starts a displaced outer-sub-track span's leader at its own bar", () => {
-    const a = ev("2020-01-01", "a", { endStr: "2030" });
-    const c = ev("2020-01-05", "c, pushed down by a", { endStr: "2035" });
-    const l = v([a, c, ev("2090", "far")]);
-    const sa = l.spans.find((s) => s.id === a.id)!;
-    const sc = l.spans.find((s) => s.id === c.id)!;
-    expect(sc.x).toBeLessThan(sa.x); // c is on sub-track 1, left of a
-    const pts = l.stems.find((s) => s.id === c.id)!.points;
-    const xLeg = l.rules[0]!.x1 + TL_GEOM.dotR + 2;
-    // Out of c's own bar's right edge at its start, across to the leg beside the rule, down, in.
-    expect(pts[0]).toEqual([sc.x + sc.w, sc.y]);
-    expect(pts[1]).toEqual([xLeg, sc.y]);
-    expect(pts[2]![0]).toBe(xLeg);
+  it("joins a displaced left label from its own bar's left edge, on the left of the band", () => {
+    // a holds sub-track 0 and b sub-track 1 for a day, so d (after b ends) takes sub-track 1 again,
+    // while c holds sub-track 2 outside it. d's label is pushed down by b's and c's.
+    const a = ev("2020-01-01", "a", { endStr: "2040" });
+    const b = ev("2020-01-01", "b", { endStr: "2020-01-02" });
+    const c = ev("2020-01-01", "c", { endStr: "2040" });
+    const d = ev("2020-01-03", "d, pushed down by b and c", { endStr: "2035" });
+    const l = v([a, b, c, d, ev("2090", "far")]);
+    const sd = spanOf(l, d.id), sc = spanOf(l, c.id);
+    expect(sc.x).toBeLessThan(sd.x); // c is outside d
+    const lab = labelOf(l, d.id);
+    expect(lab.box.x1).toBeLessThan(leftmostBar(l));
+    const pts = l.stems.find((s) => s.id === d.id)!.points;
+    expect(pts).toHaveLength(4);
+    // Out of d's own bar's left edge at its start, across c's bar to a leg just left of the band,
+    // down parallel to the rule, then into the label's first line from its right.
+    expect(pts[0]).toEqual([sd.x, sd.y]);
+    expect(pts[1]![1]).toBe(sd.y);
+    expect(pts[1]![0]).toBeLessThan(leftmostBar(l));
+    expect(pts[1]![0]).toBeGreaterThan(lab.box.x1);
+    expect(pts[2]![0]).toBe(pts[1]![0]);
+    expect(pts[2]![1]).toBeGreaterThan(pts[1]![1]);
+    expect(pts[2]![1]).toBeLessThan(lab.lines[0]!.y);
     expect(pts[3]![1]).toBe(pts[2]![1]);
-    expect(pts[3]![0]).toBeLessThan(labelOf(l, c.id).box.x0);
-    // A displaced sub-track-0 span keeps the leader that starts beside the rule.
-    const b = ev("2020-01-01", "b", { endStr: "2021" });
-    const d = ev("2021-01-01", "d, pushed down by b", { endStr: "2022" });
-    const l0 = v([ev("2020-01-01", "p"), b, d, ev("2090", "far")]);
-    for (const s of l0.stems) expect(s.points[0]![0]).toBe(l0.rules[0]!.x1 + TL_GEOM.dotR + 2);
+    expect(pts[3]![0]).toBeLessThan(pts[2]![0]);
+    expect(pts[3]![0]).toBeGreaterThan(lab.box.x1);
+    // A displaced right-side item (a point, or a sub-track-0 span) keeps the leader that starts
+    // beside the rule.
+    const p = ev("2020-01-01", "p");
+    const s0 = ev("2020-01-01", "s0", { endStr: "2021" });
+    const s1 = ev("2021-01-01", "s1, pushed down by s0", { endStr: "2022" });
+    const l0 = v([p, s0, s1, ev("2090", "far")]);
+    expect(l0.stems.length).toBeGreaterThan(0);
+    for (const s of l0.stems) expect(s.points[0]![0]).toBe(ruleX(l0) + TL_GEOM.dotR + 2);
   });
 });
 
-describe("vertical layout at narrow widths (left region capped at 45%)", () => {
+describe("vertical layout at narrow widths (side columns)", () => {
   const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
     layoutTimeline(base(events, { orientation: "vertical", ...o }));
   const W = 280;
   const dateLines = (l: TimelineLayout) => l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"));
-  // Bold date text: the estimator is calibrated on regular weight, bold runs ~8% wider.
-  const dateLeft = (d: { x: number; text: string }) => d.x - estimateLabelWidth(d.text, 13) * 1.08;
+  // A line's painted extent: estimated width (bold dates run ~8% wider), placed by its anchor.
+  const extent = (ln: { x: number; text: string; role: "date" | "title" | "description"; anchor: string }): [number, number] => {
+    const w = estimateLabelWidth(ln.text, LINE_STYLE[ln.role].size) * (ln.role === "date" ? 1.08 : 1);
+    return ln.anchor === "end" ? [ln.x - w, ln.x] : ln.anchor === "middle" ? [ln.x - w / 2, ln.x + w / 2] : [ln.x, ln.x + w];
+  };
   const leftmostMark = (l: TimelineLayout) => Math.min(l.rules[0]!.x1, ...l.spans.map((s) => s.x));
-  const inFrame = (l: TimelineLayout) => {
+  const isLeft = (l: TimelineLayout, lab: { box: { x1: number } }) => lab.box.x1 < l.rules[0]!.x1;
+  const inFrame = (l: TimelineLayout, width = W) => {
     for (const lab of l.labels) {
-      expect(lab.box.x0).toBeGreaterThanOrEqual(0);
-      expect(lab.box.x1).toBeLessThanOrEqual(W + 1e-9);
+      expect(lab.box.x0).toBeGreaterThanOrEqual(-1e-6);
+      expect(lab.box.x1).toBeLessThanOrEqual(width + 1e-6);
       for (const ln of lab.lines) {
-        expect(ln.x).toBeGreaterThanOrEqual(0);
-        expect(ln.x).toBeLessThanOrEqual(W);
+        const [x0, x1] = extent(ln);
+        expect(x0).toBeGreaterThanOrEqual(-1e-6);
+        expect(x1).toBeLessThanOrEqual(width + 1e-6);
+        expect(ln.y).toBeLessThanOrEqual(lab.box.y1);
       }
     }
-    for (const d of dateLines(l)) expect(dateLeft(d)).toBeGreaterThanOrEqual(-1e-9);
-    // Rows still stack: a wrapped date is part of its row, so the next row starts below it.
-    for (let i = 1; i < l.labels.length; i++) expect(l.labels[i]!.box.y0).toBeGreaterThanOrEqual(l.labels[i - 1]!.box.y1);
-    for (const lab of l.labels) for (const ln of lab.lines) expect(ln.y).toBeLessThanOrEqual(lab.box.y1);
+    // Each side's labels stack: a wrapped date is part of its block, so the next block starts below it.
+    for (const left of [true, false]) {
+      const side = l.labels.filter((x) => isLeft(l, x) === left);
+      for (let i = 1; i < side.length; i++) expect(side[i]!.box.y0).toBeGreaterThanOrEqual(side[i - 1]!.box.y1);
+    }
+    for (const s of l.spans) expect(s.x).toBeGreaterThanOrEqual(0);
   };
   // Dates wrap only between words: each event's date lines, read in order, are exactly its
   // dateText's whitespace-separated words, with no word split across lines.
@@ -694,22 +789,24 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
       expect(got).toEqual(src);
     }
   };
-  const sixSeptembers = () => Array.from({ length: 6 }, (_, i) =>
-    ev(`2026-0${i + 1}-01`, `Event ${i} title`, { dateText: "September 30, 2026" }));
+  // Six overlapping spans with long dates: sub-tracks 0-5, so five label on the left.
+  const sixSeptemberSpans = () => Array.from({ length: 6 }, (_, i) =>
+    ev(`2026-0${i + 1}-01`, `Event ${i} title`, { endStr: "2030", dateText: "September 30, 2026" }));
 
-  it("wraps long dates between words inside a capped gutter, keeping every label in the frame", () => {
-    const events = sixSeptembers();
+  it("wraps long dates between words in the capped left column, keeping every label in the frame", () => {
+    const events = sixSeptemberSpans();
     const l = v(events, { width: W, axis: true });
     expect(allFinite(l)).toBe(true);
     inFrame(l);
     wholeWords(l, events);
-    const textX = l.labels[0]!.box.x0;
-    expect(textX).toBeLessThanOrEqual(0.45 * W + 1e-9); // the whole left region, rule and gaps included
-    const dates = dateLines(l);
-    expect(dates.length).toBeGreaterThan(events.length); // the dates did wrap
-    expect(dates.every((d) => d.anchor === "end" && d.x <= leftmostMark(l))).toBe(true);
-    // Month ticks ("February") do not fit beside a whole-word date gutter at 280: they are omitted
-    // rather than breaking the dates mid-word.
+    const left = l.labels.filter((x) => isLeft(l, x));
+    expect(left).toHaveLength(5);
+    // The left column is held to 40% of the width, and its dates wrapped to fit it.
+    for (const lab of left) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(0.4 * W + 1e-6);
+    expect(left.every((x) => x.lines.filter((ln) => ln.role === "date").length === 2)).toBe(true);
+    expect(Math.max(...left.map((x) => x.box.x1))).toBeLessThanOrEqual(leftmostMark(l));
+    // Month ticks do not fit beside the two text columns at 280: they are omitted rather than
+    // squeezing the right column or breaking dates mid-word.
     expect(l.ticks).toEqual([]);
   });
 
@@ -718,58 +815,105 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
       const l = v(FIG7(), { width, axis: true });
       expect(l.ticks.length).toBeGreaterThanOrEqual(2);
       const tickRight = Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
-      expect(Math.min(...dateLines(l).map(dateLeft))).toBeGreaterThan(tickRight);
-      expect(l.labels[0]!.box.x0).toBeLessThanOrEqual(0.45 * width + 1e-9);
+      expect(Math.min(...l.labels.flatMap((x) => x.lines.map((ln) => extent(ln)[0])))).toBeGreaterThan(tickRight);
+      expect(l.rules[0]!.x1).toBeLessThanOrEqual(tickRight + 40);
     }
+    // The same six-span data that drops its ticks at 280 keeps them where there is room.
+    const wide = v(sixSeptemberSpans(), { width: 900, axis: true });
+    expect(wide.ticks.length).toBeGreaterThanOrEqual(2);
+    inFrame(wide, 900);
   });
 
   it("compresses a crowded sub-track band instead of pushing text off-canvas", () => {
-    const spans = Array.from({ length: 20 }, (_, i) =>
+    const crowd = (n: number) => Array.from({ length: n }, (_, i) =>
       ev(`${1990 + i}`, `Span ${i}`, { endStr: `${2030 + i}`, dateText: `${1990 + i} – ${2030 + i}` }));
-    const l = v(spans, { width: W });
+    const xsOf = (l: TimelineLayout) => [...new Set(l.spans.map((s) => s.x))].sort((a, b) => a - b);
+    // Twenty sub-tracks: the band narrows (bars and gaps shrink together) and every range still
+    // fits its column on one line.
+    const twenty = crowd(20);
+    const l = v(twenty, { width: W });
     expect(allFinite(l)).toBe(true);
     expect(l.spans).toHaveLength(20);
     inFrame(l);
-    // The dash is now a real break point (D1's spaced range), so a crowded band no longer forces
-    // the whole range onto one line: it wraps there — "<start> –" then "<end>" — never mid-date,
-    // while the sub-track band still compresses to its floor rather than pushing anything off-canvas.
-    wholeWords(l, spans);
-    const dates = dateLines(l);
-    expect(dates).toHaveLength(40);
-    for (let i = 0; i < dates.length; i += 2) expect(dates[i]!.text.endsWith(" –")).toBe(true);
+    wholeWords(l, twenty);
+    expect(dateLines(l)).toHaveLength(20);
     for (const s of l.spans) {
-      expect(s.x).toBeGreaterThanOrEqual(0);
-      expect(s.w).toBeCloseTo(3, 6); // at the V_MIN_BAR floor
+      expect(s.w).toBeLessThan(TL_GEOM.spanH);
+      expect(s.w).toBeGreaterThanOrEqual(3 - 1e-9); // never below the V_MIN_BAR floor
     }
-    // Twenty distinct sub-tracks, none overlapping another.
-    const xs = [...new Set(l.spans.map((s) => s.x))].sort((a, b) => a - b);
+    const xs = xsOf(l);
     expect(xs).toHaveLength(20);
     for (let i = 1; i < xs.length; i++) expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(l.spans[0]!.w + 1 - 1e-9);
-    expect(Math.max(...dateLines(l).map((d) => d.x))).toBeLessThanOrEqual(leftmostMark(l));
+    expect(Math.max(...l.labels.filter((x) => isLeft(l, x)).map((x) => x.box.x1))).toBeLessThanOrEqual(leftmostMark(l));
+    // Thirty: the bars reach their floor and the left column yields down to its widest date word,
+    // so each range wraps after its en dash — "<start> –" then "<end>" — never mid-date.
+    const thirty = crowd(30);
+    const t = v(thirty, { width: W });
+    expect(allFinite(t)).toBe(true);
+    inFrame(t);
+    wholeWords(t, thirty);
+    for (const s of t.spans) expect(s.w).toBeCloseTo(3, 6);
+    const txs = xsOf(t);
+    expect(txs).toHaveLength(30);
+    for (let i = 1; i < txs.length; i++) expect(txs[i]! - txs[i - 1]!).toBeGreaterThanOrEqual(3 + 1 - 1e-9);
+    const leftDates = t.labels.filter((x) => isLeft(t, x)).map((x) => x.lines.filter((ln) => ln.role === "date").map((ln) => ln.text));
+    expect(leftDates).toHaveLength(29);
+    for (const d of leftDates) {
+      expect(d).toHaveLength(2);
+      expect(d[0]!.endsWith(" –")).toBe(true);
+    }
   });
 
-  it("leaves layouts that fit under the cap exactly as they were", () => {
-    // Values recorded from the layout before the cap (commit 0d9dca0).
-    const digest = (l: TimelineLayout) => ({
-      rule: l.rules[0], height: l.height,
-      boxes: l.labels.map((x) => [x.box.x0, x.box.y0, x.box.x1, x.box.y1]),
-      lines: l.labels.map((x) => x.lines.map((ln) => [ln.x, ln.y, ln.text])),
-      spans: l.spans.map((s) => [s.x, s.y, s.w, s.h]), ticks: l.ticks.map((t) => [t.x, t.y, t.text]),
-    });
-    const close = (a: unknown, b: unknown): void => {
-      if (typeof b === "number") expect(a as number).toBeCloseTo(b, 9);
-      else if (b !== null && typeof b === "object") {
-        expect(Object.keys(a as object)).toEqual(Object.keys(b));
-        for (const k of Object.keys(b)) close((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]);
-      } else expect(a).toBe(b);
-    };
-    const at360 = (e: LayoutEvent[], axis = false) => v(e, { width: 360, axis });
-    close(digest(at360(FIG7())), JSON.parse(String.raw`{"rule":{"x1":72.5,"y1":8,"x2":72.5,"y2":400},"height":408,"boxes":[[87,0,172.8,16],[87,26,344.40000000000003,56],[87,161.38909610348387,232.20000000000002,177.38909610348387],[87,187.38909610348387,219,203.38909610348387],[87,384,219,400]],"lines":[[[56,13,"2026"],[87,12,"Policy begins"]],[[56,39,"2030"],[87,38,"First cohort born under fully phased-in"],[87,53,"policy"]],[[56,174.38909610348387,"2055"],[87,173.38909610348387,"Annual projection ends"]],[[56,200.38909610348387,"2057"],[87,199.38909610348387,"That cohort turns 27"]],[[56,397,"2095"],[87,396,"That cohort turns 65"]]],"spans":[],"ticks":[]}`));
-    close(digest(at360(FIG7(), true)), JSON.parse(String.raw`{"rule":{"x1":103.6,"y1":8,"x2":103.6,"y2":400},"height":408,"boxes":[[118.1,0,203.9,16],[118.1,26,309.5,56],[118.1,161.38909610348387,263.3,177.38909610348387],[118.1,187.38909610348387,250.1,203.38909610348387],[118.1,384,250.1,400]],"lines":[[[87.1,13,"2026"],[118.1,12,"Policy begins"]],[[87.1,39,"2030"],[118.1,38,"First cohort born under fully"],[118.1,53,"phased-in policy"]],[[87.1,174.38909610348387,"2055"],[118.1,173.38909610348387,"Annual projection ends"]],[[87.1,200.38909610348387,"2057"],[118.1,199.38909610348387,"That cohort turns 27"]],[[87.1,397,"2095"],[118.1,396,"That cohort turns 65"]]],"spans":[],"ticks":[[0,89.90619792079994,"2040"],[0,201.211649869058,"2060"],[0,312.5171018173161,"2080"]]}`));
-    close(
-      digest(at360([ev("2020", "a", { endStr: "2030" }), ev("2025", "c", { endStr: "2035" }), ev("2040", "b")])),
-      JSON.parse(String.raw`{"rule":{"x1":82,"y1":8,"x2":82,"y2":400},"height":408,"boxes":[[96.5,0,103.1,16],[96.5,96.0394250513347,103.1,112.0394250513347],[96.5,384,103.1,400]],"lines":[[[56,13,"2020"],[96.5,12,"a"]],[[56,109.0394250513347,"2025"],[96.5,108.0394250513347,"c"]],[[56,397,"2040"],[96.5,396,"b"]]],"spans":[[78,8,8,192.02628336755646],[68,104.0394250513347,8,191.97371663244348]],"ticks":[]}`),
-    );
+  it("budgets the width: tick column, left column min(40%, need), band, rule, then the right column", () => {
+    // Every value follows from the documented budget and the text estimator, not from a recording.
+    const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
+    const edge = 4, gap = TL_GEOM.vLabelGap, dotR = TL_GEOM.dotR;
+    const rightOfRule = dotR + gap; // the marker's half-width (≥ half a bar) plus the label gap
+    // Nothing on the left: an edge pad, the marker, the rule; the right column is the rest.
+    const plain = v(FIG7(), { width: 360 });
+    expect(plain.rules[0]!.x1).toBeCloseTo(edge + dotR, 9);
+    for (const lab of plain.labels) expect(lab.box.x0).toBeCloseTo(edge + dotR + rightOfRule, 9);
+    // The tick column goes first, sized to its widest tick plus its gap.
+    const axis = v(FIG7(), { width: 360, axis: true });
+    const tickW = Math.max(...axis.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
+    expect(axis.rules[0]!.x1).toBeCloseTo(tickW + edge + dotR, 9);
+    // A left column at its natural need (here, c's date), then the gap, then the band of two
+    // sub-tracks (half a bar plus one pitch), then the rule.
+    const a = ev("2020", "a", { endStr: "2030" });
+    const c = ev("2025", "c", { endStr: "2035", dateText: "2025 – 2035" });
+    const two = v([a, c, ev("2040", "b")], { width: 360 });
+    const need = bold("2025 – 2035");
+    const band = TL_GEOM.spanH / 2 + TL_GEOM.spanH + TL_GEOM.subTrackGap;
+    expect(labelOf(two, c.id).box.x1).toBeCloseTo(need, 9);
+    expect(two.rules[0]!.x1).toBeCloseTo(need + gap + band, 9);
+    expect(labelOf(two, a.id).box.x0).toBeCloseTo(need + gap + band + rightOfRule, 9);
+    // A left label wider than 40% of the width is capped there and wraps.
+    const cl = ev("2025", "c, whose title is far too long for forty percent of a phone", { endStr: "2035", dateText: "2025 – 2035" });
+    const capped = v([a, cl, ev("2040", "b")], { width: 360 });
+    expect(labelOf(capped, cl.id).box.x1).toBeCloseTo(0.4 * 360, 9);
+    expect(labelOf(capped, cl.id).lines.filter((ln) => ln.role === "title").length).toBeGreaterThan(1);
+    expect(capped.rules[0]!.x1).toBeCloseTo(0.4 * 360 + gap + band, 9);
+  });
+
+  it("keeps every box inside the frame at 280 and 375", () => {
+    const SPANS = () => [
+      ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" }),
+      ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021 – Dec 31, 2021" }),
+      ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022 –" }),
+      ev("2025-07-04", "OBBBA enacted", { dateText: "Jul 4, 2025" }),
+      ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026 – Dec 31, 2030" }),
+      ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034" }),
+    ];
+    const withDesc = () => FIG7().map((e) => ({ ...e, description: "A description long enough to wrap onto several lines in a narrow column" }));
+    for (const width of [280, 375]) {
+      for (const events of [FIG7(), withDesc(), SPANS(), sixSeptemberSpans()]) {
+        for (const axis of [false, true]) {
+          const l = v(events, { width, axis });
+          expect(allFinite(l)).toBe(true);
+          inFrame(l, width);
+        }
+      }
+    }
   });
 
   it("never isolates the dash on its own line or leaves a stray space, across a width sweep", () => {
@@ -795,9 +939,73 @@ describe("vertical layout at narrow widths (left region capped at 45%)", () => {
           expect(d.text).not.toBe(" –");
           expect(d.text.startsWith(" ")).toBe(false);
           expect(d.text.endsWith(" ")).toBe(false);
-          expect(dateLeft(d)).toBeGreaterThanOrEqual(-1e-6);
+          expect(extent(d)[0]).toBeGreaterThanOrEqual(-1e-6);
         }
       }
     }
+  });
+
+  it("splits a date word wider than its whole column without separating its dash", () => {
+    // The only route to the character-level fallback: one unit wider than the right column itself.
+    // Near 332-339px the column holds exactly the 40-letter word, which is
+    // where a plain character split strands the dash, or a trailing space, on a line of its own.
+    const word = "A".repeat(40);
+    for (const dateText of [`${word} – 2030`, `${word}–2030`]) {
+      for (let width = 280; width <= 339; width++) {
+        const e = ev("2020", "t", { endStr: "2030", dateText });
+        const l = v([e, ev("2040", "z")], { width });
+        const d = labelOf(l, e.id).lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+        expect(d.length).toBeGreaterThan(2); // the word really was split
+        expect(d.join("").replace(/\s/g, "")).toBe(dateText.replace(/\s/g, ""));
+        const dashLine = d.findIndex((s) => s.includes("–"));
+        expect(d[dashLine]).toMatch(/^A+ ?–$/); // a word character travels with the dash
+        for (const s of d) {
+          expect(s).not.toBe("–");
+          expect(s).not.toBe(" –");
+          expect(s.startsWith(" ")).toBe(false);
+          expect(s.endsWith(" ")).toBe(false);
+        }
+        inFrame(l, width);
+      }
+    }
+  });
+
+  it("keeps a range's dash on its word in either column, for long and unspaced dates, across 280-420", () => {
+    // Ruling 27: date wrapping reuses the dash-aware units, and no fallback may split a word from
+    // its glued dash or leave an edge space. Each text is tried on the right (alone on sub-track 0)
+    // and on the left (the outer two of three overlapping spans).
+    const TEXTS = ["Dec 22, 2017–Dec 31, 2025", "September 30, 2017 – October 31, 2095"];
+    const alone = (t: string) => [ev("2017-09-30", "a", { endStr: "2095", dateText: t }), ev("2100", "z")];
+    const three = (t: string) => [
+      ev("2017-09-30", "a", { endStr: "2095", dateText: t }),
+      ev("2017-10-01", "b", { endStr: "2095", dateText: t }),
+      ev("2017-10-02", "c", { endStr: "2095", dateText: t }),
+      ev("2100", "z"),
+    ];
+    let sawLeftWrap = false;
+    for (let width = 280; width <= 420; width++) {
+      for (const t of TEXTS) {
+        for (const events of [alone(t), three(t)]) {
+          const l = v(events, { width });
+          inFrame(l, width);
+          for (const lab of l.labels) {
+            const d = lab.lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+            if (lab.box.x1 < l.rules[0]!.x1 && d.length > 1) sawLeftWrap = true;
+            for (const s of d) {
+              expect(s).not.toBe("–");
+              expect(s).not.toBe(" –");
+              expect(s.startsWith(" ")).toBe(false);
+              expect(s.endsWith(" ")).toBe(false);
+            }
+            // Read back in order, the lines are the source text broken only at spaces or after the dash.
+            if (lab.id !== events.at(-1)!.id) {
+              const src = events.find((e) => e.id === lab.id)!.dateText;
+              expect(d.join(" ").replace(/– /g, "–").replace(/\s+/g, " ")).toBe(src.replace(/– /g, "–"));
+            }
+          }
+        }
+      }
+    }
+    expect(sawLeftWrap).toBe(true); // the sweep really reaches wrapping widths
   });
 });

@@ -247,8 +247,8 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
   // span bars, then marker halos and markers (so a dot always paints over any bar, whatever the CSV
   // order of a same-date point and span), then labels, whose white text halos keep the text readable
   // where a stem passes beneath. Vertical only: the leaders paint above bars and markers (still below
-  // labels). They run beside the rule and never cross label text, and beneath, an outer sub-track
-  // span's leader would hide under the inner bar it crosses and read as that bar's. The mark layers
+  // labels). They run beside the track and never cross label text, and beneath, a left-side leader
+  // leaving an inner sub-track's bar would hide under the outer bars it crosses. The mark layers
   // are aria-hidden; the list carries one listitem per event in chronological order. Every mark keeps
   // data-series for the legend's dimming.
   const stemsLayer = el("g", { class: "tbl-timeline-stems", "aria-hidden": "true" });

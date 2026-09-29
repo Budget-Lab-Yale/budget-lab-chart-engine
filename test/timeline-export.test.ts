@@ -119,8 +119,9 @@ describe("timeline export — x-axis title follows the ticks", () => {
     const withTicks = buildExportSvg(spec, rows(""));
     expect(withTicks.querySelectorAll(".tbl-timeline-tick").length).toBeGreaterThan(0);
     expect(withTicks.textContent).toContain("Axis caption");
-    // A date word wider than the whole left-region cap leaves no room for the tick column.
-    const noTicks = buildExportSvg(spec, rows("W".repeat(80)));
+    // A date word so wide the right column needs nearly the whole width leaves no room for the
+    // tick column.
+    const noTicks = buildExportSvg(spec, rows("W".repeat(120)));
     expect(noTicks.querySelectorAll(".tbl-timeline-tick")).toHaveLength(0);
     expect(noTicks.textContent).not.toContain("Axis caption");
   });
@@ -133,7 +134,7 @@ describe("timeline export — x-axis title follows the ticks", () => {
     const narrowW = timelineExportChartWidth(right, withKinds(""));
     expect(narrowW).toBeLessThan(INNER_W);
     // The shortest date word whose tick column fits at INNER_W but not at the right-legend width.
-    const n = Array.from({ length: 80 }, (_, i) => i + 1).find((k) => ticksAt("W".repeat(k), INNER_W) > 0 && ticksAt("W".repeat(k), narrowW) === 0);
+    const n = Array.from({ length: 160 }, (_, i) => i + 1).find((k) => ticksAt("W".repeat(k), INNER_W) > 0 && ticksAt("W".repeat(k), narrowW) === 0);
     expect(n).toBeDefined();
     const svg = buildExportSvg(right, withKinds("W".repeat(n!)));
     expect(svg.querySelectorAll(".tbl-timeline-tick")).toHaveLength(0);
