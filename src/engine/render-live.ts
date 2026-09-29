@@ -1056,7 +1056,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     canvas.replaceChildren(svg);
     currentSvg = svg;
 
-    if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
+    if (spec.chartType === "timeline") {
+      // A timeline's title follows its ticks, which a resize can remove (a narrow vertical render
+      // omits them) or bring back, so it is rebuilt on every draw rather than added once.
+      canvasScroll.querySelector(":scope > .figure-x-axis-title")?.remove();
+      appendXAxisTitle(canvasScroll, xAxisTitle);
+    } else if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
     // --- Legend layout ---
     const shapeOpts = {

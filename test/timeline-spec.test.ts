@@ -18,7 +18,7 @@ describe("timeline — structural validation", () => {
       columns: { x: "date", end: "end", label: "t", description: "d", date_label: "dl", series: "kind" },
       series_order: ["a"], series_colors: { a: "navy" }, series_labels: { a: "A" },
       projected_field: "p", legend: true, series_legend: true, legendPosition: "top",
-      color_legend_title: "Kind", x_axis_title: "Year", subtitle: "s", note: "n", source: "src", tags: ["x"],
+      x_axis_title: "Year", subtitle: "s", note: "n", source: "src", tags: ["x"],
       timeline: { spacing: "proportional", lanes: true, axis: true, date_format: "%Y", label_width: 150, max_rows: 2, auto_vertical: true },
     });
     expect(r).toEqual({ valid: true, errors: [] });
@@ -67,6 +67,8 @@ describe("timeline — structural validation", () => {
     ["series_styles", {}],
     ["dot_radius", 5],
     ["yAxisPolicy", { min: 0 }],
+    // Only the shape-legend layout draws it, and a timeline has no shape legend.
+    ["color_legend_title", "Kind"],
   ])("rejects %s on a timeline", (field, value) => {
     expect(errs({ ...TL, [field]: value })).toContain(`${field} is not supported on chartType "timeline"`);
   });

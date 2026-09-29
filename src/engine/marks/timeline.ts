@@ -328,7 +328,6 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
 }
 
 export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
-  const cfg = resolveTimelineConfig(spec);
   const width = opts.width ?? 720;
   const orientation = opts.timelineOrientation ?? spec.orientation ?? "horizontal";
   const { layout, events, seriesNames, lanesOn } = build(spec, rows, width, orientation);
@@ -351,7 +350,9 @@ export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOpt
   return {
     svg, legendItems, seriesKeyRows, colorLegendTitle: spec.color_legend_title, seriesLabels,
     seriesOrder: seriesNames, dashedNames: new Set(), colors, valueAffixes: { prefix: "", suffix: "" },
-    xAxisTitle: cfg.axis ? (spec.x_axis_title ?? null) : null,
+    // The title captions the ticks, so it goes wherever they do: a vertical render too narrow for the
+    // tick column draws neither, nor does a single distinct date (no scale).
+    xAxisTitle: layout.ticks.length ? (spec.x_axis_title ?? null) : null,
     dataInScope: [], overlayTooltips: [], timelineOrientation: orientation,
   };
 }

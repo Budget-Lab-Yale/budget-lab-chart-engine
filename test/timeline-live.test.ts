@@ -85,6 +85,11 @@ describe("timeline live mount", () => {
     expect(Number(svg.getAttribute("width"))).toBe(340);
     expect(Number(svg.getAttribute("height"))).toBeLessThan(400);
     expect(orientationOf(svg)).toBe("horizontal");
+    // The 280px floor holds either way: narrower still, it stays horizontal at 280.
+    document.body.replaceChildren();
+    const floored = svgOf(mountAt(250, { ...SPEC, timeline: { auto_vertical: false } } as ChartSpec));
+    expect(Number(floored.getAttribute("width"))).toBe(280);
+    expect(orientationOf(floored)).toBe("horizontal");
   });
 
   it("re-resolves the orientation on every width-driven redraw", async () => {
@@ -96,6 +101,27 @@ describe("timeline live mount", () => {
     expect(Number(svgOf(host).getAttribute("width"))).toBe(340);
     await resizeTo(host, 900);
     expect(orientationOf(svgOf(host))).toBe("horizontal");
+  });
+
+  it("shows the x-axis title only while the ticks are drawn, across resizes", async () => {
+    // Month ticks fit at 900 but not beside whole-word dates on a 280px vertical render (A8).
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const spec = {
+      ...SPEC, columns: { x: "date", label: "title", date_label: "dl" }, timeline: { axis: true }, x_axis_title: "Month",
+    } as ChartSpec;
+    const rows = Array.from({ length: 6 }, (_, i) => ({ date: `2026-0${i + 1}-01`, title: `Event ${i} title`, dl: "September 30, 2026" })) as TidyRow[];
+    const host = mountAt(900, spec, rows);
+    const titles = () => [...host.querySelectorAll(".figure-x-axis-title")].map((t) => t.textContent);
+    const ticks = () => svgOf(host).querySelectorAll(".tbl-timeline-tick").length;
+    expect(ticks()).toBeGreaterThan(0);
+    expect(titles()).toEqual(["Month"]);
+    await resizeTo(host, 280);
+    expect(orientationOf(svgOf(host))).toBe("vertical");
+    expect(ticks()).toBe(0);
+    expect(titles()).toEqual([]);
+    await resizeTo(host, 900);
+    expect(ticks()).toBeGreaterThan(0);
+    expect(titles()).toEqual(["Month"]);
   });
 
   it("renders the lanes fixture horizontal at 900px", () => {

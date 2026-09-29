@@ -27,6 +27,7 @@ export const TL_GEOM = {
   laneGutterPad: 12,
   axisH: 24,
   minVerticalHeight: 400,
+  /** Vertical axis inset, top and bottom. Must equal half the date line height (see layoutVertical's sweep). */
   vPad: 8,
   /** Horizontal: space kept above the topmost label box (or lane name) once the band the uniform row
    *  pitch leaves above shorter top-row boxes is trimmed. */
@@ -429,7 +430,16 @@ function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): Ti
     const n = Math.max(2, Math.floor((inp.width - gutter) / 100));
     const fmt = scale.tickFormat(n);
     const y = cursor + G.axisH - 8;
-    out.ticks = scale.ticks(n).map((t) => ({ x: scale(t), y, text: fmt(t), anchor: "middle" as const }));
+    // A tick is centred on its date unless that would push its text off the frame: the range inset
+    // makes room only for point labels, so a span's end can sit a marker radius from an edge. There
+    // the tick anchors at its date and reads inward instead.
+    out.ticks = scale.ticks(n).map((t) => {
+      const x = scale(t);
+      const text = fmt(t);
+      const half = estimateLabelWidth(text, TBL.size.axis) / 2;
+      const anchor = x - half < 0 ? "start" : x + half > inp.width ? "end" : "middle";
+      return { x, y, text, anchor };
+    });
     cursor += G.axisH;
   }
   // Rows share one pitch (the tallest box), so when the top row holds only shorter boxes a band is
@@ -508,7 +518,8 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const bandRoom = free - dateMin;
     let barW: number = G.spanH;
     let gap: number = G.subTrackGap;
-    if (Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
+    // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero).
+    if (nSub && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
       const s = Math.max(0, bandRoom) / bandOf(barW, gap);
       barW = G.spanH * s;
       gap = G.subTrackGap * s;
@@ -572,6 +583,8 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   let prevBottom = -Infinity;
   const tops = new Map<number, number>();
   for (const e of events) {
+    // The first label gets no leader only because vPad (the axis's top inset) equals half the date
+    // line height: its desired top is then exactly 0, so the clamp below never pushes it off its date.
     const desired = pos(e.start) - LINE_STYLE.date.lineH / 2;
     const top = Math.max(desired, prevBottom + G.vLabelGap, 0);
     tops.set(e.id, top);

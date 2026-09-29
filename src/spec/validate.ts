@@ -731,7 +731,7 @@ function rugBoundOrder(xAxisType: XAxisType, value: string): number {
  *  must be classified here rather than silently accepted and ignored on a timeline. */
 export const TIMELINE_ALLOWED_FIELDS: readonly string[] = [
   "chartType", "columns", "title", "subtitle", "source", "note", "x_axis_title", "xAxisType",
-  "series_order", "series_colors", "series_labels", "color_legend_title", "projected_field",
+  "series_order", "series_colors", "series_labels", "projected_field",
   "orientation", "legendPosition", "legend", "series_legend", "data", "tags", "timeline",
 ];
 
@@ -744,6 +744,8 @@ export const TIMELINE_REJECTED_FIELDS: readonly string[] = [
   "rug", "points", "projected_style", "valueLabels", "barStack", "waterfall", "histogram",
   "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "value_format",
   "highlightSeries", "chrome", "small_multiples",
+  // Drawn only as a heading in the shape-legend layout, and a timeline has no shape legend.
+  "color_legend_title",
 ];
 
 const TIMELINE_ONLY_COLUMNS = ["end", "label", "description", "date_label"] as const;

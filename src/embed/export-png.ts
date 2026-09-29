@@ -351,7 +351,7 @@ export function buildExportSvg(
   const hasShapeLegend = shapeLegendItems.length > 0;
   const colorLegendTitle = meta.colorLegendTitle ?? "";
   const shapeLegendTitle = meta.shapeLegendTitle ?? "";
-  const xAxisTitle = meta.xAxisTitle ?? "";
+  let xAxisTitle = meta.xAxisTitle ?? "";
   const yAxisTitle = spec.y_axis_title ?? "";
 
   // Title-selector tokens → the active (or default) option labels, as plain SVG text.
@@ -477,17 +477,27 @@ export function buildExportSvg(
       }
       contentHeight = Math.max(contentHeight, Math.ceil(measured));
     }
-    const { svg: chartSvg } = renderChart(spec, rows, {
+    const rendered = renderChart(spec, rows, {
       width: chartW,
       height: contentHeight,
       hooks: opts.hooks,
       phase: "export",
       ...(accentColor ? { accentColor } : {}),
     });
+    const chartSvg = rendered.svg;
     chartSvg.setAttribute("x", String(MARGIN));
     chartSvg.setAttribute("y", String(chartTop));
     chartSvg.setAttribute("width", String(chartW));
-    chartSvg.setAttribute("height", String(contentHeight));
+    // A timeline keeps its own layout height: a right legend taller than it grows `contentHeight`,
+    // and stretching the SVG to that would centre the timeline (xMidYMid meet) beside the legend.
+    if (!isTimeline) chartSvg.setAttribute("height", String(contentHeight));
+    // A timeline's x-axis title follows the ticks of THIS render, at `chartW`: the metadata pass ran
+    // at INNER_W, and a vertical timeline can drop its ticks at the narrower right-legend width.
+    if (isTimeline) {
+      const title = rendered.xAxisTitle ?? "";
+      if (!title !== !xAxisTitle) bottomH += title ? 14 : -14;
+      xAxisTitle = title;
+    }
     root.appendChild(chartSvg);
     if (rightLegend) {
       // Beside the plot, ordered top-to-bottom as the stack reads (orderForRightLegend) — the same

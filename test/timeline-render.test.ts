@@ -278,6 +278,45 @@ describe("timeline render", () => {
     expect(layerSeq(r().svg)).toEqual(["tbl-timeline-stems", "tbl-timeline-spans", "tbl-timeline-markers", "list"]);
   });
 
+  it("drops the x-axis title with the ticks: drawn only when a render draws ticks", () => {
+    const axis = { timeline: { axis: true }, x_axis_title: "Year" } as Partial<ChartSpec>;
+    const wide = r(axis);
+    expect(q(wide.svg, ".tbl-timeline-tick").length).toBeGreaterThanOrEqual(2);
+    expect(wide.xAxisTitle).toBe("Year");
+    // Month ticks do not fit beside whole-word dates at 280 (amendment A8): no ticks, no title.
+    const months = Array.from({ length: 6 }, (_, i) => ({
+      date: `2026-0${i + 1}-01`, end: "", title: `Event ${i} title`, detail: "", kind: "policy", projected: "",
+      dl: "September 30, 2026",
+    })) as TidyRow[];
+    const narrow = renderChart(
+      { ...SPEC, ...axis, columns: { ...SPEC.columns, date_label: "dl" } } as ChartSpec, months,
+      { width: 280, timelineOrientation: "vertical" },
+    );
+    expect(q(narrow.svg, ".tbl-timeline-tick")).toHaveLength(0);
+    expect(narrow.xAxisTitle).toBeNull();
+    // One distinct date: no scale, so no ticks and no title either.
+    const one = r(axis, 900, [ROWS[0]!] as TidyRow[]);
+    expect(q(one.svg, ".tbl-timeline-tick")).toHaveLength(0);
+    expect(one.xAxisTitle).toBeNull();
+  });
+
+  it("uses series_order as an inclusion filter: an unlisted category is not drawn at all", () => {
+    const res = r({ series_order: ["policy"], series_legend: true });
+    const cohort = ROWS.filter((x) => x.kind === "cohort").map((x) => x.title as string);
+    expect(q(res.svg, '[data-series="cohort"]')).toHaveLength(0);
+    expect(q(res.svg, 'g[role="listitem"]')).toHaveLength(ROWS.length - cohort.length);
+    expect(res.svg.querySelector('g[role="list"]')!.getAttribute("aria-label")).toBe(`Timeline, ${ROWS.length - cohort.length} events`);
+    for (const title of cohort) expect(res.svg.textContent).not.toContain(title);
+    expect(res.legendItems!.map((i) => i.series)).toEqual(["policy"]);
+  });
+
+  it("draws the description as visible text in the event's label, not only in its aria-label", () => {
+    const item = q(r().svg, 'g[role="listitem"]').find((g) => g.getAttribute("aria-label")!.startsWith("2030:"))!;
+    const muted = q(item, "g.tbl-timeline-label text").filter((t) => t.getAttribute("font-size") === "11");
+    expect(muted.map((t) => t.textContent).join(" ")).toBe("Under fully phased-in policy");
+    for (const t of muted) expect(t.getAttribute("fill")).toBe(TBL.color.muted);
+  });
+
   it("contains no NaN", () => {
     expect(/NaN/.test(r().svg.outerHTML)).toBe(false);
     expect(/NaN/.test(renderChart(SPEC, ROWS, { width: 320, timelineOrientation: "vertical" }).svg.outerHTML)).toBe(false);

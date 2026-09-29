@@ -207,6 +207,26 @@ describe("horizontal layout", () => {
     expect(withAxis.height).toBeGreaterThan(layoutTimeline(base(FIG7())).height);
   });
 
+  it("keeps every horizontal tick's text inside the frame, end ticks included", () => {
+    // Span labels are start-anchored, so the range inset only makes room for point labels: the
+    // 2020 and 2030 ends sit a marker radius from each edge, where a centred tick would half-clip.
+    const probe = () => [
+      ev("2020", "Span one", { endStr: "2025" }), ev("2026", "Span two", { endStr: "2030" }), ev("2022", "A point"),
+    ];
+    for (const width of [920, 600]) {
+      const l = layoutTimeline(base(probe(), { width, axis: true }));
+      expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+      for (const t of l.ticks) {
+        const w = estimateLabelWidth(t.text, TBL.size.axis);
+        const x0 = t.anchor === "start" ? t.x : t.anchor === "end" ? t.x - w : t.x - w / 2;
+        expect(x0).toBeGreaterThanOrEqual(0);
+        expect(x0 + w).toBeLessThanOrEqual(width);
+      }
+      // Interior ticks stay centred on their date.
+      expect(l.ticks.some((t) => t.anchor === "middle")).toBe(true);
+    }
+  });
+
   it("labels an outer sub-track span above, its stem rising from its own bar", () => {
     // b is second in date order, so alternation alone would send it below, where its stem would
     // hang off a's bar on sub-track 0.
