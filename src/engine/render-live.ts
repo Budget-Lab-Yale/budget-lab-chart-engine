@@ -27,6 +27,8 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
+import { resolveTimelineOrientation, timelineHeight } from "./marks/timeline.js";
+import { TL_GEOM } from "./timeline-layout.js";
 import { waterfallValueDecimals } from "./scales.js";
 import { applyValueAffixes, formatNumericX } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
@@ -220,6 +222,9 @@ const FIXED_CHART_HEIGHT = 400;
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+  // Timeline height is content-derived (label rows, or the stacked vertical column); renderChart
+  // computes it again at the real width, so this is only the pre-draw estimate.
+  if (spec.chartType === "timeline") return timelineHeight(spec, rows, 720);
   // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
   // same as a single-series horizontal bar, section spacers included).
@@ -892,7 +897,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const chartAvail = legendPos === "right"
       ? outerWidth - LEGEND_COLUMN_WIDTH - LEGEND_GAP
       : outerWidth;
-    const target = Math.max(MIN_CHART_WIDTH, Math.round(chartAvail));
+    // A timeline goes vertical instead of scrolling, so it renders at the real width down to a phone.
+    const minW = spec.chartType === "timeline" ? TL_GEOM.minLiveWidth : MIN_CHART_WIDTH;
+    const target = Math.max(minW, Math.round(chartAvail));
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
 
@@ -905,12 +912,18 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       : undefined;
     const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
 
+    // Spec §5.4: re-resolved on every width-driven redraw, on the width actually drawn (`target` —
+    // beside a right legend that is the chart column, not the card).
+    const timelineOrientation =
+      spec.chartType === "timeline" ? resolveTimelineOrientation(spec, rows, target) : undefined;
+
     let built;
     try {
       built = renderChart(spec, rows, {
         width: target,
         height,
         hooks: opts.hooks,
+        ...(timelineOrientation ? { timelineOrientation } : {}),
         ...(restackOrder ? { stackOrder: restackOrder } : {}),
         ...(accentColor ? { accentColor } : {}),
       });
@@ -1092,6 +1105,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           ...shapeOpts,
         });
       }
+    } else if (spec.chartType === "timeline") {
+      // A timeline's legend can come and go on a resize (lanes name the categories when horizontal;
+      // the auto-switched vertical has none, so the legend does), so drop the last draw's legend.
+      legendSlot.replaceChildren();
+      rightLegendSlot?.replaceChildren();
     }
 
     // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
@@ -1104,7 +1122,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    if (spec.chartType === "scatter") {
+    if (spec.chartType === "timeline") {
+      // Static by design: every label is on the page, so screen and PNG agree. Legend pin/dim
+      // still works through the data-series attributes.
+    } else if (spec.chartType === "scatter") {
       // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
       attachPointHover(svg, scatterPointHoverOptions({
         spec,
@@ -1351,7 +1372,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
-    currentOverlay = attachYAxisOverlay(canvasScroll, svg);
+    currentOverlay = spec.chartType === "timeline" ? null : attachYAxisOverlay(canvasScroll, svg);
 
     // --- Reciprocal annotation highlight: hovering a rug block lights up its legend row and every
     // other chart element carrying the same key (its bands, its fills, its other blocks), and dims
