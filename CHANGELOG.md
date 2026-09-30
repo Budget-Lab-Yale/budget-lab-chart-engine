@@ -10,10 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `chartType: timeline` — dated point, span and open-ended events along a rule, one CSV row per
   event (`columns.end`, `columns.label`, `columns.description`, `columns.date_label`); proportional
   or even spacing; optional lanes and date axis; horizontal or vertical, switching to vertical on
-  screen when narrow or crowded. Static (no hover); the PNG export keeps the authored orientation.
-  `tbl-chart validate` warns on more than 20 events or on label overflow at the export width. The
-  `timeline:` block and the new column roles are rejected on every other chart type, so no existing
-  spec changes. See CONFIG-SPEC "Timeline options".
+  screen when narrow or crowded. Date ranges are spaced (`2031 – 2035`, open-ended `2040 –`). A
+  vertical timeline sets each label beside its item, with its bold date above the title; two lanes
+  draw as side-by-side lane columns unless `timeline.vertical_lanes: single`, and three or more
+  share one track. Static (no hover); the PNG export keeps the authored orientation.
+  `tbl-chart validate` warns on more than 20 events, on label overflow at the export width, or on
+  an explicit `vertical_lanes: columns` with three or more lanes. The `timeline:` block and the new
+  column roles are rejected on every other chart type, so no existing spec changes. See CONFIG-SPEC
+  "Timeline options".
 
 ## [1.14.0] - 2026-09-10
 
