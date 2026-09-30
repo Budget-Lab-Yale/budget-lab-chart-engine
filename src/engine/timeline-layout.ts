@@ -41,6 +41,10 @@ export const TL_GEOM = {
   autoVerticalMinWidth: 480,
   /** Live floor for a timeline's width (vertical reads down to a small phone). */
   minLiveWidth: 280,
+  /** Vertical: no text column (single-track right or left, or either lane column) is wider than
+   *  this, for a readable line length; the block it leaves is centred in the width (E2, Ruling 32).
+   *  A date unit wider than it still sets that column's floor. */
+  vTextColumnMax: 360,
 } as const;
 
 export type LineRole = "date" | "title" | "description";
@@ -93,6 +97,11 @@ export interface TimelineLayoutInput {
   axis: boolean;
   labelWidth: number;
   maxRows: number;
+  /** Vertical only: lay the columns out as if the width were this, then centre the block in
+   *  `width` — if the block fits there; otherwise it is laid out at `width` as usual. The PNG
+   *  export's portrait frame (E3) lays out at its widest chart area and trims the frame to the
+   *  block. Absent: `width`. Horizontal ignores it. */
+  budgetWidth?: number;
 }
 
 export interface PlacedLine { role: LineRole; text: string; x: number; y: number; anchor: "start" | "middle" | "end" }
@@ -759,7 +768,8 @@ function vLeader(
  *  between words or after an en dash), on the left capped at V_SIDE_SHARE (40%) of the width; its
  *  NEED is its widest unwrapped line capped at 40%, but never below its floor. The right side is
  *  every main-track label (any may stay right); the left side is the outer spans, plus B's
- *  candidates. Allocated in this priority:
+ *  candidates. Every need is also capped at vTextColumnMax (Ruling 32), never below its floor.
+ *  Allocated in this priority:
  *   1. The tick column is drawn if it fits beside the left floor, the band at its floors (bars
  *      V_MIN_BAR, gaps V_MIN_TRACK_GAP), the right floor and the fixed gaps; otherwise it is omitted
  *      (not squeezed), and the x-axis title with it (amendment A8).
@@ -768,34 +778,80 @@ function vLeader(
  *      the right column its need.
  *   4. If the band at its floors still leaves the right column short, the left column yields, down
  *      to its floor.
- *   5. The right column gets everything that remains.
+ *   5. The right column gets everything that remains, up to vTextColumnMax (or its date-word
+ *      floor, if wider) — E2, Ruling 32.
  *   6. With nothing on the left (no left column at all), the rule from step 3 is a "natural" left
  *      extent — tick column, band and V_EDGE, hugging the left edge. Inset it for balance: the rule
  *      moves to `max(natural, vTrackInsetShare of the width)`, capped so the right column never
  *      drops below its date-word floor (and the rule never moves left of the natural extent). A
  *      left column overrides this — the rule stays at its step-3 position (so B never insets).
+ *      When the right column would pass its cap even with the inset (`slack`, the room past the
+ *      capped column with the rule at its natural extent, exceeds the inset), the inset shrinks to
+ *      max(0, 2 * inset - slack): the blank left of the block is then (slack + inset) / 2 after
+ *      centring, which starts at the inset and reaches slack / 2 (plain centring) by slack = 2 *
+ *      inset, so the track moves continuously as the width grows.
+ *   7. The block — [0, the right column's end] — is centred in the width (centreBlock): every x
+ *      moves right by half the width it leaves. A block that fills the width is not moved, so a
+ *      layout whose right column stays within the cap is unchanged: every width up to ~420px (the
+ *      narrowest left column, band and gaps leave 360px only past that), ~450px with no left column.
  *  A left date unit wider than 40% is split by hardBreakDate, so the left column never pushes the
  *  track off the frame; a right one is split to whatever the right column gets.
  *  The axis length is chosen so the taller side's whole stack fits — outer spans at the left width,
  *  every main-track label at the right width, as if none swapped — which keeps pushes local. */
-function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
+function layoutVertical(inp: TimelineLayoutInput): VBlockLayout {
   if (inp.lanes?.length === 2) return layoutLaneColumns(inp, inp.lanes);
   const a = layoutSingleTrack(inp, null);
   // A candidate with a word wider than the whole left share could never swap, so it must not widen
   // the column (Ruling 36).
   const share = V_SIDE_SHARE * inp.width;
   const candidates = new Set(inp.events.filter((e) => a.displacedMain.has(e.id) && widestUnit(e) <= share + V_EPS).map((e) => e.id));
-  if (!candidates.size) return a.layout;
+  if (!candidates.size) return a;
   const b = layoutSingleTrack(inp, candidates);
-  return b.swapped && b.layout.stems.length <= a.layout.stems.length ? b.layout : a.layout;
+  return b.swapped && b.layout.stems.length <= a.layout.stems.length ? b : a;
+}
+
+/** A vertical layout laid out from x = 0, before centring: everything it draws lies in
+ *  [0, blockW], and blockW is exactly the layout's width unless a text column reached
+ *  vTextColumnMax. */
+interface VBlockLayout { layout: TimelineLayout; blockW: number }
+
+/** E2: moves every x in the layout right by half the width the block leaves, so the block sits in
+ *  the middle of `width`, and sets the layout's width to `width`. A block that fills the width
+ *  (every phone width) is left exactly as laid out. */
+function centreBlock({ layout: l, blockW }: VBlockLayout, width: number): TimelineLayout {
+  l.width = width;
+  const dx = (width - blockW) / 2;
+  if (!(dx > 0)) return l;
+  for (const r of l.rules) { r.x1 += dx; r.x2 += dx; }
+  for (const m of l.markers) m.cx += dx;
+  for (const s of l.spans) s.x += dx;
+  for (const s of l.stems) s.points = s.points.map(([x, y]): [number, number] => [x + dx, y]);
+  for (const lab of l.labels) {
+    lab.box = { ...lab.box, x0: lab.box.x0 + dx, x1: lab.box.x1 + dx };
+    for (const ln of lab.lines) ln.x += dx;
+  }
+  for (const k of l.ticks) k.x += dx;
+  for (const ll of l.laneLabels) ll.x += dx;
+  return l;
+}
+
+/** Vertical (E2, E3): laid out at `budgetWidth` when that block fits `width`, else at `width`;
+ *  either way centred in `width`. */
+function layoutVerticalCentred(inp: TimelineLayoutInput): TimelineLayout {
+  if (inp.budgetWidth !== undefined && inp.budgetWidth !== inp.width) {
+    const r = layoutVertical({ ...inp, width: inp.budgetWidth });
+    if (r.blockW <= inp.width) return centreBlock(r, inp.width);
+  }
+  return centreBlock(layoutVertical(inp), inp.width);
 }
 
 /** One single-track vertical attempt (see layoutVertical): `candidates` null is attempt A (no
- *  swaps), else attempt B with those main-track ids sizing the left column. Returns the layout, the
- *  main-track labels it displaced on the right, and whether any main-track label went left. */
+ *  swaps), else attempt B with those main-track ids sizing the left column. Returns the layout
+ *  (uncentred) and its block width, the main-track labels it displaced on the right, and whether
+ *  any main-track label went left. */
 function layoutSingleTrack(
   inp: TimelineLayoutInput, candidates: Set<number> | null,
-): { layout: TimelineLayout; displacedMain: Set<number>; swapped: boolean } {
+): VBlockLayout & { displacedMain: Set<number>; swapped: boolean } {
   const G = TL_GEOM;
   const W = inp.width;
   const events = [...inp.events].sort(byTime);
@@ -826,7 +882,7 @@ function layoutSingleTrack(
     const nat = Math.max(0, ...evs.flatMap((e) => [
       ...widest("date", e.dateText), ...widest("title", e.title), ...widest("description", e.description),
     ]));
-    return { need: Math.max(word, Math.min(share, nat)), word };
+    return { need: Math.max(word, Math.min(share, G.vTextColumnMax, nat)), word };
   };
   const leftNeed = needOf(leftSizing, true);
   const rightNeeds = needOf(right, false);
@@ -864,26 +920,34 @@ function layoutSingleTrack(
     return { barW, gap, band, leftW };
   };
 
+  // Step 5's cap (E2): the right column never passes vTextColumnMax, nor splits a date unit for it.
+  const capR = Math.max(G.vTextColumnMax, rightNeeds.word);
   const geometry = (tickNeed: number) => {
     const tickW = tickNeed > 0 && tickNeed <= tickRoom ? tickNeed : 0;
     const { barW, gap, band, leftW } = allocate(W - tickW);
     const naturalRuleX = tickW + leftOf(leftW) + band;
     // Step 6: no left column — inset the rule for balance, capped so the right column keeps its
-    // date-word floor (rightNeeds.word), and never left of the natural extent.
+    // date-word floor (rightNeeds.word), and never left of the natural extent. Once the right
+    // column reaches its cap, the inset gives way to centring (step 7).
     let ruleX = naturalRuleX;
     if (!hasLeft) {
       const colRAtNatural = W - (naturalRuleX + rightOf(barW));
       const maxInset = Math.max(0, colRAtNatural - rightNeeds.word);
       const desiredInset = Math.max(0, G.vTrackInsetShare * W - naturalRuleX);
-      ruleX = naturalRuleX + Math.min(desiredInset, maxInset);
+      const inset = Math.min(desiredInset, maxInset);
+      const slack = colRAtNatural - capR;
+      ruleX = naturalRuleX + (slack > inset ? Math.max(0, 2 * inset - slack) : inset);
     }
     const leftCol: VColumn = { x0: tickW, x1: tickW + leftW, anchor: "end" };
-    const rightCol: VColumn = { x0: ruleX + rightOf(barW), x1: W, anchor: "start" };
-    const colR = Math.max(0, W - rightCol.x0);
+    const x0 = ruleX + rightOf(barW);
+    // `blockW` is exactly W unless the cap binds, so a layout the cap does not reach never moves.
+    const blockW = W - x0 > capR ? x0 + capR : W;
+    const rightCol: VColumn = { x0, x1: blockW, anchor: "start" };
+    const colR = Math.max(0, blockW - x0);
     const blocks = new Map(events.map((e) => [e.id, vBlock(e, kOf(e) > 0 ? leftW : colR)]));
     const stackOf = (evs: LayoutEvent[]): number => vStack(evs.map((e) => blocks.get(e.id) as TextBlock));
     const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stackOf(left), stackOf(right));
-    return { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L };
+    return { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L, blockW };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
@@ -899,7 +963,7 @@ function layoutSingleTrack(
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L } = geometry(tickNeed);
+  const { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L, blockW } = geometry(tickNeed);
   if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 
@@ -978,7 +1042,7 @@ function layoutSingleTrack(
     const fmt = tickFmt;
     out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
   }
-  return { layout: out, displacedMain, swapped };
+  return { layout: out, displacedMain, swapped, blockW };
 }
 
 /** Lane columns: rule-to-rule distance between the two tracks. */
@@ -1006,10 +1070,13 @@ const V_LANE_NAME_INSET = 6;
  *      toward their floors only as far as it takes to leave each column its floor.
  *   3. The columns split what remains equally; a date unit wider than its column is split by
  *      hardBreakDate, so no label leaves the frame.
- *  Lane names wrap to their side (the frame edge or tick column to 6px short of the rule) and the
+ *   4. Each column stops at vTextColumnMax (or the shared date-word floor, if wider) — E2, Ruling
+ *      32 — and the block is centred in the width, as layoutVertical's step 7. Below the cap
+ *      (up to ~770px with no tick column) the columns fill the width and nothing moves.
+ *  Lane names wrap to their side (the block's edge or tick column to 6px short of the rule) and the
  *  taller name block is reserved at the top: labels start below it (placeColumn's min-top) and the
  *  axis starts vPad below that. */
-function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string; label: string }>): TimelineLayout {
+function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string; label: string }>): VBlockLayout {
   const G = TL_GEOM;
   const W = inp.width;
   const keys = lanes.map((l) => l.key);
@@ -1057,16 +1124,21 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const tickW = tickNeed > 0 && tickNeed <= tickRoom ? tickNeed : 0;
     const { barW, gap } = bars(W - tickW);
     const bands = nSubs.map((n) => bandOf(n, barW, gap));
-    const colW = Math.max(0, (W - tickW - fixed - bands[0]! - bands[1]!) / 2);
+    const colFree = Math.max(0, (W - tickW - fixed - bands[0]! - bands[1]!) / 2);
+    // Step 4 (E2): each column stops at vTextColumnMax (or the date-word floor, if wider).
+    // `blockW` is exactly W unless that cap binds, so a layout it does not reach never moves.
+    const colCap = Math.max(G.vTextColumnMax, word);
+    const colW = Math.min(colFree, colCap);
+    const blockW = colFree > colCap ? tickW + 2 * colW + fixed + bands[0]! + bands[1]! : W;
     const rules = [tickW + colW + G.vLabelGap + bands[0]!];
     rules.push(rules[0]! + V_LANE_GAP);
     const cols: VColumn[] = [
       { x0: tickW, x1: tickW + colW, anchor: "end" },
-      { x0: rules[1]! + bands[1]! + G.vLabelGap, x1: W, anchor: "start" },
+      { x0: rules[1]! + bands[1]! + G.vLabelGap, x1: blockW, anchor: "start" },
     ];
     const names = [
       laneNameLines(lanes[0]!.label, Math.max(0, rules[0]! - V_LANE_NAME_INSET - tickW)),
-      laneNameLines(lanes[1]!.label, Math.max(0, W - rules[1]! - V_LANE_NAME_INSET)),
+      laneNameLines(lanes[1]!.label, Math.max(0, blockW - rules[1]! - V_LANE_NAME_INSET)),
     ];
     const top = Math.max(...names.map((n) => n.length)) * LANE_LINE_H + G.rowGap;
     const blocks = new Map(events.map((e) => [e.id, vBlock(e, colW)]));
@@ -1074,7 +1146,7 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
       G.minVerticalHeight - top - 2 * G.vPad - tail,
       ...laneEvs.map((evs) => vStack(evs.map((e) => blocks.get(e.id) as TextBlock))),
     );
-    return { tickW, barW, gap, bands, rules, cols, names, top, blocks, L };
+    return { tickW, barW, gap, bands, rules, cols, names, top, blocks, L, blockW };
   };
 
   // Ticks as layoutVertical chooses them: count from the tickless axis, column sized to the widest.
@@ -1089,7 +1161,7 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, barW, gap, bands, rules, cols, names, top, blocks, L } = geometry(tickNeed);
+  const { tickW, barW, gap, bands, rules, cols, names, top, blocks, L, blockW } = geometry(tickNeed);
   if (!tickW) ticks = [];
   const y0 = top + G.vPad;
   const { pos, scale } = positioner(events, inp.spacing, y0, y0 + L);
@@ -1143,11 +1215,18 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const fmt = tickFmt;
     out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
   }
-  return out;
+  return { layout: out, blockW };
 }
 
 export function layoutTimeline(inp: TimelineLayoutInput): TimelineLayout {
-  return inp.orientation === "vertical" ? layoutVertical(inp) : layoutHorizontal(inp);
+  return inp.orientation === "vertical" ? layoutVerticalCentred(inp) : layoutHorizontal(inp);
+}
+
+/** Vertical: the width the laid-out block needs at `inp.width` (its tick column, text columns,
+ *  band and track, each text column at most vTextColumnMax) — `inp.width` itself unless a column
+ *  reached that cap. The PNG export sizes its portrait frame from this (E3). */
+export function verticalBlockWidth(inp: TimelineLayoutInput): number {
+  return layoutVertical(inp).blockW;
 }
 
 /** Internal, for tests: `fits` of the horizontal layout under plain §5.2 first-fit alone (no
@@ -1159,5 +1238,5 @@ export function plainFirstFitFits(inp: TimelineLayoutInput): boolean {
 /** Internal, for tests: a single-track vertical layout with no swaps (attempt A in layoutVertical),
  *  whose connector count `layoutTimeline`'s never exceeds (Ruling 34). */
 export function verticalNoSwapLayout(inp: TimelineLayoutInput): TimelineLayout {
-  return layoutSingleTrack(inp, null).layout;
+  return centreBlock(layoutSingleTrack(inp, null), inp.width);
 }

@@ -146,6 +146,10 @@ export interface RenderOptions {
    *  auto-switch (resolveTimelineOrientation); absent everywhere else, so the PNG export and every
    *  other caller render the authored orientation. */
   timelineOrientation?: "horizontal" | "vertical";
+  /** Timeline only, vertical: budget the layout's columns at this width and centre the block in
+   *  `width` (TimelineLayoutInput.budgetWidth). Set by the PNG export's portrait frame
+   *  (timelineExportFrame); absent everywhere else. */
+  timelineBudgetWidth?: number;
 }
 
 export interface LegendItem {

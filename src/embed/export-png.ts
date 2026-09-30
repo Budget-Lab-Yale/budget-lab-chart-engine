@@ -8,7 +8,7 @@ import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
-import { timelineHeight, timelineExportChartWidth } from "../engine/marks/timeline.js";
+import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
@@ -101,6 +101,9 @@ function drawLegend(
   leadingTitle?: string,
   /** Only `legendKey` is consumed here, and only for rows carrying `series` — see above. */
   hooks?: RenderHooks,
+  /** Where a row wraps: the frame's right margin (a vertical timeline's portrait frame is narrower
+   *  than `W`). */
+  maxRight: number = MARGIN + INNER_W,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
   const titleFont = `${W_SEMI} 12px ${FONT}`;
@@ -157,7 +160,7 @@ function drawLegend(
       probe.innerHTML = custom;
       itemW = swatchW + GAP + measureText(probe.textContent ?? "", legendFont);
     }
-    if (x > MARGIN && x + itemW > MARGIN + INNER_W) {
+    if (x > MARGIN && x + itemW > maxRight) {
       x = MARGIN;
       y += ROW_H;
     }
@@ -315,7 +318,9 @@ function drawLegendColumn(
 /**
  * Build a self-contained export SVG for the given chart spec and data rows.
  * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame. The chart
- * fills the height left after the title/subtitle/legend chrome.
+ * fills the height left after the title/subtitle/legend chrome. A timeline's frame height is its
+ * content's, and a vertical timeline's frame is portrait: as wide as the timeline needs, at most
+ * 640px (timelineExportFrame, E3), with every piece of chrome laid out at that width.
  * NOTE: the eyebrow is intentionally NOT drawn in the export — the figure number belongs to
  * the publication context, not to the standalone image.
  *
@@ -370,36 +375,43 @@ export function buildExportSvg(
     : undefined;
   const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
 
-  const { root, bgRect } = createExportRoot(document, W, H);
+  // A timeline's frame (width, chart width, legend side) is decided the SAME way `tbl-chart
+  // validate` decides it — timelineExportFrame, no DOM render needed — so the two can never drift
+  // apart (Ruling 17 / task-8 fix round 1). Every other chart keeps the fixed W frame.
+  const tlFrame = isTimeline ? timelineExportFrame(spec, rows) : null;
+  const frameW = tlFrame?.frameW ?? W;
+
+  const { root, bgRect } = createExportRoot(document, frameW, H);
 
   // --- top chrome: title (+ logo), subtitle ---
-  let cursor = composeTopChrome(document, root, { title, subtitle, width: W });
+  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW });
 
   // Legend POSITION, from the same decision the live card makes (engine/legend-layout.ts). The
   // export never consulted it, so a stacked chart with five or more series — or a diverging one —
   // showed its legend beside the chart on screen and above it in the download. A small_multiples
   // figure keeps the top layout: its legend is figure-level, and the live path never puts that in a
   // column either. The frame is a fixed 1000px, so the live path's narrow-card fallback to "top"
-  // cannot apply here.
+  // cannot apply here — except in a vertical timeline's portrait frame, which is always that
+  // narrow, so its legend always goes on top (timelineExportFrame).
   // `legendItems || shapeLegendItems.length` mirrors render-live.ts's own gate. Testing only
   // `legendItems` missed a chart whose ONLY visible legend is the shape legend — `series_legend:
   // false`, or a lone scatter series, leaves `buildLegendItems` null while the shape rows remain —
   // so live laid it out on the right and the export drew it above a full-width plot: the very
   // divergence this file's legend work exists to remove.
-  // A timeline decides this the SAME way `tbl-chart validate` does — `timelineExportChartWidth`,
-  // no DOM render needed for the decision — rather than from this call's own rendered legend
-  // metadata, so the two can never drift back apart (Ruling 17 / task-8 fix round 1).
+  // A timeline takes both from `tlFrame` rather than from this call's own rendered legend metadata.
   const rightLegend =
     !isFigure &&
-    (isTimeline
-      ? timelineExportChartWidth(spec, rows) < INNER_W
+    (tlFrame
+      ? tlFrame.rightLegend
       : (legendItems.length > 0 || shapeLegendItems.length > 0) &&
         resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right");
-  const chartW = rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+  const chartW = tlFrame ? tlFrame.chartW : rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
   if (legendItems.length && !rightLegend) {
-    cursor = drawLegend(root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks);
+    cursor = drawLegend(
+      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN,
+    );
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
   if (hasShapeLegend) {
@@ -411,7 +423,9 @@ export function buildExportSvg(
       markerSymbol: s.markerSymbol,
     }));
     if (!rightLegend) {
-      cursor = drawLegend(root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined);
+      cursor = drawLegend(
+        root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined, undefined, frameW - MARGIN,
+      );
     }
   }
   // Y-axis title: a left-aligned caption just above the plot (coexists with the units subtitle).
@@ -425,7 +439,7 @@ export function buildExportSvg(
   const chartTop = cursor + 14;
 
   // Reserve the bottom-chrome height so the chart fills the rest (total == H).
-  let bottomH = bottomChromeHeight({ note, source, width: W });
+  let bottomH = bottomChromeHeight({ note, source, width: frameW });
   if (xAxisTitle) bottomH += 14;
 
   // Chart region. `contentHeight` is the height occupied by the chart/figure body below
@@ -438,7 +452,7 @@ export function buildExportSvg(
     contentHeight = isSingleHorizontalBar
       ? horizontalBarChartHeight(spec, rows)
       : isTimeline
-        ? timelineHeight(spec, rows, chartW)
+        ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
         : Math.max(160, H - chartTop - bottomH);
     // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
@@ -483,6 +497,7 @@ export function buildExportSvg(
       hooks: opts.hooks,
       phase: "export",
       ...(accentColor ? { accentColor } : {}),
+      ...(tlFrame?.budgetWidth !== undefined ? { timelineBudgetWidth: tlFrame.budgetWidth } : {}),
     });
     const chartSvg = rendered.svg;
     chartSvg.setAttribute("x", String(MARGIN));
@@ -631,10 +646,10 @@ export function buildExportSvg(
     by += 14;
     // Centred on the PLOT, not the frame: a right-hand legend takes 176px off the right, so the
     // frame's centre is 88px right of the plot's and the title sat visibly off-axis.
-    const titleX = rightLegend ? MARGIN + chartW / 2 : W / 2;
+    const titleX = rightLegend ? MARGIN + chartW / 2 : frameW / 2;
     root.appendChild(textEl(titleX, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
   }
-  composeBottomChrome(document, root, by, { note, source, width: W });
+  composeBottomChrome(document, root, by, { note, source, width: frameW });
 
   return root;
 }

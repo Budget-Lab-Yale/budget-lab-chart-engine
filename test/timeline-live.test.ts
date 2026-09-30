@@ -80,6 +80,25 @@ describe("timeline live mount", () => {
     expect(orientationOf(svg)).toBe("vertical");
   });
 
+  it("centres an authored-vertical timeline on a wide card, its text column capped at 360px (E2)", () => {
+    const long = "A title long enough to need two lines in a readable column but one line across a wide card";
+    const rows = [
+      { date: "2026", title: "Policy begins" }, { date: "2050", title: long },
+      { date: "2075", title: "Projection ends" }, { date: "2100", title: "Cohort turns 65" },
+    ] as TidyRow[];
+    const svg = svgOf(mountAt(1000, { ...SPEC, orientation: "vertical" } as ChartSpec, rows));
+    expect(Number(svg.getAttribute("width"))).toBe(1000);
+    expect(orientationOf(svg)).toBe("vertical");
+    const ruleX = Number(svg.querySelector(".tbl-timeline-rule")!.getAttribute("x1"));
+    const labelX = Number(svg.querySelector(".tbl-timeline-label text")!.getAttribute("x"));
+    // The block runs from the marker's 4px edge pad to the column's 360px cap, with equal blank
+    // either side.
+    expect(ruleX - 4.5 - 4).toBeCloseTo(1000 - (labelX + 360), 6);
+    expect(ruleX).toBeGreaterThan(300);
+    const titleLines = [...svg.querySelectorAll(".tbl-timeline-label")][1]!.querySelectorAll('text[font-size="12"]');
+    expect(titleLines).toHaveLength(2);
+  });
+
   it("stays horizontal with auto_vertical: false", () => {
     const svg = svgOf(mountAt(340, { ...SPEC, timeline: { auto_vertical: false } } as ChartSpec));
     expect(Number(svg.getAttribute("width"))).toBe(340);

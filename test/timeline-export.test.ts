@@ -2,8 +2,8 @@
 import { describe, it, expect } from "vitest";
 import { buildExportSvg } from "../src/embed/export-png";
 import { renderChart } from "../src/engine/index";
-import { resolveTimelineOrientation, timelineExportChartWidth, TIMELINE_CLASS } from "../src/engine/marks/timeline";
-import { INNER_W } from "../src/embed/figure-chrome";
+import { resolveTimelineOrientation, timelineExportChartWidth, TIMELINE_CLASS, TIMELINE_PORTRAIT_MAX_FRAME } from "../src/engine/marks/timeline";
+import { INNER_W, MARGIN } from "../src/embed/figure-chrome";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -86,12 +86,14 @@ describe("timeline export — right-legend chart width (Ruling 17)", () => {
 describe("timeline export — authored vertical two-lane chart", () => {
   const spec = { ...LEGEND_SPEC, orientation: "vertical", legendPosition: "right", timeline: { lanes: true } } as ChartSpec;
 
-  it("re-renders the lane columns: two vertical rules, both lane names, at the full width with no legend", () => {
-    // Lane names label the categories, so there are no legend rows and no right column to narrow it.
-    expect(timelineExportChartWidth(spec, LEGEND_ROWS)).toBe(INNER_W);
+  it("re-renders the lane columns: two vertical rules, both lane names, at the portrait frame's full chart width with no legend", () => {
+    // Lane names label the categories, so there are no legend rows. The two columns fill the widest
+    // portrait chart area (E3, Ruling 33).
+    const portraitW = TIMELINE_PORTRAIT_MAX_FRAME - 2 * MARGIN;
+    expect(timelineExportChartWidth(spec, LEGEND_ROWS)).toBe(portraitW);
     const svg = buildExportSvg(spec, LEGEND_ROWS);
     const chart = svg.querySelector(`svg.${TIMELINE_CLASS}`)!;
-    expect(Number(chart.getAttribute("width"))).toBe(INNER_W);
+    expect(Number(chart.getAttribute("width"))).toBe(portraitW);
     const rules = [...chart.querySelectorAll("line.tbl-timeline-rule")];
     expect(rules).toHaveLength(2);
     for (const r of rules) expect(r.getAttribute("x1")).toBe(r.getAttribute("x2"));
@@ -99,13 +101,18 @@ describe("timeline export — authored vertical two-lane chart", () => {
     expect(svg.querySelectorAll(".tbl-legend-item, .figure-legend-slot--right")).toHaveLength(0);
   });
 
-  it("narrows for the right legend when vertical_lanes: single brings the legend rows back", () => {
+  it("draws one track, with the legend rows above it, when vertical_lanes: single brings them back", () => {
     const single = { ...spec, timeline: { lanes: true, vertical_lanes: "single" } } as ChartSpec;
     const w = timelineExportChartWidth(single, LEGEND_ROWS);
-    expect(w).toBeLessThan(INNER_W);
-    const chart = buildExportSvg(single, LEGEND_ROWS).querySelector(`svg.${TIMELINE_CLASS}`)!;
+    expect(w).toBeLessThanOrEqual(TIMELINE_PORTRAIT_MAX_FRAME - 2 * MARGIN);
+    const svg = buildExportSvg(single, LEGEND_ROWS);
+    const chart = svg.querySelector(`svg.${TIMELINE_CLASS}`)!;
     expect(Number(chart.getAttribute("width"))).toBe(w);
     expect(chart.querySelectorAll("line.tbl-timeline-rule")).toHaveLength(1);
+    // legendPosition: "right", but a portrait frame has no room for the column (E3).
+    const legend = [...svg.querySelectorAll("text")].filter((t) => ["alpha", "beta"].includes(t.textContent ?? "") && !t.closest("svg." + TIMELINE_CLASS));
+    expect(legend).toHaveLength(2);
+    for (const t of legend) expect(Number(t.getAttribute("y"))).toBeLessThan(Number(chart.getAttribute("y")));
   });
 });
 
@@ -152,14 +159,16 @@ describe("timeline export — x-axis title follows the ticks", () => {
     expect(noTicks.textContent).not.toContain("Axis caption");
   });
 
-  it("decides at the export's chart width: ticks that fit at 920px but not beside a right legend", () => {
+  it("decides at the export's own layout width: ticks that fit at 920px but not in the portrait frame", () => {
     const right = { ...spec, legendPosition: "right", columns: { ...spec.columns, series: "k" } } as ChartSpec;
     const withKinds = (dl: string) => rows(dl).map((r, i) => ({ ...r, k: i % 2 ? "a" : "b" })) as TidyRow[];
     const ticksAt = (dl: string, width: number) =>
       renderChart(right, withKinds(dl), { width }).svg.querySelectorAll(".tbl-timeline-tick").length;
-    const narrowW = timelineExportChartWidth(right, withKinds(""));
-    expect(narrowW).toBeLessThan(INNER_W);
-    // The shortest date word whose tick column fits at INNER_W but not at the right-legend width.
+    // A vertical export budgets its layout at the widest portrait chart area (E3, Ruling 33), while
+    // the metadata pass renders at INNER_W.
+    const narrowW = TIMELINE_PORTRAIT_MAX_FRAME - 2 * MARGIN;
+    expect(timelineExportChartWidth(right, withKinds(""))).toBeLessThanOrEqual(narrowW);
+    // The shortest date word whose tick column fits at INNER_W but not at the portrait width.
     const n = Array.from({ length: 160 }, (_, i) => i + 1).find((k) => ticksAt("W".repeat(k), INNER_W) > 0 && ticksAt("W".repeat(k), narrowW) === 0);
     expect(n).toBeDefined();
     const svg = buildExportSvg(right, withKinds("W".repeat(n!)));

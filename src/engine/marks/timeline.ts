@@ -21,11 +21,11 @@ import {
   resolveTimelineConfig, timelineColumns, parseEndCell, deriveDateFormat, TIMELINE_EVENT_WARN_COUNT,
 } from "../../spec/timeline";
 import {
-  layoutTimeline, TL_GEOM, LINE_STYLE, LANE_SIZE, LANE_LINE_H,
-  type LayoutEvent, type TimelineLayout, type PlacedSpan,
+  layoutTimeline, verticalBlockWidth, TL_GEOM, LINE_STYLE, LANE_SIZE, LANE_LINE_H,
+  type LayoutEvent, type TimelineLayout, type TimelineLayoutInput, type PlacedSpan,
 } from "../timeline-layout";
 import { resolveLegendPosition, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
-import { INNER_W } from "../../embed/figure-chrome";
+import { W, INNER_W, MARGIN } from "../../embed/figure-chrome";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 export const TIMELINE_CLASS = "tbl-timeline";
@@ -92,19 +92,28 @@ function lanesDrawn(spec: ChartSpec, laneCount: number, orientation: Orientation
   return orientation === "horizontal" || (laneCount === 2 && cfg.verticalLanes === "columns");
 }
 
-/** The one place a spec + width + orientation becomes a layout, so render, height, the auto-switch
- *  and the warnings can never disagree about geometry. */
-function build(spec: ChartSpec, rows: TidyRow[], width: number, orientation: Orientation): Built {
+/** The one place a spec + width + orientation becomes a layout input, so render, height, the
+ *  auto-switch, the export frame and the warnings can never disagree about geometry. `budgetWidth`
+ *  is the export's portrait budget (timelineExportFrame); absent everywhere else. */
+function layoutInput(
+  spec: ChartSpec, rows: TidyRow[], width: number, orientation: Orientation, budgetWidth?: number,
+): Omit<Built, "layout"> & { input: TimelineLayoutInput } {
   const cfg = resolveTimelineConfig(spec);
   const { events, seriesNames } = prepareTimeline(spec, rows);
   const lanesOn = lanesDrawn(spec, seriesNames.length, orientation);
   const labels = spec.series_labels ?? {};
-  const layout = layoutTimeline({
+  const input: TimelineLayoutInput = {
     events, width, orientation, spacing: cfg.spacing,
     lanes: lanesOn ? seriesNames.map((k) => ({ key: k, label: labels[k] ?? k })) : null,
     axis: cfg.axis, labelWidth: cfg.labelWidth, maxRows: cfg.maxRows,
-  });
-  return { layout, events, seriesNames, lanesOn };
+    ...(budgetWidth !== undefined ? { budgetWidth } : {}),
+  };
+  return { input, events, seriesNames, lanesOn };
+}
+
+function build(spec: ChartSpec, rows: TidyRow[], width: number, orientation: Orientation, budgetWidth?: number): Built {
+  const { input, ...rest } = layoutInput(spec, rows, width, orientation, budgetWidth);
+  return { layout: layoutTimeline(input), ...rest };
 }
 
 /** Live auto-switch (spec §5.4): an authored horizontal with `auto_vertical` renders vertical when
@@ -117,9 +126,12 @@ export function resolveTimelineOrientation(spec: ChartSpec, rows: TidyRow[], cha
   return build(spec, rows, chartWidth, "horizontal").layout.fits ? "horizontal" : "vertical";
 }
 
-/** Content height at this width and orientation (default: the authored one). */
-export function timelineHeight(spec: ChartSpec, rows: TidyRow[], width: number, orientation?: Orientation): number {
-  return build(spec, rows, width, orientation ?? spec.orientation ?? "horizontal").layout.height;
+/** Content height at this width and orientation (default: the authored one), and, for the
+ *  export's portrait frame, its budget width (timelineExportFrame). */
+export function timelineHeight(
+  spec: ChartSpec, rows: TidyRow[], width: number, orientation?: Orientation, budgetWidth?: number,
+): number {
+  return build(spec, rows, width, orientation ?? spec.orientation ?? "horizontal", budgetWidth).layout.height;
 }
 
 /** Non-fatal `tbl-chart validate` lines. The overflow check runs at the export width in the
@@ -145,27 +157,62 @@ export function timelineWarnings(spec: ChartSpec, rows: TidyRow[], exportWidth: 
   return out;
 }
 
-/** The chart width the PNG export lays a timeline out at: `INNER_W`, minus the right-hand legend
- *  column when the export shows one (`buildExportSvg` in embed/export-png.ts, `rightLegend` /
- *  `chartW`). DOM-free by construction — a timeline's legend row count is fully determined by its
- *  series count, `series_legend`/`legend`, and lane mode (mirrors the same decision
- *  `renderTimeline` makes for its `legendItems`), so `tbl-chart validate` and the export can both
- *  call this ONE function instead of computing the width two ways that only happen to agree
- *  (Ruling 17 / task-8 fix round 1: a right-legend timeline overflowed `max_rows` in the PNG with
- *  no validate warning, because validate always checked the full 920px).
+/** Ruling 33: the widest frame a vertical timeline's PNG export uses (its chart area is this less
+ *  both margins). */
+export const TIMELINE_PORTRAIT_MAX_FRAME = 640;
+
+/** How the PNG export frames a timeline (`buildExportSvg` in embed/export-png.ts). */
+export interface TimelineExportFrame {
+  /** The export's frame width: `W`, or a vertical timeline's portrait width. */
+  frameW: number;
+  /** The chart width the timeline is laid out and drawn at. */
+  chartW: number;
+  /** Whether the legend is a column right of the chart (never in a portrait frame). */
+  rightLegend: boolean;
+  /** Portrait only: the width the vertical layout budgets its columns at (renderChart's
+   *  `timelineBudgetWidth`), which `chartW` is trimmed to fit. */
+  budgetWidth?: number;
+}
+
+/** How the PNG export frames this timeline. Always the AUTHORED orientation: `buildExportSvg` never
+ *  resolves the live auto-switch (`resolveTimelineOrientation` only applies to a live mount), so
+ *  lane mode here does not need to account for it either — matching `timelineWarnings`' own
+ *  overflow check. DOM-free by construction, so `tbl-chart validate` and the export both call this
+ *  ONE function instead of computing the width two ways that only happen to agree (Ruling 17 /
+ *  task-8 fix round 1: a right-legend timeline overflowed `max_rows` in the PNG with no validate
+ *  warning, because validate always checked the full 920px).
  *
- *  Always the AUTHORED orientation: `buildExportSvg` never resolves the live auto-switch
- *  (`resolveTimelineOrientation` only applies to a live mount), so lane mode here does not
- *  need to account for it either — matching `timelineWarnings`' own overflow check. */
-export function timelineExportChartWidth(spec: ChartSpec, rows: TidyRow[]): number {
-  if (spec.legend === false) return INNER_W;
+ *  Vertical (E3, Ruling 33): a portrait frame. The layout budgets its columns at the widest chart
+ *  area (TIMELINE_PORTRAIT_MAX_FRAME less both margins, 560px), and the chart width is that
+ *  layout's block (verticalBlockWidth: each text column at most vTextColumnMax), rounded up and
+ *  never below the live floor TL_GEOM.minLiveWidth — so the frame is 360-640px wide and hugs the
+ *  timeline, which the layout centres in it. The legend always goes above the chart: a portrait
+ *  frame is narrower than the card width at which the live card keeps a right-hand column.
+ *
+ *  Horizontal: the fixed `W` frame; the chart is `INNER_W`, minus the right-hand legend column when
+ *  the export shows one. A timeline's legend row count is fully determined by its series count,
+ *  `series_legend`/`legend`, and lane mode (the same decision `renderTimeline` makes for its
+ *  `legendItems`). */
+export function timelineExportFrame(spec: ChartSpec, rows: TidyRow[]): TimelineExportFrame {
+  if ((spec.orientation ?? "horizontal") === "vertical") {
+    const budgetWidth = TIMELINE_PORTRAIT_MAX_FRAME - 2 * MARGIN;
+    const block = verticalBlockWidth(layoutInput(spec, rows, budgetWidth, "vertical").input);
+    const chartW = Math.min(budgetWidth, Math.max(TL_GEOM.minLiveWidth, Math.ceil(block)));
+    return { frameW: chartW + 2 * MARGIN, chartW, rightLegend: false, budgetWidth };
+  }
+  if (spec.legend === false) return { frameW: W, chartW: INNER_W, rightLegend: false };
   const { seriesNames } = prepareTimeline(spec, rows);
-  const lanesOn = lanesDrawn(spec, seriesNames.length, spec.orientation ?? "horizontal");
+  const lanesOn = lanesDrawn(spec, seriesNames.length, "horizontal");
   const showRows =
     spec.series_legend === true || (spec.series_legend !== false && seriesNames.length > 1 && !lanesOn);
   const legendCount = showRows ? seriesNames.length : 0;
   const rightLegend = legendCount > 0 && resolveLegendPosition(spec, legendCount, rows) === "right";
-  return rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+  return { frameW: W, chartW: rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W, rightLegend };
+}
+
+/** The chart width the PNG export lays a timeline out at (timelineExportFrame's `chartW`). */
+export function timelineExportChartWidth(spec: ChartSpec, rows: TidyRow[]): number {
+  return timelineExportFrame(spec, rows).chartW;
 }
 
 /** Where an open-ended span's fade begins, as a share of the bar along its fade direction: the bar
@@ -347,7 +394,7 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
 export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
   const width = opts.width ?? 720;
   const orientation = opts.timelineOrientation ?? spec.orientation ?? "horizontal";
-  const { layout, events, seriesNames, lanesOn } = build(spec, rows, width, orientation);
+  const { layout, events, seriesNames, lanesOn } = build(spec, rows, width, orientation, opts.timelineBudgetWidth);
   const colors = buildColorMap(seriesNames, spec.series_colors);
   const svg = draw(opts.document ?? document, layout, events, colors);
 

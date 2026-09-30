@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { layoutTimeline, plainFirstFitFits, verticalNoSwapLayout, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
 import { estimateLabelWidth } from "../src/engine/axes";
@@ -673,8 +674,10 @@ describe("vertical layout", () => {
 
   it("insets the track for balance when nothing labels left, and gives the right column the rest (Ruling 29)", () => {
     // Wraps at every width tried, so its widest line fills the right column to within a word.
+    // Phone widths only: wider, the right column stops at vTextColumnMax and the block is centred
+    // (E2; see "vertical in wide space" below).
     const long = Array.from({ length: 40 }, () => "word").join(" ");
-    for (const width of [280, 375, 900]) {
+    for (const width of [280, 375, 440]) {
       const plain = v([...SPREAD(), ev("2130", long)], { width });
       expect(ruleX(plain)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
       expect(Math.max(...plain.labels.map((x) => x.box.x1))).toBeGreaterThan(width - 40);
@@ -1901,5 +1904,167 @@ describe("vertical lane columns (exactly two lanes)", () => {
     expect(none.rules).toHaveLength(1);
     expect(JSON.stringify(three)).toBe(JSON.stringify(none));
     expect(JSON.stringify(one)).toBe(JSON.stringify(none));
+  });
+});
+
+describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)", () => {
+  const LANES = [{ key: "a", label: "Legislation" }, { key: "b", label: "Implementation" }];
+  const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
+    layoutTimeline(base(events, { orientation: "vertical", width: 1000, ...o }));
+  const A = (start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}) => ev(start, title, { category: "a", ...o });
+  const B = (start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}) => ev(start, title, { category: "b", ...o });
+  const TWO = () => [
+    A("2025-07-04", "Bill signed into law, with a title long enough to wrap in any column it is given", { dateText: "Jul 4, 2025" }),
+    B("2026-01-01", "Rulemaking period", { endStr: "2027-12-31", dateText: "Jan 1, 2026 – Dec 31, 2027" }),
+    A("2027-06-01", "Technical corrections bill", { dateText: "Jun 1, 2027" }),
+    B("2028-01-01", "Credits take effect, with a title long enough to wrap in any column it is given", { dateText: "Jan 1, 2028" }),
+    A("2033-01-01", "Scheduled sunset", { dateText: "Jan 1, 2033" }),
+  ];
+  const long = Array.from({ length: 40 }, () => "word").join(" ");
+  const cap = TL_GEOM.vTextColumnMax;
+  const ruleX = (l: TimelineLayout): number => l.rules[0]!.x1;
+  const rightX0 = (l: TimelineLayout): number =>
+    Math.min(...l.labels.flatMap((x) => x.lines.filter((ln) => ln.anchor === "start").map((ln) => ln.x)));
+  const X_KEYS = new Set(["x", "x0", "x1", "x2", "cx"]);
+  // Every x in `a` is `b`'s moved by `dx` (a stem point's first coordinate included); every other
+  // value is equal, the width aside.
+  const expectShifted = (a: TimelineLayout, b: TimelineLayout, dx: number): void => {
+    const walk = (p: unknown, q: unknown, key: string, path: string): void => {
+      if (typeof p === "number") {
+        if (X_KEYS.has(key)) expect(Math.abs(p - ((q as number) + dx)), path).toBeLessThan(1e-9);
+        else expect(p, path).toBe(q);
+      } else if (Array.isArray(p)) {
+        expect((q as unknown[]).length, path).toBe(p.length);
+        const isPoint = p.length === 2 && typeof p[0] === "number" && path.includes("points");
+        p.forEach((x, i) => walk(x, (q as unknown[])[i], isPoint ? (i === 0 ? "x" : "y") : key, `${path}[${i}]`));
+      } else if (p !== null && typeof p === "object") {
+        for (const k of Object.keys(p)) {
+          if (k !== "width") walk((p as Record<string, unknown>)[k], (q as Record<string, unknown>)[k], k, `${path}.${k}`);
+        }
+      } else {
+        expect(p, path).toBe(q);
+      }
+    };
+    walk(a, b, "", "layout");
+  };
+
+  it("caps the right column at vTextColumnMax and centres the track and column in the width", () => {
+    expect(cap).toBe(360);
+    for (const axis of [false, true]) {
+      const l = v([...SPREAD(), ev("2130", long)], { axis });
+      const x0 = rightX0(l);
+      const widest = Math.max(...l.labels.map((x) => x.box.x1));
+      // The long title fills the capped column to within a word, and never passes it.
+      expect(widest).toBeLessThanOrEqual(x0 + cap + 1e-9);
+      expect(widest).toBeGreaterThan(x0 + cap - 40);
+      for (const lab of l.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
+      // The block runs from the tick column (without one, from the marker's 4px edge pad) to the
+      // column's cap, and sits in the middle of the width.
+      const left = axis ? l.ticks[0]!.x : ruleX(l) - TL_GEOM.dotR - 4;
+      if (axis) expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+      expect((left + x0 + cap) / 2).toBeCloseTo(500, 9);
+      expect(left).toBeGreaterThan(250);
+      for (const t of l.ticks) expect(t.x).toBe(left);
+    }
+  });
+
+  it("adds extra width as equal margins on both sides, for every kind of vertical layout", () => {
+    const outer = [
+      ev("2020", "a", { endStr: "2030" }), ev("2025", `c, on the outer sub-track: ${long}`, { endStr: "2035" }),
+      ev("2027", `a point on the rule ${long}`), ev("2040", "b"),
+    ];
+    const cases: Array<[LayoutEvent[], Partial<TimelineLayoutInput>]> = [
+      [[...SPREAD(), ev("2130", long)], {}],
+      [[...SPREAD(), ev("2130", long)], { axis: true }],
+      [FIG7(), { axis: true }],
+      [outer, {}],
+      [TWO(), { lanes: LANES }],
+      [TWO(), { lanes: LANES, axis: true }],
+    ];
+    for (const [events, o] of cases) {
+      const a = v(events, { ...o, width: 1000 });
+      const b = v(events, { ...o, width: 1600 });
+      expect(b.width).toBe(1600);
+      expectShifted(b, a, 300);
+    }
+  });
+
+  it("caps the left column (outer-span and swapped labels) at vTextColumnMax too", () => {
+    const lefty = [ev("2020", "a", { endStr: "2030" }), ev("2025", `c, on the outer sub-track: ${long}`, { endStr: "2035" }), ev("2040", "b")];
+    const l = v(lefty, { width: 1400 });
+    const leftLabel = l.labels.find((x) => x.lines[0]!.anchor === "end")!;
+    // 40% of 1400 is 560: without the cap the column would take 560px of the unwrapped title.
+    expect(leftLabel.box.x1 - leftLabel.box.x0).toBeLessThanOrEqual(cap + 1e-9);
+    expect(leftLabel.box.x1 - leftLabel.box.x0).toBeGreaterThan(cap - 40);
+    // The left column starts the block, and the blank either side of the block is equal.
+    const dx = 1400 - (rightX0(l) + cap);
+    expect(dx).toBeGreaterThan(0);
+    expect(leftLabel.box.x0).toBeGreaterThanOrEqual(dx - 1e-9);
+    expect(leftLabel.box.x0).toBeLessThan(dx + 40);
+    // FIG7 swaps labels left (E1) in wide space as at a phone width, and is centred too.
+    const f = v(FIG7(), { width: 1000 });
+    expect(f.labels.some((x) => x.lines[0]!.anchor === "end")).toBe(true);
+    for (const lab of f.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
+    const fdx = 1000 - (rightX0(f) + cap);
+    expect(fdx).toBeGreaterThan(100);
+    expect(Math.min(...f.labels.map((x) => x.box.x0), ...f.markers.map((m) => m.cx - TL_GEOM.dotR))).toBeGreaterThanOrEqual(fdx - 1e-9);
+  });
+
+  it("caps both lane columns and centres the two tracks", () => {
+    const l = v(TWO(), { lanes: LANES });
+    const [r0, r1] = [l.rules[0]!.x1, l.rules[1]!.x1];
+    expect((r0 + r1) / 2).toBeCloseTo(500, 9);
+    for (const lab of l.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
+    // Each lane's long title fills its capped column to within a word.
+    const lane0 = l.labels.filter((x) => x.category === "a");
+    const lane1 = l.labels.filter((x) => x.category === "b");
+    expect(Math.max(...lane0.map((x) => x.box.x1)) - Math.min(...lane0.map((x) => x.box.x0))).toBeGreaterThan(cap - 40);
+    expect(Math.max(...lane1.map((x) => x.box.x1)) - Math.min(...lane1.map((x) => x.box.x0))).toBeGreaterThan(cap - 40);
+    // Lane names move with their tracks.
+    expect(l.laneLabels.map((n) => n.x)).toEqual([r0 - 6, r1 + 6]);
+  });
+
+  it("moves the track continuously as the width grows: the balance inset gives way to centring", () => {
+    let prev: TimelineLayout | null = null;
+    for (let w = 280; w <= 1400; w++) {
+      const l = v(SPREAD(), { width: w });
+      if (prev) {
+        expect(Math.abs(ruleX(l) - ruleX(prev))).toBeLessThanOrEqual(1);
+        expect(Math.abs(rightX0(l) - rightX0(prev))).toBeLessThanOrEqual(1);
+      }
+      prev = l;
+    }
+    // In wide space the blank left of the block equals the blank right of it: no inset remains.
+    const wide = v(SPREAD(), { width: 1400 });
+    expect(ruleX(wide) - TL_GEOM.dotR - 4).toBeCloseTo(1400 - (rightX0(wide) + cap), 9);
+  });
+
+  it("lays out at budgetWidth and centres the block in width when it fits, else at width", () => {
+    const events = [...SPREAD(), ev("2130", long)];
+    const at560 = v(events, { width: 560, axis: true });
+    const trimmed = v(events, { width: 440, budgetWidth: 560, axis: true });
+    expect(trimmed.width).toBe(440);
+    expectShifted(trimmed, at560, -60);
+    // Lane columns fill 560, which does not fit 420: laid out at 420 as if no budget were given.
+    const two = TWO();
+    expect(JSON.stringify(v(two, { width: 420, budgetWidth: 560, lanes: LANES }))).toBe(JSON.stringify(v(two, { width: 420, lanes: LANES })));
+    // Horizontal ignores it.
+    const fig7 = FIG7();
+    expect(JSON.stringify(layoutTimeline(base(fig7, { budgetWidth: 1400 })))).toBe(JSON.stringify(layoutTimeline(base(fig7))));
+  });
+
+  it("leaves every phone-width vertical layout byte-identical to c60f9a8 (280-440)", () => {
+    const outer = () => [ev("2020", "a", { endStr: "2030" }), ev("2025", "c, on the outer sub-track", { endStr: "2035" }), ev("2027", "a point on the rule"), ev("2040", "b")];
+    const out: string[] = [];
+    for (let w = 280; w <= 440; w += 8) {
+      for (const axis of [false, true]) {
+        nextId = 0;
+        out.push(JSON.stringify(v([...SPREAD(), ev("2130", long)], { width: w, axis })));
+        out.push(JSON.stringify(v(FIG7(), { width: w, axis })));
+        out.push(JSON.stringify(v(outer(), { width: w, axis })));
+        out.push(JSON.stringify(v(TWO(), { width: w, axis, lanes: LANES })));
+      }
+    }
+    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("ddaf2faf041a2098");
   });
 });
