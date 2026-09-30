@@ -872,6 +872,25 @@ describe("vertical layout at narrow widths (side columns)", () => {
     inFrame(wide, 900);
   });
 
+  it("judges the tick column on the left floor capped at 40% of the width", () => {
+    // The left date unit ("AAA…A –", 42 characters) is far wider than 40% of 375px. Measured
+    // uncapped it would leave no room for ticks; capped at 40% it leaves plenty, so they are drawn.
+    const width = 375;
+    const leftUnit = `${"A".repeat(40)} –`;
+    const outer = ev("2020-01-02", "outer", { endStr: "2035", dateText: `${"A".repeat(40)} – 2035` });
+    const events = [ev("2020", "inner", { endStr: "2030", dateText: "2020 – 2030" }), outer, ev("2040", "z")];
+    const tickNeed = estimateLabelWidth("2020", TBL.size.axis) + 8;
+    expect(bold(leftUnit)).toBeGreaterThan(0.4 * width);
+    const uncapped = width - (bold(leftUnit) + TL_GEOM.vLabelGap) - Math.max(TL_GEOM.dotR, 1.5 + 4) - (TL_GEOM.dotR + TL_GEOM.vLabelGap) - bold("2020 –");
+    expect(uncapped).toBeLessThan(tickNeed);
+    expect(tickRoom(width, bold(leftUnit), 2, bold("2020 –"))).toBeGreaterThanOrEqual(tickNeed);
+    const l = v(events, { width, axis: true });
+    expect(l.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(labelOf(l, outer.id).box.x1).toBeLessThan(l.rules[0]!.x1); // on the left
+    expect(labelOf(l, outer.id).box.x0).toBeGreaterThan(tickRightOf(l));
+    inFrame(l, width);
+  });
+
   it("compresses a crowded sub-track band instead of pushing text off-canvas", () => {
     const crowd = (n: number) => Array.from({ length: n }, (_, i) =>
       ev(`${1990 + i}`, `Span ${i}`, { endStr: `${2030 + i}`, dateText: `${1990 + i} – ${2030 + i}` }));
@@ -1384,6 +1403,31 @@ describe("vertical lane columns (exactly two lanes)", () => {
       }
     }
     expect(sawCompressed).toBe(true);
+  });
+
+  it("judges the tick column on one shared floor, the wider lane's date word, for both columns", () => {
+    // Lane 0's dates are one long word; lane 1's are four-digit years. Both columns are held to the
+    // wider word, so the fit test is 2 x lane 0's word: at 375 that leaves no room for ticks, although
+    // lane 0's word plus lane 1's own (a per-lane reading) would.
+    const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
+    const tickNeed = estimateLabelWidth("2026", TBL.size.axis) + 8;
+    const fixed = 2 * TL_GEOM.vLabelGap + 32;
+    const bands = 2 * TL_GEOM.dotR; // points only: each lane's band is a marker radius
+    const word = "X".repeat(25);
+    const events = [
+      A("2026", "a1", { dateText: word }), A("2029", "a2", { dateText: word }), A("2033", "a3", { dateText: word }),
+      B("2027", "b1"), B("2031", "b2"),
+    ];
+    const room = (width: number, w0: number, w1: number) => width - fixed - bands - w0 - w1;
+    expect(room(375, bold(word), bold("2027"))).toBeGreaterThanOrEqual(tickNeed); // per-lane: would fit
+    expect(room(375, bold(word), bold(word))).toBeLessThan(tickNeed); // shared: does not
+    const narrow = vc(events, { width: 375, axis: true });
+    expect(narrow.ticks).toEqual([]);
+    // The same data draws ticks once the shared floor fits.
+    expect(room(500, bold(word), bold(word))).toBeGreaterThanOrEqual(tickNeed);
+    const wide = vc(events, { width: 500, axis: true });
+    expect(wide.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(Math.min(...wide.labels.map((x) => x.box.x0))).toBeGreaterThan(tickRight(wide));
   });
 
   it("draws one track for one lane or three lanes, exactly as with no lanes", () => {

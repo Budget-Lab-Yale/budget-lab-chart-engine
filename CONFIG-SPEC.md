@@ -804,7 +804,7 @@ validation errors on every other chart type.
 | `timeline.spacing` | enum | `proportional` (default — distance along the rule is elapsed time) \| `even` (every distinct date, span ends included, gets an equal slot; use it when only the order matters). |
 | `timeline.lanes` | boolean | Separate tracks for the categories. On a horizontal render, one track per category, stacked top to bottom in `series_order` and named in a left gutter, and each lane's labels sit above it only; long lane names wrap, and the gutter never takes more than 30% of the width. On a vertical render (authored, or switched on screen — see `auto_vertical`), exactly two lanes draw by default as two side-by-side tracks and three or more share one track — see `timeline.vertical_lanes`. Wherever lanes are drawn, the legend's category rows default off, since the lane names label the categories; `series_legend: true` brings them back. Default false. |
 | `timeline.vertical_lanes` | enum | How `timeline.lanes` draws on a vertical render, authored or switched on screen, in the PNG as on screen. `columns` (default): exactly two lanes draw as two side-by-side tracks near the centre, each named at the top of its track; the first lane labels to the left of its track, right-aligned, and the second to the right, and each lane's overlapping spans stack outward, away from the other lane. `single`: two lanes draw as one track, exactly as with no lanes, and the legend shows their category rows. Three or more lanes always draw one track, and the legend shows the category rows, whatever this field says; an explicit `columns` then makes `tbl-chart validate` warn. Any other value is a validation error. |
-| `timeline.axis` | boolean | Adds sparse date ticks, at the axis tick size and colour; on a vertical timeline they sit in a column at the left edge, left of every label and mark. **A vertical render omits the ticks when that column does not fit** beside the label columns narrowed to their widest date word, the span sub-tracks at their narrowest and the fixed gaps (with lane columns, both lanes' label columns and sub-tracks) — so an authored axis can disappear on a narrow screen. A validation error with `spacing: even`, where ticks would imply proportional gaps. `x_axis_title` is accepted on a timeline only with it, and is drawn only when ticks are: a render that omits them omits the title too, on screen and in the PNG. Default false. |
+| `timeline.axis` | boolean | Adds sparse date ticks, at the axis tick size and colour; on a vertical timeline they sit in a column at the left edge, left of every label and mark. **A vertical render omits the ticks when that column does not fit** beside the label columns narrowed to their widest date word (the left one never past 40% of the width; with lane columns, both to the wider lane's), the span sub-tracks at their narrowest (with lane columns, both lanes') and the fixed gaps — so an authored axis can disappear on a narrow screen. A validation error with `spacing: even`, where ticks would imply proportional gaps. `x_axis_title` is accepted on a timeline only with it, and is drawn only when ticks are: a render that omits them omits the title too, on screen and in the PNG. Default false. |
 | `timeline.date_format` | string | d3 `timeFormat` pattern for the bold date text. Default from the data: `%Y` when every date is 1 January, `%b %Y` when every date is the 1st of a month, otherwise `%b %-d, %Y`. A span reads `2031 – 2035` and an open-ended one `2040 –` (read to a screen reader as "2040 onward"; a `columns.date_label` override is read as written); a range too long for its line breaks after the en dash (the dash stays on the first line). `columns.date_label` overrides it row by row. |
 | `timeline.label_width` | number | The width, in px, that a horizontal label's text wraps to. 60–400. Default 150. |
 | `timeline.max_rows` | integer | Label rows allowed on each side of the rule (above each lane, with lanes). 1–6. Default 2. |
@@ -827,20 +827,22 @@ timeline that needs more than `max_rows` rows gets extra rows. The chart is as t
 need.
 
 **Vertical layout.** Each event's label sits beside its item as one block, starting with its bold
-date line(s) above the title. Point events and spans on the main rule label to the right of it.
-Overlapping spans stack into sub-tracks left of the rule, and a span on an outer sub-track labels to
-the left of them, right-aligned, ending just short of the leftmost bar. Each side stacks its own
-labels: a label pushed down by the one before it on its side is joined to its item by an elbow
-leader, which leaves from beside the marker or, for a span on an outer sub-track, from that span's
-own bar. The left label column exists only when some span is on an outer sub-track, and takes the
-width its labels need up to 40% of the chart; the right column gets the rest. When sub-tracks crowd,
-the band narrows first and then the left column, down to its widest date word: dates wrap between
-words or after a range's en dash rather than push text off the chart. With no left column, the rule
-sits at least 15% of the width in from the left edge, for balance, unless that would leave the right
-column narrower than its widest date word. With lanes, see `timeline.vertical_lanes`. On screen a
-timeline renders at the card's own width, down to 280px, rather than scrolling: with `auto_vertical`
-(the default) it renders vertical below 480px, and with `auto_vertical: false` it stays horizontal.
-A card narrower than 280px gets a 280px chart.
+date line(s) above the title. Two lanes drawn as lane columns follow `timeline.vertical_lanes`; the
+rest of this paragraph describes a single track. Point events and spans on the main rule label to
+the right of it. Overlapping spans stack into sub-tracks left of the rule, and a span on an outer
+sub-track labels to the left of them, right-aligned, ending just short of the leftmost bar. Each
+side stacks its own labels: a label pushed down by the one before it on its side is joined to its
+item by an elbow leader, which leaves from beside its item on the rule or, for a span on an outer
+sub-track, from that span's own bar. The left label column exists only when some span is on an outer
+sub-track, and takes the width its labels need up to 40% of the chart; the right column gets the
+rest. When sub-tracks crowd, the band narrows first and then the left column, down to its widest
+date word: dates wrap between words or after a range's en dash rather than push text off the chart.
+With no left column, the rule sits at least 15% of the width in from the left edge, for balance,
+unless that would leave the right column narrower than its widest date word.
+
+On screen a timeline renders at the card's own width, down to 280px, rather than scrolling: with
+`auto_vertical` (the default) it renders vertical below 480px, and with `auto_vertical: false` it
+stays horizontal. A card narrower than 280px gets a 280px chart.
 
 **PNG export** always renders the authored orientation — it never switches to vertical — at the
 export's chart width (744px with a right-hand legend, the full 920px otherwise), and sizes the image
