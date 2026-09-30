@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { buildExportSvg } from "../src/embed/export-png";
+import { renderChart } from "../src/engine/index";
 import { timelineExportChartWidth, TIMELINE_CLASS } from "../src/engine/marks/timeline";
 import { W, MARGIN, LOGO_W } from "../src/embed/figure-chrome";
 import { TL_GEOM } from "../src/engine/timeline-layout";
@@ -158,6 +159,21 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
       const [lo, hi] = inkOfChart(chart);
       expect(Math.abs((lo + hi) / 2 - chartW / 2)).toBeLessThanOrEqual(2);
     }
+  });
+
+  it("wraps every label as a 560px chart would, then trims the frame to the timeline (E3)", () => {
+    // FIG7 with a long title on a label that swaps left: the left column's 40% share, and so that
+    // label's wrap, depends on the width the layout is budgeted at.
+    const rows = FIG7_ROWS.map((r, i) => (i === 1 ? { ...r, title: `${r.title}, ${LONG}` } : r)) as TidyRow[];
+    const lines = (chart: SVGSVGElement) => [...chart.querySelectorAll(".tbl-timeline-label text")].map((t) => t.textContent);
+    const svg = buildExportSvg(VSPEC, rows);
+    const chart = chartOf(svg);
+    const chartW = num(chart, "width");
+    const budget = 640 - 2 * MARGIN;
+    expect(chartW).toBeLessThan(budget);
+    expect(lines(chart)).toEqual(lines(renderChart(VSPEC, rows, { width: budget }).svg));
+    // Precondition: laid out at its own trimmed width, the same timeline would wrap differently.
+    expect(lines(renderChart(VSPEC, rows, { width: chartW }).svg)).not.toEqual(lines(chart));
   });
 
   it("keeps the frame within 640 when two lane columns of long titles wrap in the widest chart area", () => {

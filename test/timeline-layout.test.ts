@@ -1060,6 +1060,31 @@ describe("vertical single track: a colliding label swaps left before any connect
     }
   });
 
+  it("does not swap a label left where it would land beside an outer bar, though none runs at its date (Ruling 35)", () => {
+    // b is pushed far down on the right by a's tall label. No outer bar runs at b's date, but s1's
+    // label sits on the left there, so b would land below it — beside s1's bar while it still
+    // runs. It stays right, with a leader; once s1 ends above that landing, b swaps left.
+    const tall = "a, whose title is long enough to wrap onto several lines in the right-hand column of this chart";
+    const mk = (s1End: string) => [
+      ev("1990", "s0", { id: 0, endStr: "2060" }), ev("2010", tall, { id: 1 }), ev("2010-01-02", "b", { id: 2 }),
+      ev("2010-01-05", "s1", { id: 3, endStr: s1End }), ev("2100", "far", { id: 4 }),
+    ];
+    const long = v(mk("2060"));
+    const s1 = long.spans.find((s) => s.id === 3)!;
+    expect(s1.x + s1.w).toBeLessThan(ruleX(long) - TL_GEOM.dotR); // s1 is on an outer sub-track
+    expect(s1.y).toBeGreaterThan(itemY(long, 2)); // not running at b's date
+    expect(onLeft(long, 2)).toBe(false);
+    expect(long.stems.map((s) => s.id)).toEqual([2]);
+    const short = v(mk("2011"));
+    expect(onLeft(short, 2)).toBe(true);
+    const lab = labelOf(short, 2).box;
+    // It lands below s1's label, off its own date, past the end of s1's bar.
+    expect(lab.y0).toBeCloseTo(labelOf(short, 3).box.y1 + TL_GEOM.vLabelGap, 9);
+    const s1s = short.spans.find((s) => s.id === 3)!;
+    expect(lab.y0 + LINE_STYLE.date.lineH / 2).toBeGreaterThan(s1s.y + s1s.h);
+    expect(short.stems.map((s) => s.id)).toEqual([2]);
+  });
+
   it("does not let a label that can never swap widen the left column (Ruling 36)", () => {
     // b swaps; x is displaced too but its date is one word wider than 40% of the width, so it can
     // never go left. The column is sized to b alone, and the ticks keep their room.
