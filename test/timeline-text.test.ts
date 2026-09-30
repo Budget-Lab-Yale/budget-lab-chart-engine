@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timelineTextWidth } from "../src/engine/timeline-text";
+import { timelineTextWidth, WIDE_EM } from "../src/engine/timeline-text";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "../src/engine/timeline-metrics";
 import { layoutTimeline, LINE_STYLE, type LayoutEvent } from "../src/engine/timeline-layout";
 
@@ -24,9 +24,14 @@ describe("timelineTextWidth (Ruling 45)", () => {
     for (const w of [500, 700] as const) expect(FIGTREE_ADVANCE[w]).toHaveLength([...FIGTREE_CHARS].length);
   });
 
-  it("measures a character outside the table at the fallback advance", () => {
+  it("measures a character outside the table at the fallback advance, or an em if it is wide", () => {
     expect(timelineTextWidth("ק", 1000, 500)).toBeCloseTo(FIGTREE_FALLBACK[500], 9);
-    expect(timelineTextWidth("😀", 1000, 700)).toBeCloseTo(FIGTREE_FALLBACK[700], 9); // one code point, one advance
+    expect(timelineTextWidth("ｱ", 1000, 500)).toBeCloseTo(FIGTREE_FALLBACK[500], 9); // halfwidth katakana
+    // Astral (emoji; one code point, one advance) and East Asian Wide/Fullwidth: about an em in
+    // Chromium's fallback fonts (😀 1.37em, 中 한 Ａ 1em), far past the 0.58em letter mean.
+    expect(WIDE_EM).toBe(1000);
+    for (const ch of ["😀", "中", "한", "Ａ", "、", "𠀀"]) expect(timelineTextWidth(ch, 1000, 700), ch).toBeCloseTo(WIDE_EM, 9);
+    expect(timelineTextWidth("中文 title", 12, 500)).toBeCloseTo(2 * 12 + timelineTextWidth(" title", 12, 500), 9);
   });
 
   // Chromium-rendered widths (getComputedTextLength, the embedded Figtree @font-face, kerning on),
@@ -42,8 +47,8 @@ describe("timelineTextWidth (Ruling 45)", () => {
     ["Most individual provisions expire after 2025.", 11, 500, 218.66],
     ["Proposed legislation", 12, 700, 111.81],
     ["2020", 10.5, 500, 25.36],
-  ] as const)("%s at %ipx/%i is within 3%% of Chromium", (text, size, weight, px) => {
-    expect(Math.abs(timelineTextWidth(text, size, weight) - px) / px).toBeLessThan(0.03);
+  ] as const)("%s at %ipx/%i is within 1%% of Chromium", (text, size, weight, px) => {
+    expect(Math.abs(timelineTextWidth(text, size, weight) - px) / px).toBeLessThan(0.01);
   });
 });
 

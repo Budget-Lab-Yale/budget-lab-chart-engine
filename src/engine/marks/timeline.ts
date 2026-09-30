@@ -296,12 +296,13 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     });
     chrome.append(t);
   }
-  // TBL.size.axis is the size the vertical layout reserved the tick column at; text_axis ink as
+  // TBL.size.axis at weight 500 is what the layout measured the ticks at; the weight is explicit
+  // because the PNG export has no page CSS to inherit 500 from (it would draw 400). text_axis ink as
   // every other chart's tick labels (annotation_dim text would fail WCAG contrast).
   for (const k of layout.ticks) {
     const t = el("text", {
       class: "tbl-timeline-tick", x: r2(k.x), y: r2(k.y), "text-anchor": k.anchor, "font-size": TBL.size.axis,
-      fill: TBL.color.axis,
+      "font-weight": 500, fill: TBL.color.axis,
     });
     t.textContent = k.text;
     chrome.append(t);

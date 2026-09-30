@@ -402,6 +402,8 @@ describe("timeline render", () => {
     const axis = { timeline: { axis: true }, x_axis_title: "Year" } as Partial<ChartSpec>;
     const wide = r(axis);
     expect(q(wide.svg, ".tbl-timeline-tick").length).toBeGreaterThanOrEqual(2);
+    // Drawn at the weight the layout measured them at, not whatever the page (or none) supplies.
+    for (const t of q(wide.svg, ".tbl-timeline-tick")) expect(t.getAttribute("font-weight")).toBe("500");
     expect(wide.xAxisTitle).toBe("Year");
     // Six overlapping spans whose date word ("Mid-to-late-September") is too wide on both sides at 280 to
     // leave a tick column any room beside the floors (amendment A8, Ruling 28): no ticks, no title.

@@ -145,7 +145,7 @@ function textW(role: LineRole, s: string): number {
 }
 /** Width of a lane name (bold, LANE_SIZE). */
 const laneW = (s: string): number => timelineTextWidth(s, LANE_SIZE, 700);
-/** Width of a tick label: TBL.size.axis, measured at 500, the weight it inherits live. */
+/** Width of a tick label: TBL.size.axis at weight 500, as marks/timeline.ts draws it. */
 const tickTextW = (s: string): number => timelineTextWidth(s, TBL.size.axis, 500);
 
 interface TextBlock { roles: LineRole[]; texts: string[]; w: number; h: number }

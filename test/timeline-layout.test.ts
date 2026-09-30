@@ -702,10 +702,10 @@ describe("vertical layout", () => {
     expect(ruleX(v([a, p, b]))).toBeLessThan(ruleX(l));
   });
 
-  it("leaves a layout with a left label column byte-identical to the parent commit (Ruling 29)", () => {
-    // The Task 13b inset applies only with no left column at all; captured with `git show
-    // 46a6c7a:src/engine/timeline-layout.ts` at the parent commit, before that change, and
-    // re-captured at Task 16b, whose measured Figtree widths (Ruling 45) move every coordinate.
+  it("pins a layout with a left label column relative to its track (Ruling 29: no inset beside a left column)", () => {
+    // The Task 13b inset applies only with no left column at all. First captured at 46a6c7a (the
+    // parent of that change) to prove it left this layout alone; re-captured at Task 16b, whose
+    // measured Figtree widths (Ruling 45) move every coordinate, so it is now a regression pin.
     const a = ev("2020", "a", { id: 0, endStr: "2030" });
     const c = ev("2025", "c, on the outer sub-track", { id: 1, endStr: "2035" });
     const p = ev("2027", "a point on the rule", { id: 2 });
@@ -935,32 +935,32 @@ describe("vertical single track: a colliding label swaps left before any connect
     expect(lp[2]![0]).toBeLessThan(leg);
   });
 
-  it("leaves a layout with no collision byte-identical to the parent commit (attempt A)", () => {
-    // Captured at 17022b0, before swapping existed (re-captured at Task 16b for the measured
-    // Figtree widths, Ruling 45): spread-out points with the axis drawn, no left column, the
-    // Ruling 29 inset in force.
+  it("leaves a layout with no collision exactly attempt A's (the no-swap layout)", () => {
+    // Spread-out points with the axis drawn: no label is displaced, so layoutVertical returns
+    // attempt A unchanged — no left column, the Ruling 29 inset in force.
     const events = [
       ev("2026", "Policy begins", { id: 0 }), ev("2050", "First cohort born under fully phased-in policy", { id: 1 }),
       ev("2075", "Annual projection ends", { id: 2 }), ev("2100", "That cohort turns 65", { id: 3 }),
     ];
-    expectPinnedUpToCentring(v(events, { width: 375, axis: true }),
-      '{"orientation":"vertical","width":375,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":79.8505,"y1":8,"x2":79.8505,"y2":415}],"markers":[{"id":0,"category":"","cx":79.8505,"cy":8,"projected":false},{"id":1,"category":"","cx":79.8505,"cy":132.54284445759953,"projected":false},{"id":2,"category":"","cx":79.8505,"cy":262.2714222287998,"projected":false},{"id":3,"category":"","cx":79.8505,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":94.3505,"y0":0,"x1":165.7985,"y1":31},"lines":[{"role":"date","text":"2026","x":94.3505,"y":13,"anchor":"start"},{"role":"title","text":"Policy begins","x":94.3505,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":94.3505,"y0":124.54284445759953,"x1":337.6265,"y1":155.54284445759953},"lines":[{"role":"date","text":"2050","x":94.3505,"y":137.54284445759953,"anchor":"start"},{"role":"title","text":"First cohort born under fully phased-in policy","x":94.3505,"y":152.54284445759953,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":94.3505,"y0":254.2714222287998,"x1":219.35450000000003,"y1":285.2714222287998},"lines":[{"role":"date","text":"2075","x":94.3505,"y":267.2714222287998,"anchor":"start"},{"role":"title","text":"Annual projection ends","x":94.3505,"y":282.2714222287998,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":94.3505,"y0":384,"x1":204.9425,"y1":415},"lines":[{"role":"date","text":"2100","x":94.3505,"y":397,"anchor":"start"},{"role":"title","text":"That cohort turns 65","x":94.3505,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[{"x":37.37349999999999,"y":84.64288885600118,"text":"2040","anchor":"start"},{"x":37.37349999999999,"y":188.42859257066746,"text":"2060","anchor":"start"},{"x":37.37349999999999,"y":292.2142962853337,"text":"2080","anchor":"start"},{"x":37.37349999999999,"y":396,"text":"2100","anchor":"start"}],"laneLabels":[]}',
-    );
+    const inp = base(events, { orientation: "vertical", width: 375, axis: true });
+    const l = layoutTimeline(inp);
+    expect(l.stems).toEqual([]);
+    expect(l.labels.some((x) => onLeft(l, x.id))).toBe(false);
+    expect(JSON.stringify(l)).toBe(JSON.stringify(verticalNoSwapLayout(inp)));
   });
 
-  it("keeps a label right, with a connector, when its date word would not fit the left column (byte-identical to the parent commit)", () => {
+  it("keeps a label right, with a connector, when its date word would not fit the left column (attempt A exactly)", () => {
     // b collides with a, but its date is one word wider than 40% of the width: swapping would split
     // it, so it stays right and is pushed down with a leader, and with nothing swapped the layout is
-    // attempt A's exactly (captured at 17022b0; re-captured at Task 16b for Ruling 45's widths).
+    // attempt A's (the no-swap layout) exactly.
     const word = "X".repeat(24);
     expect(bold(word)).toBeGreaterThan(0.4 * 360);
     const events = [ev("2026", "a", { id: 0 }), ev("2026-01-02", "b", { id: 1, dateText: word }), ev("2090", "far", { id: 2 })];
-    const l = v(events);
+    const inp = base(events, { orientation: "vertical", width: 360 });
+    const l = layoutTimeline(inp);
     expect(l.stems.map((s) => s.id)).toEqual([1]);
     expect(onLeft(l, 1)).toBe(false);
-    expectPinnedUpToCentring(l,
-      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2],"rules":[{"x1":69.076,"y1":8,"x2":69.076,"y2":415}],"markers":[{"id":0,"category":"","cx":69.076,"cy":8,"projected":false},{"id":1,"category":"","cx":69.076,"cy":8.016427104722792,"projected":false},{"id":2,"category":"","cx":69.076,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":83.576,"y0":0,"x1":114.594,"y1":31},"lines":[{"role":"date","text":"2026","x":83.576,"y":13,"anchor":"start"},{"role":"title","text":"a","x":83.576,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":83.576,"y0":41,"x1":295.424,"y1":72},"lines":[{"role":"date","text":"XXXXXXXXXXXXXXXXXXXXXXXX","x":83.576,"y":54,"anchor":"start"},{"role":"title","text":"b","x":83.576,"y":69,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":83.576,"y0":384,"x1":115.49099999999999,"y1":415},"lines":[{"role":"date","text":"2090","x":83.576,"y":397,"anchor":"start"},{"role":"title","text":"far","x":83.576,"y":412,"anchor":"start"}]}],"stems":[{"id":1,"category":"","points":[[75.576,8.016427104722792],[75.576,49],[79.576,49]]}],"ticks":[],"laneLabels":[]}',
-    );
+    expect(JSON.stringify(l)).toBe(JSON.stringify(verticalNoSwapLayout(inp)));
   });
 
   it("sizes the left column to min(40% of the width, the widest need of the labels a no-swap layout displaced)", () => {

@@ -245,6 +245,10 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     const cap = chromeTexts(svg).find((t) => t.textContent === "Axis caption")!;
     expect(cap.getAttribute("text-anchor")).toBe("middle");
     expect(num(cap, "x")).toBe(num(svg, "width") / 2);
+    // The export has no page CSS: the ticks carry the weight the layout measured them at.
+    const ticks = [...chartOf(svg).querySelectorAll(".tbl-timeline-tick")];
+    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    for (const t of ticks) expect(t.getAttribute("font-weight")).toBe("500");
   });
 
 });
