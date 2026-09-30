@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timelineTextWidth, WIDE_EM, ASTRAL_EM } from "../src/engine/timeline-text";
+import { timelineTextWidth, WIDE_EM, EMOJI_EM } from "../src/engine/timeline-text";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "../src/engine/timeline-metrics";
 import { layoutTimeline, LINE_STYLE, type LayoutEvent } from "../src/engine/timeline-layout";
 
@@ -24,7 +24,7 @@ describe("timelineTextWidth (Ruling 45)", () => {
     for (const w of [500, 700] as const) expect(FIGTREE_ADVANCE[w]).toHaveLength([...FIGTREE_CHARS].length);
   });
 
-  it("measures a character outside the table at the fallback advance, an em if it is wide, 1.4em if astral", () => {
+  it("measures a character outside the table at the fallback advance, an em if it is wide, 1.4em if emoji", () => {
     expect(timelineTextWidth("ק", 1000, 500)).toBeCloseTo(FIGTREE_FALLBACK[500], 9);
     expect(timelineTextWidth("ｱ", 1000, 500)).toBeCloseTo(FIGTREE_FALLBACK[500], 9); // halfwidth katakana
     // BMP East Asian Wide/Fullwidth: an em in Chromium's fallback fonts (中 한 Ａ 1em), far past the
@@ -32,13 +32,20 @@ describe("timelineTextWidth (Ruling 45)", () => {
     expect(WIDE_EM).toBe(1000);
     for (const ch of ["中", "한", "Ａ", "、"]) expect(timelineTextWidth(ch, 1000, 700), ch).toBeCloseTo(WIDE_EM, 9);
     expect(timelineTextWidth("中文 title", 12, 500)).toBeCloseTo(2 * 12 + timelineTextWidth(" title", 12, 500), 9);
-    // Astral (emoji, supplementary CJK; one code point, one advance): Chromium draws 😀 at 1.37em, so
-    // the estimate must be at least that or an emoji-heavy line overflows the column it was wrapped to
-    // (Ruling 48).
-    expect(ASTRAL_EM).toBe(1400);
+    // Astral (emoji, supplementary CJK; one code point, one advance) and the BMP emoji/symbol blocks:
+    // Chromium draws 😀 at 1.37em and ✅ ⭐ ☀ ⌛ at ~1.3em, so the estimate must be at least that or
+    // an emoji-heavy line overflows the column it was wrapped to (Rulings 48, 49).
+    expect(EMOJI_EM).toBe(1400);
     for (const w of [500, 700] as const) {
-      for (const ch of ["😀", "𠀀"]) expect(timelineTextWidth(ch, 1000, w), ch).toBeCloseTo(ASTRAL_EM, 9);
+      for (const ch of ["😀", "𠀀", "✅", "⭐", "☀", "⌛", "⌀", "⏿", "☀", "➿", "⬀", "⯿"]) {
+        expect(timelineTextWidth(ch, 1000, w), ch).toBeCloseTo(EMOJI_EM, 9);
+      }
       expect(timelineTextWidth("😀", 12, w)).toBeGreaterThanOrEqual(1.37 * 12);
+      for (const ch of ["✅", "⭐", "☀"]) expect(timelineTextWidth(ch, 12, w), ch).toBeGreaterThanOrEqual(1.3 * 12);
+      // Just outside each block: the letter-mean fallback.
+      for (const ch of ["⋿", "␀", "◿", "⟀", "⫿", "Ⰰ"]) {
+        expect(timelineTextWidth(ch, 1000, w), ch).toBeCloseTo(FIGTREE_FALLBACK[w], 9);
+      }
     }
   });
 

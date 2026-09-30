@@ -4,10 +4,15 @@
 // from the embedded font (timeline-metrics.ts; scripts/gen-timeline-metrics.mjs), so it is as
 // deterministic as the estimate — no DOM, canvas or getBBox — and the live mount, the PNG export
 // and the jsdom goldens still agree. Kerning is ignored: Figtree's pairs mostly tighten, so a
-// kerned line renders no wider than this. A character outside the table measures ASTRAL_EM if it is
-// astral (emoji, supplementary CJK), WIDE_EM if it is BMP East Asian Wide/Fullwidth (see isWide),
-// else FIGTREE_FALLBACK. Both wide advances are at least what Chromium's fallback fonts draw, so a
-// line wrapped to a column never renders past it (Ruling 48).
+// kerned line renders no wider than this. A character outside the table (Latin-1 plus common
+// punctuation) measures, by code point:
+//   - EMOJI_EM (1.4em): astral (emoji, supplementary CJK) and the BMP emoji/symbol blocks in
+//     EMOJI_RANGES — at least what Chromium's fallback fonts draw (😀 1.37em, ✅ ⭐ ☀ ~1.3em);
+//   - WIDE_EM (1em): BMP East Asian Wide/Fullwidth (WIDE_RANGES) — Chromium draws those an em wide;
+//   - FIGTREE_FALLBACK (the Latin letter mean): everything else. Scripts that render wider than that
+//     (Cyrillic, Greek) can still measure short, so a line of them may run past its column.
+// So a line wrapped to a column renders inside it only for the table's characters and the two wide
+// classes (Rulings 48, 49).
 // Timeline-only: every other chart keeps estimateLabelWidth, byte-identical.
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "./timeline-metrics";
 
@@ -23,9 +28,15 @@ const ADVANCE: Record<TimelineWeight, Map<string, number>> = {
  *  Chromium's fallback fonts). */
 export const WIDE_EM = 1000;
 
-/** Advance, per 1000 em, for an astral code point (cp > 0xFFFF: emoji, supplementary CJK). Chromium
- *  draws 😀 at 1.37em, so an em would let an emoji-heavy line overflow its column (Ruling 48). */
-export const ASTRAL_EM = 1400;
+/** Advance, per 1000 em, for an astral code point (cp > 0xFFFF: emoji, supplementary CJK) or one in
+ *  EMOJI_RANGES. Chromium draws 😀 at 1.37em and ✅ ⭐ ☀ at ~1.3em, so an em would let an
+ *  emoji-heavy line overflow its column (Rulings 48, 49). */
+export const EMOJI_EM = 1400;
+
+/** BMP blocks whose characters Chromium draws from an emoji or symbol font, well past an em wide:
+ *  Miscellaneous Technical (⌛), Miscellaneous Symbols and Dingbats (☀ ✅), Miscellaneous Symbols
+ *  and Arrows (⭐), inclusive (Ruling 49). */
+const EMOJI_RANGES: ReadonlyArray<readonly [number, number]> = [[0x2300, 0x23ff], [0x2600, 0x27bf], [0x2b00, 0x2bff]];
 
 /** East Asian Wide / Fullwidth blocks (Hangul Jamo, CJK radicals through Yi, Hangul syllables, CJK
  *  compatibility, vertical and fullwidth forms), inclusive. Figtree has none of them. */
@@ -34,16 +45,14 @@ const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0xa000, 0xa4cf], [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe30, 0xfe4f], [0xff00, 0xff60], [0xffe0, 0xffe6],
 ];
 
-/** A BMP East Asian Wide/Fullwidth code point: rendered about an em wide, well past the letter-mean
- *  fallback. */
-function isWide(cp: number): boolean {
-  return WIDE_RANGES.some(([a, b]) => cp >= a && cp <= b);
-}
+const inRanges = (cp: number, ranges: ReadonlyArray<readonly [number, number]>): boolean =>
+  ranges.some(([a, b]) => cp >= a && cp <= b);
 
 /** Advance, per 1000 em, for a character outside the table. */
 function fallbackEm(ch: string, weight: TimelineWeight): number {
   const cp = ch.codePointAt(0)!;
-  return cp > 0xffff ? ASTRAL_EM : isWide(cp) ? WIDE_EM : FIGTREE_FALLBACK[weight];
+  if (cp > 0xffff || inRanges(cp, EMOJI_RANGES)) return EMOJI_EM;
+  return inRanges(cp, WIDE_RANGES) ? WIDE_EM : FIGTREE_FALLBACK[weight];
 }
 
 /** Width in px of `text` set in Figtree at `sizePx` and `weight`, one table advance per code point. */

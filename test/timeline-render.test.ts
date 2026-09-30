@@ -462,6 +462,21 @@ describe("timeline render", () => {
     }
   });
 
+  it("never splits an emoji's surrogate pair when a date word is broken to keep its dash", () => {
+    // A 15-emoji date_label ending " –" is wider than the 280px frame, so hardBreakDate splits it
+    // and moves the last character down with the dash: that must be the last code point, not half
+    // of one.
+    const dl = `${"😀".repeat(15)} –`;
+    const rows = [{ date: "2026", end: "", title: "t", detail: "", kind: "policy", projected: "", dl }] as TidyRow[];
+    const spec = { timeline: { auto_vertical: false }, columns: { ...SPEC.columns, date_label: "dl" } } as Partial<ChartSpec>;
+    const { svg } = r(spec, 280, rows);
+    const dates = q(svg, ".tbl-timeline-label text").filter((t) => t.getAttribute("font-weight") === "700").map((t) => t.textContent!);
+    expect(dates.length).toBeGreaterThan(1); // the word really was broken
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    for (const d of dates) expect(lone.test(d), JSON.stringify(d)).toBe(false);
+    expect(dates.join("").replace(/\s/g, "")).toBe(dl.replace(/\s/g, ""));
+  });
+
   it("contains no NaN", () => {
     expect(/NaN/.test(r().svg.outerHTML)).toBe(false);
     expect(/NaN/.test(renderChart(SPEC, ROWS, { width: 320, timelineOrientation: "vertical" }).svg.outerHTML)).toBe(false);
