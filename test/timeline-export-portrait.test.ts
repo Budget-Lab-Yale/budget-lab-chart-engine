@@ -84,9 +84,9 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     const chart = chartOf(svg);
     const chartW = num(chart, "width");
     // Points only, no tick column: the block runs from the 4px edge pad left of the markers to the
-    // widest label, which is narrower than a full 360px column.
+    // widest label and the same pad beyond it, narrower than a full 360px column.
     const ruleX = num(chart.querySelector(".tbl-timeline-rule")!, "x1");
-    const block = inkRight(chart) - (ruleX - TL_GEOM.dotR - 4);
+    const block = inkRight(chart) + 4 - (ruleX - TL_GEOM.dotR - 4);
     expect(block).toBeLessThan(TL_GEOM.vTextColumnMax);
     expect(block).toBeGreaterThan(TL_GEOM.minLiveWidth);
     expect(timelineExportChartWidth(VSPEC, POINTS)).toBe(chartW);
@@ -110,17 +110,61 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     expect(num(svg, "width")).toBe(TL_GEOM.minLiveWidth + 2 * MARGIN);
     expect(num(chart, "width")).toBe(TL_GEOM.minLiveWidth);
     const ruleX = num(chart.querySelector(".tbl-timeline-rule")!, "x1");
-    const block = inkRight(chart) - (ruleX - TL_GEOM.dotR - 4);
+    const block = inkRight(chart) + 4 - (ruleX - TL_GEOM.dotR - 4);
     expect(ruleX - TL_GEOM.dotR - 4).toBeCloseTo((TL_GEOM.minLiveWidth - block) / 2, 1);
     expect(ruleX - TL_GEOM.dotR - 4).toBeGreaterThan(50);
   });
 
-  it("caps the frame at 640 when the block fills the widest chart area (two lane columns)", () => {
+  /** Horizontal extent of the chart's ink: label and lane-name text, markers and bars. */
+  const inkOfChart = (chart: SVGSVGElement): [number, number] => {
+    const spans: Array<[number, number]> = [];
+    for (const t of chart.querySelectorAll(".tbl-timeline-label text, .tbl-timeline-lane-label tspan, .tbl-timeline-tick")) {
+      const el = t.tagName === "tspan" ? t.parentElement! : t;
+      const w = estimateLabelWidth(t.textContent ?? "", num(el, "font-size")) * (el.getAttribute("font-weight") === "700" && !el.classList.contains("tbl-timeline-lane-label") ? 1.08 : 1);
+      const x = num(t, "x");
+      spans.push(el.getAttribute("text-anchor") === "end" ? [x - w, x] : [x, x + w]);
+    }
+    for (const c of chart.querySelectorAll(".tbl-timeline-marker")) spans.push([num(c, "cx") - TL_GEOM.dotR, num(c, "cx") + TL_GEOM.dotR]);
+    for (const r of chart.querySelectorAll(".tbl-timeline-span")) spans.push([num(r, "x"), num(r, "x") + num(r, "width")]);
+    return [Math.min(...spans.map((s) => s[0])), Math.max(...spans.map((s) => s[1]))];
+  };
+  const LONG = "a title long enough to wrap in any column a portrait frame can give it, twice over";
+  const FIG7_ROWS = [
+    { date: "2026", title: "Policy begins" }, { date: "2030", title: "First cohort born under fully phased-in policy" },
+    { date: "2055", title: "Annual projection ends" }, { date: "2057", title: "That cohort turns 27" }, { date: "2095", title: "That cohort turns 65" },
+  ] as TidyRow[];
+
+  it("hugs every column in the export too: FIG7 (swapped labels) and short-label lanes frame narrower than 640, ink centred (Ruling 43)", () => {
+    const shortLanes = [
+      { date: "2025", title: "Signed", category: "alpha" }, { date: "2026", title: "Rules", category: "beta" },
+      { date: "2027", title: "Fix", category: "alpha" }, { date: "2028", title: "Effective", category: "beta" },
+    ] as TidyRow[];
+    const lanes = { ...TL, orientation: "vertical", timeline: { lanes: true }, columns: { x: "date", label: "title", series: "category" } } as ChartSpec;
+    const cases: Array<[ChartSpec, TidyRow[]]> = [
+      [VSPEC, FIG7_ROWS], [{ ...VSPEC, timeline: { axis: true } } as ChartSpec, FIG7_ROWS],
+      [lanes, shortLanes], [{ ...lanes, timeline: { lanes: true, axis: true } } as ChartSpec, shortLanes], [lanes, LEGEND_ROWS],
+    ];
+    for (const [spec, rows] of cases) {
+      const svg = buildExportSvg(spec, rows);
+      const chart = chartOf(svg);
+      const chartW = num(chart, "width");
+      expect(num(svg, "width")).toBeLessThan(640);
+      expect(num(svg, "width")).toBe(chartW + 2 * MARGIN);
+      expect(timelineExportChartWidth(spec, rows)).toBe(chartW);
+      if (chartW > TL_GEOM.minLiveWidth) {
+        const [lo, hi] = inkOfChart(chart);
+        expect(Math.abs((lo + hi) / 2 - chartW / 2)).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
+  it("keeps the frame within 640 when two lane columns of long titles wrap in the widest chart area", () => {
     const spec = { ...TL, orientation: "vertical", timeline: { lanes: true }, columns: { x: "date", label: "title", series: "category" } } as ChartSpec;
-    const svg = buildExportSvg(spec, LEGEND_ROWS);
-    expect(num(svg, "width")).toBe(640);
-    expect(num(chartOf(svg), "width")).toBe(640 - 2 * MARGIN);
-    expect(timelineExportChartWidth(spec, LEGEND_ROWS)).toBe(640 - 2 * MARGIN);
+    const rows = LEGEND_ROWS.map((r) => ({ ...r, title: LONG })) as TidyRow[];
+    const svg = buildExportSvg(spec, rows);
+    expect(num(svg, "width")).toBeLessThanOrEqual(640);
+    expect(num(svg, "width")).toBeGreaterThan(600); // each column wraps within a word of its share
+    expect(timelineExportChartWidth(spec, rows)).toBe(num(chartOf(svg), "width"));
     expect(chartOf(svg).querySelectorAll("line.tbl-timeline-rule")).toHaveLength(2);
   });
 

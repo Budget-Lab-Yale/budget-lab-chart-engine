@@ -112,6 +112,36 @@ describe("timeline live mount", () => {
     expect(titleLines).toHaveLength(2);
   });
 
+  it("centres the ink on wide cards whether or not a column reaches the cap: FIG7, lanes, a long left label (Ruling 43)", () => {
+    const fig7 = [
+      { date: "2026", title: "Policy begins" }, { date: "2030", title: "First cohort born under fully phased-in policy" },
+      { date: "2055", title: "Annual projection ends" }, { date: "2057", title: "That cohort turns 27" }, { date: "2095", title: "That cohort turns 65" },
+    ] as TidyRow[];
+    const lanes = [
+      { date: "2025", title: "Signed", kind: "a" }, { date: "2026", title: "Rules", kind: "b" },
+      { date: "2027", title: "Fix", kind: "a" }, { date: "2028", title: "Effective", kind: "b" },
+    ] as TidyRow[];
+    const long = Array.from({ length: 30 }, () => "word").join(" ");
+    const outer = [
+      { date: "2020", end: "2030", title: "a" }, { date: "2025", end: "2035", title: `outer: ${long}` },
+      { date: "2027", end: "", title: "pt" }, { date: "2040", end: "", title: "b" },
+    ] as TidyRow[];
+    const V = { ...SPEC, orientation: "vertical" } as ChartSpec;
+    const cases: Array<[string, ChartSpec, TidyRow[]]> = [
+      ["FIG7", V, fig7], ["FIG7 axis", { ...V, timeline: { axis: true } } as ChartSpec, fig7],
+      ["lanes axis", { ...V, columns: { x: "date", label: "title", series: "kind" }, timeline: { lanes: true, axis: true } } as ChartSpec, lanes],
+      ["outer axis", { ...V, columns: { x: "date", end: "end", label: "title" }, timeline: { axis: true } } as ChartSpec, outer],
+    ];
+    for (const [name, spec, rows] of cases) {
+      for (const width of [728, 800, 900, 1100]) {
+        document.body.replaceChildren();
+        const svg = svgOf(mountAt(width, spec, rows));
+        const [lo, hi] = inkOf(svg);
+        expect(Math.abs((lo + hi) / 2 - Number(svg.getAttribute("width")) / 2), `${name} @${width}`).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
   it("centres the ink on a 728px card with a left column and a tick column (Ruling 39)", () => {
     const spec = { ...SPEC, orientation: "vertical", columns: { x: "date", end: "end", label: "title" }, timeline: { axis: true } } as ChartSpec;
     const rows = [

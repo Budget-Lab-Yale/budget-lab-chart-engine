@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { resolveTimelineOrientation, timelineWarnings, TIMELINE_CLASS } from "../src/engine/marks/timeline";
 import { TL_GEOM } from "../src/engine/timeline-layout";
+import { estimateLabelWidth } from "../src/engine/axes";
 import { TBL } from "../src/engine/theme";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
@@ -385,11 +386,16 @@ describe("timeline render", () => {
         }
       }
     }
-    // With nothing on the left (no outer sub-track, no collision to swap), the track insets to 15% of
-    // the width for balance (Ruling 29).
+    // With nothing on the left (no outer sub-track, no collision to swap), the block is centred: the
+    // blank beside the markers (past a 4px edge pad) equals the blank beyond the widest label, rather
+    // than all of it sitting left of the rule (Rulings 29, 43).
     const spread = ROWS.filter((row) => ["2026", "2040", "2057", "2095"].includes(row.date as string));
     const plain = renderChart(SPEC, spread, { width: 375, timelineOrientation: "vertical" }).svg;
-    expect(Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"))).toBeCloseTo(375 * TL_GEOM.vTrackInsetShare, 9);
+    const px = Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"));
+    const right = Math.max(...q(plain, ".tbl-timeline-label text").map((t) =>
+      Number(t.getAttribute("x")) + estimateLabelWidth(t.textContent ?? "", Number(t.getAttribute("font-size"))) * (t.getAttribute("font-weight") === "700" ? 1.08 : 1)));
+    expect(px - TL_GEOM.dotR - 4).toBeCloseTo(375 - right - 4, 1);
+    expect(px - TL_GEOM.dotR - 4).toBeGreaterThan(20);
   });
 
   it("drops the x-axis title with the ticks: drawn only when a render draws ticks", () => {

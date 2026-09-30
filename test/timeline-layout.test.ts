@@ -32,6 +32,48 @@ const allFinite = (v: unknown): boolean =>
 const labelOf = (l: TimelineLayout, id: number) => l.labels.find((x) => x.id === id)!;
 const ruleY = (l: TimelineLayout): number => l.rules[0]!.y1;
 
+const REL_X_KEYS = new Set(["x", "x0", "x1", "x2", "cx"]);
+/** The layout with every x taken relative to the first rule and rounded, tick x dropped: what
+ *  Ruling 43 must leave unchanged (it only moves the block, and the tick column within it). */
+const relative = (l: TimelineLayout): unknown => {
+  const r0 = l.rules[0]!.x1;
+  const round = (n: number) => Math.round(n * 1e6) / 1e6;
+  const walk = (p: unknown, key: string, path: string): unknown => {
+    if (typeof p === "number") return round(REL_X_KEYS.has(key) && !path.startsWith(".ticks") ? p - r0 : key === "x" ? 0 : p);
+    if (Array.isArray(p)) {
+      const isPoint = p.length === 2 && typeof p[0] === "number" && path.includes("points");
+      return p.map((x, i) => walk(x, isPoint ? (i === 0 ? "x" : "y") : key, `${path}[${i}]`));
+    }
+    if (p !== null && typeof p === "object") {
+      return Object.fromEntries(Object.entries(p).map(([k, x]) => [k, walk(x, k, `${path}.${k}`)]));
+    }
+    return p;
+  };
+  return walk(l, "", "");
+};
+const inkOf = (l: TimelineLayout): [number, number] => {
+  const nameW = (n: TimelineLayout["laneLabels"][number]) => Math.max(...n.lines.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+  const lo = [
+    ...l.labels.map((x) => x.box.x0), ...l.markers.map((m) => m.cx - TL_GEOM.dotR), ...l.spans.map((s) => s.x),
+    ...l.ticks.map((k) => k.x), ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x - nameW(n) : n.x)),
+  ];
+  const hi = [
+    ...l.labels.map((x) => x.box.x1), ...l.markers.map((m) => m.cx + TL_GEOM.dotR), ...l.spans.map((s) => s.x + s.w),
+    ...l.ticks.map((k) => k.x + estimateLabelWidth(k.text, TBL.size.axis)),
+    ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x : n.x + nameW(n))),
+  ];
+  return [Math.min(...lo), Math.max(...hi)];
+};
+/** Ruling 43 leaves a vertical layout's geometry relative to its track unchanged and only moves
+ *  the block: `l` is the pinned layout `pinned` (captured before Ruling 43), centred, with its tick
+ *  column against the block's left. */
+const expectPinnedUpToCentring = (l: TimelineLayout, pinned: string): void => {
+  expect(JSON.stringify(relative(l))).toBe(JSON.stringify(relative(JSON.parse(pinned) as TimelineLayout)));
+  const [lo, hi] = inkOf(l);
+  for (const k of l.ticks) expect(k.x).toBeCloseTo(lo, 9);
+  expect(Math.abs((lo + hi) / 2 - l.width / 2)).toBeLessThanOrEqual(1e-6);
+};
+
 // The reference image: five milestones, 2026–2095.
 const FIG7 = () => [
   ev("2026", "Policy begins"),
@@ -667,28 +709,32 @@ describe("vertical layout", () => {
     const p = ev("2027", "a point on the rule", { id: 2 });
     const b = ev("2040", "b", { id: 3 });
     const l = v([a, c, p, b]);
-    expect(JSON.stringify(l)).toBe(
+    expectPinnedUpToCentring(l,
       '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":168,"y1":8,"x2":168,"y2":415}],"markers":[{"id":2,"category":"","cx":168,"cy":142.41314168377826,"projected":false},{"id":3,"category":"","cx":168,"cy":392,"projected":false}],"spans":[{"id":0,"category":"","x":164,"y":8,"w":8,"h":192.02628336755646,"projected":false,"fade":null},{"id":1,"category":"","x":154,"y":104.0394250513347,"w":8,"h":191.97371663244348,"projected":false,"fade":null}],"labels":[{"id":0,"category":"","box":{"x0":182.5,"y0":0,"x1":213.388,"y1":31},"lines":[{"role":"date","text":"2020","x":182.5,"y":13,"anchor":"start"},{"role":"title","text":"a","x":182.5,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":44.999999999999986,"y0":96.0394250513347,"x1":144,"y1":142.03942505133472},"lines":[{"role":"date","text":"2025","x":144,"y":109.0394250513347,"anchor":"end"},{"role":"title","text":"c, on the outer","x":144,"y":124.0394250513347,"anchor":"end"},{"role":"title","text":"sub-track","x":144,"y":139.03942505133472,"anchor":"end"}]},{"id":2,"category":"","box":{"x0":182.5,"y0":134.41314168377826,"x1":307.9,"y1":165.41314168377826},"lines":[{"role":"date","text":"2027","x":182.5,"y":147.41314168377826,"anchor":"start"},{"role":"title","text":"a point on the rule","x":182.5,"y":162.41314168377826,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":182.5,"y0":384,"x1":213.388,"y1":415},"lines":[{"role":"date","text":"2040","x":182.5,"y":397,"anchor":"start"},{"role":"title","text":"b","x":182.5,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[],"laneLabels":[]}',
     );
   });
 
-  it("insets the track for balance when nothing labels left, and gives the right column the rest (Ruling 29)", () => {
-    // Wraps at every width tried, so its widest line fills the right column to within a word.
-    // Phone widths only: wider, the right column stops at vTextColumnMax and the block is centred
-    // (E2; see "vertical in wide space" below).
+  it("wraps the right column as if the rule were inset for balance, then centres the block (Rulings 29, 43)", () => {
+    // Wraps at every width tried, so its widest line fills the right column to within a word. That
+    // column is what the rule inset to 15% of the width leaves; the block it makes is centred.
     const long = Array.from({ length: 40 }, () => "word").join(" ");
+    const colR = (width: number) => width - width * TL_GEOM.vTrackInsetShare - TL_GEOM.dotR - TL_GEOM.vLabelGap;
     for (const width of [280, 375, 440]) {
       const plain = v([...SPREAD(), ev("2130", long)], { width });
-      expect(ruleX(plain)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
-      expect(Math.max(...plain.labels.map((x) => x.box.x1))).toBeGreaterThan(width - 40);
+      const x0 = ruleX(plain) + TL_GEOM.dotR + TL_GEOM.vLabelGap;
+      const widest = Math.max(...plain.labels.map((x) => x.box.x1));
+      expect(widest - x0).toBeLessThanOrEqual(colR(width) + 1e-9);
+      expect(widest - x0).toBeGreaterThan(colR(width) - 40);
+      const [lo, hi] = inkOf(plain);
+      expect((lo + hi) / 2).toBeCloseTo(width / 2, 9);
       // Spans on the main rule only (sub-track 0) do not open a left column either.
       const s0 = v([ev("2020", "a", { endStr: "2025" }), ev("2026", "b", { endStr: "2030" }), ev("2040", "c")], { width });
-      expect(ruleX(s0)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
-      // With the tick column drawn, it still sits left of the (now inset) rule.
+      expect(s0.labels.every((x) => x.box.x0 > ruleX(s0))).toBe(true);
+      // With the tick column drawn, it sits left of the rule, the block's left edge.
       const axis = v(SPREAD(), { width, axis: true });
       expect(axis.ticks.length).toBeGreaterThanOrEqual(2);
       expect(ruleX(axis)).toBeGreaterThan(tickRight(axis));
-      expect(ruleX(axis)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
+      expect(axis.ticks[0]!.x).toBeCloseTo(inkOf(axis)[0], 9);
     }
   });
 
@@ -894,7 +940,7 @@ describe("vertical single track: a colliding label swaps left before any connect
       ev("2026", "Policy begins", { id: 0 }), ev("2050", "First cohort born under fully phased-in policy", { id: 1 }),
       ev("2075", "Annual projection ends", { id: 2 }), ev("2100", "That cohort turns 65", { id: 3 }),
     ];
-    expect(JSON.stringify(v(events, { width: 375, axis: true }))).toBe(
+    expectPinnedUpToCentring(v(events, { width: 375, axis: true }),
       '{"orientation":"vertical","width":375,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":56.25,"y1":8,"x2":56.25,"y2":415}],"markers":[{"id":0,"category":"","cx":56.25,"cy":8,"projected":false},{"id":1,"category":"","cx":56.25,"cy":132.54284445759953,"projected":false},{"id":2,"category":"","cx":56.25,"cy":262.2714222287998,"projected":false},{"id":3,"category":"","cx":56.25,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":70.75,"y0":0,"x1":156.55,"y1":31},"lines":[{"role":"date","text":"2026","x":70.75,"y":13,"anchor":"start"},{"role":"title","text":"Policy begins","x":70.75,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":70.75,"y0":124.54284445759953,"x1":374.35,"y1":155.54284445759953},"lines":[{"role":"date","text":"2050","x":70.75,"y":137.54284445759953,"anchor":"start"},{"role":"title","text":"First cohort born under fully phased-in policy","x":70.75,"y":152.54284445759953,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":70.75,"y0":254.2714222287998,"x1":215.95000000000002,"y1":285.2714222287998},"lines":[{"role":"date","text":"2075","x":70.75,"y":267.2714222287998,"anchor":"start"},{"role":"title","text":"Annual projection ends","x":70.75,"y":282.2714222287998,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":70.75,"y0":384,"x1":202.75,"y1":415},"lines":[{"role":"date","text":"2100","x":70.75,"y":397,"anchor":"start"},{"role":"title","text":"That cohort turns 65","x":70.75,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[{"x":0,"y":84.64288885600118,"text":"2040","anchor":"start"},{"x":0,"y":188.42859257066746,"text":"2060","anchor":"start"},{"x":0,"y":292.2142962853337,"text":"2080","anchor":"start"},{"x":0,"y":396,"text":"2100","anchor":"start"}],"laneLabels":[]}',
     );
   });
@@ -909,7 +955,7 @@ describe("vertical single track: a colliding label swaps left before any connect
     const l = v(events);
     expect(l.stems.map((s) => s.id)).toEqual([1]);
     expect(onLeft(l, 1)).toBe(false);
-    expect(JSON.stringify(l)).toBe(
+    expectPinnedUpToCentring(l,
       '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2],"rules":[{"x1":54,"y1":8,"x2":54,"y2":415}],"markers":[{"id":0,"category":"","cx":54,"cy":8,"projected":false},{"id":1,"category":"","cx":54,"cy":8.016427104722792,"projected":false},{"id":2,"category":"","cx":54,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":68.5,"y0":0,"x1":99.388,"y1":31},"lines":[{"role":"date","text":"2026","x":68.5,"y":13,"anchor":"start"},{"role":"title","text":"a","x":68.5,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":68.5,"y0":41,"x1":253.82800000000003,"y1":72},"lines":[{"role":"date","text":"XXXXXXXXXXXXXXXXXXXXXXXX","x":68.5,"y":54,"anchor":"start"},{"role":"title","text":"b","x":68.5,"y":69,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":68.5,"y0":384,"x1":99.388,"y1":415},"lines":[{"role":"date","text":"2090","x":68.5,"y":397,"anchor":"start"},{"role":"title","text":"far","x":68.5,"y":412,"anchor":"start"}]}],"stems":[{"id":1,"category":"","points":[[60.5,8.016427104722792],[60.5,49],[64.5,49]]}],"ticks":[],"laneLabels":[]}',
     );
   });
@@ -921,18 +967,19 @@ describe("vertical single track: a colliding label swaps left before any connect
     const l = v([a, b, ev("2090", "far")]);
     const need = Math.max(bold("2026"), estimateLabelWidth("b short", LINE_STYLE.title.size));
     expect(need).toBeLessThan(0.4 * 360);
-    expect(labelOf(l, b.id).box.x0).toBeCloseTo(0, 9);
-    expect(labelOf(l, b.id).box.x1).toBeCloseTo(need, 9);
+    expect(labelOf(l, b.id).box.x1 - labelOf(l, b.id).box.x0).toBeCloseTo(need, 9);
     // a is not a candidate (a no-swap layout leaves it at its date), so its long title does not widen
     // the column; the right column gets the rest.
-    expect(labelOf(l, a.id).box.x0).toBeCloseTo(need + TL_GEOM.vLabelGap + 2 * TL_GEOM.dotR + TL_GEOM.vLabelGap, 9);
+    expect(labelOf(l, a.id).box.x0 - labelOf(l, b.id).box.x1).toBeCloseTo(TL_GEOM.vLabelGap + 2 * TL_GEOM.dotR + TL_GEOM.vLabelGap, 9);
     // A candidate whose title is wider than 40% caps the column there, and wraps in it.
     const b2 = ev("2026-01-02", "b, whose title is far too long for forty percent of this width");
     const c = v([ev("2026", "a"), b2, ev("2090", "far")]);
     expect(onLeft(c, b2.id)).toBe(true);
-    expect(labelOf(c, b2.id).box.x1).toBeCloseTo(0.4 * 360, 9);
+    const b2Box = labelOf(c, b2.id).box;
+    expect(b2Box.x1 - b2Box.x0).toBeLessThanOrEqual(0.4 * 360 + 1e-9);
+    expect(b2Box.x1 - b2Box.x0).toBeGreaterThan(0.4 * 360 - 40);
     expect(labelOf(c, b2.id).lines.filter((ln) => ln.role === "title").length).toBeGreaterThan(1);
-    expect(ruleX(c)).toBeCloseTo(0.4 * 360 + TL_GEOM.vLabelGap + TL_GEOM.dotR, 9);
+    expect(ruleX(c) - b2Box.x1).toBeCloseTo(TL_GEOM.vLabelGap + TL_GEOM.dotR, 9);
   });
 
   it("ends a swapped label a label gap short of an outer-sub-track band", () => {
@@ -1023,7 +1070,7 @@ describe("vertical single track: a colliding label swaps left before any connect
     expect(onLeft(l, x.id)).toBe(false);
     expect(l.ticks.length).toBeGreaterThanOrEqual(2);
     const tickW = Math.max(...l.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
-    expect(labelOf(l, b.id).box.x1).toBeCloseTo(tickW + Math.max(bold("2026"), estimateLabelWidth("b", LINE_STYLE.title.size)), 9);
+    expect(labelOf(l, b.id).box.x1 - l.ticks[0]!.x).toBeCloseTo(tickW + Math.max(bold("2026"), estimateLabelWidth("b", LINE_STYLE.title.size)), 9);
   });
 
   it("never starts a span's leader inside an outer bar, however compressed the band (single track and lane columns)", () => {
@@ -1402,18 +1449,14 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
     const edge = 4, gap = TL_GEOM.vLabelGap, dotR = TL_GEOM.dotR;
     const rightOfRule = dotR + gap; // the marker's half-width (≥ half a bar) plus the label gap
-    // Nothing on the left: an edge pad, the marker, the rule — but Ruling 29 insets that natural
-    // position to 15% of the width for balance (the natural extent here is well under that floor).
-    const inset = TL_GEOM.vTrackInsetShare * 360;
+    // Nothing on the left: an edge pad, the marker, the rule, then the right column (Ruling 29's
+    // balance inset sets only that column's wrap width; Ruling 43 trims it from the block).
     const plain = v(SPREAD(), { width: 360 });
-    expect(edge + dotR).toBeLessThan(inset); // the natural extent does not itself reach the floor
-    expect(plain.rules[0]!.x1).toBeCloseTo(inset, 9);
-    for (const lab of plain.labels) expect(lab.box.x0).toBeCloseTo(inset + rightOfRule, 9);
-    // The tick column goes first, sized to its widest tick plus its gap; the inset still applies.
+    for (const lab of plain.labels) expect(lab.box.x0 - plain.rules[0]!.x1).toBeCloseTo(rightOfRule, 9);
+    // The tick column goes first, sized to its widest tick plus its gap, then the edge pad.
     const axis = v(SPREAD(), { width: 360, axis: true });
     const tickW = Math.max(...axis.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
-    expect(tickW + edge + dotR).toBeLessThan(inset);
-    expect(axis.rules[0]!.x1).toBeCloseTo(inset, 9);
+    expect(axis.rules[0]!.x1 - axis.ticks[0]!.x).toBeCloseTo(tickW + edge + dotR, 9);
     // A left column at its natural need (here, c's date), then the gap, then the band of two
     // sub-tracks (half a bar plus one pitch), then the rule.
     const a = ev("2020", "a", { endStr: "2030" });
@@ -1421,29 +1464,34 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const two = v([a, c, ev("2040", "b")], { width: 360 });
     const need = bold("2025 – 2035");
     const band = TL_GEOM.spanH / 2 + TL_GEOM.spanH + TL_GEOM.subTrackGap;
-    expect(labelOf(two, c.id).box.x1).toBeCloseTo(need, 9);
-    expect(two.rules[0]!.x1).toBeCloseTo(need + gap + band, 9);
-    expect(labelOf(two, a.id).box.x0).toBeCloseTo(need + gap + band + rightOfRule, 9);
+    const cBox = labelOf(two, c.id).box;
+    expect(cBox.x1 - cBox.x0).toBeCloseTo(need, 9);
+    expect(two.rules[0]!.x1 - cBox.x1).toBeCloseTo(gap + band, 9);
+    expect(labelOf(two, a.id).box.x0 - two.rules[0]!.x1).toBeCloseTo(rightOfRule, 9);
     // A left label wider than 40% of the width is capped there and wraps.
     const cl = ev("2025", "c, whose title is far too long for forty percent of a phone", { endStr: "2035", dateText: "2025 – 2035" });
     const capped = v([a, cl, ev("2040", "b")], { width: 360 });
-    expect(labelOf(capped, cl.id).box.x1).toBeCloseTo(0.4 * 360, 9);
+    const clBox = labelOf(capped, cl.id).box;
+    expect(clBox.x1 - clBox.x0).toBeLessThanOrEqual(0.4 * 360 + 1e-9);
+    expect(clBox.x1 - clBox.x0).toBeGreaterThan(0.4 * 360 - 40);
     expect(labelOf(capped, cl.id).lines.filter((ln) => ln.role === "title").length).toBeGreaterThan(1);
-    expect(capped.rules[0]!.x1).toBeCloseTo(0.4 * 360 + gap + band, 9);
+    expect(capped.rules[0]!.x1 - clBox.x1).toBeCloseTo(gap + band, 9);
     // With ticks, the tick column comes first and the left column starts where it ends.
     const ticked = v([a, c, ev("2040", "b")], { width: 360, axis: true });
     expect(ticked.ticks.length).toBeGreaterThanOrEqual(2);
     const tw = tickCol(ticked);
-    expect(labelOf(ticked, c.id).box.x1).toBeCloseTo(tw + need, 9);
-    expect(ticked.rules[0]!.x1).toBeCloseTo(tw + need + gap + band, 9);
+    expect(labelOf(ticked, c.id).box.x1 - ticked.ticks[0]!.x).toBeCloseTo(tw + need, 9);
+    expect(ticked.rules[0]!.x1 - ticked.ticks[0]!.x).toBeCloseTo(tw + need + gap + band, 9);
   });
 
-  it("insets a single-track vertical timeline's rule to 15% of the width for balance (Ruling 29)", () => {
-    // Point-only, no left column: the rule sits at vTrackInsetShare of the width, not hugging the
-    // left edge (the natural extent — V_EDGE + a marker radius — is well under that floor at 375).
+  it("balances a single-track vertical timeline with nothing on the left: its block is centred (Rulings 29, 43)", () => {
+    // Point-only, no left column: the blank the balance inset leaves beside the right column is
+    // split evenly either side of the block (the 4px edge pad mirrored), not left of the rule.
     const l = v(SPREAD(), { width: 375 });
-    expect(l.labels.some((lab) => lab.box.x0 < 0)).toBe(false); // sanity: nothing on the left
-    expect(l.rules[0]!.x1).toBeCloseTo(375 * TL_GEOM.vTrackInsetShare, 9);
+    expect(l.labels.some((lab) => lab.box.x0 < l.rules[0]!.x1)).toBe(false); // sanity: nothing on the left
+    const [lo, hi] = inkOf(l);
+    expect(lo - 4).toBeCloseTo(375 - hi - 4, 9);
+    expect(lo).toBeGreaterThan(20);
   });
 
   it("shrinks the balance inset to keep the right column's date-word floor, never below the natural extent (Ruling 29)", () => {
@@ -1456,11 +1504,14 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const naturalRuleX = TL_GEOM.dotR + 4; // V_EDGE (4) + a marker radius: no left col, no ticks, no spans
     const fullInset = width * TL_GEOM.vTrackInsetShare;
     const wordFloor = estimateLabelWidth(wordDate, LINE_STYLE.date.size) * 1.08; // bold factor
-    const rx = l.rules[0]!.x1;
-    const rightColW = width - (rx + TL_GEOM.dotR + TL_GEOM.vLabelGap);
-    expect(rightColW).toBeCloseTo(wordFloor, 6); // shrunk to exactly the floor, not further
-    expect(rx).toBeGreaterThan(naturalRuleX + 1e-6); // some inset still applied
-    expect(rx).toBeLessThan(fullInset - 1e-6); // but less than the full 15%
+    // The inset only sets the right column's wrap width (Ruling 43 then centres the block): the word
+    // keeps its line, so the inset shrank to leave it room, and the block is exactly that wide.
+    const z = l.labels.find((x) => x.lines[0]!.text === wordDate)!;
+    expect(z.lines.filter((ln) => ln.role === "date")).toHaveLength(1);
+    expect(z.box.x1 - z.box.x0).toBeCloseTo(wordFloor, 6);
+    // The full 15% inset would have split it; the natural (uninset) position leaves room to spare.
+    expect(width - fullInset - TL_GEOM.dotR - TL_GEOM.vLabelGap).toBeLessThan(wordFloor);
+    expect(width - naturalRuleX - TL_GEOM.dotR - TL_GEOM.vLabelGap).toBeGreaterThan(wordFloor);
     inFrame(l, width);
   });
 
@@ -1762,7 +1813,8 @@ describe("vertical lane columns (exactly two lanes)", () => {
   it("keeps the tick column leftmost, outside lane 0's labels and name, with axis:true", () => {
     const l = vc(TWO(), { axis: true });
     expect(l.ticks.length).toBeGreaterThanOrEqual(2);
-    expect(l.ticks.every((t) => t.x === 0 && t.anchor === "start")).toBe(true);
+    expect(l.ticks.every((t) => t.x === l.ticks[0]!.x && t.anchor === "start")).toBe(true);
+    expect(l.ticks[0]!.x).toBeCloseTo(inkOf(l)[0], 9);
     expect(Math.min(...l.labels.map((x) => x.box.x0))).toBeGreaterThan(tickRight(l));
     expect(nameExtent(l.laneLabels[0]!)[0]).toBeGreaterThan(tickRight(l));
     for (const t of l.ticks) expect(t.y - TBL.size.axis).toBeGreaterThan(nameBottom(l));
@@ -1980,11 +2032,11 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
       expect(widest).toBeLessThanOrEqual(x0 + cap + 1e-9);
       expect(widest).toBeGreaterThan(x0 + cap - 40);
       for (const lab of l.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
-      // The block runs from the tick column (without one, from the marker's 4px edge pad) to the
-      // widest wrapped label, and sits in the middle of the width.
+      // The block runs from the tick column (without one, from the marker's 4px edge pad, mirrored
+      // on the right) to the widest wrapped label, and sits in the middle of the width.
       const left = axis ? l.ticks[0]!.x : ruleX(l) - TL_GEOM.dotR - 4;
       if (axis) expect(l.ticks.length).toBeGreaterThanOrEqual(2);
-      expect((left + widest) / 2).toBeCloseTo(500, 9);
+      expect((left + widest + (axis ? 0 : 4)) / 2).toBeCloseTo(500, 9);
       expect(left).toBeGreaterThan(250);
       for (const t of l.ticks) expect(t.x).toBe(left);
     }
@@ -2041,23 +2093,33 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
     expect(l.laneLabels.map((n) => n.x)).toEqual([r0 - 6, r1 + 6]);
   });
 
-  it("moves the track continuously as the width grows: the balance inset gives way to centring", () => {
-    // No jump: a 1px wider chart moves the track and column by at most 4px (the steep but
-    // continuous V_HUG_RATE close-in past the cap), and by at most 1px everywhere else.
-    let prev: TimelineLayout | null = null;
-    let steep = 0;
-    for (let w = 280; w <= 1400; w++) {
-      const l = v(SPREAD(), { width: w });
-      if (prev) {
-        const step = Math.max(Math.abs(ruleX(l) - ruleX(prev)), Math.abs(rightX0(l) - rightX0(prev)));
-        expect(step).toBeLessThanOrEqual(4 + 1e-9);
-        if (step > 1 + 1e-9) steep++;
+  it("moves the block continuously between reflows, 280-1400 (Ruling 43)", () => {
+    // A position may change only where the text visibly reflows — some label's lines, or its side,
+    // change. Between such widths a 1px wider chart moves the rule by at most 2px.
+    const lanesLong = [
+      ev("2025", `Bill signed into law ${long}`, { category: "a" }), ev("2026", "Rulemaking", { category: "b", endStr: "2027" }),
+      ev("2027", "Technical corrections bill", { category: "a" }), ev("2028", `Credits take effect ${long}`, { category: "b" }),
+    ];
+    const outer = () => [ev("2020", "a", { endStr: "2030" }), ev("2025", `c, on the outer sub-track: ${long}`, { endStr: "2035" }), ev("2027", "a point"), ev("2040", "b")];
+    const cases: Array<[string, () => LayoutEvent[], Partial<TimelineLayoutInput>]> = [
+      ["FIG7", FIG7, {}], ["FIG7 axis", FIG7, { axis: true }], ["outer", outer, {}], ["outer axis", outer, { axis: true }],
+      ["lanes", () => lanesLong, { lanes: LANES }], ["lanes axis", () => lanesLong, { lanes: LANES, axis: true }],
+    ];
+    const text = (l: TimelineLayout) => JSON.stringify(l.labels.map((x) => [x.id, x.lines[0]!.anchor, x.lines.map((ln) => ln.text)]));
+    for (const [name, mk, o] of cases) {
+      const events = mk();
+      let prev: TimelineLayout | null = null;
+      let steps = 0;
+      for (let w = 280; w <= 1400; w++) {
+        const l = v(events, { ...o, width: w });
+        if (prev && text(l) === text(prev)) {
+          steps++;
+          expect(Math.abs(ruleX(l) - ruleX(prev)), `${name} @${w}`).toBeLessThanOrEqual(2);
+        }
+        prev = l;
       }
-      prev = l;
+      expect(steps, name).toBeGreaterThan(900);
     }
-    expect(steep).toBeLessThan(60);
-    // In wide space no inset remains: the ink is centred.
-    expectInkCentred(v(SPREAD(), { width: 1400 }));
   });
 
   it("hugs each column's widest line past the cap, so the ink is centred, without changing any wrap (Ruling 39)", () => {
@@ -2121,18 +2183,80 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
     expect(JSON.stringify(layoutTimeline(base(fig7, { budgetWidth: 1400 })))).toBe(JSON.stringify(layoutTimeline(base(fig7))));
   });
 
-  it("leaves every phone-width vertical layout byte-identical to c60f9a8 (280-440)", () => {
+  it("leaves every phone-width vertical layout as at c60f9a8 relative to its track (280-440; Ruling 43 moves only the block)", () => {
     const outer = () => [ev("2020", "a", { endStr: "2030" }), ev("2025", "c, on the outer sub-track", { endStr: "2035" }), ev("2027", "a point on the rule"), ev("2040", "b")];
     const out: string[] = [];
     for (let w = 280; w <= 440; w += 8) {
       for (const axis of [false, true]) {
         nextId = 0;
-        out.push(JSON.stringify(v([...SPREAD(), ev("2130", long)], { width: w, axis })));
-        out.push(JSON.stringify(v(FIG7(), { width: w, axis })));
-        out.push(JSON.stringify(v(outer(), { width: w, axis })));
-        out.push(JSON.stringify(v(TWO(), { width: w, axis, lanes: LANES })));
+        out.push(JSON.stringify(relative(v([...SPREAD(), ev("2130", long)], { width: w, axis }))));
+        out.push(JSON.stringify(relative(v(FIG7(), { width: w, axis }))));
+        out.push(JSON.stringify(relative(v(outer(), { width: w, axis }))));
+        out.push(JSON.stringify(relative(v(TWO(), { width: w, axis, lanes: LANES }))));
       }
     }
-    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("ddaf2faf041a2098");
+    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("7bcea104352c64e7");
+  });
+});
+
+describe("vertical: every column hugs its placed content and the block is centred (Ruling 43)", () => {
+  const LANES = [{ key: "a", label: "Legislation" }, { key: "b", label: "Implementation" }];
+  const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
+    layoutTimeline(base(events, { orientation: "vertical", width: 728, ...o }));
+  const A = (start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}) => ev(start, title, { category: "a", ...o });
+  const B = (start: string, title: string, o: Partial<LayoutEvent> & { endStr?: string } = {}) => ev(start, title, { category: "b", ...o });
+  const long = Array.from({ length: 40 }, () => "word").join(" ");
+  // Fresh events each call, ids from 0, so layouts are comparable across calls.
+  const DATA: Record<string, [() => LayoutEvent[], Partial<TimelineLayoutInput>]> = {
+    spreadLong: [() => [...SPREAD(), ev("2130", long)], {}],
+    fig7: [FIG7, {}],
+    fig7Axis: [FIG7, { axis: true }],
+    outerLong: [() => [ev("2020", "a", { endStr: "2030" }), ev("2025", `outer: ${long}`, { endStr: "2035" }), ev("2027", "pt"), ev("2040", "b")], {}],
+    outerLongAxis: [() => [ev("2020", "a", { endStr: "2030" }), ev("2025", `outer: ${long}`, { endStr: "2035" }), ev("2027", "pt"), ev("2040", "b")], { axis: true }],
+    shortLanes: [() => [A("2025", "Signed"), B("2026", "Rules", { endStr: "2027" }), A("2027", "Fix"), B("2028", "Effective")], { lanes: LANES }],
+    shortLanesAxis: [() => [A("2025", "Signed"), B("2026", "Rules", { endStr: "2027" }), A("2027", "Fix"), B("2028", "Effective")], { lanes: LANES, axis: true }],
+    longLanes: [() => [A("2025", long), B("2026", `Rules ${long}`, { endStr: "2027" }), A("2027", "Fix"), B("2028", "Effective")], { lanes: LANES }],
+  };
+  const make = (name: string, o: Partial<TimelineLayoutInput>) => {
+    const [mk, base0] = DATA[name]!;
+    nextId = 0;
+    return v(mk(), { ...base0, ...o });
+  };
+  it("centres the ink of every kind of vertical layout, cap binding or not, with the ticks against it", () => {
+    for (const name of Object.keys(DATA)) {
+      for (const width of [375, 728, 800, 900, 1100]) {
+        const l = make(name, { width });
+        const [lo, hi] = inkOf(l);
+        expect(Math.abs((lo + hi) / 2 - width / 2), `${name} @${width}`).toBeLessThanOrEqual(2);
+        for (const k of l.ticks) expect(k.x).toBeCloseTo(lo, 9);
+      }
+    }
+    // Short labels leave a narrow block: nothing reserves the unused column width.
+    const [lo, hi] = inkOf(make("shortLanesAxis", { width: 900 }));
+    expect(hi - lo).toBeLessThan(260);
+  });
+
+  it("floors every column's date word at the cap too: an oversized unit never costs the tick column (Ruling 40)", () => {
+    const word = "W".repeat(65);
+    expect(estimateLabelWidth(word, 13) * 1.08).toBeGreaterThan(TL_GEOM.vTextColumnMax);
+    // Lanes need two columns at the (capped) floor beside the tick column: 2 x 360 + the tracks
+    // leaves it room from ~830px (at 800 it is still correctly omitted).
+    for (const width of [900, 1000]) {
+      nextId = 0;
+      const lanes = v([A("2026", "a", { dateText: word }), B("2027", "b"), A("2035", "c")], { lanes: LANES, axis: true, width });
+      expect(lanes.ticks.length, `lanes @${width}`).toBeGreaterThanOrEqual(2);
+      nextId = 0;
+      const single = v([ev("2026", "a"), ev("2050", "b", { dateText: word }), ev("2090", "c")], { axis: true, width: width - 480 });
+      expect(single.ticks.length, `single @${width - 480}`).toBeGreaterThanOrEqual(2);
+      for (const l of [lanes, single]) for (const x of l.labels) expect(x.box.x1 - x.box.x0).toBeLessThanOrEqual(TL_GEOM.vTextColumnMax + 1e-9);
+    }
+  });
+
+  it("leaves wrapping and every position relative to the track byte-identical to 1bbc859, at every width", () => {
+    const out: string[] = [];
+    for (const name of Object.keys(DATA)) {
+      for (let w = 280; w <= 1400; w += 8) out.push(JSON.stringify(relative(make(name, { width: w }))));
+    }
+    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("70935b12bc6b16c1");
   });
 });

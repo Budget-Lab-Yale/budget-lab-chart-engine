@@ -41,11 +41,10 @@ export const TL_GEOM = {
   autoVerticalMinWidth: 480,
   /** Live floor for a timeline's width (vertical reads down to a small phone). */
   minLiveWidth: 280,
-  /** Vertical: no text column (single-track right or left, or either lane column) is ever wider
-   *  than this, for a readable line length (E2, Ruling 32). It is absolute (Ruling 40): a date unit
-   *  wider than it is split by hardBreakDate. Once a column would pass it, the column wraps as a
-   *  column this wide would and hugs its widest block instead of filling the width, and the block
-   *  is centred (Ruling 39). */
+  /** Vertical: no text column (single-track right or left, or either lane column) ever wraps wider
+   *  than this, for a readable line length (E2, Ruling 32). It is absolute, floors included (Ruling
+   *  40): a date unit wider than it is split by hardBreakDate. Every column then hugs its widest
+   *  placed block and the block is centred (Ruling 43). */
   vTextColumnMax: 360,
 } as const;
 
@@ -636,20 +635,6 @@ function naturalLineWidth(evs: LayoutEvent[]): number {
   ]));
 }
 
-/** How fast a vertical text column past the cap closes in on its widest block: px of extent per px
- *  of extra room. Steep, so a column reaches its content within (cap - hug) / 4 px of passing the
- *  cap (a 720px card is always past that), yet not a jump: on a resize the content slides rather
- *  than leaps. */
-const V_HUG_RATE = 4;
-
-/** Once a vertical text column could pass vTextColumnMax (`avail`, what it would get by filling,
- *  is over the cap), its extent: its widest block `hug` (at most the cap), reached continuously
- *  from the cap at `avail` = cap, at V_HUG_RATE (Ruling 39). */
-function hugExtent(hug: number, avail: number): number {
-  const cap = TL_GEOM.vTextColumnMax;
-  return Math.max(hug, cap - V_HUG_RATE * (avail - cap));
-}
-
 /** Height of a column's blocks stacked with no slack: the shortest axis that can hold them. */
 const vStack = (blocks: TextBlock[]): number =>
   blocks.reduce((s, b) => s + b.h, 0) + TL_GEOM.vLabelGap * Math.max(0, blocks.length - 1);
@@ -805,25 +790,21 @@ function vLeader(
  *      to its floor.
  *   5. The right column gets everything that remains while that is at most vTextColumnMax (E2,
  *      Ruling 32). Past the cap (Ruling 39) it wraps at its widest line, at most the cap — so it
- *      wraps exactly as a full column of the cap's width would — and its extent closes in on its
- *      widest block on the right (hugExtent); a date unit wider than the cap is split (Ruling 40).
+ *      wraps exactly as a full column of the cap's width would; a date unit wider than the cap is
+ *      split (Ruling 40).
  *   6. With nothing on the left (no left column at all), the rule from step 3 is a "natural" left
- *      extent — tick column, band and V_EDGE, hugging the left edge. Inset it for balance: the rule
- *      moves to `max(natural, vTrackInsetShare of the width)`, capped so the right column never
- *      drops below its date-word floor (and the rule never moves left of the natural extent). A
- *      left column overrides this — the rule stays at its step-3 position (so B never insets).
- *      When the right column would pass its cap even with the inset, it takes its step-5 extent,
- *      and `rest` is the room left beside it with the rule at its natural extent. The inset shrinks
- *      to max(0, 2 * inset - rest). After centring, while rest runs from inset to 2 * inset the
- *      blank left of the block stays exactly `inset` and the blank right of it grows from 0 to
- *      `inset`; from rest = 2 * inset on it is plain centring (rest / 2 each side). So the track
- *      moves continuously as the width grows.
- *   7. The block is centred in the width (centreBlock). Placement never depends on x, so it is
- *      measured after placement: it ends at the right column's step-5 extent, and past the cap it
- *      starts where the blank beyond the left column's widest block is trimmed, at the pace the
- *      right column closes in (the tick column moving in with it); otherwise it starts at 0. A block that fills the width is not moved, so a
- *      layout whose right column stays within the cap is unchanged: every width up to ~420px (the
- *      narrowest left column, band and gaps leave 360px only past that), ~450px with no left column.
+ *      extent — tick column, band and V_EDGE. Inset it for balance: the rule moves to
+ *      `max(natural, vTrackInsetShare of the width)`, capped so the right column never drops below
+ *      its date-word floor (and the rule never moves left of the natural extent). A left column
+ *      overrides this (so B never insets). The inset sets only the right column's wrap width: step 7
+ *      trims it from the block, so its balance is the centring's even margins.
+ *   Steps 1-6 set every wrap width, and so every label's lines; step 7 only moves things.
+ *   7. The block (Ruling 43). Placement never depends on x, so it is measured after placement and
+ *      every column hugs what it holds: it runs from the left column's widest placed block (with no
+ *      left column, from V_EDGE short of the band, mirrored beyond the right column where it fits),
+ *      the tick column moved in against it, to the right column's widest placed block. It is
+ *      centred in the width (centreBlock). Its extent changes only with some label's lines or side,
+ *      so between such reflows the track moves continuously (half a pixel per pixel of width).
  *  A left date unit wider than 40% is split by hardBreakDate, so the left column never pushes the
  *  track off the frame; a right one is split to whatever the right column gets.
  *  The axis length is chosen so the taller side's whole stack fits — outer spans at the left width,
@@ -841,12 +822,11 @@ function layoutVertical(inp: TimelineLayoutInput): VBlockLayout {
 }
 
 /** A vertical layout before centring: everything it draws lies in [blockX0 (default 0), blockW],
- *  and that is exactly [0, the layout's width] unless a text column would pass vTextColumnMax. */
+ *  each column hugging what it holds (Ruling 43). */
 interface VBlockLayout { layout: TimelineLayout; blockW: number; blockX0?: number }
 
-/** E2: moves every x in the layout so the block sits in the middle of `width`, and sets the
- *  layout's width to `width`. A block that fills the width (every phone width) is left exactly as
- *  laid out. */
+/** E2, Ruling 43: moves every x in the layout so the block sits in the middle of `width`, and
+ *  sets the layout's width to `width`. */
 function centreBlock({ layout: l, blockW, blockX0 = 0 }: VBlockLayout, width: number): TimelineLayout {
   l.width = width;
   const dx = (width - blockW - blockX0) / 2;
@@ -900,13 +880,14 @@ function layoutSingleTrack(
 
   const share = V_SIDE_SHARE * W;
   // `word` is the side's widest date unit (the floor below which a date would split mid-word) and
-  // `need` its widest unwrapped line, capped at `share`. On the left the floor is capped at `share`
-  // too, so the left column never passes 40% of the width: a wider unit there is split by
-  // hardBreakDate rather than pushing the track and the right column off the frame.
+  // `need` its widest unwrapped line, capped at `share`. Both floors are capped at vTextColumnMax
+  // (Ruling 40), and on the left at `share` too, so the left column never passes 40% of the width:
+  // a wider unit is split by hardBreakDate rather than pushing the track and the right column off
+  // the frame, or costing the tick column room no column would ever use.
   const needOf = (evs: LayoutEvent[], capWord: boolean): { need: number; word: number; nat: number } => {
     if (!evs.length) return { need: 0, word: 0, nat: 0 };
     const rawWord = Math.max(0, ...evs.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u))));
-    const word = capWord ? Math.min(share, G.vTextColumnMax, rawWord) : rawWord;
+    const word = Math.min(capWord ? share : Infinity, G.vTextColumnMax, rawWord);
     const nat = naturalLineWidth(evs);
     return { need: Math.max(word, Math.min(share, G.vTextColumnMax, nat)), word, nat };
   };
@@ -947,7 +928,7 @@ function layoutSingleTrack(
   };
 
   // Step 5 (E2, Ruling 39): past vTextColumnMax the right column wraps at its widest line, at
-  // most the cap — exactly as a full column of the cap's width would — and hugs the widest block.
+  // most the cap — exactly as a full column of the cap's width would.
   const cap = G.vTextColumnMax;
   const wrapR = Math.min(cap, rightNeeds.nat);
   const geometry = (tickNeed: number) => {
@@ -955,37 +936,23 @@ function layoutSingleTrack(
     const { barW, gap, band, leftW } = allocate(W - tickW);
     const naturalRuleX = tickW + leftOf(leftW) + band;
     // Step 6: no left column — inset the rule for balance, capped so the right column keeps its
-    // date-word floor (rightNeeds.word), and never left of the natural extent. Once the right
-    // column would pass its cap, the inset gives way to centring (step 7), measured against the
-    // column's step-5 extent (every label here is on the right, so it is known before placement).
-    // `availR` is what the right column would get by filling the width (with no left column, beside
-    // the full balance inset); past the cap, the column's step-5 extent is measured against it.
+    // date-word floor (rightNeeds.word), and never left of the natural extent. The inset sets only
+    // the right column's wrap width: step 7 trims it from the block.
     let ruleX = naturalRuleX;
-    let availR = 0;
     if (!hasLeft) {
       const colRAtNatural = W - (naturalRuleX + rightOf(barW));
       const maxInset = Math.max(0, colRAtNatural - rightNeeds.word);
       const desiredInset = Math.max(0, G.vTrackInsetShare * W - naturalRuleX);
-      const inset = Math.min(desiredInset, maxInset);
-      availR = colRAtNatural - inset;
-      if (availR > cap) {
-        const widest = Math.max(0, ...right.map((e) => vBlock(e, wrapR).w));
-        const rest = colRAtNatural - hugExtent(widest, availR);
-        ruleX = naturalRuleX + Math.max(0, 2 * inset - rest);
-      } else {
-        ruleX = naturalRuleX + inset;
-      }
+      ruleX = naturalRuleX + Math.min(desiredInset, maxInset);
     }
     const leftCol: VColumn = { x0: tickW, x1: tickW + leftW, anchor: "end" };
     const x0 = ruleX + rightOf(barW);
     const rightCol: VColumn = { x0, x1: W, anchor: "start" };
-    if (hasLeft) availR = W - x0;
-    const capped = availR > cap;
-    const colR = capped ? wrapR : Math.max(0, W - x0);
+    const colR = W - x0 > cap ? wrapR : Math.max(0, W - x0);
     const blocks = new Map(events.map((e) => [e.id, vBlock(e, kOf(e) > 0 ? leftW : colR)]));
     const stackOf = (evs: LayoutEvent[]): number => vStack(evs.map((e) => blocks.get(e.id) as TextBlock));
     const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stackOf(left), stackOf(right));
-    return { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L, capped, availR };
+    return { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
@@ -1001,7 +968,7 @@ function layoutSingleTrack(
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L, capped, availR } = geometry(tickNeed);
+  const { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 
@@ -1036,18 +1003,18 @@ function layoutSingleTrack(
   const bottom = Math.max(0, ...placedList.map((p) => p.box.y1));
   const height = Math.ceil(Math.max(G.vPad + L + tail + G.vPad, bottom + G.vPad));
 
-  // Step 7's block (Ruling 39). Placement never depends on x, so with the labels placed each side's
-  // extent is known: the right column hugs its widest block on the right (hugExtent), and the left
-  // column's blank beyond its widest left block is trimmed at the same pace (never more than the
-  // right column has passed the cap), the tick column moving in with it. While the right column
-  // fills the width the block is exactly [0, W], so such a layout never moves.
-  let blockX0 = 0;
-  let blockW = W;
-  if (capped) {
-    const widths = (side: boolean) => placedList.filter((p) => onLeft.has(p.id) === side).map((p) => p.box.x1 - p.box.x0);
-    blockW = rightCol.x0 + hugExtent(Math.max(0, ...widths(false)), availR);
-    if (hasLeft) blockX0 = Math.max(0, Math.min(leftW - Math.max(0, ...widths(true)), availR - cap));
-  }
+  // Step 7's block (Ruling 43). Placement never depends on x, so with the labels placed every
+  // column hugs what it holds: the block runs from the left column's widest placed block (with no
+  // left column, from V_EDGE short of the band, which trims the balance inset), with the tick
+  // column moved in against it, to the right column's widest placed block. With neither a left nor a
+  // tick column the V_EDGE pad is mirrored on the right, where it fits, so the drawn marks sit in
+  // the block's middle.
+  const sideBoxes = (left: boolean): Box[] => placedList.filter((p) => onLeft.has(p.id) === left).map((p) => p.box);
+  const leftBoxes = sideBoxes(true);
+  const inkL = leftBoxes.length ? Math.min(...leftBoxes.map((b) => b.x0)) : ruleX - band - V_EDGE;
+  const inkR = Math.max(rightCol.x0, ...sideBoxes(false).map((b) => b.x1));
+  const blockX0 = inkL - tickW;
+  const blockW = inkR + (!leftBoxes.length && !tickW ? Math.min(V_EDGE, W - (inkR - blockX0)) : 0);
 
   const out: TimelineLayout = {
     orientation: "vertical", width: W, height, fits: true, order: events.map((e) => e.id),
@@ -1122,10 +1089,11 @@ const V_LANE_NAME_INSET = 6;
  *   3. The columns split what remains equally; a date unit wider than its column is split by
  *      hardBreakDate, so no label leaves the frame.
  *   4. Past vTextColumnMax (E2, Ruling 32) each column wraps at its lane's widest line, at most the
- *      cap, and closes in (hugExtent, Ruling 39) on its widest block or what its lane name needs
- *      beyond the column, whichever is wider, at most the cap; the block is centred in the width,
- *      as layoutVertical's step 7. Below the cap (up to ~770px with
- *      no tick column) the columns fill the width and nothing moves.
+ *      cap, and each lane name at what a full column of the cap's width would leave it (Ruling 39).
+ *   5. The block (Ruling 43), as layoutVertical's step 7: each lane hugs what it holds — its placed
+ *      labels, its name and its bars — the tick column moved in against lane 0, and the block is
+ *      centred in the width.
+ *  The shared date-word floor is capped at vTextColumnMax (Ruling 40).
  *  Lane names wrap to their side (the block's edge or tick column to 6px short of the rule) and the
  *  taller name block is reserved at the top: labels start below it (placeColumn's min-top) and the
  *  axis starts vPad below that. */
@@ -1144,13 +1112,12 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
 
   // Rule to the outer edge of a lane's outermost bar, at least a marker radius.
   const bandOf = (n: number, w: number, g: number): number => Math.max(G.dotR, n ? w / 2 + (n - 1) * (w + g) : 0);
-  const word = Math.max(0, ...events.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u))));
+  // The shared date-word floor, at most vTextColumnMax (Ruling 40: a wider unit is split).
+  const word = Math.min(G.vTextColumnMax, Math.max(0, ...events.flatMap((e) => dateUnits(e.dateText).map((u) => textW("date", u)))));
   const fixed = 2 * G.vLabelGap + V_LANE_GAP;
   // Ruling 39: once a lane's column would pass vTextColumnMax it wraps at its widest line, at most
-  // the cap (as a full column of the cap's width would), and hugs its widest block or what its lane
-  // name needs beyond the column, whichever is wider.
+  // the cap, exactly as a full column of the cap's width would.
   const laneNat = laneEvs.map(naturalLineWidth);
-  const nameW = lanes.map((l) => estimateLabelWidth(l.label.split(/\s+/).filter(Boolean).join(" "), LANE_SIZE));
   const tickRoom = W - 2 * word - fixed - nSubs.reduce((s, n) => s + bandOf(n, V_MIN_BAR, V_MIN_TRACK_GAP), 0);
 
   // Step 2: one bar width and gap for both lanes, solved directly as layoutVertical's is. The solve
@@ -1183,27 +1150,20 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const { barW, gap } = bars(W - tickW);
     const bands = nSubs.map((n) => bandOf(n, barW, gap));
     const colFree = Math.max(0, (W - tickW - fixed - bands[0]! - bands[1]!) / 2);
-    // Step 4 (E2): past vTextColumnMax each column hugs its lane (Ruling 39). `blockW` is exactly
-    // W while the columns fill it, so a layout the cap does not reach never moves.
+    // Step 4 (E2): past vTextColumnMax each column wraps at its lane's widest line, at most the cap
+    // (Ruling 39), and each lane name at what a full column of the cap's width would give it.
     const capped = colFree > G.vTextColumnMax;
     const beyond = (i: number): number => G.vLabelGap + bands[i]! - V_LANE_NAME_INSET;
     const wrap = capped ? laneNat.map((n) => Math.min(G.vTextColumnMax, n)) : [colFree, colFree];
     const blocks = new Map(events.map((e) => [e.id, vBlock(e, wrap[laneIx.get(e.id) as number]!)]));
-    const widest = (i: number): number => Math.max(0, ...laneEvs[i]!.map((e) => (blocks.get(e.id) as TextBlock).w));
-    const ext = capped
-      ? [0, 1].map((i) => hugExtent(Math.min(G.vTextColumnMax, Math.max(widest(i), nameW[i]! - beyond(i))), colFree))
-      : [colFree, colFree];
-    const blockW = capped ? tickW + ext[0]! + ext[1]! + fixed + bands[0]! + bands[1]! : W;
-    const rules = [tickW + ext[0]! + G.vLabelGap + bands[0]!];
+    const rules = [tickW + colFree + G.vLabelGap + bands[0]!];
     rules.push(rules[0]! + V_LANE_GAP);
     const cols: VColumn[] = [
-      { x0: tickW, x1: tickW + ext[0]!, anchor: "end" },
-      { x0: rules[1]! + bands[1]! + G.vLabelGap, x1: blockW, anchor: "start" },
+      { x0: tickW, x1: tickW + colFree, anchor: "end" },
+      { x0: rules[1]! + bands[1]! + G.vLabelGap, x1: W, anchor: "start" },
     ];
-    // A hugged name gets its width back exactly (V_EPS absorbs the round trip), so it wraps as it
-    // would in a full column.
     const names = capped
-      ? lanes.map((l, i) => laneNameLines(l.label, ext[i]! + beyond(i) + V_EPS))
+      ? lanes.map((l, i) => laneNameLines(l.label, G.vTextColumnMax + beyond(i) + V_EPS))
       : [
           laneNameLines(lanes[0]!.label, Math.max(0, rules[0]! - V_LANE_NAME_INSET - tickW)),
           laneNameLines(lanes[1]!.label, Math.max(0, W - rules[1]! - V_LANE_NAME_INSET)),
@@ -1213,7 +1173,7 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
       G.minVerticalHeight - top - 2 * G.vPad - tail,
       ...laneEvs.map((evs) => vStack(evs.map((e) => blocks.get(e.id) as TextBlock))),
     );
-    return { tickW, barW, gap, bands, rules, cols, names, top, blocks, L, blockW };
+    return { tickW, barW, gap, bands, rules, cols, names, top, blocks, L };
   };
 
   // Ticks as layoutVertical chooses them: count from the tickless axis, column sized to the widest.
@@ -1228,7 +1188,7 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, barW, gap, bands, rules, cols, names, top, blocks, L, blockW } = geometry(tickNeed);
+  const { tickW, barW, gap, bands, rules, cols, names, top, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = [];
   const y0 = top + G.vPad;
   const { pos, scale } = positioner(events, inp.spacing, y0, y0 + L);
@@ -1278,11 +1238,18 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     const colEdge = s < 0 ? cols[i]!.x1 + 4 : cols[i]!.x0 - 4;
     out.stems.push({ id: e.id, category: e.category, points: vLeader(s, rules[i]!, bands[i]!, start, y, p.mid, colEdge) });
   }
+  // Step 5's block (Ruling 43): each lane hugs what it holds — its labels, its name and its bars —
+  // with the tick column moved in against lane 0.
+  const nameW = (i: number): number => Math.max(0, ...names[i]!.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+  const laneBoxes = (i: number): Box[] => laneEvs[i]!.map((e) => (placed.get(e.id) as VPlaced).box);
+  const inkL = Math.min(rules[0]! - bands[0]!, rules[0]! - V_LANE_NAME_INSET - nameW(0), ...laneBoxes(0).map((b) => b.x0));
+  const blockW = Math.max(rules[1]! + bands[1]!, rules[1]! + V_LANE_NAME_INSET + nameW(1), ...laneBoxes(1).map((b) => b.x1));
+  const blockX0 = inkL - tickW;
   if (scale && tickFmt) {
     const fmt = tickFmt;
-    out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
+    out.ticks = ticks.map((t) => ({ x: blockX0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
   }
-  return { layout: out, blockW };
+  return { layout: out, blockW, blockX0 };
 }
 
 export function layoutTimeline(inp: TimelineLayoutInput): TimelineLayout {
