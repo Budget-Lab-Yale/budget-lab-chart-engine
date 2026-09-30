@@ -356,10 +356,10 @@ describe("timeline render", () => {
 
   it("draws each vertical label beside its item: bold date first, outer-sub-track spans on the left", () => {
     // "Overlap" runs inside the 2031-2035 phase-in, so it takes sub-track 1, left of the rule. The
-    // 2030 label collides with 2026's on the right, but on the left it would run into Overlap's
-    // label, which a swap may never move (Ruling 34), so it stays right with a leader. The 2040
-    // "Credits" span, pushed on the right by the labels above it, is free on the left (no outer bar
-    // runs there by then), so it swaps left (E1).
+    // 2030 label collides with 2026's on the right; the left would first be clear only below
+    // Overlap's label, which a swap may never move (Ruling 34), a bigger push, so it stays right with
+    // a leader. The 2031 phase-in, pushed on the right below that, is pushed less on the left, just
+    // below Overlap's label (Ruling 38; Overlap's bar has ended there), so it goes left with a leader.
     const rows = [...ROWS, { date: "2032", end: "2034", title: "Overlap", detail: "", kind: "cohort", projected: "" }] as TidyRow[];
     const { svg } = renderChart(SPEC, rows, { width: 375, timelineOrientation: "vertical" });
     const rule = svg.querySelector("line.tbl-timeline-rule")!;
@@ -373,7 +373,7 @@ describe("timeline render", () => {
       expect(texts[0]!.getAttribute("font-weight")).toBe("700"); // the date line leads the block
       expect(texts[0]!.textContent!.length).toBeGreaterThan(0);
       const label = item.getAttribute("aria-label")!;
-      const onLeft = label.includes("Overlap") || label.includes("Credits");
+      const onLeft = label.includes("Overlap") || label.includes("Phase-in");
       for (const t of texts) {
         const x = Number(t.getAttribute("x"));
         if (onLeft) {

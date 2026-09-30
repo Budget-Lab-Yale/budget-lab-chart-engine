@@ -1051,12 +1051,74 @@ describe("vertical single track: a colliding label swaps left before any connect
       if (lc.spans[0]!.w < 5) compressed++;
       expect(lc.stems.some((s) => s.id === g.id)).toBe(true);
       expect(inside(lc, g.id)).toBe(false);
+      // Single track: g has outer bars active at its date, so it stays right (Ruling 35) and its
+      // leader leaves on the right, clear of every bar.
       const st = make();
       const one = v(st, { width });
       const gs = st.at(-1)!;
-      if (one.stems.some((s) => s.id === gs.id)) expect(inside(one, gs.id)).toBe(false);
+      expect(onLeft(one, gs.id)).toBe(false);
+      expect(one.stems.some((s) => s.id === gs.id)).toBe(true);
+      expect(inside(one, gs.id)).toBe(false);
     }
     expect(compressed).toBeGreaterThan(0); // the sweep reaches compressed bands
+    // Single track, a LEFT leader over a compressed band: five outer spans (ended by 1986) compress
+    // the band; at 2020 p2 swaps left and p3, pushed less on the left than below p1's tall label,
+    // goes left below p2 with a leader. No outer bar runs there, so it leaves beside the marker and
+    // starts inside no bar.
+    const d = (y: string) => `Late-September ${y}`;
+    let thin = 0;
+    for (let width = 280; width <= 340; width += 10) {
+      const f = [
+        ev("1980", "long", { endStr: "2030", dateText: d("1980") }),
+        ...Array.from({ length: 5 }, (_, i) => ev(`198${1 + i}-01-01`, `o${i}`, { endStr: "1986", dateText: d(`198${1 + i}`) })),
+        ev("2020", "p1, a title long enough to wrap onto several lines in the right-hand column", { dateText: d("2020") }),
+        ev("2020-01-02", "p2", { dateText: d("2020") }),
+        ev("2020-01-03", "p3", { dateText: d("2020") }),
+        ev("2030", "far", { dateText: d("2030") }),
+      ];
+      const m = v(f, { width });
+      const p3 = f[8]!.id;
+      if (m.spans[0]!.w < 5) thin++;
+      expect(onLeft(m, f[7]!.id)).toBe(true);
+      expect(onLeft(m, p3)).toBe(true);
+      const s = m.stems.find((x) => x.id === p3)!;
+      expect(s.points[0]![0]).toBeLessThanOrEqual(ruleX(m) - TL_GEOM.dotR + 1e-9);
+      expect(inside(m, p3)).toBe(false);
+    }
+    expect(thin).toBeGreaterThan(0);
+  });
+
+  it("searches the left column below fixed outer-span labels before comparing pushes (Ruling 38)", () => {
+    // Codex repro (360, proportional, dates shown as the start year): outer and outer2 hold the top
+    // of the left column. b, pushed far down on the right by the long label above it, could start on
+    // the left one label gap below outer2's label: that is the smaller push, so it goes there, with
+    // a leader, moving no fixed label and beside no active outer bar.
+    const rows = [
+      ev("2000-01-01", "a", { endStr: "2050-01-01" }),
+      ev("2001-01-01", "outer", { endStr: "2002-01-01" }),
+      ev("2002-01-01", "outer2", { endStr: "2003-01-01" }),
+      ev("2003-01-01", "many words ".repeat(30).trim()),
+      ev("2003-01-02", "b"),
+      ev("2003-01-03", "c"),
+      ev("2100-01-01", "far"),
+    ];
+    const [, outer, outer2, long, b] = rows as [LayoutEvent, LayoutEvent, LayoutEvent, LayoutEvent, LayoutEvent];
+    const inp = base(rows, { orientation: "vertical", width: 360 });
+    const l = layoutTimeline(inp);
+    const a = verticalNoSwapLayout(inp);
+    // The fixed labels are only where the left column's own sweep puts them: outer at its date,
+    // outer2 pushed below outer alone.
+    atOwnDate(l, outer.id);
+    expect(labelOf(l, outer2.id).box.y0).toBeCloseTo(labelOf(l, outer.id).box.y1 + TL_GEOM.vLabelGap, 9);
+    expect(onLeft(l, b.id)).toBe(true);
+    const lowestFixed = Math.max(labelOf(l, outer.id).box.y1, labelOf(l, outer2.id).box.y1);
+    const natural = itemY(l, b.id) - LINE_STYLE.date.lineH / 2;
+    expect(natural).toBeLessThan(lowestFixed + TL_GEOM.vLabelGap);
+    expect(labelOf(l, b.id).box.y0).toBeCloseTo(lowestFixed + TL_GEOM.vLabelGap, 9);
+    // That is less of a push than the right, below the long label, would have been.
+    expect(labelOf(l, b.id).box.y0).toBeLessThan(labelOf(l, long.id).box.y1 + TL_GEOM.vLabelGap);
+    expect(l.stems.some((s) => s.id === b.id)).toBe(true);
+    expect(l.stems.length).toBeLessThanOrEqual(a.stems.length);
   });
 
   it("never ends with more connectors than the no-swap layout, nor a swap beside an active outer bar, across seeded random layouts (Rulings 34-35)", () => {
