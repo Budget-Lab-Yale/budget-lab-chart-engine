@@ -1925,6 +1925,28 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
   const ruleX = (l: TimelineLayout): number => l.rules[0]!.x1;
   const rightX0 = (l: TimelineLayout): number =>
     Math.min(...l.labels.flatMap((x) => x.lines.filter((ln) => ln.anchor === "start").map((ln) => ln.x)));
+  /** Horizontal extent of everything drawn: label boxes, markers, bars, ticks and lane names. */
+  const inkOf = (l: TimelineLayout): [number, number] => {
+    const nameW = (n: TimelineLayout["laneLabels"][number]) => Math.max(...n.lines.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+    const lo = [
+      ...l.labels.map((x) => x.box.x0), ...l.markers.map((m) => m.cx - TL_GEOM.dotR), ...l.spans.map((s) => s.x),
+      ...l.ticks.map((k) => k.x), ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x - nameW(n) : n.x)),
+    ];
+    const hi = [
+      ...l.labels.map((x) => x.box.x1), ...l.markers.map((m) => m.cx + TL_GEOM.dotR), ...l.spans.map((s) => s.x + s.w),
+      ...l.ticks.map((k) => k.x + estimateLabelWidth(k.text, TBL.size.axis)),
+      ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x : n.x + nameW(n))),
+    ];
+    return [Math.min(...lo), Math.max(...hi)];
+  };
+  // The block starts 4px (V_EDGE) left of a marker's edge when nothing is left of the track, so
+  // its ink can sit up to 2px right of the block's centre.
+  const expectInkCentred = (l: TimelineLayout): void => {
+    const [lo, hi] = inkOf(l);
+    expect(Math.abs((lo + hi) / 2 - l.width / 2)).toBeLessThanOrEqual(2 + 1e-9);
+    expect(lo).toBeGreaterThan(0);
+  };
+  const lineTexts = (l: TimelineLayout) => l.labels.map((x) => x.lines.map((ln) => ln.text));
   const X_KEYS = new Set(["x", "x0", "x1", "x2", "cx"]);
   // Every x in `a` is `b`'s moved by `dx` (a stem point's first coordinate included); every other
   // value is equal, the width aside.
@@ -1959,10 +1981,10 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
       expect(widest).toBeGreaterThan(x0 + cap - 40);
       for (const lab of l.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
       // The block runs from the tick column (without one, from the marker's 4px edge pad) to the
-      // column's cap, and sits in the middle of the width.
+      // widest wrapped label, and sits in the middle of the width.
       const left = axis ? l.ticks[0]!.x : ruleX(l) - TL_GEOM.dotR - 4;
       if (axis) expect(l.ticks.length).toBeGreaterThanOrEqual(2);
-      expect((left + x0 + cap) / 2).toBeCloseTo(500, 9);
+      expect((left + widest) / 2).toBeCloseTo(500, 9);
       expect(left).toBeGreaterThan(250);
       for (const t of l.ticks) expect(t.x).toBe(left);
     }
@@ -1996,24 +2018,19 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
     // 40% of 1400 is 560: without the cap the column would take 560px of the unwrapped title.
     expect(leftLabel.box.x1 - leftLabel.box.x0).toBeLessThanOrEqual(cap + 1e-9);
     expect(leftLabel.box.x1 - leftLabel.box.x0).toBeGreaterThan(cap - 40);
-    // The left column starts the block, and the blank either side of the block is equal.
-    const dx = 1400 - (rightX0(l) + cap);
-    expect(dx).toBeGreaterThan(0);
-    expect(leftLabel.box.x0).toBeGreaterThanOrEqual(dx - 1e-9);
-    expect(leftLabel.box.x0).toBeLessThan(dx + 40);
+    // The ink (the long left label to the short right ones) is centred.
+    expectInkCentred(l);
     // FIG7 swaps labels left (E1) in wide space as at a phone width, and is centred too.
     const f = v(FIG7(), { width: 1000 });
     expect(f.labels.some((x) => x.lines[0]!.anchor === "end")).toBe(true);
     for (const lab of f.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
-    const fdx = 1000 - (rightX0(f) + cap);
-    expect(fdx).toBeGreaterThan(100);
-    expect(Math.min(...f.labels.map((x) => x.box.x0), ...f.markers.map((m) => m.cx - TL_GEOM.dotR))).toBeGreaterThanOrEqual(fdx - 1e-9);
+    expectInkCentred(f);
   });
 
   it("caps both lane columns and centres the two tracks", () => {
     const l = v(TWO(), { lanes: LANES });
     const [r0, r1] = [l.rules[0]!.x1, l.rules[1]!.x1];
-    expect((r0 + r1) / 2).toBeCloseTo(500, 9);
+    expectInkCentred(l);
     for (const lab of l.labels) expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
     // Each lane's long title fills its capped column to within a word.
     const lane0 = l.labels.filter((x) => x.category === "a");
@@ -2025,18 +2042,69 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
   });
 
   it("moves the track continuously as the width grows: the balance inset gives way to centring", () => {
+    // No jump: a 1px wider chart moves the track and column by at most 4px (the steep but
+    // continuous V_HUG_RATE close-in past the cap), and by at most 1px everywhere else.
     let prev: TimelineLayout | null = null;
+    let steep = 0;
     for (let w = 280; w <= 1400; w++) {
       const l = v(SPREAD(), { width: w });
       if (prev) {
-        expect(Math.abs(ruleX(l) - ruleX(prev))).toBeLessThanOrEqual(1);
-        expect(Math.abs(rightX0(l) - rightX0(prev))).toBeLessThanOrEqual(1);
+        const step = Math.max(Math.abs(ruleX(l) - ruleX(prev)), Math.abs(rightX0(l) - rightX0(prev)));
+        expect(step).toBeLessThanOrEqual(4 + 1e-9);
+        if (step > 1 + 1e-9) steep++;
       }
       prev = l;
     }
-    // In wide space the blank left of the block equals the blank right of it: no inset remains.
-    const wide = v(SPREAD(), { width: 1400 });
-    expect(ruleX(wide) - TL_GEOM.dotR - 4).toBeCloseTo(1400 - (rightX0(wide) + cap), 9);
+    expect(steep).toBeLessThan(60);
+    // In wide space no inset remains: the ink is centred.
+    expectInkCentred(v(SPREAD(), { width: 1400 }));
+  });
+
+  it("hugs each column's widest line past the cap, so the ink is centred, without changing any wrap (Ruling 39)", () => {
+    const outer = [ev("2020", "a", { endStr: "2030" }), ev("2025", "c, on the outer sub-track", { endStr: "2035" }), ev("2027", "a point"), ev("2040", "b")];
+    const shortLanes = [A("2025", "Signed"), B("2026", "Rules", { endStr: "2027" }), A("2027", "Fix"), B("2028", "Effective")];
+    const cases: Array<[LayoutEvent[], Partial<TimelineLayoutInput>]> = [
+      [SPREAD(), {}], [SPREAD(), { axis: true }], [FIG7(), {}], [FIG7(), { axis: true }], [outer, {}], [outer, { axis: true }],
+      [shortLanes, { lanes: LANES }], [shortLanes, { lanes: LANES, axis: true }], [TWO(), { lanes: LANES }],
+    ];
+    for (const [events, o] of cases) {
+      const wide = v(events, { ...o, width: 1400 });
+      expectInkCentred(wide);
+      // From 900px (where 40% of the width no longer narrows the left column below the cap) every
+      // width wraps each label exactly as 1400 does, and as a full 360px column would.
+      for (let w = 900; w <= 1400; w += 10) expect(lineTexts(v(events, { ...o, width: w }))).toEqual(lineTexts(wide));
+    }
+    // Short labels leave a block much narrower than a 360px column would.
+    const [lo, hi] = inkOf(v(SPREAD().map((e) => ({ ...e, title: "x" })), { width: 1000 }));
+    expect(hi - lo).toBeLessThan(120);
+    // A hugged lane name wraps as it would in a full column: on one line.
+    const named = v(shortLanes, { lanes: [{ key: "a", label: "Legislation and statute" }, { key: "b", label: "Implementation" }], width: 1400 });
+    expect(named.laneLabels.map((n) => n.lines.length)).toEqual([1, 1]);
+    expectInkCentred(named);
+  });
+
+  it("never lets a date unit widen a column past the cap: the unit is split, its dash kept (Ruling 40)", () => {
+    const word = "W".repeat(65);
+    for (const dateText of [word, `${word} – 2030`]) {
+      const l = v([ev("2026", "a"), ev("2050", "b", { dateText }), ev("2090", "c")], { width: 1000 });
+      const lab = l.labels.find((x) => x.lines.some((ln) => ln.text.startsWith("WWW")))!;
+      expect(lab.box.x1 - lab.box.x0).toBeLessThanOrEqual(cap + 1e-9);
+      const dates = lab.lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+      expect(dates.length).toBeGreaterThan(1);
+      expect(dates.join("").replace(/\s/g, "")).toBe(dateText.replace(/\s/g, ""));
+      for (const d of dates) {
+        expect(d.trim()).not.toBe("–");
+        expect(d.startsWith("–")).toBe(false);
+        expect(d).toBe(d.trim());
+      }
+      for (const x of l.labels) {
+        expect(x.box.x0).toBeGreaterThanOrEqual(0);
+        expect(x.box.x1).toBeLessThanOrEqual(1000);
+      }
+    }
+    // Lane columns likewise.
+    const lanes = v([A("2026", "a", { dateText: word }), B("2027", "b")], { lanes: LANES, width: 1400 });
+    for (const x of lanes.labels) expect(x.box.x1 - x.box.x0).toBeLessThanOrEqual(cap + 1e-9);
   });
 
   it("lays out at budgetWidth and centres the block in width when it fits, else at width", () => {

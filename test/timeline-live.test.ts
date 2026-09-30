@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../src/engine/legend-layout";
+import { estimateLabelWidth } from "../src/engine/axes";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -80,7 +81,22 @@ describe("timeline live mount", () => {
     expect(orientationOf(svg)).toBe("vertical");
   });
 
-  it("centres an authored-vertical timeline on a wide card, its text column capped at 360px (E2)", () => {
+  /** Horizontal extent of the drawn ink: label and tick text (by the layout's width estimate),
+   *  markers and bars. */
+  const inkOf = (svg: SVGSVGElement): [number, number] => {
+    const num = (el: Element, a: string) => Number(el.getAttribute(a));
+    const spans: Array<[number, number]> = [];
+    for (const t of svg.querySelectorAll(".tbl-timeline-label text, .tbl-timeline-tick")) {
+      const w = estimateLabelWidth(t.textContent ?? "", num(t, "font-size")) * (t.getAttribute("font-weight") === "700" ? 1.08 : 1);
+      const x = num(t, "x");
+      spans.push(t.getAttribute("text-anchor") === "end" ? [x - w, x] : [x, x + w]);
+    }
+    for (const c of svg.querySelectorAll(".tbl-timeline-marker")) spans.push([num(c, "cx") - num(c, "r"), num(c, "cx") + num(c, "r")]);
+    for (const r of svg.querySelectorAll(".tbl-timeline-span")) spans.push([num(r, "x"), num(r, "x") + num(r, "width")]);
+    return [Math.min(...spans.map((s) => s[0])), Math.max(...spans.map((s) => s[1]))];
+  };
+
+  it("centres an authored-vertical timeline's ink on a wide card, its text column capped at 360px (E2, Ruling 39)", () => {
     const long = "A title long enough to need two lines in a readable column but one line across a wide card";
     const rows = [
       { date: "2026", title: "Policy begins" }, { date: "2050", title: long },
@@ -89,14 +105,27 @@ describe("timeline live mount", () => {
     const svg = svgOf(mountAt(1000, { ...SPEC, orientation: "vertical" } as ChartSpec, rows));
     expect(Number(svg.getAttribute("width"))).toBe(1000);
     expect(orientationOf(svg)).toBe("vertical");
-    const ruleX = Number(svg.querySelector(".tbl-timeline-rule")!.getAttribute("x1"));
-    const labelX = Number(svg.querySelector(".tbl-timeline-label text")!.getAttribute("x"));
-    // The block runs from the marker's 4px edge pad to the column's 360px cap, with equal blank
-    // either side.
-    expect(ruleX - 4.5 - 4).toBeCloseTo(1000 - (labelX + 360), 6);
-    expect(ruleX).toBeGreaterThan(300);
+    const [lo, hi] = inkOf(svg);
+    expect(Math.abs((lo + hi) / 2 - 500)).toBeLessThanOrEqual(2);
+    expect(hi - lo).toBeLessThanOrEqual(360 + 23);
     const titleLines = [...svg.querySelectorAll(".tbl-timeline-label")][1]!.querySelectorAll('text[font-size="12"]');
     expect(titleLines).toHaveLength(2);
+  });
+
+  it("centres the ink on a 728px card with a left column and a tick column (Ruling 39)", () => {
+    const spec = { ...SPEC, orientation: "vertical", columns: { x: "date", end: "end", label: "title" }, timeline: { axis: true } } as ChartSpec;
+    const rows = [
+      { date: "2017-12-22", end: "2025-12-31", title: "TCJA individual provisions" },
+      { date: "2021-03-11", end: "2021-12-31", title: "Expanded child tax credit" },
+      { date: "2022-08-16", end: "ongoing", title: "IRA clean-energy credits" },
+      { date: "2025-07-04", end: "", title: "OBBBA enacted" },
+      { date: "2034-01-01", end: "", title: "Trust fund depletion" },
+    ] as TidyRow[];
+    const svg = svgOf(mountAt(728, spec, rows));
+    expect(svg.querySelectorAll(".tbl-timeline-label text[text-anchor=\"end\"]").length).toBeGreaterThan(0);
+    expect(svg.querySelectorAll(".tbl-timeline-tick").length).toBeGreaterThan(0);
+    const [lo, hi] = inkOf(svg);
+    expect(Math.abs((lo + hi) / 2 - Number(svg.getAttribute("width")) / 2)).toBeLessThanOrEqual(2);
   });
 
   it("stays horizontal with auto_vertical: false", () => {

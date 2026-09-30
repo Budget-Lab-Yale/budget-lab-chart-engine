@@ -71,6 +71,7 @@ function drawLines(
 // Small-multiples figure layout tokens. Per-pane chart height comes from figurePaneHeight
 // (engine/figure.ts) — the single source of truth shared with the live figure mount.
 const PANE_TITLE_H = 18; // per-pane title band height
+const WRAP_LINE_H = 16; // a wrapped legend label's line pitch (the right-hand column's)
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
 
@@ -104,6 +105,9 @@ function drawLegend(
   /** Where a row wraps: the frame's right margin (a vertical timeline's portrait frame is narrower
    *  than `W`). */
   maxRight: number = MARGIN + INNER_W,
+  /** Wrap a label too wide for a whole row onto several lines (Ruling 41). Only the portrait frame
+   *  sets it: elsewhere such a label keeps its one line, byte-identical to before. */
+  wrapLong = false,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
   const titleFont = `${W_SEMI} 12px ${FONT}`;
@@ -181,13 +185,16 @@ function drawLegend(
         drawing.setAttribute("color", NAVY);
         root.appendChild(drawing);
       }
-      root.appendChild(
-        textEl(x + swatchW + GAP, y, item.label, {
-          size: 13,
-          weight: W_BODY,
-          fill: BODY,
-        }),
-      );
+      const style = { size: 13, weight: W_BODY, fill: BODY };
+      if (wrapLong && itemW > maxRight - MARGIN) {
+        // Wider than a whole row: its own rows, the label wrapped beside the swatch, and the next
+        // item starts a row below the last line (the returned baseline reserves them).
+        const lines = wrapToColumn(item.label, legendFont, maxRight - MARGIN - swatchW - GAP);
+        y = drawLines(root, lines, x + swatchW + GAP, y, WRAP_LINE_H, style);
+        x = maxRight;
+        continue;
+      }
+      root.appendChild(textEl(x + swatchW + GAP, y, item.label, style));
     }
     x += itemW + ITEM_GAP;
   }
@@ -380,6 +387,7 @@ export function buildExportSvg(
   // apart (Ruling 17 / task-8 fix round 1). Every other chart keeps the fixed W frame.
   const tlFrame = isTimeline ? timelineExportFrame(spec, rows) : null;
   const frameW = tlFrame?.frameW ?? W;
+  const portrait = tlFrame?.budgetWidth !== undefined;
 
   const { root, bgRect } = createExportRoot(document, frameW, H);
 
@@ -410,7 +418,7 @@ export function buildExportSvg(
   // --- legend(s) + y-axis title (chart-specific chrome) ---
   if (legendItems.length && !rightLegend) {
     cursor = drawLegend(
-      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN,
+      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN, portrait,
     );
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
@@ -425,6 +433,7 @@ export function buildExportSvg(
     if (!rightLegend) {
       cursor = drawLegend(
         root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined, undefined, frameW - MARGIN,
+        portrait,
       );
     }
   }

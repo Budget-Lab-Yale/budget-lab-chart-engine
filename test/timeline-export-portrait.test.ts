@@ -11,6 +11,7 @@ import { buildExportSvg } from "../src/embed/export-png";
 import { timelineExportChartWidth, TIMELINE_CLASS } from "../src/engine/marks/timeline";
 import { W, MARGIN, LOGO_W } from "../src/embed/figure-chrome";
 import { TL_GEOM } from "../src/engine/timeline-layout";
+import { estimateLabelWidth } from "../src/engine/axes";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -73,23 +74,45 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
   /** Text drawn by the frame's chrome (not inside the chart SVG). */
   const chromeTexts = (svg: SVGSVGElement) => [...svg.querySelectorAll("text")].filter((t) => !t.closest(`svg.${TIMELINE_CLASS}`));
 
-  it("sizes the frame to the timeline's block, no wider than 640, with the chart centred in it", () => {
+  /** Right edge of the chart's widest label line, from the layout's own width estimate. */
+  const inkRight = (chart: SVGSVGElement): number =>
+    Math.max(...[...chart.querySelectorAll(".tbl-timeline-label text")].map((t) =>
+      num(t, "x") + estimateLabelWidth(t.textContent ?? "", num(t, "font-size")) * (t.getAttribute("font-weight") === "700" ? 1.08 : 1)));
+
+  it("sizes the frame to the timeline's content, no wider than 640, with the chart centred in it (Ruling 39)", () => {
     const svg = buildExportSvg(VSPEC, POINTS);
     const chart = chartOf(svg);
-    // Points only, no tick column: 4px edge pad + marker radius, the rule, a marker radius and the
-    // label gap, then the right column at its 360px cap.
-    const block = 4 + TL_GEOM.dotR + TL_GEOM.dotR + TL_GEOM.vLabelGap + TL_GEOM.vTextColumnMax;
-    expect(timelineExportChartWidth(VSPEC, POINTS)).toBe(Math.ceil(block));
-    expect(num(chart, "width")).toBe(Math.ceil(block));
-    expect(chart.getAttribute("viewBox")!.split(" ")[2]).toBe(String(Math.ceil(block)));
+    const chartW = num(chart, "width");
+    // Points only, no tick column: the block runs from the 4px edge pad left of the markers to the
+    // widest label, which is narrower than a full 360px column.
+    const ruleX = num(chart.querySelector(".tbl-timeline-rule")!, "x1");
+    const block = inkRight(chart) - (ruleX - TL_GEOM.dotR - 4);
+    expect(block).toBeLessThan(TL_GEOM.vTextColumnMax);
+    expect(block).toBeGreaterThan(TL_GEOM.minLiveWidth);
+    expect(timelineExportChartWidth(VSPEC, POINTS)).toBe(chartW);
+    expect(chartW - block).toBeGreaterThanOrEqual(-0.02);
+    expect(chartW - block).toBeLessThan(1.02);
+    expect(chart.getAttribute("viewBox")!.split(" ")[2]).toBe(String(chartW));
     expect(num(chart, "x")).toBe(MARGIN);
-    expect(num(svg, "width")).toBe(Math.ceil(block) + 2 * MARGIN);
-    expect(num(svg, "width")).toBeLessThanOrEqual(640);
+    expect(num(svg, "width")).toBe(chartW + 2 * MARGIN);
+    // Round 0 sized this frame to the 360px column: 4 + 4.5 + 4.5 + 10 + 360, rounded up, + margins.
+    expect(num(svg, "width")).toBeLessThan(383 + 2 * MARGIN);
     expect(svg.querySelector("rect")!.getAttribute("width")).toBe(svg.getAttribute("width"));
-    // The block starts at the chart's left edge (centred in a chart area it fills to within half a
-    // pixel), so the frame's margins either side of it are equal.
-    const rule = chart.querySelector(".tbl-timeline-rule")!;
-    expect(num(rule, "x1") - TL_GEOM.dotR - 4).toBeCloseTo((Math.ceil(block) - block) / 2, 2);
+    // The block is centred in the chart area it fills to within a pixel, so the frame's margins
+    // either side of it are equal.
+    expect(ruleX - TL_GEOM.dotR - 4).toBeCloseTo((chartW - block) / 2, 1);
+  });
+
+  it("never frames narrower than the live floor: short labels centre in a 280px chart area", () => {
+    const tiny = POINTS.map((r) => ({ ...r, title: "x" })) as TidyRow[];
+    const svg = buildExportSvg(VSPEC, tiny);
+    const chart = chartOf(svg);
+    expect(num(svg, "width")).toBe(TL_GEOM.minLiveWidth + 2 * MARGIN);
+    expect(num(chart, "width")).toBe(TL_GEOM.minLiveWidth);
+    const ruleX = num(chart.querySelector(".tbl-timeline-rule")!, "x1");
+    const block = inkRight(chart) - (ruleX - TL_GEOM.dotR - 4);
+    expect(ruleX - TL_GEOM.dotR - 4).toBeCloseTo((TL_GEOM.minLiveWidth - block) / 2, 1);
+    expect(ruleX - TL_GEOM.dotR - 4).toBeGreaterThan(50);
   });
 
   it("caps the frame at 640 when the block fills the widest chart area (two lane columns)", () => {
@@ -111,10 +134,12 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     const landscape = buildExportSvg({ ...VSPEC, orientation: "horizontal" } as ChartSpec, POINTS);
     expect(num(landscape, "width")).toBe(W);
     expect(titleLines(svg)).toBeGreaterThan(titleLines(landscape));
-    // Every chrome line starts at the left margin and fits the frame (jsdom measures 8px a character).
+    // Every chrome line starts at the left margin and ends inside the frame's right margin — the
+    // title short of the logo (jsdom measures 8px a character, as wrapText does here).
     for (const t of chromeTexts(svg)) {
+      const right = t.getAttribute("font-size") === "22" ? frameW - MARGIN - LOGO_W - 24 : frameW - MARGIN;
       expect(num(t, "x")).toBe(MARGIN);
-      expect(num(t, "x") + 8 * (t.textContent ?? "").length).toBeLessThanOrEqual(frameW - MARGIN + 8 * 2);
+      expect(num(t, "x") + 8 * (t.textContent ?? "").length).toBeLessThanOrEqual(right);
     }
     // Note and source sit below the chart, the source last.
     const chart = chartOf(svg);
@@ -140,6 +165,32 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     }
     // Five items do not fit one row of a portrait frame.
     expect(new Set(legend.map((t) => t.getAttribute("y"))).size).toBeGreaterThan(1);
+  });
+
+  it("wraps a legend label wider than the portrait frame, and starts the chart below it (Ruling 41)", () => {
+    const rows = [
+      { date: "2026", title: "Policy begins", k: "a" }, { date: "2050", title: "Credits", k: "b" },
+      { date: "2090", title: "Sunset", k: "a" },
+    ] as TidyRow[];
+    const long = "First category includes an unusually long but valid explanatory label";
+    const spec = { ...VSPEC, columns: { x: "date", label: "title", series: "k" }, series_labels: { a: long, b: "Second" } } as ChartSpec;
+    const svg = buildExportSvg(spec, rows);
+    const frameW = num(svg, "width");
+    expect(frameW).toBeLessThan(8 * long.length + 2 * MARGIN);
+    const chart = chartOf(svg);
+    const words = new Set([...long.split(" "), "Second"]);
+    const legend = chromeTexts(svg).filter((t) => (t.textContent ?? "").split(" ").every((w) => words.has(w)));
+    expect(legend.map((t) => t.textContent).join(" ")).toBe(`${long} Second`);
+    expect(legend.length).toBeGreaterThan(2);
+    for (const t of legend) {
+      expect(num(t, "x")).toBeGreaterThanOrEqual(MARGIN);
+      expect(num(t, "x") + 8 * (t.textContent ?? "").length).toBeLessThanOrEqual(frameW - MARGIN);
+      expect(num(t, "y")).toBeLessThan(num(chart, "y"));
+    }
+    // "Second" starts its own row below the wrapped label's last line.
+    const ys = legend.map((t) => num(t, "y"));
+    expect(ys[ys.length - 1]).toBeGreaterThan(ys[ys.length - 2]!);
+    expect(new Set(ys).size).toBe(legend.length);
   });
 
   it("centres the x-axis title on the portrait frame", () => {

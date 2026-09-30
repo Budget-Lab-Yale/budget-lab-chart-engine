@@ -184,7 +184,8 @@ export interface TimelineExportFrame {
  *
  *  Vertical (E3, Ruling 33): a portrait frame. The layout budgets its columns at the widest chart
  *  area (TIMELINE_PORTRAIT_MAX_FRAME less both margins, 560px), and the chart width is that
- *  layout's block (verticalBlockWidth: each text column at most vTextColumnMax), rounded up and
+ *  layout's block (verticalBlockWidth: each text column hugging its content, at most
+ *  vTextColumnMax), rounded up and
  *  never below the live floor TL_GEOM.minLiveWidth — so the frame is 360-640px wide and hugs the
  *  timeline, which the layout centres in it. The legend always goes above the chart: a portrait
  *  frame is narrower than the card width at which the live card keeps a right-hand column.
