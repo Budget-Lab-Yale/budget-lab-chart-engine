@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { resolveTimelineOrientation, timelineWarnings, TIMELINE_CLASS } from "../src/engine/marks/timeline";
 import { TL_GEOM } from "../src/engine/timeline-layout";
-import { estimateLabelWidth } from "../src/engine/axes";
+import { timelineTextWidth } from "../src/engine/timeline-text";
 import { TBL } from "../src/engine/theme";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
@@ -393,7 +393,7 @@ describe("timeline render", () => {
     const plain = renderChart(SPEC, spread, { width: 375, timelineOrientation: "vertical" }).svg;
     const px = Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"));
     const right = Math.max(...q(plain, ".tbl-timeline-label text").map((t) =>
-      Number(t.getAttribute("x")) + estimateLabelWidth(t.textContent ?? "", Number(t.getAttribute("font-size"))) * (t.getAttribute("font-weight") === "700" ? 1.08 : 1)));
+      Number(t.getAttribute("x")) + timelineTextWidth(t.textContent ?? "", Number(t.getAttribute("font-size")), t.getAttribute("font-weight") === "700" ? 700 : 500)));
     expect(px - TL_GEOM.dotR - 4).toBeCloseTo(375 - right - 4, 1);
     expect(px - TL_GEOM.dotR - 4).toBeGreaterThan(20);
   });
@@ -403,11 +403,11 @@ describe("timeline render", () => {
     const wide = r(axis);
     expect(q(wide.svg, ".tbl-timeline-tick").length).toBeGreaterThanOrEqual(2);
     expect(wide.xAxisTitle).toBe("Year");
-    // Six overlapping spans whose date word ("Late-September") is too wide on both sides at 280 to
+    // Six overlapping spans whose date word ("Mid-to-late-September") is too wide on both sides at 280 to
     // leave a tick column any room beside the floors (amendment A8, Ruling 28): no ticks, no title.
     const months = Array.from({ length: 6 }, (_, i) => ({
       date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, detail: "", kind: "policy", projected: "",
-      dl: "Late-September 30, 2026",
+      dl: "Mid-to-late-September 30, 2026",
     })) as TidyRow[];
     const narrow = renderChart(
       { ...SPEC, ...axis, columns: { ...SPEC.columns, date_label: "dl" } } as ChartSpec, months,

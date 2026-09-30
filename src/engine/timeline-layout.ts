@@ -1,6 +1,6 @@
-// Timeline geometry. PURE: no DOM, no measurement. Every position is computed from estimated text
-// widths (estimateLabelWidth / wrapToWidth), so the live mount, the PNG export (which re-renders
-// from the spec) and the jsdom goldens place every element identically — the rule
+// Timeline geometry. PURE: no DOM, no measurement. Every position is computed from table-derived
+// Figtree text widths (timelineTextWidth, Ruling 45), so the live mount, the PNG export (which
+// re-renders from the spec) and the jsdom goldens place every element identically — the rule
 // callout-placement.ts follows for the same reason.
 //
 // Horizontal label rows are TimelineJS-style greedy first-fit in date order (ties: CSV order): each
@@ -10,8 +10,8 @@
 // That preference is dropped for a track when it would not fit, so `fits` is always plain
 // first-fit's (see assignRows). Overflow rows past `maxRows` never drop a label.
 import { d3 } from "./vendor";
-import { estimateLabelWidth, wrapToWidth } from "./axes";
 import { TBL } from "./theme";
+import { timelineTextWidth } from "./timeline-text";
 
 export const TL_GEOM = {
   dotR: 4.5,
@@ -34,8 +34,10 @@ export const TL_GEOM = {
   topPad: 4,
   vLabelGap: 10,
   minSpanPx: 2,
-  /** Single-track vertical, no left column: share of the width the rule is inset to, for balance
-   *  (Ruling 29). Never applied when a left column is present. */
+  /** Single-track vertical, no left column: the rule is inset to this share of the width, for
+   *  balance (Ruling 29), but only to set the right column's wrap width — the block then hugs its
+   *  content and is centred (Ruling 43), so the inset itself never shows. Never applied when a left
+   *  column is present. */
   vTrackInsetShare: 0.15,
   /** Live auto-switch: a chart narrower than this renders vertical regardless of fit. */
   autoVerticalMinWidth: 480,
@@ -61,9 +63,6 @@ export const LANE_SIZE = 12;
 export const LANE_LINE_H = 15;
 /** The lanes gutter never takes more than this share of the width, however long a lane name is. */
 const LANE_GUTTER_MAX_SHARE = 0.3;
-
-/** estimateLabelWidth is calibrated on regular weight; bold Figtree advances ~8% wider. */
-const BOLD_FACTOR = 1.08;
 
 export interface LayoutEvent {
   /** Stable identity: the event's 0-based CSV row index. Also the tie-break for equal dates. */
@@ -140,14 +139,18 @@ export interface TimelineLayout {
 
 const byTime = (a: LayoutEvent, b: LayoutEvent): number => +a.start - +b.start || a.id - b.id;
 
+/** Width of `s` as the renderer draws a line of `role` (dates bold, titles and descriptions 500). */
 function textW(role: LineRole, s: string): number {
-  const w = estimateLabelWidth(s, LINE_STYLE[role].size);
-  return LINE_STYLE[role].bold ? w * BOLD_FACTOR : w;
+  return timelineTextWidth(s, LINE_STYLE[role].size, LINE_STYLE[role].bold ? 700 : 500);
 }
+/** Width of a lane name (bold, LANE_SIZE). */
+const laneW = (s: string): number => timelineTextWidth(s, LANE_SIZE, 700);
+/** Width of a tick label: TBL.size.axis, measured at 500, the weight it inherits live. */
+const tickTextW = (s: string): number => timelineTextWidth(s, TBL.size.axis, 500);
 
 interface TextBlock { roles: LineRole[]; texts: string[]; w: number; h: number }
 
-/** Split a line wider than `framePx` into character chunks that each fit. wrapToWidth leaves a
+/** Split a line wider than `framePx` into character chunks that each fit. wrapWords leaves a
  *  single over-long word whole, which is right up to the frame (the box widens to the word), but a
  *  word wider than the whole frame could otherwise only be clamped off one edge or the other. */
 function hardBreak(line: string, framePx: number, measure: (s: string) => number): string[] {
@@ -180,16 +183,16 @@ function dateWordUnits(text: string): string[] {
   return out;
 }
 
-/** Greedily wraps pre-split units the way `wrapToWidth` wraps words, but never re-splits a unit at
- *  whitespace it contains (a glued "<word> –" from `dateWordUnits` must stay one piece): each unit
- *  joins the current line if that still fits `maxPx`, else starts a new one. A unit wider than
- *  `maxPx` alone still gets its own (over-wide) line — `hardBreak` is the caller's fallback for it. */
-function wrapUnits(units: string[], maxPx: number, size: number): string[] {
+/** Greedily wraps pre-split units, never re-splitting a unit at whitespace it contains (a glued
+ *  "<word> –" from `dateWordUnits` must stay one piece): each unit joins the current line if that
+ *  still `measure`s within `maxPx`, else starts a new one. A unit wider than `maxPx` alone still
+ *  gets its own (over-wide) line — `hardBreak` is the caller's fallback for it. */
+function wrapUnits(units: string[], maxPx: number, measure: (s: string) => number): string[] {
   const lines: string[] = [];
   let cur = "";
   for (const u of units) {
     const trial = cur ? `${cur} ${u}` : u;
-    if (!cur || estimateLabelWidth(trial, size) <= maxPx) cur = trial;
+    if (!cur || measure(trial) <= maxPx) cur = trial;
     else {
       lines.push(cur);
       cur = u;
@@ -199,19 +202,27 @@ function wrapUnits(units: string[], maxPx: number, size: number): string[] {
   return lines;
 }
 
+/** axes.ts `wrapToWidth`'s wrap — an explicit "\n" is a hard break, each line wraps greedily
+ *  between whitespace-separated words, a text of at most one word is returned unchanged — measured
+ *  with `measure` instead of estimateLabelWidth, which every other chart keeps. */
+function wrapWords(text: string, maxPx: number, measure: (s: string) => number): string[] {
+  if (text.includes("\n")) return text.split("\n").flatMap((seg) => wrapWords(seg, maxPx, measure));
+  const words = text.split(/\s+/).filter(Boolean);
+  return words.length <= 1 ? [text] : wrapUnits(words, maxPx, measure);
+}
+
 /** Date text wraps between words and after a spaced en dash ("<start> – <end>"), preferring the
  *  dash: a range too wide for one line breaks as "<start> –" / "<end>" (the dash stays on line 1,
  *  the leading space before the tail is dropped) before either date breaks inside itself, and each
- *  part then wraps between words only if it still does not fit. `maxPx` is in estimateLabelWidth's
- *  (regular-weight) terms, as wrapToWidth's is. */
-function wrapDate(text: string, maxPx: number, size: number): string[] {
-  if (estimateLabelWidth(text, size) <= maxPx) return [text];
+ *  part then wraps between words only if it still does not fit, as `measure` (bold) sees it. */
+function wrapDate(text: string, maxPx: number, measure: (s: string) => number): string[] {
+  if (measure(text) <= maxPx) return [text];
   // Wrap each part as `dateWordUnits` — the same units a vertical column's whole-word floor
   // measures — rather than a raw string: gluing "<end word> –" into one unit before wrapping (not
   // after) guarantees no emitted line exceeds maxPx unless that glued unit alone does, and reuses
   // whatever separator (space or none) the author's own text had at that boundary instead of
   // assuming one.
-  return dateParts(text).flatMap((part) => wrapUnits(dateWordUnits(part), maxPx, size));
+  return dateParts(text).flatMap((part) => wrapUnits(dateWordUnits(part), maxPx, measure));
 }
 
 /** `text` split after each en dash, the dash kept on the piece before it and each piece trimmed:
@@ -248,13 +259,13 @@ function buildBlock(e: LayoutEvent, maxPx: number, framePx: number): TextBlock {
   const wrapPx = Math.min(maxPx, framePx);
   const push = (role: LineRole, text: string | null): void => {
     if (!text) return;
-    const size = LINE_STYLE[role].size;
-    const wrappedLines = role === "date" ? wrapDate(text, wrapPx, size) : wrapToWidth(text, wrapPx, size).split("\n");
+    const measure = (s: string): number => textW(role, s);
+    const wrappedLines = role === "date" ? wrapDate(text, wrapPx, measure) : wrapWords(text, wrapPx, measure);
     // A date line is only over-wide as one unit, which may carry a glued dash: hardBreakDate keeps
     // the dash on its word, where plain hardBreak could strand it on a line of its own.
     const breakLine = role === "date" ? hardBreakDate : hardBreak;
     for (const wrapped of wrappedLines) {
-      for (const line of breakLine(wrapped, framePx, (s) => textW(role, s))) {
+      for (const line of breakLine(wrapped, framePx, measure)) {
         roles.push(role);
         texts.push(line);
       }
@@ -394,9 +405,7 @@ function placeLines(block: TextBlock, box: Box, anchor: "start" | "middle" | "en
 
 /** A lane name wrapped to `px` between words; a word wider than `px` alone is split. */
 function laneNameLines(label: string, px: number): string[] {
-  return wrapToWidth(label, px, LANE_SIZE)
-    .split("\n")
-    .flatMap((l) => hardBreak(l, px, (s) => estimateLabelWidth(s, LANE_SIZE)));
+  return wrapWords(label, px, laneW).flatMap((l) => hardBreak(l, px, laneW));
 }
 
 function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): TimelineLayout {
@@ -407,7 +416,7 @@ function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): Ti
   const events = inp.events.filter((e) => !laneKeys || laneKeys.has(e.category)).sort(byTime);
   const gutter = inp.lanes
     ? Math.min(
-        Math.max(0, ...inp.lanes.map((l) => estimateLabelWidth(l.label, LANE_SIZE))) + G.laneGutterPad,
+        Math.max(0, ...inp.lanes.map((l) => laneW(l.label))) + G.laneGutterPad,
         inp.width * LANE_GUTTER_MAX_SHARE,
       )
     : 0;
@@ -529,7 +538,7 @@ function layoutHorizontal(inp: TimelineLayoutInput, preferClearStems = true): Ti
     out.ticks = scale.ticks(n).map((t) => {
       const x = scale(t);
       const text = fmt(t);
-      const half = estimateLabelWidth(text, TBL.size.axis) / 2;
+      const half = tickTextW(text) / 2;
       const anchor = x - half < 0 ? "start" : x + half > inp.width ? "end" : "middle";
       return { x, y, text, anchor };
     });
@@ -575,8 +584,8 @@ const V_EDGE = 4;
 /** Floors for a compressed vertical sub-track band. */
 const V_MIN_BAR = 3;
 const V_MIN_TRACK_GAP = 1;
-/** Slack for a width that round-trips through BOLD_FACTOR: a date unit that exactly fits its
- *  column must never be split. */
+/** Slack for a column sized to a measured width: a date unit that exactly fits its column must
+ *  never be split by floating-point rounding. */
 const V_EPS = 1e-6;
 /** A vertical label whose first line's centre sits more than this below its item is "displaced":
  *  it gets a leader, and on a single track its right-hand placement counts as a collision (E1). */
@@ -607,14 +616,13 @@ function vBlock(e: LayoutEvent, colW: number): TextBlock {
   const frame = colW + V_EPS;
   const dateW = (s: string): number => textW("date", s);
   if (e.dateText) {
-    const wrapped = dateW(e.dateText) <= frame ? [e.dateText] : wrapDate(e.dateText, frame / BOLD_FACTOR, LINE_STYLE.date.size);
-    add("date", wrapped.flatMap((ln) => hardBreakDate(ln, frame, dateW)));
+    add("date", wrapDate(e.dateText, frame, dateW).flatMap((ln) => hardBreakDate(ln, frame, dateW)));
   }
   for (const role of ["title", "description"] as const) {
     const text = role === "title" ? e.title : e.description;
     if (!text) continue;
-    const lines = wrapToWidth(text, colW, LINE_STYLE[role].size).split("\n");
-    add(role, lines.flatMap((ln) => hardBreak(ln, colW, (s) => textW(role, s))));
+    const measure = (s: string): number => textW(role, s);
+    add(role, wrapWords(text, colW, measure).flatMap((ln) => hardBreak(ln, colW, measure)));
   }
   return measureBlock(roles, texts);
 }
@@ -966,7 +974,7 @@ function layoutSingleTrack(
     ticks = probe.ticks(n);
     tickFmt = probe.tickFormat(n);
     const fmt = tickFmt;
-    if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
+    if (ticks.length) tickNeed = Math.max(...ticks.map((d) => tickTextW(fmt(d)))) + V_TICK_GAP;
   }
   const { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
@@ -1186,7 +1194,7 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
     ticks = probe.ticks(n);
     tickFmt = probe.tickFormat(n);
     const fmt = tickFmt;
-    if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
+    if (ticks.length) tickNeed = Math.max(...ticks.map((d) => tickTextW(fmt(d)))) + V_TICK_GAP;
   }
   const { tickW, barW, gap, bands, rules, cols, names, top, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = [];
@@ -1240,7 +1248,7 @@ function layoutLaneColumns(inp: TimelineLayoutInput, lanes: Array<{ key: string;
   }
   // Step 5's block (Ruling 43): each lane hugs what it holds — its labels, its name and its bars —
   // with the tick column moved in against lane 0.
-  const nameW = (i: number): number => Math.max(0, ...names[i]!.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+  const nameW = (i: number): number => Math.max(0, ...names[i]!.map(laneW));
   const laneBoxes = (i: number): Box[] => laneEvs[i]!.map((e) => (placed.get(e.id) as VPlaced).box);
   const inkL = Math.min(rules[0]! - bands[0]!, rules[0]! - V_LANE_NAME_INSET - nameW(0), ...laneBoxes(0).map((b) => b.x0));
   const blockW = Math.max(rules[1]! + bands[1]!, rules[1]! + V_LANE_NAME_INSET + nameW(1), ...laneBoxes(1).map((b) => b.x1));
@@ -1256,9 +1264,9 @@ export function layoutTimeline(inp: TimelineLayoutInput): TimelineLayout {
   return inp.orientation === "vertical" ? layoutVerticalCentred(inp) : layoutHorizontal(inp);
 }
 
-/** Vertical: the width the laid-out block needs at `inp.width` (its tick column, text columns,
- *  band and track, each text column at most vTextColumnMax) — `inp.width` itself unless a column
- *  reached that cap. The PNG export sizes its portrait frame from this (E3). */
+/** Vertical: the width the laid-out block needs at `inp.width` — its tick column, text columns,
+ *  band and track, each column hugging its placed content (Ruling 43), at most vTextColumnMax — so
+ *  at most `inp.width`, and usually less. The PNG export sizes its portrait frame from this (E3). */
 export function verticalBlockWidth(inp: TimelineLayoutInput): number {
   const r = layoutVertical(inp);
   return r.blockW - (r.blockX0 ?? 0);

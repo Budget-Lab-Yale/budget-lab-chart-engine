@@ -11,7 +11,7 @@ import { buildExportSvg } from "../src/embed/export-png";
 import { timelineExportChartWidth, TIMELINE_CLASS } from "../src/engine/marks/timeline";
 import { W, MARGIN, LOGO_W } from "../src/embed/figure-chrome";
 import { TL_GEOM } from "../src/engine/timeline-layout";
-import { estimateLabelWidth } from "../src/engine/axes";
+import { timelineTextWidth } from "../src/engine/timeline-text";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -43,12 +43,13 @@ const LEGEND_ROWS = Array.from({ length: 11 }, (_, i) => ({
 })) as TidyRow[];
 
 // Captured at c60f9a8, before the portrait frame existed. None of these renders a vertical
-// timeline, so none may move.
+// timeline, so none may move. The three horizontal-timeline pins were re-captured at Task 16b, which
+// changed only how timeline text is measured (Ruling 45); the non-timeline pins are c60f9a8's.
 describe("exports that are not a vertical timeline stay byte-identical (Task 16)", () => {
   const cases: Array<[string, ChartSpec, TidyRow[], string]> = [
-    ["horizontal timeline, top legend", { ...TL, columns: { x: "date", series: "kind" } } as ChartSpec, FIG7, "e94c7202ec08cf11"],
-    ["horizontal timeline, lanes", { ...TL, columns: { x: "date", end: "end_date", series: "kind" }, projected_field: "projected", timeline: { lanes: true } } as ChartSpec, SPANS, "a0c0de92184efa78"],
-    ["horizontal timeline, right legend", { ...TL, legendPosition: "right", timeline: { spacing: "even", max_rows: 1 }, columns: { x: "date", label: "title", series: "category" } } as ChartSpec, LEGEND_ROWS, "b0a1fc54129975e3"],
+    ["horizontal timeline, top legend", { ...TL, columns: { x: "date", series: "kind" } } as ChartSpec, FIG7, "f4f470f301117db5"],
+    ["horizontal timeline, lanes", { ...TL, columns: { x: "date", end: "end_date", series: "kind" }, projected_field: "projected", timeline: { lanes: true } } as ChartSpec, SPANS, "3653532fbc4f53f4"],
+    ["horizontal timeline, right legend", { ...TL, legendPosition: "right", timeline: { spacing: "even", max_rows: 1 }, columns: { x: "date", label: "title", series: "category" } } as ChartSpec, LEGEND_ROWS, "c39b64adbbc3a9e3"],
     ["line chart", { chartType: "line", title: TL.title, subtitle: TL.subtitle, note: TL.note, source: TL.source, xAxisType: "temporal", data: "d.csv" } as ChartSpec, parseCsv("./fixtures/grads-recent.csv"), "dc0d7b55c8fc2b8c"],
     ["stacked, right legend", { chartType: "stacked", title: "T", source: "S", xAxisType: "categorical", columns: { x: "g", value: "v", series: "s" }, data: "d.csv" } as unknown as ChartSpec,
       ["A", "B"].flatMap((g) => Array.from({ length: 5 }, (_, i) => ({ g, s: `s${i}`, v: String(i + 1) }))) as unknown as TidyRow[], "a0e6a480e0cb3f81"],
@@ -65,7 +66,9 @@ describe("exports that are not a vertical timeline stay byte-identical (Task 16)
 
 describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
   const POINTS = [
-    { date: "2026", title: "Policy begins" }, { date: "2050", title: "First cohort born under fully phased-in policy" },
+    // The widest title sets a block between the 280px floor and the 360px cap (Task 16b: sized for
+    // the measured Figtree widths, which run ~20% narrower than the old 0.55em estimate).
+    { date: "2026", title: "Policy begins" }, { date: "2050", title: "First cohort born under the fully phased-in new policy" },
     { date: "2075", title: "Annual projection ends" }, { date: "2100", title: "That cohort turns 65" },
   ] as TidyRow[];
   const VSPEC = { ...TL, orientation: "vertical", columns: { x: "date", label: "title" } } as ChartSpec;
@@ -74,10 +77,10 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
   /** Text drawn by the frame's chrome (not inside the chart SVG). */
   const chromeTexts = (svg: SVGSVGElement) => [...svg.querySelectorAll("text")].filter((t) => !t.closest(`svg.${TIMELINE_CLASS}`));
 
-  /** Right edge of the chart's widest label line, from the layout's own width estimate. */
+  /** Right edge of the chart's widest label line, from the layout's own width measure. */
   const inkRight = (chart: SVGSVGElement): number =>
     Math.max(...[...chart.querySelectorAll(".tbl-timeline-label text")].map((t) =>
-      num(t, "x") + estimateLabelWidth(t.textContent ?? "", num(t, "font-size")) * (t.getAttribute("font-weight") === "700" ? 1.08 : 1)));
+      num(t, "x") + timelineTextWidth(t.textContent ?? "", num(t, "font-size"), t.getAttribute("font-weight") === "700" ? 700 : 500)));
 
   it("sizes the frame to the timeline's content, no wider than 640, with the chart centred in it (Ruling 39)", () => {
     const svg = buildExportSvg(VSPEC, POINTS);
@@ -120,7 +123,7 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     const spans: Array<[number, number]> = [];
     for (const t of chart.querySelectorAll(".tbl-timeline-label text, .tbl-timeline-lane-label tspan, .tbl-timeline-tick")) {
       const el = t.tagName === "tspan" ? t.parentElement! : t;
-      const w = estimateLabelWidth(t.textContent ?? "", num(el, "font-size")) * (el.getAttribute("font-weight") === "700" && !el.classList.contains("tbl-timeline-lane-label") ? 1.08 : 1);
+      const w = timelineTextWidth(t.textContent ?? "", num(el, "font-size"), el.getAttribute("font-weight") === "700" ? 700 : 500);
       const x = num(t, "x");
       spans.push(el.getAttribute("text-anchor") === "end" ? [x - w, x] : [x, x + w]);
     }
@@ -151,10 +154,9 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
       expect(num(svg, "width")).toBeLessThan(640);
       expect(num(svg, "width")).toBe(chartW + 2 * MARGIN);
       expect(timelineExportChartWidth(spec, rows)).toBe(chartW);
-      if (chartW > TL_GEOM.minLiveWidth) {
-        const [lo, hi] = inkOfChart(chart);
-        expect(Math.abs((lo + hi) / 2 - chartW / 2)).toBeLessThanOrEqual(2);
-      }
+      // At the 280px floor too: the block is centred in whatever chart area it gets.
+      const [lo, hi] = inkOfChart(chart);
+      expect(Math.abs((lo + hi) / 2 - chartW / 2)).toBeLessThanOrEqual(2);
     }
   });
 

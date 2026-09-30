@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../src/engine/legend-layout";
-import { estimateLabelWidth } from "../src/engine/axes";
+import { timelineTextWidth } from "../src/engine/timeline-text";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -87,7 +87,7 @@ describe("timeline live mount", () => {
     const num = (el: Element, a: string) => Number(el.getAttribute(a));
     const spans: Array<[number, number]> = [];
     for (const t of svg.querySelectorAll(".tbl-timeline-label text, .tbl-timeline-tick")) {
-      const w = estimateLabelWidth(t.textContent ?? "", num(t, "font-size")) * (t.getAttribute("font-weight") === "700" ? 1.08 : 1);
+      const w = timelineTextWidth(t.textContent ?? "", num(t, "font-size"), t.getAttribute("font-weight") === "700" ? 700 : 500);
       const x = num(t, "x");
       spans.push(t.getAttribute("text-anchor") === "end" ? [x - w, x] : [x, x + w]);
     }
@@ -183,12 +183,12 @@ describe("timeline live mount", () => {
 
   it("shows the x-axis title only while the ticks are drawn, across resizes", async () => {
     // Ticks fit at 900, but on a 280px vertical render six overlapping spans with a date word this
-    // wide ("Late-September") leave the tick column no room beside the floors (A8, Ruling 28).
+    // wide ("Mid-to-late-September") leave the tick column no room beside the floors (A8, Ruling 28).
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
     const spec = {
       ...SPEC, columns: { x: "date", end: "end", label: "title", date_label: "dl" }, timeline: { axis: true }, x_axis_title: "Month",
     } as ChartSpec;
-    const rows = Array.from({ length: 6 }, (_, i) => ({ date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, dl: "Late-September 30, 2026" })) as TidyRow[];
+    const rows = Array.from({ length: 6 }, (_, i) => ({ date: `2026-0${i + 1}-01`, end: "2030", title: `Event ${i} title`, dl: "Mid-to-late-September 30, 2026" })) as TidyRow[];
     const host = mountAt(900, spec, rows);
     const titles = () => [...host.querySelectorAll(".figure-x-axis-title")].map((t) => t.textContent);
     const ticks = () => svgOf(host).querySelectorAll(".tbl-timeline-tick").length;

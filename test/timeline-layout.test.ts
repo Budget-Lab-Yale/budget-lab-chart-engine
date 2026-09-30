@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { layoutTimeline, plainFirstFitFits, verticalNoSwapLayout, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
-import { estimateLabelWidth } from "../src/engine/axes";
+import { timelineTextWidth } from "../src/engine/timeline-text";
 import { TBL } from "../src/engine/theme";
 
 let nextId = 0;
@@ -52,21 +52,21 @@ const relative = (l: TimelineLayout): unknown => {
   return walk(l, "", "");
 };
 const inkOf = (l: TimelineLayout): [number, number] => {
-  const nameW = (n: TimelineLayout["laneLabels"][number]) => Math.max(...n.lines.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+  const nameW = (n: TimelineLayout["laneLabels"][number]) => Math.max(...n.lines.map((s) => timelineTextWidth(s, LANE_SIZE, 700)));
   const lo = [
     ...l.labels.map((x) => x.box.x0), ...l.markers.map((m) => m.cx - TL_GEOM.dotR), ...l.spans.map((s) => s.x),
     ...l.ticks.map((k) => k.x), ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x - nameW(n) : n.x)),
   ];
   const hi = [
     ...l.labels.map((x) => x.box.x1), ...l.markers.map((m) => m.cx + TL_GEOM.dotR), ...l.spans.map((s) => s.x + s.w),
-    ...l.ticks.map((k) => k.x + estimateLabelWidth(k.text, TBL.size.axis)),
+    ...l.ticks.map((k) => k.x + timelineTextWidth(k.text, TBL.size.axis, 500)),
     ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x : n.x + nameW(n))),
   ];
   return [Math.min(...lo), Math.max(...hi)];
 };
 /** Ruling 43 leaves a vertical layout's geometry relative to its track unchanged and only moves
- *  the block: `l` is the pinned layout `pinned` (captured before Ruling 43), centred, with its tick
- *  column against the block's left. */
+ *  the block: `l` is the pinned layout `pinned` (captured before Ruling 43, re-captured at Task
+ *  16b), centred, with its tick column against the block's left. */
 const expectPinnedUpToCentring = (l: TimelineLayout, pinned: string): void => {
   expect(JSON.stringify(relative(l))).toBe(JSON.stringify(relative(JSON.parse(pinned) as TimelineLayout)));
   const [lo, hi] = inkOf(l);
@@ -269,7 +269,7 @@ describe("horizontal layout", () => {
       const l = layoutTimeline(base(probe(), { width, axis: true }));
       expect(l.ticks.length).toBeGreaterThanOrEqual(2);
       for (const t of l.ticks) {
-        const w = estimateLabelWidth(t.text, TBL.size.axis);
+        const w = timelineTextWidth(t.text, TBL.size.axis, 500);
         const x0 = t.anchor === "start" ? t.x : t.anchor === "end" ? t.x - w : t.x - w / 2;
         expect(x0).toBeGreaterThanOrEqual(0);
         expect(x0 + w).toBeLessThanOrEqual(width);
@@ -414,10 +414,12 @@ describe("horizontal layout", () => {
       const flat = layoutTimeline(base(one, { width: 920 }));
       expect(flat.fits).toBe(true);
       expect(crossings(flat)).toEqual([[one[2]!.id, one[1]!.id]]);
-      // Two labels that each cover the other's stem: the same fallback, and still fits.
+      // Two labels that each cover the other's stem: the same fallback, and still fits. (Titles
+      // lengthened at Task 16b: at the measured Figtree widths "Policy begins" / "First cohort born"
+      // no longer reach each other's stems.)
       const lane = [{ key: "p", label: "Policy" }];
       const pair = layoutTimeline(base([
-        ev("2026", "Policy begins", { category: "p" }), ev("2030", "First cohort born", { category: "p" }), ev("2095", "z", { category: "p" }),
+        ev("2026", "Policy begins in earnest", { category: "p" }), ev("2030", "First cohort born under it", { category: "p" }), ev("2095", "z", { category: "p" }),
       ], { lanes: lane }));
       expect(pair.fits).toBe(true);
       expect(crossings(pair)).toHaveLength(1);
@@ -566,9 +568,8 @@ describe("horizontal layout", () => {
           expect(d.text).not.toBe(" –");
           expect(d.text.startsWith(" ")).toBe(false);
           expect(d.text.endsWith(" ")).toBe(false);
-          // wrapDate's own maxPx budget is in regular-weight terms (no bold factor — see its
-          // doc comment), so compare on the same terms it wraps against.
-          const w = estimateLabelWidth(d.text, 13);
+          // wrapDate measures its maxPx budget in the date line's own (bold) width.
+          const w = timelineTextWidth(d.text, 13, 700);
           expect(w <= labelWidth + 1e-6 || atomic(d.text)).toBe(true);
         }
       }
@@ -606,7 +607,7 @@ describe("vertical layout", () => {
     layoutTimeline(base(events, { orientation: "vertical", width: 360, ...o }));
   const ruleX = (l: TimelineLayout): number => l.rules[0]!.x1;
   const leftmostBar = (l: TimelineLayout): number => Math.min(...l.spans.map((s) => s.x));
-  const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+  const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + timelineTextWidth(t.text, TBL.size.axis, 500)));
   const spanOf = (l: TimelineLayout, id: number) => l.spans.find((s) => s.id === id)!;
 
   it("runs oldest at top, one rule, each label beside its item: bold date above the title, right of the rule", () => {
@@ -703,14 +704,15 @@ describe("vertical layout", () => {
 
   it("leaves a layout with a left label column byte-identical to the parent commit (Ruling 29)", () => {
     // The Task 13b inset applies only with no left column at all; captured with `git show
-    // 46a6c7a:src/engine/timeline-layout.ts` at the parent commit, before that change.
+    // 46a6c7a:src/engine/timeline-layout.ts` at the parent commit, before that change, and
+    // re-captured at Task 16b, whose measured Figtree widths (Ruling 45) move every coordinate.
     const a = ev("2020", "a", { id: 0, endStr: "2030" });
     const c = ev("2025", "c, on the outer sub-track", { id: 1, endStr: "2035" });
     const p = ev("2027", "a point on the rule", { id: 2 });
     const b = ev("2040", "b", { id: 3 });
     const l = v([a, c, p, b]);
     expectPinnedUpToCentring(l,
-      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":168,"y1":8,"x2":168,"y2":415}],"markers":[{"id":2,"category":"","cx":168,"cy":142.41314168377826,"projected":false},{"id":3,"category":"","cx":168,"cy":392,"projected":false}],"spans":[{"id":0,"category":"","x":164,"y":8,"w":8,"h":192.02628336755646,"projected":false,"fade":null},{"id":1,"category":"","x":154,"y":104.0394250513347,"w":8,"h":191.97371663244348,"projected":false,"fade":null}],"labels":[{"id":0,"category":"","box":{"x0":182.5,"y0":0,"x1":213.388,"y1":31},"lines":[{"role":"date","text":"2020","x":182.5,"y":13,"anchor":"start"},{"role":"title","text":"a","x":182.5,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":44.999999999999986,"y0":96.0394250513347,"x1":144,"y1":142.03942505133472},"lines":[{"role":"date","text":"2025","x":144,"y":109.0394250513347,"anchor":"end"},{"role":"title","text":"c, on the outer","x":144,"y":124.0394250513347,"anchor":"end"},{"role":"title","text":"sub-track","x":144,"y":139.03942505133472,"anchor":"end"}]},{"id":2,"category":"","box":{"x0":182.5,"y0":134.41314168377826,"x1":307.9,"y1":165.41314168377826},"lines":[{"role":"date","text":"2027","x":182.5,"y":147.41314168377826,"anchor":"start"},{"role":"title","text":"a point on the rule","x":182.5,"y":162.41314168377826,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":182.5,"y0":384,"x1":213.388,"y1":415},"lines":[{"role":"date","text":"2040","x":182.5,"y":397,"anchor":"start"},{"role":"title","text":"b","x":182.5,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[],"laneLabels":[]}',
+      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":202.51,"y1":8,"x2":202.51,"y2":415}],"markers":[{"id":2,"category":"","cx":202.51,"cy":142.41314168377826,"projected":false},{"id":3,"category":"","cx":202.51,"cy":392,"projected":false}],"spans":[{"id":0,"category":"","x":198.51,"y":8,"w":8,"h":192.02628336755646,"projected":false,"fade":null},{"id":1,"category":"","x":188.51,"y":104.0394250513347,"w":8,"h":191.97371663244348,"projected":false,"fade":null}],"labels":[{"id":0,"category":"","box":{"x0":217.01,"y0":0,"x1":248.91199999999998,"y1":31},"lines":[{"role":"date","text":"2020","x":217.01,"y":13,"anchor":"start"},{"role":"title","text":"a","x":217.01,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":44.94999999999999,"y0":96.0394250513347,"x1":178.51,"y1":127.0394250513347},"lines":[{"role":"date","text":"2025","x":178.51,"y":109.0394250513347,"anchor":"end"},{"role":"title","text":"c, on the outer sub-track","x":178.51,"y":124.0394250513347,"anchor":"end"}]},{"id":2,"category":"","box":{"x0":217.01,"y0":134.41314168377826,"x1":315.05,"y1":165.41314168377826},"lines":[{"role":"date","text":"2027","x":217.01,"y":147.41314168377826,"anchor":"start"},{"role":"title","text":"a point on the rule","x":217.01,"y":162.41314168377826,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":217.01,"y0":384,"x1":249.61399999999998,"y1":415},"lines":[{"role":"date","text":"2040","x":217.01,"y":397,"anchor":"start"},{"role":"title","text":"b","x":217.01,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[],"laneLabels":[]}',
     );
   });
 
@@ -872,9 +874,9 @@ describe("vertical single track: a colliding label swaps left before any connect
     expect(lab.lines[0]!.role).toBe("date"); // date above the title
     expect(lab.lines.every((ln) => ln.anchor === "end" && ln.x === lab.box.x1)).toBe(true);
   };
-  const bold = (s: string) => estimateLabelWidth(s, LINE_STYLE.date.size) * 1.08;
+  const bold = (s: string) => timelineTextWidth(s, LINE_STYLE.date.size, 700);
   const extent = (ln: { x: number; text: string; role: "date" | "title" | "description"; anchor: string }): [number, number] => {
-    const w = estimateLabelWidth(ln.text, LINE_STYLE[ln.role].size) * (ln.role === "date" ? 1.08 : 1);
+    const w = timelineTextWidth(ln.text, LINE_STYLE[ln.role].size, ln.role === "date" ? 700 : 500);
     return ln.anchor === "end" ? [ln.x - w, ln.x] : [ln.x, ln.x + w];
   };
 
@@ -934,21 +936,22 @@ describe("vertical single track: a colliding label swaps left before any connect
   });
 
   it("leaves a layout with no collision byte-identical to the parent commit (attempt A)", () => {
-    // Captured at 17022b0, before swapping existed: spread-out points with the axis drawn, no left
-    // column, the Ruling 29 inset (56.25 = 15% of 375) in force.
+    // Captured at 17022b0, before swapping existed (re-captured at Task 16b for the measured
+    // Figtree widths, Ruling 45): spread-out points with the axis drawn, no left column, the
+    // Ruling 29 inset in force.
     const events = [
       ev("2026", "Policy begins", { id: 0 }), ev("2050", "First cohort born under fully phased-in policy", { id: 1 }),
       ev("2075", "Annual projection ends", { id: 2 }), ev("2100", "That cohort turns 65", { id: 3 }),
     ];
     expectPinnedUpToCentring(v(events, { width: 375, axis: true }),
-      '{"orientation":"vertical","width":375,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":56.25,"y1":8,"x2":56.25,"y2":415}],"markers":[{"id":0,"category":"","cx":56.25,"cy":8,"projected":false},{"id":1,"category":"","cx":56.25,"cy":132.54284445759953,"projected":false},{"id":2,"category":"","cx":56.25,"cy":262.2714222287998,"projected":false},{"id":3,"category":"","cx":56.25,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":70.75,"y0":0,"x1":156.55,"y1":31},"lines":[{"role":"date","text":"2026","x":70.75,"y":13,"anchor":"start"},{"role":"title","text":"Policy begins","x":70.75,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":70.75,"y0":124.54284445759953,"x1":374.35,"y1":155.54284445759953},"lines":[{"role":"date","text":"2050","x":70.75,"y":137.54284445759953,"anchor":"start"},{"role":"title","text":"First cohort born under fully phased-in policy","x":70.75,"y":152.54284445759953,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":70.75,"y0":254.2714222287998,"x1":215.95000000000002,"y1":285.2714222287998},"lines":[{"role":"date","text":"2075","x":70.75,"y":267.2714222287998,"anchor":"start"},{"role":"title","text":"Annual projection ends","x":70.75,"y":282.2714222287998,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":70.75,"y0":384,"x1":202.75,"y1":415},"lines":[{"role":"date","text":"2100","x":70.75,"y":397,"anchor":"start"},{"role":"title","text":"That cohort turns 65","x":70.75,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[{"x":0,"y":84.64288885600118,"text":"2040","anchor":"start"},{"x":0,"y":188.42859257066746,"text":"2060","anchor":"start"},{"x":0,"y":292.2142962853337,"text":"2080","anchor":"start"},{"x":0,"y":396,"text":"2100","anchor":"start"}],"laneLabels":[]}',
+      '{"orientation":"vertical","width":375,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":79.8505,"y1":8,"x2":79.8505,"y2":415}],"markers":[{"id":0,"category":"","cx":79.8505,"cy":8,"projected":false},{"id":1,"category":"","cx":79.8505,"cy":132.54284445759953,"projected":false},{"id":2,"category":"","cx":79.8505,"cy":262.2714222287998,"projected":false},{"id":3,"category":"","cx":79.8505,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":94.3505,"y0":0,"x1":165.7985,"y1":31},"lines":[{"role":"date","text":"2026","x":94.3505,"y":13,"anchor":"start"},{"role":"title","text":"Policy begins","x":94.3505,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":94.3505,"y0":124.54284445759953,"x1":337.6265,"y1":155.54284445759953},"lines":[{"role":"date","text":"2050","x":94.3505,"y":137.54284445759953,"anchor":"start"},{"role":"title","text":"First cohort born under fully phased-in policy","x":94.3505,"y":152.54284445759953,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":94.3505,"y0":254.2714222287998,"x1":219.35450000000003,"y1":285.2714222287998},"lines":[{"role":"date","text":"2075","x":94.3505,"y":267.2714222287998,"anchor":"start"},{"role":"title","text":"Annual projection ends","x":94.3505,"y":282.2714222287998,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":94.3505,"y0":384,"x1":204.9425,"y1":415},"lines":[{"role":"date","text":"2100","x":94.3505,"y":397,"anchor":"start"},{"role":"title","text":"That cohort turns 65","x":94.3505,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[{"x":37.37349999999999,"y":84.64288885600118,"text":"2040","anchor":"start"},{"x":37.37349999999999,"y":188.42859257066746,"text":"2060","anchor":"start"},{"x":37.37349999999999,"y":292.2142962853337,"text":"2080","anchor":"start"},{"x":37.37349999999999,"y":396,"text":"2100","anchor":"start"}],"laneLabels":[]}',
     );
   });
 
   it("keeps a label right, with a connector, when its date word would not fit the left column (byte-identical to the parent commit)", () => {
     // b collides with a, but its date is one word wider than 40% of the width: swapping would split
     // it, so it stays right and is pushed down with a leader, and with nothing swapped the layout is
-    // attempt A's exactly (captured at 17022b0).
+    // attempt A's exactly (captured at 17022b0; re-captured at Task 16b for Ruling 45's widths).
     const word = "X".repeat(24);
     expect(bold(word)).toBeGreaterThan(0.4 * 360);
     const events = [ev("2026", "a", { id: 0 }), ev("2026-01-02", "b", { id: 1, dateText: word }), ev("2090", "far", { id: 2 })];
@@ -956,7 +959,7 @@ describe("vertical single track: a colliding label swaps left before any connect
     expect(l.stems.map((s) => s.id)).toEqual([1]);
     expect(onLeft(l, 1)).toBe(false);
     expectPinnedUpToCentring(l,
-      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2],"rules":[{"x1":54,"y1":8,"x2":54,"y2":415}],"markers":[{"id":0,"category":"","cx":54,"cy":8,"projected":false},{"id":1,"category":"","cx":54,"cy":8.016427104722792,"projected":false},{"id":2,"category":"","cx":54,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":68.5,"y0":0,"x1":99.388,"y1":31},"lines":[{"role":"date","text":"2026","x":68.5,"y":13,"anchor":"start"},{"role":"title","text":"a","x":68.5,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":68.5,"y0":41,"x1":253.82800000000003,"y1":72},"lines":[{"role":"date","text":"XXXXXXXXXXXXXXXXXXXXXXXX","x":68.5,"y":54,"anchor":"start"},{"role":"title","text":"b","x":68.5,"y":69,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":68.5,"y0":384,"x1":99.388,"y1":415},"lines":[{"role":"date","text":"2090","x":68.5,"y":397,"anchor":"start"},{"role":"title","text":"far","x":68.5,"y":412,"anchor":"start"}]}],"stems":[{"id":1,"category":"","points":[[60.5,8.016427104722792],[60.5,49],[64.5,49]]}],"ticks":[],"laneLabels":[]}',
+      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2],"rules":[{"x1":69.076,"y1":8,"x2":69.076,"y2":415}],"markers":[{"id":0,"category":"","cx":69.076,"cy":8,"projected":false},{"id":1,"category":"","cx":69.076,"cy":8.016427104722792,"projected":false},{"id":2,"category":"","cx":69.076,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":83.576,"y0":0,"x1":114.594,"y1":31},"lines":[{"role":"date","text":"2026","x":83.576,"y":13,"anchor":"start"},{"role":"title","text":"a","x":83.576,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":83.576,"y0":41,"x1":295.424,"y1":72},"lines":[{"role":"date","text":"XXXXXXXXXXXXXXXXXXXXXXXX","x":83.576,"y":54,"anchor":"start"},{"role":"title","text":"b","x":83.576,"y":69,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":83.576,"y0":384,"x1":115.49099999999999,"y1":415},"lines":[{"role":"date","text":"2090","x":83.576,"y":397,"anchor":"start"},{"role":"title","text":"far","x":83.576,"y":412,"anchor":"start"}]}],"stems":[{"id":1,"category":"","points":[[75.576,8.016427104722792],[75.576,49],[79.576,49]]}],"ticks":[],"laneLabels":[]}',
     );
   });
 
@@ -965,7 +968,7 @@ describe("vertical single track: a colliding label swaps left before any connect
     const a = ev("2026", "a, whose title is long enough to wrap onto two lines in a right column");
     const b = ev("2026-01-02", "b short");
     const l = v([a, b, ev("2090", "far")]);
-    const need = Math.max(bold("2026"), estimateLabelWidth("b short", LINE_STYLE.title.size));
+    const need = Math.max(bold("2026"), timelineTextWidth("b short", LINE_STYLE.title.size, 500));
     expect(need).toBeLessThan(0.4 * 360);
     expect(labelOf(l, b.id).box.x1 - labelOf(l, b.id).box.x0).toBeCloseTo(need, 9);
     // a is not a candidate (a no-swap layout leaves it at its date), so its long title does not widen
@@ -1069,8 +1072,8 @@ describe("vertical single track: a colliding label swaps left before any connect
     expect(onLeft(l, b.id)).toBe(true);
     expect(onLeft(l, x.id)).toBe(false);
     expect(l.ticks.length).toBeGreaterThanOrEqual(2);
-    const tickW = Math.max(...l.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
-    expect(labelOf(l, b.id).box.x1 - l.ticks[0]!.x).toBeCloseTo(tickW + Math.max(bold("2026"), estimateLabelWidth("b", LINE_STYLE.title.size)), 9);
+    const tickW = Math.max(...l.ticks.map((t) => timelineTextWidth(t.text, TBL.size.axis, 500))) + 8;
+    expect(labelOf(l, b.id).box.x1 - l.ticks[0]!.x).toBeCloseTo(tickW + Math.max(bold("2026"), timelineTextWidth("b", LINE_STYLE.title.size, 500)), 9);
   });
 
   it("never starts a span's leader inside an outer bar, however compressed the band (single track and lane columns)", () => {
@@ -1273,7 +1276,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
   const dateLines = (l: TimelineLayout) => l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"));
   // A line's painted extent: estimated width (bold dates run ~8% wider), placed by its anchor.
   const extent = (ln: { x: number; text: string; role: "date" | "title" | "description"; anchor: string }): [number, number] => {
-    const w = estimateLabelWidth(ln.text, LINE_STYLE[ln.role].size) * (ln.role === "date" ? 1.08 : 1);
+    const w = timelineTextWidth(ln.text, LINE_STYLE[ln.role].size, ln.role === "date" ? 700 : 500);
     return ln.anchor === "end" ? [ln.x - w, ln.x] : ln.anchor === "middle" ? [ln.x - w / 2, ln.x + w / 2] : [ln.x, ln.x + w];
   };
   const leftmostMark = (l: TimelineLayout) => Math.min(l.rules[0]!.x1, ...l.spans.map((s) => s.x));
@@ -1317,15 +1320,15 @@ describe("vertical layout at narrow widths (side columns)", () => {
     ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026 – Dec 31, 2030" }),
     ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034" }),
   ];
-  const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
+  const bold = (s: string) => timelineTextWidth(s, 13, 700);
   // Ruling 28, from the documented floors: the left date-word floor (capped at 40%) plus its gap, or
   // the edge pad; the band at 3px bars and 1px gaps; the marker half-width and gap; the right
   // date-word floor. A tick column is drawn when it fits in what is left.
   const tickRoom = (width: number, leftWord: number, nSub: number, rightWord: number): number =>
     width - (leftWord ? Math.min(leftWord, 0.4 * width) + TL_GEOM.vLabelGap : 4)
     - Math.max(TL_GEOM.dotR, nSub ? 1.5 + (nSub - 1) * 4 : 0) - (TL_GEOM.dotR + TL_GEOM.vLabelGap) - rightWord;
-  const tickCol = (l: TimelineLayout): number => Math.max(...l.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
-  const tickRightOf = (l: TimelineLayout): number => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+  const tickCol = (l: TimelineLayout): number => Math.max(...l.ticks.map((t) => timelineTextWidth(t.text, TBL.size.axis, 500))) + 8;
+  const tickRightOf = (l: TimelineLayout): number => Math.max(...l.ticks.map((t) => t.x + timelineTextWidth(t.text, TBL.size.axis, 500)));
 
   it("wraps long dates between words in the capped left column, keeping every label in the frame", () => {
     const events = sixSeptemberSpans();
@@ -1350,7 +1353,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
     for (const width of [W, 360]) {
       const l = v(SPREAD(), { width, axis: true });
       expect(l.ticks.length).toBeGreaterThanOrEqual(2);
-      const tickRight = Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+      const tickRight = Math.max(...l.ticks.map((t) => t.x + timelineTextWidth(t.text, TBL.size.axis, 500)));
       expect(Math.min(...l.labels.flatMap((x) => x.lines.map((ln) => extent(ln)[0])))).toBeGreaterThan(tickRight);
       expect(l.rules[0]!.x1).toBeLessThanOrEqual(tickRight + 40);
     }
@@ -1365,12 +1368,12 @@ describe("vertical layout at narrow widths (side columns)", () => {
     }
     // A date word too wide to leave any tick column room at 280 (less than the narrowest possible,
     // a four-digit year plus its gap) omits the ticks; the same data keeps them at 900.
-    const late = sixSeptemberSpans("Late-September 30, 2026");
-    expect(tickRoom(W, bold("Late-September"), 6, bold("Late-September"))).toBeLessThan(estimateLabelWidth("2027", TBL.size.axis) + 8);
+    const late = sixSeptemberSpans("Mid-to-late-September 30, 2026");
+    expect(tickRoom(W, bold("Mid-to-late-September"), 6, bold("Mid-to-late-September"))).toBeLessThan(timelineTextWidth("2027", TBL.size.axis, 500) + 8);
     const narrow = v(late, { width: W, axis: true });
     expect(narrow.ticks).toEqual([]);
     inFrame(narrow);
-    const wide = v(sixSeptemberSpans("Late-September 30, 2026"), { width: 900, axis: true });
+    const wide = v(sixSeptemberSpans("Mid-to-late-September 30, 2026"), { width: 900, axis: true });
     expect(wide.ticks.length).toBeGreaterThanOrEqual(2);
     inFrame(wide, 900);
   });
@@ -1382,7 +1385,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const leftUnit = `${"A".repeat(40)} –`;
     const outer = ev("2020-01-02", "outer", { endStr: "2035", dateText: `${"A".repeat(40)} – 2035` });
     const events = [ev("2020", "inner", { endStr: "2030", dateText: "2020 – 2030" }), outer, ev("2040", "z")];
-    const tickNeed = estimateLabelWidth("2020", TBL.size.axis) + 8;
+    const tickNeed = timelineTextWidth("2020", TBL.size.axis, 500) + 8;
     expect(bold(leftUnit)).toBeGreaterThan(0.4 * width);
     const uncapped = width - (bold(leftUnit) + TL_GEOM.vLabelGap) - Math.max(TL_GEOM.dotR, 1.5 + 4) - (TL_GEOM.dotR + TL_GEOM.vLabelGap) - bold("2020 –");
     expect(uncapped).toBeLessThan(tickNeed);
@@ -1446,7 +1449,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
 
   it("budgets the width: tick column, left column min(40%, need), band, rule, then the right column", () => {
     // Every value follows from the documented budget and the text estimator, not from a recording.
-    const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
+    const bold = (s: string) => timelineTextWidth(s, 13, 700);
     const edge = 4, gap = TL_GEOM.vLabelGap, dotR = TL_GEOM.dotR;
     const rightOfRule = dotR + gap; // the marker's half-width (≥ half a bar) plus the label gap
     // Nothing on the left: an edge pad, the marker, the rule, then the right column (Ruling 29's
@@ -1455,7 +1458,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
     for (const lab of plain.labels) expect(lab.box.x0 - plain.rules[0]!.x1).toBeCloseTo(rightOfRule, 9);
     // The tick column goes first, sized to its widest tick plus its gap, then the edge pad.
     const axis = v(SPREAD(), { width: 360, axis: true });
-    const tickW = Math.max(...axis.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
+    const tickW = Math.max(...axis.ticks.map((t) => timelineTextWidth(t.text, TBL.size.axis, 500))) + 8;
     expect(axis.rules[0]!.x1 - axis.ticks[0]!.x).toBeCloseTo(tickW + edge + dotR, 9);
     // A left column at its natural need (here, c's date), then the gap, then the band of two
     // sub-tracks (half a bar plus one pitch), then the rule.
@@ -1498,12 +1501,12 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const width = 280;
     // One long unbroken date unit: wide enough that the full 15% inset would compress the right
     // column below the width this word needs, but not so wide that even the natural (uninset)
-    // position already fails it.
-    const wordDate = "X".repeat(31);
+    // position already fails it. (27 Xs at the measured bold Figtree width; 31 under the old estimate.)
+    const wordDate = "X".repeat(27);
     const l = v([...SPREAD(), ev("2088", "z", { dateText: wordDate })], { width });
     const naturalRuleX = TL_GEOM.dotR + 4; // V_EDGE (4) + a marker radius: no left col, no ticks, no spans
     const fullInset = width * TL_GEOM.vTrackInsetShare;
-    const wordFloor = estimateLabelWidth(wordDate, LINE_STYLE.date.size) * 1.08; // bold factor
+    const wordFloor = timelineTextWidth(wordDate, LINE_STYLE.date.size, 700);
     // The inset only sets the right column's wrap width (Ruling 43 then centres the block): the word
     // keeps its line, so the inset shrank to leave it room, and the block is exactly that wide.
     const z = l.labels.find((x) => x.lines[0]!.text === wordDate)!;
@@ -1665,14 +1668,14 @@ describe("vertical lane columns (exactly two lanes)", () => {
   const nameBottom = (l: TimelineLayout): number =>
     Math.max(...l.laneLabels.map((n) => n.y + (n.lines.length - 1) * LANE_LINE_H + (LANE_LINE_H - LANE_SIZE)));
   const nameExtent = (n: TimelineLayout["laneLabels"][number]): [number, number] => {
-    const w = Math.max(...n.lines.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+    const w = Math.max(...n.lines.map((s) => timelineTextWidth(s, LANE_SIZE, 700)));
     return n.anchor === "end" ? [n.x - w, n.x] : [n.x, n.x + w];
   };
   const lineExtent = (ln: { x: number; text: string; role: "date" | "title" | "description"; anchor: string }): [number, number] => {
-    const w = estimateLabelWidth(ln.text, LINE_STYLE[ln.role].size) * (ln.role === "date" ? 1.08 : 1);
+    const w = timelineTextWidth(ln.text, LINE_STYLE[ln.role].size, ln.role === "date" ? 700 : 500);
     return ln.anchor === "end" ? [ln.x - w, ln.x] : [ln.x, ln.x + w];
   };
-  const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
+  const tickRight = (l: TimelineLayout) => Math.max(...l.ticks.map((t) => t.x + timelineTextWidth(t.text, TBL.size.axis, 500)));
 
   it("draws two vertical rules near the centre, each lane named at the top of its own track", () => {
     const l = vc(TWO());
@@ -1896,7 +1899,7 @@ describe("vertical lane columns (exactly two lanes)", () => {
     // Lane 0 holds one span and a point (a band of one marker radius, not half a bar); lane 1 a
     // crowd of overlapping spans. The compression must model lane 0's band exactly as drawn.
     const D = "September 30, 2026";
-    const word = estimateLabelWidth("September", 13) * 1.08;
+    const word = timelineTextWidth("September", 13, 700);
     const bandFloor = (n: number) => Math.max(TL_GEOM.dotR, n ? 1.5 + (n - 1) * 4 : 0);
     let sawCompressed = false;
     for (const nb of [6, 8, 12]) {
@@ -1927,11 +1930,11 @@ describe("vertical lane columns (exactly two lanes)", () => {
     // Lane 0's dates are one long word; lane 1's are four-digit years. Both columns are held to the
     // wider word, so the fit test is 2 x lane 0's word: at 375 that leaves no room for ticks, although
     // lane 0's word plus lane 1's own (a per-lane reading) would.
-    const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
-    const tickNeed = estimateLabelWidth("2026", TBL.size.axis) + 8;
+    const bold = (s: string) => timelineTextWidth(s, 13, 700);
+    const tickNeed = timelineTextWidth("2026", TBL.size.axis, 500) + 8;
     const fixed = 2 * TL_GEOM.vLabelGap + 32;
     const bands = 2 * TL_GEOM.dotR; // points only: each lane's band is a marker radius
-    const word = "X".repeat(25);
+    const word = "X".repeat(20); // 25 under the old estimate; the measured bold X is wider
     const events = [
       A("2026", "a1", { dateText: word }), A("2029", "a2", { dateText: word }), A("2033", "a3", { dateText: word }),
       B("2027", "b1"), B("2031", "b2"),
@@ -1979,14 +1982,14 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
     Math.min(...l.labels.flatMap((x) => x.lines.filter((ln) => ln.anchor === "start").map((ln) => ln.x)));
   /** Horizontal extent of everything drawn: label boxes, markers, bars, ticks and lane names. */
   const inkOf = (l: TimelineLayout): [number, number] => {
-    const nameW = (n: TimelineLayout["laneLabels"][number]) => Math.max(...n.lines.map((s) => estimateLabelWidth(s, LANE_SIZE)));
+    const nameW = (n: TimelineLayout["laneLabels"][number]) => Math.max(...n.lines.map((s) => timelineTextWidth(s, LANE_SIZE, 700)));
     const lo = [
       ...l.labels.map((x) => x.box.x0), ...l.markers.map((m) => m.cx - TL_GEOM.dotR), ...l.spans.map((s) => s.x),
       ...l.ticks.map((k) => k.x), ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x - nameW(n) : n.x)),
     ];
     const hi = [
       ...l.labels.map((x) => x.box.x1), ...l.markers.map((m) => m.cx + TL_GEOM.dotR), ...l.spans.map((s) => s.x + s.w),
-      ...l.ticks.map((k) => k.x + estimateLabelWidth(k.text, TBL.size.axis)),
+      ...l.ticks.map((k) => k.x + timelineTextWidth(k.text, TBL.size.axis, 500)),
       ...l.laneLabels.map((n) => (n.anchor === "end" ? n.x : n.x + nameW(n))),
     ];
     return [Math.min(...lo), Math.max(...hi)];
@@ -2183,7 +2186,9 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
     expect(JSON.stringify(layoutTimeline(base(fig7, { budgetWidth: 1400 })))).toBe(JSON.stringify(layoutTimeline(base(fig7))));
   });
 
-  it("leaves every phone-width vertical layout as at c60f9a8 relative to its track (280-440; Ruling 43 moves only the block)", () => {
+  it("leaves every phone-width vertical layout as pinned relative to its track (280-440; Ruling 43 moves only the block)", () => {
+    // Pinned at c60f9a8, before Ruling 43; re-pinned at Task 16b, whose measured Figtree widths
+    // (Ruling 45) change every wrap and position.
     const outer = () => [ev("2020", "a", { endStr: "2030" }), ev("2025", "c, on the outer sub-track", { endStr: "2035" }), ev("2027", "a point on the rule"), ev("2040", "b")];
     const out: string[] = [];
     for (let w = 280; w <= 440; w += 8) {
@@ -2195,7 +2200,7 @@ describe("vertical in wide space: readable text columns, centred (E2, Ruling 32)
         out.push(JSON.stringify(relative(v(TWO(), { width: w, axis, lanes: LANES }))));
       }
     }
-    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("7bcea104352c64e7");
+    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("de4dfde56eeba34d");
   });
 });
 
@@ -2238,7 +2243,7 @@ describe("vertical: every column hugs its placed content and the block is centre
 
   it("floors every column's date word at the cap too: an oversized unit never costs the tick column (Ruling 40)", () => {
     const word = "W".repeat(65);
-    expect(estimateLabelWidth(word, 13) * 1.08).toBeGreaterThan(TL_GEOM.vTextColumnMax);
+    expect(timelineTextWidth(word, 13, 700)).toBeGreaterThan(TL_GEOM.vTextColumnMax);
     // Lanes need two columns at the (capped) floor beside the tick column: 2 x 360 + the tracks
     // leaves it room from ~830px (at 800 it is still correctly omitted).
     for (const width of [900, 1000]) {
@@ -2252,11 +2257,12 @@ describe("vertical: every column hugs its placed content and the block is centre
     }
   });
 
-  it("leaves wrapping and every position relative to the track byte-identical to 1bbc859, at every width", () => {
+  it("leaves wrapping and every position relative to the track as pinned, at every width", () => {
+    // Pinned at 1bbc859; re-pinned at Task 16b for the measured Figtree widths (Ruling 45).
     const out: string[] = [];
     for (const name of Object.keys(DATA)) {
       for (let w = 280; w <= 1400; w += 8) out.push(JSON.stringify(relative(make(name, { width: w }))));
     }
-    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("70935b12bc6b16c1");
+    expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("ce344858b9d58fe6");
   });
 });
