@@ -235,6 +235,9 @@ describe("timeline render", () => {
         expect(rules(res.svg)).toHaveLength(1);
         expect(q(res.svg, ".tbl-timeline-lane-label")).toHaveLength(0);
         expect(res.legendItems).toHaveLength(3);
+        // On by default only: series_legend: false and legend: false still remove them.
+        expect(vert({ series_order: ["policy", "cohort", "other"], series_legend: false, timeline: { lanes: true } }, THREE).legendItems).toBeNull();
+        expect(vert({ series_order: ["policy", "cohort", "other"], legend: false, timeline: { lanes: true } }, THREE).legendItems).toBeNull();
       }
     });
 
@@ -245,6 +248,9 @@ describe("timeline render", () => {
       expect(res.legendItems).toHaveLength(2);
       // Exactly the single-track chart of the same spec without lanes.
       expect(res.svg.outerHTML).toBe(vert({}).svg.outerHTML);
+      // On by default only: series_legend: false and legend: false still remove them.
+      expect(vert({ series_legend: false, timeline: { lanes: true, vertical_lanes: "single" } }).legendItems).toBeNull();
+      expect(vert({ legend: false, timeline: { lanes: true, vertical_lanes: "single" } }).legendItems).toBeNull();
     });
 
     it("renders a lanes spec switched to vertical as lane columns too", () => {

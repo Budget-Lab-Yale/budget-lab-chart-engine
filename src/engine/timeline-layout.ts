@@ -714,8 +714,9 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const bandRoom = avail - leftOf(leftNeed.need) - rightNeed - rightOf(G.spanH);
     let barW: number = G.spanH;
     let gap: number = G.subTrackGap;
-    // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero).
-    if (nSub && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
+    // nSub = 0 has no bars to compress (bandOf is 0, so the scale below would divide by zero), and
+    // nSub = 1's band is a fixed dotR (half a bar never exceeds it), so thinning its bar gains no room.
+    if (nSub > 1 && Math.max(G.dotR, bandOf(barW, gap)) > bandRoom) {
       const s = Math.max(0, bandRoom) / bandOf(barW, gap);
       barW = G.spanH * s;
       gap = G.subTrackGap * s;

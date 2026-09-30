@@ -891,6 +891,16 @@ describe("vertical layout at narrow widths (side columns)", () => {
     inFrame(l, width);
   });
 
+  it("keeps a lone sub-track's bar at full width however little room the right column leaves", () => {
+    // One sub-track's band is a marker radius whatever the bar width, so thinning the bar gains nothing.
+    const word = "X".repeat(34);
+    expect(bold(word)).toBeGreaterThan(W - 4 - 2 * TL_GEOM.dotR - TL_GEOM.vLabelGap); // right column is short
+    const l = v([ev("2020", "span", { endStr: "2030" }), ev("2025", "long date", { dateText: word }), ev("2040", "z")], { width: W });
+    expect(l.spans).toHaveLength(1);
+    expect(l.spans[0]!.w).toBe(TL_GEOM.spanH);
+    inFrame(l);
+  });
+
   it("compresses a crowded sub-track band instead of pushing text off-canvas", () => {
     const crowd = (n: number) => Array.from({ length: n }, (_, i) =>
       ev(`${1990 + i}`, `Span ${i}`, { endStr: `${2030 + i}`, dateText: `${1990 + i} – ${2030 + i}` }));
