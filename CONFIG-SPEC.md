@@ -860,7 +860,8 @@ the image's height to the timeline's content. A horizontal timeline renders at t
 width (744px with a right-hand legend, the full 920px otherwise). A vertical one downloads as a
 portrait image: its labels wrap as they would in a 560px chart, and the image is then trimmed to the
 timeline, 360–640px wide (a 280–560px chart plus margins), with the timeline centred in it. The
-title, subtitle, note and source wrap to that width, and the legend always sits above the chart,
+title, subtitle, note and source wrap at their spaces to that width, so a single word wider than the
+frame (a long URL, say) is not broken and runs past it. The legend always sits above the chart,
 whatever `legendPosition` says, its rows and any over-long label wrapped to fit.
 
 `tbl-chart validate` passes but warns when a timeline has more than 20 events, when a horizontal one
@@ -986,17 +987,20 @@ downloaded PNG**, because the export re-renders through the very same builders w
 marks and text match the live render's.
 
 **`afterRender` is guaranteed to RUN on both paths, with `ctx.phase` naming which — not to produce
-identical output.** The export re-renders into its own frame, whatever the card's size: a 920px-wide
-content column (on a vertical `timeline`, the 280–560px one of its portrait image — see
-[Timeline options](#timeline-options)) by a height computed from the chart's chrome, against the live
-card's own width by its own height. A hook that positions or sizes anything off the SVG it is
-handed therefore lands at different coordinates in the PNG than on screen, and no way of writing the
-hook changes that. (A consumer can also branch on
-`ctx.phase` and differ on purpose — but the frame-size difference applies even to a hook that does
-not.) Keep an `afterRender` mutation relative to the SVG's own dimensions if it must survive the trip,
-and check the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates both
-halves: that the hook fires once per path and both SVGs carry its mutation, and that the two frames
-really are different sizes.
+identical output.** The export re-renders into its own frame, chosen without reference to the card:
+the chart is drawn at the export's own chart width (920px, less the right-hand legend column where
+there is one, and 280–560px on a vertical `timeline` — see [Timeline options](#timeline-options)) and
+at a height the export computes (on most chart types, what the fixed frame leaves after its chrome;
+on a timeline, its content's height, as on screen), where the live chart is sized to the card. So
+the SVG handed to the hook usually differs in size between the two paths, and a hook that positions
+or sizes anything off it then lands at different coordinates in the PNG than on screen. The two can
+match — a horizontal timeline with no right-hand legend, drawn live at 920px, hands the hook the
+same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also branch on `ctx.phase` and
+differ on purpose — but the size difference applies even to a hook that does not.) Keep an
+`afterRender` mutation relative to the SVG's own dimensions if it must survive the trip, and check
+the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates all three:
+that the hook fires once per path and both SVGs carry its mutation, that a chart drawn live at 720px
+hands it differently sized SVGs, and that the horizontal timeline above hands it the same size.
 
 **`hooks.tooltip` is screen-only.** A static PNG export has no hover state, so there is nothing for
 a tooltip's content to be identical *to* — the hook is simply never invoked while building an

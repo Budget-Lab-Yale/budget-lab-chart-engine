@@ -211,6 +211,18 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     expect(num(svg, "height")).toBeGreaterThan(Math.max(...below.map((t) => num(t, "y"))));
   });
 
+  it("wraps chrome only at spaces: a word wider than the portrait frame stays whole", () => {
+    const word = `https://example.org/${"x".repeat(100)}`;
+    const svg = buildExportSvg({ ...VSPEC, note: `See ${word} for details.` } as ChartSpec, POINTS);
+    const frameW = num(svg, "width");
+    const line = chromeTexts(svg).find((t) => t.textContent === word)!;
+    expect(line).toBeDefined(); // on a line of its own, unbroken
+    expect(num(line, "x")).toBe(MARGIN);
+    expect(num(line, "x") + 8 * word.length).toBeGreaterThan(frameW); // jsdom measures 8px a character
+    // The words around it still wrap to the frame.
+    expect(chromeTexts(svg).some((t) => t.textContent === "See")).toBe(true);
+  });
+
   it("draws the legend above the chart, wrapped to the frame, even when legendPosition is right", () => {
     const kinds = ["First category", "Second category", "Third category", "Fourth category", "Fifth category"];
     const rows = kinds.map((k, i) => ({ date: `${2020 + i * 3}`, title: `Event ${i}`, kind: k })) as TidyRow[];
