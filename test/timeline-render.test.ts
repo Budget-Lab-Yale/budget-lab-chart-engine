@@ -440,6 +440,28 @@ describe("timeline render", () => {
     for (const t of muted) expect(t.getAttribute("fill")).toBe(TBL.color.muted);
   });
 
+  it("keeps an all-emoji title inside a 280px horizontal frame at Chromium's 1.37em advance (Ruling 48)", () => {
+    // 23 consecutive 😀 with no break opportunity: hardBreak splits the line at the frame, so each
+    // piece must be measured at least as wide as Chromium draws it (1.37em) to stay inside.
+    const emoji = "😀".repeat(23);
+    const rows = [{ date: "2026", end: "", title: emoji, detail: "", kind: "policy", projected: "" }] as TidyRow[];
+    const { svg } = r({ timeline: { auto_vertical: false } }, 280, rows);
+    const W = Number(svg.getAttribute("width"));
+    expect(W).toBe(280);
+    const texts = q(svg, ".tbl-timeline-label text");
+    expect(texts.map((t) => t.textContent).join("")).toContain(emoji);
+    for (const t of texts) {
+      const size = Number(t.getAttribute("font-size"));
+      const weight = Number(t.getAttribute("font-weight")) as 500 | 700;
+      const w = [...t.textContent!].reduce((s, ch) => s + (ch.codePointAt(0)! > 0xffff ? 1.37 * size : timelineTextWidth(ch, size, weight)), 0);
+      const x = Number(t.getAttribute("x"));
+      const anchor = t.getAttribute("text-anchor");
+      const x0 = anchor === "start" ? x : anchor === "end" ? x - w : x - w / 2;
+      expect(x0, t.textContent!).toBeGreaterThanOrEqual(0);
+      expect(x0 + w, t.textContent!).toBeLessThanOrEqual(W);
+    }
+  });
+
   it("contains no NaN", () => {
     expect(/NaN/.test(r().svg.outerHTML)).toBe(false);
     expect(/NaN/.test(renderChart(SPEC, ROWS, { width: 320, timelineOrientation: "vertical" }).svg.outerHTML)).toBe(false);
