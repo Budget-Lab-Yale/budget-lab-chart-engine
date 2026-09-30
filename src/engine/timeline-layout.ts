@@ -34,6 +34,9 @@ export const TL_GEOM = {
   topPad: 4,
   vLabelGap: 10,
   minSpanPx: 2,
+  /** Single-track vertical, no left column: share of the width the rule is inset to, for balance
+   *  (Ruling 29). Never applied when a left column is present. */
+  vTrackInsetShare: 0.15,
   /** Live auto-switch: a chart narrower than this renders vertical regardless of fit. */
   autoVerticalMinWidth: 480,
   /** Live floor for a timeline's width (vertical reads down to a small phone). */
@@ -66,6 +69,10 @@ export interface LayoutEvent {
   ongoing: boolean;
   category: string;
   dateText: string;
+  /** Date text for the event's aria-label, if it differs from the visible `dateText` (an
+   *  auto-generated open-ended span reads "<date> –" visually but "<date> onward" to a screen
+   *  reader). Defaults to `dateText` — a `columns.date_label` override is always used verbatim. */
+  ariaDateText?: string;
   title: string;
   description: string | null;
   projected: boolean;
@@ -648,11 +655,16 @@ function vLeader(
  *   4. If the band at its floors still leaves the right column short, the left column yields, down
  *      to its floor.
  *   5. The right column gets everything that remains.
+ *   6. With nothing on the left (no left column at all), the rule from step 3 is a "natural" left
+ *      extent — tick column, band and V_EDGE, hugging the left edge. Inset it for balance: the rule
+ *      moves to `max(natural, vTrackInsetShare of the width)`, capped so the right column never
+ *      drops below its date-word floor (and the rule never moves left of the natural extent). A
+ *      left column overrides this — the rule stays at its step-3 position.
  *  A left date unit wider than 40% is split by hardBreakDate, so the left column never pushes the
  *  track off the frame; a right one is split to whatever the right column gets.
- *  With nothing on the left the track sits V_EDGE + a marker radius from the tick column (or the
- *  frame edge), and the right column gets the rest of the width. The axis length is chosen so the
- *  taller side's whole stack fits, which keeps pushes local. */
+ *  With nothing on the left the track sits at its natural or inset position (step 6) and the right
+ *  column gets the rest of the width. The axis length is chosen so the taller side's whole stack
+ *  fits, which keeps pushes local. */
 function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   if (inp.lanes?.length === 2) return layoutLaneColumns(inp, inp.lanes);
   const G = TL_GEOM;
@@ -723,7 +735,16 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   const geometry = (tickNeed: number) => {
     const tickW = tickNeed > 0 && tickNeed <= tickRoom ? tickNeed : 0;
     const { barW, gap, band, leftW } = allocate(W - tickW);
-    const ruleX = tickW + leftOf(leftW) + band;
+    const naturalRuleX = tickW + leftOf(leftW) + band;
+    // Step 6: no left column — inset the rule for balance, capped so the right column keeps its
+    // date-word floor (rightNeeds.word), and never left of the natural extent.
+    let ruleX = naturalRuleX;
+    if (!hasLeft) {
+      const colRAtNatural = W - (naturalRuleX + rightOf(barW));
+      const maxInset = Math.max(0, colRAtNatural - rightNeeds.word);
+      const desiredInset = Math.max(0, G.vTrackInsetShare * W - naturalRuleX);
+      ruleX = naturalRuleX + Math.min(desiredInset, maxInset);
+    }
     const leftCol: VColumn = { x0: tickW, x1: tickW + leftW, anchor: "end" };
     const rightCol: VColumn = { x0: ruleX + rightOf(barW), x1: W, anchor: "start" };
     const colR = Math.max(0, W - rightCol.x0);

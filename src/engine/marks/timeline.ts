@@ -62,9 +62,12 @@ export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: Lay
     const override = cell(e.r, cols.date_label).trim();
     const dateText =
       override || (e.end ? `${fmt(e.start)} – ${fmt(e.end)}` : e.ongoing ? `${fmt(e.start)} –` : fmt(e.start));
+    // An auto-generated open-ended span's visible dash reads as "onward" to a screen reader; an
+    // override is used verbatim (as today), so this only fires when there is none.
+    const ariaDateText = !override && e.ongoing ? `${fmt(e.start)} onward` : undefined;
     const description = cell(e.r, cols.description).trim();
     return {
-      id: e.id, start: e.start, end: e.end, ongoing: e.ongoing, category: e.category, dateText,
+      id: e.id, start: e.start, end: e.end, ongoing: e.ongoing, category: e.category, dateText, ariaDateText,
       title: cell(e.r, cols.label).trim(), description: description || null,
       projected: spec.projected_field ? isTruthyFlag(e.r[spec.projected_field]) : false,
     };
@@ -316,7 +319,7 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     }
     const item = el("g", {
       role: "listitem",
-      "aria-label": `${e.dateText}: ${e.title}.${e.description ? ` ${e.description}` : ""}`,
+      "aria-label": `${e.ariaDateText ?? e.dateText}: ${e.title}.${e.description ? ` ${e.description}` : ""}`,
     });
     const lab = labels.get(id);
     if (lab) {

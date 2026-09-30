@@ -110,6 +110,23 @@ describe("timeline render", () => {
     expect(items.at(-1)).toBe("2095: That cohort turns 65.");
   });
 
+  it("reads an open-ended span's aria-label as '<date> onward', while the visible date keeps the dash", () => {
+    const { svg } = r();
+    const items = q(svg, 'g[role="listitem"]');
+    const ongoing = items.find((g) => g.getAttribute("aria-label")!.startsWith("2040"))!;
+    expect(ongoing.getAttribute("aria-label")).toBe("2040 onward: Credits.");
+    const dateLine = q(ongoing, "text")[0]!;
+    expect(dateLine.textContent).toBe("2040 –");
+    // A closed span's aria-label is unaffected.
+    const closed = items.find((g) => g.getAttribute("aria-label")!.startsWith("2031"))!;
+    expect(closed.getAttribute("aria-label")).toBe("2031 – 2035: Phase-in.");
+    // An override is used verbatim, even for an open-ended span.
+    const rows = ROWS.map((x, i) => ({ ...x, dl: i === 3 ? "Since 2040 –" : "" })) as TidyRow[];
+    const overridden = q(r({ columns: { ...SPEC.columns, date_label: "dl" } }, 900, rows).svg, 'g[role="listitem"]')
+      .find((g) => g.getAttribute("aria-label")!.startsWith("Since"))!;
+    expect(overridden.getAttribute("aria-label")).toBe("Since 2040 –: Credits.");
+  });
+
   it("orders listitems by date, not CSV order", () => {
     const shuffled = [ROWS[5], ROWS[0], ROWS[3], ROWS[1], ROWS[4], ROWS[2]] as TidyRow[];
     const items = q(r({}, 900, shuffled).svg, 'g[role="listitem"]').map((g) => g.getAttribute("aria-label")!.slice(0, 4));
@@ -357,9 +374,9 @@ describe("timeline render", () => {
         }
       }
     }
-    // With nothing on an outer sub-track, the track sits at the left edge.
+    // With nothing on an outer sub-track, the track insets to 15% of the width for balance (Ruling 29).
     const plain = renderChart(SPEC, ROWS, { width: 375, timelineOrientation: "vertical" }).svg;
-    expect(Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"))).toBeLessThanOrEqual(40);
+    expect(Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"))).toBeCloseTo(375 * TL_GEOM.vTrackInsetShare, 9);
   });
 
   it("drops the x-axis title with the ticks: drawn only when a render draws ticks", () => {

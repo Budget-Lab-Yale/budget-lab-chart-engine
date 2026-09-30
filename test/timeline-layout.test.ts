@@ -612,21 +612,34 @@ describe("vertical layout", () => {
     expect(ruleX(v([a, p, b]))).toBeLessThan(ruleX(l));
   });
 
-  it("keeps the track at the left edge when nothing labels left, and gives the right column the rest", () => {
+  it("leaves a layout with a left label column byte-identical to the parent commit (Ruling 29)", () => {
+    // The Task 13b inset applies only with no left column at all; captured with `git show
+    // 46a6c7a:src/engine/timeline-layout.ts` at the parent commit, before that change.
+    const a = ev("2020", "a", { id: 0, endStr: "2030" });
+    const c = ev("2025", "c, on the outer sub-track", { id: 1, endStr: "2035" });
+    const p = ev("2027", "a point on the rule", { id: 2 });
+    const b = ev("2040", "b", { id: 3 });
+    const l = v([a, c, p, b]);
+    expect(JSON.stringify(l)).toBe(
+      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":168,"y1":8,"x2":168,"y2":415}],"markers":[{"id":2,"category":"","cx":168,"cy":142.41314168377826,"projected":false},{"id":3,"category":"","cx":168,"cy":392,"projected":false}],"spans":[{"id":0,"category":"","x":164,"y":8,"w":8,"h":192.02628336755646,"projected":false,"fade":null},{"id":1,"category":"","x":154,"y":104.0394250513347,"w":8,"h":191.97371663244348,"projected":false,"fade":null}],"labels":[{"id":0,"category":"","box":{"x0":182.5,"y0":0,"x1":213.388,"y1":31},"lines":[{"role":"date","text":"2020","x":182.5,"y":13,"anchor":"start"},{"role":"title","text":"a","x":182.5,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":44.999999999999986,"y0":96.0394250513347,"x1":144,"y1":142.03942505133472},"lines":[{"role":"date","text":"2025","x":144,"y":109.0394250513347,"anchor":"end"},{"role":"title","text":"c, on the outer","x":144,"y":124.0394250513347,"anchor":"end"},{"role":"title","text":"sub-track","x":144,"y":139.03942505133472,"anchor":"end"}]},{"id":2,"category":"","box":{"x0":182.5,"y0":134.41314168377826,"x1":307.9,"y1":165.41314168377826},"lines":[{"role":"date","text":"2027","x":182.5,"y":147.41314168377826,"anchor":"start"},{"role":"title","text":"a point on the rule","x":182.5,"y":162.41314168377826,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":182.5,"y0":384,"x1":213.388,"y1":415},"lines":[{"role":"date","text":"2040","x":182.5,"y":397,"anchor":"start"},{"role":"title","text":"b","x":182.5,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[],"laneLabels":[]}',
+    );
+  });
+
+  it("insets the track for balance when nothing labels left, and gives the right column the rest (Ruling 29)", () => {
     // Wraps at every width tried, so its widest line fills the right column to within a word.
     const long = Array.from({ length: 40 }, () => "word").join(" ");
     for (const width of [280, 375, 900]) {
       const plain = v([...FIG7(), ev("2060", long)], { width });
-      expect(ruleX(plain)).toBeLessThanOrEqual(40);
+      expect(ruleX(plain)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
       expect(Math.max(...plain.labels.map((x) => x.box.x1))).toBeGreaterThan(width - 40);
       // Spans on the main rule only (sub-track 0) do not open a left column either.
       const s0 = v([ev("2020", "a", { endStr: "2025" }), ev("2026", "b", { endStr: "2030" }), ev("2040", "c")], { width });
-      expect(ruleX(s0)).toBeLessThanOrEqual(40);
-      // With the tick column drawn, the track sits just right of it.
+      expect(ruleX(s0)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
+      // With the tick column drawn, it still sits left of the (now inset) rule.
       const axis = v(FIG7(), { width, axis: true });
       expect(axis.ticks.length).toBeGreaterThanOrEqual(2);
       expect(ruleX(axis)).toBeGreaterThan(tickRight(axis));
-      expect(ruleX(axis)).toBeLessThanOrEqual(tickRight(axis) + 40);
+      expect(ruleX(axis)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
     }
   });
 
@@ -904,14 +917,18 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const bold = (s: string) => estimateLabelWidth(s, 13) * 1.08;
     const edge = 4, gap = TL_GEOM.vLabelGap, dotR = TL_GEOM.dotR;
     const rightOfRule = dotR + gap; // the marker's half-width (≥ half a bar) plus the label gap
-    // Nothing on the left: an edge pad, the marker, the rule; the right column is the rest.
+    // Nothing on the left: an edge pad, the marker, the rule — but Ruling 29 insets that natural
+    // position to 15% of the width for balance (the natural extent here is well under that floor).
+    const inset = TL_GEOM.vTrackInsetShare * 360;
     const plain = v(FIG7(), { width: 360 });
-    expect(plain.rules[0]!.x1).toBeCloseTo(edge + dotR, 9);
-    for (const lab of plain.labels) expect(lab.box.x0).toBeCloseTo(edge + dotR + rightOfRule, 9);
-    // The tick column goes first, sized to its widest tick plus its gap.
+    expect(edge + dotR).toBeLessThan(inset); // the natural extent does not itself reach the floor
+    expect(plain.rules[0]!.x1).toBeCloseTo(inset, 9);
+    for (const lab of plain.labels) expect(lab.box.x0).toBeCloseTo(inset + rightOfRule, 9);
+    // The tick column goes first, sized to its widest tick plus its gap; the inset still applies.
     const axis = v(FIG7(), { width: 360, axis: true });
     const tickW = Math.max(...axis.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
-    expect(axis.rules[0]!.x1).toBeCloseTo(tickW + edge + dotR, 9);
+    expect(tickW + edge + dotR).toBeLessThan(inset);
+    expect(axis.rules[0]!.x1).toBeCloseTo(inset, 9);
     // A left column at its natural need (here, c's date), then the gap, then the band of two
     // sub-tracks (half a bar plus one pitch), then the rule.
     const a = ev("2020", "a", { endStr: "2030" });
@@ -934,6 +951,32 @@ describe("vertical layout at narrow widths (side columns)", () => {
     const tw = tickCol(ticked);
     expect(labelOf(ticked, c.id).box.x1).toBeCloseTo(tw + need, 9);
     expect(ticked.rules[0]!.x1).toBeCloseTo(tw + need + gap + band, 9);
+  });
+
+  it("insets a single-track vertical timeline's rule to 15% of the width for balance (Ruling 29)", () => {
+    // Point-only, no left column: the rule sits at vTrackInsetShare of the width, not hugging the
+    // left edge (the natural extent — V_EDGE + a marker radius — is well under that floor at 375).
+    const l = v(FIG7(), { width: 375 });
+    expect(l.labels.some((lab) => lab.box.x0 < 0)).toBe(false); // sanity: nothing on the left
+    expect(l.rules[0]!.x1).toBeCloseTo(375 * TL_GEOM.vTrackInsetShare, 9);
+  });
+
+  it("shrinks the balance inset to keep the right column's date-word floor, never below the natural extent (Ruling 29)", () => {
+    const width = 280;
+    // One long unbroken date unit: wide enough that the full 15% inset would compress the right
+    // column below the width this word needs, but not so wide that even the natural (uninset)
+    // position already fails it.
+    const wordDate = "X".repeat(31);
+    const l = v([...FIG7(), ev("2060", "z", { dateText: wordDate })], { width });
+    const naturalRuleX = TL_GEOM.dotR + 4; // V_EDGE (4) + a marker radius: no left col, no ticks, no spans
+    const fullInset = width * TL_GEOM.vTrackInsetShare;
+    const wordFloor = estimateLabelWidth(wordDate, LINE_STYLE.date.size) * 1.08; // bold factor
+    const rx = l.rules[0]!.x1;
+    const rightColW = width - (rx + TL_GEOM.dotR + TL_GEOM.vLabelGap);
+    expect(rightColW).toBeCloseTo(wordFloor, 6); // shrunk to exactly the floor, not further
+    expect(rx).toBeGreaterThan(naturalRuleX + 1e-6); // some inset still applied
+    expect(rx).toBeLessThan(fullInset - 1e-6); // but less than the full 15%
+    inFrame(l, width);
   });
 
   it("keeps every box inside the frame at 280 and 375", () => {
