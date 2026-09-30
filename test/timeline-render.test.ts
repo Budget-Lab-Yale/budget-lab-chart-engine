@@ -355,7 +355,8 @@ describe("timeline render", () => {
   });
 
   it("draws each vertical label beside its item: bold date first, outer-sub-track spans on the left", () => {
-    // "Overlap" runs inside the 2031-2035 phase-in, so it takes sub-track 1, left of the rule.
+    // "Overlap" runs inside the 2031-2035 phase-in, so it takes sub-track 1, left of the rule. The
+    // 2030 label would collide with 2026's on the right, so it swaps left (E1).
     const rows = [...ROWS, { date: "2032", end: "2034", title: "Overlap", detail: "", kind: "cohort", projected: "" }] as TidyRow[];
     const { svg } = renderChart(SPEC, rows, { width: 375, timelineOrientation: "vertical" });
     const rule = svg.querySelector("line.tbl-timeline-rule")!;
@@ -368,7 +369,8 @@ describe("timeline render", () => {
       const texts = q(item, "text");
       expect(texts[0]!.getAttribute("font-weight")).toBe("700"); // the date line leads the block
       expect(texts[0]!.textContent!.length).toBeGreaterThan(0);
-      const onLeft = item.getAttribute("aria-label")!.includes("Overlap");
+      const label = item.getAttribute("aria-label")!;
+      const onLeft = label.includes("Overlap") || label.includes("First cohort born");
       for (const t of texts) {
         const x = Number(t.getAttribute("x"));
         if (onLeft) {
@@ -380,8 +382,10 @@ describe("timeline render", () => {
         }
       }
     }
-    // With nothing on an outer sub-track, the track insets to 15% of the width for balance (Ruling 29).
-    const plain = renderChart(SPEC, ROWS, { width: 375, timelineOrientation: "vertical" }).svg;
+    // With nothing on the left (no outer sub-track, no collision to swap), the track insets to 15% of
+    // the width for balance (Ruling 29).
+    const spread = ROWS.filter((row) => ["2026", "2040", "2057", "2095"].includes(row.date as string));
+    const plain = renderChart(SPEC, spread, { width: 375, timelineOrientation: "vertical" }).svg;
     expect(Number(plain.querySelector("line.tbl-timeline-rule")!.getAttribute("x1"))).toBeCloseTo(375 * TL_GEOM.vTrackInsetShare, 9);
   });
 

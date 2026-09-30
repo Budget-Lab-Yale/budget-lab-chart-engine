@@ -565,11 +565,22 @@ const V_MIN_TRACK_GAP = 1;
 /** Slack for a width that round-trips through BOLD_FACTOR: a date unit that exactly fits its
  *  column must never be split. */
 const V_EPS = 1e-6;
+/** A vertical label whose first line's centre sits more than this below its item is "displaced":
+ *  it gets a leader, and on a single track its right-hand placement counts as a collision (E1). */
+const V_DISPLACED = 0.5;
 
 /** One side's column of vertical label blocks: left-aligned at `x0` ("start") or right-aligned
  *  at `x1` ("end"). */
 interface VColumn { x0: number; x1: number; anchor: "start" | "end" }
 interface VPlaced { id: number; box: Box; lines: PlacedLine[]; mid: number; displaced: boolean }
+
+/** One block in `col` with its top at `top`, for an item at `y`. */
+function placeBlock(col: VColumn, id: number, y: number, block: TextBlock, top: number): VPlaced {
+  const half = LINE_STYLE.date.lineH / 2;
+  const [x0, x1] = col.anchor === "start" ? [col.x0, col.x0 + block.w] : [col.x1 - block.w, col.x1];
+  const box: Box = { x0, y0: top, x1, y1: top + block.h };
+  return { id, box, lines: placeLines(block, box, col.anchor), mid: top + half, displaced: top + half - y > V_DISPLACED };
+}
 
 /** A vertical label block: bold date line(s), then the title, then the description, each wrapped to
  *  `colW`. A date wraps only between `dateUnits` (bold-aware); `hardBreakDate` splits only a unit
@@ -613,10 +624,44 @@ function placeColumn(col: VColumn, items: Array<{ id: number; y: number; block: 
   return items.map(({ id, y, block }) => {
     const top = Math.max(y - half, prevBottom + TL_GEOM.vLabelGap, minTop);
     prevBottom = top + block.h;
-    const [x0, x1] = col.anchor === "start" ? [col.x0, col.x0 + block.w] : [col.x1 - block.w, col.x1];
-    const box: Box = { x0, y0: top, x1, y1: top + block.h };
-    return { id, box, lines: placeLines(block, box, col.anchor), mid: top + half, displaced: top + half - y > 0.5 };
+    return placeBlock(col, id, y, block, top);
   });
+}
+
+/** One single-track item for `placeSwapping`: its right-hand block (null for an outer-sub-track
+ *  span, which always labels left) and its left-hand block (null when it may not go left). */
+interface SwapItem { id: number; y: number; right: TextBlock | null; left: TextBlock | null }
+
+/** Single-track placement with swaps (E1), in date order, one downward sweep per side. An item with
+ *  no right block (an outer-sub-track span) goes left. Otherwise it goes right unless the right-hand
+ *  sweep would displace it (push its first line's centre more than V_DISPLACED below its item) and
+ *  it has a left block and the left-hand sweep would displace it less: so a label that is free on
+ *  the left at its own date goes there with no leader, and one that is free on neither side takes
+ *  the smaller push, ties to the right. `onLeft` holds the ids placed left. */
+function placeSwapping(
+  leftCol: VColumn, rightCol: VColumn, items: SwapItem[],
+): { placed: VPlaced[]; onLeft: Set<number> } {
+  const half = LINE_STYLE.date.lineH / 2;
+  let prevL = -Infinity;
+  let prevR = -Infinity;
+  const onLeft = new Set<number>();
+  const placed = items.map(({ id, y, right, left }) => {
+    const natural = y - half;
+    const topAfter = (prevBottom: number): number => Math.max(natural, prevBottom + TL_GEOM.vLabelGap, 0);
+    const rightTop = topAfter(prevR);
+    const leftTop = topAfter(prevL);
+    const goLeft = !right || (left !== null && rightTop - natural > V_DISPLACED && leftTop - natural < rightTop - natural);
+    if (goLeft) {
+      const block = (left ?? right) as TextBlock;
+      prevL = leftTop + block.h;
+      onLeft.add(id);
+      return placeBlock(leftCol, id, y, block, leftTop);
+    }
+    const block = right as TextBlock;
+    prevR = rightTop + block.h;
+    return placeBlock(rightCol, id, y, block, rightTop);
+  });
+  return { placed, onLeft };
 }
 
 /** The elbow leader joining a displaced vertical label to its item, on the side its label sits
@@ -636,16 +681,40 @@ function vLeader(
 
 /** Vertical: time top → bottom, each event's label beside its item — one block of bold date line(s)
  *  above the title and description. Points and spans on the main rule (sub-track 0) label to the
- *  RIGHT of the track, left-aligned; spans on outer sub-tracks (k ≥ 1, stacked leftward from the
- *  rule) label to the LEFT, right-aligned, ending a label gap short of the band's leftmost bar. Each
- *  side sweeps on its own. Exactly two lanes draw as lane columns (layoutLaneColumns); any other
- *  `lanes` value is ignored here — one track, every event drawn.
+ *  RIGHT of the track, left-aligned, unless they collide there (below); spans on outer sub-tracks
+ *  (k ≥ 1, stacked leftward from the rule) always label to the LEFT, right-aligned, ending a label
+ *  gap short of the band's leftmost bar. Each side sweeps on its own. Exactly two lanes draw as lane
+ *  columns (layoutLaneColumns); any other `lanes` value is ignored here — one track, every event
+ *  drawn.
  *
- *  Width budget, left to right: [tick column] → [left text column + gap, only when some span is on
- *  k ≥ 1; otherwise a V_EDGE pad] → span band → rule → marker half-width + gap → right text column.
- *  Each side's FLOOR is its widest date unit (dates wrap only between words or after an en dash),
- *  on the left capped at V_SIDE_SHARE (40%) of the width; its NEED is its widest unwrapped line
- *  capped at 40%, but never below its floor. Allocated in this priority:
+ *  Swapping left before connectors (E1), in this order:
+ *   A. Lay out with no swaps (`layoutSingleTrack(inp, null)`: main-track labels right, outer spans
+ *      left). If no main-track label is displaced — pushed more than V_DISPLACED below its item by
+ *      the right-hand sweep — A is the result, unchanged.
+ *   B. Otherwise lay out again with the labels A displaced as swap candidates. They size the left
+ *      column (with any outer-sub-track spans), before placement, because its width sets every
+ *      block's wrapping and height: the column's floor and need below are taken over the outer spans
+ *      and the candidates, so it is min(40% of the width, their widest unwrapped line), never below
+ *      their widest date unit. Sized to the candidates rather than to every main-track label, so one
+ *      long title elsewhere does not reserve 40% of the width (and narrow every right-hand label) for
+ *      a column that may hold one short one. Placement is then one date-order pass over every label
+ *      (placeSwapping): an outer span goes left; a main-track label goes right unless the right-hand
+ *      sweep would displace it and it may go left — its every date unit and title/description word
+ *      fits the left column, so a swap never splits a word — and the left-hand sweep would displace
+ *      it less. So a label free on the left at its own date goes there, right-aligned, with no leader;
+ *      one free on neither side takes the side with the smaller push, ties right, and an elbow leader
+ *      from that side. Outer spans and swapped labels share the left sweep, so either can push the
+ *      other. Any main-track label may swap in B, not only a candidate, if it fits.
+ *   C. If B swapped nothing (its narrower right column moved every collision away, or no candidate
+ *      fits the left column), A is the result: a left column exists only when some label uses it.
+ *
+ *  Width budget (each attempt), left to right: [tick column] → [left text column + gap, only when
+ *  some span is on k ≥ 1 or, in B, always; otherwise a V_EDGE pad] → span band → rule → marker
+ *  half-width + gap → right text column. Each side's FLOOR is its widest date unit (dates wrap only
+ *  between words or after an en dash), on the left capped at V_SIDE_SHARE (40%) of the width; its
+ *  NEED is its widest unwrapped line capped at 40%, but never below its floor. The right side is
+ *  every main-track label (any may stay right); the left side is the outer spans, plus B's
+ *  candidates. Allocated in this priority:
  *   1. The tick column is drawn if it fits beside the left floor, the band at its floors (bars
  *      V_MIN_BAR, gaps V_MIN_TRACK_GAP), the right floor and the fixed gaps; otherwise it is omitted
  *      (not squeezed), and the x-axis title with it (amendment A8).
@@ -659,14 +728,25 @@ function vLeader(
  *      extent — tick column, band and V_EDGE, hugging the left edge. Inset it for balance: the rule
  *      moves to `max(natural, vTrackInsetShare of the width)`, capped so the right column never
  *      drops below its date-word floor (and the rule never moves left of the natural extent). A
- *      left column overrides this — the rule stays at its step-3 position.
+ *      left column overrides this — the rule stays at its step-3 position (so B never insets).
  *  A left date unit wider than 40% is split by hardBreakDate, so the left column never pushes the
  *  track off the frame; a right one is split to whatever the right column gets.
- *  With nothing on the left the track sits at its natural or inset position (step 6) and the right
- *  column gets the rest of the width. The axis length is chosen so the taller side's whole stack
- *  fits, which keeps pushes local. */
+ *  The axis length is chosen so the taller side's whole stack fits — outer spans at the left width,
+ *  every main-track label at the right width, as if none swapped — which keeps pushes local. */
 function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   if (inp.lanes?.length === 2) return layoutLaneColumns(inp, inp.lanes);
+  const a = layoutSingleTrack(inp, null);
+  if (!a.displacedMain.size) return a.layout;
+  const b = layoutSingleTrack(inp, a.displacedMain);
+  return b.swapped ? b.layout : a.layout;
+}
+
+/** One single-track vertical attempt (see layoutVertical): `candidates` null is attempt A (no
+ *  swaps), else attempt B with those main-track ids sizing the left column. Returns the layout, the
+ *  main-track labels it displaced on the right, and whether any main-track label went left. */
+function layoutSingleTrack(
+  inp: TimelineLayoutInput, candidates: Set<number> | null,
+): { layout: TimelineLayout; displacedMain: Set<number>; swapped: boolean } {
   const G = TL_GEOM;
   const W = inp.width;
   const events = [...inp.events].sort(byTime);
@@ -675,7 +755,9 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
   const kOf = (e: LayoutEvent): number => sub.get(e.id) ?? 0;
   const left = events.filter((e) => kOf(e) > 0);
   const right = events.filter((e) => kOf(e) === 0);
-  const hasLeft = left.length > 0;
+  // The labels that size the left column: outer spans, and in attempt B the swap candidates.
+  const leftSizing = candidates ? events.filter((e) => kOf(e) > 0 || candidates.has(e.id)) : left;
+  const hasLeft = leftSizing.length > 0;
   // Sub-tracks stack leftward from the rule, bar width `w` at pitch `w + g`; `bandOf` is the rule
   // to the outermost bar's left edge.
   const bandOf = (w: number, g: number): number => (nSub ? w / 2 + (nSub - 1) * (w + g) : 0);
@@ -697,7 +779,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     ]));
     return { need: Math.max(word, Math.min(share, nat)), word };
   };
-  const leftNeed = needOf(left, true);
+  const leftNeed = needOf(leftSizing, true);
   const rightNeeds = needOf(right, false);
   const rightNeed = rightNeeds.need;
   const rightOf = (w: number): number => Math.max(G.dotR, nSub ? w / 2 : 0) + G.vLabelGap;
@@ -752,7 +834,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const blocks = new Map(events.map((e) => [e.id, vBlock(e, kOf(e) > 0 ? leftW : colR)]));
     const stackOf = (evs: LayoutEvent[]): number => vStack(evs.map((e) => blocks.get(e.id) as TextBlock));
     const L = Math.max(G.minVerticalHeight - 2 * G.vPad - tail, stackOf(left), stackOf(right));
-    return { tickW, ruleX, barW, gap, band, leftCol, rightCol, blocks, L };
+    return { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L };
   };
 
   // Tick text depends only on the domain and the count, not the range, so the ticks are chosen
@@ -768,19 +850,42 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const fmt = tickFmt;
     if (ticks.length) tickNeed = Math.max(...ticks.map((d) => estimateLabelWidth(fmt(d), TBL.size.axis))) + V_TICK_GAP;
   }
-  const { tickW, ruleX, barW, gap, band, leftCol, rightCol, blocks, L } = geometry(tickNeed);
+  const { tickW, ruleX, barW, gap, band, leftW, leftCol, rightCol, blocks, L } = geometry(tickNeed);
   if (!tickW) ticks = []; // the column did not fit: omitted, not squeezed
   const { pos, scale } = positioner(events, inp.spacing, G.vPad, G.vPad + L);
 
-  const itemsOf = (evs: LayoutEvent[]) => evs.map((e) => ({ id: e.id, y: pos(e.start), block: blocks.get(e.id) as TextBlock }));
-  const placed = new Map([...placeColumn(leftCol, itemsOf(left)), ...placeColumn(rightCol, itemsOf(right))].map((p) => [p.id, p]));
-  const bottom = Math.max(0, ...[...placed.values()].map((p) => p.box.y1));
+  let placedList: VPlaced[];
+  let onLeft: Set<number>;
+  if (!candidates) {
+    const itemsOf = (evs: LayoutEvent[]) => evs.map((e) => ({ id: e.id, y: pos(e.start), block: blocks.get(e.id) as TextBlock }));
+    placedList = [...placeColumn(leftCol, itemsOf(left)), ...placeColumn(rightCol, itemsOf(right))];
+    onLeft = new Set(left.map((e) => e.id));
+  } else {
+    // A main-track label may go left only if nothing in it would split: every date unit and every
+    // title/description word fits the left column.
+    const fitsLeft = (e: LayoutEvent): boolean => {
+      const words = (role: LineRole, s: string | null): number[] => (s ? s.split(/\s+/).filter(Boolean).map((x) => textW(role, x)) : []);
+      const units = [...dateUnits(e.dateText).map((u) => textW("date", u)), ...words("title", e.title), ...words("description", e.description)];
+      return Math.max(0, ...units) <= leftW + V_EPS;
+    };
+    const res = placeSwapping(leftCol, rightCol, events.map((e) => {
+      const block = blocks.get(e.id) as TextBlock;
+      if (kOf(e) > 0) return { id: e.id, y: pos(e.start), right: null, left: block };
+      return { id: e.id, y: pos(e.start), right: block, left: fitsLeft(e) ? vBlock(e, leftW) : null };
+    }));
+    placedList = res.placed;
+    onLeft = res.onLeft;
+  }
+  const placed = new Map(placedList.map((p) => [p.id, p]));
+  const bottom = Math.max(0, ...placedList.map((p) => p.box.y1));
   const height = Math.ceil(Math.max(G.vPad + L + tail + G.vPad, bottom + G.vPad));
 
   const out: TimelineLayout = {
     orientation: "vertical", width: W, height, fits: true, order: events.map((e) => e.id),
     rules: [], markers: [], spans: [], labels: [], stems: [], ticks: [], laneLabels: [],
   };
+  const displacedMain = new Set<number>();
+  let swapped = false;
   const barX = (k: number): number => ruleX - barW / 2 - k * (barW + gap);
   for (const e of events) {
     const y = pos(e.start);
@@ -795,14 +900,23 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
       out.markers.push({ id: e.id, category: e.category, cx: ruleX, cy: y, projected: e.projected });
     }
     const p = placed.get(e.id) as VPlaced;
+    const isLeft = onLeft.has(e.id);
+    if (k === 0 && isLeft) swapped = true;
+    if (k === 0 && !isLeft && p.displaced) displacedMain.add(e.id);
     out.labels.push({ id: e.id, category: e.category, box: p.box, lines: p.lines });
     if (!p.displaced) continue;
-    // Left labels (k ≥ 1) sit beyond the band; right labels have only the marker (or the
-    // sub-track-0 bar's half, never wider than it) between them and the rule.
-    const points =
-      k > 0
-        ? vLeader(-1, ruleX, band, barX(k), y, p.mid, leftCol.x1 + 4)
-        : vLeader(1, ruleX, G.dotR, null, y, p.mid, rightCol.x0 - 4);
+    // Left labels sit beyond the band. An outer-sub-track span's leader leaves its own bar's left
+    // edge; a swapped main-track item's leaves beside the marker, but no further out than the first
+    // outer bar's inner edge, so it never starts inside that bar (as in lane columns). Right labels
+    // have only the marker (or the sub-track-0 bar's half, never wider than it) between them and
+    // the rule.
+    const points = !isLeft
+      ? vLeader(1, ruleX, G.dotR, null, y, p.mid, rightCol.x0 - 4)
+      : vLeader(
+          -1, ruleX, band,
+          k > 0 ? barX(k) : nSub > 1 ? ruleX - Math.max(G.dotR, Math.min(G.dotR + 2, barW / 2 + gap)) : null,
+          y, p.mid, leftCol.x1 + 4,
+        );
     out.stems.push({ id: e.id, category: e.category, points });
   }
 
@@ -811,7 +925,7 @@ function layoutVertical(inp: TimelineLayoutInput): TimelineLayout {
     const fmt = tickFmt;
     out.ticks = ticks.map((t) => ({ x: 0, y: scale(t) + 4, text: fmt(t), anchor: "start" as const }));
   }
-  return out;
+  return { layout: out, displacedMain, swapped };
 }
 
 /** Lane columns: rule-to-rule distance between the two tracks. */

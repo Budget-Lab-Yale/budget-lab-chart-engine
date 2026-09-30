@@ -39,6 +39,15 @@ const FIG7 = () => [
   ev("2057", "That cohort turns 27"),
   ev("2095", "That cohort turns 65"),
 ];
+// FIG7's titles at dates spread far enough apart that no two labels collide on a vertical track, so
+// a single-track vertical layout of it never swaps a label left (E1): the no-left-column budget and
+// the Ruling 29 inset apply. (FIG7 itself swaps 2030 and 2057 left.)
+const SPREAD = () => [
+  ev("2026", "Policy begins"),
+  ev("2050", "First cohort born under fully phased-in policy"),
+  ev("2075", "Annual projection ends"),
+  ev("2100", "That cohort turns 65"),
+];
 
 describe("horizontal layout", () => {
   it("places markers proportionally to elapsed time", () => {
@@ -533,11 +542,12 @@ describe("vertical layout", () => {
   const spanOf = (l: TimelineLayout, id: number) => l.spans.find((s) => s.id === id)!;
 
   it("runs oldest at top, one rule, each label beside its item: bold date above the title, right of the rule", () => {
-    const l = v(FIG7());
+    // No two labels collide here, so none swaps left (E1; see the swap tests below).
+    const l = v(SPREAD());
     const ys = l.order.map((id) => l.markers.find((m) => m.id === id)!.cy);
     expect([...ys].sort((a, b) => a - b)).toEqual(ys);
     expect(l.rules).toHaveLength(1);
-    expect(l.labels).toHaveLength(5);
+    expect(l.labels).toHaveLength(4);
     for (const lab of l.labels) {
       // One block per event: its date line(s) first, then the title, all left-aligned at the box's
       // left edge, which sits right of the rule and clear of the marker.
@@ -559,14 +569,25 @@ describe("vertical layout", () => {
     const dense = Array.from({ length: 30 }, (_, i) => ev(`2026-01-${String(i + 1).padStart(2, "0")}`, `Event ${i} with a title that wraps onto a second line`));
     const l = v([...dense, ev("2030", "far, with a title long enough to wrap onto a second line")]);
     expect(l.height).toBeGreaterThan(400);
-    const boxes = l.labels.map((x) => x.box);
-    for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.y0).toBeGreaterThanOrEqual(boxes[i - 1]!.y1);
-    for (const b of boxes) expect(b.y1).toBeLessThanOrEqual(l.height);
+    // The cluster fills both sides (E1: a label pushed on the right tries the left), each side
+    // stacking in date order with no two boxes overlapping.
+    const rule = l.rules[0]!.x1;
+    for (const left of [true, false]) {
+      const boxes = l.labels.map((x) => x.box).filter((b) => (b.x1 < rule) === left);
+      expect(boxes.length).toBeGreaterThan(5);
+      for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.y0).toBeGreaterThanOrEqual(boxes[i - 1]!.y1);
+    }
+    for (let i = 0; i < l.labels.length; i++) {
+      for (let j = i + 1; j < l.labels.length; j++) expect(overlaps(l.labels[i]!.box, l.labels[j]!.box)).toBe(false);
+    }
+    for (const b of l.labels.map((x) => x.box)) expect(b.y1).toBeLessThanOrEqual(l.height);
   });
 
   it("draws an elbow leader only for a displaced label", () => {
-    const b = ev("2026-01-02", "b, pushed down by a");
-    const l = v([ev("2026", "a"), b, ev("2090", "far")]);
+    // a takes the right at its date and a's neighbour the left (E1), so b, free on neither side, is
+    // pushed down below a with a leader.
+    const b = ev("2026-01-03", "b, pushed down by a");
+    const l = v([ev("2026", "a"), ev("2026-01-02", "a2"), b, ev("2090", "far")]);
     expect(l.stems.map((s) => s.id)).toEqual([b.id]);
     const pts = l.stems[0]!.points;
     expect(pts).toHaveLength(3);
@@ -629,14 +650,14 @@ describe("vertical layout", () => {
     // Wraps at every width tried, so its widest line fills the right column to within a word.
     const long = Array.from({ length: 40 }, () => "word").join(" ");
     for (const width of [280, 375, 900]) {
-      const plain = v([...FIG7(), ev("2060", long)], { width });
+      const plain = v([...SPREAD(), ev("2130", long)], { width });
       expect(ruleX(plain)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
       expect(Math.max(...plain.labels.map((x) => x.box.x1))).toBeGreaterThan(width - 40);
       // Spans on the main rule only (sub-track 0) do not open a left column either.
       const s0 = v([ev("2020", "a", { endStr: "2025" }), ev("2026", "b", { endStr: "2030" }), ev("2040", "c")], { width });
       expect(ruleX(s0)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
       // With the tick column drawn, it still sits left of the (now inset) rule.
-      const axis = v(FIG7(), { width, axis: true });
+      const axis = v(SPREAD(), { width, axis: true });
       expect(axis.ticks.length).toBeGreaterThanOrEqual(2);
       expect(ruleX(axis)).toBeGreaterThan(tickRight(axis));
       expect(ruleX(axis)).toBeCloseTo(width * TL_GEOM.vTrackInsetShare, 9);
@@ -763,6 +784,228 @@ describe("vertical layout", () => {
   });
 });
 
+describe("vertical single track: a colliding label swaps left before any connector (E1)", () => {
+  const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
+    layoutTimeline(base(events, { orientation: "vertical", width: 360, ...o }));
+  const ruleX = (l: TimelineLayout): number => l.rules[0]!.x1;
+  const onLeft = (l: TimelineLayout, id: number): boolean => labelOf(l, id).box.x1 < ruleX(l);
+  const itemY = (l: TimelineLayout, id: number): number => l.markers.find((m) => m.id === id)?.cy ?? l.spans.find((s) => s.id === id)!.y;
+  // A label at its own date: its first (date) line is centred on its item.
+  const atOwnDate = (l: TimelineLayout, id: number) =>
+    expect(labelOf(l, id).box.y0 + LINE_STYLE.date.lineH / 2).toBeCloseTo(itemY(l, id), 6);
+  const rightAligned = (l: TimelineLayout, id: number) => {
+    const lab = labelOf(l, id);
+    expect(lab.lines[0]!.role).toBe("date"); // date above the title
+    expect(lab.lines.every((ln) => ln.anchor === "end" && ln.x === lab.box.x1)).toBe(true);
+  };
+  const bold = (s: string) => estimateLabelWidth(s, LINE_STYLE.date.size) * 1.08;
+  const extent = (ln: { x: number; text: string; role: "date" | "title" | "description"; anchor: string }): [number, number] => {
+    const w = estimateLabelWidth(ln.text, LINE_STYLE[ln.role].size) * (ln.role === "date" ? 1.08 : 1);
+    return ln.anchor === "end" ? [ln.x - w, ln.x] : [ln.x, ln.x + w];
+  };
+
+  it("puts the second of two close events LEFT of the track at its own date, right-aligned, with no connector", () => {
+    const a = ev("2026", "a");
+    const b = ev("2026-01-02", "b, which would collide on the right");
+    const far = ev("2090", "far");
+    const l = v([a, b, far]);
+    expect(l.stems).toEqual([]);
+    expect([a, b, far].map((e) => onLeft(l, e.id))).toEqual([false, true, false]);
+    for (const e of [a, b, far]) atOwnDate(l, e.id);
+    rightAligned(l, b.id);
+    // The box ends a label gap short of the marker (the band, with no spans), inside the frame.
+    const box = labelOf(l, b.id).box;
+    expect(ruleX(l) - TL_GEOM.dotR - box.x1).toBeCloseTo(TL_GEOM.vLabelGap, 9);
+    expect(box.x0).toBeGreaterThanOrEqual(0);
+    // With a left column, the Ruling 29 inset no longer applies: the rule sits right after it.
+    expect(ruleX(l)).toBeCloseTo(box.x1 + TL_GEOM.vLabelGap + TL_GEOM.dotR, 9);
+  });
+
+  it("three close events: right, left, then a connector for the third on the side it is pushed less", () => {
+    const a = ev("2026", "a");
+    const b = ev("2026-01-02", "b");
+    const c = ev("2026-01-03", "c");
+    const far = ev("2090", "far");
+    const l = v([a, b, c, far]);
+    expect([a, b, c].map((e) => onLeft(l, e.id))).toEqual([false, true, false]);
+    atOwnDate(l, a.id);
+    atOwnDate(l, b.id);
+    // a and b are the same height and b sits a day lower, so c is pushed less on the right, below a,
+    // and its leader leaves beside the marker on the right.
+    expect(l.stems.map((s) => s.id)).toEqual([c.id]);
+    expect(labelOf(l, c.id).box.y0).toBeCloseTo(labelOf(l, a.id).box.y1 + TL_GEOM.vLabelGap, 9);
+    const pts = l.stems[0]!.points;
+    expect(pts[0]).toEqual([ruleX(l) + TL_GEOM.dotR + 2, itemY(l, c.id)]);
+    expect(pts.at(-1)![0]).toBeLessThan(labelOf(l, c.id).box.x0);
+    // When a's label is the taller one, c is pushed less on the left: it goes there, below b, with
+    // an elbow leader from the left of the rule into its first line's right end.
+    const aTall = ev("2026", "a, whose title is long enough to wrap onto several lines in the right-hand column");
+    const b2 = ev("2026-01-02", "b");
+    const c2 = ev("2026-01-03", "c");
+    const t = v([aTall, b2, c2, ev("2090", "far")]);
+    expect([aTall, b2, c2].map((e) => onLeft(t, e.id))).toEqual([false, true, true]);
+    expect(t.stems.map((s) => s.id)).toEqual([c2.id]);
+    rightAligned(t, c2.id);
+    const lab = labelOf(t, c2.id);
+    expect(lab.box.y0).toBeCloseTo(labelOf(t, b2.id).box.y1 + TL_GEOM.vLabelGap, 9);
+    const lp = t.stems[0]!.points;
+    // No spans: it leaves 2px off the marker, which is also the leg, so the elbow has three points.
+    expect(lp).toHaveLength(3);
+    const leg = ruleX(t) - TL_GEOM.dotR - 2;
+    expect(lp[0]).toEqual([leg, itemY(t, c2.id)]);
+    expect(lp[1]).toEqual([leg, lab.box.y0 + LINE_STYLE.date.lineH / 2]);
+    expect(lp[2]![1]).toBe(lp[1]![1]);
+    expect(lp[2]![0]).toBeGreaterThan(lab.box.x1);
+    expect(lp[2]![0]).toBeLessThan(leg);
+  });
+
+  it("leaves a layout with no collision byte-identical to the parent commit (attempt A)", () => {
+    // Captured at 17022b0, before swapping existed: spread-out points with the axis drawn, no left
+    // column, the Ruling 29 inset (56.25 = 15% of 375) in force.
+    const events = [
+      ev("2026", "Policy begins", { id: 0 }), ev("2050", "First cohort born under fully phased-in policy", { id: 1 }),
+      ev("2075", "Annual projection ends", { id: 2 }), ev("2100", "That cohort turns 65", { id: 3 }),
+    ];
+    expect(JSON.stringify(v(events, { width: 375, axis: true }))).toBe(
+      '{"orientation":"vertical","width":375,"height":423,"fits":true,"order":[0,1,2,3],"rules":[{"x1":56.25,"y1":8,"x2":56.25,"y2":415}],"markers":[{"id":0,"category":"","cx":56.25,"cy":8,"projected":false},{"id":1,"category":"","cx":56.25,"cy":132.54284445759953,"projected":false},{"id":2,"category":"","cx":56.25,"cy":262.2714222287998,"projected":false},{"id":3,"category":"","cx":56.25,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":70.75,"y0":0,"x1":156.55,"y1":31},"lines":[{"role":"date","text":"2026","x":70.75,"y":13,"anchor":"start"},{"role":"title","text":"Policy begins","x":70.75,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":70.75,"y0":124.54284445759953,"x1":374.35,"y1":155.54284445759953},"lines":[{"role":"date","text":"2050","x":70.75,"y":137.54284445759953,"anchor":"start"},{"role":"title","text":"First cohort born under fully phased-in policy","x":70.75,"y":152.54284445759953,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":70.75,"y0":254.2714222287998,"x1":215.95000000000002,"y1":285.2714222287998},"lines":[{"role":"date","text":"2075","x":70.75,"y":267.2714222287998,"anchor":"start"},{"role":"title","text":"Annual projection ends","x":70.75,"y":282.2714222287998,"anchor":"start"}]},{"id":3,"category":"","box":{"x0":70.75,"y0":384,"x1":202.75,"y1":415},"lines":[{"role":"date","text":"2100","x":70.75,"y":397,"anchor":"start"},{"role":"title","text":"That cohort turns 65","x":70.75,"y":412,"anchor":"start"}]}],"stems":[],"ticks":[{"x":0,"y":84.64288885600118,"text":"2040","anchor":"start"},{"x":0,"y":188.42859257066746,"text":"2060","anchor":"start"},{"x":0,"y":292.2142962853337,"text":"2080","anchor":"start"},{"x":0,"y":396,"text":"2100","anchor":"start"}],"laneLabels":[]}',
+    );
+  });
+
+  it("keeps a label right, with a connector, when its date word would not fit the left column (byte-identical to the parent commit)", () => {
+    // b collides with a, but its date is one word wider than 40% of the width: swapping would split
+    // it, so it stays right and is pushed down with a leader, and with nothing swapped the layout is
+    // attempt A's exactly (captured at 17022b0).
+    const word = "X".repeat(24);
+    expect(bold(word)).toBeGreaterThan(0.4 * 360);
+    const events = [ev("2026", "a", { id: 0 }), ev("2026-01-02", "b", { id: 1, dateText: word }), ev("2090", "far", { id: 2 })];
+    const l = v(events);
+    expect(l.stems.map((s) => s.id)).toEqual([1]);
+    expect(onLeft(l, 1)).toBe(false);
+    expect(JSON.stringify(l)).toBe(
+      '{"orientation":"vertical","width":360,"height":423,"fits":true,"order":[0,1,2],"rules":[{"x1":54,"y1":8,"x2":54,"y2":415}],"markers":[{"id":0,"category":"","cx":54,"cy":8,"projected":false},{"id":1,"category":"","cx":54,"cy":8.016427104722792,"projected":false},{"id":2,"category":"","cx":54,"cy":392,"projected":false}],"spans":[],"labels":[{"id":0,"category":"","box":{"x0":68.5,"y0":0,"x1":99.388,"y1":31},"lines":[{"role":"date","text":"2026","x":68.5,"y":13,"anchor":"start"},{"role":"title","text":"a","x":68.5,"y":28,"anchor":"start"}]},{"id":1,"category":"","box":{"x0":68.5,"y0":41,"x1":253.82800000000003,"y1":72},"lines":[{"role":"date","text":"XXXXXXXXXXXXXXXXXXXXXXXX","x":68.5,"y":54,"anchor":"start"},{"role":"title","text":"b","x":68.5,"y":69,"anchor":"start"}]},{"id":2,"category":"","box":{"x0":68.5,"y0":384,"x1":99.388,"y1":415},"lines":[{"role":"date","text":"2090","x":68.5,"y":397,"anchor":"start"},{"role":"title","text":"far","x":68.5,"y":412,"anchor":"start"}]}],"stems":[{"id":1,"category":"","points":[[60.5,8.016427104722792],[60.5,49],[64.5,49]]}],"ticks":[],"laneLabels":[]}',
+    );
+  });
+
+  it("sizes the left column to min(40% of the width, the widest need of the labels a no-swap layout displaced)", () => {
+    // b's own need (its title, unwrapped) is under 40%: the column is exactly that wide.
+    const a = ev("2026", "a, whose title is long enough to wrap onto two lines in a right column");
+    const b = ev("2026-01-02", "b short");
+    const l = v([a, b, ev("2090", "far")]);
+    const need = Math.max(bold("2026"), estimateLabelWidth("b short", LINE_STYLE.title.size));
+    expect(need).toBeLessThan(0.4 * 360);
+    expect(labelOf(l, b.id).box.x0).toBeCloseTo(0, 9);
+    expect(labelOf(l, b.id).box.x1).toBeCloseTo(need, 9);
+    // a is not a candidate (a no-swap layout leaves it at its date), so its long title does not widen
+    // the column; the right column gets the rest.
+    expect(labelOf(l, a.id).box.x0).toBeCloseTo(need + TL_GEOM.vLabelGap + 2 * TL_GEOM.dotR + TL_GEOM.vLabelGap, 9);
+    // A candidate whose title is wider than 40% caps the column there, and wraps in it.
+    const b2 = ev("2026-01-02", "b, whose title is far too long for forty percent of this width");
+    const c = v([ev("2026", "a"), b2, ev("2090", "far")]);
+    expect(onLeft(c, b2.id)).toBe(true);
+    expect(labelOf(c, b2.id).box.x1).toBeCloseTo(0.4 * 360, 9);
+    expect(labelOf(c, b2.id).lines.filter((ln) => ln.role === "title").length).toBeGreaterThan(1);
+    expect(ruleX(c)).toBeCloseTo(0.4 * 360 + TL_GEOM.vLabelGap + TL_GEOM.dotR, 9);
+  });
+
+  it("ends a swapped label a label gap short of an outer-sub-track band, sharing the left sweep with outer spans", () => {
+    // s0 holds sub-track 0 and s1 sub-track 1. q sits on s0's start date, so on the right it would be
+    // pushed below s0's label: it swaps left instead, where nothing is yet.
+    const s0 = ev("2010", "s0", { endStr: "2030" });
+    const q = ev("2010-01-02", "q");
+    const s1 = ev("2025", "s1", { endStr: "2035" });
+    const l = v([s0, q, s1, ev("2090", "far")]);
+    expect(onLeft(l, q.id)).toBe(true);
+    atOwnDate(l, q.id);
+    rightAligned(l, q.id);
+    const leftmostBar = Math.min(...l.spans.map((s) => s.x));
+    expect(leftmostBar - labelOf(l, q.id).box.x1).toBeCloseTo(TL_GEOM.vLabelGap, 9);
+    expect(l.stems).toEqual([]);
+    // A swapped label and an outer span push each other in the one left sweep: p swaps left at 2025
+    // (the right is taken by r), and s1, starting two days later on sub-track 1, is pushed below it
+    // and joined by a leader from its own bar's left edge.
+    const r = ev("2024-12-30", "r");
+    const p = ev("2025-01-01", "p");
+    const s1b = ev("2025-01-03", "s1b", { endStr: "2035" });
+    const m = v([s0, r, p, s1b, ev("2090", "far")]);
+    expect(onLeft(m, p.id)).toBe(true);
+    expect(onLeft(m, s1b.id)).toBe(true);
+    atOwnDate(m, p.id);
+    expect(labelOf(m, s1b.id).box.y0).toBeCloseTo(labelOf(m, p.id).box.y1 + TL_GEOM.vLabelGap, 9);
+    const bar = m.spans.find((s) => s.id === s1b.id)!;
+    expect(m.stems.map((s) => s.id)).toEqual([s1b.id]);
+    expect(m.stems[0]!.points[0]).toEqual([bar.x, bar.y]);
+  });
+
+  it("leads a swapped item across the outer bars from their inner edge, never from inside one", () => {
+    // s0/s1 put a band of two sub-tracks left of the rule. a, b and c share one date on the rule: b
+    // swaps left, and c, taller-pushed on the right, goes left below b with a leader. It leaves at the
+    // first outer bar's inner edge (as in lane columns), crosses to a leg 2px outside the band, and
+    // enters c's first line from its right.
+    const s0 = ev("2020", "s0", { endStr: "2040" });
+    const s1 = ev("2020-01-01", "s1", { endStr: "2040" });
+    const a = ev("2030", "a, whose title is long enough to wrap onto several lines in the right-hand column");
+    const b = ev("2030-01-02", "b");
+    const c = ev("2030-01-03", "c");
+    const l = v([s0, s1, a, b, c, ev("2090", "far")]);
+    expect([a, b, c].map((e) => onLeft(l, e.id))).toEqual([false, true, true]);
+    const st = l.stems.find((s) => s.id === c.id)!;
+    const bars = l.spans.map((s) => s.x).sort((x, y) => x - y);
+    const outerBar = l.spans.find((s) => s.x === bars[0])!;
+    expect(st.points[0]![0]).toBeCloseTo(outerBar.x + outerBar.w, 9); // sub-track 1's inner edge
+    expect(st.points[1]![0]).toBeCloseTo(bars[0]! - 2, 9);
+    expect(st.points.at(-1)![0]).toBeGreaterThan(labelOf(l, c.id).box.x1);
+    expect(st.points.at(-1)![0]).toBeLessThan(bars[0]!);
+  });
+
+  it("keeps every box in the frame, no two boxes overlapping and every leader on its label's side, across 280-420", () => {
+    const withDesc = () => FIG7().map((e) => ({ ...e, description: "A description long enough to wrap onto several lines in a narrow column" }));
+    const dense = () => Array.from({ length: 12 }, (_, i) => ev(`2026-01-${String(i + 1).padStart(2, "0")}`, `Event ${i} with a title that wraps`));
+    const spans = () => [
+      ev("2017-12-22", "TCJA individual provisions", { endStr: "2025-12-31", dateText: "Dec 22, 2017 – Dec 31, 2025" }),
+      ev("2021-03-11", "Expanded child tax credit", { endStr: "2021-12-31", dateText: "Mar 11, 2021 – Dec 31, 2021" }),
+      ev("2022-08-16", "IRA clean-energy credits", { ongoing: true, dateText: "Aug 16, 2022 –" }),
+      ev("2025-07-04", "OBBBA enacted", { dateText: "Jul 4, 2025" }),
+      ev("2026-01-01", "Phase-in period", { endStr: "2030-12-31", dateText: "Jan 1, 2026 – Dec 31, 2030" }),
+      ev("2034-01-01", "Trust fund depletion", { dateText: "Jan 1, 2034" }),
+    ];
+    let swappedFig7 = 0;
+    for (let width = 280; width <= 420; width += 4) {
+      for (const make of [FIG7, withDesc, dense, spans]) {
+        for (const axis of [false, true]) {
+          const events = make();
+          const l = v(events, { width, axis });
+          expect(allFinite(l)).toBe(true);
+          expect(l.height).toBeGreaterThanOrEqual(400);
+          for (const lab of l.labels) {
+            expect(lab.box.x0).toBeGreaterThanOrEqual(-1e-6);
+            expect(lab.box.x1).toBeLessThanOrEqual(width + 1e-6);
+            expect(lab.box.y1).toBeLessThanOrEqual(l.height);
+            for (const ln of lab.lines) {
+              const [x0, x1] = extent(ln);
+              expect(x0).toBeGreaterThanOrEqual(lab.box.x0 - 1e-6);
+              expect(x1).toBeLessThanOrEqual(lab.box.x1 + 1e-6);
+            }
+          }
+          for (let i = 0; i < l.labels.length; i++) {
+            for (let j = i + 1; j < l.labels.length; j++) expect(overlaps(l.labels[i]!.box, l.labels[j]!.box)).toBe(false);
+          }
+          // A leader ends beside its own label, on the label's side of the rule.
+          for (const s of l.stems) {
+            const end = s.points.at(-1)![0];
+            const box = labelOf(l, s.id).box;
+            if (onLeft(l, s.id)) expect(end).toBeGreaterThan(box.x1);
+            else expect(end).toBeLessThan(box.x0);
+            expect(Math.sign(end - ruleX(l))).toBe(onLeft(l, s.id) ? -1 : 1);
+          }
+          if (make === FIG7 && l.labels.some((lab) => onLeft(l, lab.id))) swappedFig7++;
+        }
+      }
+    }
+    // The sweep really exercises swapping: FIG7's near pairs (2026/2030, 2055/2057) swap at every width.
+    expect(swappedFig7).toBe(2 * 36);
+  });
+});
+
 describe("vertical layout at narrow widths (side columns)", () => {
   const v = (events: LayoutEvent[], o: Partial<TimelineLayoutInput> = {}) =>
     layoutTimeline(base(events, { orientation: "vertical", ...o }));
@@ -845,7 +1088,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
 
   it("omits the vertical tick column only when it does not fit", () => {
     for (const width of [W, 360]) {
-      const l = v(FIG7(), { width, axis: true });
+      const l = v(SPREAD(), { width, axis: true });
       expect(l.ticks.length).toBeGreaterThanOrEqual(2);
       const tickRight = Math.max(...l.ticks.map((t) => t.x + estimateLabelWidth(t.text, TBL.size.axis)));
       expect(Math.min(...l.labels.flatMap((x) => x.lines.map((ln) => extent(ln)[0])))).toBeGreaterThan(tickRight);
@@ -949,12 +1192,12 @@ describe("vertical layout at narrow widths (side columns)", () => {
     // Nothing on the left: an edge pad, the marker, the rule — but Ruling 29 insets that natural
     // position to 15% of the width for balance (the natural extent here is well under that floor).
     const inset = TL_GEOM.vTrackInsetShare * 360;
-    const plain = v(FIG7(), { width: 360 });
+    const plain = v(SPREAD(), { width: 360 });
     expect(edge + dotR).toBeLessThan(inset); // the natural extent does not itself reach the floor
     expect(plain.rules[0]!.x1).toBeCloseTo(inset, 9);
     for (const lab of plain.labels) expect(lab.box.x0).toBeCloseTo(inset + rightOfRule, 9);
     // The tick column goes first, sized to its widest tick plus its gap; the inset still applies.
-    const axis = v(FIG7(), { width: 360, axis: true });
+    const axis = v(SPREAD(), { width: 360, axis: true });
     const tickW = Math.max(...axis.ticks.map((t) => estimateLabelWidth(t.text, TBL.size.axis))) + 8;
     expect(tickW + edge + dotR).toBeLessThan(inset);
     expect(axis.rules[0]!.x1).toBeCloseTo(inset, 9);
@@ -985,7 +1228,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
   it("insets a single-track vertical timeline's rule to 15% of the width for balance (Ruling 29)", () => {
     // Point-only, no left column: the rule sits at vTrackInsetShare of the width, not hugging the
     // left edge (the natural extent — V_EDGE + a marker radius — is well under that floor at 375).
-    const l = v(FIG7(), { width: 375 });
+    const l = v(SPREAD(), { width: 375 });
     expect(l.labels.some((lab) => lab.box.x0 < 0)).toBe(false); // sanity: nothing on the left
     expect(l.rules[0]!.x1).toBeCloseTo(375 * TL_GEOM.vTrackInsetShare, 9);
   });
@@ -996,7 +1239,7 @@ describe("vertical layout at narrow widths (side columns)", () => {
     // column below the width this word needs, but not so wide that even the natural (uninset)
     // position already fails it.
     const wordDate = "X".repeat(31);
-    const l = v([...FIG7(), ev("2060", "z", { dateText: wordDate })], { width });
+    const l = v([...SPREAD(), ev("2088", "z", { dateText: wordDate })], { width });
     const naturalRuleX = TL_GEOM.dotR + 4; // V_EDGE (4) + a marker radius: no left col, no ticks, no spans
     const fullInset = width * TL_GEOM.vTrackInsetShare;
     const wordFloor = estimateLabelWidth(wordDate, LINE_STYLE.date.size) * 1.08; // bold factor
