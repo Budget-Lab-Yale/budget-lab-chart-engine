@@ -99,7 +99,7 @@ describe("timelineDataErrors", () => {
     expect(validateChartData(spec, [ok])).toEqual({ valid: true, errors: [] });
   });
   it("still checks series_colors keys against the data", () => {
-    const s = { ...spec, columns: { ...spec.columns, series: "k" }, series_colors: { nope: "navy" } } as ChartSpec;
+    const s = { ...spec, columns: { ...spec.columns, series: "k" }, series_colors: { nope: "blue" } } as ChartSpec;
     expect(validateChartData(s, [{ ...ok, k: "a" }]).valid).toBe(false);
   });
 });

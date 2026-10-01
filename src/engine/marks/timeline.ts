@@ -242,7 +242,7 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
     return n;
   };
   const r2 = (v: number): number => Math.round(v * 100) / 100;
-  const colorOf = (cat: string): string => colors.get(cat) ?? TBL.color.navy;
+  const colorOf = (cat: string): string => colors.get(cat) ?? TBL.color.blue;
   const byId = new Map(events.map((e) => [e.id, e]));
   const halo = {
     "paint-order": LABEL_HALO.paintOrder, stroke: LABEL_HALO.stroke, "stroke-width": LABEL_HALO.strokeWidth,

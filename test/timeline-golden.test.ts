@@ -23,7 +23,7 @@ const base = { chartType: "timeline", title: "t", xAxisType: "temporal", data: "
 
 describe("timeline goldens", () => {
   it("reference image (horizontal, two categories, points)", async () => {
-    const spec = { ...base, columns: { x: "date", series: "kind" }, series_colors: { policy: "navy", cohort: "amber" } } as ChartSpec;
+    const spec = { ...base, columns: { x: "date", series: "kind" }, series_colors: { policy: "blue", cohort: "amber" } } as ChartSpec;
     await expect(renderChart(spec, FIG7, { width: 920 }).svg.outerHTML).toMatchFileSnapshot("./fixtures/timeline-figure7.golden.svg");
   });
   it("spans + lanes + projected + ongoing", async () => {

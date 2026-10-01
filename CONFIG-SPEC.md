@@ -888,7 +888,7 @@ subtitle: "Cohort milestones"
 xAxisType: temporal
 columns: { x: date, series: kind }
 series_order: [policy, cohort]
-series_colors: { policy: navy, cohort: amber }
+series_colors: { policy: blue, cohort: amber }
 series_labels: { policy: Policy, cohort: Cohort milestone }
 data: data.csv
 ```
