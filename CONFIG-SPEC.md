@@ -977,7 +977,7 @@ byte-identical to passing no `hooks` at all.
 | `tickLabel` | one value-axis tick's text | Yes |
 | `valueLabel` | one in-mark value label (stacked segment / net callout, waterfall running total) | Yes |
 | `legendKey` | one legend row's key markup | Yes — **but see `ctx.medium` below** |
-| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | It runs on both, by construction — but see the note below: the two SVGs are not the same size |
+| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | It runs on both, by construction — but see the note below: the two SVGs usually differ in size |
 | `tooltip` | a band tooltip's content — on the few chart types that draw one at default settings; **see the reach table below before relying on it** | **No — screen-only, see below** |
 
 **`tickLabel`, `valueLabel` and `legendKey` are guaranteed identical between the screen and the
@@ -995,8 +995,9 @@ on a timeline, its content's height, as on screen), where the live chart is size
 the SVG handed to the hook usually differs in size between the two paths, and a hook that positions
 or sizes anything off it then lands at different coordinates in the PNG than on screen. The two can
 match — a horizontal timeline with no right-hand legend, drawn live at 920px, hands the hook the
-same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also branch on `ctx.phase` and
-differ on purpose — but the size difference applies even to a hook that does not.) Keep an
+same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also
+branch on `ctx.phase` and differ on purpose — but the size difference applies even to a hook that
+does not.) Keep an
 `afterRender` mutation relative to the SVG's own dimensions if it must survive the trip, and check
 the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates all three:
 that the hook fires once per path and both SVGs carry its mutation, that a chart drawn live at 720px

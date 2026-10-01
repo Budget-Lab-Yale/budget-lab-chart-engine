@@ -264,7 +264,7 @@ describe("hooks export parity — legendKey swatch width / layout regressions (2
 // paths no matter how the hook is written. (A consumer can also branch on `ctx.phase` deliberately —
 // a second, weaker reason.) What IS guaranteed is that the hook runs on both paths, with the phase
 // naming which, and that both SVGs carry its mutation — gated by the suite above.
-describe("afterRender parity has a limit: the two SVGs are not the same size", () => {
+describe("afterRender parity has a limit: the two SVGs usually differ in size", () => {
   const frames: Array<{ phase: string; w: number; h: number }> = [];
   const hooks: RenderHooks = {
     afterRender: (svg, ctx) => {
