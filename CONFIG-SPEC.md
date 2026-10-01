@@ -9,7 +9,7 @@ what differs**.
 Two figure types, one file each:
 
 - **`chart.yaml`** — a `ChartSpec`: line, area, bar, stacked-bar, scatter, dot-plot, waterfall,
-  histogram, dumbbell, and timeline charts.
+  histogram, dumbbell, timeline, and treemap charts.
 - **`table.yaml`** — a `TableSpec`: a formatted, interactive data table.
 
 Validate with `tbl-chart validate <file>` (schema + data cross-reference). Consuming repos
@@ -24,7 +24,7 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 | field | type | notes |
 |---|---|---|
-| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram` \| `dumbbell` \| `timeline`. |
+| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram` \| `dumbbell` \| `timeline` \| `treemap`. |
 | `title` | string | Card title above the chart. Rendered verbatim. |
 | `xAxisType` | enum | `numeric` \| `temporal` \| `quarterly` \| `categorical`. Determines how the x column is parsed (see [CSV format](#csv-format)). |
 | `data` | string \| object | Usually just `data.csv` (see [Data](#data)). |
@@ -46,9 +46,11 @@ histogram bins a continuous axis — it has no categorical or quarterly form); `
 `xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`);
 `waterfall` requires `xAxisType: categorical` **and** is vertical only — `orientation: horizontal`
 is a validation error there (the running cumulative reads down the value axis); `timeline` requires
-`xAxisType: temporal` and has no value axis — see [Timeline options](#timeline-options).
+`xAxisType: temporal` and has no value axis — see [Timeline options](#timeline-options); `treemap`
+requires `xAxisType: categorical` and has no axes at all — see [Treemap options](#treemap-options).
 [`overlays`](#overlay-lines) additionally requires a non-categorical x-axis and a **vertical**
-chart, which together leave it unavailable on `bar` and `stacked`; a `timeline` rejects it outright.
+chart, which together leave it unavailable on `bar` and `stacked`; a `timeline` or a `treemap`
+rejects it outright.
 
 ### Column mapping
 
@@ -58,10 +60,10 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 
 | field | type | notes |
 |---|---|---|
-| `columns.x` | string | Column holding the x value. Default `"time"`. |
+| `columns.x` | string | Column holding the x value. Default `"time"`. On a treemap, the tile's name, shown as written. |
 | `columns.category` | string | Dumbbell only: the categorical-axis column — a synonym for `columns.x` (wins when both are set). |
-| `columns.value` | string | Column holding the numeric y value. Default `"value"`. |
-| `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. |
+| `columns.value` | string | Column holding the numeric y value. Default `"value"`. On a treemap, the tile's size: a number ≥ 0 in every row. |
+| `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. On a treemap, the tile's group (optional, one level). |
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
 | `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
@@ -76,12 +78,12 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 
 | field | type | notes |
 |---|---|---|
-| `subtitle` | string | Below the title (conventionally naming the units). **Display text only** — it does not affect number formatting; use `value_prefix`/`value_suffix` for that. |
+| `subtitle` | string | Below the title (conventionally naming the units). **Display text only** — it does not affect number formatting; use `value_prefix`/`value_suffix` for that (`value_format` on a treemap). |
 | `source` | string | Source line below the chart. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. A URL longer than 2048 characters is not a link either — the parser stops looking there, which is what keeps a malformed line from being expensive to parse. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
 | `note` | string | Note line below the chart, above the source. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. A URL longer than 2048 characters is not a link either — the parser stops looking there, which is what keeps a malformed line from being expensive to parse. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
 | `x_axis_title` | string | Caption below the x-axis. |
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
-| `tooltip_decimals` | integer | Decimal places for every hover **value**, independent of the axis ticks — the tooltip card where one is drawn, and the coordinated cursor's value pills where those replace it, so a multi-pane figure honours it too. Default 2. |
+| `tooltip_decimals` | integer | Decimal places for every hover **value**, independent of the axis ticks — the tooltip card where one is drawn, and the coordinated cursor's value pills where those replace it, so a multi-pane figure honours it too. Default 2 — except on a treemap, where it sets the hover card's Value row and defaults to `value_format.decimals`, else 0. |
 | `tooltip_series_name` | boolean | **`scatter` only** (validation rejects it elsewhere): set `false` to drop the **series token** from the hover card's header, leaving the shape and `columns.point_label` tokens — so `Observed · 2004` reads `2004`. Use it where the series exists to colour the marks and `point_label` already says which observation the reader is on. Rejected on other chart types because their cards use the series name as a ROW label against a value: suppressing it there would leave a list of unlabelled numbers, which is a different thing entirely. Pairs with `series_legend` but is independent of it — either surface can name the series without the other. Default true. |
 | `tooltip_x_label` / `tooltip_y_label` | string | **`scatter` only** (validation rejects them elsewhere): the row labels for the x and y value rows in the hover card, defaulting to `x_axis_title` / `y_axis_title` (and, absent those, the literal `"x"` / `"Value"`). Use them when the axis has room for a full title and the card does not — the card is read repeatedly in a narrow floating box, so a long axis title wraps onto two or three lines there and the card grows taller than the region it is describing. (Before 1.14.0 it did not wrap: the line ran out through the card's right border and the value was clipped, which is what these fields were introduced to work around.) The axis title itself is untouched. Hover-only, like every tooltip field, so absent from a PNG export. Rejected on other chart types because their cards label rows by SERIES, not by axis. |
 | `tooltip_x_format` | string | d3 `timeFormat` pattern for the tooltip's **x** value. `xAxisType: temporal` or `quarterly` only — rejected on `numeric`/`categorical`. Default (absent): `"%b %Y"` on temporal, `YYYYQ#` on quarterly, matching the axis ticks — except that an **annual** temporal series (every x cell on 1 January, the natural spelling being a bare `YYYY`) defaults to `"%Y"`, because the year alone identifies the point and the axis prints it bare for a year-cadence span. That test is on the DATA, not the tick cadence: a monthly series across eighty years also gets decade ticks, and there the month is the only thing telling adjacent points apart. Set it when the data is finer than the ticks: on a **daily** series every point in a month otherwise shares one tooltip label, so hovering cannot tell you which day you are on. `"%b %-d, %Y"` → `Jul 23, 2026`. **Faceted figures too:** a multi-pane figure's coordinated cursor replaces each pane's card, and its x echo is drawn with this pattern on one line, on the hovered pane. It is drawn there even where the pane has no x-axis tick to annotate — a temporal axis ticks on whole months, so a **daily** multi-pane line draws none, and the echo is anchored just below the plot instead. Where there ARE tick rows the echo sits on them, and since your format can be wider than the tick it lands on, the tick labels its pill covers are hidden for as long as it shows and restored when the cursor leaves — ticks the pill does not reach stay put, so the axis keeps its context. Absent the field that echo keeps its axis-matching form instead: `%b` over `%Y`, one line per tick row, and nothing at all on a sub-month span, since there is no tick row to mirror. `test/hover-claims-defaults.test.ts` gates all four cases at default settings. |
@@ -90,8 +92,8 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 
 | field | type | notes |
 |---|---|---|
-| `value_prefix` | string | Text placed **before** every rendered value — axis ticks, value labels, tooltips. Concatenated literally, so include any space you want (`"$"` vs `"USD "`). On a negative value it sits **after** the minus sign: `-$5`. |
-| `value_suffix` | string | Text placed **after** every rendered value. Concatenated literally, so include any leading space you want (`" pp"`, `" billion"`); `"%"` normally wants none. |
+| `value_prefix` | string | Text placed **before** every rendered value — axis ticks, value labels, tooltips. Concatenated literally, so include any space you want (`"$"` vs `"USD "`). On a negative value it sits **after** the minus sign: `-$5`. A validation error on a treemap, which formats values with `value_format` instead. |
+| `value_suffix` | string | Text placed **after** every rendered value. Concatenated literally, so include any leading space you want (`" pp"`, `" billion"`); `"%"` normally wants none. A validation error on a treemap, as `value_prefix` is. |
 
 ```yaml
 subtitle: Percentage points     # prose; read by nothing
@@ -108,7 +110,8 @@ No spacing is inserted for you, because `%` wants none and ` pp` does — only t
 **Precedence.** A narrower explicitly-set format still wins locally: a per-annotation
 `value_format` (on an `annotations.xAxis`/`yAxis`/`points` marker) formats that annotation's
 `{value}`, and a dumbbell's `gap_annotation.format` — else its chart-level `value_format` — formats
-the gap label. Everything else uses `value_prefix`/`value_suffix`.
+the gap label. On a treemap, `value_format` formats every value (see [Treemap options](#treemap-options)).
+Everything else uses `value_prefix`/`value_suffix`.
 
 > **Changed in 1.8.0.** Units used to be **guessed from the subtitle** by substring-matching
 > `"percent"`. That put `%` on percentage-*point* charts (a 2 pp change rendered as `2%`) and on any
@@ -157,7 +160,7 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `yAxisPolicy.autoWiden.step` | number | When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
 
 **Truncating the axis below the data.** When `min`/`max` cut into the data, **every chart type**
-with a value axis (all but `timeline`, which rejects `yAxisPolicy`) clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
+with a value axis (all but `timeline` and `treemap`, which reject `yAxisPolicy`) clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
 stops there. Nothing is dropped or clamped, so the shape resumes at the correct x when a series
 re-enters the range — do *not* pre-clip the source data (that either fakes a plateau or reads as
 missing data, and the chart's CSV download would ship the altered values). Value labels, gap
@@ -204,8 +207,8 @@ The series **column** is set via `columns.series`. These options reference the s
 
 | field | type | notes |
 |---|---|---|
-| `series_order` | array | Render order. **Also an inclusion filter** — when set, only listed series render. For stacked charts (bar/area) it is also the bottom→top stack order. |
-| `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). |
+| `series_order` | array | Render order. **Also an inclusion filter** — when set, only listed series render. For stacked charts (bar/area) it is also the bottom→top stack order. **A treemap is the exception:** there it neither filters nor orders the layout — every group draws, largest first — and only sets the groups' hue order and breaks ties between equal group totals (see [Treemap options](#treemap-options)). |
+| `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). On a treemap the key is a group, and the colour picks that group's hue family or, off the hue ramps, fills its tiles as written (see [Treemap options](#treemap-options)). |
 | `series_patterns` | object | `{ <seriesKey>: hatch }` — a **texture** for the series' fill, alongside its color. Filled chart types only (`bar`, `stacked`, `area`, `histogram`, `waterfall`); rejected elsewhere. See [Series textures](#series-textures). |
 | `series_styles` | object | `{ <seriesKey>: { dashed: true } }`. `dashed` is currently the only flag. |
 | `series_labels` | object | `{ <seriesKey>: "Display name" }`. Lets the CSV use short keys while the legend/tooltip show full names. |
@@ -465,7 +468,7 @@ the **y** axis, so a chart whose value axis is x has nowhere to put them: `overl
 `orientation`. Those two are unavailable in *either* orientation, because they also require
 `xAxisType: categorical` and a categorical axis is rejected above — a bar or stacked chart cannot
 carry an overlay. `dumbbell` — horizontal by default — is likewise excluded by its categorical x.
-`timeline` rejects `overlays` in either orientation: it has no value axis to draw them against.
+`timeline` and `treemap` reject `overlays` outright: neither has a value axis to draw them against.
 On `line`, `area` and `scatter`, `orientation` has no effect at all, so it neither changes the chart
 nor the overlay there.
 
@@ -629,13 +632,13 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
 | `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, but the gap never changes **whether** a label is drawn: the ~25px fit threshold is a judgement about a segment's share of the data, applied once to the un-gapped extent, and a rect that cleared it is at worst 13px after the maximum gap — still room for a 10px glyph. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
-| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it. **Four routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top`, at mount and on every resize (a card narrowed below it moves the legend to the top, and one widened past it again moves the legend back to the right column); a `small_multiples` figure has only a top legend slot, in the export as on screen; and a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)). **Otherwise the PNG export follows this field**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. |
-| `series_legend` | boolean | Set `false` to drop the **series rows** from the legend while keeping the rows overlays and annotations opted into with `legend: true`. For a chart whose colour channel does not need naming because the points are identified some other way — a `columns.point_label`, or a single highlighted observation the note explains. Distinct from `legend: false` directly below, which removes the whole box (and, having nowhere to put them, pushes overlay labels back in-frame). Because the box survives, click-to-pin/dim still works for the rows that remain. One caveat, and it is per DIMENSION rather than per legend: colour/annotation rows and shape rows are selected independently, and each dims only on a strict subset of its own dimension. So selecting a row that is the only one left in **its** dimension dims nothing — which `series_legend: false` makes reachable on a dual-encoding point chart, where it strips the colour rows but **not** the shape rows (those follow the top-level `legend` only), leaving a lone overlay row in the colour/annotation dimension beside two live shape rows. The same is already true of a single-series scatter with one keyed overlay. Not chart-type specific. Default true. |
-| `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
-| `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip — which is a real restriction, not a formality: on a chart whose hover is the coordinated cursor or the value pills rather than a card (see `small_multiples.coordinated_cursor` and `barStack.hover`) there is no card to suppress and this switch is a no-op, pills included. Use `chrome.valuePills` for those. Default true. Not bar-specific. The card itself is capped at 320px wide and **wraps** a row label longer than that onto further lines rather than clipping it — including a label with no space or hyphen to break at, which is broken mid-word rather than run out through the border. A row's value is joined to its label by a non-breaking space, so a wrap does not separate them. A long series name, category name, overlay label or (on a `scatter`) axis title therefore makes the card taller, never wider, and never leaves its number outside the card. Wrapping is live-DOM CSS: a PNG export has no card, so nothing about it changes in a download. |
+| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it. **Four routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top`, at mount and on every resize (a card narrowed below it moves the legend to the top, and one widened past it again moves the legend back to the right column); a `small_multiples` figure has only a top legend slot, in the export as on screen; and a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)). **Otherwise the PNG export follows this field**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. A treemap draws no legend and rejects this field, as it does `legend` and `series_legend`. |
+| `series_legend` | boolean | Set `false` to drop the **series rows** from the legend while keeping the rows overlays and annotations opted into with `legend: true`. For a chart whose colour channel does not need naming because the points are identified some other way — a `columns.point_label`, or a single highlighted observation the note explains. Distinct from `legend: false` directly below, which removes the whole box (and, having nowhere to put them, pushes overlay labels back in-frame). Because the box survives, click-to-pin/dim still works for the rows that remain. One caveat, and it is per DIMENSION rather than per legend: colour/annotation rows and shape rows are selected independently, and each dims only on a strict subset of its own dimension. So selecting a row that is the only one left in **its** dimension dims nothing — which `series_legend: false` makes reachable on a dual-encoding point chart, where it strips the colour rows but **not** the shape rows (those follow the top-level `legend` only), leaving a lone overlay row in the colour/annotation dimension beside two live shape rows. The same is already true of a single-series scatter with one keyed overlay. Not chart-type specific, except that a treemap, which draws no legend, rejects it. Default true. |
+| `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend; a treemap has none and rejects the field. |
+| `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed — on a treemap, the hovered tile's outline and the dimming of the other tiles stay. Applies to any chart type that has a tooltip — which is a real restriction, not a formality: on a chart whose hover is the coordinated cursor or the value pills rather than a card (see `small_multiples.coordinated_cursor` and `barStack.hover`) there is no card to suppress and this switch is a no-op, pills included. Use `chrome.valuePills` for those. Default true. Not bar-specific. The card itself is capped at 320px wide and **wraps** a row label longer than that onto further lines rather than clipping it — including a label with no space or hyphen to break at, which is broken mid-word rather than run out through the border. A row's value is joined to its label by a non-breaking space, so a wrap does not separate them. A long series name, category name, overlay label or (on a `scatter`) axis title therefore makes the card taller, never wider, and never leaves its number outside the card. Wrapping is live-DOM CSS: a PNG export has no card, so nothing about it changes in a download. |
 | `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). On a **faceted** figure it also covers the coordinated cursor's per-series pills, on the hovered pane as well as on the echoed panes. Only the pills go: the guide line, the band/bin highlight, the per-series hover dots, the hovered pane's category echo, and hit-testing are untouched. Default true — **except where `valueLabels.show` has painted the numbers into EVERY segment** (a stacked chart that is not diverging, not a small-multiples pane, and with no segment too thin for its label), where the default flips to **off** so the hover does not repeat them. One skipped segment label keeps the default at true for the whole chart, so that segment still gets a number. That is a change of default, not an override: `true` here still wins and shows both, and `false` still suppresses them anywhere. |
 
-`chrome` is deliberately just these two switches. There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
+`chrome` is deliberately just these two switches (a treemap accepts `chrome.tooltip` only). There is no `chrome.netMarker` or `chrome.legend`: each already has an owning field, and adding a second one here would just be a second formula for the same decision — use `barStack.netDisplay: none` for the net marker (see above) and the top-level `legend: false` (directly above) for the legend.
 
 #### Why `bar` and `stacked` refuse a continuous axis
 
@@ -757,7 +760,7 @@ reuses `category_order` (or `x_order`); faceting reuses `columns.facet` + `small
 | `dot_radius` | number | Dot radius in px. Default 5. |
 | `gap_annotation` | boolean \| object | Label the numeric gap between two series on each stem. `true` uses the first two series in order; an object names them: `{ series_a, series_b, format? }`. `format` (else `value_format`) formats the number. Default off. |
 | `value_axis_title` | string | Short caption on the value axis. |
-| `value_format` | object | Number format for values in labels: `{ decimals, prefix, suffix }` (e.g. `{ decimals: 1, suffix: "%" }`). |
+| `value_format` | object | Number format for values in labels: `{ decimals, prefix, suffix }` (e.g. `{ decimals: 1, suffix: "%" }`). A treemap uses the same field differently — thousands grouped, `decimals` defaulting to 0; see [Treemap options](#treemap-options). |
 
 The value axis **fits the data** and does **not** force a zero baseline (a 2%–35% rate view keeps
 its useful range); zero is included only when the dots cross it, and a zero rule is drawn there.
@@ -893,6 +896,118 @@ series_labels: { policy: Policy, cohort: Cohort milestone }
 data: data.csv
 ```
 
+### Treemap options
+
+`chartType: treemap` draws a part-to-whole composition as nested rectangles, one **tile** per CSV
+row (a zero value draws none), its area proportional to its value. It suits many categories of very different sizes, where a
+stacked bar gets crowded. Map the tile's name with `columns.x`, its size with `columns.value`, and
+an optional **group** with `columns.series` (one level of grouping only). It requires
+`xAxisType: categorical` and has no axes and no legend. The `treemap:` block is a validation error on
+every other chart type.
+
+| field | type | notes |
+|---|---|---|
+| `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card, the tile's screen-reader label and, for a tile listed there, the key). |
+| `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's base hue. Distinct from the top-level `shading`, which a treemap rejects. |
+| `treemap.share_decimals` | integer | Decimal places on every share, 0–3. Default 1. |
+| `treemap.tooltip` | array | Extra hover-card rows, in order, after Value and Share. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
+| `value_format` | object | `{decimals, prefix, suffix}` for every value a treemap prints: tile labels with `label_value: value`, the key, the hover card's Value row and each tile's screen-reader label. Thousands are grouped with commas (`$28,452`) and `decimals` defaults to 0. The grouping is a treemap behaviour: a dumbbell's gap label, the other user of this field, prints no separators. `value_prefix` and `value_suffix` are validation errors on a treemap. |
+| `tooltip_decimals` | integer | Decimal places on the hover card's Value row. Default `value_format.decimals`, else 0. |
+
+**Data.** One row per tile. A negative, blank or non-numeric value is a validation error naming the
+row, as is a blank name, a blank group cell on a grouped treemap, the same name twice within one
+group or, with no groups, twice anywhere (the error names both rows), data whose every value is
+zero, and values too large to total. A tile whose value is 0 is not drawn, and `tbl-chart validate`
+warns, naming its row. Keys of `series_order`, `series_colors` and `series_labels` must name groups
+in the data.
+
+**Layout.** Squarified, and deterministic: the same data always draws the same tiles. Tiles are
+sorted by value, the largest first and top-left; equal values keep their CSV order. With groups,
+each group is one block: blocks are sorted by group total, largest first, ties broken by
+`series_order` and then by first appearance, and within a block its tiles are sorted as above.
+A 2px gutter separates tiles and a 4px one separates group blocks. A group's header strip is taken out of its own block,
+so tile areas are exactly proportional within a group and only approximately across groups.
+
+**Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
+rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first
+appearance. Data with no groups is blue. That, and breaking ties between equal group totals, is all
+`series_order` does on a treemap: it does not filter (every group draws) and does not set the layout
+order. `series_colors` sets a group's colour: a hue name or one of its tiers (`green`, `violet-300`)
+picks that hue family, and a colour on none of the hue ramps (a raw hex such as `#5B4B8A`) fills the
+group's strip and every tile in it as written. With `shading: size`, tiles take the hue family's
+tonal tiers by rank, spread evenly from darkest to lightest: `700` → `100` with no groups, `600` →
+`100` with groups (the group's `700` is its header strip). Rank, not value, decides the shade, so a
+few large tiles do not wash every small one out to the same pale tier. The `50` tier is never used.
+Text on a tile or strip is white or navy, whichever contrasts more with its fill. Past seven
+groups the hues repeat, so `tbl-chart validate` warns on more than seven groups with no
+`series_colors` set.
+`series_labels` renames a group in its strip, the key, the hover card and the screen-reader labels.
+
+**Tile labels.** A tile shows its name in bold above its number, centred, at the largest size from
+20px down to 11px at which both fit; the name wraps at spaces, to at most three lines. Where no size
+fits stacked, the name and number are tried on one line. Where that does not fit either, the tile
+is left unlabelled and listed in the key. A label is never truncated or ellipsised, and a tile never
+shows its number without its name.
+
+**Header strips.** With groups, each block opens with a 22px strip in the group's `700` tier (or its
+off-ramp `series_colors` colour, as written): the group's name in bold and its share, or the name
+alone where both do not fit. A group keeps its strip only when its block is at least 44px tall and
+the name fits across it. Otherwise the block has no strip, and the group is named in the key.
+
+**Key.** Under the treemap, 12px muted text wrapped to the chart's width, opening with a bold
+**Not labelled above:**. Groups without a strip come first (`Other spending: 1.1%`), then every
+unlabelled tile in layout order — `Education 2.0%`, or with groups `Medicare (Mandatory) 2.0%` —
+separated by ` · `. An entry breaks across lines only when it is wider than a whole line. The
+number follows `label_value`: the formatted value with `value`, the share otherwise (`none`
+included). There is no key when every tile and group is labelled. The key is drawn the same in the
+live chart and the PNG.
+
+**Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
+280px and narrower, linear in between, and the treemap is never more than 460px tall; the key adds
+its own lines below. On screen it renders at the card's own width (a card narrower than 280px gets a
+280px chart) and is laid out afresh on every resize, so tiles can move into or out of the key. The
+**PNG export** re-renders at the full 920px chart width — there is no legend column — through the
+same layout and labelling, and sizes the image's height to the chart, key included.
+
+**Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
+hover card: the tile's name, prefixed by its group's name with groups (`Mandatory · Medicare`), then
+**Value** (`value_format`, at `tooltip_decimals`), **Share**, and the `treemap.tooltip` rows.
+`chrome.tooltip: false` removes the card; the outline and dimming stay. Like every tooltip, the hover
+is screen-only and absent from the PNG. A treemap's hover does not call `hooks.tooltip` and fires no
+`onHover` / `tbl-hover` (see [Customisation](#customisation)), and it is pointer-only: tiles are not
+keyboard-focusable.
+
+**Accessibility.** The chart's SVG is a `role="group"` labelled with the title. Each tile is a
+`role="img"` whose `aria-label` reads `[Group · ]Name, <share> of total, <value>` — `Housing, 33.4% of
+total, $28,452` — with both numbers whatever `label_value` says, so a tile listed in the key is
+described in full. The drawn tile and strip text is hidden from assistive technology so it is not
+read twice; the key is not.
+
+`tbl-chart validate` passes but warns on zero-value rows (naming them), on more than 30 tiles, when
+more than half the tiles are too small to label at the 920px export width, and on more than seven
+groups with no `series_colors` set.
+
+**Accepted fields.** A treemap accepts only `chartType`, `title`, `subtitle`, `note`, `source`,
+`xAxisType`, `data`, `tags`, `columns` (roles `x`, `value`, `series`), `series_order`,
+`series_colors`, `series_labels`, `value_format`, `tooltip_decimals`, `chrome` (`chrome.tooltip`
+only) and `treemap`. Every other field is a validation error — among them `legend`,
+`legendPosition` and `series_legend` (a treemap draws no legend), `value_prefix` and `value_suffix`
+(use `value_format`), `annotations`, `overlays`, `small_multiples`, the top-level `shading`, every
+axis field and every other chart type's options — as is any other column role.
+
+```yaml
+chartType: treemap
+title: "Federal outlays by category"
+xAxisType: categorical
+columns: { x: category, value: outlays, series: kind }
+series_order: [Mandatory, Discretionary, Net interest]
+value_format: { prefix: "$", suffix: " billion" }
+treemap:
+  tooltip:
+    - { column: change, label: "Change from 2023", format: { decimals: 1, suffix: " pp" } }
+data: data.csv
+```
+
 ### Small multiples
 
 Set `columns.facet` to the pane-splitting column, then tune the grid here.
@@ -994,17 +1109,17 @@ identical output.** The export re-renders into its own frame, chosen without ref
 the chart is drawn at the export's own chart width (920px, less the right-hand legend column where
 there is one, and 280–560px on a vertical `timeline` — see [Timeline options](#timeline-options)) and
 at a height the export computes (on most chart types, what the fixed frame leaves after its chrome;
-on a timeline, its content's height, as on screen), where the live chart is sized to the card. So
+on a timeline or a treemap, its content's height, as on screen), where the live chart is sized to the card. So
 the SVG handed to the hook usually differs in size between the two paths, and a hook that positions
 or sizes anything off it then lands at different coordinates in the PNG than on screen. The two can
-match — a horizontal timeline with no right-hand legend, drawn live at 920px, hands the hook the
-same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also
+match — a horizontal timeline with no right-hand legend, or a treemap, drawn live at 920px, hands the
+hook the same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also
 branch on `ctx.phase` and differ on purpose — but the size difference applies even to a hook that
 does not.) Keep an
 `afterRender` mutation relative to the SVG's own dimensions if it must survive the trip, and check
 the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates all three:
 that the hook fires once per path and both SVGs carry its mutation, that a chart drawn live at 720px
-hands it differently sized SVGs, and that the horizontal timeline above hands it the same size.
+hands it differently sized SVGs, and that the horizontal timeline and the treemap above hand it the same size.
 
 **`hooks.tooltip` is screen-only.** A static PNG export has no hover state, so there is nothing for
 a tooltip's content to be identical *to* — the hook is simply never invoked while building an
@@ -1023,6 +1138,7 @@ content has no card to replace. Where the hook fires, at defaults:
 | `stacked` | **only where the net dot is drawn** — i.e. a stack with a negative value, or an explicit `barStack.hover: "tooltip"`; standalone and faceted alike | an all-positive stack hovers with per-segment value pills, not a card |
 | `bar` (plain or grouped), `waterfall` | **never, in any configuration** | `resolveHoverMode` returns `"pills"` whenever the chart is not a stack, ahead of reading `barStack.hover` at all — these two have no card to hook |
 | temporal/numeric-x `line`, `area`, `histogram`, `scatter` | **never** | their cards are built by `attachCrosshair` / `attachHistogramHover` / `attachPointHover`, which do not call this hook |
+| `treemap` | **never** | its card is built by `attachTreemapHover`, which does not call this hook (a treemap has no small-multiples form, so it is gated standalone only) |
 
 `test/hover-card-reach.test.ts` gates every row of that table by mounting each chart type at
 default settings, standalone and two-pane, and asserting both whether a card appears and whether
@@ -1059,7 +1175,7 @@ no callback wired through JavaScript at mount time.
 
 | event | callback | fires | frequency note |
 |---|---|---|---|
-| Hover | `onHover` | `attachBandCrosshair` only — categorical bar/stacked band crosshairs, standalone and faceted. **Not** wired for line, scatter, histogram, dot-plot, dumbbell, or categorical-line charts; those report nothing, which is not the same as "no hover occurred." | Fires on every `pointermove`, and once more with `null` on pointer-leave. Consumers wanting less than that should debounce/throttle themselves. |
+| Hover | `onHover` | `attachBandCrosshair` only — categorical bar/stacked band crosshairs, standalone and faceted. **Not** wired for line, scatter, histogram, dot-plot, dumbbell, categorical-line, or treemap charts; those report nothing, which is not the same as "no hover occurred." | Fires on every `pointermove`, and once more with `null` on pointer-leave. Consumers wanting less than that should debounce/throttle themselves. |
 | Render | `onRender` | Once per mount, once per width-driven resize, once per title-selector reselect, and once per area-chart click-to-restack. `ctx.phase` is `"mount" \| "resize" \| "reselect" \| "restack"`. A small-multiples figure fires once **per pane**. | **The `"mount"` phase is asynchronous** — it fires one microtask after `mountChart()` returns, so a consumer's `onRender` cannot itself throw back into `mountChart()`'s caller. `"resize"`/`"reselect"`/`"restack"` fire synchronously, inside the redraw that caused them. A mount torn down before that microtask runs never fires it at all. `ctx.svg` is always the svg **on screen** when the callback runs: a re-render that lands inside that microtask gap (a title-selector change made immediately after `mountChart()` returns) fires `"reselect"` first, and the `"mount"` call that follows reports the new svg rather than the superseded one. |
 | Legend select | `onLegendSelect` | Any chart with a legend. Reports the full active/dimmed series set. | Fires on a pin (click), **and also on hover, focus, blur, and the reset button** — issue #30's own gloss for this is "pin/**dim**", so hover-firing is intended, not a bug. A consumer that only cares about pins should debounce or de-duplicate. |
 
@@ -1429,13 +1545,15 @@ scale, so a hex has no scale to pull and is rejected too.
 
 **Charts** use long format. Columns are named freely and mapped via `columns:`; absent that block,
 the engine expects `time`, `series`, `value`. A timeline has no value column: it takes one row per
-event, with `time` and `label` by default — see [Timeline options](#timeline-options).
+event, with `time` and `label` by default — see [Timeline options](#timeline-options). A treemap takes
+one row per tile: its name in `time`, its size in `value` and, optionally, its group in `series` —
+see [Treemap options](#treemap-options).
 
 | role | content |
 |---|---|
 | x (`time`) | x-value. Must parse per `xAxisType`: a number for `numeric`; `YYYY-MM-DD` **or a bare `YYYY`** for `temporal` (a bare year is read as that year's 1 January, and is the right spelling for an annual series — see the note under `annotations.points` row tokens on why an annual series belongs on a temporal axis rather than a numeric one); `YYYYQ#` for `quarterly`; any **non-empty** string for `categorical` (a blank or whitespace-only cell is a validation error, not an unnamed category). |
 | series | Series identifier; each distinct value is a separate line/segment/band. Omit the column for a single-series chart. |
-| value | Numeric y-value. May be empty for missing observations. |
+| value | Numeric y-value. May be empty for missing observations — except on a treemap, where a blank value is a validation error. |
 
 Optional chart columns: confidence-bound columns (if `confidence_bands` references them), the facet
 column (if `columns.facet` is set), the shape column (if `columns.shape` is set), the point-label
@@ -1501,6 +1619,16 @@ chartType: timeline
 title: "Tax law milestones"
 xAxisType: temporal
 columns: { x: start, end: end, label: event }   # end: blank = point, "ongoing" = open-ended
+data: data.csv
+```
+
+**Treemap of shares:**
+
+```yaml
+chartType: treemap
+title: "Share of total annual expenditures"
+xAxisType: categorical
+columns: { x: category, value: amount }   # add series: <column> to group the tiles
 data: data.csv
 ```
 

@@ -577,6 +577,17 @@ describe("card builders outside hooks.tooltip's two call sites", () => {
     expect(m.calls()).toBe(0);
   });
 
+  // A treemap has no small-multiples form (validation rejects `small_multiples`), so standalone only.
+  it("treemap, standalone: card at defaults but hooks.tooltip never fires", () => {
+    const m = mount(
+      spec({ chartType: "treemap", xAxisType: "categorical", columns: { x: "time", value: "value" } }),
+      [{ time: "A", value: "6" }, { time: "B", value: "4" }] as unknown as TidyRow[],
+    );
+    m.svgs[0]!.querySelector("g[role=img]")!.dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10 }));
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBe(0);
+  });
+
   it("histogram, 2-pane: no card at defaults", () => {
     const rows: TidyRow[] = [];
     for (const pane of ["P1", "P2"]) for (let v = 0; v < 16; v++) rows.push({ pane, amount: String(v) } as unknown as TidyRow);

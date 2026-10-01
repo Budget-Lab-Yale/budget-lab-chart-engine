@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
+### Added
+- `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
+  (`columns.x` name, `columns.value` size, optional `columns.series` group). Squarified and
+  deterministic; tiles shaded by size rank in each group's hue; labels sized to fit, with tiles too
+  small to label listed in a key below the chart; a header strip per group where it fits. New
+  `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap,
+  `value_format` groups thousands and `series_order` sets hue order only, without filtering.
+  Hover card on screen; the PNG export re-renders at 920px with the key. `tbl-chart validate` warns
+  on zero rows, more than 30 tiles, mostly unlabelled tiles at the export width, or more than seven
+  groups without `series_colors`. The `treemap:` block is rejected on every other chart type, so no
+  existing spec changes. See CONFIG-SPEC "Treemap options".
+
 ### Fixed
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,
   the chart stayed squeezed beside the old right column with a second legend drawn on top; widened
