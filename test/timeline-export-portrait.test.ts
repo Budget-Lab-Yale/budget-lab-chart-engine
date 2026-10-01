@@ -196,12 +196,14 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     const landscape = buildExportSvg({ ...VSPEC, orientation: "horizontal" } as ChartSpec, POINTS);
     expect(num(landscape, "width")).toBe(W);
     expect(titleLines(svg)).toBeGreaterThan(titleLines(landscape));
-    // Every chrome line starts at the left margin and ends inside the frame's right margin — the
-    // title short of the logo (jsdom measures 8px a character, as wrapText does here).
+    // Every chrome line starts at the left margin and ends inside the frame's right margin, the
+    // title included: it starts below the logo's row (Ruling 50). jsdom measures 8px a character, as
+    // wrapText does here; timeline-export-portrait-chrome.test.ts measures closer to Figtree.
+    const logoBottom = num(logo, "y") + num(logo, "height");
     for (const t of chromeTexts(svg)) {
-      const right = t.getAttribute("font-size") === "22" ? frameW - MARGIN - LOGO_W - 24 : frameW - MARGIN;
       expect(num(t, "x")).toBe(MARGIN);
-      expect(num(t, "x") + 8 * (t.textContent ?? "").length).toBeLessThanOrEqual(right);
+      expect(num(t, "x") + 8 * (t.textContent ?? "").length).toBeLessThanOrEqual(frameW - MARGIN);
+      if (t.getAttribute("font-size") === "22") expect(num(t, "y") - 22).toBeGreaterThanOrEqual(logoBottom);
     }
     // Note and source sit below the chart, the source last.
     const chart = chartOf(svg);
@@ -265,6 +267,27 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     const ys = legend.map((t) => num(t, "y"));
     expect(ys[ys.length - 1]).toBeGreaterThan(ys[ys.length - 2]!);
     expect(new Set(ys).size).toBe(legend.length);
+  });
+
+  it("draws a legendKey hook's row as returned, not wrapped (Ruling 51a)", () => {
+    const rows = [
+      { date: "2026", title: "Policy begins", k: "a" }, { date: "2050", title: "Credits", k: "b" },
+    ] as TidyRow[];
+    const long = "Long ".repeat(40).trim();
+    const spec = { ...VSPEC, columns: { x: "date", label: "title", series: "k" }, series_labels: { a: long, b: "Second" } } as ChartSpec;
+    const labelTexts = (svg: SVGSVGElement) =>
+      [...svg.querySelectorAll("text")].filter((t) => !t.closest(`svg.${TIMELINE_CLASS}`) && /^Long/.test(t.textContent ?? ""));
+    // Precondition: the engine's own legend key wraps this label within the portrait frame.
+    const plain = buildExportSvg(spec, rows);
+    expect(labelTexts(plain).length).toBeGreaterThan(2);
+    // A hook returning the default markup unchanged draws it as one row: the export does not re-wrap
+    // markup it did not draw.
+    const hooked = buildExportSvg(spec, rows, { hooks: { legendKey: (ctx) => ctx.rendered } });
+    const lines = labelTexts(hooked);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.textContent).toBe(long);
+    expect(lines[0]!.closest("g")).not.toBeNull();
+    expect(8 * long.length).toBeGreaterThan(num(hooked, "width"));
   });
 
   it("centres the x-axis title on the portrait frame", () => {

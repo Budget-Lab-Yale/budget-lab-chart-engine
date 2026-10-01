@@ -860,9 +860,12 @@ the image's height to the timeline's content. A horizontal timeline renders at t
 width (744px with a right-hand legend, the full 920px otherwise). A vertical one downloads as a
 portrait image: its labels wrap as they would in a 560px chart, and the image is then trimmed to the
 timeline, 360–640px wide (a 280–560px chart plus margins), with the timeline centred in it. The
-title, subtitle, note and source wrap at their spaces to that width, so a single word wider than the
-frame (a long URL, say) is not broken and runs past it. The legend always sits above the chart,
-whatever `legendPosition` says, its rows and any over-long label wrapped to fit.
+logo takes a row of its own at the top right, and the title starts below it. The title, subtitle,
+note and source wrap at their spaces to the frame's width less its margins, so a single word wider
+than that (a long URL, say) is not broken and runs past it. An `x_axis_title` is centred and wraps to
+the same width, a word wider than it split. The legend always sits above the chart, whatever
+`legendPosition` says, its rows and any over-long label wrapped to fit — except a row a `legendKey`
+hook draws, whose markup is drawn as returned, unwrapped.
 
 `tbl-chart validate` passes but warns when a timeline has more than 20 events, when a horizontal one
 needs more than `max_rows` rows at its export width (the warning names the width), or when

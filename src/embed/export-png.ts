@@ -74,6 +74,7 @@ const PANE_TITLE_H = 18; // per-pane title band height
 const WRAP_LINE_H = 16; // a wrapped legend label's line pitch (the right-hand column's)
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
+const AXIS_TITLE_LINE_H = 16; // a wrapped x-axis title's line pitch (the y-axis title's)
 
 // ---------------------------------------------------------------------------
 // Legend
@@ -392,7 +393,7 @@ export function buildExportSvg(
   const { root, bgRect } = createExportRoot(document, frameW, H);
 
   // --- top chrome: title (+ logo), subtitle ---
-  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW });
+  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow: portrait });
 
   // Legend POSITION, from the same decision the live card makes (engine/legend-layout.ts). The
   // export never consulted it, so a stacked chart with five or more series — or a diverging one —
@@ -640,6 +641,12 @@ export function buildExportSvg(
   // A right-hand legend taller than the plot grows the frame too, for the same reason a
   // horizontal bar chart does: the content genuinely needs the room, and clipping it would
   // silently drop legend rows from the download.
+  // The portrait frame wraps the x-axis title to its inner width, centred (Ruling 51b): one line can
+  // be wider than a 360px frame. Its extra lines are reserved here; every other export keeps one line.
+  const xAxisLines = xAxisTitle && portrait
+    ? wrapToColumn(xAxisTitle, `${W_SEMI} 12px ${FONT}`, frameW - 2 * MARGIN)
+    : [xAxisTitle];
+  if (portrait) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
   const H_eff =
     isFigure || isSingleHorizontalBar || isTimeline || chartTop + contentHeight + bottomH > H
       ? Math.round(chartTop + contentHeight + bottomH)
@@ -656,7 +663,7 @@ export function buildExportSvg(
     // Centred on the PLOT, not the frame: a right-hand legend takes 176px off the right, so the
     // frame's centre is 88px right of the plot's and the title sat visibly off-axis.
     const titleX = rightLegend ? MARGIN + chartW / 2 : frameW / 2;
-    root.appendChild(textEl(titleX, by, xAxisTitle, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" }));
+    by = drawLines(root, xAxisLines, titleX, by, AXIS_TITLE_LINE_H, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" });
   }
   composeBottomChrome(document, root, by, { note, source, width: frameW });
 
