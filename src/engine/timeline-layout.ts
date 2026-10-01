@@ -677,13 +677,13 @@ interface SwapItem { id: number; y: number; right: TextBlock; left: TextBlock | 
  *  V_DISPLACED below its item) and the left is free and would displace it less. Its left top is the
  *  first top, at or below its natural one and a label gap below the labels swapped before it, that
  *  is a label gap clear of every fixed label (Ruling 38: searched past each obstacle rather than
- *  rejected at the first); the left is free there if the item has a left block and, when that top
- *  is displaced, no outer bar is active at its first line's centre (`outerActive`), so a displaced
- *  label never lands beside a bar it does not belong to. So a label free on the left at its own
+ *  rejected at the first); the left is free there if the item has a left block and no outer bar is
+ *  active anywhere beside that block, top to bottom (`outerOver`), so a label never lands beside a
+ *  bar it does not belong to. So a label free on the left at its own
  *  date goes there with no leader, and one free on neither side takes the smaller push, ties to the
  *  right. `onLeft` holds the ids placed left. */
 function placeSwapping(
-  leftCol: VColumn, rightCol: VColumn, items: SwapItem[], fixed: VPlaced[], outerActive: (y: number) => boolean,
+  leftCol: VColumn, rightCol: VColumn, items: SwapItem[], fixed: VPlaced[], outerOver: (y0: number, y1: number) => boolean,
 ): { placed: VPlaced[]; onLeft: Set<number> } {
   const half = LINE_STYLE.date.lineH / 2;
   const gap = TL_GEOM.vLabelGap;
@@ -702,7 +702,7 @@ function placeSwapping(
     const topAfter = (prevBottom: number): number => Math.max(natural, prevBottom + gap, 0);
     const rightTop = topAfter(prevR);
     const leftTop = left ? clearTop(topAfter(prevL), left.h) : Infinity;
-    const leftFree = left !== null && (leftTop - natural <= V_DISPLACED || !outerActive(leftTop + half));
+    const leftFree = left !== null && !outerOver(leftTop, leftTop + left.h);
     const goLeft = leftFree && rightTop - natural > V_DISPLACED && leftTop - natural < rightTop - natural;
     if (goLeft && left) {
       prevL = leftTop + left.h;
@@ -772,11 +772,11 @@ function vLeader(
  *      (Ruling 35: beside that bar it would read as the bar's label, and a leader from it would cross
  *      the bar) — and the left would displace it less. Its left top is the first top at or below its
  *      natural one, a label gap below the labels swapped before it, that is a label gap clear of
- *      every fixed label, searched past each obstacle (Ruling 38); if that top is displaced, no outer
- *      bar may be active at its first line's centre either. So a label free on the left at its own
- *      date goes there, right-aligned, with no leader; one free on neither side takes the side with
- *      the smaller push, ties right, and an elbow leader from that side. Any main-track label may
- *      swap in B, not only a candidate.
+ *      every fixed label, searched past each obstacle (Ruling 38); no outer bar may be active beside
+ *      the block placed there, anywhere from its top to its bottom, either. So a label free on the
+ *      left at its own date goes there, right-aligned, with no leader; one free on neither side takes
+ *      the side with the smaller push, ties right, and an elbow leader from that side. Any main-track
+ *      label may swap in B, not only a candidate.
  *   C. A is the result if B swapped nothing (its narrower right column moved every collision away,
  *      or no label could go left) — a left column exists only when some label uses it — or if B has
  *      more leaders than A (Ruling 34: a swap never costs connectors overall).
@@ -1000,11 +1000,13 @@ function layoutSingleTrack(
       return [y0, e.ongoing ? Infinity : y0 + Math.max(G.minSpanPx, pos(e.end as Date) - y0)] as const;
     });
     const outerActive = (y: number): boolean => outerAt.some(([y0, y1]) => y0 <= y && y <= y1);
+    // Any outer bar active beside a block spanning [top, bottom] (Ruling 35 over the block's height).
+    const outerOver = (top: number, bottom: number): boolean => outerAt.some(([y0, y1]) => y0 <= bottom && top <= y1);
     const mayGoLeft = (e: LayoutEvent, y: number): boolean => widestUnit(e) <= leftW + V_EPS && !outerActive(y);
     const res = placeSwapping(leftCol, rightCol, right.map((e) => {
       const y = pos(e.start);
       return { id: e.id, y, right: blocks.get(e.id) as TextBlock, left: mayGoLeft(e, y) ? vBlock(e, leftW) : null };
-    }), fixed, outerActive);
+    }), fixed, outerOver);
     placedList = [...fixed, ...res.placed];
     onLeft = new Set([...left.map((e) => e.id), ...res.onLeft]);
   }

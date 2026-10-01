@@ -1038,8 +1038,9 @@ describe("vertical single track: a colliding label swaps left before any connect
     expect(onLeft(l, b.id)).toBe(false);
     expect(l.stems.map((s) => s.id)).toEqual([b.id]);
     expect(l.stems[0]!.points[0]![0]).toBeGreaterThan(ruleX(l));
-    // Once s1 has ended, the same pair swaps.
-    const late = v([s0, ev("2021", "s1", { endStr: "2029" }), ev("2030", "a"), ev("2030-01-02", "b2", { id: 999 }), ev("2090", "far")]);
+    // Once s1 has ended above where b's block would start, the same pair swaps (ending in 2029, a few
+    // pixels above b's date, it is still beside b's date line: see the M3 test below).
+    const late = v([s0, ev("2021", "s1", { endStr: "2028" }), ev("2030", "a"), ev("2030-01-02", "b2", { id: 999 }), ev("2090", "far")]);
     expect(onLeft(late, 999)).toBe(true);
     expect(late.stems).toEqual([]);
     // The spans golden's data: the 2026 phase-in (sub-track 0) is pushed on both sides, and the
@@ -1083,6 +1084,30 @@ describe("vertical single track: a colliding label swaps left before any connect
     const s1s = short.spans.find((s) => s.id === 3)!;
     expect(lab.y0 + LINE_STYLE.date.lineH / 2).toBeGreaterThan(s1s.y + s1s.h);
     expect(short.stems.map((s) => s.id)).toEqual([2]);
+  });
+
+  it("does not swap a label left beside an outer bar anywhere over the label's height, not just at its first line (Ruling 35, M3)", () => {
+    // s1 (sub-track 1) ends a few pixels above b's date: not running at b's date, but beside the top
+    // of b's date line were b on the left. b stays right, with its leader; once s1 ends above where
+    // b's block would start, b swaps.
+    const half = LINE_STYLE.date.lineH / 2;
+    const mk = (s1End: string) => v([
+      ev("2020", "s0", { id: 0, endStr: "2040" }), ev("2021", "s1", { id: 1, endStr: s1End }),
+      ev("2030", "a", { id: 2 }), ev("2030-01-02", "b", { id: 3 }), ev("2090", "far", { id: 4 }),
+    ]);
+    const near = mk("2029-07-01");
+    const s1 = near.spans.find((s) => s.id === 1)!;
+    expect(s1.x + s1.w).toBeLessThan(ruleX(near) - TL_GEOM.dotR); // an outer sub-track
+    const end = s1.y + s1.h;
+    expect(end).toBeLessThan(itemY(near, 3)); // not running at b's date...
+    expect(end).toBeGreaterThan(itemY(near, 3) - half); // ...but beside where b's block would start
+    expect(onLeft(near, 3)).toBe(false);
+    expect(near.stems.map((s) => s.id)).toEqual([3]);
+    const clear = mk("2028-01-01");
+    const s1c = clear.spans.find((s) => s.id === 1)!;
+    expect(s1c.y + s1c.h).toBeLessThan(itemY(clear, 3) - half);
+    expect(onLeft(clear, 3)).toBe(true);
+    expect(clear.stems).toEqual([]);
   });
 
   it("does not let a label that can never swap widen the left column (Ruling 36)", () => {
