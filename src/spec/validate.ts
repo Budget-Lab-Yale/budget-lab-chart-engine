@@ -25,6 +25,7 @@ import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
 import { overlayKind, overlayPerSeries } from "./overlays";
 import type { Overlay } from "./types";
 import { timelineDataErrors, timelineColumns } from "./timeline";
+import { treemapDataErrors, treemapColumns } from "./treemap";
 
 export interface ValidationResult {
   valid: boolean;
@@ -743,7 +744,7 @@ export const TIMELINE_REJECTED_FIELDS: readonly string[] = [
   "shape_order", "shape_labels", "shape_legend_title", "confidence_bands", "overlays", "shading",
   "rug", "points", "projected_style", "valueLabels", "barStack", "waterfall", "histogram",
   "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "value_format",
-  "highlightSeries", "chrome", "small_multiples",
+  "highlightSeries", "chrome", "small_multiples", "treemap",
   // Drawn only as a heading in the shape-legend layout, and a timeline has no shape legend.
   "color_legend_title",
 ];
@@ -785,6 +786,55 @@ function timelineSpecErrors(spec: Record<string, unknown>): string[] {
   return errors;
 }
 
+/** Top-level fields a treemap honours. Every CHART_SPEC_SCHEMA property is in exactly one of
+ *  these two lists — test/treemap-spec.test.ts enforces it. Inside `chrome`, only `tooltip`. */
+export const TREEMAP_ALLOWED_FIELDS: readonly string[] = [
+  "chartType", "title", "subtitle", "note", "source", "xAxisType", "data", "tags", "columns",
+  "series_order", "series_colors", "series_labels", "value_format", "tooltip_decimals", "chrome", "treemap",
+];
+
+export const TREEMAP_REJECTED_FIELDS: readonly string[] = [
+  "legend", "legendPosition", "series_legend", "value_prefix", "value_suffix", "annotations", "overlays",
+  "title_selectors", "x_axis_title", "x_axis_ticks", "y_axis_title", "tooltip_series_name",
+  "tooltip_x_format", "tooltip_x_label", "tooltip_y_label", "xAxisPolicy", "yAxisPolicy",
+  "series_patterns", "bar_color", "category_colors", "series_styles", "section_order", "section_labels",
+  "x_order", "category_order", "x_labels", "shape_order", "shape_labels", "color_legend_title",
+  "shape_legend_title", "confidence_bands", "shading", "rug", "points", "projected_field",
+  "projected_style", "orientation", "valueLabels", "barStack", "waterfall", "histogram", "timeline",
+  "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "highlightSeries",
+  "small_multiples",
+];
+
+const TREEMAP_ALLOWED_COLUMNS: readonly string[] = ["x", "value", "series"];
+
+/** Treemap cross-field rules, plus the reverse direction: the `treemap:` block is an error on every
+ *  other chart type. Off a treemap this can only fire on a field that did not exist before it, so
+ *  no existing spec changes validity. */
+function treemapSpecErrors(spec: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  if (spec.chartType !== "treemap") {
+    if (spec.treemap != null) errors.push(`the treemap block is only valid on chartType "treemap"`);
+    return errors;
+  }
+  if (spec.xAxisType !== "categorical") {
+    errors.push(`chartType "treemap" requires xAxisType "categorical" (got ${JSON.stringify(spec.xAxisType)})`);
+  }
+  for (const f of TREEMAP_REJECTED_FIELDS) {
+    if (spec[f] !== undefined) errors.push(`${f} is not supported on chartType "treemap"`);
+  }
+  const cols = (spec.columns ?? {}) as Record<string, unknown>;
+  for (const c of Object.keys(cols)) {
+    if (cols[c] != null && !TREEMAP_ALLOWED_COLUMNS.includes(c)) {
+      errors.push(`columns.${c} is not supported on chartType "treemap"`);
+    }
+  }
+  const chrome = (spec.chrome ?? {}) as Record<string, unknown>;
+  for (const k of Object.keys(chrome)) {
+    if (k !== "tooltip") errors.push(`chrome.${k} is not supported on chartType "treemap"`);
+  }
+  return errors;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -795,6 +845,10 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   // First, so a timeline's rejected fields report as such instead of tripping a chart-type rule
   // further down with a less specific message (e.g. tooltip_x_format's axis check).
+  // The treemap check goes before the timeline's so a treemap carrying a timeline-only column or the
+  // timeline block reports as unsupported on a treemap, not as "only valid on a timeline".
+  const tmErrors = treemapSpecErrors(spec as unknown as Record<string, unknown>);
+  if (tmErrors.length) return { valid: false, errors: tmErrors };
   const tlErrors = timelineSpecErrors(spec as unknown as Record<string, unknown>);
   if (tlErrors.length) return { valid: false, errors: tlErrors };
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
@@ -1035,6 +1089,19 @@ function validateTimelineKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResul
   return { valid: errors.length === 0, errors };
 }
 
+/** series_order / series_colors / series_labels keys must name groups present in the data. */
+function validateTreemapKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
+  const cols = treemapColumns(spec, rows);
+  const seriesSeen = new Set<string>();
+  for (const r of rows) seriesSeen.add(cols.group ? ((r[cols.group] as string) ?? "") : SINGLE_SERIES_KEY);
+  const errors = [
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"),
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"),
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"),
+  ];
+  return { valid: errors.length === 0, errors };
+}
+
 /** Layers 2-3: cross-reference + CSV-format checks over the chart's data rows. Assumes the
  * spec already passed structural validation. */
 export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
@@ -1059,6 +1126,13 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     const tlErrors = timelineDataErrors(spec, rows);
     if (tlErrors.length) return { valid: false, errors: tlErrors };
     return validateTimelineKeys(spec, rows);
+  }
+
+  // Treemap: one row per tile (name / value / optional group); its own row contract.
+  if (spec.chartType === "treemap") {
+    const tmErrors = treemapDataErrors(spec, rows);
+    if (tmErrors.length) return { valid: false, errors: tmErrors };
+    return validateTreemapKeys(spec, rows);
   }
 
   // Required columns resolve from the `columns` role map (defaults x:"time", value:"value",

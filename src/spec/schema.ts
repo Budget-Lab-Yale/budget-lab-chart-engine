@@ -355,7 +355,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell", "timeline"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell", "timeline", "treemap"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -555,6 +555,28 @@ export const CHART_SPEC_SCHEMA = {
         max_rows: { type: "integer", minimum: 1, maximum: 6 },
         auto_vertical: { type: "boolean" },
         vertical_lanes: { type: "string", enum: ["columns", "single"] },
+      },
+    },
+    treemap: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        label_value: { type: "string", enum: ["share", "value", "none"] },
+        shading: { type: "string", enum: ["size", "none"] },
+        share_decimals: { type: "integer", minimum: 0, maximum: 3 },
+        tooltip: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["column"],
+            properties: {
+              column: { type: "string", minLength: 1 },
+              label: { type: "string" },
+              format: VALUE_FORMAT,
+            },
+          },
+        },
       },
     },
     // Dumbbell (connected dot plot). Categorical axis via xAxisType; orientation flips it.

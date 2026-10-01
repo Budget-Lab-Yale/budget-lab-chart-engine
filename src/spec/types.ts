@@ -5,7 +5,7 @@
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
 // is a union so each new type is additive; it now carries ten — see below, and CONFIG-SPEC.md.
 
-export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell" | "timeline";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell" | "timeline" | "treemap";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -31,6 +31,28 @@ export interface TimelineConfig {
    *  (default): exactly two lanes draw as two side-by-side tracks, each named at the top; any other
    *  lane count draws one track. `single`: always one track. */
   vertical_lanes?: "columns" | "single";
+}
+
+/** One extra hover row on a treemap tile: the cell of `column` for that tile's row. */
+export interface TreemapTooltipRow {
+  column: string;
+  /** Row label. Default: the column name. */
+  label?: string;
+  /** Formats a numeric cell. Absent, the cell prints verbatim. */
+  format?: ValueFormat;
+}
+
+/** `chartType: treemap` options. Every field optional; defaults are applied in
+ *  `spec/treemap.ts#resolveTreemapConfig`. */
+export interface TreemapConfig {
+  /** Number printed under a tile's name. Default `share`. */
+  label_value?: "share" | "value" | "none";
+  /** `size` (default): tonal shade follows tile size within its group. `none`: one shade per group. */
+  shading?: "size" | "none";
+  /** Decimals on a share percentage, integer 0-3. Default 1. */
+  share_decimals?: number;
+  /** Extra hover rows, in order. */
+  tooltip?: TreemapTooltipRow[];
 }
 
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
@@ -771,6 +793,9 @@ export interface ChartSpec {
 
   /** `chartType: timeline` options. Rejected on every other chart type. */
   timeline?: TimelineConfig;
+
+  /** `chartType: treemap` options. Rejected on every other chart type. */
+  treemap?: TreemapConfig;
 
   // Dumbbell (connected dot plot). A categorical axis × numeric value axis rendered as per-category
   // dots joined by a connector; `orientation` flips it (horizontal = categories on screen-y). The
