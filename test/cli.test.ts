@@ -323,3 +323,55 @@ describe("runRender with shared assets", () => {
     expect(html).not.toContain("body{}");
   });
 });
+
+// ---------------------------------------------------------------------------
+// validate: treemap warnings
+// ---------------------------------------------------------------------------
+
+describe("runValidate — treemap warnings", () => {
+  function treemapSpec(rowsCsv: string, extraYaml: string[] = []): string {
+    const dir = mkdtempSync(join(tmpdir(), "cli-test-treemap-"));
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, rowsCsv, "utf8");
+    writeFileSync(
+      specPath,
+      ["chartType: treemap", "title: Test", "xAxisType: categorical", "data: data.csv", "columns:", "  x: category", "  value: amount", ...extraYaml].join("\n") + "\n",
+      "utf8",
+    );
+    return specPath;
+  }
+  const csv = (rows: Array<[string, number]>) => "category,amount\n" + rows.map(([c, a]) => `${c},${a}`).join("\n") + "\n";
+  const count = (s: string, needle: string) => s.split(needle).length - 1;
+
+  it("warns once about more than 30 tiles and exits 0", async () => {
+    const specPath = treemapSpec(csv(Array.from({ length: 40 }, (_, i): [string, number] => [`Cat ${i}`, 100 + i])));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(count(result.message, "40 tiles")).toBe(1);
+    expect(result.message).toMatch(/warning: treemap: 40 tiles; consider grouping small categories into "Other"/);
+  });
+
+  it("prints each warning exactly once (no double emission of the data warnings)", async () => {
+    const specPath = treemapSpec(csv([["Big", 100], ["Nothing", 0]]));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(count(result.message, "zero-value row not drawn")).toBe(1);
+  });
+
+  it("warns when most tiles are unlabelled at the 920px export width, naming that width", async () => {
+    const specPath = treemapSpec(csv([["Big", 1_000_000], ...Array.from({ length: 6 }, (_, i): [string, number] => [`Tiny${i}`, 1])]));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/warning: treemap: 6 of 7 tiles are too small to label at 920px wide/);
+  });
+
+  it("prints no warnings for a well-labelled treemap", async () => {
+    const specPath = treemapSpec(csv([["Alpha", 500], ["Beta", 300], ["Gamma", 200]]));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).not.toMatch(/warning:/);
+  });
+});

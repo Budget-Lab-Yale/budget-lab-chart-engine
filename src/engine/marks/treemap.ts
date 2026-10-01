@@ -132,7 +132,7 @@ export function treemapHeight(spec: ChartSpec, rows: TidyRow[], width: number): 
   return build(spec, rows, width).height;
 }
 
-/** Non-fatal warnings at the export width: the data warnings, plus more than half the tiles
+/** Non-fatal warnings at `width` (the export width by default): the data warnings, plus more than half the tiles
  *  unlabelled (they still read in the key). */
 export function treemapWarnings(spec: ChartSpec, rows: TidyRow[], width: number = EXPORT_WIDTH): string[] {
   const out = treemapDataWarnings(spec, rows);
@@ -140,7 +140,7 @@ export function treemapWarnings(spec: ChartSpec, rows: TidyRow[], width: number 
   const unlabelled = tiles.filter((t) => t.label.mode === "none").length;
   if (unlabelled * 2 > tiles.length) {
     out.push(
-      `treemap: ${unlabelled} of ${tiles.length} tiles are too small to label at the ${width}px export width and are listed in the key below the chart; consider grouping small categories into "Other"`,
+      `treemap: ${unlabelled} of ${tiles.length} tiles are too small to label at ${width}px wide and are listed in the key below the chart; consider grouping small categories into "Other"`,
     );
   }
   return out;

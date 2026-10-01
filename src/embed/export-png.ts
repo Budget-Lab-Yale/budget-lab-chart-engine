@@ -9,6 +9,7 @@ import { renderChart, renderFigure } from "../engine/index.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
+import { treemapHeight } from "../engine/marks/treemap.js";
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
@@ -345,6 +346,8 @@ export function buildExportSvg(
   const isSingleHorizontalBar =
     !isFigure && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   const isTimeline = !isFigure && spec.chartType === "timeline";
+  // A treemap has no legend and no portrait frame: always the full inner width, frame height = content.
+  const isTreemap = !isFigure && spec.chartType === "treemap";
 
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
@@ -463,7 +466,10 @@ export function buildExportSvg(
       ? horizontalBarChartHeight(spec, rows)
       : isTimeline
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
-        : Math.max(160, H - chartTop - bottomH);
+        : isTreemap
+          // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
+          ? Math.ceil(treemapHeight(spec, rows, chartW))
+          : Math.max(160, H - chartTop - bottomH);
     // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
     // title, note and source, and then off the frame. Measure it first (same routine that draws
@@ -515,7 +521,8 @@ export function buildExportSvg(
     chartSvg.setAttribute("width", String(chartW));
     // A timeline keeps its own layout height: a right legend taller than it grows `contentHeight`,
     // and stretching the SVG to that would centre the timeline (xMidYMid meet) beside the legend.
-    if (!isTimeline) chartSvg.setAttribute("height", String(contentHeight));
+    // A treemap too: its own height is the layout height, and the frame is sized to its ceiling.
+    if (!isTimeline && !isTreemap) chartSvg.setAttribute("height", String(contentHeight));
     // A timeline's x-axis title follows the ticks of THIS render, at `chartW`: the metadata pass ran
     // at INNER_W, and a vertical timeline can drop its ticks at the narrower right-legend width.
     if (isTimeline) {
@@ -648,7 +655,7 @@ export function buildExportSvg(
     : [xAxisTitle];
   if (portrait) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
   const H_eff =
-    isFigure || isSingleHorizontalBar || isTimeline || chartTop + contentHeight + bottomH > H
+    isFigure || isSingleHorizontalBar || isTimeline || isTreemap || chartTop + contentHeight + bottomH > H
       ? Math.round(chartTop + contentHeight + bottomH)
       : H;
   if (H_eff !== H) {

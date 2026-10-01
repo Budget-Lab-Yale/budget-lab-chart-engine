@@ -282,8 +282,10 @@ describe("treemapWarnings", () => {
   it("warns when more than half the tiles are unlabelled at the 920px export width", () => {
     const rows = rowsOf([["Big", 1_000_000], ...Array.from({ length: 6 }, (_, i): [string, number] => [`Tiny ${i}`, 1])]);
     expect(treemapWarnings(FLAT_SPEC, rows)).toEqual([
-      `treemap: 6 of 7 tiles are too small to label at the 920px export width and are listed in the key below the chart; consider grouping small categories into "Other"`,
+      `treemap: 6 of 7 tiles are too small to label at 920px wide and are listed in the key below the chart; consider grouping small categories into "Other"`,
     ]);
+    // The message names the width it was measured at, not a fixed "export width".
+    expect(treemapWarnings(FLAT_SPEC, rows, 640)[0]).toMatch(/too small to label at 640px wide/);
     // Exactly half unlabelled is not more than half.
     const half = rowsOf([["Big", 1_000_000], ["Big 2", 1_000_000], ["Tiny 0", 1], ["Tiny 1", 1]]);
     expect(treemapWarnings(FLAT_SPEC, half)).toEqual([]);
