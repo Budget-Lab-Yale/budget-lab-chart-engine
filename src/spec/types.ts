@@ -38,7 +38,8 @@ export interface TreemapTooltipRow {
   column: string;
   /** Row label. Default: the column name. */
   label?: string;
-  /** Formats a numeric cell. Absent, the cell prints verbatim. */
+  /** Number format for the cell. Absent, a numeric cell uses the chart's `value_format` and a text
+   *  cell prints verbatim. */
   format?: ValueFormat;
 }
 

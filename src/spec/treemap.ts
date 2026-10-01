@@ -33,11 +33,11 @@ export interface TreemapColumns {
 
 /** Name = `columns.x`, size = `columns.value`, group = `columns.series`. As everywhere else, an
  *  unset `columns.series` resolves to a column literally called "series" when `rows` carries one
- *  (and to flat otherwise); without `rows` the group is null unless authored. */
-export function treemapColumns(spec: ChartSpec, rows?: ReadonlyArray<Record<string, unknown>>): TreemapColumns {
+ *  (flat otherwise). `rows` is required so a spec resolves to one answer, the one validation used. */
+export function treemapColumns(spec: ChartSpec, rows: ReadonlyArray<Record<string, unknown>>): TreemapColumns {
   const authored = spec.columns?.series;
-  const cols = resolveColumns(spec, rows ?? []);
-  const group = authored != null && authored !== "" ? authored : rows && rows.length > 0 ? cols.series : null;
+  const cols = resolveColumns(spec, rows);
+  const group = authored != null && authored !== "" ? authored : rows.length > 0 ? cols.series : null;
   return { name: cols.x, value: cols.value, group };
 }
 
@@ -102,6 +102,10 @@ export function treemapDataErrors(spec: ChartSpec, rows: TidyRow[]): string[] {
     }
     if (name.trim() === "") return;
     const group = cols.group ? String(r[cols.group] ?? "") : null;
+    if (group !== null && group.trim() === "") {
+      errors.push(`row ${n}: columns.series (${JSON.stringify(cols.group)}) is blank`);
+      return;
+    }
     const key = JSON.stringify([group, name]);
     const seen = firstRow.get(key);
     if (seen === undefined) {
@@ -112,6 +116,9 @@ export function treemapDataErrors(spec: ChartSpec, rows: TidyRow[]): string[] {
       errors.push(`row ${n}: duplicate tile ${JSON.stringify(name)} in group ${JSON.stringify(group)} (also row ${seen})`);
     }
   });
+  if (!errors.length && !rows.some((r) => parseSize(r[cols.value]) !== 0)) {
+    errors.push("treemap has no tiles to draw: every value is zero");
+  }
   return errors;
 }
 
@@ -142,9 +149,10 @@ export function treemapDataWarnings(spec: ChartSpec, rows: TidyRow[]): string[] 
  *  `value_format` elsewhere, which defaults to 2 and prints no separators). */
 export function formatTreemapValue(v: number, fmt: ValueFormat | undefined): string {
   const fixed = Math.abs(v).toFixed(fmt?.decimals ?? 0);
+  const sign = v < 0 && Number(fixed) !== 0 ? "-" : "";
   const [int, frac] = fixed.split(".");
   const grouped = int!.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${fmt?.prefix ?? ""}${v < 0 ? "-" : ""}${grouped}${frac !== undefined ? "." + frac : ""}${fmt?.suffix ?? ""}`;
+  return `${sign}${fmt?.prefix ?? ""}${grouped}${frac !== undefined ? "." + frac : ""}${fmt?.suffix ?? ""}`;
 }
 
 /** A 0-1 share as a percentage: 0.334 -> "33.4%". */

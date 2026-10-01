@@ -33,6 +33,22 @@ describe("treemapDataErrors", () => {
     expect(treemapDataErrors(spec(), [row("A", "1"), row("  ", "2")])).toEqual([`row 2: columns.x ("name") is blank`]);
   });
 
+  it.each(["", "   "])("rejects a blank group cell %j on a grouped treemap, naming the row", (blank) => {
+    expect(treemapDataErrors(grouped(), [row("A", "1", "X"), row("B", "2", blank)])).toEqual([
+      `row 2: columns.series ("g") is blank`,
+    ]);
+  });
+
+  it("rejects data with no drawable tile", () => {
+    expect(treemapDataErrors(spec(), [row("A", "0"), row("B", "0")])).toEqual([
+      "treemap has no tiles to draw: every value is zero",
+    ]);
+  });
+
+  it("does not add the no-tiles error when a row is already invalid", () => {
+    expect(treemapDataErrors(spec(), [row("A", "0"), row("B", "x")])).toHaveLength(1);
+  });
+
   it("rejects a duplicate name within a group, naming both rows", () => {
     expect(treemapDataErrors(grouped(), [row("A", "1", "X"), row("B", "1", "X"), row("A", "3", "X")])).toEqual([
       `row 3: duplicate tile "A" in group "X" (also row 1)`,
@@ -129,6 +145,13 @@ describe("formatters", () => {
     expect(formatTreemapValue(1234567, undefined)).toBe("1,234,567");
     expect(formatTreemapValue(999, undefined)).toBe("999");
     expect(formatTreemapValue(1000, { decimals: 2 })).toBe("1,000.00");
+  });
+
+  it("puts the minus before the prefix and never prints a negative zero", () => {
+    expect(formatTreemapValue(-5, { prefix: "$" })).toBe("-$5");
+    expect(formatTreemapValue(-1234.56, { decimals: 1, suffix: " bn" })).toBe("-1,234.6 bn");
+    expect(formatTreemapValue(-0.04, { decimals: 1 })).toBe("0.0");
+    expect(formatTreemapValue(-0, undefined)).toBe("0");
   });
 
   it("formats shares", () => {

@@ -90,9 +90,10 @@ describe("treemap - config and columns", () => {
   });
 
   it("resolves name / value / group, group optional", () => {
-    expect(treemapColumns(TM)).toEqual({ name: "time", value: "value", group: null });
+    const flat = [{ time: "a", value: "1" }];
+    expect(treemapColumns(TM, flat)).toEqual({ name: "time", value: "value", group: null });
     const spec = { ...TM, columns: { x: "n", value: "v", series: "g" } } as ChartSpec;
-    expect(treemapColumns(spec)).toEqual({ name: "n", value: "v", group: "g" });
+    expect(treemapColumns(spec, [{ n: "a", v: "1", g: "x" }])).toEqual({ name: "n", value: "v", group: "g" });
   });
 
   it("picks up a column named series when rows carry one, as other chart types do", () => {
