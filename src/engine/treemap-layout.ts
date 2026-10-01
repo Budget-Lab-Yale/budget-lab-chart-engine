@@ -5,7 +5,7 @@
 import { d3 } from "./vendor";
 import type { TreemapDatum } from "../spec/treemap";
 
-export const TM_GEOM = { tileGutter: 2, groupGutter: 4, stripH: 22, pad: 6,
+export const TM_GEOM = { tileGutter: 2, groupGutter: 4, stripH: 22, pad: 6, stripPad: 6,
   aspectWide: 2.0, aspectNarrow: 0.8, wideAt: 720, narrowAt: 280, maxHeight: 460, minLiveWidth: 280 } as const;
 
 /** Treemap area height for a chart width (spec §6): aspect interpolated, capped. */

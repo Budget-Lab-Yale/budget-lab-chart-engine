@@ -41,6 +41,14 @@ export function tileFill(hueBase: string, rank: number, n: number, grouped: bool
   return scale?.[treemapTier(rank, n, grouped)] ?? hueBase;
 }
 
+/** Header strip fill: the hue family's 700 tier, or the base as-is when it is off every ramp
+ *  (the same rule as tileFill). */
+export function stripFill(hueBase: string): string {
+  const ramp = locateOnRamp(hueBase);
+  if (!ramp) return hueBase;
+  return (tokens.scales as Record<string, Record<string, string>>)[ramp.family]?.["700"] ?? hueBase;
+}
+
 /** WCAG 2 relative luminance of a colour (an unparseable one reads as white). */
 function luminance(color: string): number {
   const c = d3.color(color);
@@ -67,7 +75,7 @@ export function contrastText(fill: string): string {
 
 export type TileLabel =
   | { mode: "stacked"; size: number; numberSize: number; nameLines: string[]; number: string | null }
-  | { mode: "inline"; size: number; text: string }
+  | { mode: "inline"; size: number; text: string; name: string; number: string | null }
   | { mode: "none" };
 
 /** Greedy wrap at spaces to `width` (bold, `size`px). Null if a single word is wider than `width`. */
@@ -91,8 +99,8 @@ function wrapName(name: string, size: number, width: number): string[] | null {
 /** Fit name (+ number unless null) into the tile's inner box (spec §5). Never truncates.
  *  `w`/`h` are the tile's full size; the inner box is 6px in from each edge.
  *  Stacked: the name wrapped at spaces (700, ≤ 3 lines) above the number (500, round(1.4 × s)).
- *  Inline: one line `text` = name + " " + number, measured as drawn — the name at 700, then " " and
- *  the number at 500, both at `size`. */
+ *  Inline: one line `text` = name + " " + number, measured as drawn — `name` at 700, then " " and
+ *  `number` at 500, both at `size`; draw it as those two spans, not as `text` in one weight. */
 export function fitTileLabel(name: string, number: string | null, w: number, h: number): TileLabel {
   const iw = w - 2 * TM_GEOM.pad;
   const ih = h - 2 * TM_GEOM.pad;
@@ -106,10 +114,11 @@ export function fitTileLabel(name: string, number: string | null, w: number, h: 
     if (height > ih) continue;
     return { mode: "stacked", size: s, numberSize: ns, nameLines: lines, number };
   }
+  // Without a number this never fits: any one line that fits at s already fit stacked at s.
   for (const s of TM_NAME_SIZES) {
     if (s * LINE_HEIGHT > ih) continue;
     const width = timelineTextWidth(name, s, 700) + (number !== null ? timelineTextWidth(` ${number}`, s, 500) : 0);
-    if (width <= iw) return { mode: "inline", size: s, text: number !== null ? `${name} ${number}` : name };
+    if (width <= iw) return { mode: "inline", size: s, text: number !== null ? `${name} ${number}` : name, name, number };
   }
   return { mode: "none" };
 }
@@ -119,49 +128,59 @@ export type StripLabel = { mode: "full"; name: string; share: string } | { mode:
 /** Header strip text at 12px (spec §5): name (700) + " " + share (500), else the name alone, else
  *  nothing. Judges width only; whether the block is tall enough for a strip is the caller's call. */
 export function fitStripLabel(name: string, share: string, blockWidth: number): StripLabel {
-  const avail = blockWidth - 2 * TM_GEOM.pad;
+  const avail = blockWidth - 2 * TM_GEOM.stripPad;
   const nameW = timelineTextWidth(name, STRIP_TEXT, 700);
   if (nameW + timelineTextWidth(` ${share}`, STRIP_TEXT, 500) <= avail) return { mode: "full", name, share };
   if (nameW <= avail) return { mode: "name", name };
   return { mode: "none" };
 }
 
-/** Key text entries in order: strip-less groups first ("G: 1.1%"), then unlabelled tiles ("G · Name 2.0%" / "Name 2.0%"). */
+/** Key text entries in order: strip-less groups first ("Other spending: 1.1%"), then unlabelled tiles
+ *  ("Medicare (Mandatory) 2.0%" grouped, "Education 2.0%" flat). */
 export function keyEntries(args: { groups: Array<{ name: string; share: string; strip: boolean }>;
   tiles: Array<{ group: string | null; name: string; number: string; labelled: boolean }> }): string[] {
   return [
     ...args.groups.filter((g) => !g.strip).map((g) => `${g.name}: ${g.share}`),
     ...args.tiles.filter((t) => !t.labelled)
-      .map((t) => (t.group !== null ? `${t.group} · ${t.name} ${t.number}` : `${t.name} ${t.number}`)),
+      .map((t) => (t.group !== null ? `${t.name} (${t.group}) ${t.number}` : `${t.name} ${t.number}`)),
   ];
 }
 
-/** Wrap key entries ("Not labelled above: " + entries joined " · ") into lines of ≤ width at 12px.
- *  Breaks at spaces. Measured as drawn: TM_KEY_PREFIX at 700, everything else at 500. A single word
- *  wider than `width` takes a line of its own and overflows it (no truncation anywhere). */
+/** Wrap key entries into lines of ≤ width at 12px. Line 0 opens with TM_KEY_PREFIX, one atomic unit
+ *  drawn (and measured) at 700; everything else is measured at 500. Whole entries follow, joined by
+ *  " · " while they fit; at a break the separator is dropped, so no line starts or ends with it. Only
+ *  an entry wider than a whole line breaks, at its own spaces, starting on a fresh line. A single word
+ *  (or the prefix) wider than `width` overflows its line: no truncation anywhere. */
 export function wrapKey(entries: string[], width: number): string[] {
   if (entries.length === 0) return [];
-  const text = `${TM_KEY_PREFIX} ${entries.join(" · ")}`;
-  const boldEnd = TM_KEY_PREFIX.length;
-  // A line is a substring of `text` starting at `start`; its bold part is whatever of the prefix it holds.
-  const measure = (line: string, start: number): number => {
-    const b = Math.max(0, Math.min(line.length, boldEnd - start));
-    return timelineTextWidth(line.slice(0, b), KEY_TEXT, 700) + timelineTextWidth(line.slice(b), KEY_TEXT, 500);
-  };
   const lines: string[] = [];
-  let line = "";
-  let start = 0;
-  let pos = 0;
-  for (const word of text.split(" ")) {
-    const next = line ? `${line} ${word}` : word;
-    if (line && measure(next, start) > width) {
-      lines.push(line);
-      line = word;
-      start = pos;
-    } else {
+  const fits = (text: string): boolean => {
+    const bold = lines.length === 0 ? TM_KEY_PREFIX : "";
+    return timelineTextWidth(bold, KEY_TEXT, 700) + timelineTextWidth(text.slice(bold.length), KEY_TEXT, 500) <= width;
+  };
+  let line = TM_KEY_PREFIX;
+  for (const entry of entries) {
+    const next = `${line}${lines.length === 0 && line === TM_KEY_PREFIX ? " " : " · "}${entry}`;
+    if (fits(next)) {
       line = next;
+      continue;
     }
-    pos += word.length + 1;
+    lines.push(line);
+    if (fits(entry)) {
+      line = entry;
+      continue;
+    }
+    // Wider than a whole line: wrap the entry at its own spaces, from this fresh line.
+    line = "";
+    for (const word of entry.split(" ")) {
+      const joined = line ? `${line} ${word}` : word;
+      if (line && !fits(joined)) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = joined;
+      }
+    }
   }
   lines.push(line);
   return lines;

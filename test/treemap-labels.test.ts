@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   TM_NAME_SIZES, TM_KEY_PREFIX, treemapTier, tileFill, contrastText, fitTileLabel, fitStripLabel,
-  keyEntries, wrapKey, type TileLabel,
+  keyEntries, wrapKey, stripFill, type TileLabel,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
 import { timelineTextWidth } from "../src/engine/timeline-text";
@@ -69,10 +69,24 @@ describe("tileFill", () => {
   });
 });
 
+describe("stripFill", () => {
+  const scales = tokens.scales as Record<string, Record<string, string>>;
+  it("is the hue family's 700 tier", () => {
+    expect(stripFill("#0072B2")).toBe(scales.blue!["700"]);
+    expect(stripFill("#E69F00")).toBe(scales.amber!["700"]);
+  });
+  it("is a raw series colour off every ramp, as-is", () => {
+    expect(stripFill("#123456")).toBe("#123456");
+  });
+});
+
 describe("contrastText", () => {
   it("puts white on the darkest blue and navy on the lightest", () => {
     expect(contrastText("#002B61")).toBe(WHITE);
     expect(contrastText("#95DAFF")).toBe(NAVY);
+  });
+  it("puts navy on blue-100, the lightest tier a tile is drawn in", () => {
+    expect(contrastText((tokens.scales as Record<string, Record<string, string>>).blue!["100"]!)).toBe(NAVY);
   });
   it("puts navy on white and white on navy", () => {
     expect(contrastText("#FFFFFF")).toBe(NAVY);
@@ -96,6 +110,8 @@ function assertFits(label: TileLabel, name: string, number: string | null, w: nu
     expect(height).toBeLessThanOrEqual(ih);
   } else if (label.mode === "inline") {
     expect(label.text).toBe(number !== null ? `${name} ${number}` : name);
+    expect(label.name).toBe(name);
+    expect(label.number).toBe(number);
     const width = timelineTextWidth(name, label.size, 700) + (number !== null ? timelineTextWidth(` ${number}`, label.size, 500) : 0);
     expect(width).toBeLessThanOrEqual(iw);
     expect(label.size * 1.2).toBeLessThanOrEqual(ih);
@@ -135,7 +151,7 @@ describe("fitTileLabel", () => {
   });
   it("falls back to one line when stacking is too tall but the line fits", () => {
     const l = fitTileLabel("Food", "13.0%", 140, 32);
-    expect(l.mode).toBe("inline");
+    expect(l).toEqual({ mode: "inline", size: 15, text: "Food 13.0%", name: "Food", number: "13.0%" });
     assertFits(l, "Food", "13.0%", 140, 32);
   });
   it("leaves an unbroken 40-character name in a 120px tile unlabelled", () => {
@@ -174,7 +190,11 @@ describe("fitTileLabel", () => {
 });
 
 describe("fitStripLabel", () => {
-  const avail = (bw: number): number => bw - 2 * pad;
+  const spad = TM_GEOM.stripPad;
+  it("pads the strip text by its own constant, 6px", () => {
+    expect(spad).toBe(6);
+  });
+  const avail = (bw: number): number => bw - 2 * spad;
   const full = (n: string, s: string): number => timelineTextWidth(n, 12, 700) + timelineTextWidth(` ${s}`, 12, 500);
   it("shows name and share when both fit", () => {
     expect(fitStripLabel("Housing", "33.4%", 300)).toEqual({ mode: "full", name: "Housing", share: "33.4%" });
@@ -183,13 +203,13 @@ describe("fitStripLabel", () => {
     const name = "Transportation";
     const nameW = timelineTextWidth(name, 12, 700);
     // Wide enough for the name alone, not for name + share.
-    const bw = Math.ceil(nameW + 2 * pad) + 1;
+    const bw = Math.ceil(nameW + 2 * spad) + 1;
     expect(full(name, "17.0%")).toBeGreaterThan(avail(bw));
     expect(fitStripLabel(name, "17.0%", bw)).toEqual({ mode: "name", name });
-    expect(fitStripLabel(name, "17.0%", Math.floor(nameW + 2 * pad) - 1)).toEqual({ mode: "none" });
+    expect(fitStripLabel(name, "17.0%", Math.floor(nameW + 2 * spad) - 1)).toEqual({ mode: "none" });
   });
-  it("measures exactly at the boundary (name + share at 12px within blockWidth - 2*pad)", () => {
-    const bw = full("Food", "13.0%") + 2 * pad;
+  it("measures exactly at the boundary (name + share at 12px within blockWidth - 2*stripPad)", () => {
+    const bw = full("Food", "13.0%") + 2 * spad;
     expect(fitStripLabel("Food", "13.0%", bw + 1e-9).mode).toBe("full"); // float slack only
     expect(fitStripLabel("Food", "13.0%", bw - 0.01).mode).toBe("name");
   });
@@ -213,8 +233,8 @@ describe("keyEntries", () => {
     expect(out).toEqual([
       "Other spending: 1.1%",
       "Food: 13.0%",
-      "Housing · Utilities 2.0%",
-      "Other spending · Misc 1.1%",
+      "Utilities (Housing) 2.0%",
+      "Misc (Other spending) 1.1%",
     ]);
   });
   it("omits the group prefix on flat data", () => {
@@ -240,8 +260,13 @@ describe("wrapKey", () => {
     const bold = i === 0 && line.startsWith(TM_KEY_PREFIX) ? TM_KEY_PREFIX : "";
     return timelineTextWidth(bold, 12, 700) + timelineTextWidth(line.slice(bold.length), 12, 500);
   };
-  const entries = ["Other spending: 1.1%", "Housing · Utilities 2.0%", "Education 2.0%",
-    "Apparel and services 2.5%", "Entertainment 4.7%", "Personal insurance and pensions 12.0%"];
+  const long = "Personal insurance and pensions (Other spending) 12.0%";
+  const entries = ["Other spending: 1.1%", "Utilities (Housing) 2.0%", "Education 2.0%",
+    "Apparel and services 2.5%", "Entertainment 4.7%", long];
+  /** The entry-level pieces of each line: line 0 without its prefix, split at the separator. */
+  const pieces = (lines: string[]): string[][] => lines.map((l, i) =>
+    (i === 0 ? l.slice(TM_KEY_PREFIX.length).trimStart() : l).split(" · ").filter((s) => s !== ""));
+  const widths = [200, 280, 400, 600, 920];
 
   it("is empty with no entries", () => {
     expect(wrapKey([], 600)).toEqual([]);
@@ -249,18 +274,52 @@ describe("wrapKey", () => {
   it("is one line when it fits", () => {
     expect(wrapKey(["Education 2.0%"], 900)).toEqual(["Not labelled above: Education 2.0%"]);
   });
-  it("wraps at spaces into lines no wider than the width, losing no text", () => {
-    for (const width of [120, 200, 280, 400, 600, 920]) {
+  it("starts line 0 with the whole prefix", () => {
+    for (const width of widths) expect(wrapKey(entries, width)[0]!.startsWith(`${TM_KEY_PREFIX}`)).toBe(true);
+  });
+  it("keeps every line within the width (prefix at 700, the rest at 500)", () => {
+    for (const width of widths) {
       const lines = wrapKey(entries, width);
-      expect(lines.join(" ")).toBe(`${TM_KEY_PREFIX} ${entries.join(" · ")}`);
       lines.forEach((line, i) => expect(lineWidth(line, i)).toBeLessThanOrEqual(width));
       if (width < 600) expect(lines.length).toBeGreaterThan(1);
+    }
+  });
+  it("never starts or ends a line with the separator", () => {
+    for (const width of widths) {
+      for (const line of wrapKey(entries, width)) {
+        expect(line.startsWith("·")).toBe(false);
+        expect(line.trimEnd().endsWith("·")).toBe(false);
+      }
+    }
+  });
+  it("keeps every entry that fits a line whole on one line", () => {
+    for (const width of widths) {
+      const all = pieces(wrapKey(entries, width)).flat();
+      for (const e of entries) if (lineWidth(e, 1) <= width) expect(all).toContain(e);
+    }
+  });
+  it("breaks between entries, dropping the separator at the break", () => {
+    const one = lineWidth(`${TM_KEY_PREFIX} Education 2.0%`, 0);
+    expect(lineWidth(`${TM_KEY_PREFIX} Education 2.0% · Housing 33.4%`, 0)).toBeGreaterThan(one + 0.5);
+    expect(wrapKey(["Education 2.0%", "Housing 33.4%"], one + 0.5))
+      .toEqual(["Not labelled above: Education 2.0%", "Housing 33.4%"]);
+  });
+  it("breaks an entry at its own spaces only when it is wider than a whole line", () => {
+    expect(lineWidth(long, 1)).toBeGreaterThan(200);
+    const lines = wrapKey(entries, 200);
+    expect(pieces(lines).flat()).not.toContain(long);
+    lines.forEach((line, i) => expect(lineWidth(line, i)).toBeLessThanOrEqual(200));
+  });
+  it("loses no text apart from separators dropped at breaks", () => {
+    for (const width of widths) {
+      const lines = wrapKey(entries, width);
+      expect(lines.join(" ").replace(/ · /g, " ")).toBe(`${TM_KEY_PREFIX} ${entries.join(" ")}`);
     }
   });
   it("measures the prefix bold: a width that fits it at 500 but not 700 still wraps", () => {
     const w500 = timelineTextWidth(`${TM_KEY_PREFIX} Education 2.0%`, 12, 500);
     const drawn = lineWidth(`${TM_KEY_PREFIX} Education 2.0%`, 0);
     expect(drawn).toBeGreaterThan(w500);
-    expect(wrapKey(["Education 2.0%"], (w500 + drawn) / 2).length).toBe(2);
+    expect(wrapKey(["Education 2.0%"], (w500 + drawn) / 2)).toEqual([TM_KEY_PREFIX, "Education 2.0%"]);
   });
 });
