@@ -24,6 +24,7 @@ import type { TidyRow } from "../data/index";
 import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
 import { overlayKind, overlayPerSeries } from "./overlays";
 import type { Overlay } from "./types";
+import { timelineDataErrors, timelineColumns } from "./timeline";
 
 export interface ValidationResult {
   valid: boolean;
@@ -725,6 +726,65 @@ function rugBoundOrder(xAxisType: XAxisType, value: string): number {
   return Number(value.slice(0, 4)) * 4 + Number(value[5]); // quarterly: YYYYQ#
 }
 
+/** Top-level fields a timeline honours. Every CHART_SPEC_SCHEMA property is in exactly one of
+ *  these two lists — test/timeline-spec.test.ts enforces it, so a field added to the schema later
+ *  must be classified here rather than silently accepted and ignored on a timeline. */
+export const TIMELINE_ALLOWED_FIELDS: readonly string[] = [
+  "chartType", "columns", "title", "subtitle", "source", "note", "x_axis_title", "xAxisType",
+  "series_order", "series_colors", "series_labels", "projected_field",
+  "orientation", "legendPosition", "legend", "series_legend", "data", "tags", "timeline",
+];
+
+export const TIMELINE_REJECTED_FIELDS: readonly string[] = [
+  "title_selectors", "value_prefix", "value_suffix", "x_axis_ticks", "y_axis_title",
+  "tooltip_decimals", "tooltip_series_name", "tooltip_x_format", "tooltip_x_label", "tooltip_y_label",
+  "xAxisPolicy", "yAxisPolicy", "annotations", "series_patterns", "bar_color", "category_colors",
+  "series_styles", "section_order", "section_labels", "x_order", "category_order", "x_labels",
+  "shape_order", "shape_labels", "shape_legend_title", "confidence_bands", "overlays", "shading",
+  "rug", "points", "projected_style", "valueLabels", "barStack", "waterfall", "histogram",
+  "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "value_format",
+  "highlightSeries", "chrome", "small_multiples",
+  // Drawn only as a heading in the shape-legend layout, and a timeline has no shape legend.
+  "color_legend_title",
+];
+
+const TIMELINE_ONLY_COLUMNS = ["end", "label", "description", "date_label"] as const;
+const TIMELINE_REJECTED_COLUMNS = ["value", "facet", "shape", "point_label", "section", "kind", "x0", "x1", "category"] as const;
+
+/** Timeline cross-field rules, plus the reverse direction: the timeline-only column roles and the
+ *  `timeline:` block are errors on every other chart type. Off a timeline this can only fire on a
+ *  field that did not exist before 1.15.0, so no existing spec changes validity. */
+function timelineSpecErrors(spec: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const cols = (spec.columns ?? {}) as Record<string, unknown>;
+  if (spec.chartType !== "timeline") {
+    for (const c of TIMELINE_ONLY_COLUMNS) {
+      if (cols[c] != null) errors.push(`columns.${c} is only valid on chartType "timeline"`);
+    }
+    if (spec.timeline != null) errors.push(`the timeline block is only valid on chartType "timeline"`);
+    return errors;
+  }
+  if (spec.xAxisType !== "temporal") {
+    errors.push(`chartType "timeline" requires xAxisType "temporal" (got ${JSON.stringify(spec.xAxisType)})`);
+  }
+  for (const f of TIMELINE_REJECTED_FIELDS) {
+    if (spec[f] !== undefined) errors.push(`${f} is not supported on chartType "timeline"`);
+  }
+  for (const c of TIMELINE_REJECTED_COLUMNS) {
+    if (cols[c] != null) errors.push(`columns.${c} is not supported on chartType "timeline"`);
+  }
+  const tl = (spec.timeline ?? {}) as { axis?: boolean; spacing?: string };
+  if (tl.axis === true && tl.spacing === "even") {
+    errors.push(
+      `timeline.axis cannot be used with timeline.spacing "even": ticks would imply proportional gaps between evenly spaced events`,
+    );
+  }
+  if (spec.x_axis_title !== undefined && tl.axis !== true) {
+    errors.push(`x_axis_title on a timeline requires timeline.axis: true (there is no axis to caption)`);
+  }
+  return errors;
+}
+
 /** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
  *  constraint (a cross-field rule outside the schema). */
 export function validateSpec(spec: unknown): ValidationResult {
@@ -733,6 +793,10 @@ export function validateSpec(spec: unknown): ValidationResult {
     const errors = (validateStructural.errors ?? []).map(formatAjvError);
     return { valid: false, errors };
   }
+  // First, so a timeline's rejected fields report as such instead of tripping a chart-type rule
+  // further down with a less specific message (e.g. tooltip_x_format's axis check).
+  const tlErrors = timelineSpecErrors(spec as unknown as Record<string, unknown>);
+  if (tlErrors.length) return { valid: false, errors: tlErrors };
   const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
   if (axisErr) return { valid: false, errors: [axisErr] };
   const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
@@ -940,6 +1004,37 @@ function validateHistogramData(
   return { valid: errors.length === 0, errors };
 }
 
+/** Unknown-key error for one series_* field, in the ONE wording every chart type uses — shared by
+ *  the normal path's series/shape/etc. cross-reference below and by `validateTimelineKeys`, so
+ *  neither can hold a second (drifting) copy of the message. Returns 0 or 1 error, spreadable into
+ *  a caller's `errors` array. */
+function unknownSeriesKeyErrors(
+  seriesSeen: Set<string>,
+  named: string[] | Record<string, unknown> | undefined,
+  source: string,
+): string[] {
+  if (!named) return [];
+  const keys = Array.isArray(named) ? named : Object.keys(named);
+  const unknown = keys.filter((k) => !seriesSeen.has(k));
+  if (!unknown.length) return [];
+  const knownSeries = JSON.stringify([...seriesSeen].sort());
+  return [`${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`];
+}
+
+/** series_order / series_colors / series_labels keys must name categories present in the data —
+ *  see `unknownSeriesKeyErrors`. */
+function validateTimelineKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
+  const cols = timelineColumns(spec, rows);
+  const seriesSeen = new Set<string>();
+  for (const r of rows) seriesSeen.add(cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY);
+  const errors = [
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"),
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"),
+    ...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"),
+  ];
+  return { valid: errors.length === 0, errors };
+}
+
 /** Layers 2-3: cross-reference + CSV-format checks over the chart's data rows. Assumes the
  * spec already passed structural validation. */
 export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
@@ -955,6 +1050,15 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // edge columns instead of a continuous x). Handle it separately, leaving the path below intact.
   if (spec.chartType === "histogram") {
     return validateHistogramData(spec, rows, cols, columns);
+  }
+
+  // Timeline has no value column and its own row contract (start / end / label). Its errors come
+  // from spec/timeline.ts; the key cross-reference below (series_order/series_colors/series_labels
+  // vs data) still applies.
+  if (spec.chartType === "timeline") {
+    const tlErrors = timelineDataErrors(spec, rows);
+    if (tlErrors.length) return { valid: false, errors: tlErrors };
+    return validateTimelineKeys(spec, rows);
   }
 
   // Required columns resolve from the `columns` role map (defaults x:"time", value:"value",
@@ -1117,21 +1221,11 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // Only when the column is absent: with a series column present, "" names nothing and IS a mistake.
   if (!cols.series) seriesSeen.add(SINGLE_SERIES_KEY);
   const knownSeries = JSON.stringify([...seriesSeen].sort());
-  const checkSeries = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
-    if (!named) return;
-    const keys = Array.isArray(named) ? named : Object.keys(named);
-    const unknown = keys.filter((k) => !seriesSeen.has(k));
-    if (unknown.length) {
-      errors.push(
-        `${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`,
-      );
-    }
-  };
-  checkSeries(spec.series_order, "series_order");
-  checkSeries(spec.series_colors, "series_colors");
-  checkSeries(spec.series_patterns, "series_patterns");
-  checkSeries(spec.series_styles, "series_styles");
-  checkSeries(spec.series_labels, "series_labels");
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_patterns, "series_patterns"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_styles, "series_styles"));
+  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"));
 
   // Cross-reference: every config-named shape value must appear in the shape column's data.
   if (cols.shape) {

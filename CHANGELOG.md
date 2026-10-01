@@ -4,6 +4,27 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] - 2026-10-01
+
+### Added
+- `chartType: timeline` — dated point, span and open-ended events along a rule, one CSV row per
+  event (`columns.end`, `columns.label`, `columns.description`, `columns.date_label`); proportional
+  or even spacing; optional lanes and date axis; horizontal or vertical, switching to vertical on
+  screen when narrow or crowded. Date ranges are spaced (`2031 – 2035`, open-ended `2040 –`). A
+  vertical timeline sets each label beside its item, with its bold date above the title; a label
+  that would collide on the right moves to the left of the track when that clears it, and a label
+  still pushed below its date gets a leader. Moving labels left never adds leaders overall, so where
+  it would, the labels on the rule all stay on the right, leaders included, even one whose left side
+  was clear. Its text columns wrap at no more than 360px and hug their labels, and the whole timeline
+  is centred in the chart. Two lanes draw as side-by-side lane columns unless
+  `timeline.vertical_lanes: single`, and three or more share one track. Static (no hover); the PNG
+  export keeps the authored orientation, and a vertical timeline downloads as a portrait image,
+  360–640px wide, with its legend above the chart.
+  `tbl-chart validate` warns on more than 20 events, on label overflow at the export width, or on
+  an explicit `vertical_lanes: columns` with three or more lanes. The `timeline:` block and the new
+  column roles are rejected on every other chart type, so no existing spec changes. See CONFIG-SPEC
+  "Timeline options".
+
 ## [1.14.0] - 2026-09-10
 
 ### Added

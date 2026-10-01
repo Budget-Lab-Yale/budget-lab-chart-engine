@@ -3,11 +3,35 @@
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
-// is a union so each new type is additive; it now carries nine — see below, and CONFIG-SPEC.md.
+// is a union so each new type is additive; it now carries ten — see below, and CONFIG-SPEC.md.
 
-export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell" | "timeline";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
+
+/** `chartType: timeline` options — see CONFIG-SPEC "Timeline options". Every field optional;
+ *  defaults are applied in `spec/timeline.ts#resolveTimelineConfig`. */
+export interface TimelineConfig {
+  /** `proportional` (default): distance is elapsed time. `even`: every distinct date gets one slot. */
+  spacing?: "proportional" | "even";
+  /** One track per category. Horizontal: lanes stacked top to bottom. Vertical: see
+   *  `vertical_lanes`. Default false. */
+  lanes?: boolean;
+  /** Sparse date axis (proportional only). Default false. */
+  axis?: boolean;
+  /** d3 timeFormat pattern for the date label. Default derived from the data. */
+  date_format?: string;
+  /** Label wrap width, px (horizontal). Default 150. */
+  label_width?: number;
+  /** Label rows per side (horizontal) or per lane. Default 2. */
+  max_rows?: number;
+  /** Live only: render vertical when horizontal does not fit. Default true. */
+  auto_vertical?: boolean;
+  /** With `lanes`, how a vertical render (authored or auto-switched) draws them. `columns`
+   *  (default): exactly two lanes draw as two side-by-side tracks, each named at the top; any other
+   *  lane count draws one track. `single`: always one track. */
+  vertical_lanes?: "columns" | "single";
+}
 
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
 export type ColorRef = string;
@@ -445,6 +469,14 @@ export interface ColumnMap {
    *  the histogram treats data as pre-binned (no engine binning) and `value` is the bar height. */
   x0?: string;
   x1?: string;
+  /** Timeline only: span end date (`YYYY`/`YYYY-MM-DD`), blank for a point event, `ongoing` for open-ended. */
+  end?: string;
+  /** Timeline only: event headline. Default `"label"`. */
+  label?: string;
+  /** Timeline only: optional second text line. */
+  description?: string;
+  /** Timeline only: override text for the bold date label. */
+  date_label?: string;
 }
 
 export interface HistogramConfig {
@@ -736,6 +768,9 @@ export interface ChartSpec {
   };
   // Histogram (continuous-x binned bars). Ignored by other chart types.
   histogram?: HistogramConfig;
+
+  /** `chartType: timeline` options. Rejected on every other chart type. */
+  timeline?: TimelineConfig;
 
   // Dumbbell (connected dot plot). A categorical axis × numeric value axis rendered as per-category
   // dots joined by a connector; `orientation` flips it (horizontal = categories on screen-y). The

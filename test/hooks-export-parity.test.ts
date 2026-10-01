@@ -264,7 +264,7 @@ describe("hooks export parity — legendKey swatch width / layout regressions (2
 // paths no matter how the hook is written. (A consumer can also branch on `ctx.phase` deliberately —
 // a second, weaker reason.) What IS guaranteed is that the hook runs on both paths, with the phase
 // naming which, and that both SVGs carry its mutation — gated by the suite above.
-describe("afterRender parity has a limit: the two SVGs are not the same size", () => {
+describe("afterRender parity has a limit: the two SVGs usually differ in size", () => {
   const frames: Array<{ phase: string; w: number; h: number }> = [];
   const hooks: RenderHooks = {
     afterRender: (svg, ctx) => {
@@ -304,5 +304,29 @@ describe("afterRender parity has a limit: the two SVGs are not the same size", (
   it("but the mutation IS present on both — that much is guaranteed", () => {
     expect(liveSvg.querySelectorAll(".hooked-edge").length).toBe(1);
     expect(exportChartSvg2.querySelectorAll(".hooked-edge").length).toBe(1);
+  });
+});
+
+// The other side of that limit: the export frame is chosen without reference to the card, so the
+// sizes only USUALLY differ. A timeline's chart height is its content's on both paths, so a
+// horizontal one whose live chart is the export's 920px is handed an identically sized SVG.
+describe("afterRender on a horizontal timeline at 920px gets the same-sized SVG on both paths", () => {
+  const sizes = (spec: ChartSpec, rows: TidyRow[], width: number) => {
+    const seen: Array<{ phase: string; w: string | null; h: string | null }> = [];
+    const hooks: RenderHooks = {
+      afterRender: (svg, ctx) => { seen.push({ phase: ctx.phase, w: svg.getAttribute("width"), h: svg.getAttribute("height") }); },
+    };
+    renderChart(spec, rows, { width, hooks });
+    buildExportSvg(spec, rows, { hooks });
+    return seen;
+  };
+  const TL = { chartType: "timeline", title: "t", xAxisType: "temporal", data: "d.csv", columns: { x: "date", label: "title" } } as ChartSpec;
+
+  it("horizontal, no right legend, at 920", () => {
+    const rows = [{ date: "2026", title: "Policy begins" }, { date: "2030", title: "Credits" }, { date: "2095", title: "Cohort turns 65" }] as TidyRow[];
+    const seen = sizes(TL, rows, 920);
+    expect(seen.map((s) => s.phase)).toEqual(["live", "export"]);
+    expect(seen[0]!.w).toBe("920");
+    expect(seen[1]).toEqual({ ...seen[0], phase: "export" });
   });
 });

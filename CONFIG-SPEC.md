@@ -9,7 +9,7 @@ what differs**.
 Two figure types, one file each:
 
 - **`chart.yaml`** — a `ChartSpec`: line, area, bar, stacked-bar, scatter, dot-plot, waterfall,
-  histogram, and dumbbell charts.
+  histogram, dumbbell, and timeline charts.
 - **`table.yaml`** — a `TableSpec`: a formatted, interactive data table.
 
 Validate with `tbl-chart validate <file>` (schema + data cross-reference). Consuming repos
@@ -24,7 +24,7 @@ figure-number maps, catalog — which is **not** part of the engine and is docum
 
 | field | type | notes |
 |---|---|---|
-| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram` \| `dumbbell`. |
+| `chartType` | enum | `line` \| `area` \| `bar` \| `stacked` \| `scatter` \| `dotplot` \| `waterfall` \| `histogram` \| `dumbbell` \| `timeline`. |
 | `title` | string | Card title above the chart. Rendered verbatim. |
 | `xAxisType` | enum | `numeric` \| `temporal` \| `quarterly` \| `categorical`. Determines how the x column is parsed (see [CSV format](#csv-format)). |
 | `data` | string \| object | Usually just `data.csv` (see [Data](#data)). |
@@ -45,14 +45,16 @@ or use `chartType: line`. `scatter` requires `xAxisType: numeric`; `dotplot` req
 histogram bins a continuous axis — it has no categorical or quarterly form); `dumbbell` requires
 `xAxisType: categorical` (the categorical axis; `orientation` flips it — there is no `yAxisType`);
 `waterfall` requires `xAxisType: categorical` **and** is vertical only — `orientation: horizontal`
-is a validation error there (the running cumulative reads down the value axis).
+is a validation error there (the running cumulative reads down the value axis); `timeline` requires
+`xAxisType: temporal` and has no value axis — see [Timeline options](#timeline-options).
 [`overlays`](#overlay-lines) additionally requires a non-categorical x-axis and a **vertical**
-chart, which together leave it unavailable on `bar` and `stacked`.
+chart, which together leave it unavailable on `bar` and `stacked`; a `timeline` rejects it outright.
 
 ### Column mapping
 
 `columns:` maps your CSV column names onto the engine's roles. The whole block is optional; absent,
-it defaults to `x: time`, `value: value`, `series: series`.
+it defaults to `x: time`, `value: value`, `series: series` (a timeline has no value role, and its
+`label` defaults to `label`).
 
 | field | type | notes |
 |---|---|---|
@@ -65,6 +67,10 @@ it defaults to `x: time`, `value: value`, `series: series`.
 | `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
 | `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
 | `columns.x0` / `columns.x1` | string | Histograms only: columns holding each row's bin **lower**/**upper** edge, for **pre-binned** input. Map both to switch the histogram to pre-binned mode; mapping only one is a validation error. See [Histogram](#histogram-options). |
+| `columns.end` | string | **Timeline only** — like the three rows below, a validation error on every other chart type. The span's end date, `YYYY` or `YYYY-MM-DD`. A blank cell makes the row a point event, and `ongoing` (any case) an open-ended span. Any other text, an impossible calendar date (`2026-13-01`), or an end before its start is a validation error naming the row. See [Timeline options](#timeline-options). |
+| `columns.label` | string | **Timeline only.** The event's headline. Default `"label"`. A blank cell is a validation error. |
+| `columns.description` | string | **Timeline only.** Optional supporting text for the event. |
+| `columns.date_label` | string | **Timeline only.** Text that replaces the formatted date for that row (`FY2030`, `Spring 2027`). |
 
 ### Text
 
@@ -151,7 +157,7 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `yAxisPolicy.autoWiden.step` | number | When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
 
 **Truncating the axis below the data.** When `min`/`max` cut into the data, **every chart type**
-clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
+with a value axis (all but `timeline`, which rejects `yAxisPolicy`) clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
 stops there. Nothing is dropped or clamped, so the shape resumes at the correct x when a series
 re-enters the range — do *not* pre-clip the source data (that either fakes a plateau or reads as
 missing data, and the chart's CSV download would ship the altered values). Value labels, gap
@@ -170,7 +176,7 @@ lower value sits at the top: `yAxisPolicy: { min: 0.0, max: -3.0 }` puts `-3.0` 
 `0.0` at the floor. Use it for indices where more-negative is worse (CFNAI, output gaps) and the
 conventional reading is "down is bad, so draw it up."
 
-Reversal works on **every chart type**, and on the value axis wherever it lives. `min` is the axis'
+Reversal works on **every chart type** with a value axis, and on the value axis wherever it lives. `min` is the axis'
 NEAR edge — the bottom on a vertical chart, the left on a horizontal one — and `max` is the far edge,
 so reversing moves the numerically lower value to the top (vertical) or the right (horizontal). On
 horizontal bars that means negative data grows left-to-right from a zero line at the left, the mirror
@@ -459,6 +465,7 @@ the **y** axis, so a chart whose value axis is x has nowhere to put them: `overl
 `orientation`. Those two are unavailable in *either* orientation, because they also require
 `xAxisType: categorical` and a categorical axis is rejected above — a bar or stacked chart cannot
 carry an overlay. `dumbbell` — horizontal by default — is likewise excluded by its categorical x.
+`timeline` rejects `overlays` in either orientation: it has no value axis to draw them against.
 On `line`, `area` and `scatter`, `orientation` has no effect at all, so it neither changes the chart
 nor the overlay there.
 
@@ -577,7 +584,7 @@ overlays:
 | field | type | notes |
 |---|---|---|
 | `points` | boolean | Line charts: draw a marker dot at each data point. Default false. |
-| `projected_field` | string | Data column whose truthy value (`1`/`true`/`yes`, case-insensitive, trimmed) flags a row as projected (forecast/estimated) rather than actual. **Line:** the flagged run(s) of a series draw dashed, connecting continuously to adjacent actual points — a series may have multiple disjoint projected runs. **Area (stacked):** the fill fades over x-ranges where *every* in-scope series is flagged projected (conservative — a stack can't express partial-series fading). Absent ⇒ no projected styling (byte-identical output). A series also listed in `series_styles[..].dashed` (whole-series dashed) is not split by this field — the whole-series override wins. |
+| `projected_field` | string | Data column whose truthy value (`1`/`true`/`yes`, case-insensitive, trimmed) flags a row as projected (forecast/estimated) rather than actual. **Line:** the flagged run(s) of a series draw dashed, connecting continuously to adjacent actual points — a series may have multiple disjoint projected runs. **Area (stacked):** the fill fades over x-ranges where *every* in-scope series is flagged projected (conservative — a stack can't express partial-series fading). **Timeline:** a flagged point event draws hollow and a flagged span dashed. Absent ⇒ no projected styling (byte-identical output). A series also listed in `series_styles[..].dashed` (whole-series dashed) is not split by this field — the whole-series override wins. |
 | `projected_style.dashed` | boolean | Line charts, only consulted when `projected_field` is set. Default true; `false` renders the projected run solid (opts out of the visual distinction while keeping the field wired). |
 | `projected_style.fillOpacity` | number | Area charts, only consulted when `projected_field` is set. Effective fill opacity of the projected x-range's white veil overlay. Default 0.2. |
 
@@ -622,7 +629,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
 | `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, but the gap never changes **whether** a label is drawn: the ~25px fit threshold is a judgement about a segment's share of the data, applied once to the un-gapped extent, and a rect that cleared it is at worst 13px after the maximum gap — still room for a 10px glyph. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
-| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it. **Three routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top` at mount (and a card that STARTS wide and is later narrowed keeps its right column — the resize path re-resolves the position but does not dismantle a right legend already built, a long-standing limitation); and a `small_multiples` figure has only a top legend slot, in the export as on screen. **The PNG export follows this field**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. |
+| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it. **Four routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top` at mount (and a card that STARTS wide and is later narrowed keeps its right column — the resize path re-resolves the position but does not dismantle a right legend already built, a long-standing limitation — except on a `timeline`, whose resize path does take the column down); a `small_multiples` figure has only a top legend slot, in the export as on screen; and a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)). **Otherwise the PNG export follows this field**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. |
 | `series_legend` | boolean | Set `false` to drop the **series rows** from the legend while keeping the rows overlays and annotations opted into with `legend: true`. For a chart whose colour channel does not need naming because the points are identified some other way — a `columns.point_label`, or a single highlighted observation the note explains. Distinct from `legend: false` directly below, which removes the whole box (and, having nowhere to put them, pushes overlay labels back in-frame). Because the box survives, click-to-pin/dim still works for the rows that remain. One caveat, and it is per DIMENSION rather than per legend: colour/annotation rows and shape rows are selected independently, and each dims only on a strict subset of its own dimension. So selecting a row that is the only one left in **its** dimension dims nothing — which `series_legend: false` makes reachable on a dual-encoding point chart, where it strips the colour rows but **not** the shape rows (those follow the top-level `legend` only), leaving a lone overlay row in the colour/annotation dimension beside two live shape rows. The same is already true of a single-series scatter with one keyed overlay. Not chart-type specific. Default true. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend. |
 | `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed. Applies to any chart type that has a tooltip — which is a real restriction, not a formality: on a chart whose hover is the coordinated cursor or the value pills rather than a card (see `small_multiples.coordinated_cursor` and `barStack.hover`) there is no card to suppress and this switch is a no-op, pills included. Use `chrome.valuePills` for those. Default true. Not bar-specific. The card itself is capped at 320px wide and **wraps** a row label longer than that onto further lines rather than clipping it — including a label with no space or hyphen to break at, which is broken mid-word rather than run out through the border. A row's value is joined to its label by a non-breaking space, so a wrap does not separate them. A long series name, category name, overlay label or (on a `scatter`) axis title therefore makes the card taller, never wider, and never leaves its number outside the card. Wrapping is live-DOM CSS: a PNG export has no card, so nothing about it changes in a download. |
@@ -780,6 +787,112 @@ value_format: { decimals: 1, suffix: "%" }
 gap_annotation: { series_a: static, series_b: collected }
 ```
 
+### Timeline options
+
+`chartType: timeline` draws dated events along a rule: **point** events as dots, **spans** as bars,
+and **open-ended** spans as bars that run to the end of the rule and fade out. One CSV row per event,
+mapped with `columns.x` (the start date), `columns.end`, `columns.label`, `columns.description` and
+`columns.date_label` (see [Column mapping](#column-mapping)). It requires `xAxisType: temporal`
+(start dates are `YYYY` or `YYYY-MM-DD`; an impossible calendar date is a validation error) and has
+no value axis. There is no hover and no tooltip — every label is always drawn — but the legend still
+pins and dims categories. The `timeline:` block and the four timeline-only column roles are
+validation errors on every other chart type.
+
+| field | type | notes |
+|---|---|---|
+| `orientation` | enum | `horizontal` (default) \| `vertical` — oldest at top, each event's label beside its item (see **Vertical layout** below); at least 400px tall, growing as the labels need. |
+| `timeline.spacing` | enum | `proportional` (default — distance along the rule is elapsed time) \| `even` (every distinct date, span ends included, gets an equal slot; use it when only the order matters). |
+| `timeline.lanes` | boolean | Separate tracks for the categories. On a horizontal render, one track per category, stacked top to bottom in `series_order` and named in a left gutter, and each lane's labels sit above it only; long lane names wrap, and the gutter never takes more than 30% of the width. On a vertical render (authored, or switched on screen — see `auto_vertical`), exactly two lanes draw by default as two side-by-side tracks and three or more share one track — see `timeline.vertical_lanes`. Wherever lanes are drawn, the legend's category rows default off, since the lane names label the categories; `series_legend: true` brings them back. Default false. |
+| `timeline.vertical_lanes` | enum | How `timeline.lanes` draws on a vertical render, authored or switched on screen, in the PNG as on screen. `columns` (default): exactly two lanes draw as two side-by-side tracks near the centre, each named at the top of its track; the first lane labels to the left of its track, right-aligned, and the second to the right, and each lane's overlapping spans stack outward, away from the other lane. `single`: two lanes draw as one track, exactly as with no lanes, so the legend's category rows default on. Three or more lanes always draw one track, whatever this field says, with the legend's category rows on by default as without lanes; an explicit `columns` then makes `tbl-chart validate` warn. Any other value is a validation error. |
+| `timeline.axis` | boolean | Adds sparse date ticks, at the axis tick size and colour; on a vertical timeline they sit in a column just left of the leftmost label or mark, moving with the centred timeline. **A vertical render omits the ticks when that column does not fit** beside the label columns narrowed to their widest date word (neither past 360px, the left one never past 40% of the width; with lane columns, both to the wider lane's), the span sub-tracks at their narrowest (with lane columns, both lanes') and the fixed gaps — so an authored axis can disappear on a narrow screen. A validation error with `spacing: even`, where ticks would imply proportional gaps. `x_axis_title` is accepted on a timeline only with it, and is drawn only when ticks are: a render that omits them omits the title too, on screen and in the PNG. Default false. |
+| `timeline.date_format` | string | d3 `timeFormat` pattern for the bold date text. Default from the data: `%Y` when every date is 1 January, `%b %Y` when every date is the 1st of a month, otherwise `%b %-d, %Y`. A span reads `2031 – 2035` and an open-ended one `2040 –` (read to a screen reader as "2040 onward"; a `columns.date_label` override is read as written); a range too long for its line breaks after the en dash (the dash stays on the first line). `columns.date_label` overrides it row by row. |
+| `timeline.label_width` | number | The width, in px, that a horizontal label's text wraps to. 60–400. Default 150. |
+| `timeline.max_rows` | integer | Label rows allowed on each side of the rule (above each lane, with lanes). 1–6. Default 2. |
+| `timeline.auto_vertical` | boolean | On screen, a horizontal timeline renders vertical when the chart is narrower than 480px or its labels need more than `max_rows` rows, re-checked on every resize. The width is the chart's own, so a right-hand legend beside it counts against it. An authored `orientation: vertical` never switches. Default true. |
+
+Categories come from `columns.series` (optional; one category draws no legend by default). `series_order` sets
+the lane order, `series_colors` and `series_labels` work as on other charts, and `projected_field`
+draws a flagged point hollow and a flagged span dashed. `legend: false` hides the legend, and
+`series_legend: false` drops its category rows.
+
+**Label placement (horizontal).** Labels alternate above and below the rule in date order, starting
+above; events on the same date keep their CSV order. Each label takes the nearest free row on its
+side, then on the other side. Within `max_rows`, a row whose stem does not pass through another label
+is preferred, even on the other side — a preference that never changes whether the timeline fits in
+`max_rows`. A label near the frame edge shifts inward while its stem stays on its date. Overlapping
+spans stack into separate sub-tracks, and a span on an outer sub-track is labelled above the rule,
+its stem rising from its own bar. Point markers carry a ring of the background colour, so a dot stays
+visible on a bar of the same colour, and stems run beneath the labels. Labels are never dropped: a
+timeline that needs more than `max_rows` rows gets extra rows. The chart is as tall as its rows
+need.
+
+**Vertical layout.** Each event's label sits beside its item as one block, starting with its bold
+date line(s) above the title. Two lanes drawn as lane columns follow `timeline.vertical_lanes`; the
+rest of this paragraph describes a single track. Overlapping spans stack into sub-tracks left of the
+rule, and a span on an outer sub-track labels to the left of them, right-aligned, ending just short
+of the leftmost bar. Point events and spans on the main rule label to the right of the rule. Each
+side stacks its own labels, so a label can be pushed below its item by one above it on its side.
+A main-rule label that would be pushed on the right moves to the left of the rule instead,
+right-aligned, when the left pushes it less (not at all, where the left is clear at its date) — but
+only if no word of it would have to split in the left column, no outer-sub-track bar runs at its
+date or beside where it would land (next to one it would read as that bar's label), and no
+outer-sub-track span's label has to move for it. A label still pushed below its item, on either
+side, is joined to it by an elbow leader, which leaves from beside its item on the rule or, for a
+span on an outer sub-track, from that span's own bar. Moving labels left never costs leaders: a
+timeline never has more of them than it would with every main-rule label kept on the right.
+The left label column exists only when some label sits in it. Each column wraps its labels at the
+width they need — the left one at most 40% of the chart's width, the right one at most what
+remains — and neither wraps wider than 360px. When sub-tracks crowd, the band narrows first and then
+the left column, down to its widest date word: dates wrap between words or after a range's en dash
+rather than push text off the chart, and a date word wider than its whole column is split. Each
+column is then only as wide as its widest label, and the timeline — tick column, labels, band and
+rule — is centred in the chart's width, so extra width becomes equal margins on both sides. With no
+left column, the right column wraps as if the rule sat at least 15% of the chart's width in from the
+left edge, unless that would leave it narrower than its widest date word; the timeline is still
+centred.
+
+On screen a timeline renders at the card's own width, down to 280px, rather than scrolling: with
+`auto_vertical` (the default) it renders vertical below 480px, and with `auto_vertical: false` it
+stays horizontal. A card narrower than 280px gets a 280px chart.
+
+**PNG export** always renders the authored orientation — it never switches to vertical — and sizes
+the image's height to the timeline's content. A horizontal timeline renders at the export's chart
+width (744px with a right-hand legend, the full 920px otherwise). A vertical one downloads as a
+portrait image: its labels wrap as they would in a 560px chart, and the image is then trimmed to the
+timeline, 360–640px wide (a 280–560px chart plus margins), with the timeline centred in it. The
+logo takes a row of its own at the top right, and the title starts below it. The title, subtitle,
+note and source wrap at their spaces to the frame's width less its margins, so a single word wider
+than that (a long URL, say) is not broken and runs past it. An `x_axis_title` is centred and wraps to
+the same width, a word wider than it split. The legend always sits above the chart, whatever
+`legendPosition` says, its rows and any over-long label wrapped to fit — except a row a `legendKey`
+hook draws, whose markup is drawn as returned, unwrapped.
+
+`tbl-chart validate` passes but warns when a timeline has more than 20 events, when a horizontal one
+needs more than `max_rows` rows at its export width (the warning names the width), or when
+`timeline.lanes` meets an explicit `timeline.vertical_lanes: "columns"` and three or more lanes (a
+vertical render draws those on one track).
+
+**Accepted fields.** A timeline accepts only `chartType`, `title`, `subtitle`, `note`, `source`,
+`xAxisType`, `data`, `tags`, `columns` (roles `x`, `end`, `label`, `description`, `date_label`,
+`series`), `series_order`, `series_colors`, `series_labels`, `projected_field`, `orientation`,
+`legend`, `legendPosition`, `series_legend`, `x_axis_title` (with `timeline.axis`) and `timeline`.
+Every other field is a validation error — among them `annotations`, `overlays`, `shading`, `rug`,
+`confidence_bands`, `small_multiples`, `title_selectors`, every `tooltip_*` field, `chrome`,
+`value_prefix`, `value_suffix`, `value_format`, `xAxisPolicy`, `yAxisPolicy`, `projected_style`,
+`color_legend_title` and every other chart type's options — as is any other column role.
+
+```yaml
+chartType: timeline
+title: "Policy and workforce timing"
+subtitle: "Cohort milestones"
+xAxisType: temporal
+columns: { x: date, series: kind }
+series_order: [policy, cohort]
+series_colors: { policy: blue, cohort: amber }
+series_labels: { policy: Policy, cohort: Cohort milestone }
+data: data.csv
+```
+
 ### Small multiples
 
 Set `columns.facet` to the pane-splitting column, then tune the grid here.
@@ -867,7 +980,7 @@ byte-identical to passing no `hooks` at all.
 | `tickLabel` | one value-axis tick's text | Yes |
 | `valueLabel` | one in-mark value label (stacked segment / net callout, waterfall running total) | Yes |
 | `legendKey` | one legend row's key markup | Yes — **but see `ctx.medium` below** |
-| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | It runs on both, by construction — but see the note below: the two SVGs are not the same size |
+| `afterRender` | the assembled SVG itself, live and export alike (`ctx.phase` says which) | It runs on both, by construction — but see the note below: the two SVGs usually differ in size |
 | `tooltip` | a band tooltip's content — on the few chart types that draw one at default settings; **see the reach table below before relying on it** | **No — screen-only, see below** |
 
 **`tickLabel`, `valueLabel` and `legendKey` are guaranteed identical between the screen and the
@@ -877,15 +990,21 @@ downloaded PNG**, because the export re-renders through the very same builders w
 marks and text match the live render's.
 
 **`afterRender` is guaranteed to RUN on both paths, with `ctx.phase` naming which — not to produce
-identical output.** The export re-renders into its own frame: a fixed 920px-wide content column by a
-height computed from the chart's chrome, against the live card's own width by its own height. A hook
-that positions or sizes anything off the SVG it is handed therefore lands at different coordinates in
-the PNG than on screen, and no way of writing the hook changes that. (A consumer can also branch on
-`ctx.phase` and differ on purpose — but the frame-size difference applies even to a hook that does
-not.) Keep an `afterRender` mutation relative to the SVG's own dimensions if it must survive the trip,
-and check the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates both
-halves: that the hook fires once per path and both SVGs carry its mutation, and that the two frames
-really are different sizes.
+identical output.** The export re-renders into its own frame, chosen without reference to the card:
+the chart is drawn at the export's own chart width (920px, less the right-hand legend column where
+there is one, and 280–560px on a vertical `timeline` — see [Timeline options](#timeline-options)) and
+at a height the export computes (on most chart types, what the fixed frame leaves after its chrome;
+on a timeline, its content's height, as on screen), where the live chart is sized to the card. So
+the SVG handed to the hook usually differs in size between the two paths, and a hook that positions
+or sizes anything off it then lands at different coordinates in the PNG than on screen. The two can
+match — a horizontal timeline with no right-hand legend, drawn live at 920px, hands the hook the
+same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also
+branch on `ctx.phase` and differ on purpose — but the size difference applies even to a hook that
+does not.) Keep an
+`afterRender` mutation relative to the SVG's own dimensions if it must survive the trip, and check
+the download rather than assuming it matches. `test/hooks-export-parity.test.ts` gates all three:
+that the hook fires once per path and both SVGs carry its mutation, that a chart drawn live at 720px
+hands it differently sized SVGs, and that the horizontal timeline above hands it the same size.
 
 **`hooks.tooltip` is screen-only.** A static PNG export has no hover state, so there is nothing for
 a tooltip's content to be identical *to* — the hook is simply never invoked while building an
@@ -1309,7 +1428,8 @@ scale, so a hex has no scale to pull and is rejected too.
 ## CSV format
 
 **Charts** use long format. Columns are named freely and mapped via `columns:`; absent that block,
-the engine expects `time`, `series`, `value`.
+the engine expects `time`, `series`, `value`. A timeline has no value column: it takes one row per
+event, with `time` and `label` by default — see [Timeline options](#timeline-options).
 
 | role | content |
 |---|---|
@@ -1371,6 +1491,16 @@ annotations:
   points:
     - { point: "2025b", label: "{point_label}", connector: true }
     - { point: "2026a", label: "{point_label}: {value}", value_format: { suffix: "% of GDP", decimals: 1 } }
+data: data.csv
+```
+
+**Timeline of spans and point events:**
+
+```yaml
+chartType: timeline
+title: "Tax law milestones"
+xAxisType: temporal
+columns: { x: start, end: end, label: event }   # end: blank = point, "ongoing" = open-ended
 data: data.csv
 ```
 

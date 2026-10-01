@@ -1,0 +1,7 @@
+date,end_date,label,kind,projected
+2017-12-22,2025-12-31,TCJA individual provisions,law,
+2021-03-11,2021-12-31,Expanded child tax credit,law,
+2022-08-16,ongoing,IRA clean-energy credits,law,
+2025-07-04,,OBBBA enacted,law,
+2026-01-01,2030-12-31,Phase-in period,projection,1
+2034-01-01,,Trust fund depletion,projection,1

@@ -27,6 +27,7 @@ import { isTableSpec } from "./table-detect";
 import type { ChartSpec } from "../spec/types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
+import { timelineWarnings, timelineExportChartWidth } from "../engine/marks/timeline";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -186,9 +187,19 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
     seriesSet.add(cols.series ? (row[cols.series] ?? "") : "");
   }
 
+  // Non-fatal: a timeline can publish, but these make it hard to read or overflow in the PNG.
+  // Checked at the SAME width the export actually draws at (Ruling 17) — a right-hand legend
+  // narrows that below INNER_W, and validate must not silently check the wider, unwarranted width.
+  const warnings =
+    typedSpec.chartType === "timeline"
+      ? timelineWarnings(typedSpec, rows, timelineExportChartWidth(typedSpec, rows))
+      : [];
   return {
     exitCode: 0,
-    message: `OK: ${absSpecPath} (${rows.length} rows, ${seriesSet.size} series)`,
+    message: [
+      `OK: ${absSpecPath} (${rows.length} rows, ${seriesSet.size} series)`,
+      ...warnings.map((w) => `${absSpecPath}: warning: ${w}`),
+    ].join("\n"),
   };
 }
 

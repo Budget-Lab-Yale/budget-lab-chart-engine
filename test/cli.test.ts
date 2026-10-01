@@ -17,6 +17,22 @@ const EXAMPLE_SPEC = resolve(
   fileURLToPath(new URL("./fixtures/sample-chart/chart.yaml", import.meta.url)),
 );
 
+const TIMELINE_DENSE_SPEC = resolve(
+  fileURLToPath(new URL("./fixtures/timeline-dense/chart.yaml", import.meta.url)),
+);
+
+const TIMELINE_SMALL_SPEC = resolve(
+  fileURLToPath(new URL("./fixtures/timeline-small/chart.yaml", import.meta.url)),
+);
+
+const TIMELINE_RIGHT_LEGEND_SPEC = resolve(
+  fileURLToPath(new URL("./fixtures/timeline-right-legend/chart.yaml", import.meta.url)),
+);
+
+const TIMELINE_TOP_LEGEND_SPEC = resolve(
+  fileURLToPath(new URL("./fixtures/timeline-top-legend/chart.yaml", import.meta.url)),
+);
+
 // Stub live bundle — just needs to be a non-empty JS string.
 const STUB_BUNDLE = `var BudgetLabChart={mountChart:function(el,opts){el.innerHTML='<p>chart</p>';}};`;
 
@@ -103,6 +119,64 @@ describe("runValidate — series_order names missing series", () => {
     expect(result.exitCode).toBe(1);
     expect(result.message).toMatch(/series_order/);
     expect(result.message).toMatch(/missing-series/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validate: timeline warnings
+// ---------------------------------------------------------------------------
+
+describe("runValidate — timeline warnings", () => {
+  it("passes with warnings appended (exit 0)", async () => {
+    const result = await runValidate(TIMELINE_DENSE_SPEC);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).toMatch(/warning: timeline has 21 events/);
+    expect(result.message).toMatch(/warning: horizontal layout needs more than 2 label rows per side at the 920px export width/);
+  });
+
+  it("passes with no warnings for a small timeline (exit 0, no warning lines)", async () => {
+    const result = await runValidate(TIMELINE_SMALL_SPEC);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).not.toMatch(/warning:/);
+  });
+
+  // Codex scenario: a right-hand legend narrows the export's chart width from INNER_W (920) to
+  // 744 (INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP), so a layout that fits at 920 can overflow
+  // max_rows at the width the PNG actually draws. validate must check the SAME width (Ruling 17).
+  it("warns of overflow at the narrower right-legend export width (744px), naming that width", async () => {
+    const result = await runValidate(TIMELINE_RIGHT_LEGEND_SPEC);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).toMatch(/warning: horizontal layout needs more than 1 label rows per side at the 744px export width/);
+  });
+
+  it("warns (exit 0) when an explicit vertical_lanes: columns meets three lanes (Ruling 25)", async () => {
+    const dir = join(tmpdir(), `cli-test-vertical-lanes-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, "date,label,kind\n2020,A,a\n2025,B,b\n2030,C,c\n", "utf8");
+    const spec = (vl: string) => [
+      "chartType: timeline", "title: T", "xAxisType: temporal", "orientation: vertical", "data: data.csv",
+      "columns: { x: date, label: label, series: kind }", `timeline: { lanes: true${vl} }`,
+    ].join("\n") + "\n";
+    writeFileSync(specPath, spec(", vertical_lanes: columns"), "utf8");
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).toMatch(/warning: timeline\.vertical_lanes "columns" draws lane columns only for exactly two lanes; with 3 lanes a vertical render draws one track/);
+    writeFileSync(specPath, spec(""), "utf8");
+    expect((await runValidate(specPath)).message).not.toMatch(/warning:/);
+  });
+
+  it("does not warn for the same data with a top legend (fits at the full 920px width)", async () => {
+    const result = await runValidate(TIMELINE_TOP_LEGEND_SPEC);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(result.message).not.toMatch(/warning:/);
   });
 });
 

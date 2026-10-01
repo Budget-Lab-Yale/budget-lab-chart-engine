@@ -1,0 +1,5 @@
+chartType: timeline
+title: Dense timeline
+xAxisType: temporal
+columns: { x: date, label: title }
+data: data.csv

@@ -248,16 +248,21 @@ export function createExportRoot(
 export function composeTopChrome(
   doc: Document,
   root: SVGElement,
-  opts: { title: string; subtitle?: string; width?: number },
+  opts: { title: string; subtitle?: string; width?: number; logoRow?: boolean },
 ): number {
   const width = opts.width ?? W;
   const innerW = width - MARGIN * 2;
   const title = opts.title ?? "";
   const subtitle = opts.subtitle ?? "";
 
-  // Title (+ logo): title first line baseline at MARGIN + 22.
-  const titleFirstBaseline = MARGIN + 22;
-  const titleLines = wrapText(title, `${W_BOLD} 22px ${FONT}`, innerW - LOGO_W - 24);
+  // Title (+ logo): title first line baseline at MARGIN + 22, the logo beside its first line. With
+  // `logoRow` (a vertical timeline's portrait frame, Ruling 50) the logo keeps that position on a row
+  // of its own and the title starts below it at the full inner width: beside the logo, a 360px frame
+  // leaves the title a 106px column, narrower than ordinary 22px words, which then ran into the logo.
+  const logoBaseline = MARGIN + 22;
+  const logoY = logoBaseline - LOGO_H * LOGO_BASELINE_FRAC;
+  const titleFirstBaseline = opts.logoRow ? Math.ceil(logoY + LOGO_H) + 10 + 22 : logoBaseline;
+  const titleLines = wrapText(title, `${W_BOLD} 22px ${FONT}`, opts.logoRow ? innerW : innerW - LOGO_W - 24);
   let cursor = drawLines(doc, root, titleLines, MARGIN, titleFirstBaseline, 28, {
     size: 22,
     weight: W_BOLD,
@@ -265,8 +270,8 @@ export function composeTopChrome(
   });
 
   // Logo: right edge flush with the content-right bound; baseline shared with the title's first
-  // line. Set both href and xlink:href so it rasterizes across browsers.
-  const logoY = titleFirstBaseline - LOGO_H * LOGO_BASELINE_FRAC;
+  // line (or, with `logoRow`, where that line would be). Set both href and xlink:href so it
+  // rasterizes across browsers.
   const logoEl = svgEl(doc, "image", {
     x: width - MARGIN - LOGO_W,
     y: logoY,
