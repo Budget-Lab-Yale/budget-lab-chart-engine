@@ -4,9 +4,13 @@ name: CI
 #
 # A browser IS needed. Four suites launch Chromium, and they are the ones measuring facts no other
 # kind of test can reach: whether an icon's ink is cut by its box, whether a hatch key reads as the
-# character it names, and whether a faceted clip confines marks to their own cell. Two of them
-# guard with `describe.skipIf(!HAS_BROWSER)`, so before this step they passed CI by not running —
-# installing the browser is what makes them mean something here rather than only on a laptop.
+# character it names, and whether a faceted clip confines marks to their own cell. Some of them
+# guard with `describe.skipIf(!HAS_BROWSER)`, so without a browser they pass CI by not running —
+# having the browser is what makes them mean something here rather than only on a laptop.
+#
+# The browser comes from the Playwright container image rather than `playwright install
+# --with-deps`, whose apt step depends on the Ubuntu mirror: it took 7m45s on PR #39 and hung
+# outright on one run.
 
 on:
   workflow_dispatch:
@@ -21,6 +25,11 @@ jobs:
   check:
     name: Typecheck + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The tag MUST equal the playwright version in package-lock.json: each Playwright release pins
+    # its own Chromium build, and the image carries only that one. Bump both in the same commit.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.0-noble
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -28,8 +37,13 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      # Chromium only: none of the suites are cross-browser, and --with-deps pulls the system
-      # libraries the runner image lacks.
-      - run: npx playwright install --with-deps chromium
+      # The same test HAS_BROWSER makes: a drifted image tag would otherwise skip the browser
+      # suites silently instead of failing.
+      - name: Check the image has Chromium for the locked playwright
+        run: >-
+          node -e "const p = require('playwright').chromium.executablePath();
+          if (!require('fs').existsSync(p)) { console.error('No Chromium at ' + p + ': set the container
+          image tag in ci.yml to the playwright version in package-lock.json.'); process.exit(1); }
+          console.log(p);"
       - run: npm run typecheck
       - run: npm test
