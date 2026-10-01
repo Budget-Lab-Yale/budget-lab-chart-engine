@@ -47,7 +47,7 @@ describe("timeline render", () => {
     const grad = svg.querySelector("linearGradient");
     expect(grad).not.toBeNull();
     const id = grad!.getAttribute("id")!;
-    expect(id).toMatch(/^tblfade-[A-Za-z0-9]+-right/);
+    expect(id).toMatch(/^tblfade-[A-Za-z0-9_]+-right/);
     expect(grad!.getAttribute("x2")).toBe("1");
     expect(grad!.getAttribute("y2")).toBe("0");
     expect(q(svg, "rect.tbl-timeline-span").some((s) => s.getAttribute("fill") === `url(#${id})`)).toBe(true);
@@ -65,10 +65,32 @@ describe("timeline render", () => {
   it("fades downward on a vertical render", () => {
     const { svg } = renderChart(SPEC, ROWS, { width: 400, timelineOrientation: "vertical" });
     const grad = svg.querySelector("linearGradient")!;
-    expect(grad.getAttribute("id")).toMatch(/^tblfade-[A-Za-z0-9]+-down/);
+    expect(grad.getAttribute("id")).toMatch(/^tblfade-[A-Za-z0-9_]+-down/);
     expect(grad.getAttribute("x2")).toBe("0");
     expect(grad.getAttribute("y2")).toBe("1");
     expect(q(svg, "rect.tbl-timeline-span").some((s) => s.getAttribute("fill") === `url(#${grad.getAttribute("id")})`)).toBe(true);
+  });
+
+  it("gives distinct colours distinct fade gradients even when they share their alphanumerics", () => {
+    // rgb(255, 0, 0) and rgb(25, 50, 0) both strip to "rgb25500": two equal ongoing spans then
+    // shared one gradient and both drew in the second colour.
+    const colors = { a: "rgb(255, 0, 0)", b: "rgb(25, 50, 0)" };
+    const rows = [
+      { date: "2026", end: "ongoing", title: "A", detail: "", kind: "a", projected: "" },
+      { date: "2026", end: "ongoing", title: "B", detail: "", kind: "b", projected: "" },
+      { date: "2030", end: "", title: "Point", detail: "", kind: "a", projected: "" },
+    ] as TidyRow[];
+    const spec = { series_order: ["a", "b"], series_labels: { a: "A", b: "B" }, series_colors: colors };
+    for (const orientation of ["horizontal", "vertical"] as const) {
+      const { svg } = renderChart({ ...SPEC, ...spec } as ChartSpec, rows, { width: 600, timelineOrientation: orientation });
+      const spans = q(svg, "rect.tbl-timeline-span");
+      expect(spans).toHaveLength(2);
+      const stopColors = spans.map((s) => {
+        const id = /^url\(#(.+)\)$/.exec(s.getAttribute("fill") ?? "")![1]!;
+        return svg.querySelector(`linearGradient[id="${id}"] stop`)!.getAttribute("stop-color");
+      });
+      expect(new Set(stopColors), orientation).toEqual(new Set(Object.values(colors)));
+    }
   });
 
   it("renders the derived year format and a span range", () => {

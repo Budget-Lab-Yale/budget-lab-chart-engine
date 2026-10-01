@@ -49,7 +49,7 @@ const LEGEND_ROWS = Array.from({ length: 11 }, (_, i) => ({
 describe("exports that are not a vertical timeline stay byte-identical (Task 16)", () => {
   const cases: Array<[string, ChartSpec, TidyRow[], string]> = [
     ["horizontal timeline, top legend", { ...TL, columns: { x: "date", series: "kind" } } as ChartSpec, FIG7, "f4f470f301117db5"],
-    ["horizontal timeline, lanes", { ...TL, columns: { x: "date", end: "end_date", series: "kind" }, projected_field: "projected", timeline: { lanes: true } } as ChartSpec, SPANS, "3653532fbc4f53f4"],
+    ["horizontal timeline, lanes", { ...TL, columns: { x: "date", end: "end_date", series: "kind" }, projected_field: "projected", timeline: { lanes: true } } as ChartSpec, SPANS, "190d93473c1ea548"],
     ["horizontal timeline, right legend", { ...TL, legendPosition: "right", timeline: { spacing: "even", max_rows: 1 }, columns: { x: "date", label: "title", series: "category" } } as ChartSpec, LEGEND_ROWS, "c39b64adbbc3a9e3"],
     ["line chart", { chartType: "line", title: TL.title, subtitle: TL.subtitle, note: TL.note, source: TL.source, xAxisType: "temporal", data: "d.csv" } as ChartSpec, parseCsv("./fixtures/grads-recent.csv"), "dc0d7b55c8fc2b8c"],
     ["stacked, right legend", { chartType: "stacked", title: "T", source: "S", xAxisType: "categorical", columns: { x: "g", value: "v", series: "s" }, data: "d.csv" } as unknown as ChartSpec,

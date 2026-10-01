@@ -225,9 +225,13 @@ function fadeStart(s: PlacedSpan): number {
 
 /** Content-derived gradient id (hatch.ts's scheme): colour, direction and fade start fully
  *  determine the gradient, so goldens are deterministic and two charts on one page that share an id
- *  share identical content. The gradient is in objectBoundingBox units, so it has no position. */
+ *  share identical content. The gradient is in objectBoundingBox units, so it has no position.
+ *  The colour is escaped, not stripped: every non-alphanumeric character (including "_") becomes
+ *  "_<hex code>_", so distinct colours never share an id ("rgb(255, 0, 0)" and "rgb(25, 50, 0)"
+ *  both strip to "rgb25500"). */
 function fadeId(color: string, dir: "right" | "down", start: number): string {
-  return `tblfade-${color.replace(/[^a-zA-Z0-9]/g, "")}-${dir}-${Math.round(start * 1000)}`;
+  const key = color.replace(/[^a-zA-Z0-9]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
+  return `tblfade-${key}-${dir}-${Math.round(start * 1000)}`;
 }
 
 /** Marker ring width: a projected (hollow) marker carries the heavier ring. */
