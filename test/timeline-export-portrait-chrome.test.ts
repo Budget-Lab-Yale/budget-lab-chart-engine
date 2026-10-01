@@ -156,6 +156,7 @@ describe("portrait frame: the x-axis title wraps within the frame (Ruling 51b)",
       expect(num(t, "x") - w / 2).toBeGreaterThanOrEqual(MARGIN);
       expect(num(t, "x") + w / 2).toBeLessThanOrEqual(frameW - MARGIN);
     }
+    expectWrappedTo(lines.map((t) => t.textContent ?? ""), font, frameW - 2 * MARGIN);
     const chart = chartOf(svg);
     const ys = lines.map((t) => num(t, "y"));
     expect(Math.min(...ys)).toBeGreaterThan(num(chart, "y") + num(chart, "height"));
