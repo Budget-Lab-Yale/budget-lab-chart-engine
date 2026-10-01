@@ -4,6 +4,15 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,
+  the chart stayed squeezed beside the old right column with a second legend drawn on top; widened
+  again, the redraw threw `NotFoundError` and stopped partway. The column is now taken down when the
+  legend moves to the top and rebuilt when it moves back, as timelines already did. Live only: the
+  first draw and the PNG export are unchanged, and no published figure resolves to a right legend.
+
 ## [1.15.0] - 2026-10-01
 
 ### Added

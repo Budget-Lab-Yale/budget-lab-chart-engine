@@ -1070,9 +1070,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       shapeTitle: shapeLegendTitle,
     };
     let legendHandle: LegendHandle | null = null;
-    // A timeline's legend can move to the top or vanish on a resize, so take down a right column
-    // this draw does not use; a later right-legend draw rebuilds it (the guard below).
-    if (spec.chartType === "timeline" && rightLegendSlot) {
+    // A resize below LEGEND_RIGHT_MIN_CARD_WIDTH moves the legend to the top (and a timeline's can
+    // vanish), so take down a right column this draw does not use; a later right-legend draw
+    // rebuilds it (the guard below). Left standing, the narrow draw kept the chart squeezed beside a
+    // stale column under a second, top legend, and the next wide draw threw NotFoundError: its
+    // rebuild inserts relative to canvasScroll, which was still inside the old wrapper.
+    if (rightLegendSlot) {
       const hasLegend = !!legendItems || !!(shapeLegendItems && shapeLegendItems.length);
       if (legendPos !== "right" || !hasLegend) {
         const bodyWrapper = rightLegendSlot.parentElement as HTMLElement;
@@ -1086,7 +1089,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // Activate the right-legend layout on first use (or if switching from top).
         // A timeline can reach here already "right" with no wrapper built: an earlier draw
         // (horizontal with lanes) had no legend items, so it recorded the position without one.
-        if (currentLegendPos !== "right" || (spec.chartType === "timeline" && !rightLegendSlot)) {
+        if (currentLegendPos !== "right" || !rightLegendSlot) {
           // Move canvasScroll into the body wrapper.
           const bodyWrapper = doc.createElement("div");
           bodyWrapper.className = "figure-body--legend-right";
