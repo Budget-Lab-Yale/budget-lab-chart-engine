@@ -258,6 +258,8 @@ export interface RenderResult {
   segmentLabelsDropped?: boolean;
   /** Timeline only: the orientation actually rendered. */
   timelineOrientation?: "horizontal" | "vertical";
+  /** Treemap only: per-tile hover payload, in DOM order of `rect.tbl-treemap-tile`. */
+  treemapTiles?: TreemapTileInfo[];
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -1303,6 +1305,8 @@ export function renderChart(
   // Timeline draws its own SVG (no Plot frame, no value axis): branch before renderPane so no
   // existing chart type's path runs any timeline code.
   if (spec.chartType === "timeline") return renderTimeline(spec, rows, opts);
+  // Treemap likewise draws its own SVG.
+  if (spec.chartType === "treemap") return renderTreemap(spec, rows, opts);
   const pane = renderPane(spec, rows, opts);
   const { svg, seriesNames, colors, valueAffixes, dataInScope, layers } = pane;
 
@@ -1359,6 +1363,9 @@ export { renderFigure } from "./figure";
 export type { FigureRenderResult, FigurePane } from "./figure";
 // Timeline renderer: the same safe cycle — marks/timeline.ts imports buildColorMap back from here.
 import { renderTimeline } from "./marks/timeline";
+// Treemap renderer: the same safe cycle — marks/treemap.ts imports buildColorMap back from here.
+import { renderTreemap } from "./marks/treemap";
+import type { TreemapTileInfo } from "./marks/treemap";
 
 /** Top-level dispatcher: a `small_multiples` spec renders a multi-panel figure (renderFigure),
  *  everything else renders a single chart (renderChart). render-live/export switch to this in

@@ -27,11 +27,15 @@ interface Node { group?: string; order?: number; datum?: TreemapDatum; children?
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
-/** Rounded rect with x1 >= x0 and y1 >= y0 (a sub-pixel tile never gets a negative size). */
-function rect(n: { x0: number; y0: number; x1: number; y1: number }): { x0: number; y0: number; x1: number; y1: number } {
-  const x0 = r2(n.x0);
-  const y0 = r2(n.y0);
-  return { x0, y0, x1: Math.max(x0, r2(n.x1)), y1: Math.max(y0, r2(n.y1)) };
+const clamp = (v: number, hi: number): number => Math.min(hi, Math.max(0, v));
+
+/** Rounded rect inside the `w` x `h` frame with x1 >= x0 and y1 >= y0. A sub-pixel tile never gets a
+ *  negative size, and a collapsed one d3 centres past the frame (a sliver of a block whose strip it
+ *  cannot hold) sits at the frame edge with 0 size. */
+function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, h: number): { x0: number; y0: number; x1: number; y1: number } {
+  const x0 = clamp(r2(n.x0), w);
+  const y0 = clamp(r2(n.y0), h);
+  return { x0, y0, x1: Math.max(x0, clamp(r2(n.x1), w)), y1: Math.max(y0, clamp(r2(n.y1), h)) };
 }
 
 /**
@@ -65,9 +69,14 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
     rootInput = { children: data.map((datum) => ({ datum })) };
   }
 
+  // Geometry is scale-free: d3 sees every value divided by the largest, so neither 1e308 (whose
+  // areas overflow) nor 1e-308 (whose areas underflow) reaches its arithmetic. Totals are summed
+  // from the raw values below, in data order.
+  const max = data.reduce((m, d) => Math.max(m, d.value), 0);
+  const scaled = (v: number): number => (max > 0 ? v / max : 0);
   const root = d3
     .hierarchy(rootInput)
-    .sum((n: Node) => n.datum?.value ?? 0)
+    .sum((n: Node) => scaled(n.datum?.value ?? 0))
     .sort((a: { data: Node; value: number }, b: { data: Node; value: number }) =>
       b.value - a.value || (a.data.datum && b.data.datum ? a.data.datum.index - b.data.datum.index : a.data.order! - b.data.order!));
 
@@ -82,21 +91,22 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   // pass 1 lays out with no strips and asks `stripFits` of every block; pass 2 lays out again with
   // `paddingTop` on the groups whose strip fits. Group padding never feeds back into the root-level
   // tiling, so the blocks `stripFits` saw are exactly the final blocks; only tiles move.
+  const totalOf = (g: string): number => data.reduce((s, d) => (d.group === g ? s + d.value : s), 0);
   const groupNodes = (): Array<{ data: Node; value: number; x0: number; y0: number; x1: number; y1: number }> =>
     grouped ? (root.children ?? []) : [];
   run(new Set());
   const strips = new Set<string>();
   for (const n of groupNodes()) {
-    const g: GroupRect = { group: n.data.group!, total: n.value, ...rect(n), strip: false };
+    const g: GroupRect = { group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: false };
     if (!opts.stripFits || opts.stripFits(g)) strips.add(g.group);
   }
   if (strips.size) run(strips);
 
   const groups: GroupRect[] = groupNodes().map((n) => ({
-    group: n.data.group!, total: n.value, ...rect(n), strip: strips.has(n.data.group!),
+    group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: strips.has(n.data.group!),
   }));
   const tiles: TileRect[] = root.leaves().map((n: { data: Node; parent: { children: unknown[] }; x0: number; y0: number; x1: number; y1: number }) => ({
-    datum: n.data.datum!, ...rect(n), rank: n.parent.children.indexOf(n),
+    datum: n.data.datum!, ...rect(n, width, height), rank: n.parent.children.indexOf(n),
   }));
-  return { width, height, tiles, groups, total: root.value };
+  return { width, height, tiles, groups, total: data.reduce((s, d) => s + d.value, 0) };
 }

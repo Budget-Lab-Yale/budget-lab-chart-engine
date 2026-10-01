@@ -45,6 +45,16 @@ describe("treemapDataErrors", () => {
     ]);
   });
 
+  it("rejects values whose grand total overflows to Infinity", () => {
+    expect(treemapDataErrors(spec(), [row("A", "1e308"), row("B", "1e308")])).toEqual([
+      "treemap values are too large to total",
+    ]);
+  });
+
+  it("accepts one huge value whose total is still finite", () => {
+    expect(treemapDataErrors(spec(), [row("A", "1e308")])).toEqual([]);
+  });
+
   it("does not add the no-tiles error when a row is already invalid", () => {
     expect(treemapDataErrors(spec(), [row("A", "0"), row("B", "x")])).toHaveLength(1);
   });

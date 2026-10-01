@@ -114,6 +114,22 @@ describe("layoutTreemap: flat", () => {
     expect(one.tiles[0]!.rank).toBe(0);
   });
 
+  it.each([
+    ["one tile of 1e308", [1e308]],
+    ["two tiles of 1e308 (their total overflows)", [1e308, 1e308]],
+    ["two tiles of 1e-308", [1e-308, 1e-308]],
+  ])("lays out %s with finite coordinates covering the frame", (_label, values) => {
+    const l = layoutTreemap(flat(values), W, H, { groupOrder: [] });
+    expect(l.tiles).toHaveLength(values.length);
+    for (const t of l.tiles) for (const v of coords(t)) expect(Number.isFinite(v)).toBe(true);
+    expect(Math.min(...l.tiles.map((t) => t.x0))).toBe(0);
+    expect(Math.min(...l.tiles.map((t) => t.y0))).toBe(0);
+    expect(Math.max(...l.tiles.map((t) => t.x1))).toBe(W);
+    expect(Math.max(...l.tiles.map((t) => t.y1))).toBe(H);
+    const covered = l.tiles.reduce((s, t) => s + area(t), 0);
+    expect(covered).toBeGreaterThan(0.98 * W * H);
+  });
+
   it("keeps a 0.0001% tile finite and non-negative", () => {
     const tiny = layoutTreemap(flat([1_000_000, 1]), W, H, { groupOrder: [] });
     const t = tiny.tiles.find((x) => x.datum.value === 1)!;
@@ -215,6 +231,23 @@ describe("layoutTreemap: grouped", () => {
     const a = l.groups.find((g) => g.group === "A")!;
     expect(a.strip).toBe(true);
     expect(Math.min(...tilesOf(l, "A").map((t) => t.y0))).toBeGreaterThanOrEqual(a.y0 + TM_GEOM.stripH);
+  });
+
+  it("clamps every tile and group to the frame, even a sliver under a strip it cannot hold", () => {
+    // B's block is a thin sliver along the frame edge; with every strip forced on, d3 centres its
+    // collapsed tiles below the block's bottom (past the frame) unless rect() clamps them.
+    const sliver = grouped([["A", 10_000], ["A", 9_000], ["B", 3], ["B", 2]]);
+    for (const [w, h] of [[920, 460], [375, 354], [280, 350]] as const) {
+      const l = layoutTreemap(sliver, w, h, { groupOrder: [], stripFits: () => true });
+      for (const r of [...l.tiles, ...l.groups]) {
+        expect(r.x0).toBeGreaterThanOrEqual(0);
+        expect(r.y0).toBeGreaterThanOrEqual(0);
+        expect(r.x1).toBeLessThanOrEqual(w);
+        expect(r.y1).toBeLessThanOrEqual(h);
+        expect(r.x1).toBeGreaterThanOrEqual(r.x0);
+        expect(r.y1).toBeGreaterThanOrEqual(r.y0);
+      }
+    }
   });
 
   it("is deterministic", () => {

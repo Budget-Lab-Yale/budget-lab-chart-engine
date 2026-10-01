@@ -119,6 +119,10 @@ export function treemapDataErrors(spec: ChartSpec, rows: TidyRow[]): string[] {
   if (!errors.length && !rows.some((r) => parseSize(r[cols.value]) !== 0)) {
     errors.push("treemap has no tiles to draw: every value is zero");
   }
+  // Every value is finite, but their sum can still overflow; shares would then all read 0%.
+  if (!errors.length && !Number.isFinite(rows.reduce((s, r) => s + (parseSize(r[cols.value]) ?? 0), 0))) {
+    errors.push("treemap values are too large to total");
+  }
   return errors;
 }
 

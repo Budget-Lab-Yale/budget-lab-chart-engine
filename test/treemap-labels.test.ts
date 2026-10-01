@@ -92,6 +92,23 @@ describe("contrastText", () => {
     expect(contrastText("#FFFFFF")).toBe(NAVY);
     expect(contrastText(NAVY)).toBe(WHITE);
   });
+  it("parses CSS4 space syntax: rgb(0 0 0) is black, so white text", () => {
+    expect(contrastText("rgb(0 0 0)")).toBe(WHITE);
+    expect(contrastText("hsl(0 0% 0%)")).toBe(WHITE);
+  });
+  it("composites a translucent fill over white before judging it", () => {
+    expect(contrastText("#000000")).toBe(WHITE);
+    expect(contrastText("#0000001A")).toBe(NAVY);
+    expect(contrastText("rgb(0 0 0 / 10%)")).toBe(NAVY);
+    expect(contrastText("rgb(0 0 0 / 0.1)")).toBe(NAVY);
+    expect(contrastText("rgba(0, 0, 0, 0.1)")).toBe(NAVY);
+    expect(contrastText("hsl(0 0% 0% / 10%)")).toBe(NAVY);
+    expect(contrastText("transparent")).toBe(NAVY);
+  });
+  it("falls back to navy on an unparseable colour", () => {
+    expect(contrastText("not-a-colour")).toBe(NAVY);
+    expect(contrastText("")).toBe(NAVY);
+  });
 });
 
 /** Every drawn line of a label, measured as it will be drawn, fits the tile's inner box. */

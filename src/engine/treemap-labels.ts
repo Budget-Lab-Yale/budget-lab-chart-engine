@@ -49,12 +49,30 @@ export function stripFill(hueBase: string): string {
   return (tokens.scales as Record<string, Record<string, string>>)[ramp.family]?.["700"] ?? hueBase;
 }
 
-/** WCAG 2 relative luminance of a colour (an unparseable one reads as white). */
-function luminance(color: string): number {
-  const c = d3.color(color);
-  if (!c) return 1;
-  const { r, g, b } = c.rgb();
-  const lin = (v: number): number => {
+/** CSS4 space/slash syntax (`rgb(0 0 0 / 10%)`, `hsl(0 0% 0%)`) to the comma form d3.color reads
+ *  (`rgba(0, 0, 0, 0.1)`); anything else is returned as-is. */
+function commaColor(color: string): string {
+  const m = /^\s*(rgb|hsl)a?\(\s*([^,()]*?)\s*\)\s*$/i.exec(color);
+  if (!m) return color;
+  const [body, alpha] = m[2]!.split("/").map((s) => s.trim());
+  const parts = body!.split(/\s+/);
+  if (parts.length !== 3) return color;
+  if (alpha === undefined) return `${m[1]}(${parts.join(", ")})`;
+  const a = alpha.endsWith("%") ? Number(alpha.slice(0, -1)) / 100 : Number(alpha);
+  return `${m[1]}a(${parts.join(", ")}, ${a})`;
+}
+
+/** WCAG 2 relative luminance of a colour as painted on the white card: a translucent fill is
+ *  composited over white first. Null when the colour does not parse. */
+function luminance(color: string): number | null {
+  const c = d3.color(commaColor(color));
+  if (!c) return null;
+  const { r, g, b, opacity } = c.rgb();
+  const a = Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
+  // d3 parses "transparent" with NaN channels; at alpha 0 it is the white card whatever they are.
+  const over = (v: number): number => (a === 0 ? 255 : a * v + (1 - a) * 255);
+  const lin = (v0: number): number => {
+    const v = over(v0);
     const s = v / 255;
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
   };
@@ -65,12 +83,14 @@ function contrast(a: number, b: number): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-/** White or navy, whichever has the higher WCAG contrast on `fill`. Ties go to white. */
+/** White or navy, whichever has the higher WCAG contrast on `fill` (composited over white). Ties go
+ *  to white; an unparseable colour gets navy. */
 export function contrastText(fill: string): string {
   const white = tokens.structural.background;
   const navy = tokens.structural.text_heading;
   const lf = luminance(fill);
-  return contrast(lf, luminance(white)) >= contrast(lf, luminance(navy)) ? white : navy;
+  if (lf === null) return navy;
+  return contrast(lf, luminance(white)!) >= contrast(lf, luminance(navy)!) ? white : navy;
 }
 
 export type TileLabel =
