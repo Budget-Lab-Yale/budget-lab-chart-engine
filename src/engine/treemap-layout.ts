@@ -23,7 +23,10 @@ export interface GroupRect { group: string; total: number; x0: number; y0: numbe
 export interface TreemapLayout { width: number; height: number; tiles: TileRect[]; groups: GroupRect[]; total: number }
 
 /** Hierarchy node input: the root, a group, or a tile. */
-interface Node { group?: string; order?: number; datum?: TreemapDatum; children?: Node[] }
+interface Node { group?: string; order?: number; datum?: TreemapDatum; children?: Node[]; raw?: number }
+
+/** The raw value (a tile) or raw total (a group, summed in data order) the sort compares. */
+const rawOf = (n: Node): number => n.datum?.value ?? n.raw ?? 0;
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
@@ -59,10 +62,11 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
       if (!node) {
         const listed = opts.groupOrder.indexOf(g);
         // Listed groups by their groupOrder position, then the rest by first appearance.
-        node = { group: g, order: listed >= 0 ? listed : opts.groupOrder.length + byGroup.size, children: [] };
+        node = { group: g, order: listed >= 0 ? listed : opts.groupOrder.length + byGroup.size, children: [], raw: 0 };
         byGroup.set(g, node);
       }
       node.children!.push({ datum });
+      node.raw! += datum.value;
     }
     rootInput = { children: [...byGroup.values()] };
   } else {
@@ -70,15 +74,20 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   }
 
   // Geometry is scale-free: d3 sees every value divided by the largest, so neither 1e308 (whose
-  // areas overflow) nor 1e-308 (whose areas underflow) reaches its arithmetic. Totals are summed
-  // from the raw values below, in data order.
+  // areas overflow) nor 1e-308 (whose areas underflow) reaches its arithmetic. The SORT compares raw
+  // values and totals instead: normalized sums are float-inexact (seven 1/7s sum below 1, defeating
+  // the groupOrder tie-break) and distinct tiny values can underflow to the same 0.
   const max = data.reduce((m, d) => Math.max(m, d.value), 0);
   const scaled = (v: number): number => (max > 0 ? v / max : 0);
   const root = d3
     .hierarchy(rootInput)
     .sum((n: Node) => scaled(n.datum?.value ?? 0))
-    .sort((a: { data: Node; value: number }, b: { data: Node; value: number }) =>
-      b.value - a.value || (a.data.datum && b.data.datum ? a.data.datum.index - b.data.datum.index : a.data.order! - b.data.order!));
+    .sort((a: { data: Node }, b: { data: Node }) => {
+      const ra = rawOf(a.data);
+      const rb = rawOf(b.data);
+      if (ra !== rb) return rb > ra ? 1 : -1;
+      return a.data.datum && b.data.datum ? a.data.datum.index - b.data.datum.index : a.data.order! - b.data.order!;
+    });
 
   const run = (strips: Set<string>) =>
     d3.treemap()

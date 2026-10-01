@@ -873,6 +873,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // --- chart controller: re-render at the container width on resize ---
   let lastWidth = -1;
   let currentOverlay: OverlayEl | null = null;
+  // Treemap only: hides the hover card a draw left showing. The card sits outside the svg, so a
+  // redraw or unmount under a still pointer would otherwise strand it (Ruling 21).
+  let hideTreemapHover: (() => void) | null = null;
   // The svg CURRENTLY in the canvas, re-read (not captured) by the deferred "mount" onRender
   // dispatch below — see it for why. Null between a failed render and the next successful one:
   // draw()'s catch replaces the canvas with a .figure-error and there is no live svg to report.
@@ -910,6 +913,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const target = Math.max(minW, Math.round(chartAvail));
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
+    hideTreemapHover?.();
+    hideTreemapHover = null;
 
     // Color accent feed: resolve the active title-selector option's color (raw
     // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
@@ -1154,8 +1159,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Static by design: every label is on the page, so screen and PNG agree. Legend pin/dim
       // still works through the data-series attributes.
     } else if (spec.chartType === "treemap") {
-      // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false.
-      attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer });
+      // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false. That flag
+      // suppresses only the card, as on every chart type (CONFIG-SPEC `chrome.tooltip`).
+      hideTreemapHover = attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer });
     } else if (spec.chartType === "scatter") {
       // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
       attachPointHover(svg, scatterPointHoverOptions({
@@ -1589,6 +1595,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   return () => {
     disposed = true;
+    hideTreemapHover?.();
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);

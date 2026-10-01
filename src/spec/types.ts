@@ -38,8 +38,9 @@ export interface TreemapTooltipRow {
   column: string;
   /** Row label. Default: the column name. */
   label?: string;
-  /** Number format for the cell. Absent, a numeric cell uses the chart's `value_format` and a text
-   *  cell prints verbatim. */
+  /** Number format for the cell. Set, a numeric cell is formatted with it (thousands grouping, as
+   *  `value_format` on a treemap) and a text cell prints verbatim. Absent, every cell prints verbatim,
+   *  numbers included (a Year of 2024 prints "2024"). */
   format?: ValueFormat;
 }
 

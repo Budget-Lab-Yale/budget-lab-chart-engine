@@ -28,8 +28,9 @@ const FLAT_SPEC = {
   columns: { x: "category", value: "amount" }, value_format: { prefix: "$" },
 } as ChartSpec;
 
-// Grouped, with markup in a group label, a tile name and a text cell (escaping), a numeric cell with
-// its own format, a numeric cell falling back to value_format, and blank cells (row omitted).
+// Grouped, with markup in a group label, a tile name, a text cell and a row label (escaping), a
+// numeric cell with its row's own format, numeric cells in rows with no format (verbatim, Ruling
+// 18), a text cell in a formatted row (verbatim), and blank cells (row omitted).
 const HOVER_SPEC = {
   chartType: "treemap", title: "Outlays", xAxisType: "categorical", data: "d.csv",
   columns: { x: "category", value: "amount", series: "group" },
@@ -41,14 +42,15 @@ const HOVER_SPEC = {
       { column: "change", label: "Change", format: { decimals: 1, suffix: " pp" } },
       { column: "note" },
       { column: "count", label: "Count" },
+      { column: "year", label: "<i>Year</i> & FY" },
     ],
   },
 } as ChartSpec;
 const HOVER_ROWS = [
-  { group: "Mandatory", category: "Social <Security>", amount: "1461", change: "1.26", note: "Includes <OASI> & DI", count: "1234" },
-  { group: "Mandatory", category: "Medicare", amount: "874", change: "-1.04", note: "", count: "5000" },
-  { group: "Discretionary", category: "Defense", amount: "850", change: "", note: "Base budget", count: "" },
-  { group: "Discretionary", category: "Education", amount: "300", change: "2", note: "", count: "" },
+  { group: "Mandatory", category: "Social <Security>", amount: "1461", change: "1.26", note: "Includes <OASI> & DI", count: "1234", year: "2024" },
+  { group: "Mandatory", category: "Medicare", amount: "874", change: "-1.04", note: "", count: "5000", year: "" },
+  { group: "Discretionary", category: "Defense", amount: "850", change: "", note: "Base budget", count: "", year: "2023" },
+  { group: "Discretionary", category: "Education", amount: "300", change: "n/a", note: "", count: "" },
 ] as unknown as TidyRow[];
 
 /** Minimal ResizeObserver stub — jsdom has none. Same pattern as test/timeline-live.test.ts. */
@@ -182,7 +184,11 @@ describe("treemap live mount: hover", () => {
     expect(outline.getAttribute("stroke")).toBe(tokens.structural.text_heading);
     expect(outline.getAttribute("stroke-width")).toBe("2");
     expect(outline.getAttribute("fill")).toBe("none");
-    for (const a of ["x", "y", "width", "height"]) expect(outline.getAttribute(a)).toBe(rect.getAttribute(a));
+    // Inset 1px so the whole 2px stroke shows even on a tile at the svg edge (Ruling 19).
+    expect(num(outline, "x")).toBeCloseTo(num(rect, "x") + 1, 6);
+    expect(num(outline, "y")).toBeCloseTo(num(rect, "y") + 1, 6);
+    expect(num(outline, "width")).toBeCloseTo(num(rect, "width") - 2, 6);
+    expect(num(outline, "height")).toBeCloseTo(num(rect, "height") - 2, 6);
     // Dim: every other tile at 0.85, the hovered one untouched.
     for (const other of tileGroups(svg)) {
       expect(other.getAttribute("opacity")).toBe(other === (g as unknown as SVGGElement) ? null : "0.85");
@@ -193,15 +199,19 @@ describe("treemap live mount: hover", () => {
     expect(head.textContent).toBe("Mandatory & <co> · Social <Security>");
     expect(head.innerHTML).toBe("Mandatory &amp; &lt;co&gt; · Social &lt;Security&gt;");
     // Value at tooltip_decimals (1), Share at share_decimals (2: 1461 / 3485), then the configured
-    // rows in order: own format, text verbatim (label defaults to the column), value_format fallback.
+    // rows in order: own format, text verbatim (label defaults to the column), numbers in rows with
+    // no format verbatim (no value_format prefix, no grouping).
     expect(cardRows()).toEqual([
       "Value: $1,461.0",
       "Share: 41.92%",
       "Change: 1.3 pp",
       "note: Includes <OASI> & DI",
-      "Count: $1,234",
+      "Count: 1234",
+      "<i>Year</i> & FY: 2024",
     ]);
     expect(tip()!.innerHTML).toContain("Includes &lt;OASI&gt; &amp; DI");
+    expect(tip()!.innerHTML).toContain("&lt;i&gt;Year&lt;/i&gt; &amp; FY:");
+    expect(tip()!.querySelector("i")).toBeNull();
     // Same row markup as the scatter card: label span, a non-breaking gap, value span.
     const row = tip()!.querySelector(".tbl-tooltip-row")!;
     const parts = [...row.firstElementChild!.childNodes].map((n) =>
@@ -213,10 +223,14 @@ describe("treemap live mount: hover", () => {
     const svg = svgOf(mountAt(900, HOVER_SPEC, HOVER_ROWS));
     enter(tileNamed(svg, "Defense").parentElement!);
     expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Discretionary · Defense");
-    expect(cardRows()).toEqual(["Value: $850.0", "Share: 24.39%", "note: Base budget"]);
+    expect(cardRows()).toEqual(["Value: $850.0", "Share: 24.39%", "note: Base budget", "<i>Year</i> & FY: 2023"]);
 
     enter(tileNamed(svg, "Medicare").parentElement!);
-    expect(cardRows()).toEqual(["Value: $874.0", "Share: 25.08%", "Change: -1.0 pp", "Count: $5,000"]);
+    expect(cardRows()).toEqual(["Value: $874.0", "Share: 25.08%", "Change: -1.0 pp", "Count: 5000"]);
+
+    // A text cell in a row that has a format prints verbatim.
+    enter(tileNamed(svg, "Education").parentElement!);
+    expect(cardRows()).toEqual(["Value: $300.0", "Share: 8.61%", "Change: n/a"]);
   });
 
   it("value uses value_format.decimals when tooltip_decimals is unset; flat tiles have no group prefix", () => {
@@ -247,6 +261,54 @@ describe("treemap live mount: hover", () => {
     expect(svg.querySelectorAll(".tbl-treemap-hover-outline")).toHaveLength(1);
     expect(a.getAttribute("opacity")).toBe("0.85");
     expect(b.getAttribute("opacity")).toBeNull();
+  });
+
+  it("a redraw while a tile is hovered hides the card (Ruling 21)", async () => {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const host = mountAt(900, HOVER_SPEC, HOVER_ROWS);
+    enter(tileNamed(svgOf(host), "Medicare").parentElement!);
+    expect(cardShown()).toBe(true);
+    await resizeTo(host, 340);
+    expect(cardShown()).toBe(false);
+  });
+
+  it("disposing the mount while a tile is hovered hides the card (Ruling 21)", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const dispose = mountChart(host, { spec: HOVER_SPEC, rows: HOVER_ROWS, width: 900 });
+    enter(tileNamed(svgOf(host), "Medicare").parentElement!);
+    expect(cardShown()).toBe(true);
+    dispose();
+    expect(cardShown()).toBe(false);
+  });
+
+  it("a redraw does not hide a card another chart is showing", async () => {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+    const a = mountAt(900, HOVER_SPEC, HOVER_ROWS);
+    const b = mountAt(900, HOVER_SPEC, HOVER_ROWS);
+    enter(tileNamed(svgOf(b), "Defense").parentElement!);
+    // Resize only `a`: its observer is the first one created.
+    const cardA = a.querySelector<HTMLElement>(".figure-card")!;
+    Object.defineProperty(cardA, "clientWidth", { value: 340, configurable: true });
+    FakeResizeObserver.instances[0]!.cb([], FakeResizeObserver.instances[0] as unknown as ResizeObserver);
+    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => requestAnimationFrame(r));
+    expect(num(svgOf(a), "width")).toBe(340);
+    expect(cardShown()).toBe(true);
+  });
+
+  it("tooltipContainer: the card is placed in the given element, not document.body", () => {
+    const holder = document.createElement("div");
+    document.body.append(holder);
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountChart(host, { spec: HOVER_SPEC, rows: HOVER_ROWS, width: 900, tooltipContainer: holder });
+    enter(tileNamed(svgOf(host), "Medicare").parentElement!);
+    const cards = [...document.querySelectorAll<HTMLElement>(".tbl-tooltip")];
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.parentElement).toBe(holder);
+    expect(cards[0]!.style.opacity).toBe("1");
+    expect(cards[0]!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Mandatory & <co> · Medicare");
   });
 
   it("chrome.tooltip: false keeps the outline and dim but shows no card", () => {

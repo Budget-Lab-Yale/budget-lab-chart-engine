@@ -36,8 +36,9 @@ type Row = Record<string, unknown>;
  *  Every row builder in this file reads this constant -- there are seven emission sites (the
  *  scatter card's x and y rows, the shared series row, the band card's two Total variants, the
  *  cumulative-area Total, and the overlay rows) and they drifted apart on smaller things than
- *  this. Gated by test/card-wrap.test.ts. */
-export const LABEL_VALUE_GAP ="\u00a0";
+ *  this. Gated by test/card-wrap.test.ts. The treemap card's rows (treemap-hover.ts) are an eighth
+ *  site, importing this constant; test/treemap-live.test.ts gates that one. */
+export const LABEL_VALUE_GAP = "\u00a0";
 
 export interface CrosshairOptions {
   rows: Row[];

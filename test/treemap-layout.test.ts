@@ -95,6 +95,12 @@ describe("layoutTreemap: flat", () => {
     expect(byRank(tie).map((t) => t.datum.index)).toEqual([1, 0, 2, 3]);
   });
 
+  it("ranks distinct tiny values by raw value even where normalization underflows them to zero", () => {
+    // 1e-300 / 1e300 and 2e-300 / 1e300 both underflow to 0; the raw values still differ.
+    const tiny = layoutTreemap(flat([1e300, 1e-300, 2e-300]), W, H, { groupOrder: [] });
+    expect(byRank(tiny).map((t) => t.datum.index)).toEqual([0, 2, 1]);
+  });
+
   it("is deterministic", () => {
     expect(l.tiles).toHaveLength(data.length);
     expect(layoutTreemap(data, W, H, { groupOrder: [] })).toEqual(layoutTreemap(data, W, H, { groupOrder: [] }));
@@ -159,6 +165,16 @@ describe("layoutTreemap: grouped", () => {
     const tied = grouped([["X", 10], ["Y", 10], ["Z", 10]]);
     expect(layoutTreemap(tied, W, H, { groupOrder: [] }).groups.map((g) => g.group)).toEqual(["X", "Y", "Z"]);
     expect(layoutTreemap(tied, W, H, { groupOrder: ["Z", "X"] }).groups.map((g) => g.group)).toEqual(["Z", "X", "Y"]);
+  });
+
+  it("sorts groups on raw totals, so a float-inexact normalized sum cannot defeat the groupOrder tie-break", () => {
+    // A: seven tiles of 1; B: one tile of 7. Raw totals tie at 7; normalized (by the max, 7) A sums
+    // to 0.9999999999999998 and B to 1, which would put B first.
+    const tie = grouped([...Array.from({ length: 7 }, () => ["A", 1] as [string, number]), ["B", 7]]);
+    const l = layoutTreemap(tie, W, H, { groupOrder: ["A", "B"] });
+    expect(l.groups.map((g) => g.group)).toEqual(["A", "B"]);
+    expect(l.groups[0]!.x0).toBe(0);
+    expect(l.groups[0]!.y0).toBe(0);
   });
 
   it("sizes group blocks in proportion to totals (within 3%)", () => {
