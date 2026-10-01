@@ -37,7 +37,7 @@ type Row = Record<string, unknown>;
  *  scatter card's x and y rows, the shared series row, the band card's two Total variants, the
  *  cumulative-area Total, and the overlay rows) and they drifted apart on smaller things than
  *  this. Gated by test/card-wrap.test.ts. */
-const LABEL_VALUE_GAP = "\u00a0";
+export const LABEL_VALUE_GAP ="\u00a0";
 
 export interface CrosshairOptions {
   rows: Row[];
@@ -107,7 +107,7 @@ export interface CrosshairOptions {
 // just this map with exactly one key, `document.body`, which is the default below.
 const tooltipsByParent = new WeakMap<Node, HTMLElement>();
 
-function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body): HTMLElement {
+export function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body): HTMLElement {
   const existing = tooltipsByParent.get(parent);
   if (existing && parent.contains(existing)) return existing;
   const tip = doc.createElement("div");

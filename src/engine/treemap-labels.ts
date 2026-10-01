@@ -12,10 +12,12 @@ export const TM_NAME_SIZES = [20, 17, 15, 13, 12, 11] as const;
 /** The key's leading text, drawn bold (700); wrapKey's first line starts with it. */
 export const TM_KEY_PREFIX = "Not labelled above:";
 
-const LINE_HEIGHT = 1.2;
+/** Text-layout constants shared with the drawing (marks/treemap), so what is measured here is what
+ *  is drawn there. Line height is a factor of the font size. */
+export const TM_LINE_HEIGHT = 1.2;
+export const TM_STRIP_TEXT = 12;
+export const TM_KEY_TEXT = 12;
 const MAX_NAME_LINES = 3;
-const STRIP_TEXT = 12;
-const KEY_TEXT = 12;
 
 // Usable tiers darkest-first. 50 is excluded (too close to the white gutters); grouped tiles stop at
 // 600 because 700 is the group's header strip.
@@ -130,13 +132,13 @@ export function fitTileLabel(name: string, number: string | null, w: number, h: 
     if (!lines || lines.length > MAX_NAME_LINES) continue;
     const ns = Math.round(1.4 * s);
     if (number !== null && timelineTextWidth(number, ns, 500) > iw) continue;
-    const height = lines.length * s * LINE_HEIGHT + (number !== null ? ns * LINE_HEIGHT : 0);
+    const height = lines.length * s * TM_LINE_HEIGHT + (number !== null ? ns * TM_LINE_HEIGHT : 0);
     if (height > ih) continue;
     return { mode: "stacked", size: s, numberSize: ns, nameLines: lines, number };
   }
   // Without a number this never fits: any one line that fits at s already fit stacked at s.
   for (const s of TM_NAME_SIZES) {
-    if (s * LINE_HEIGHT > ih) continue;
+    if (s * TM_LINE_HEIGHT > ih) continue;
     const width = timelineTextWidth(name, s, 700) + (number !== null ? timelineTextWidth(` ${number}`, s, 500) : 0);
     if (width <= iw) return { mode: "inline", size: s, text: number !== null ? `${name} ${number}` : name, name, number };
   }
@@ -149,8 +151,8 @@ export type StripLabel = { mode: "full"; name: string; share: string } | { mode:
  *  nothing. Judges width only; whether the block is tall enough for a strip is the caller's call. */
 export function fitStripLabel(name: string, share: string, blockWidth: number): StripLabel {
   const avail = blockWidth - 2 * TM_GEOM.stripPad;
-  const nameW = timelineTextWidth(name, STRIP_TEXT, 700);
-  if (nameW + timelineTextWidth(` ${share}`, STRIP_TEXT, 500) <= avail) return { mode: "full", name, share };
+  const nameW = timelineTextWidth(name, TM_STRIP_TEXT, 700);
+  if (nameW + timelineTextWidth(` ${share}`, TM_STRIP_TEXT, 500) <= avail) return { mode: "full", name, share };
   if (nameW <= avail) return { mode: "name", name };
   return { mode: "none" };
 }
@@ -176,7 +178,7 @@ export function wrapKey(entries: string[], width: number): string[] {
   const lines: string[] = [];
   const fits = (text: string): boolean => {
     const bold = lines.length === 0 ? TM_KEY_PREFIX : "";
-    return timelineTextWidth(bold, KEY_TEXT, 700) + timelineTextWidth(text.slice(bold.length), KEY_TEXT, 500) <= width;
+    return timelineTextWidth(bold, TM_KEY_TEXT, 700) + timelineTextWidth(text.slice(bold.length), TM_KEY_TEXT, 500) <= width;
   };
   let line = TM_KEY_PREFIX;
   for (const entry of entries) {

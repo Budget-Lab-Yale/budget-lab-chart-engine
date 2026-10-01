@@ -29,6 +29,9 @@ import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { resolveTimelineOrientation, timelineHeight } from "./marks/timeline.js";
 import { TL_GEOM } from "./timeline-layout.js";
+import { treemapHeight } from "./marks/treemap.js";
+import { TM_GEOM } from "./treemap-layout.js";
+import { attachTreemapHover } from "./treemap-hover.js";
 import { waterfallValueDecimals } from "./scales.js";
 import { applyValueAffixes, formatNumericX } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
@@ -225,6 +228,8 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   // Timeline height is content-derived (label rows, or the stacked vertical column); renderChart
   // computes it again at the real width, so this is only the pre-draw estimate.
   if (spec.chartType === "timeline") return timelineHeight(spec, rows, 720);
+  // Treemap: the same pre-draw estimate; its height follows its width (spec §6).
+  if (spec.chartType === "treemap") return treemapHeight(spec, rows, 720);
   // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
   // same as a single-series horizontal bar, section spacers included).
@@ -897,8 +902,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const chartAvail = legendPos === "right"
       ? outerWidth - LEGEND_COLUMN_WIDTH - LEGEND_GAP
       : outerWidth;
-    // A timeline goes vertical instead of scrolling, so it renders at the real width down to a phone.
-    const minW = spec.chartType === "timeline" ? TL_GEOM.minLiveWidth : MIN_CHART_WIDTH;
+    // A timeline goes vertical instead of scrolling, so it renders at the real width down to a phone;
+    // a treemap re-lays itself out at any width, down to its own 280px floor.
+    const minW = spec.chartType === "timeline" ? TL_GEOM.minLiveWidth
+      : spec.chartType === "treemap" ? TM_GEOM.minLiveWidth
+      : MIN_CHART_WIDTH;
     const target = Math.max(minW, Math.round(chartAvail));
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
@@ -1145,6 +1153,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (spec.chartType === "timeline") {
       // Static by design: every label is on the page, so screen and PNG agree. Legend pin/dim
       // still works through the data-series attributes.
+    } else if (spec.chartType === "treemap") {
+      // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false.
+      attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer });
     } else if (spec.chartType === "scatter") {
       // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
       attachPointHover(svg, scatterPointHoverOptions({
@@ -1392,7 +1403,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
-    currentOverlay = spec.chartType === "timeline" ? null : attachYAxisOverlay(canvasScroll, svg);
+    currentOverlay = spec.chartType === "timeline" || spec.chartType === "treemap" ? null : attachYAxisOverlay(canvasScroll, svg);
 
     // --- Reciprocal annotation highlight: hovering a rug block lights up its legend row and every
     // other chart element carrying the same key (its bands, its fills, its other blocks), and dims

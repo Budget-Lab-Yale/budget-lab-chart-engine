@@ -19,6 +19,7 @@ import {
 import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TreemapLayout } from "../treemap-layout";
 import {
   tileFill, stripFill, contrastText, fitTileLabel, fitStripLabel, keyEntries, wrapKey, TM_KEY_PREFIX,
+  TM_LINE_HEIGHT as LINE_HEIGHT, TM_STRIP_TEXT as STRIP_TEXT, TM_KEY_TEXT,
   type TileLabel, type StripLabel,
 } from "../treemap-labels";
 
@@ -27,9 +28,7 @@ export const TREEMAP_CLASS = "tbl-treemap";
 
 /** The PNG export's chart width; the unlabelled-tiles warning is judged there. */
 const EXPORT_WIDTH = 920;
-const LINE_HEIGHT = 1.2;
-const STRIP_TEXT = 12;
-const KEY = { size: 12, gap: 8, lineHeight: 16 } as const;
+const KEY = { size: TM_KEY_TEXT, gap: 8, lineHeight: 16 } as const;
 /** Baseline below a line box's centre that centres Figtree's cap height (0.7 em) in the box. */
 const CAP_CENTRE = 0.35;
 
