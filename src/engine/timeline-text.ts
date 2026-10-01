@@ -3,16 +3,18 @@
 // content-hugged columns visibly loose. This sums a static per-character advance table generated
 // from the embedded font (timeline-metrics.ts; scripts/gen-timeline-metrics.mjs), so it is as
 // deterministic as the estimate — no DOM, canvas or getBBox — and the live mount, the PNG export
-// and the jsdom goldens still agree. Kerning is ignored: Figtree's pairs mostly tighten, so a
-// kerned line renders no wider than this. A character outside the table (Latin-1 plus common
-// punctuation) measures, by code point:
+// and the jsdom goldens still agree. Kerning is ignored, so the sum is not an upper bound: against
+// Chromium's rendering (getComputedTextLength, the embedded Figtree), 95,108 drawn lines of vertical
+// timelines at 280–440px ran from 1.5% narrower than it (kerned pairs tighten) to 0.23% wider, never
+// more than 0.05px wider (round-3 final fix probe). A character outside the table (Latin-1 plus
+// common punctuation) measures, by code point:
 //   - EMOJI_EM (1.4em): astral (emoji, supplementary CJK) and the BMP emoji/symbol blocks in
 //     EMOJI_RANGES — at least what Chromium's fallback fonts draw (😀 1.37em, ✅ ⭐ ☀ ~1.3em);
 //   - WIDE_EM (1em): BMP East Asian Wide/Fullwidth (WIDE_RANGES) — Chromium draws those an em wide;
 //   - FIGTREE_FALLBACK (the Latin letter mean): everything else. Scripts that render wider than that
 //     (Cyrillic, Greek) can still measure short, so a line of them may run past its column.
-// So a line wrapped to a column renders inside it only for the table's characters and the two wide
-// classes (Rulings 48, 49).
+// So a line wrapped to a column renders inside it, to within that fraction of a pixel, only for the
+// table's characters and the two wide classes (Rulings 48, 49).
 // Timeline-only: every other chart keeps estimateLabelWidth, byte-identical.
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "./timeline-metrics";
 
