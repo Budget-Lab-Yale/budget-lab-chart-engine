@@ -45,17 +45,33 @@ function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, 
   return { x0, y0, x1: Math.max(x0, clamp(r2(n.x1), w)), y1: Math.max(y0, clamp(r2(n.y1), h)) };
 }
 
+
+/** Fixed-point cap for the strip compensation (deterministic whether or not it converges first). */
+const MAX_COMPENSATION_ROUNDS = 50;
+/** Block widths (px) that move less than this between rounds count as converged. */
+const CONVERGED_PX = 1e-6;
+
 /**
  * Squarified layout (spec §3). Sort: tiles by value desc, ties by CSV `index`; groups by total desc,
  * ties by `opts.groupOrder` position (listed groups first), then first appearance in `data`.
  * Gutters: `groupGutter` between group blocks, `tileGutter` between tiles; no outer padding, so the
- * outermost tiles reach the frame edges. A group whose strip fits gets `stripH` of top padding, so
- * its tiles are laid out below the strip and stay proportional within the block.
+ * outermost tiles reach the frame edges.
  *
- * `stripFits` decides each group's strip from its block. Absent, every group reserves the strip.
+ * Header strips are compensated: a group whose strip fits gets `stripH` of top padding AND extra
+ * block area equal to the strip's, so a tile's area per unit value is the same in every group, strip
+ * or no strip (exactly with gutters 0; less the fixed gutters otherwise). A strip's area depends on
+ * its block's width, which depends on the layout, so the extra is solved by fixed-point iteration.
+ *
+ * `stripFits` decides each group's strip from its block: asked first of every uncompensated block,
+ * then again of each compensated final block that holds a strip. A strip whose final block fails is
+ * dropped (with its extra area) and the layout re-solved, so every returned strip fits its final
+ * block. Absent, every group reserves the strip. `gutters` is for tests only (0 isolates the
+ * proportionality from the fixed gutters); every caller in the engine uses TM_GEOM's.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,
-  opts: { groupOrder: string[]; stripFits?: (g: GroupRect) => boolean }): TreemapLayout {
+  opts: { groupOrder: string[]; stripFits?: (g: GroupRect) => boolean; gutters?: { tile: number; group: number } }): TreemapLayout {
+  const tileGutter = opts.gutters?.tile ?? TM_GEOM.tileGutter;
+  const groupGutter = opts.gutters?.group ?? TM_GEOM.groupGutter;
   const grouped = data.some((d) => d.group !== null);
   let rootInput: Node;
   if (grouped) {
@@ -84,41 +100,92 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   // underflow to the same 0.
   const max = data.reduce((m, d) => Math.max(m, d.value), 0);
   const scaled = (v: number): number => (max > 0 ? v / max : 0);
+  // A group node's own weight is its strip compensation (none without a strip); d3 adds its tiles'.
+  let extra = new Map<string, number>();
+  const weight = (n: Node): number =>
+    n.datum ? scaled(n.datum.value) : n.group !== undefined ? extra.get(n.group) ?? 0 : 0;
   const root = d3
     .hierarchy(rootInput)
-    .sum((n: Node) => scaled(n.datum?.value ?? 0))
+    .sum(weight)
     .sort((a: { data: Node }, b: { data: Node }) => {
       const ra = sortKey(a.data);
       const rb = sortKey(b.data);
       if (ra !== rb) return rb > ra ? 1 : -1;
       return a.data.datum && b.data.datum ? a.data.datum.index - b.data.datum.index : a.data.order! - b.data.order!;
     });
+  /** The tiles' normalized total (no compensation yet). */
+  const tilesTotal: number = root.value;
+  const reweigh = (): void => {
+    root.sum(weight);
+  };
 
+  // The root is tiled by resquarify: its first run squarifies and caches the rows on the root, and
+  // every later run keeps those rows and only re-divides them by the new weights. So the
+  // compensation moves block edges continuously and its iteration converges; re-squarifying each
+  // round can flip a row decision back and forth and never settle.
+  // squarify shares a parent's area by parent.value. At the root that value includes the groups'
+  // compensation, so a block grows by its strip; inside a group its tiles must share the block
+  // (below the strip) by their own values alone, so there the group's value is its tiles' sum.
+  type TNode = { depth: number; value: number; children?: TNode[] };
+  const tile = (node: TNode, x0: number, y0: number, x1: number, y1: number): void => {
+    if (node.depth === 0) return d3.treemapResquarify(node, x0, y0, x1, y1);
+    const own = node.value;
+    node.value = node.children!.reduce((s, c) => s + c.value, 0);
+    d3.treemapSquarify(node, x0, y0, x1, y1);
+    node.value = own;
+  };
   const run = (strips: Set<string>) =>
     d3.treemap()
-      .tile(d3.treemapSquarify)
+      .tile(tile)
       .size([width, height])
-      .paddingInner((n: { depth: number }) => (grouped && n.depth === 0 ? TM_GEOM.groupGutter : TM_GEOM.tileGutter))
+      .paddingInner((n: { depth: number }) => (grouped && n.depth === 0 ? groupGutter : tileGutter))
       .paddingTop((n: { depth: number; data: Node }) => (n.depth === 1 && grouped && strips.has(n.data.group!) ? TM_GEOM.stripH : 0))(root);
 
-  // Two passes. The strip decision needs each block's size, which d3 only knows after layout, so
-  // pass 1 lays out with no strips and asks `stripFits` of every block; pass 2 lays out again with
-  // `paddingTop` on the groups whose strip fits. Group padding never feeds back into the root-level
-  // tiling, so the blocks `stripFits` saw are exactly the final blocks; only tiles move.
   const totalOf = (g: string): number => data.reduce((s, d) => (d.group === g ? s + d.value : s), 0);
-  const groupNodes = (): Array<{ data: Node; value: number; x0: number; y0: number; x1: number; y1: number }> =>
-    grouped ? (root.children ?? []) : [];
+  type GNode = { data: Node; x0: number; y0: number; x1: number; y1: number };
+  const groupNodes = (): GNode[] => (grouped ? (root.children ?? []) : []);
+  /** A block as stripFits sees it: before (or regardless of) its strip decision. */
+  const block = (n: GNode): GroupRect => ({ group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: false });
+
+  // The strip takes stripH off the region its block's tiles are laid out in, whose width is the
+  // block's plus one tile gutter (d3 extends a parent's tiling region half a gutter past each side).
+  const stripArea = (n: GNode): number => TM_GEOM.stripH * (n.x1 - n.x0 + tileGutter);
+  // Solve the compensation for a strip set. The root's tiling region (the frame, extended half a
+  // group gutter past each edge) is shared by value: each tile's value at one area-per-unit factor,
+  // plus each strip group's strip. So factor = (region - all strips) / tiles' total, and a strip
+  // group's extra weight is its strip's area / factor. The strips' areas follow the block widths,
+  // so iterate from the current layout until the widths stop moving.
+  const region = (width + groupGutter) * (height + groupGutter);
+  const solve = (strips: Set<string>): void => {
+    for (let round = 0; round < MAX_COMPENSATION_ROUNDS; round++) {
+      const nodes = groupNodes().filter((n) => strips.has(n.data.group!));
+      const before = nodes.map((n) => n.x1 - n.x0);
+      const factor = (region - nodes.reduce((s, n) => s + stripArea(n), 0)) / tilesTotal;
+      if (!(factor > 0)) return;
+      extra = new Map(nodes.map((n) => [n.data.group!, stripArea(n) / factor]));
+      reweigh();
+      run(strips);
+      if (nodes.every((n, i) => Math.abs(n.x1 - n.x0 - before[i]!) <= CONVERGED_PX)) return;
+    }
+  };
+
+  // Pass 1: no strips, no compensation (this run fixes the root's rows); ask stripFits of every block.
   run(new Set());
   const strips = new Set<string>();
-  for (const n of groupNodes()) {
-    const g: GroupRect = { group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: false };
-    if (!opts.stripFits || opts.stripFits(g)) strips.add(g.group);
+  for (const n of groupNodes()) if (!opts.stripFits || opts.stripFits(block(n))) strips.add(n.data.group!);
+  // Compensate, then drop any strip whose final block no longer fits it and solve again. The set
+  // only shrinks, so this ends.
+  while (strips.size) {
+    solve(strips);
+    const lost = opts.stripFits ? groupNodes().filter((n) => strips.has(n.data.group!) && !opts.stripFits!(block(n))) : [];
+    if (!lost.length) break;
+    for (const n of lost) strips.delete(n.data.group!);
+    extra = new Map();
+    reweigh();
+    run(strips);
   }
-  if (strips.size) run(strips);
 
-  const groups: GroupRect[] = groupNodes().map((n) => ({
-    group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: strips.has(n.data.group!),
-  }));
+  const groups: GroupRect[] = groupNodes().map((n) => ({ ...block(n), strip: strips.has(n.data.group!) }));
   const tiles: TileRect[] = root.leaves().map((n: { data: Node; parent: { children: unknown[] }; x0: number; y0: number; x1: number; y1: number }) => ({
     datum: n.data.datum!, ...rect(n, width, height), rank: n.parent.children.indexOf(n),
   }));

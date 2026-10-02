@@ -252,10 +252,11 @@ describe("layoutTreemap: grouped", () => {
         return g.group !== "B";
       },
     });
-    // stripFits is asked once per group with the final block geometry, before any strip is decided.
-    expect(seen.map((g) => g.group)).toEqual(["A", "B", "C"]);
+    // stripFits is asked of every uncompensated block (no strip decided yet), then again of each
+    // compensated final block that holds a strip; the second answers are on the final geometry.
+    expect(seen.map((g) => g.group)).toEqual(["A", "B", "C", "A", "C"]);
     expect(seen.every((g) => g.strip === false)).toBe(true);
-    expect(seen.map(coords)).toEqual(l.groups.map(coords));
+    expect(seen.slice(3).map(coords)).toEqual(l.groups.filter((g) => g.strip).map(coords));
     const b = l.groups.find((g) => g.group === "B")!;
     expect(b.strip).toBe(false);
     expect(Math.min(...tilesOf(l, "B").map((t) => t.y0))).toBe(b.y0);
@@ -279,6 +280,73 @@ describe("layoutTreemap: grouped", () => {
         expect(r.y1).toBeGreaterThanOrEqual(r.y0);
       }
     }
+  });
+
+  describe("header strips are compensated: the same area per unit value in every group", () => {
+    // Groups of several tiles; A and C keep their strips, B and D do not.
+    const mixed = grouped([
+      ["A", 40], ["A", 25], ["A", 12], ["B", 35], ["B", 30], ["B", 8], ["C", 20], ["C", 9], ["D", 14], ["D", 6],
+    ]);
+    const fits = (g: GroupRect): boolean => g.group === "A" || g.group === "C";
+    const perUnit = (l: TreemapLayout, g: string): number => {
+      const ts = tilesOf(l, g);
+      return ts.reduce((s, t) => s + area(t), 0) / ts.reduce((s, t) => s + t.datum.value, 0);
+    };
+
+    it.each([[920, 460], [600, 330], [375, 354]] as const)("with gutters 0, every tile at %ipx is value x one factor (strip and strip-less groups alike)", (w, h) => {
+      const l = layoutTreemap(mixed, w, h, { groupOrder: [], stripFits: fits, gutters: { tile: 0, group: 0 } });
+      expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false], ["C", true], ["D", false]]);
+      // Tiles plus strips cover the frame, so the one factor is (frame - strips) / total.
+      const strips = l.groups.filter((g) => g.strip).reduce((s, g) => s + (g.x1 - g.x0) * TM_GEOM.stripH, 0);
+      const k = (w * h - strips) / l.total;
+      for (const t of l.tiles) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(2e-3);
+      for (const g of ["A", "B", "C", "D"]) expect(Math.abs(perUnit(l, g) - k) / k).toBeLessThan(1e-4);
+      // The strip sits on top of the block, its tiles below it.
+      for (const g of l.groups.filter((x) => x.strip)) {
+        expect(Math.min(...tilesOf(l, g.group).map((t) => t.y0))).toBeCloseTo(g.y0 + TM_GEOM.stripH, 1);
+      }
+    });
+
+    it("with the real gutters, a strip group's tiles are within 2% per unit of a strip-less group's", () => {
+      const l = layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: fits });
+      const a = perUnit(l, "A");
+      const b = perUnit(l, "B");
+      expect(Math.abs(a - b) / b).toBeLessThan(0.02);
+    });
+
+    it("a group that loses its strip gets no extra area: no strips, no compensation", () => {
+      const none = layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: () => false, gutters: { tile: 0, group: 0 } });
+      const k = (920 * 460) / none.total;
+      for (const g of ["A", "B", "C", "D"]) expect(Math.abs(perUnit(none, g) - k) / k).toBeLessThan(1e-4);
+    });
+
+    it("every strip it reserves fits its final, compensated block: one that stops fitting is dropped", () => {
+      // Compensating every group's strip makes A's block shorter than it was uncompensated, so a
+      // height floor on A between the two admits A's strip first and must then drop it.
+      const h = (l: TreemapLayout, g: string): number => { const b = l.groups.find((x) => x.group === g)!; return b.y1 - b.y0; };
+      const before = h(layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: () => false }), "A");
+      const after = h(layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: () => true }), "A");
+      expect(after).toBeLessThan(before);
+      const floor = (g: GroupRect): boolean => g.group !== "A" || g.y1 - g.y0 >= (before + after) / 2;
+      const asked: Array<[string, boolean]> = [];
+      const l = layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: (g) => { asked.push([g.group, floor(g)]); return floor(g); } });
+      expect(asked.slice(0, 4)).toEqual([["A", true], ["B", true], ["C", true], ["D", true]]);
+      expect(asked).toContainEqual(["A", false]);
+      expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", false], ["B", true], ["C", true], ["D", true]]);
+      for (const g of l.groups.filter((x) => x.strip)) expect(floor(g)).toBe(true);
+      // A lost its strip and its extra area with it: the result is the layout that never gave A a strip.
+      const never = layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: (g) => g.group !== "A" });
+      expect(never.groups.map((g) => g.strip)).toEqual(l.groups.map((g) => g.strip));
+      [...l.tiles, ...l.groups].forEach((r, i) => {
+        const n = [...never.tiles, ...never.groups][i]!;
+        coords(r).forEach((v, j) => expect(Math.abs(v - coords(n)[j]!)).toBeLessThanOrEqual(0.011));
+      });
+    });
+
+    it("is deterministic", () => {
+      const o = { groupOrder: [], stripFits: fits };
+      expect(layoutTreemap(mixed, 920, 460, o)).toEqual(layoutTreemap(mixed, 920, 460, o));
+    });
   });
 
   it("is deterministic", () => {

@@ -257,13 +257,18 @@ describe("tile areas: proportional to value, less the gutters", () => {
     const { svg } = renderChart(FLAT, flatRows([["Big", 1_000_000], ["Tiny", 1]]), { width: 920 });
     expect(area(svg, "Tiny")).toBe(0);
   });
-  it("a tile in a group with a strip is smaller than an equal-valued tile in a group without one", () => {
+  it("a header strip costs its group's tiles nothing: equal values draw equal tiles, strip or not, less the gutters", () => {
     const data = [["A", "a1"], ["A", "a2"], ["B", "b1"], ["B", "b2"]].map(([group, name], index) =>
       ({ index, name: name!, group: group!, value: 100, row: {} as TidyRow }));
-    const l = layoutTreemap(data, 920, 460, { groupOrder: ["A", "B"], stripFits: (g) => g.group === "A" });
-    const a = (n: string) => { const t = l.tiles.find((x) => x.datum.name === n)!; return (t.x1 - t.x0) * (t.y1 - t.y0); };
-    expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false]]);
-    expect(a("a1")).toBeLessThan(a("b1") * 0.97);
+    const at = (gutters?: { tile: number; group: number }) => {
+      const l = layoutTreemap(data, 920, 460, { groupOrder: ["A", "B"], stripFits: (g) => g.group === "A", ...(gutters ? { gutters } : {}) });
+      expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false]]);
+      return (n: string) => { const t = l.tiles.find((x) => x.datum.name === n)!; return (t.x1 - t.x0) * (t.y1 - t.y0); };
+    };
+    const exact = at({ tile: 0, group: 0 });
+    expect(Math.abs(exact("a1") - exact("b1")) / exact("b1")).toBeLessThan(1e-4);
+    const drawn = at();
+    expect(Math.abs(drawn("a1") - drawn("b1")) / drawn("b1")).toBeLessThan(0.02);
   });
 });
 

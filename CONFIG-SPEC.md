@@ -900,8 +900,8 @@ data: data.csv
 ### Treemap options
 
 `chartType: treemap` draws a part-to-whole composition as nested rectangles, one **tile** per CSV
-row (a zero value draws none), its area proportional to its value less the gutters and header strips
-(see **Layout** below). It suits many categories of very different sizes, where a stacked bar gets
+row (a zero value draws none), its area proportional to its value less the gutters (see **Layout**
+below). It suits many categories of very different sizes, where a stacked bar gets
 crowded. Map the tile's name with `columns.x`, its size with `columns.value`, and an optional
 **group** with `columns.series` (one level of grouping only).
 It requires `xAxisType: categorical` and has no axes and no legend. The `treemap:` block is a
@@ -931,8 +931,9 @@ sorted by group total, largest first, ties (to 12 significant digits, so `0.1 + 
 broken by `series_order` and then by first appearance, and within a block its tiles are sorted as above.
 A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas are proportional to
 value less those fixed gutters, which take relatively more from a small tile (a sliver can be left
-with no area at all). A group's header strip is taken out of its own block, so a tile in a group
-with a strip is drawn smaller than an equal-valued tile in a group without one.
+with no area at all). A group's header strip is added to its block: the block is enlarged by the
+strip's area, so a tile's area per unit of value is the same in every group, with a strip or without
+one, less the gutters.
 
 **Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
 rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first
@@ -965,8 +966,10 @@ shows its number without its name.
 
 **Header strips.** With groups, each block opens with a 22px strip in the group's `700` tier (or its
 off-ramp `series_colors` colour, as written): the group's name in bold and its share, or the name
-alone where both do not fit. A group keeps its strip only when its block is at least 44px tall and
-the name fits across it. Otherwise the block has no strip, and the group is named in the key.
+alone where both do not fit. A group keeps its strip only when its block, as finally drawn, is at
+least 44px tall and the name fits across it. Strips are decided on the blocks before any strip area
+is added and re-checked on the final blocks, so a block can lose its strip but never gain one. A
+group without a strip is named in the key, and its block gets no strip area.
 
 **Key.** Under the treemap, 12px muted text wrapped to the chart's width, opening with a bold
 **Not labelled above:**. Groups without a strip come first (`Other spending: 1.1%`), then every
