@@ -216,7 +216,7 @@ describe("treemap live mount: hover", () => {
     const row = tip()!.querySelector(".tbl-tooltip-row")!;
     const parts = [...row.firstElementChild!.childNodes].map((n) =>
       n.nodeType === 1 ? `${(n as Element).className}=${n.textContent}` : JSON.stringify(n.textContent));
-    expect(parts).toEqual(["tbl-tooltip-label=Value:", JSON.stringify(" "), "tbl-tooltip-value=$1,461.0"]);
+    expect(parts).toEqual(["tbl-tooltip-label=Value:", JSON.stringify("\u00a0"), "tbl-tooltip-value=$1,461.0"]);
   });
 
   it("a blank cell omits that row for that tile", () => {

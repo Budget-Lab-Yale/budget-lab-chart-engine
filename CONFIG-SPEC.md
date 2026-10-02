@@ -900,9 +900,10 @@ data: data.csv
 ### Treemap options
 
 `chartType: treemap` draws a part-to-whole composition as nested rectangles, one **tile** per CSV
-row (a zero value draws none), its area proportional to its value. It suits many categories of very
-different sizes, where a stacked bar gets crowded. Map the tile's name with `columns.x`, its size
-with `columns.value`, and an optional **group** with `columns.series` (one level of grouping only).
+row (a zero value draws none), its area proportional to its value less the gutters and header strips
+(see **Layout** below). It suits many categories of very different sizes, where a stacked bar gets
+crowded. Map the tile's name with `columns.x`, its size with `columns.value`, and an optional
+**group** with `columns.series` (one level of grouping only).
 It requires `xAxisType: categorical` and has no axes and no legend. The `treemap:` block is a
 validation error on every other chart type.
 
@@ -941,7 +942,9 @@ picks that hue family, and a colour on none of the hue ramps (a raw hex such as 
 group's strip and every tile in it as written. With `shading: size`, tiles take the hue family's
 tonal tiers by rank, spread evenly from darkest to lightest: `700` → `100` with no groups, `600` →
 `100` with groups (the group's `700` is its header strip). Rank, not value, decides the shade, so a
-few large tiles do not wash every small one out to the same pale tier. The `50` tier is never used.
+few large tiles do not wash every small one out to the same pale tier. With `shading: size` the `50`
+tier is never used, even when `series_colors` names it; with `shading: none`, a group's tiles are a
+`50` tier only when its `series_colors` sets one.
 Text on a tile or strip is white or navy, whichever contrasts more with its fill. Past seven
 groups the hues repeat, so `tbl-chart validate` warns on more than seven groups with no
 `series_colors` set.

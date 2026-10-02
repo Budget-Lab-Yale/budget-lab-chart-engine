@@ -196,7 +196,8 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
     typedSpec.chartType === "timeline"
       ? timelineWarnings(typedSpec, rows, timelineExportChartWidth(typedSpec, rows))
       : typedSpec.chartType === "treemap"
-        // Includes the data warnings (>30 tiles, zero/negative rows); a treemap always exports at INNER_W.
+        // Includes the data warnings (>30 tiles, zero-value rows; negatives are validation errors); a
+        // treemap always exports at INNER_W.
         ? treemapWarnings(typedSpec, rows, INNER_W)
         : [];
   return {

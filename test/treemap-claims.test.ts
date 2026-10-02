@@ -148,6 +148,30 @@ describe("treemap.shading", () => {
     for (const n of ["x", "y", "z"]) expect(tileFill(flat, n)).toBe(tokens.categorical[0]!.base);
   });
 
+  it("size: the 50 tier is never used, even when series_colors names it; none: only when series_colors sets it", () => {
+    const fifties = new Set(Object.values(tokens.scales).map((s) => (s as Record<string, string>)["50"]));
+    const many = rows([
+      ...Array.from({ length: 12 }, (_, i): [string, string, number] => ["A", `a${i}`, 100 - i]),
+      ...Array.from({ length: 12 }, (_, i): [string, string, number] => ["B", `b${i}`, 90 - i]),
+    ]);
+    const flatMany = flatRows(Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 100 - i]));
+    const allFills = (svg: SVGSVGElement): string[] =>
+      [...q(svg, "rect.tbl-treemap-tile"), ...q(svg, "rect.tbl-treemap-strip")].map((r) => r.getAttribute("fill")!);
+    // shading: size (default), grouped and flat, a 50-tier series_colors included: no fill is a 50 tier.
+    for (const svg of [
+      renderChart(TM, many, { width: 920 }).svg,
+      renderChart({ ...TM, series_colors: { A: "blue-50", B: "amber-50" } } as ChartSpec, many, { width: 920 }).svg,
+      renderChart(FLAT, flatMany, { width: 920 }).svg,
+    ]) for (const f of allFills(svg)) expect(fifties.has(f)).toBe(false);
+    // shading: none: the default hues are not 50 tiers, so without series_colors none appears ...
+    const none = { ...TM, treemap: { shading: "none" } } as ChartSpec;
+    for (const f of allFills(renderChart(none, many, { width: 920 }).svg)) expect(fifties.has(f)).toBe(false);
+    // ... and a series_colors 50 tier fills its group's tiles as written (its strip stays 700).
+    const svg = renderChart({ ...none, series_colors: { A: "blue-50" } } as ChartSpec, many, { width: 920 }).svg;
+    expect(new Set(tileFills(svg, "A"))).toEqual(new Set([tokens.scales.blue["50"]]));
+    expect(stripFillOf(svg, "A")).toBe(tokens.scales.blue["700"]);
+  });
+
   it("size (default) with groups: tiles run 600 → 100 by rank, the 700 tier is the strip's", () => {
     const { svg } = renderChart(TM, TWO, { width: 920 });
     expect(tileFills(svg, "A")).toEqual([tokens.scales.blue["600"], tokens.scales.blue["300"], tokens.scales.blue["100"]]);
