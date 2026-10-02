@@ -567,13 +567,14 @@ describe("waterfall value pills survive a single-valued series column", () => {
 });
 
 // ---------------------------------------------------------------------------
-// CONFIG-SPEC `tooltip_decimals`: a waterfall's hover delta takes the running-total labels'
-// precision (`valueLabels.decimals`, else the fewest decimals the data needs, at most 2), never
-// `tooltip_decimals`, so the pill and the always-on label cannot disagree. A plain bar's pill is the
-// control: there `tooltip_decimals` applies.
+// CONFIG-SPEC `tooltip_decimals`: where a waterfall hovers with its value pill (standalone, or a
+// coordinated small-multiples pane), the pill takes the running-total labels' precision
+// (`valueLabels.decimals`, else the fewest decimals the data needs, at most 2), never
+// `tooltip_decimals`. A waterfall pane that hovers with a card instead uses `tooltip_decimals`. A
+// plain bar's pill is the control: there `tooltip_decimals` applies.
 // ---------------------------------------------------------------------------
 
-describe("tooltip_decimals does not reach a waterfall's hover delta", () => {
+describe("tooltip_decimals and a waterfall's hover: the pill ignores it, a card uses it", () => {
   const rows = [["Up", "5"], ["Down", "-3"]].map(([step, value]) => ({ step, value })) as unknown as TidyRow[];
   const wf = (extra: Record<string, unknown>): ChartSpec =>
     spec({ chartType: "waterfall", xAxisType: "categorical", columns: { x: "step", value: "value" }, ...extra });
@@ -590,6 +591,41 @@ describe("tooltip_decimals does not reach a waterfall's hover delta", () => {
 
   it("waterfall: valueLabels.decimals sets it", () => {
     expect(pill(wf({ tooltip_decimals: 3, valueLabels: { decimals: 1 } }))).toEqual(["+5.0"]);
+  });
+
+  // Small multiples: a coordinated pane hovers with the same pill (data precision); a pane that
+  // hovers with a card instead — coordinated_cursor: false, or a figure with one pane (a waterfall
+  // figure is not coordinated with nothing to coordinate) — formats the card with tooltip_decimals.
+  const faceted = (cc?: boolean): ChartSpec => wf({
+    data: "d.csv", tooltip_decimals: 3, columns: { x: "step", value: "value", facet: "pane" },
+    small_multiples: { columns: 2, mode: "shared", ...(cc === undefined ? {} : { coordinated_cursor: cc }) },
+  });
+  const paneRows = (panes: string[]): TidyRow[] =>
+    panes.flatMap((pane) => [["Up", "5"], ["Down", "-3"]].map(([step, value]) => ({ pane, step, value }))) as unknown as TidyRow[];
+  const hoverPane = (s: ChartSpec, r: TidyRow[]) => {
+    const m = mountHover(s, r, true);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    return {
+      panes: m.svgs.length,
+      pills: Array.from(m.svgs[0]!.querySelectorAll(".tbl-coord-pill-text")).map((t) => t.textContent ?? ""),
+      card: cardShown() ? cardText() : null,
+    };
+  };
+
+  it("coordinated small-multiples waterfall pane: the pill keeps the data's precision", () => {
+    expect(hoverPane(faceted(), paneRows(["P1", "P2"]))).toEqual({ panes: 2, pills: ["+5"], card: null });
+  });
+
+  it("coordinated_cursor: false: the pane's card uses tooltip_decimals", () => {
+    const h = hoverPane(faceted(false), paneRows(["P1", "P2"]));
+    expect(h.panes).toBe(2);
+    expect(h.card).toContain("5.000");
+  });
+
+  it("a waterfall figure that resolves to one pane: its card uses tooltip_decimals", () => {
+    const h = hoverPane(faceted(), paneRows(["P1"]));
+    expect(h.panes).toBe(1);
+    expect(h.card).toContain("5.000");
   });
 
   it("control: a plain bar's pill does take tooltip_decimals", () => {

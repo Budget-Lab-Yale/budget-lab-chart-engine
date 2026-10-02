@@ -11,7 +11,7 @@ import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { timelineTextWidth } from "../src/engine/timeline-text";
 import { layoutTreemap } from "../src/engine/treemap-layout";
-import { renderChart } from "../src/engine/index";
+import { renderChart, renderFigure } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { tokens } from "../src/theme/tokens";
 import { TM_KEY_PREFIX, TM_NAME_SIZES, fitTileLabel } from "../src/engine/treemap-labels";
@@ -212,6 +212,17 @@ describe("series_order: [] is no filter", () => {
     expect(q(svg, 'g[aria-label="bar"] rect')).toHaveLength(2);
     const listed = renderChart({ ...spec, series_order: ["S1"] } as ChartSpec, r, { width: 720, height: 400 }).svg;
     expect(q(listed, 'g[aria-label="bar"] rect')).toHaveLength(1);
+  });
+
+  it("draws every series in each small-multiples pane too", () => {
+    const spec = {
+      chartType: "bar", title: "b", xAxisType: "categorical", data: "d.csv", series_order: [],
+      columns: { x: "time", value: "value", series: "series", facet: "pane" }, small_multiples: { columns: 2 },
+    } as unknown as ChartSpec;
+    const r = ["P1", "P2"].flatMap((pane) => [{ pane, time: "A", series: "S1", value: "3" }, { pane, time: "A", series: "S2", value: "5" }]) as unknown as TidyRow[];
+    const bars = (s: ChartSpec) => renderFigure(s, r, { width: 838, height: 420, document }).panes.map((p) => q(p.svg!, 'g[aria-label="bar"] rect').length);
+    expect(bars(spec)).toEqual([2, 2]);
+    expect(bars({ ...spec, series_order: ["S2"] } as ChartSpec)).toEqual([1, 1]);
   });
 });
 

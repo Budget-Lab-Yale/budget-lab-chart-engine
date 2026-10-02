@@ -16,14 +16,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   equal group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px
   with the key. `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly
   unlabelled tiles at the export width, or more than seven groups without `series_colors`. The
-  `treemap:` block is rejected on every other chart type, so no existing spec changes. See CONFIG-SPEC "Treemap options".
+  `treemap:` block is rejected on every other chart type, so no existing spec changes. See
+  CONFIG-SPEC "Treemap options".
 
 ### Docs
-- CONFIG-SPEC `tooltip_decimals`: a waterfall's hover delta never used it; it takes the
-  running-total labels' precision (`valueLabels.decimals`, else what the data needs).
+- CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
+  small-multiples pane) never used it; the pill takes the running-total labels' precision
+  (`valueLabels.decimals`, else what the data needs). A waterfall pane with a card does use it.
 - CONFIG-SPEC `series_order`: an empty `series_order: []` filters nothing.
 
 ### Fixed
+- A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
+  `series_order`, matching every other chart type.
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,
   the chart stayed squeezed beside the old right column with a second legend drawn on top; widened
   again, the redraw threw `NotFoundError` and stopped partway. The column is now taken down when the

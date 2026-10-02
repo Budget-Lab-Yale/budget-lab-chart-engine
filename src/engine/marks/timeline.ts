@@ -44,7 +44,8 @@ export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: Lay
     const k = categoryOf(r);
     if (!encounter.includes(k)) encounter.push(k);
   }
-  const seriesNames = spec.series_order ? spec.series_order.filter((s) => encounter.includes(s)) : encounter;
+  // An empty series_order is no filter, as on every other chart type.
+  const seriesNames = spec.series_order?.length ? spec.series_order.filter((s) => encounter.includes(s)) : encounter;
   const kept = rows
     .map((r, id) => ({ r, id, category: categoryOf(r) }))
     .filter((e) => seriesNames.includes(e.category));
