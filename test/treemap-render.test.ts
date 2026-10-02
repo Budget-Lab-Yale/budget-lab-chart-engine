@@ -276,6 +276,30 @@ describe("treemap render", () => {
     expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "C"]);
   });
 
+  it("re-tiles a group whose largest tile cannot hold its label: full-width rows inside the same block, every tile labelled", () => {
+    // Squarified, A's largest tile is a 126px-wide cell, too narrow for "Intergovernmental" at 14px,
+    // so the whole group would go unlabelled. Sliced into rows, every tile fits.
+    const rows = [["A", "Intergovernmental transfers", 13], ...Array.from({ length: 6 }, (_, i) => ["A", `a${i}`, 12]),
+      ["B", "Big", 90], ["C", "Mid", 40]].map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    const { svg } = render(GROUPED_SPEC, rows, 920);
+    const strip = q(svg, "rect.tbl-treemap-strip").find((s) => s.getAttribute("data-series") === "A")!;
+    const a = q<SVGGElement>(svg, 'g[data-series="A"]');
+    expect(a.map((g) => g.getAttribute("aria-label")!.split(", ")[0])).toEqual(
+      ["A · Intergovernmental transfers", ...Array.from({ length: 6 }, (_, i) => `A · a${i}`)]);
+    let top = num(strip, "y") + num(strip, "height");
+    for (const g of a) {
+      const r = g.querySelector("rect")!;
+      expect(g.querySelector("text")).not.toBeNull();
+      expect([num(r, "x"), num(r, "width")]).toEqual([num(strip, "x"), num(strip, "width")]);
+      expect(num(r, "y")).toBeCloseTo(top, 1);
+      top = num(r, "y") + num(r, "height") + TM_GEOM.tileGutter;
+    }
+    // The rows fill the block to the bottom of the area, and their heights follow value (less gutters).
+    expect(top - TM_GEOM.tileGutter).toBeCloseTo(treemapAreaHeight(920), 1);
+    const h = (g: SVGGElement): number => num(g.querySelector("rect")!, "height") + TM_GEOM.tileGutter;
+    expect(h(a[0]!) / h(a[1]!)).toBeCloseTo(13 / 12, 2);
+  });
+
   it("drops the strip of a block under two strips tall, even when its name fits", () => {
     const g = (rows: Array<[string, string, number]>) => rows.map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     // At 280px wide the second group is a full-width band: 10% of 350px is 35px (< 44), 15% is 52.5px.

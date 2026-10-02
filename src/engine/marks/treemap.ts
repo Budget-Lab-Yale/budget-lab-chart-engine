@@ -18,7 +18,7 @@ import {
 } from "../../spec/treemap";
 import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TreemapLayout } from "../treemap-layout";
 import {
-  tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel, treemapLabelSize, treemapStripHeight,
+  tileFill, stripFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel, treemapLabelSize, treemapStripHeight,
   TM_LINE_HEIGHT as LINE_HEIGHT,
   type TileLabel, type StripLabel,
 } from "../treemap-labels";
@@ -101,19 +101,21 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   // Strip text is the tile labels' size, and the strip's height follows it.
   const size = treemapLabelSize(width);
   const stripH = treemapStripHeight(size);
-  // A group keeps its strip only if its block is at least two strips tall and the strip has text.
+  const numberOf = (v: number): string | null =>
+    cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
+  // A group keeps its strip only if its block is at least two strips tall and the strip has text. A
+  // group whose largest tile cannot hold its label is re-tiled inside its block where that helps.
   const layout = layoutTreemap(data, width, areaH, {
     groupOrder: groupNames,
     stripH,
     stripFits: (g) =>
       g.y1 - g.y0 >= 2 * stripH &&
       fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, size).mode !== "none",
+    labelFits: (t) => fitTileLabel(t.datum.name, numberOf(t.datum.value), t.x1 - t.x0, t.y1 - t.y0, size).mode !== "none",
   });
 
   const groupSize = new Map<string | null, number>();
   for (const t of layout.tiles) groupSize.set(t.datum.group, (groupSize.get(t.datum.group) ?? 0) + 1);
-  const numberOf = (v: number): string | null =>
-    cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
   // One label size for the whole chart, labelled top-down by value within each group.
   const labels = fitTileLabels(layout.tiles.map((t) => ({
     name: t.datum.name, number: numberOf(t.datum.value), group: t.datum.group, value: t.datum.value,

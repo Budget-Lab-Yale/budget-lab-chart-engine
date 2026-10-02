@@ -355,3 +355,153 @@ describe("layoutTreemap: grouped", () => {
     expect(layoutTreemap(data, W, H, o)).toEqual(layoutTreemap(data, W, H, o));
   });
 });
+
+describe("layoutTreemap: a group re-tiled so its largest tile's label fits", () => {
+  // Three groups; A's tiles are close in value, so squarify gives its largest tile a near-square cell.
+  const data = grouped([
+    ["A", 30], ["A", 26], ["A", 22], ["A", 18], ["A", 14], ["B", 50], ["B", 20], ["C", 30], ["C", 10],
+  ]);
+  const o = { groupOrder: [] as string[], stripFits: () => true };
+  const base = layoutTreemap(data, 920, 460, o);
+  const blockOf = (l: TreemapLayout, g: string): GroupRect => l.groups.find((x) => x.group === g)!;
+  const largestOf = (l: TreemapLayout, g: string): TileRect => tilesOf(l, g).reduce((a, b) => (b.datum.value > a.datum.value ? b : a));
+  /** Every rect the layout asked labelFits about for group `g`'s largest tile, in order. */
+  const tried = (fits: (t: TileRect) => boolean, g = "A"): Array<{ x0: number; y0: number; x1: number; y1: number }> => {
+    const seen: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+    layoutTreemap(data, 920, 460, { ...o, labelFits: (t) => {
+      if (t.datum.group === g) seen.push({ x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1 });
+      return fits(t);
+    } });
+    return seen;
+  };
+  const tileTop = (l: TreemapLayout, g: string): number => blockOf(l, g).y0 + TM_GEOM.stripH;
+
+  it("keeps squarify when the largest tile's label fits: labelFits is asked once per group, of that tile", () => {
+    const asked: string[] = [];
+    const l = layoutTreemap(data, 920, 460, { ...o, labelFits: (t) => { asked.push(t.datum.name); return true; } });
+    expect(asked).toEqual(["t0", "t5", "t7"]);
+    expect(l).toEqual({ ...base, groups: base.groups.map((g) => ({ ...g, tiling: "squarify" })) });
+    expect(base.groups.every((g) => g.tiling === "squarify")).toBe(true);
+  });
+
+  it("tries slice (largest first, full-width rows), dice (full-height columns), sliceDice, binary, in that order", () => {
+    const a = blockOf(base, "A");
+    const seen = tried(() => false);
+    expect(seen).toHaveLength(5);
+    // squarify's cell, as drawn without labelFits.
+    expect(seen[0]).toEqual((({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }))(largestOf(base, "A")));
+    // slice: the largest tile is the top row, the block's full width.
+    expect([seen[1]!.x0, seen[1]!.y0, seen[1]!.x1]).toEqual([a.x0, tileTop(base, "A"), a.x1]);
+    // dice: the largest tile is the left column, the block's full height below the strip.
+    expect([seen[2]!.x0, seen[2]!.y0, seen[2]!.y1]).toEqual([a.x0, tileTop(base, "A"), a.y1]);
+    // sliceDice slices at a group's depth: the same rows as slice.
+    expect(seen[3]).toEqual(seen[1]);
+    // binary differs from all of them.
+    for (const i of [0, 1, 2]) expect(seen[4]).not.toEqual(seen[i]);
+  });
+
+  it("takes the first tiling under which the label fits, and keeps squarify when none does", () => {
+    const seen = tried(() => false);
+    const same = (r: { x0: number; y0: number; x1: number; y1: number }) => (t: TileRect) =>
+      t.datum.group !== "A" || (t.x0 === r.x0 && t.y0 === r.y0 && t.x1 === r.x1 && t.y1 === r.y1);
+    const tilingFor = (fits: (t: TileRect) => boolean) => blockOf(layoutTreemap(data, 920, 460, { ...o, labelFits: fits }), "A").tiling;
+    expect(tilingFor(same(seen[1]!))).toBe("slice");
+    expect(tilingFor(same(seen[2]!))).toBe("dice");
+    expect(tilingFor(same(seen[4]!))).toBe("binary");
+    // Full-width or full-height both pass: slice is first.
+    expect(tilingFor((t) => t.datum.group !== "A" || !(t.x1 === seen[0]!.x1 && t.y1 === seen[0]!.y1))).toBe("slice");
+    // Nothing fits: squarify stays, tile for tile.
+    const none = layoutTreemap(data, 920, 460, { ...o, labelFits: (t) => t.datum.group !== "A" });
+    expect(blockOf(none, "A").tiling).toBe("squarify");
+    expect(none.tiles).toEqual(base.tiles);
+  });
+
+  it("moves only that group's tiles: every block, and every other group's tiles, stay where they were", () => {
+    for (const fits of [(t: TileRect) => t.datum.group !== "A", (t: TileRect) => t.datum.group !== "A" || t.x1 - t.x0 > 400]) {
+      const l = layoutTreemap(data, 920, 460, { ...o, labelFits: fits });
+      expect(l.groups.map(({ tiling: _, ...g }) => g)).toEqual(base.groups.map(({ tiling: _, ...g }) => g));
+      expect(l.tiles.filter((t) => t.datum.group !== "A")).toEqual(base.tiles.filter((t) => t.datum.group !== "A"));
+    }
+    const sliced = layoutTreemap(data, 920, 460, { ...o, labelFits: (t) => t.datum.group !== "A" || t.x1 - t.x0 > 400 });
+    expect(blockOf(sliced, "A").tiling).toBe("slice");
+    // Slice rows, largest first, top to bottom, each the block's width, inside the block.
+    const a = blockOf(sliced, "A");
+    const rows = tilesOf(sliced, "A").sort((p, q) => p.rank - q.rank);
+    expect(rows.map((t) => t.datum.value)).toEqual([30, 26, 22, 18, 14]);
+    for (let i = 1; i < rows.length; i++) expect(rows[i]!.y0).toBeGreaterThan(rows[i - 1]!.y0);
+    for (const t of rows) {
+      expect([t.x0, t.x1]).toEqual([a.x0, a.x1]);
+      expect(t.y0).toBeGreaterThanOrEqual(a.y0);
+      expect(t.y1).toBeLessThanOrEqual(a.y1);
+    }
+  });
+
+  it("keeps areas exactly proportional to value: with gutters 0, every tile under every tiling is value x one factor", () => {
+    const g0 = { tile: 0, group: 0 };
+    const sq = layoutTreemap(data, 920, 460, { ...o, gutters: g0 });
+    const strips = sq.groups.reduce((s, g) => s + (g.x1 - g.x0) * TM_GEOM.stripH, 0);
+    const k = (920 * 460 - strips) / sq.total;
+    const seen: string[] = [];
+    // Accept the n-th alternative tiling for A, rejecting the ones before it.
+    for (let n = 1; n <= 4; n++) {
+      let calls = 0;
+      const l = layoutTreemap(data, 920, 460, { ...o, gutters: g0, labelFits: (t) => t.datum.group !== "A" || calls++ === n });
+      seen.push(blockOf(l, "A").tiling);
+      for (const t of l.tiles) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(2e-3);
+      const ts = tilesOf(l, "A");
+      const sum = ts.reduce((s, t) => s + area(t), 0) / ts.reduce((s, t) => s + t.datum.value, 0);
+      expect(Math.abs(sum - k) / k).toBeLessThan(1e-4);
+    }
+    expect(seen).toEqual(["slice", "dice", "sliceDice", "binary"]);
+  });
+
+  it("property: re-tiling never moves a block and keeps areas proportional (gutters 0, 200 random charts)", () => {
+    let s = 5;
+    const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const used = new Set<string>();
+    for (let c = 0; c < 200; c++) {
+      const n = 4 + Math.floor(rand() * 20);
+      const d = grouped(Array.from({ length: n }, (): [string, number] => [`G${Math.floor(rand() * 4)}`, 1 + Math.floor(rand() ** 2 * 100)]));
+      const w = 280 + Math.floor(rand() * 640);
+      const h = treemapAreaHeight(w);
+      const minW = rand() * 200;
+      const minH = rand() * 120;
+      const opts = { groupOrder: [], stripFits: (g: GroupRect) => g.y1 - g.y0 >= 44, gutters: { tile: 0, group: 0 } };
+      const sq = layoutTreemap(d, w, h, opts);
+      const l = layoutTreemap(d, w, h, { ...opts, labelFits: (t) => t.x1 - t.x0 >= minW && t.y1 - t.y0 >= minH });
+      expect(l.groups.map(({ tiling: _, ...g }) => g)).toEqual(sq.groups.map(({ tiling: _, ...g }) => g));
+      const strips = l.groups.filter((g) => g.strip).reduce((sum, g) => sum + (g.x1 - g.x0) * TM_GEOM.stripH, 0);
+      const k = (w * h - strips) / l.total;
+      for (const g of l.groups) {
+        used.add(g.tiling);
+        const ts = tilesOf(l, g.group);
+        if (g.tiling === "squarify") expect(ts).toEqual(tilesOf(sq, g.group));
+        const top = g.strip ? g.y0 + TM_GEOM.stripH : g.y0;
+        for (const t of ts) {
+          expect(t.x0).toBeGreaterThanOrEqual(g.x0);
+          expect(t.x1).toBeLessThanOrEqual(g.x1);
+          expect(t.y0).toBeGreaterThanOrEqual(top - 0.01);
+          expect(t.y1).toBeLessThanOrEqual(g.y1);
+          if (t.x1 - t.x0 >= 10 && t.y1 - t.y0 >= 10) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(5e-3);
+        }
+        const perUnit = ts.reduce((sum, t) => sum + area(t), 0) / ts.reduce((sum, t) => sum + t.datum.value, 0);
+        expect(Math.abs(perUnit - k) / k).toBeLessThan(1e-3);
+      }
+    }
+    // Binary rarely wins on a size threshold; the fixed-data tests above force it.
+    for (const tiling of ["squarify", "slice", "dice"]) expect(used).toContain(tiling);
+  });
+
+  it("never re-tiles flat data: labelFits is not asked and the layout is squarify's", () => {
+    const f = flat([30, 26, 22, 18, 5]);
+    let asked = 0;
+    const l = layoutTreemap(f, 920, 460, { groupOrder: [], labelFits: () => { asked++; return false; } });
+    expect(asked).toBe(0);
+    expect(l).toEqual(layoutTreemap(f, 920, 460, { groupOrder: [] }));
+  });
+
+  it("is deterministic", () => {
+    const opts = { ...o, labelFits: (t: TileRect) => t.datum.group !== "A" || t.x1 - t.x0 > 400 };
+    expect(layoutTreemap(data, 920, 460, opts)).toEqual(layoutTreemap(data, 920, 460, opts));
+  });
+});

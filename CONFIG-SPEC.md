@@ -933,7 +933,12 @@ A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas ar
 value less those fixed gutters, which take relatively more from a small tile (a sliver can be left
 with no area at all). A group's header strip is added to its block: the block is enlarged by the
 strip's area, so a tile's area per unit of value is the same in every group, with a strip or without
-one, less the gutters.
+one, less the gutters. When a group's largest tile cannot hold its label (see **Tile labels**), that
+group's tiles alone are laid out again inside the same block, trying in turn full-width rows from
+the largest down, full-height columns from the left, and a balanced split by value, and the first
+under which the largest tile's label fits is kept (squarified if none). The block's position and
+size never change, and tile areas stay proportional to value as above. Data with no groups is
+always squarified.
 
 **Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
 rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first

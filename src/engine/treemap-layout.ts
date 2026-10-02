@@ -20,8 +20,13 @@ export function treemapAreaHeight(width: number): number {
 
 /** `rank` is the tile's index within its group (overall when flat) by the layout sort, 0 = largest. */
 export interface TileRect { datum: TreemapDatum; x0: number; y0: number; x1: number; y1: number; rank: number }
-/** A group's whole block, header strip included. `strip`: the block reserves the header strip. */
-export interface GroupRect { group: string; total: number; x0: number; y0: number; x1: number; y1: number; strip: boolean }
+/** How a group's tiles are laid out inside its block: squarified, or one of the re-tilings tried,
+ *  in this order, when the largest tile's label does not fit under squarify (layoutTreemap). */
+export const TM_RETILINGS = ["slice", "dice", "sliceDice", "binary"] as const;
+export type TreemapTiling = "squarify" | (typeof TM_RETILINGS)[number];
+/** A group's whole block, header strip included. `strip`: the block reserves the header strip.
+ *  `tiling`: how its tiles are laid out inside it. */
+export interface GroupRect { group: string; total: number; x0: number; y0: number; x1: number; y1: number; strip: boolean; tiling: TreemapTiling }
 export interface TreemapLayout { width: number; height: number; tiles: TileRect[]; groups: GroupRect[]; total: number }
 
 /** Hierarchy node input: the root, a group, or a tile. */
@@ -48,6 +53,13 @@ function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, 
 }
 
 
+/** The d3 tiling for each re-tiling. "slice" stacks full-width rows top to bottom and "dice" lays
+ *  full-height columns left to right, both in the group's sort order (largest first); "sliceDice"
+ *  alternates by depth, which for a group block (depth 1) is slice; "binary" splits by value. */
+const RETILE = {
+  slice: d3.treemapSlice, dice: d3.treemapDice, sliceDice: d3.treemapSliceDice, binary: d3.treemapBinary,
+} as const;
+
 /** Fixed-point cap for the strip compensation (deterministic whether or not it converges first). */
 const MAX_COMPENSATION_ROUNDS = 50;
 /** Block widths (px) that move less than this between rounds count as converged. */
@@ -70,9 +82,19 @@ const CONVERGED_PX = 1e-6;
  * block. Absent, every group reserves the strip. `stripH` is the strip's height (default
  * TM_GEOM.stripH). `gutters` is for tests only (0 isolates the proportionality from the fixed
  * gutters); every caller in the engine uses TM_GEOM's.
+ *
+ * `labelFits` rescues a group whose largest tile (by value; ties: layout order) cannot hold its
+ * label: asked of that tile once the blocks are final, and if it fails, the group's tiles alone are
+ * laid out again inside the same block (below the same strip) by each of TM_RETILINGS in turn,
+ * keeping the first under which it passes, else squarify. Blocks never move and every tiling shares
+ * the block by value, so areas stay proportional exactly as under squarify. Flat data is never
+ * re-tiled (re-tiling the whole chart would change its whole look), so it is not asked there.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,
-  opts: { groupOrder: string[]; stripFits?: (g: GroupRect) => boolean; stripH?: number; gutters?: { tile: number; group: number } }): TreemapLayout {
+  opts: {
+    groupOrder: string[]; stripFits?: (g: GroupRect) => boolean; stripH?: number;
+    labelFits?: (largest: TileRect) => boolean; gutters?: { tile: number; group: number };
+  }): TreemapLayout {
   const stripH = opts.stripH ?? TM_GEOM.stripH;
   const tileGutter = opts.gutters?.tile ?? TM_GEOM.tileGutter;
   const groupGutter = opts.gutters?.group ?? TM_GEOM.groupGutter;
@@ -149,7 +171,8 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   type GNode = { data: Node; x0: number; y0: number; x1: number; y1: number };
   const groupNodes = (): GNode[] => (grouped ? (root.children ?? []) : []);
   /** A block as stripFits sees it: before (or regardless of) its strip decision. */
-  const block = (n: GNode): GroupRect => ({ group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: false });
+  const block = (n: GNode): GroupRect =>
+    ({ group: n.data.group!, total: totalOf(n.data.group!), ...rect(n, width, height), strip: false, tiling: "squarify" });
 
   // The strip takes stripH off the region its block's tiles are laid out in, whose width is the
   // block's plus one tile gutter (d3 extends a parent's tiling region half a gutter past each side).
@@ -192,9 +215,49 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
     run(strips);
   }
 
-  const groups: GroupRect[] = groupNodes().map((n) => ({ ...block(n), strip: strips.has(n.data.group!) }));
-  const tiles: TileRect[] = root.leaves().map((n: { data: Node; parent: { children: unknown[] }; x0: number; y0: number; x1: number; y1: number }) => ({
-    datum: n.data.datum!, ...rect(n, width, height), rank: n.parent.children.indexOf(n),
-  }));
+  type LNode = { data: Node; parent: { children: unknown[] }; x0: number; y0: number; x1: number; y1: number };
+  const tileRect = (n: LNode): TileRect => ({ datum: n.data.datum!, ...rect(n, width, height), rank: n.parent.children.indexOf(n) });
+
+  // Rescue: re-tile a group whose largest tile cannot hold its label (blocks and strips are final).
+  const tilings = new Map<string, TreemapTiling>();
+  if (opts.labelFits) {
+    type Kid = LNode & { value: number };
+    for (const n of groupNodes() as Array<GNode & { value: number; children: Kid[] }>) {
+      const kids = n.children;
+      // Largest by raw value; on a tie the first in layout order (strict >).
+      const largest = kids.reduce((a, b) => (b.data.datum!.value > a.data.datum!.value ? b : a));
+      if (opts.labelFits(tileRect(largest))) continue;
+      const squarified = kids.map(({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }));
+      // The region d3 tiled this block's tiles in: the block below its strip, extended half a tile
+      // gutter past each side; each tile is then inset by that half gutter (d3's positionNode).
+      const p = tileGutter / 2;
+      let [x0, y0, x1, y1] = [n.x0 - p, n.y0 + (strips.has(n.data.group!) ? stripH : 0) - p, n.x1 + p, n.y1 + p];
+      if (x1 < x0) x0 = x1 = (x0 + x1) / 2;
+      if (y1 < y0) y0 = y1 = (y0 + y1) / 2;
+      const own = n.value;
+      let found: TreemapTiling | null = null;
+      for (const name of TM_RETILINGS) {
+        // As in `tile`: the block is shared by its tiles' own values, not the strip compensation.
+        n.value = kids.reduce((s, c) => s + c.value, 0);
+        RETILE[name](n, x0, y0, x1, y1);
+        n.value = own;
+        for (const c of kids) {
+          c.x0 += p; c.y0 += p; c.x1 -= p; c.y1 -= p;
+          if (c.x1 < c.x0) c.x0 = c.x1 = (c.x0 + c.x1) / 2;
+          if (c.y1 < c.y0) c.y0 = c.y1 = (c.y0 + c.y1) / 2;
+        }
+        if (opts.labelFits(tileRect(largest))) {
+          found = name;
+          break;
+        }
+      }
+      if (found) tilings.set(n.data.group!, found);
+      else kids.forEach((c, i) => Object.assign(c, squarified[i]));
+    }
+  }
+
+  const groups: GroupRect[] = groupNodes().map((n) =>
+    ({ ...block(n), strip: strips.has(n.data.group!), tiling: tilings.get(n.data.group!) ?? "squarify" }));
+  const tiles: TileRect[] = root.leaves().map(tileRect);
   return { width, height, tiles, groups, total: data.reduce((s, d) => s + d.value, 0) };
 }
