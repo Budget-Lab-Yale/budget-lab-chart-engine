@@ -141,7 +141,7 @@ describe("treemap live mount: sizing", () => {
     const host = mountAt(900);
     const first = svgOf(host).outerHTML;
     const firstGeom = geometry(svgOf(host));
-    expect(keyText(svgOf(host))).toEqual([]);
+    expect(keyText(svgOf(host)).join(" ")).not.toContain("Apparel and services");
 
     await resizeTo(host, 340);
     const narrow = svgOf(host);
@@ -152,7 +152,7 @@ describe("treemap live mount: sizing", () => {
     expect(bottom).toBeGreaterThan(340);
     expect(geometry(narrow)).not.toBe(firstGeom);
     // Label fitting re-runs too: tiles too small at 340 move into the key.
-    expect(keyText(narrow).join(" ")).toContain("Cash contributions");
+    expect(keyText(narrow).join(" ")).toContain("Apparel and services");
 
     await resizeTo(host, 900);
     expect(svgOf(host).outerHTML).toBe(first);

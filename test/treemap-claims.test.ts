@@ -14,7 +14,7 @@ import { layoutTreemap } from "../src/engine/treemap-layout";
 import { renderChart, renderFigure } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { tokens } from "../src/theme/tokens";
-import { TM_KEY_PREFIX, TM_NAME_SIZES, fitTileLabel } from "../src/engine/treemap-labels";
+import { TM_KEY_PREFIX } from "../src/engine/treemap-labels";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -133,14 +133,24 @@ describe("series_labels on a treemap", () => {
 });
 
 describe("tile label sizes", () => {
-  it("run from 20px down to 11px: narrowing a tile steps the name through exactly those sizes", () => {
-    expect([...TM_NAME_SIZES]).toEqual([20, 17, 15, 13, 12, 11]);
-    const seen = new Set<number>();
-    for (let w = 200; w >= 10; w -= 0.25) {
-      const l = fitTileLabel("Housing", null, w, 400);
-      if (l.mode === "stacked") seen.add(l.size);
+  // Many tiles of very different sizes and name lengths, so the old per-tile ladder would have
+  // drawn several sizes.
+  const MANY = flatRows([
+    ["Housing", 28452], ["Transportation", 13174], ["Food", 10990], ["Personal insurance and pensions", 9556],
+    ["Healthcare", 6159], ["Entertainment", 3635], ["Cash contributions", 2531], ["Apparel and services", 2041],
+    ["Education", 1656], ["Other", 1500], ["Personal care", 950], ["Reading", 117],
+  ]);
+  // An inline label carries its size on the <text>, a stacked one on each <tspan>.
+  const drawn = (svg: SVGSVGElement): Array<[string, string]> =>
+    q(svg, "text.tbl-treemap-label tspan").map((s) => [(s.getAttribute("font-size") ?? s.parentElement!.getAttribute("font-size"))!, s.getAttribute("font-weight")!]);
+
+  it("one size in a whole chart: 14px at 600px wide and over, 12px below; the name 700, its number 500 at that size", () => {
+    for (const [w, size] of [[920, "14"], [600, "14"], [599, "12"], [375, "12"]] as const) {
+      const spans = drawn(renderChart(FLAT, MANY, { width: w }).svg);
+      expect(spans.length).toBeGreaterThan(4);
+      expect(new Set(spans.map(([s]) => s))).toEqual(new Set([size]));
+      expect(new Set(spans.map(([, wt]) => wt))).toEqual(new Set(["700", "500"]));
     }
-    expect([...seen].sort((x, y) => y - x)).toEqual([20, 17, 15, 13, 12, 11]);
   });
 });
 

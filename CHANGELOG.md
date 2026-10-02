@@ -9,8 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Added
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Squarified and
-  deterministic; tiles shaded by size rank in each group's hue; labels sized to fit, with tiles too
-  small to label listed in a key below the chart; a header strip per group where it fits. New
+  deterministic; tiles shaded by size rank in each group's hue; labels top-left at one size per
+  chart (14px, 12px below 600px wide), with tiles too small to label listed in a key below the
+  chart; a header strip per group where it fits, its area added to the group's block. New
   `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap,
   `value_format` groups thousands, and `series_order` sets hue order and breaks ties between
   equal group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px

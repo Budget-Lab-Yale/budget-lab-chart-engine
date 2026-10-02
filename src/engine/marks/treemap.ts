@@ -18,9 +18,9 @@ import {
 } from "../../spec/treemap";
 import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TreemapLayout } from "../treemap-layout";
 import {
-  tileFill, stripFill, contrastText, fitTileLabel, fitStripLabel, keyEntries, wrapKey, TM_KEY_PREFIX,
+  tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel, keyEntries, wrapKey, TM_KEY_PREFIX,
   TM_LINE_HEIGHT as LINE_HEIGHT, TM_STRIP_TEXT as STRIP_TEXT, TM_KEY_TEXT,
-  type TileLabel, type StripLabel,
+  type TileLabel, type StripLabel, type TreemapSizing,
 } from "../treemap-labels";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -68,7 +68,7 @@ const r2 = (v: number): number => Math.round(v * 100) / 100;
 
 /** The one place a spec + rows + width becomes geometry, colours, labels and key lines, so the render,
  *  its height and the warnings can never disagree. */
-function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
+function build(spec: ChartSpec, rows: TidyRow[], width: number, sizing: TreemapSizing = "uniform"): Built {
   const cfg = resolveTreemapConfig(spec);
   const data = treemapData(spec, rows);
   const grouped = data.some((d) => d.group !== null);
@@ -108,15 +108,20 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
 
   const groupSize = new Map<string | null, number>();
   for (const t of layout.tiles) groupSize.set(t.datum.group, (groupSize.get(t.datum.group) ?? 0) + 1);
-  const tiles: BuiltTile[] = layout.tiles.map((t) => {
+  const numberOf = (v: number): string | null =>
+    cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
+  // Label sizes are chosen across the whole chart (fitTileLabels), never tile by tile.
+  const labels = fitTileLabels(layout.tiles.map((t) => ({
+    name: t.datum.name, number: numberOf(t.datum.value), value: t.datum.value, w: t.x1 - t.x0, h: t.y1 - t.y0,
+  })), width, sizing);
+  const tiles: BuiltTile[] = layout.tiles.map((t, i) => {
     const d = t.datum;
-    const number = cfg.labelValue === "share" ? shareText(d.value) : cfg.labelValue === "value" ? valueText(d.value) : null;
     return {
       datum: d, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1,
       groupLabel: d.group !== null ? labelOf(d.group) : null,
       share: total > 0 ? d.value / total : 0,
       fill: tileFill(hueOf(d.group), t.rank, groupSize.get(d.group) ?? 1, grouped, cfg.shading),
-      label: fitTileLabel(d.name, number, t.x1 - t.x0, t.y1 - t.y0),
+      label: labels[i]!,
     };
   });
   const strips: BuiltStrip[] = layout.groups.filter((g) => g.strip).map((g) => ({
@@ -205,9 +210,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
           lineTop += lab.size * LINE_HEIGHT;
         }
         if (lab.number !== null) {
-          text.append(span(lab.number, {
-            x: left, y: baseline(lineTop, lab.numberSize), "font-size": lab.numberSize, "font-weight": 500,
-          }));
+          text.append(span(lab.number, { x: left, y: baseline(lineTop, lab.size), "font-size": lab.size, "font-weight": 500 }));
         }
       } else {
         // Inline: drawn exactly as fitTileLabel measured it, the name at 700 then " number" at 500.
@@ -259,7 +262,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
 }
 
 export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
-  const b = build(spec, rows, opts.width ?? 720);
+  const b = build(spec, rows, opts.width ?? 720, opts.treemapSizing);
   const svg = draw(opts.document ?? document, spec, b);
   const treemapTiles: TreemapTileInfo[] = b.tiles.map((t) => ({
     name: t.datum.name, group: t.datum.group, groupLabel: t.groupLabel, value: t.datum.value, share: t.share,

@@ -7,7 +7,7 @@ import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { TREEMAP_CLASS, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
-import { contrastText, fitTileLabel, stripFill, TM_KEY_PREFIX } from "../src/engine/treemap-labels";
+import { contrastText, fitTileLabel, fitTileLabels, stripFill, TM_KEY_PREFIX } from "../src/engine/treemap-labels";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -116,15 +116,17 @@ describe("treemap render", () => {
 
   it("draws every label exactly as fitTileLabel fitted it, top-left in its tile's inner box", () => {
     let inline = 0;
+    // One large tile and eight small equal ones: at 720 the last two are short enough to go inline.
+    const INLINE = rowsOf([["Big", 500], ...Array.from({ length: 8 }, (_, i): [string, number] => [`Food ${i}`, 10])]);
     for (const w of [375, 560, 720, 920]) {
-      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
+      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED], [FLAT_SPEC, INLINE]] as const) {
         const { svg } = render(spec, rows, w);
         for (const g of tiles(svg)) {
           const rect = g.querySelector("rect")!;
           const [x, y, rw, rh] = ["x", "y", "width", "height"].map((a) => num(rect, a)) as [number, number, number, number];
           const name = g.getAttribute("aria-label")!.split(", ")[0]!.split(" · ").pop()!;
           const share = g.getAttribute("aria-label")!.split(", ")[1]!.replace(" of total", "");
-          const fit = fitTileLabel(name, share, rw, rh);
+          const fit = fitTileLabel(name, share, rw, rh, w >= 600 ? 14 : 12);
           const text = g.querySelector("text");
           if (fit.mode === "none") {
             expect(text).toBeNull();
@@ -141,7 +143,7 @@ describe("treemap render", () => {
             expect(spans.map((s) => s.textContent)).toEqual([...fit.nameLines, fit.number]);
             spans.forEach((s, i) => {
               const isNumber = i === spans.length - 1;
-              const size = isNumber ? fit.numberSize : fit.size;
+              const size = fit.size;
               expect(num(s, "font-weight")).toBe(isNumber ? 500 : 700);
               expect(num(s, "font-size")).toBe(size);
               expect(num(s, "x")).toBeCloseTo(left, 1);
@@ -165,6 +167,27 @@ describe("treemap render", () => {
     expect(inline).toBeGreaterThan(0);
   });
 
+  it("treemapSizing (internal): uniform by default; stepped draws exactly what fitTileLabels fits, 18px then 13px by value", () => {
+    for (const w of [375, 920]) {
+      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
+        const sizes = (opts: object) => tiles(render(spec, rows, w, opts).svg).map((g) => g.querySelector("text tspan")?.getAttribute("font-size") ?? null);
+        expect(sizes({})).toEqual(sizes({ treemapSizing: "uniform" }));
+        const gs = tiles(render(spec, rows, w).svg);
+        const input = gs.map((g) => {
+          const rect = g.querySelector("rect")!;
+          const [name, share] = g.getAttribute("aria-label")!.split(", ").map((s) => s.split(" · ").pop()!) as [string, string];
+          const d = g.getAttribute("aria-label")!.split(", ");
+          return { name: name, number: share.replace(" of total", ""), value: Number(d[d.length - 1]!.replace(/[$,]/g, "")), w: num(rect, "width"), h: num(rect, "height") };
+        });
+        const want = fitTileLabels(input, w, "stepped").map((l) => (l.mode === "none" ? null : String(l.size)));
+        const got = sizes({ treemapSizing: "stepped" });
+        expect(got).toEqual(want);
+        expect(got.filter((s) => s !== null).length).toBeGreaterThan(0);
+        for (const s of got) if (s !== null) expect(["18", "13"]).toContain(s);
+      }
+    }
+  });
+
   it("lists exactly the unlabelled tiles in the key, in layout order", () => {
     for (const w of [375, 720]) {
       const { svg } = render(FLAT_SPEC, BLS, w);
@@ -172,7 +195,7 @@ describe("treemap render", () => {
         .filter((g) => {
           const rect = g.querySelector("rect")!;
           const [name, share] = g.getAttribute("aria-label")!.split(", ") as [string, string];
-          return fitTileLabel(name, share.replace(" of total", ""), num(rect, "width"), num(rect, "height")).mode === "none";
+          return fitTileLabel(name, share.replace(" of total", ""), num(rect, "width"), num(rect, "height"), w >= 600 ? 14 : 12).mode === "none";
         })
         .map((g) => g.getAttribute("aria-label")!.split(", ").slice(0, 2).join(" ").replace(" of total", ""));
       expect(want.length).toBeGreaterThan(0);

@@ -7,8 +7,13 @@ import { timelineTextWidth } from "./timeline-text";
 import { TM_GEOM } from "./treemap-layout";
 import { d3 } from "./vendor";
 
-/** Tile name sizes, largest first. The number is drawn at round(1.4 × s). */
-export const TM_NAME_SIZES = [20, 17, 15, 13, 12, 11] as const;
+/** Tile label sizes (px). A label's name (700) and number (500) are drawn at the same size, and the
+ *  size is chosen per chart, never per tile alone (fitTileLabels). "uniform": one size for every tile,
+ *  `uniformWide` on a chart at least `uniformWideAt` wide, else `uniformNarrow`. "stepped": two sizes,
+ *  `steppedLarge` for the largest tiles, `steppedSmall` for the rest. */
+export const TM_LABEL_SIZES = { uniformWide: 14, uniformNarrow: 12, uniformWideAt: 600, steppedLarge: 18, steppedSmall: 13 } as const;
+/** Chart-level label sizing. INTERNAL: an A/B switch (RenderOptions.treemapSizing), not in the spec. */
+export type TreemapSizing = "uniform" | "stepped";
 /** The key's leading text, drawn bold (700); wrapKey's first line starts with it. */
 export const TM_KEY_PREFIX = "Not labelled above:";
 
@@ -96,7 +101,7 @@ export function contrastText(fill: string): string {
 }
 
 export type TileLabel =
-  | { mode: "stacked"; size: number; numberSize: number; nameLines: string[]; number: string | null }
+  | { mode: "stacked"; size: number; nameLines: string[]; number: string | null }
   | { mode: "inline"; size: number; text: string; name: string; number: string | null }
   | { mode: "none" };
 
@@ -118,31 +123,61 @@ function wrapName(name: string, size: number, width: number): string[] | null {
   return lines;
 }
 
-/** Fit name (+ number unless null) into the tile's inner box (spec §5). Never truncates.
- *  `w`/`h` are the tile's full size; the inner box is 6px in from each edge.
- *  Stacked: the name wrapped at spaces (700, ≤ 3 lines) above the number (500, round(1.4 × s)).
- *  Inline: one line `text` = name + " " + number, measured as drawn — `name` at 700, then " " and
- *  `number` at 500, both at `size`; draw it as those two spans, not as `text` in one weight. */
-export function fitTileLabel(name: string, number: string | null, w: number, h: number): TileLabel {
+/** Fit name (+ number unless null) into the tile's inner box at exactly `size` px (spec §5); never
+ *  a smaller size, never truncated. `w`/`h` are the tile's full size; the inner box is 6px in from
+ *  each edge. Stacked: the name wrapped at spaces (700, ≤ 3 lines) above the number (500), all lines
+ *  at `size`. Else inline: one line `text` = name + " " + number, measured as drawn — `name` at 700,
+ *  then " " and `number` at 500; draw it as those two spans, not as `text` in one weight. Else none. */
+export function fitTileLabel(name: string, number: string | null, w: number, h: number, size: number): TileLabel {
   const iw = w - 2 * TM_GEOM.pad;
   const ih = h - 2 * TM_GEOM.pad;
   if (iw <= 0 || ih <= 0 || name === "") return { mode: "none" };
-  for (const s of TM_NAME_SIZES) {
-    const lines = wrapName(name, s, iw);
-    if (!lines || lines.length > MAX_NAME_LINES) continue;
-    const ns = Math.round(1.4 * s);
-    if (number !== null && timelineTextWidth(number, ns, 500) > iw) continue;
-    const height = lines.length * s * TM_LINE_HEIGHT + (number !== null ? ns * TM_LINE_HEIGHT : 0);
-    if (height > ih) continue;
-    return { mode: "stacked", size: s, numberSize: ns, nameLines: lines, number };
+  const lines = wrapName(name, size, iw);
+  if (lines && lines.length <= MAX_NAME_LINES &&
+    (number === null || timelineTextWidth(number, size, 500) <= iw) &&
+    (lines.length + (number !== null ? 1 : 0)) * size * TM_LINE_HEIGHT <= ih) {
+    return { mode: "stacked", size, nameLines: lines, number };
   }
-  // Without a number this never fits: any one line that fits at s already fit stacked at s.
-  for (const s of TM_NAME_SIZES) {
-    if (s * TM_LINE_HEIGHT > ih) continue;
-    const width = timelineTextWidth(name, s, 700) + (number !== null ? timelineTextWidth(` ${number}`, s, 500) : 0);
-    if (width <= iw) return { mode: "inline", size: s, text: number !== null ? `${name} ${number}` : name, name, number };
+  // Without a number this never fits: one line that fits already fit stacked.
+  if (number !== null && size * TM_LINE_HEIGHT <= ih &&
+    timelineTextWidth(name, size, 700) + timelineTextWidth(` ${number}`, size, 500) <= iw) {
+    return { mode: "inline", size, text: `${name} ${number}`, name, number };
   }
   return { mode: "none" };
+}
+
+/** A tile as label sizing sees it: its text, its value (for "stepped"), its full size. */
+export interface LabelTile { name: string; number: string | null; value: number; w: number; h: number }
+
+/** Every tile's label, in input (layout) order, sized per chart so that size never misleads:
+ *  - "uniform": every tile at one size, TM_LABEL_SIZES.uniformWide on a chart at least
+ *    uniformWideAt px wide, else uniformNarrow. A tile whose label does not fit is unlabelled.
+ *  - "stepped": tiles by value, largest first (ties: input order). The longest run of them that
+ *    each fit at steppedLarge take it; every tile after the first that does not uses steppedSmall,
+ *    or is unlabelled if it does not fit at that either. So no tile has smaller text than a tile of
+ *    smaller value. */
+export function fitTileLabels(tiles: LabelTile[], chartWidth: number, sizing: TreemapSizing): TileLabel[] {
+  const fit = (t: LabelTile, size: number): TileLabel => fitTileLabel(t.name, t.number, t.w, t.h, size);
+  const S = TM_LABEL_SIZES;
+  if (sizing === "uniform") {
+    const size = chartWidth >= S.uniformWideAt ? S.uniformWide : S.uniformNarrow;
+    return tiles.map((t) => fit(t, size));
+  }
+  const order = tiles.map((_, i) => i).sort((a, b) => tiles[b]!.value - tiles[a]!.value || a - b);
+  const out: TileLabel[] = new Array(tiles.length);
+  let large = true;
+  for (const i of order) {
+    if (large) {
+      const l = fit(tiles[i]!, S.steppedLarge);
+      if (l.mode !== "none") {
+        out[i] = l;
+        continue;
+      }
+      large = false;
+    }
+    out[i] = fit(tiles[i]!, S.steppedSmall);
+  }
+  return out;
 }
 
 export type StripLabel = { mode: "full"; name: string; share: string } | { mode: "name"; name: string } | { mode: "none" };

@@ -150,6 +150,11 @@ export interface RenderOptions {
    *  `width` (TimelineLayoutInput.budgetWidth). Set by the PNG export's portrait frame
    *  (timelineExportFrame); absent everywhere else. */
   timelineBudgetWidth?: number;
+  /** Treemap only, INTERNAL: tile label sizing, "uniform" (default) or "stepped" (see fitTileLabels
+   *  in treemap-labels.ts). Not in the spec schema and not documented in CONFIG-SPEC: it exists so a
+   *  scratch A/B page can render both strategies, and the losing one is deleted once one is chosen.
+   *  Honoured by renderChart only; the live mount, its height and the PNG export use the default. */
+  treemapSizing?: "uniform" | "stepped";
 }
 
 export interface LegendItem {
