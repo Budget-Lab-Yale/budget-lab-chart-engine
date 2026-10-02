@@ -10,12 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Squarified and
   deterministic; tiles shaded by size rank in each group's hue; labels top-left at one size per
-  chart (14px, 12px below 600px wide), with tiles too small to label listed in a key below the
-  chart; a header strip per group where it fits, its area added to the group's block. New
+  chart (14px, 12px below 600px wide); a tile too small to label is named by its hover card and
+  screen-reader label; a header strip per group where it fits, its area added to
+  the group's block. New
   `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap,
   `value_format` groups thousands, and `series_order` sets hue order and breaks ties between
-  equal group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px
-  with the key. `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly
+  equal group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px. `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly
   unlabelled tiles at the export width, or more than seven groups without `series_colors`. The
   `treemap:` block is rejected on every other chart type, so no existing spec changes. See
   CONFIG-SPEC "Treemap options".

@@ -9,12 +9,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData } from "../src/spec/validate";
-import { timelineTextWidth } from "../src/engine/timeline-text";
 import { layoutTreemap } from "../src/engine/treemap-layout";
 import { renderChart, renderFigure } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { tokens } from "../src/theme/tokens";
-import { TM_KEY_PREFIX } from "../src/engine/treemap-labels";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -39,7 +37,6 @@ const tileFills = (svg: SVGSVGElement, group: string): string[] =>
   q(svg, "g[role=img]").filter((g) => g.getAttribute("data-series") === group).map((g) => g.querySelector("rect")!.getAttribute("fill")!);
 const stripFillOf = (svg: SVGSVGElement, group: string): string | null =>
   q(svg, "rect.tbl-treemap-strip").find((s) => s.getAttribute("data-series") === group)?.getAttribute("fill") ?? null;
-const keyLine = (svg: SVGSVGElement): string => q(svg, "text.tbl-treemap-key").map((t) => t.textContent).join(" · ");
 
 // Two large groups whose strips fit at 920, each with three tiles.
 const TWO = rows([
@@ -119,16 +116,18 @@ describe("layout sort ties: equal to 12 significant digits", () => {
 });
 
 describe("series_labels on a treemap", () => {
-  it("renames a group in its strip and in the key, for its strip-less entry and its tiles' entries", () => {
-    const r = rows([["A", "a1", 300], ["A", "a2", 200], ["B", "b1", 1], ["C", "c1", 1_000_000], ["C", "c2", 1]]);
-    const spec = { ...TM, series_labels: { A: "Alpha group", B: "Beta group", C: "Gamma group" } } as ChartSpec;
-    const { svg } = renderChart(spec, r, { width: 375 });
-    const strip = q(svg, "text.tbl-treemap-strip-label").map((t) => t.textContent);
-    expect(strip.some((s) => s!.startsWith("Gamma group"))).toBe(true);
-    const key = keyLine(svg);
-    expect(key).toContain("Beta group: ");
-    expect(key).toContain("c2 (Gamma group) ");
-    expect(key).not.toMatch(/\b[ABC]:|\([ABC]\)/);
+  it("renames a group in its strip, the hover card and the screen-reader labels", () => {
+    const spec = { ...TM, series_labels: { A: "Alpha group", B: "Beta group" } } as ChartSpec;
+    const { svg } = renderChart(spec, TWO, { width: 920 });
+    expect(q(svg, "text.tbl-treemap-strip-label").map((t) => t.firstElementChild!.textContent)).toEqual(["Alpha group", "Beta group"]);
+    const aria = q(svg, "g[role=img]").map((g) => g.getAttribute("aria-label")!);
+    expect(aria.filter((a) => a.startsWith("Beta group · b"))).toHaveLength(3);
+    expect(aria.some((a) => /^[AB] · /.test(a))).toBe(false);
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountChart(host, { spec, rows: TWO, width: 920 });
+    q(host, "svg.tbl-treemap g[role=img]")[0]!.dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10 }));
+    expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("Alpha group · a1");
   });
 });
 
@@ -222,31 +221,16 @@ describe("treemap.shading", () => {
   });
 });
 
-describe("the key's number follows label_value", () => {
-  // One large tile and two too small to label at 375, so both land in the key.
-  const R = flatRows([["Big", 1_000_000], ["Tiny one", 1], ["Tiny two", 1]]);
-  const key = (labelValue?: "share" | "value" | "none") =>
-    keyLine(renderChart({ ...FLAT, value_format: { prefix: "$" }, ...(labelValue ? { treemap: { label_value: labelValue } } : {}) } as ChartSpec, R, { width: 375 }).svg);
-
-  it("share by default and with none; the formatted value with value", () => {
-    expect(key()).toBe(`${TM_KEY_PREFIX} Tiny one 0.0% · Tiny two 0.0%`);
-    expect(key("none")).toBe(`${TM_KEY_PREFIX} Tiny one 0.0% · Tiny two 0.0%`);
-    expect(key("value")).toBe(`${TM_KEY_PREFIX} Tiny one $1 · Tiny two $1`);
-  });
-});
-
-describe("the key wraps to the chart's width", () => {
-  it("cuts a name with no spaces that is wider than the line, so every key line fits at 280px", () => {
-    const word = "W".repeat(100);
-    const { svg } = renderChart(FLAT, flatRows([["Big", 1_000_000], [word, 1]]), { width: 280 });
-    const lines = q(svg, "text.tbl-treemap-key");
-    expect(lines.length).toBeGreaterThan(3);
-    lines.forEach((t, i) => {
-      const bold = i === 0 ? TM_KEY_PREFIX : "";
-      const text = t.textContent ?? "";
-      expect(timelineTextWidth(bold, 12, 700) + timelineTextWidth(text.slice(bold.length), 12, 500)).toBeLessThanOrEqual(280);
-    });
-    expect(lines.slice(1).map((t) => t.textContent).join("")).toContain(word);
+describe("no key", () => {
+  it("an unlabelled tile is described in full by its aria-label, both numbers whatever label_value says", () => {
+    const R = flatRows([["Big", 1_000_000], ["Tiny one", 1], ["Tiny two", 1]]);
+    for (const labelValue of ["share", "value", "none"] as const) {
+      const spec = { ...FLAT, value_format: { prefix: "$" }, treemap: { label_value: labelValue } } as ChartSpec;
+      const { svg } = renderChart(spec, R, { width: 375 });
+      expect(q(svg, "text").map((t) => t.getAttribute("class"))).toEqual(["tbl-treemap-label"]);
+      const tiny = q(svg, "g[role=img]").filter((g) => !g.querySelector("text")).map((g) => g.getAttribute("aria-label"));
+      expect(tiny).toEqual(["Tiny one, 0.0% of total, $1", "Tiny two, 0.0% of total, $1"]);
+    }
   });
 });
 
@@ -307,14 +291,14 @@ describe("series_order: [] is no filter", () => {
 });
 
 describe("treemap accessibility", () => {
-  it("the root svg is a role=group labelled with the title; drawn label text is aria-hidden, the key is not", () => {
+  it("the root svg is a role=group labelled with the title; all drawn text is aria-hidden", () => {
     const { svg } = renderChart(TM, TWO, { width: 375 });
     expect(svg.getAttribute("role")).toBe("group");
     expect(svg.getAttribute("aria-label")).toBe("Outlays");
     const hidden = q(svg, "text.tbl-treemap-label, text.tbl-treemap-strip-label");
     expect(hidden.length).toBeGreaterThan(0);
     for (const t of hidden) expect(t.getAttribute("aria-hidden")).toBe("true");
-    for (const t of q(svg, "text.tbl-treemap-key")) expect(t.hasAttribute("aria-hidden")).toBe(false);
+    expect(q(svg, "text")).toHaveLength(hidden.length);
   });
 
   it("tiles are not keyboard-focusable: nothing in the mounted chart carries a tabindex", () => {

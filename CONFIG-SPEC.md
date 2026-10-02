@@ -909,11 +909,11 @@ validation error on every other chart type.
 
 | field | type | notes |
 |---|---|---|
-| `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card, the tile's screen-reader label and, for a tile listed there, the key). |
+| `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card and the tile's screen-reader label). |
 | `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's colour as resolved — its `series_colors` value as written (a tier such as `violet-300` included), else the palette's colour for it: its hue's base colour for the first seven groups, a lighter tier of the hue from the eighth on (see **Groups and colour** below); flat data is blue. Distinct from the top-level `shading`, which a treemap rejects. |
 | `treemap.share_decimals` | integer | Decimal places on every share, 0–3. Default 1. |
 | `treemap.tooltip` | array | Extra hover-card rows, in order, after Value and Share. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
-| `value_format` | object | `{decimals, prefix, suffix}` for every value a treemap prints: tile labels and the key with `label_value: value`, the hover card's Value row and each tile's screen-reader label. Thousands are grouped with commas (`$28,452`) and `decimals` defaults to 0. The grouping is a treemap behaviour: a dumbbell's gap label, the other user of this field, prints no separators. `value_prefix` and `value_suffix` are validation errors on a treemap. |
+| `value_format` | object | `{decimals, prefix, suffix}` for every value a treemap prints: tile labels with `label_value: value`, the hover card's Value row and each tile's screen-reader label. Thousands are grouped with commas (`$28,452`) and `decimals` defaults to 0. The grouping is a treemap behaviour: a dumbbell's gap label, the other user of this field, prints no separators. `value_prefix` and `value_suffix` are validation errors on a treemap. |
 | `tooltip_decimals` | integer | Decimal places on the hover card's Value row. Default `value_format.decimals`, else 0. |
 
 **Data.** One row per tile. A negative, blank or non-numeric value is a validation error naming the
@@ -956,14 +956,15 @@ again from the 15th. A group with its own `series_colors` entry still counts tow
 `shading: none`, a group's tiles are a `50` tier when its `series_colors` sets one, or, with no
 `series_colors` entry, when it is the 9th or 13th group in hue order or any seventh after either
 (16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
-`series_labels` renames a group in its strip, the key, the hover card and the screen-reader labels.
+`series_labels` renames a group in its strip, the hover card and the screen-reader labels.
 
 **Tile labels.** Every tile label in a chart is drawn at one size: 14px on a chart at least 600px
 wide, 12px on a narrower one (so the 920px PNG is 14px). A tile shows its name in bold above its
 number, the number at the same size in medium weight, left-aligned in the tile's top-left corner,
 6px in from its top and left edges; the name wraps at spaces, to at most three lines. Where that does
 not fit, the name and number are tried on one line. Where that does not fit either, the tile is left
-unlabelled and listed in the key: a label is never drawn smaller to make it fit, so a smaller tile
+unlabelled (its hover card and screen-reader label still name it): a label is never drawn smaller
+to make it fit, so a smaller tile
 never has larger text than a bigger one. A label is never truncated or ellipsised, and a tile never
 shows its number without its name.
 
@@ -972,24 +973,14 @@ off-ramp `series_colors` colour, as written): the group's name in bold and its s
 alone where both do not fit. A group keeps its strip only when its block, as finally drawn, is at
 least 44px tall and the name fits across it. Strips are decided on the blocks before any strip area
 is added and re-checked on the final blocks, so a block can lose its strip but never gain one. A
-group without a strip is named in the key, and its block gets no strip area.
-
-**Key.** Under the treemap, 12px muted text wrapped to the chart's width, opening with a bold
-**Not labelled above:**. Groups without a strip come first (`Other spending: 1.1%`), then every
-unlabelled tile in layout order — `Education 2.0%`, or with groups `Medicare (Mandatory) 2.0%` —
-separated by ` · `. An entry breaks across lines only when it is wider than a whole line, at its
-spaces, and a single word wider than a line is cut into pieces that fit. The
-number follows `label_value`: the formatted value with `value`, the share otherwise (`none`
-included). There is no key when every tile and group is labelled. The key is part of the chart, so
-the PNG carries it too, laid out at the export's 920px; the PNG can therefore list different tiles
-than a narrower screen does.
+group without a strip gets no strip area.
 
 **Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
-280px and narrower, linear in between, and the treemap is never more than 460px tall; the key adds
-its own lines below. On screen it renders at the card's own width (a card narrower than 280px gets a
-280px chart) and is laid out afresh on every resize, so tiles can move into or out of the key. The
+280px and narrower, linear in between, and the treemap is never more than 460px tall. On screen it
+renders at the card's own width (a card narrower than 280px gets a 280px chart) and is laid out afresh on every resize, so a tile can gain or lose its label. The
 **PNG export** re-renders at the full 920px chart width — there is no legend column — through the
-same layout and labelling, and sizes the image's height to the chart, key included.
+same layout and labelling, and sizes the image's height to the treemap; the PNG can therefore label
+different tiles than a narrower screen does.
 
 **Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
 hover card: the tile's name, prefixed by its group's name with groups (`Mandatory · Medicare`), then
@@ -1001,12 +992,12 @@ keyboard-focusable.
 
 **Accessibility.** The chart's SVG is a `role="group"` labelled with the title. Each tile is a
 `role="img"` whose `aria-label` reads `[Group · ]Name, <share> of total, <value>` — `Housing, 33.4% of
-total, $28,452` — with both numbers whatever `label_value` says, so a tile listed in the key is
+total, $28,452` — with both numbers whatever `label_value` says, so an unlabelled tile is
 described in full. The drawn tile and strip text is hidden from assistive technology so it is not
-read twice; the key is not.
+read twice.
 
 `tbl-chart validate` passes but warns on zero-value rows (naming them), on more than 30 tiles, when
-more than half the tiles are too small to label at the 920px export width, and on more than seven
+more than half the tiles are unlabelled at the 920px export width, and on more than seven
 groups with no `series_colors` set.
 
 **Accepted fields.** A treemap accepts only `chartType`, `title`, `subtitle`, `note`, `source`,

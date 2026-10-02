@@ -331,7 +331,7 @@ describe("afterRender on a horizontal timeline or a treemap at 920px gets the sa
     expect(seen[1]).toEqual({ ...seen[0], phase: "export" });
   });
 
-  // A treemap's export height is its content's too (treemap area + key), never the fixed frame's.
+  // A treemap's export height is its content's too (the treemap area), never the fixed frame's.
   it("treemap, at 920", () => {
     const TMAP = { chartType: "treemap", title: "t", xAxisType: "categorical", data: "d.csv", columns: { x: "c", value: "v" } } as ChartSpec;
     const rows = [{ c: "Big", v: "1000000" }, { c: "Tiny", v: "1" }, { c: "Alpha", v: "400000" }] as TidyRow[];

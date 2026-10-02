@@ -7,7 +7,7 @@ import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { TREEMAP_CLASS, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
-import { contrastText, fitTileLabel, fitTileLabels, stripFill, TM_KEY_PREFIX } from "../src/engine/treemap-labels";
+import { contrastText, fitTileLabel, fitTileLabels, stripFill } from "../src/engine/treemap-labels";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -41,13 +41,6 @@ const num = (e: Element, a: string): number => Number(e.getAttribute(a));
 const tiles = (svg: SVGSVGElement) => q<SVGGElement>(svg, "g[role=img]");
 const tileOf = (svg: SVGSVGElement, name: string): SVGGElement =>
   tiles(svg).find((g) => (g.getAttribute("aria-label") ?? "").split(", ")[0]!.split(" · ").pop() === name)!;
-const keyText = (svg: SVGSVGElement): string[] => q(svg, "text.tbl-treemap-key").map((t) => t.textContent ?? "");
-/** The key's entries, assuming no entry was broken across lines (true at these widths). */
-const keyEntriesOf = (svg: SVGSVGElement): string[] => {
-  const lines = keyText(svg);
-  if (!lines.length) return [];
-  return lines.join(" · ").slice(TM_KEY_PREFIX.length).trim().split(" · ");
-};
 const render = (spec: ChartSpec, rows: TidyRow[], width = 920, extra = {}) => renderChart(spec, rows, { width, ...extra });
 
 describe("treemap render", () => {
@@ -188,44 +181,25 @@ describe("treemap render", () => {
     }
   });
 
-  it("lists exactly the unlabelled tiles in the key, in layout order", () => {
-    for (const w of [375, 720]) {
-      const { svg } = render(FLAT_SPEC, BLS, w);
-      const want = tiles(svg)
-        .filter((g) => {
-          const rect = g.querySelector("rect")!;
-          const [name, share] = g.getAttribute("aria-label")!.split(", ") as [string, string];
-          return fitTileLabel(name, share.replace(" of total", ""), num(rect, "width"), num(rect, "height"), w >= 600 ? 14 : 12).mode === "none";
-        })
-        .map((g) => g.getAttribute("aria-label")!.split(", ").slice(0, 2).join(" ").replace(" of total", ""));
-      expect(want.length).toBeGreaterThan(0);
-      expect(keyEntriesOf(svg)).toEqual(want);
-      expect(q(svg, "text.tbl-treemap-label")).toHaveLength(BLS.length - want.length);
+  it("draws no key: the svg is the treemap area alone, and an unlabelled tile is named by its aria-label", () => {
+    let unlabelledSeen = 0;
+    for (const w of [280, 375, 720, 920]) {
+      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
+        const { svg } = render(spec, rows, w);
+        expect(num(svg, "height")).toBe(treemapAreaHeight(w));
+        expect(svg.getAttribute("viewBox")).toBe(`0 0 ${w} ${treemapAreaHeight(w)}`);
+        // Every text is drawn on the treemap: a tile label, a strip label or a group label.
+        for (const t of q(svg, "text")) {
+          expect(["tbl-treemap-label", "tbl-treemap-strip-label", "tbl-treemap-group-label"]).toContain(t.getAttribute("class"));
+          for (const y of [t, ...t.children].filter((e) => e.hasAttribute("y"))) expect(num(y, "y")).toBeLessThan(treemapAreaHeight(w));
+        }
+        for (const g of tiles(svg).filter((t) => !t.querySelector("text"))) {
+          unlabelledSeen++;
+          expect(g.getAttribute("aria-label")).toMatch(/^.+, \d+\.\d% of total, \$[\d,]+$/);
+        }
+      }
     }
-  });
-
-  it("draws the key prefix bold, the rest at 500, 12px muted, below the area", () => {
-    const { svg } = render(FLAT_SPEC, BLS, 375);
-    const lines = q(svg, "text.tbl-treemap-key");
-    expect(lines.length).toBeGreaterThan(0);
-    const first = [...lines[0]!.children];
-    expect(first[0]!.textContent).toBe(TM_KEY_PREFIX);
-    expect(num(first[0]!, "font-weight")).toBe(700);
-    expect(num(first[1]!, "font-weight")).toBe(500);
-    const areaH = treemapAreaHeight(375);
-    lines.forEach((l, i) => {
-      expect(num(l, "font-size")).toBe(12);
-      expect(l.getAttribute("fill")).toBe(tokens.structural.text_muted);
-      expect(num(l, "y")).toBeGreaterThan(areaH + 8 + 16 * i);
-      expect(num(l, "y")).toBeLessThanOrEqual(areaH + 8 + 16 * (i + 1));
-    });
-  });
-
-  it("has no key when every tile is labelled", () => {
-    const { svg } = render(FLAT_SPEC, rowsOf([["Alpha", 5], ["Beta", 4], ["Gamma", 3]]), 920);
-    expect(q(svg, "text.tbl-treemap-label")).toHaveLength(3);
-    expect(q(svg, "text.tbl-treemap-key")).toHaveLength(0);
-    expect(num(svg, "height")).toBe(treemapAreaHeight(920));
+    expect(unlabelledSeen).toBeGreaterThan(0);
   });
 
   it("draws a header strip per group that fits, in the group's 700 tier with contrast text", () => {
@@ -245,19 +219,11 @@ describe("treemap render", () => {
     expect([...labels[0]!.children].map((s) => [s.textContent, num(s, "font-weight")])).toEqual([["Mandatory", 700], [" 58.9%", 500]]);
   });
 
-  it("lists a strip-less group first in the key", () => {
-    const { svg } = render(GROUPED_SPEC, GROUPED);
-    const entries = keyEntriesOf(svg);
-    expect(entries[0]).toBe("Other spending: 0.5%");
-    expect(entries.slice(1).every((e) => /\(.+\) \d/.test(e))).toBe(true);
-  });
-
   it("drops the strip of a block under two strips tall, even when its name fits", () => {
     const g = (rows: Array<[string, string, number]>) => rows.map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     // At 280px wide the second group is a full-width band: 10% of 350px is 35px (< 44), 15% is 52.5px.
     const short = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 40], ["B", "b1", 10]]), 280).svg;
     expect(q(short, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A"]);
-    expect(keyEntriesOf(short)[0]).toBe("B: 10.0%");
     const tall = render(GROUPED_SPEC, g([["A", "a1", 45], ["A", "a2", 40], ["B", "b1", 15]]), 280).svg;
     expect(q(tall, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "B"]);
   });
@@ -268,12 +234,11 @@ describe("treemap render", () => {
     expect(svg.querySelector("text.tbl-treemap-label")!.textContent).toBe("Everything100.0%");
   });
 
-  it("keeps a sub-pixel tile's attributes finite and lists it in the key", () => {
+  it("keeps a sub-pixel tile's attributes finite and leaves it unlabelled", () => {
     const { svg } = render(FLAT_SPEC, rowsOf([["Big", 1_000_000], ["Tiny", 1]]), 720);
     const tiny = tileOf(svg, "Tiny").querySelector("rect")!;
     for (const a of ["x", "y", "width", "height"]) expect(Number.isFinite(num(tiny, a))).toBe(true);
     expect(tileOf(svg, "Tiny").querySelector("text")).toBeNull();
-    expect(keyEntriesOf(svg)).toEqual(["Tiny 0.0%"]);
   });
 
   it("draws no legend and returns per-tile hover info in DOM order", () => {
@@ -318,10 +283,10 @@ describe("treemapWarnings", () => {
   it("warns when more than half the tiles are unlabelled at the 920px export width", () => {
     const rows = rowsOf([["Big", 1_000_000], ...Array.from({ length: 6 }, (_, i): [string, number] => [`Tiny ${i}`, 1])]);
     expect(treemapWarnings(FLAT_SPEC, rows)).toEqual([
-      `treemap: 6 of 7 tiles are too small to label at 920px wide and are listed in the key below the chart; consider grouping small categories into "Other"`,
+      `treemap: 6 of 7 tiles are unlabelled at 920px wide (hover still names them); consider grouping small categories into "Other"`,
     ]);
     // The message names the width it was measured at, not a fixed "export width".
-    expect(treemapWarnings(FLAT_SPEC, rows, 640)[0]).toMatch(/too small to label at 640px wide/);
+    expect(treemapWarnings(FLAT_SPEC, rows, 640)[0]).toMatch(/unlabelled at 640px wide/);
     // Exactly half unlabelled is not more than half.
     const half = rowsOf([["Big", 1_000_000], ["Big 2", 1_000_000], ["Tiny 0", 1], ["Tiny 1", 1]]);
     expect(treemapWarnings(FLAT_SPEC, half)).toEqual([]);
@@ -395,10 +360,8 @@ describe("treemap background", () => {
       expect([num(bg, "x"), num(bg, "y"), num(bg, "width"), num(bg, "height")])
         .toEqual([0, 0, width, Math.round(treemapAreaHeight(width) * 100) / 100]);
       expect(q(svg, "rect.tbl-treemap-bg")).toHaveLength(1);
+      // The area is the whole svg: the background covers it all.
+      expect(num(bg, "height")).toBe(Math.round(num(svg, "height") * 100) / 100);
     }
-    // The key sits below the area, on the card: the background stops at the area.
-    const keyed = render(FLAT_SPEC, rows, 375).svg;
-    expect(q(keyed, "text.tbl-treemap-key").length).toBeGreaterThan(0);
-    expect(num(keyed.firstElementChild!, "height")).toBeLessThan(num(keyed, "height"));
   });
 });

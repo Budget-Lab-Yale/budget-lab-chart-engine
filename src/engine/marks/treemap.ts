@@ -1,8 +1,8 @@
 // chartType: treemap — rows to drawable data, the squarified layout (treemap-layout), colour and label
-// fitting (treemap-labels), drawn as hand-built SVG: one tile per drawn row, a header strip per group
-// whose strip fits, and the "Not labelled above" key under the area. The live mount and the PNG
-// export both call renderTreemap at their width; nothing here is live-only. All text is SVG <text>
-// (HTML inside an SVG does not rasterise).
+// fitting (treemap-labels), drawn as hand-built SVG: one tile per drawn row and a header strip per
+// group whose strip fits. There is no key: an unlabelled tile is named by its aria-label and the hover
+// card. The live mount and the PNG export both call renderTreemap at their width; nothing here is
+// live-only. All text is SVG <text> (HTML inside an SVG does not rasterise).
 //
 // Imports buildColorMap back from ../index, which imports renderTreemap from here: the same safe
 // ES-module cycle as marks/timeline.ts (both references resolve at call time).
@@ -18,8 +18,8 @@ import {
 } from "../../spec/treemap";
 import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TreemapLayout } from "../treemap-layout";
 import {
-  tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel, keyEntries, wrapKey, TM_KEY_PREFIX,
-  TM_LINE_HEIGHT as LINE_HEIGHT, TM_STRIP_TEXT as STRIP_TEXT, TM_KEY_TEXT,
+  tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel,
+  TM_LINE_HEIGHT as LINE_HEIGHT, TM_STRIP_TEXT as STRIP_TEXT,
   type TileLabel, type StripLabel, type TreemapSizing,
 } from "../treemap-labels";
 
@@ -28,7 +28,6 @@ export const TREEMAP_CLASS = "tbl-treemap";
 
 /** The PNG export's chart width; the unlabelled-tiles warning is judged there. */
 const EXPORT_WIDTH = 920;
-const KEY = { size: TM_KEY_TEXT, gap: 8, lineHeight: 16 } as const;
 /** Baseline below a line box's centre that centres Figtree's cap height (0.7 em) in the box. */
 const CAP_CENTRE = 0.35;
 
@@ -55,19 +54,17 @@ interface BuiltStrip { group: GroupRect; fill: string; label: StripLabel }
 interface Built {
   width: number;
   areaH: number;
-  height: number;
   layout: TreemapLayout;
   tiles: BuiltTile[];
   strips: BuiltStrip[];
-  keyLines: string[];
   groupNames: string[];
   colors: Map<string, string>;
 }
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
-/** The one place a spec + rows + width becomes geometry, colours, labels and key lines, so the render,
- *  its height and the warnings can never disagree. */
+/** The one place a spec + rows + width becomes geometry, colours and labels, so the render and the
+ *  warnings can never disagree. */
 function build(spec: ChartSpec, rows: TidyRow[], width: number, sizing: TreemapSizing = "uniform"): Built {
   const cfg = resolveTreemapConfig(spec);
   const data = treemapData(spec, rows);
@@ -128,33 +125,24 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number, sizing: TreemapS
     group: g, fill: stripFill(hueOf(g.group)),
     label: fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0),
   }));
-
-  // The key's number follows label_value: the value when it is "value", else the share.
-  const keyNumber = (v: number): string => (cfg.labelValue === "value" ? valueText(v) : shareText(v));
-  const keyLines = wrapKey(keyEntries({
-    groups: layout.groups.map((g) => ({ name: labelOf(g.group), share: keyNumber(g.total), strip: g.strip })),
-    tiles: tiles.map((t) => ({
-      group: t.groupLabel, name: t.datum.name, number: keyNumber(t.datum.value), labelled: t.label.mode !== "none",
-    })),
-  }), width);
-  const height = areaH + (keyLines.length ? KEY.gap + keyLines.length * KEY.lineHeight : 0);
-  return { width, areaH, height, layout, tiles, strips, keyLines, groupNames, colors };
+  return { width, areaH, layout, tiles, strips, groupNames, colors };
 }
 
-/** Total SVG height at `width` (treemap area + key), as renderTreemap draws it. */
-export function treemapHeight(spec: ChartSpec, rows: TidyRow[], width: number): number {
-  return build(spec, rows, width).height;
+/** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone (there is no key),
+ *  so it depends on the width only. Takes the spec and rows so callers need not know that. */
+export function treemapHeight(_spec: ChartSpec, _rows: TidyRow[], width: number): number {
+  return treemapAreaHeight(width);
 }
 
-/** Non-fatal warnings at `width` (the export width by default): the data warnings, plus more than half the tiles
- *  unlabelled (they still read in the key). */
+/** Non-fatal warnings at `width` (the export width by default): the data warnings, plus more than half
+ *  the tiles unlabelled (the hover card and each tile's aria-label still name them). */
 export function treemapWarnings(spec: ChartSpec, rows: TidyRow[], width: number = EXPORT_WIDTH): string[] {
   const out = treemapDataWarnings(spec, rows);
   const { tiles } = build(spec, rows, width);
   const unlabelled = tiles.filter((t) => t.label.mode === "none").length;
   if (unlabelled * 2 > tiles.length) {
     out.push(
-      `treemap: ${unlabelled} of ${tiles.length} tiles are too small to label at ${width}px wide and are listed in the key below the chart; consider grouping small categories into "Other"`,
+      `treemap: ${unlabelled} of ${tiles.length} tiles are unlabelled at ${width}px wide (hover still names them); consider grouping small categories into "Other"`,
     );
   }
   return out;
@@ -176,11 +164,11 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
   // role="group", not "img": an img's children are presentational, which would hide every tile's
   // own label from assistive technology.
   const svg = el("svg", {
-    class: TREEMAP_CLASS, width: b.width, height: b.height, viewBox: `0 0 ${b.width} ${b.height}`,
+    class: TREEMAP_CLASS, width: b.width, height: b.areaH, viewBox: `0 0 ${b.width} ${b.areaH}`,
     "font-family": TBL.font, role: "group", "aria-label": spec.title,
   });
   // The area is white under the tiles and strips (spec §3), so the gutters are white on any host
-  // page, live as in the PNG. The key below it sits on the card.
+  // page, live as in the PNG.
   svg.append(el("rect", {
     class: "tbl-treemap-bg", x: 0, y: 0, width: b.width, height: r2(b.areaH), fill: tokens.structural.background,
     "aria-hidden": "true",
@@ -241,23 +229,6 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
     if (s.label.mode === "full") text.append(span(` ${s.label.share}`, { "font-weight": 500 }));
     svg.append(text);
   }
-
-  b.keyLines.forEach((line, i) => {
-    const text = el("text", {
-      class: "tbl-treemap-key", x: 0,
-      y: r2(b.areaH + KEY.gap + i * KEY.lineHeight + KEY.lineHeight / 2 + CAP_CENTRE * KEY.size),
-      "font-size": KEY.size, fill: tokens.structural.text_muted,
-    });
-    if (i === 0) {
-      text.append(span(TM_KEY_PREFIX, { "font-weight": 700 }));
-      const rest = line.slice(TM_KEY_PREFIX.length);
-      if (rest) text.append(span(rest, { "font-weight": 500 }));
-    } else {
-      text.setAttribute("font-weight", "500");
-      text.textContent = line;
-    }
-    svg.append(text);
-  });
   return svg;
 }
 

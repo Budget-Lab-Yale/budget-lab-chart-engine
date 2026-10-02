@@ -87,7 +87,7 @@ const tileNamed = (svg: SVGSVGElement, name: string): SVGRectElement =>
   tileRects(svg).find((r) => (r.parentElement!.getAttribute("aria-label") ?? "").split(", ")[0]!.split(" · ").pop() === name)!;
 const geometry = (svg: SVGSVGElement): string =>
   tileRects(svg).map((r) => ["x", "y", "width", "height"].map((a) => r.getAttribute(a)).join(",")).join(" ");
-const keyText = (svg: SVGSVGElement): string[] => [...svg.querySelectorAll("text.tbl-treemap-key")].map((t) => t.textContent ?? "");
+const labelled = (svg: SVGSVGElement, name: string): boolean => tileNamed(svg, name).parentElement!.querySelector("text") !== null;
 const tip = (): HTMLElement | null => document.body.querySelector<HTMLElement>(".tbl-tooltip");
 const cardShown = (): boolean => tip()?.style.opacity === "1";
 const enter = (el: Element): void => {
@@ -112,10 +112,11 @@ describe("treemap live mount: sizing", () => {
     expect(computeChartHeight(FLAT_SPEC, BLS)).toBe(treemapHeight(FLAT_SPEC, BLS, 720));
   });
 
-  it("renders at the card width with the treemap's height (area + key)", () => {
+  it("renders at the card width with the treemap's height (the area alone)", () => {
     const svg = svgOf(mountAt(900));
     expect(num(svg, "width")).toBe(900);
     expect(num(svg, "height")).toBe(treemapHeight(FLAT_SPEC, BLS, 900));
+    expect(num(svg, "height")).toBe(treemapAreaHeight(900));
     // The area is width / 2 at this width (aspect 2.0, under the 460 cap); the tiles fill it.
     const bottom = Math.max(...tileRects(svg).map((r) => num(r, "y") + num(r, "height")));
     expect(bottom).toBeCloseTo(treemapAreaHeight(900), 1);
@@ -141,7 +142,7 @@ describe("treemap live mount: sizing", () => {
     const host = mountAt(900);
     const first = svgOf(host).outerHTML;
     const firstGeom = geometry(svgOf(host));
-    expect(keyText(svgOf(host)).join(" ")).not.toContain("Apparel and services");
+    expect(labelled(svgOf(host), "Apparel and services")).toBe(true);
 
     await resizeTo(host, 340);
     const narrow = svgOf(host);
@@ -151,8 +152,8 @@ describe("treemap live mount: sizing", () => {
     const bottom = Math.max(...tileRects(narrow).map((r) => num(r, "y") + num(r, "height")));
     expect(bottom).toBeGreaterThan(340);
     expect(geometry(narrow)).not.toBe(firstGeom);
-    // Label fitting re-runs too: tiles too small at 340 move into the key.
-    expect(keyText(narrow).join(" ")).toContain("Apparel and services");
+    // Label fitting re-runs too: a tile too small at 340 loses its label.
+    expect(labelled(narrow, "Apparel and services")).toBe(false);
 
     await resizeTo(host, 900);
     expect(svgOf(host).outerHTML).toBe(first);

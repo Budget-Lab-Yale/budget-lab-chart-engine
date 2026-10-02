@@ -365,7 +365,7 @@ describe("runValidate — treemap warnings", () => {
     const specPath = treemapSpec(csv([["Big", 1_000_000], ...Array.from({ length: 6 }, (_, i): [string, number] => [`Tiny${i}`, 1])]));
     const result = await runValidate(specPath);
     expect(result.exitCode).toBe(0);
-    expect(result.message).toMatch(/warning: treemap: 6 of 7 tiles are too small to label at 920px wide/);
+    expect(result.message).toMatch(/warning: treemap: 6 of 7 tiles are unlabelled at 920px wide/);
   });
 
   it("prints no warnings for a well-labelled treemap", async () => {

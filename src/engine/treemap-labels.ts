@@ -14,14 +14,11 @@ import { d3 } from "./vendor";
 export const TM_LABEL_SIZES = { uniformWide: 14, uniformNarrow: 12, uniformWideAt: 600, steppedLarge: 18, steppedSmall: 13 } as const;
 /** Chart-level label sizing. INTERNAL: an A/B switch (RenderOptions.treemapSizing), not in the spec. */
 export type TreemapSizing = "uniform" | "stepped";
-/** The key's leading text, drawn bold (700); wrapKey's first line starts with it. */
-export const TM_KEY_PREFIX = "Not labelled above:";
 
 /** Text-layout constants shared with the drawing (marks/treemap), so what is measured here is what
  *  is drawn there. Line height is a factor of the font size. */
 export const TM_LINE_HEIGHT = 1.2;
 export const TM_STRIP_TEXT = 12;
-export const TM_KEY_TEXT = 12;
 const MAX_NAME_LINES = 3;
 
 // Usable tiers darkest-first. 50 is excluded (too close to the white gutters); grouped tiles stop at
@@ -190,69 +187,4 @@ export function fitStripLabel(name: string, share: string, blockWidth: number): 
   if (nameW + timelineTextWidth(` ${share}`, TM_STRIP_TEXT, 500) <= avail) return { mode: "full", name, share };
   if (nameW <= avail) return { mode: "name", name };
   return { mode: "none" };
-}
-
-/** Key text entries in order: strip-less groups first ("Other spending: 1.1%"), then unlabelled tiles
- *  ("Medicare (Mandatory) 2.0%" grouped, "Education 2.0%" flat). */
-export function keyEntries(args: { groups: Array<{ name: string; share: string; strip: boolean }>;
-  tiles: Array<{ group: string | null; name: string; number: string; labelled: boolean }> }): string[] {
-  return [
-    ...args.groups.filter((g) => !g.strip).map((g) => `${g.name}: ${g.share}`),
-    ...args.tiles.filter((t) => !t.labelled)
-      .map((t) => (t.group !== null ? `${t.name} (${t.group}) ${t.number}` : `${t.name} ${t.number}`)),
-  ];
-}
-
-/** Wrap key entries into lines of ≤ width at 12px. Line 0 opens with TM_KEY_PREFIX, one atomic unit
- *  drawn (and measured) at 700; everything else is measured at 500. Whole entries follow, joined by
- *  " · " while they fit; at a break the separator is dropped, so no line starts or ends with it. Only
- *  an entry wider than a whole line breaks, at its own spaces, starting on a fresh line; a single word
- *  wider than a whole line is cut into chunks that each fit (no hyphen is added). Nothing is
- *  truncated. Only the atomic prefix can overflow, and only at a width below its own (~110px). */
-export function wrapKey(entries: string[], width: number): string[] {
-  if (entries.length === 0) return [];
-  const lines: string[] = [];
-  const fits = (text: string): boolean => {
-    const bold = lines.length === 0 ? TM_KEY_PREFIX : "";
-    return timelineTextWidth(bold, TM_KEY_TEXT, 700) + timelineTextWidth(text.slice(bold.length), TM_KEY_TEXT, 500) <= width;
-  };
-  /** Starts `word` on a fresh line. A word wider than the line is cut, by code point, into the
-   *  longest chunks that fit (at least one character each); the last chunk is returned as the
-   *  line in progress. */
-  const hardBreak = (word: string): string => {
-    let rest = Array.from(word);
-    while (rest.length > 1 && !fits(rest.join(""))) {
-      let n = 1;
-      while (n < rest.length - 1 && fits(rest.slice(0, n + 1).join(""))) n++;
-      lines.push(rest.slice(0, n).join(""));
-      rest = rest.slice(n);
-    }
-    return rest.join("");
-  };
-  let line = TM_KEY_PREFIX;
-  for (const entry of entries) {
-    const next = `${line}${lines.length === 0 && line === TM_KEY_PREFIX ? " " : " · "}${entry}`;
-    if (fits(next)) {
-      line = next;
-      continue;
-    }
-    lines.push(line);
-    if (fits(entry)) {
-      line = entry;
-      continue;
-    }
-    // Wider than a whole line: wrap the entry at its own spaces, from this fresh line.
-    line = "";
-    for (const word of entry.split(" ")) {
-      const joined = line ? `${line} ${word}` : word;
-      if (fits(joined)) {
-        line = joined;
-        continue;
-      }
-      if (line) lines.push(line);
-      line = hardBreak(word);
-    }
-  }
-  lines.push(line);
-  return lines;
 }
