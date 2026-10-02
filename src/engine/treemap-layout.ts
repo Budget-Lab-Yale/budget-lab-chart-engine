@@ -79,8 +79,9 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
 
   // Geometry is scale-free: d3 sees every value divided by the largest, so neither 1e308 (whose
   // areas overflow) nor 1e-308 (whose areas underflow) reaches its arithmetic. The SORT compares raw
-  // values and totals instead (to 12 significant digits, sortKey): normalized sums are float-inexact (seven 1/7s sum below 1, defeating
-  // the groupOrder tie-break) and distinct tiny values can underflow to the same 0.
+  // values and totals instead (to 12 significant digits, sortKey): normalized sums are float-inexact
+  // (seven 1/7s sum below 1, defeating the groupOrder tie-break) and distinct tiny values can
+  // underflow to the same 0.
   const max = data.reduce((m, d) => Math.max(m, d.value), 0);
   const scaled = (v: number): number => (max > 0 ? v / max : 0);
   const root = d3
