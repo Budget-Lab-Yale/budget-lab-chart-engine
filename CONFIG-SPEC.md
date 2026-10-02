@@ -928,8 +928,8 @@ in the data; on a treemap with no groups, any key in them is a validation error 
 sorted by value, the largest first and top-left; equal values keep their CSV order, and values
 equal to 12 significant digits count as equal. With groups, each group is one block: blocks are
 sorted by group total, largest first, ties (to 12 significant digits, so `0.1 + 0.2` ties `0.3`)
-broken by `series_order` and then by first appearance, and within a block its tiles are sorted as above.
-A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas are proportional to
+broken by `series_order` and then by first appearance, and within a block its tiles are sorted as
+above. A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas are proportional to
 value less those fixed gutters, which take relatively more from a small tile (a sliver can be left
 with no area at all). A group's header strip is added to its block: the block is enlarged by the
 strip's area, so a tile's area per unit of value is the same in every group, with a strip or without
@@ -980,19 +980,21 @@ without its name.
 off-ramp `series_colors` colour, as written): the group's name in bold and its share in medium
 weight, at the tile labels' size, or the name alone where both do not fit. The strip is 26px tall
 with 14px text and 22px with 12px. A group keeps its strip only when its block, as finally drawn,
-is at least two strips tall (52px, or 44px below 600px wide) and the name fits across it. Strips are decided on the blocks before any strip area
-is added and re-checked on the final blocks, so a block can lose its strip but never gain one. A
-group without a strip gets no strip area. When none of its tiles is labelled either, the group's
-name and share are written in its block's top-left instead, at the label size (name bold, share in
-medium weight) and fitted as a tile label is, in white or navy, whichever contrasts more with the
-group's colour; where they do not fit, nothing is written, and hovering a tile still names it.
+is at least two strips tall (52px, or 44px below 600px wide) and the name fits across it. Strips
+are decided on the blocks before any strip area is added and re-checked on the final blocks, so a
+block can lose its strip but never gain one. A group without a strip gets no strip area. When none
+of its tiles is labelled either, the group's name and share are written in its block's top-left
+instead, at the label size (name bold, share in medium weight) and fitted as a tile label is, in
+white or navy, whichever contrasts more with the group's colour; where they do not fit, nothing is
+written, and hovering a tile still names it.
 
 **Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
 280px and narrower, linear in between, and the treemap is never more than 460px tall. On screen it
-renders at the card's own width (a card narrower than 280px gets a 280px chart) and is laid out afresh on every resize, so a tile can gain or lose its label. The
-**PNG export** re-renders at the full 920px chart width — there is no legend column — through the
-same layout and labelling, and sizes the image's height to the treemap; the PNG can therefore label
-different tiles than a narrower screen does.
+renders at the card's own width (a card narrower than 280px gets a 280px chart) and is laid out
+afresh on every resize, so a tile can gain or lose its label. The **PNG export** re-renders at the
+full 920px chart width — there is no legend column — through the same layout and labelling, and
+sizes the image's height to the treemap; the PNG can therefore label different tiles than a
+narrower screen does.
 
 **Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
 hover card: the tile's name, prefixed by its group's name with groups (`Mandatory · Medicare`), then

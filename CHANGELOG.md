@@ -9,13 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Added
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Squarified and
-  deterministic; tiles shaded by size rank in each group's hue; labels top-left at one size per
-  chart (14px, 12px below 600px wide); a tile too small to label is named by its hover card and
-  screen-reader label; a header strip per group where it fits, its area added to
-  the group's block. New
-  `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap,
-  `value_format` groups thousands, and `series_order` sets hue order and breaks ties between
-  equal group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px. `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly
+  deterministic; tiles shaded by size rank in each group's hue. Labels top-left at one size per
+  chart (14px, 12px below 600px wide), placed largest first within each group and stopping at the
+  first that does not fit, so a group never labels a tile while leaving a larger one bare; a group
+  whose largest tile cannot hold its label is re-laid out inside its own block (rows, columns or a
+  balanced split) where that lets it fit. A header strip per group where it fits, its text at the
+  label size and its area added to the group's block; a strip-less group with no labelled tile is
+  named inside its block where the name fits. A tile left unlabelled is named by its hover card and
+  screen-reader label. New `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip`
+  rows). On a treemap, `value_format` groups thousands, and `series_order` sets hue order and
+  breaks ties between equal group totals, without filtering. Hover card on screen; the PNG export
+  re-renders at 920px. `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly
   unlabelled tiles at the export width, or more than seven groups without `series_colors`. The
   `treemap:` block is rejected on every other chart type, so no existing spec changes. See
   CONFIG-SPEC "Treemap options".

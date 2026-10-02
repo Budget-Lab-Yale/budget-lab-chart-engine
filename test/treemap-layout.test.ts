@@ -293,17 +293,17 @@ describe("layoutTreemap: grouped", () => {
       return ts.reduce((s, t) => s + area(t), 0) / ts.reduce((s, t) => s + t.datum.value, 0);
     };
 
-    it.each([[920, 460], [600, 330], [375, 354]] as const)("with gutters 0, every tile at %ipx is value x one factor (strip and strip-less groups alike)", (w, h) => {
-      const l = layoutTreemap(mixed, w, h, { groupOrder: [], stripFits: fits, gutters: { tile: 0, group: 0 } });
+    it.each([[920, 460, 22], [600, 330, 22], [375, 354, 22], [920, 460, 26], [600, 330, 26]] as const)("with gutters 0, every tile at %ipx (%ipx tall, %ipx strips) is value x one factor (strip and strip-less groups alike)", (w, h, stripH) => {
+      const l = layoutTreemap(mixed, w, h, { groupOrder: [], stripFits: fits, stripH, gutters: { tile: 0, group: 0 } });
       expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false], ["C", true], ["D", false]]);
       // Tiles plus strips cover the frame, so the one factor is (frame - strips) / total.
-      const strips = l.groups.filter((g) => g.strip).reduce((s, g) => s + (g.x1 - g.x0) * TM_GEOM.stripH, 0);
+      const strips = l.groups.filter((g) => g.strip).reduce((s, g) => s + (g.x1 - g.x0) * stripH, 0);
       const k = (w * h - strips) / l.total;
       for (const t of l.tiles) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(2e-3);
       for (const g of ["A", "B", "C", "D"]) expect(Math.abs(perUnit(l, g) - k) / k).toBeLessThan(1e-4);
       // The strip sits on top of the block, its tiles below it.
       for (const g of l.groups.filter((x) => x.strip)) {
-        expect(Math.min(...tilesOf(l, g.group).map((t) => t.y0))).toBeCloseTo(g.y0 + TM_GEOM.stripH, 1);
+        expect(Math.min(...tilesOf(l, g.group).map((t) => t.y0))).toBeCloseTo(g.y0 + stripH, 1);
       }
     });
 
