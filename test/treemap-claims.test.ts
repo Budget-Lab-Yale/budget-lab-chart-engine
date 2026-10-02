@@ -74,6 +74,13 @@ describe("series_order on a treemap: hue order and tie-break only", () => {
     expect(first(TM)).toBe("A");
     expect(first({ ...TM, series_order: ["B", "A"] } as ChartSpec)).toBe("B");
   });
+
+  it("breaks a tie between decimal totals that float addition makes unequal (0.1 + 0.2 vs 0.3)", () => {
+    const tied = rows([["A", "a1", 0.1], ["A", "a2", 0.2], ["B", "b1", 0.3]]);
+    const first = (spec: ChartSpec) => q(renderChart(spec, tied, { width: 920 }).svg, "rect.tbl-treemap-strip")[0]!.getAttribute("data-series");
+    expect(first(TM)).toBe("A");
+    expect(first({ ...TM, series_order: ["B", "A"] } as ChartSpec)).toBe("B");
+  });
 });
 
 describe("series_colors on a treemap", () => {

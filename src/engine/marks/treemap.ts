@@ -72,15 +72,24 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   const cfg = resolveTreemapConfig(spec);
   const data = treemapData(spec, rows);
   const grouped = data.some((d) => d.group !== null);
-  const labels = spec.series_labels ?? {};
-  const labelOf = (g: string): string => labels[g] ?? g;
+  // Own-property lookups only: a group named "constructor", "toString" or "__proto__" must not
+  // find the inherited Object.prototype member (author maps are ordinary objects).
+  const own = (m: Record<string, string> | undefined, g: string): string | undefined =>
+    m && Object.hasOwn(m, g) ? m[g] : undefined;
+  const labelOf = (g: string): string => own(spec.series_labels, g) ?? g;
 
   // Hue order: series_order's present groups first, then the rest by first appearance.
   const appearance: string[] = [];
   for (const d of data) if (d.group !== null && !appearance.includes(d.group)) appearance.push(d.group);
   const listed = (spec.series_order ?? []).filter((g) => appearance.includes(g));
   const groupNames = grouped ? [...listed, ...appearance.filter((g) => !listed.includes(g))] : [];
-  const colors = buildColorMap(groupNames, spec.series_colors);
+  // buildColorMap indexes its map directly, so hand it a prototype-free copy of the own entries.
+  const colorCfg: Record<string, string> = Object.create(null);
+  for (const g of groupNames) {
+    const c = own(spec.series_colors, g);
+    if (c !== undefined) colorCfg[g] = c;
+  }
+  const colors = buildColorMap(groupNames, spec.series_colors ? colorCfg : undefined);
   const flatHue = tokens.categorical[0]!.base;
   const hueOf = (g: string | null): string => (g === null ? flatHue : colors.get(g) ?? flatHue);
 

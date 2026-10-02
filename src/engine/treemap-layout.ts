@@ -28,6 +28,10 @@ interface Node { group?: string; order?: number; datum?: TreemapDatum; children?
 /** The raw value (a tile) or raw total (a group, summed in data order) the sort compares. */
 const rawOf = (n: Node): number => n.datum?.value ?? n.raw ?? 0;
 
+/** The sort key: rawOf at 12 significant digits, so a total summed in floating point (0.1 + 0.2)
+ *  ties its decimal equal (0.3) and the tie-break decides. Sort only; geometry uses the exact values. */
+const sortKey = (n: Node): number => Number(rawOf(n).toPrecision(12));
+
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
 const clamp = (v: number, hi: number): number => Math.min(hi, Math.max(0, v));
@@ -75,7 +79,7 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
 
   // Geometry is scale-free: d3 sees every value divided by the largest, so neither 1e308 (whose
   // areas overflow) nor 1e-308 (whose areas underflow) reaches its arithmetic. The SORT compares raw
-  // values and totals instead: normalized sums are float-inexact (seven 1/7s sum below 1, defeating
+  // values and totals instead (to 12 significant digits, sortKey): normalized sums are float-inexact (seven 1/7s sum below 1, defeating
   // the groupOrder tie-break) and distinct tiny values can underflow to the same 0.
   const max = data.reduce((m, d) => Math.max(m, d.value), 0);
   const scaled = (v: number): number => (max > 0 ? v / max : 0);
@@ -83,8 +87,8 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
     .hierarchy(rootInput)
     .sum((n: Node) => scaled(n.datum?.value ?? 0))
     .sort((a: { data: Node }, b: { data: Node }) => {
-      const ra = rawOf(a.data);
-      const rb = rawOf(b.data);
+      const ra = sortKey(a.data);
+      const rb = sortKey(b.data);
       if (ra !== rb) return rb > ra ? 1 : -1;
       return a.data.datum && b.data.datum ? a.data.datum.index - b.data.datum.index : a.data.order! - b.data.order!;
     });

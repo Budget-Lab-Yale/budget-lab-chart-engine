@@ -93,6 +93,9 @@ describe("layoutTreemap: flat", () => {
     // Reversed input, so the tie-break must come from `index`, not from a stable sort.
     const tie = layoutTreemap(flat([5, 9, 5, 5]).reverse(), W, H, { groupOrder: [] });
     expect(byRank(tie).map((t) => t.datum.index)).toEqual([1, 0, 2, 3]);
+    // Tile values equal to 12 significant digits tie too: CSV order decides.
+    const near = layoutTreemap(flat([0.3, 0.1 + 0.2]), W, H, { groupOrder: [] });
+    expect(byRank(near).map((t) => t.datum.index)).toEqual([0, 1]);
   });
 
   it("ranks distinct tiny values by raw value even where normalization underflows them to zero", () => {
@@ -175,6 +178,18 @@ describe("layoutTreemap: grouped", () => {
     expect(l.groups.map((g) => g.group)).toEqual(["A", "B"]);
     expect(l.groups[0]!.x0).toBe(0);
     expect(l.groups[0]!.y0).toBe(0);
+  });
+
+  it("compares raw totals at 12 significant digits, so a float-summed total ties its decimal equal", () => {
+    // A: 0.1 + 0.2 = 0.30000000000000004 in data order; B: 0.3. Equal to 12 digits, so groupOrder decides.
+    const tie = grouped([["A", 0.1], ["A", 0.2], ["B", 0.3]]);
+    expect(layoutTreemap(tie, W, H, { groupOrder: ["B", "A"] }).groups.map((g) => g.group)).toEqual(["B", "A"]);
+    expect(layoutTreemap(tie, W, H, { groupOrder: ["A", "B"] }).groups.map((g) => g.group)).toEqual(["A", "B"]);
+    // The reported totals (and so the geometry) are untouched: only the sort rounds.
+    expect(layoutTreemap(tie, W, H, { groupOrder: ["B", "A"] }).groups.map((g) => g.total)).toEqual([0.3, 0.1 + 0.2]);
+    // A real difference past 12 digits still sorts.
+    const near = grouped([["A", 0.3], ["B", 0.300000001]]);
+    expect(layoutTreemap(near, W, H, { groupOrder: ["A", "B"] }).groups.map((g) => g.group)).toEqual(["B", "A"]);
   });
 
   it("sizes group blocks in proportion to totals (within 3%)", () => {

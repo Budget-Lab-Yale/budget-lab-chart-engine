@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
+import { mountChart } from "../src/engine/render-live";
+import { buildExportSvg } from "../src/embed/export-png";
 import { TREEMAP_CLASS, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
 import { contrastText, fitTileLabel, stripFill, TM_KEY_PREFIX } from "../src/engine/treemap-labels";
@@ -289,5 +291,60 @@ describe("treemapWarnings", () => {
     // Exactly half unlabelled is not more than half.
     const half = rowsOf([["Big", 1_000_000], ["Big 2", 1_000_000], ["Tiny 0", 1], ["Tiny 1", 1]]);
     expect(treemapWarnings(FLAT_SPEC, half)).toEqual([]);
+  });
+});
+
+describe("group names that are Object.prototype keys", () => {
+  // series_labels / series_colors are plain objects: a lookup keyed by a group named "constructor"
+  // must not find the inherited property. Each group is large enough for its strip at 920.
+  const PROTO = ["constructor", "toString", "__proto__"];
+  const protoRows = PROTO.flatMap((group, i) => [
+    { group, category: `${group} one`, amount: String(300 - 10 * i) },
+    { group, category: `${group} two`, amount: String(200 - 10 * i) },
+  ]) as TidyRow[];
+  const SPEC = { ...FLAT_SPEC, columns: { x: "category", value: "amount", series: "group" } } as ChartSpec;
+  const stripNames = (svg: SVGSVGElement): string[] =>
+    q(svg, "text.tbl-treemap-strip-label").map((t) => t.firstElementChild!.textContent ?? "");
+  const variants: Array<[string, ChartSpec]> = [
+    ["no series_labels or series_colors", SPEC],
+    // Set, but keyed by one group only: the other two must fall through to their own name and hue.
+    ["series_labels and series_colors set for one group", { ...SPEC, series_labels: { toString: "Renamed" }, series_colors: { constructor: "green" } } as ChartSpec],
+  ];
+
+  for (const [what, spec] of variants) {
+    it(`render, mount, export and warnings all work with ${what}`, () => {
+      const renamed = spec.series_labels ? { toString: "Renamed" } as Record<string, string> : {};
+      const want = PROTO.map((g) => (Object.hasOwn(renamed, g) ? renamed[g]! : g));
+      const { svg } = renderChart(spec, protoRows, { width: 920 });
+      expect(new Set(stripNames(svg))).toEqual(new Set(want));
+      expect(q(svg, "rect.tbl-treemap-strip").map((r) => r.getAttribute("fill"))).not.toContain(null);
+      for (const f of q(svg, "rect.tbl-treemap-tile").map((r) => r.getAttribute("fill")!)) expect(f).toMatch(/^#[0-9A-F]{6}$/i);
+      if (spec.series_colors) {
+        expect(q(svg, "rect.tbl-treemap-strip").find((r) => r.getAttribute("data-series") === "constructor")!.getAttribute("fill"))
+          .toBe(tokens.scales.green["700"]);
+      }
+      expect(tileOf(svg, "toString one").getAttribute("aria-label")).toMatch(new RegExp(`^${want[1]} · toString one, `));
+
+      document.body.innerHTML = "";
+      const host = document.createElement("div");
+      document.body.append(host);
+      mountChart(host, { spec, rows: protoRows, width: 920 });
+      const live = host.querySelector<SVGSVGElement>("svg.tbl-treemap")!;
+      expect(new Set(stripNames(live))).toEqual(new Set(want));
+      tileOf(live, "__proto__ one").dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10 }));
+      expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("__proto__ · __proto__ one");
+
+      const exported = buildExportSvg(spec, protoRows).querySelector<SVGSVGElement>(`svg.${TREEMAP_CLASS}`)!;
+      expect(new Set(stripNames(exported))).toEqual(new Set(want));
+
+      expect(treemapWarnings(spec, protoRows)).toEqual([]);
+    });
+  }
+
+  it("an own __proto__ key in series_labels (as JSON or YAML parsing makes one) renames that group", () => {
+    const spec = { ...SPEC, series_labels: JSON.parse('{"__proto__": "Proto group"}') } as ChartSpec;
+    expect(Object.hasOwn(spec.series_labels!, "__proto__")).toBe(true);
+    const { svg } = renderChart(spec, protoRows, { width: 920 });
+    expect(new Set(stripNames(svg))).toEqual(new Set(["constructor", "toString", "Proto group"]));
   });
 });
