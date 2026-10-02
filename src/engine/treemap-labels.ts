@@ -7,13 +7,14 @@ import { timelineTextWidth } from "./timeline-text";
 import { TM_GEOM } from "./treemap-layout";
 import { d3 } from "./vendor";
 
-/** Tile label sizes (px). A label's name (700) and number (500) are drawn at the same size, and the
- *  size is chosen per chart, never per tile alone (fitTileLabels). "uniform": one size for every tile,
- *  `uniformWide` on a chart at least `uniformWideAt` wide, else `uniformNarrow`. "stepped": two sizes,
- *  `steppedLarge` for the largest tiles, `steppedSmall` for the rest. */
-export const TM_LABEL_SIZES = { uniformWide: 14, uniformNarrow: 12, uniformWideAt: 600, steppedLarge: 18, steppedSmall: 13 } as const;
-/** Chart-level label sizing. INTERNAL: an A/B switch (RenderOptions.treemapSizing), not in the spec. */
-export type TreemapSizing = "uniform" | "stepped";
+/** Label text size (px), one per chart: `wide` on a chart at least `wideAt` px wide, else `narrow`.
+ *  A tile label's name (700) and number (500) are both drawn at it. */
+export const TM_LABEL_SIZES = { wide: 14, narrow: 12, wideAt: 600 } as const;
+
+/** The one label text size for a chart `chartWidth` px wide. */
+export function treemapLabelSize(chartWidth: number): number {
+  return chartWidth >= TM_LABEL_SIZES.wideAt ? TM_LABEL_SIZES.wide : TM_LABEL_SIZES.narrow;
+}
 
 /** Text-layout constants shared with the drawing (marks/treemap), so what is measured here is what
  *  is drawn there. Line height is a factor of the font size. */
@@ -99,7 +100,7 @@ export function contrastText(fill: string): string {
 
 export type TileLabel =
   | { mode: "stacked"; size: number; nameLines: string[]; number: string | null }
-  | { mode: "inline"; size: number; text: string; name: string; number: string | null }
+  | { mode: "inline"; size: number; text: string; name: string; number: string }
   | { mode: "none" };
 
 /** Greedy wrap at spaces to `width` (bold, `size`px). Null if a single word is wider than `width`. */
@@ -143,38 +144,14 @@ export function fitTileLabel(name: string, number: string | null, w: number, h: 
   return { mode: "none" };
 }
 
-/** A tile as label sizing sees it: its text, its value (for "stepped"), its full size. */
+/** A tile as label fitting sees it: its text, its value, its full size. */
 export interface LabelTile { name: string; number: string | null; value: number; w: number; h: number }
 
-/** Every tile's label, in input (layout) order, sized per chart so that size never misleads:
- *  - "uniform": every tile at one size, TM_LABEL_SIZES.uniformWide on a chart at least
- *    uniformWideAt px wide, else uniformNarrow. A tile whose label does not fit is unlabelled.
- *  - "stepped": tiles by value, largest first (ties: input order). The longest run of them that
- *    each fit at steppedLarge take it; every tile after the first that does not uses steppedSmall,
- *    or is unlabelled if it does not fit at that either. So no tile has smaller text than a tile of
- *    smaller value. */
-export function fitTileLabels(tiles: LabelTile[], chartWidth: number, sizing: TreemapSizing): TileLabel[] {
-  const fit = (t: LabelTile, size: number): TileLabel => fitTileLabel(t.name, t.number, t.w, t.h, size);
-  const S = TM_LABEL_SIZES;
-  if (sizing === "uniform") {
-    const size = chartWidth >= S.uniformWideAt ? S.uniformWide : S.uniformNarrow;
-    return tiles.map((t) => fit(t, size));
-  }
-  const order = tiles.map((_, i) => i).sort((a, b) => tiles[b]!.value - tiles[a]!.value || a - b);
-  const out: TileLabel[] = new Array(tiles.length);
-  let large = true;
-  for (const i of order) {
-    if (large) {
-      const l = fit(tiles[i]!, S.steppedLarge);
-      if (l.mode !== "none") {
-        out[i] = l;
-        continue;
-      }
-      large = false;
-    }
-    out[i] = fit(tiles[i]!, S.steppedSmall);
-  }
-  return out;
+/** Every tile's label, in input (layout) order, all at the chart's one size (treemapLabelSize). A
+ *  tile whose label does not fit at that size is unlabelled, never drawn smaller. */
+export function fitTileLabels(tiles: LabelTile[], chartWidth: number): TileLabel[] {
+  const size = treemapLabelSize(chartWidth);
+  return tiles.map((t) => fitTileLabel(t.name, t.number, t.w, t.h, size));
 }
 
 export type StripLabel = { mode: "full"; name: string; share: string } | { mode: "name"; name: string } | { mode: "none" };

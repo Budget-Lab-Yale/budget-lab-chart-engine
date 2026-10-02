@@ -7,7 +7,7 @@ import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { TREEMAP_CLASS, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
-import { contrastText, fitTileLabel, fitTileLabels, stripFill } from "../src/engine/treemap-labels";
+import { contrastText, fitTileLabel, stripFill } from "../src/engine/treemap-labels";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -158,27 +158,6 @@ describe("treemap render", () => {
       }
     }
     expect(inline).toBeGreaterThan(0);
-  });
-
-  it("treemapSizing (internal): uniform by default; stepped draws exactly what fitTileLabels fits, 18px then 13px by value", () => {
-    for (const w of [375, 920]) {
-      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
-        const sizes = (opts: object) => tiles(render(spec, rows, w, opts).svg).map((g) => g.querySelector("text tspan")?.getAttribute("font-size") ?? null);
-        expect(sizes({})).toEqual(sizes({ treemapSizing: "uniform" }));
-        const gs = tiles(render(spec, rows, w).svg);
-        const input = gs.map((g) => {
-          const rect = g.querySelector("rect")!;
-          const [name, share] = g.getAttribute("aria-label")!.split(", ").map((s) => s.split(" · ").pop()!) as [string, string];
-          const d = g.getAttribute("aria-label")!.split(", ");
-          return { name: name, number: share.replace(" of total", ""), value: Number(d[d.length - 1]!.replace(/[$,]/g, "")), w: num(rect, "width"), h: num(rect, "height") };
-        });
-        const want = fitTileLabels(input, w, "stepped").map((l) => (l.mode === "none" ? null : String(l.size)));
-        const got = sizes({ treemapSizing: "stepped" });
-        expect(got).toEqual(want);
-        expect(got.filter((s) => s !== null).length).toBeGreaterThan(0);
-        for (const s of got) if (s !== null) expect(["18", "13"]).toContain(s);
-      }
-    }
   });
 
   it("draws no key: the svg is the treemap area alone, and an unlabelled tile is named by its aria-label", () => {

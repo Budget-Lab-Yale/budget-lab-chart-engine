@@ -20,7 +20,7 @@ import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type Treemap
 import {
   tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel,
   TM_LINE_HEIGHT as LINE_HEIGHT, TM_STRIP_TEXT as STRIP_TEXT,
-  type TileLabel, type StripLabel, type TreemapSizing,
+  type TileLabel, type StripLabel,
 } from "../treemap-labels";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -65,7 +65,7 @@ const r2 = (v: number): number => Math.round(v * 100) / 100;
 
 /** The one place a spec + rows + width becomes geometry, colours and labels, so the render and the
  *  warnings can never disagree. */
-function build(spec: ChartSpec, rows: TidyRow[], width: number, sizing: TreemapSizing = "uniform"): Built {
+function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   const cfg = resolveTreemapConfig(spec);
   const data = treemapData(spec, rows);
   const grouped = data.some((d) => d.group !== null);
@@ -107,10 +107,10 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number, sizing: TreemapS
   for (const t of layout.tiles) groupSize.set(t.datum.group, (groupSize.get(t.datum.group) ?? 0) + 1);
   const numberOf = (v: number): string | null =>
     cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
-  // Label sizes are chosen across the whole chart (fitTileLabels), never tile by tile.
+  // One label size for the whole chart (fitTileLabels), never chosen tile by tile.
   const labels = fitTileLabels(layout.tiles.map((t) => ({
     name: t.datum.name, number: numberOf(t.datum.value), value: t.datum.value, w: t.x1 - t.x0, h: t.y1 - t.y0,
-  })), width, sizing);
+  })), width);
   const tiles: BuiltTile[] = layout.tiles.map((t, i) => {
     const d = t.datum;
     return {
@@ -206,7 +206,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
         text.setAttribute("y", String(baseline(top, lab.size)));
         text.setAttribute("font-size", String(lab.size));
         text.append(span(lab.name, { "font-weight": 700 }));
-        if (lab.number !== null) text.append(span(` ${lab.number}`, { "font-weight": 500 }));
+        text.append(span(` ${lab.number}`, { "font-weight": 500 }));
       }
       g.append(text);
     }
@@ -233,7 +233,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
 }
 
 export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
-  const b = build(spec, rows, opts.width ?? 720, opts.treemapSizing);
+  const b = build(spec, rows, opts.width ?? 720);
   const svg = draw(opts.document ?? document, spec, b);
   const treemapTiles: TreemapTileInfo[] = b.tiles.map((t) => ({
     name: t.datum.name, group: t.datum.group, groupLabel: t.groupLabel, value: t.datum.value, share: t.share,

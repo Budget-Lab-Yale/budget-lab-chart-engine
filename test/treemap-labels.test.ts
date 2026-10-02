@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  TM_LABEL_SIZES, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel,
+  TM_LABEL_SIZES, treemapLabelSize, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel,
   stripFill, type TileLabel, type LabelTile,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
@@ -126,10 +126,12 @@ function assertFits(label: TileLabel, name: string, number: string | null, w: nu
     const lines = label.nameLines.length + (number !== null ? 1 : 0);
     expect(lines * label.size * 1.2).toBeLessThanOrEqual(ih);
   } else if (label.mode === "inline") {
-    expect(label.text).toBe(number !== null ? `${name} ${number}` : name);
+    // Inline always carries a number: a name alone that fits one line already fits stacked.
+    expect(number).not.toBeNull();
+    expect(label.text).toBe(`${name} ${number}`);
     expect(label.name).toBe(name);
     expect(label.number).toBe(number);
-    const width = timelineTextWidth(name, label.size, 700) + (number !== null ? timelineTextWidth(` ${number}`, label.size, 500) : 0);
+    const width = timelineTextWidth(name, label.size, 700) + timelineTextWidth(` ${number}`, label.size, 500);
     expect(width).toBeLessThanOrEqual(iw);
     expect(label.size * 1.2).toBeLessThanOrEqual(ih);
   }
@@ -199,20 +201,24 @@ describe("fitTileLabel (one size)", () => {
   });
 });
 
-describe("fitTileLabels: chart-level sizing", () => {
+describe("fitTileLabels: one size per chart", () => {
   const sizesOf = (labels: TileLabel[]): Array<number | null> => labels.map((l) => (l.mode === "none" ? null : l.size));
 
-  it("uniform: 14px when the chart is at least 600px wide, else 12px, one size for the whole chart", () => {
-    expect(TM_LABEL_SIZES).toEqual({ uniformWide: 14, uniformNarrow: 12, uniformWideAt: 600, steppedLarge: 18, steppedSmall: 13 });
+  it("treemapLabelSize: 14px on a chart at least 600px wide, else 12px", () => {
+    expect(TM_LABEL_SIZES).toEqual({ wide: 14, narrow: 12, wideAt: 600 });
+    expect([280, 599, 599.99, 600, 920].map(treemapLabelSize)).toEqual([12, 12, 12, 14, 14]);
+  });
+
+  it("draws every label in the chart at that one size", () => {
     const tiles: LabelTile[] = [
       { name: "Housing", number: "33.4%", value: 30, w: 400, h: 300 },
       { name: "Food", number: "13.0%", value: 10, w: 120, h: 60 },
     ];
-    expect(sizesOf(fitTileLabels(tiles, 600, "uniform"))).toEqual([14, 14]);
-    expect(sizesOf(fitTileLabels(tiles, 599, "uniform"))).toEqual([12, 12]);
+    expect(sizesOf(fitTileLabels(tiles, 600))).toEqual([14, 14]);
+    expect(sizesOf(fitTileLabels(tiles, 599))).toEqual([12, 12]);
   });
 
-  it("uniform: a tile that does not fit at the chart's size is unlabelled, never drawn at a smaller size", () => {
+  it("a tile that does not fit at the chart's size is unlabelled, never drawn at a smaller size", () => {
     // Education's tile is 1px wider than the name at 12px, narrower than it at 14px.
     const w = Math.ceil(timelineTextWidth("Education", 12, 700)) + 1 + 2 * pad;
     expect(timelineTextWidth("Education", 14, 700)).toBeGreaterThan(w - 2 * pad);
@@ -220,34 +226,15 @@ describe("fitTileLabels: chart-level sizing", () => {
       { name: "Housing", number: "33.4%", value: 30, w: 400, h: 300 },
       { name: "Education", number: "2.0%", value: 5, w, h: 100 },
     ];
-    expect(sizesOf(fitTileLabels(tiles, 920, "uniform"))).toEqual([14, null]);
-    expect(sizesOf(fitTileLabels(tiles, 599, "uniform"))).toEqual([12, 12]);
+    expect(sizesOf(fitTileLabels(tiles, 920))).toEqual([14, null]);
+    expect(sizesOf(fitTileLabels(tiles, 599))).toEqual([12, 12]);
   });
 
-  it("stepped: 18px for the longest run of largest tiles that each fit at 18, 13px for every tile after", () => {
-    const tiles: LabelTile[] = [
-      { name: "Small", number: "1.0%", value: 1, w: 300, h: 300 }, // fits at 18, but follows the break
-      { name: "Housing", number: "33.4%", value: 30, w: 400, h: 300 },
-      { name: "Transportation", number: "16.0%", value: 20, w: 120, h: 60 }, // too narrow at 18
-      { name: "Food", number: "13.0%", value: 20, w: 300, h: 300 }, // ties Transportation, after it in layout order
-    ];
-    expect(timelineTextWidth("Transportation", 18, 700)).toBeGreaterThan(120 - 2 * pad);
-    expect(sizesOf(fitTileLabels(tiles, 920, "stepped"))).toEqual([13, 18, 13, 13]);
-  });
-
-  it("stepped: a tile that does not fit at 13px is unlabelled", () => {
-    const tiles: LabelTile[] = [
-      { name: "Housing", number: "33.4%", value: 30, w: 400, h: 300 },
-      { name: "A".repeat(40), number: "1.0%", value: 2, w: 120, h: 120 },
-    ];
-    expect(sizesOf(fitTileLabels(tiles, 920, "stepped"))).toEqual([18, null]);
-  });
-
-  it("property (uniform): every labelled tile in a chart shares one size, and every drawn line fits (300 charts)", () => {
+  it("property: every labelled tile in a chart shares one size, and every drawn line fits (300 charts)", () => {
     const modes = new Set<string>();
     for (let seed = 1; seed <= 300; seed++) {
       const { tiles, width } = randomChart(seed);
-      const labels = fitTileLabels(tiles, width, "uniform");
+      const labels = fitTileLabels(tiles, width);
       const want = width >= 600 ? 14 : 12;
       labels.forEach((l, i) => {
         modes.add(l.mode);
@@ -257,27 +244,6 @@ describe("fitTileLabels: chart-level sizing", () => {
       });
     }
     expect([...modes].sort()).toEqual(["inline", "none", "stacked"]);
-  });
-
-  it("property (stepped): at most two sizes, never a larger tile with smaller text, every drawn line fits (300 charts)", () => {
-    const modes = new Set<string>();
-    const sizesSeen = new Set<number>();
-    for (let seed = 1; seed <= 300; seed++) {
-      const { tiles, width } = randomChart(seed);
-      const labels = fitTileLabels(tiles, width, "stepped");
-      const drawn = labels.flatMap((l, i) => (l.mode === "none" ? [] : [{ size: l.size, value: tiles[i]!.value }]));
-      for (const d of drawn) sizesSeen.add(d.size);
-      expect(new Set(drawn.map((d) => d.size)).size).toBeLessThanOrEqual(2);
-      for (const a of drawn) for (const b of drawn) if (a.value > b.value) expect(a.size).toBeGreaterThanOrEqual(b.size);
-      labels.forEach((l, i) => {
-        modes.add(l.mode);
-        if (l.mode !== "none") expect([18, 13]).toContain(l.size);
-        const t = tiles[i]!;
-        assertFits(l, t.name, t.number, t.w, t.h);
-      });
-    }
-    expect([...modes].sort()).toEqual(["inline", "none", "stacked"]);
-    expect([...sizesSeen].sort()).toEqual([13, 18]);
   });
 });
 

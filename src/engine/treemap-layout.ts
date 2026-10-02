@@ -161,6 +161,9 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
       const nodes = groupNodes().filter((n) => strips.has(n.data.group!));
       const before = nodes.map((n) => n.x1 - n.x0);
       const factor = (region - nodes.reduce((s, n) => s + stripArea(n), 0)) / tilesTotal;
+      // Unreachable in the engine: a strip is granted only on a block at least two strips tall, so
+      // the strips cover well under the region and factor > 0. The guard keeps a caller's stripFits
+      // that grants strips on degenerate blocks from dividing by a non-positive factor.
       if (!(factor > 0)) return;
       extra = new Map(nodes.map((n) => [n.data.group!, stripArea(n) / factor]));
       reweigh();
