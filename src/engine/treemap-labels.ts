@@ -149,14 +149,32 @@ export function fitTileLabel(name: string, number: string | null, w: number, h: 
   return { mode: "none" };
 }
 
-/** A tile as label fitting sees it: its text, its value, its full size. */
-export interface LabelTile { name: string; number: string | null; value: number; w: number; h: number }
+/** A tile as label fitting sees it: its text, its group (null when flat), its value, its full size. */
+export interface LabelTile { name: string; number: string | null; group: string | null; value: number; w: number; h: number }
 
-/** Every tile's label, in input (layout) order, all at the chart's one size (treemapLabelSize). A
- *  tile whose label does not fit at that size is unlabelled, never drawn smaller. */
-export function fitTileLabels(tiles: LabelTile[], chartWidth: number): TileLabel[] {
-  const size = treemapLabelSize(chartWidth);
-  return tiles.map((t) => fitTileLabel(t.name, t.number, t.w, t.h, size));
+/** Every tile's label, in input (layout) order, all at `size` (the chart's treemapLabelSize), never
+ *  smaller. Top-down per group (flat data is one group): its tiles are visited by value, largest
+ *  first (ties: input order), and each is labelled while its label fits; the first that does not, and
+ *  every tile after it in that group, is unlabelled. So within a group no unlabelled tile is larger
+ *  than a labelled one; groups are not compared with each other. */
+export function fitTileLabels(tiles: LabelTile[], size: number): TileLabel[] {
+  const out: TileLabel[] = tiles.map(() => ({ mode: "none" }));
+  const byGroup = new Map<string | null, number[]>();
+  tiles.forEach((t, i) => {
+    const members = byGroup.get(t.group);
+    if (members) members.push(i);
+    else byGroup.set(t.group, [i]);
+  });
+  for (const members of byGroup.values()) {
+    members.sort((a, b) => tiles[b]!.value - tiles[a]!.value || a - b);
+    for (const i of members) {
+      const t = tiles[i]!;
+      const label = fitTileLabel(t.name, t.number, t.w, t.h, size);
+      if (label.mode === "none") break;
+      out[i] = label;
+    }
+  }
+  return out;
 }
 
 export type StripLabel = { mode: "full"; name: string; share: string } | { mode: "name"; name: string } | { mode: "none" };

@@ -114,10 +114,11 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   for (const t of layout.tiles) groupSize.set(t.datum.group, (groupSize.get(t.datum.group) ?? 0) + 1);
   const numberOf = (v: number): string | null =>
     cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
-  // One label size for the whole chart (fitTileLabels), never chosen tile by tile.
+  // One label size for the whole chart, labelled top-down by value within each group.
   const labels = fitTileLabels(layout.tiles.map((t) => ({
-    name: t.datum.name, number: numberOf(t.datum.value), value: t.datum.value, w: t.x1 - t.x0, h: t.y1 - t.y0,
-  })), width);
+    name: t.datum.name, number: numberOf(t.datum.value), group: t.datum.group, value: t.datum.value,
+    w: t.x1 - t.x0, h: t.y1 - t.y0,
+  })), size);
   const tiles: BuiltTile[] = layout.tiles.map((t, i) => {
     const d = t.datum;
     return {

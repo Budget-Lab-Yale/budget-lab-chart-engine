@@ -110,6 +110,7 @@ describe("treemap render", () => {
 
   it("draws every label exactly as fitTileLabel fitted it, top-left in its tile's inner box", () => {
     let inline = 0;
+    let cut = 0;
     // One large tile and eight small equal ones: at 720 the last two are short enough to go inline.
     const INLINE = rowsOf([["Big", 500], ...Array.from({ length: 8 }, (_, i): [string, number] => [`Food ${i}`, 10])]);
     for (const w of [375, 560, 720, 920]) {
@@ -124,6 +125,11 @@ describe("treemap render", () => {
           const text = g.querySelector("text");
           if (fit.mode === "none") {
             expect(text).toBeNull();
+            continue;
+          }
+          // A tile that fits can still be unlabelled: a larger tile in its group did not fit.
+          if (text === null) {
+            cut++;
             continue;
           }
           const spans = [...text!.children];
@@ -159,6 +165,42 @@ describe("treemap render", () => {
       }
     }
     expect(inline).toBeGreaterThan(0);
+    expect(cut).toBeGreaterThan(0);
+  });
+
+  it("labels top-down by value in each group: no unlabelled tile is larger than a labelled one in its group", () => {
+    let s = 11;
+    const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const words = ["Housing", "Food", "Transportation", "Health care", "Education", "Personal insurance and pensions", "Other"];
+    let charts = 0;
+    let mixed = 0;
+    for (let c = 0; c < 120; c++) {
+      const grouped = c % 2 === 1;
+      const n = 3 + Math.floor(rand() * 20);
+      const rows = Array.from({ length: n }, (_, i) => ({
+        group: `G${Math.floor(rand() * 4)}`, category: `${words[Math.floor(rand() * words.length)]} ${i}`,
+        amount: String(Math.round(1 + rand() ** 3 * 1000)),
+      })) as TidyRow[];
+      const w = [280, 375, 560, 720, 920][c % 5]!;
+      const { svg } = render(grouped ? GROUPED_SPEC : FLAT_SPEC, rows, w);
+      charts++;
+      const byGroup = new Map<string, Array<{ value: number; labelled: boolean }>>();
+      for (const g of tiles(svg)) {
+        const key = g.getAttribute("data-series") ?? "";
+        const value = Number(g.getAttribute("aria-label")!.split(", ").pop()!.replace(/[$,]/g, ""));
+        const list = byGroup.get(key) ?? [];
+        list.push({ value, labelled: g.querySelector("text") !== null });
+        byGroup.set(key, list);
+      }
+      for (const list of byGroup.values()) {
+        const minLabelled = Math.min(...list.filter((t) => t.labelled).map((t) => t.value));
+        const maxUnlabelled = Math.max(...list.filter((t) => !t.labelled).map((t) => t.value));
+        expect(maxUnlabelled).toBeLessThanOrEqual(minLabelled);
+        if (Number.isFinite(minLabelled) && Number.isFinite(maxUnlabelled)) mixed++;
+      }
+    }
+    expect(charts).toBe(120);
+    expect(mixed).toBeGreaterThan(30);
   });
 
   it("draws no key: the svg is the treemap area alone, and an unlabelled tile is named by its aria-label", () => {

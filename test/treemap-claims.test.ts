@@ -151,7 +151,7 @@ describe("tile label sizes", () => {
       for (const [spec, data] of [[FLAT, MANY], [TM, MANY_GROUPED]] as const) {
         const { svg } = renderChart(spec, data, { width: w });
         const spans = drawn(svg);
-        expect(drawn(svg, "text.tbl-treemap-label").length).toBeGreaterThan(4);
+        expect(q(svg, "text.tbl-treemap-label").length).toBeGreaterThanOrEqual(2);
         expect(new Set(spans.map(([s]) => s))).toEqual(new Set([size]));
         expect(new Set(spans.map(([, wt]) => wt))).toEqual(new Set(["700", "500"]));
       }

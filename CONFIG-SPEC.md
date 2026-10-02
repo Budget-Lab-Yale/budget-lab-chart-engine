@@ -958,15 +958,18 @@ again from the 15th. A group with its own `series_colors` entry still counts tow
 (16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
 `series_labels` renames a group in its strip, the hover card and the screen-reader labels.
 
-**Tile labels.** Every tile label in a chart is drawn at one size: 14px on a chart at least 600px
-wide, 12px on a narrower one (so the 920px PNG is 14px). A tile shows its name in bold above its
-number, the number at the same size in medium weight, left-aligned in the tile's top-left corner,
-6px in from its top and left edges; the name wraps at spaces, to at most three lines. Where that does
-not fit, the name and number are tried on one line. Where that does not fit either, the tile is left
-unlabelled (its hover card and screen-reader label still name it): a label is never drawn smaller
-to make it fit, so a smaller tile
-never has larger text than a bigger one. A label is never truncated or ellipsised, and a tile never
-shows its number without its name.
+**Tile labels.** Every label in a chart is drawn at one size: 14px on a chart at least 600px wide,
+12px on a narrower one (so the 920px PNG is 14px). A tile shows its name in bold above its number,
+the number at the same size in medium weight, left-aligned in the tile's top-left corner and fitted
+inside a 6px padding on every side; the name wraps at spaces, to at most three lines. Where that
+does not fit, the name and number are tried on one line. Tiles are labelled largest first within
+each group (with no groups, among all tiles; equal values in layout order), and labelling stops at
+the first tile whose label does not fit: that tile and every smaller one in its group are left
+unlabelled, so a group never labels a tile while leaving a larger one of its own bare. Groups are
+labelled independently, so a tile in one group can be labelled while a larger one in another is
+not. An unlabelled tile is still named by its hover card and screen-reader label. A label is never
+drawn smaller to make it fit, never truncated or ellipsised, and a tile never shows its number
+without its name.
 
 **Header strips.** With groups, each block opens with a strip in the group's `700` tier (or its
 off-ramp `series_colors` colour, as written): the group's name in bold and its share in medium

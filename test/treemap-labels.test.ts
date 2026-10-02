@@ -150,12 +150,14 @@ function randomChart(seed: number): { tiles: LabelTile[]; width: number } {
   const width = 280 + rand() * 700;
   const n = 1 + Math.floor(rand() * 25);
   const noNumber = rand() < 0.2;
+  const groups = rand() < 0.5 ? [null] : ["G1", "G2", "G3"];
   const tiles = Array.from({ length: n }, (): LabelTile => {
+    const group = groups[Math.floor(rand() * groups.length)]!;
     const nWords = 1 + Math.floor(rand() * 5);
     const name = Array.from({ length: nWords }, () => vocab[Math.floor(rand() * vocab.length)]!).join(" ");
     const value = Math.floor(rand() * 5) * 10; // coarse, so value ties occur
     // Sizes independent of value: the properties must hold for any geometry, not only a treemap's.
-    return { name, number: noNumber ? null : `${(rand() * 40).toFixed(1)}%`, value, w: 10 + rand() * 400, h: 10 + rand() * 300 };
+    return { name, group, number: noNumber ? null : `${(rand() * 40).toFixed(1)}%`, value, w: 10 + rand() * 400, h: 10 + rand() * 300 };
   });
   return { tiles, width };
 }
@@ -201,49 +203,95 @@ describe("fitTileLabel (one size)", () => {
   });
 });
 
-describe("fitTileLabels: one size per chart", () => {
-  const sizesOf = (labels: TileLabel[]): Array<number | null> => labels.map((l) => (l.mode === "none" ? null : l.size));
-
-  it("treemapLabelSize: 14px on a chart at least 600px wide, else 12px", () => {
+describe("treemapLabelSize", () => {
+  it("is 14px on a chart at least 600px wide, else 12px", () => {
     expect(TM_LABEL_SIZES).toEqual({ wide: 14, narrow: 12, wideAt: 600 });
     expect([280, 599, 599.99, 600, 920].map(treemapLabelSize)).toEqual([12, 12, 12, 14, 14]);
   });
+});
 
-  it("draws every label in the chart at that one size", () => {
-    const tiles: LabelTile[] = [
-      { name: "Housing", number: "33.4%", value: 30, w: 400, h: 300 },
-      { name: "Food", number: "13.0%", value: 10, w: 120, h: 60 },
-    ];
-    expect(sizesOf(fitTileLabels(tiles, 600))).toEqual([14, 14]);
-    expect(sizesOf(fitTileLabels(tiles, 599))).toEqual([12, 12]);
+describe("fitTileLabels: one size, top-down per group", () => {
+  const sizesOf = (labels: TileLabel[]): Array<number | null> => labels.map((l) => (l.mode === "none" ? null : l.size));
+  const tile = (name: string, value: number, w: number, h: number, group: string | null = null): LabelTile =>
+    ({ name, group, number: "1.0%", value, w, h });
+  // Education's tile is 1px wider than the name at 12px, narrower than it at 14px.
+  const eduW = Math.ceil(timelineTextWidth("Education", 12, 700)) + 1 + 2 * pad;
+
+  it("draws every label in the chart at the one size it is given", () => {
+    const tiles = [tile("Housing", 30, 400, 300), tile("Food", 10, 120, 60)];
+    expect(sizesOf(fitTileLabels(tiles, 14))).toEqual([14, 14]);
+    expect(sizesOf(fitTileLabels(tiles, 12))).toEqual([12, 12]);
   });
 
-  it("a tile that does not fit at the chart's size is unlabelled, never drawn at a smaller size", () => {
-    // Education's tile is 1px wider than the name at 12px, narrower than it at 14px.
-    const w = Math.ceil(timelineTextWidth("Education", 12, 700)) + 1 + 2 * pad;
-    expect(timelineTextWidth("Education", 14, 700)).toBeGreaterThan(w - 2 * pad);
-    const tiles: LabelTile[] = [
-      { name: "Housing", number: "33.4%", value: 30, w: 400, h: 300 },
-      { name: "Education", number: "2.0%", value: 5, w, h: 100 },
-    ];
-    expect(sizesOf(fitTileLabels(tiles, 920))).toEqual([14, null]);
-    expect(sizesOf(fitTileLabels(tiles, 599))).toEqual([12, 12]);
+  it("a tile that does not fit at that size is unlabelled, never drawn smaller", () => {
+    expect(timelineTextWidth("Education", 14, 700)).toBeGreaterThan(eduW - 2 * pad);
+    const tiles = [tile("Housing", 30, 400, 300), tile("Education", 5, eduW, 100)];
+    expect(sizesOf(fitTileLabels(tiles, 14))).toEqual([14, null]);
+    expect(sizesOf(fitTileLabels(tiles, 12))).toEqual([12, 12]);
   });
 
-  it("property: every labelled tile in a chart shares one size, and every drawn line fits (300 charts)", () => {
+  it("stops at the first tile, by value, whose label does not fit: every smaller tile in its group is unlabelled too", () => {
+    // Listed out of value order: the visit order is by value, not by position.
+    const tiles = [
+      tile("Small", 1, 300, 300), // fits, but is smaller than Education
+      tile("Housing", 30, 400, 300),
+      tile("Education", 5, eduW, 100), // does not fit at 14
+      tile("Food", 10, 300, 300),
+    ];
+    expect(sizesOf(fitTileLabels(tiles, 14))).toEqual([null, 14, null, 14]);
+    // At 12 Education fits, so the walk reaches Small.
+    expect(sizesOf(fitTileLabels(tiles, 12))).toEqual([12, 12, 12, 12]);
+  });
+
+  it("breaks value ties by input (layout) order", () => {
+    const tiles = [tile("Education", 5, eduW, 100), tile("Food", 5, 300, 300)];
+    expect(sizesOf(fitTileLabels(tiles, 14))).toEqual([null, null]);
+    expect(sizesOf(fitTileLabels([tiles[1]!, tiles[0]!], 14))).toEqual([14, null]);
+  });
+
+  it("walks each group on its own: a group's tiles are not compared with another group's", () => {
+    const tiles = [
+      tile("Housing", 30, 400, 300, "A"),
+      tile("Education", 20, eduW, 100, "A"), // stops group A
+      tile("Food", 10, 300, 300, "A"),
+      tile("Fuel", 5, 300, 300, "B"), // smaller than A's unlabelled tiles, still labelled
+    ];
+    expect(sizesOf(fitTileLabels(tiles, 14))).toEqual([14, null, null, 14]);
+  });
+
+  it("property: one size; in each group the labelled tiles are exactly the run, by value, that fit (400 charts)", () => {
     const modes = new Set<string>();
-    for (let seed = 1; seed <= 300; seed++) {
+    let cut = 0;
+    for (let seed = 1; seed <= 400; seed++) {
       const { tiles, width } = randomChart(seed);
-      const labels = fitTileLabels(tiles, width);
-      const want = width >= 600 ? 14 : 12;
+      const size = treemapLabelSize(width);
+      const labels = fitTileLabels(tiles, size);
       labels.forEach((l, i) => {
         modes.add(l.mode);
-        if (l.mode !== "none") expect(l.size).toBe(want);
+        if (l.mode !== "none") expect(l.size).toBe(size);
         const t = tiles[i]!;
         assertFits(l, t.name, t.number, t.w, t.h);
       });
+      for (const g of new Set(tiles.map((t) => t.group))) {
+        const idx = tiles.map((_, i) => i).filter((i) => tiles[i]!.group === g)
+          .sort((a, b) => tiles[b]!.value - tiles[a]!.value || a - b);
+        const labelled = idx.map((i) => labels[i]!.mode !== "none");
+        const run = labelled.indexOf(false) === -1 ? labelled.length : labelled.indexOf(false);
+        // No unlabelled tile has a larger value than a labelled one in its group.
+        for (const a of idx) for (const b of idx) {
+          if (labels[a]!.mode === "none" && labels[b]!.mode !== "none") expect(tiles[a]!.value).toBeLessThanOrEqual(tiles[b]!.value);
+        }
+        expect(labelled.slice(run).every((x) => !x)).toBe(true);
+        if (run < idx.length) {
+          const first = tiles[idx[run]!]!;
+          expect(fitTileLabel(first.name, first.number, first.w, first.h, size).mode).toBe("none");
+          if (idx.slice(run + 1).some((i) => fitTileLabel(tiles[i]!.name, tiles[i]!.number, tiles[i]!.w, tiles[i]!.h, size).mode !== "none")) cut++;
+        }
+      }
     }
     expect([...modes].sort()).toEqual(["inline", "none", "stacked"]);
+    // The walk really stopped short of tiles that would have fitted on their own.
+    expect(cut).toBeGreaterThan(10);
   });
 });
 
