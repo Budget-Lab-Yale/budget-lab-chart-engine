@@ -174,6 +174,12 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
     class: TREEMAP_CLASS, width: b.width, height: b.height, viewBox: `0 0 ${b.width} ${b.height}`,
     "font-family": TBL.font, role: "group", "aria-label": spec.title,
   });
+  // The area is white under the tiles and strips (spec §3), so the gutters are white on any host
+  // page, live as in the PNG. The key below it sits on the card.
+  svg.append(el("rect", {
+    class: "tbl-treemap-bg", x: 0, y: 0, width: b.width, height: r2(b.areaH), fill: tokens.structural.background,
+    "aria-hidden": "true",
+  }));
 
   for (const t of b.tiles) {
     const d = t.datum;

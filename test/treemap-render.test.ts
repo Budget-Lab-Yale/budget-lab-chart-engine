@@ -348,3 +348,23 @@ describe("group names that are Object.prototype keys", () => {
     expect(new Set(stripNames(svg))).toEqual(new Set(["constructor", "toString", "Proto group"]));
   });
 });
+
+describe("treemap background", () => {
+  it("paints the treemap area white under the tiles and strips, so gutters are white on any host", () => {
+    const rows = rowsOf([["Big", 1_000_000], ...Array.from({ length: 4 }, (_, i): [string, number] => [`Tiny ${i}`, 1])]);
+    for (const [spec, data, width] of [[FLAT_SPEC, rows, 375], [GROUPED_SPEC, GROUPED, 920]] as const) {
+      const { svg } = render(spec, data, width);
+      const bg = svg.firstElementChild!;
+      expect(bg.tagName).toBe("rect");
+      expect(bg.getAttribute("class")).toBe("tbl-treemap-bg");
+      expect(bg.getAttribute("fill")).toBe(WHITE);
+      expect([num(bg, "x"), num(bg, "y"), num(bg, "width"), num(bg, "height")])
+        .toEqual([0, 0, width, Math.round(treemapAreaHeight(width) * 100) / 100]);
+      expect(q(svg, "rect.tbl-treemap-bg")).toHaveLength(1);
+    }
+    // The key sits below the area, on the card: the background stops at the area.
+    const keyed = render(FLAT_SPEC, rows, 375).svg;
+    expect(q(keyed, "text.tbl-treemap-key").length).toBeGreaterThan(0);
+    expect(num(keyed.firstElementChild!, "height")).toBeLessThan(num(keyed, "height"));
+  });
+});
