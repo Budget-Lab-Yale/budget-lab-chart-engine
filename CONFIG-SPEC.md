@@ -910,7 +910,7 @@ validation error on every other chart type.
 | field | type | notes |
 |---|---|---|
 | `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card, the tile's screen-reader label and, for a tile listed there, the key). |
-| `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's colour as resolved — its `series_colors` value as written (a tier such as `violet-300` included), else its hue's base colour; flat data is blue. Distinct from the top-level `shading`, which a treemap rejects. |
+| `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's colour as resolved — its `series_colors` value as written (a tier such as `violet-300` included), else the palette's colour for it: its hue's base colour for the first seven groups, a lighter tier of the hue from the eighth on (see **Groups and colour** below); flat data is blue. Distinct from the top-level `shading`, which a treemap rejects. |
 | `treemap.share_decimals` | integer | Decimal places on every share, 0–3. Default 1. |
 | `treemap.tooltip` | array | Extra hover-card rows, in order, after Value and Share. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
 | `value_format` | object | `{decimals, prefix, suffix}` for every value a treemap prints: tile labels and the key with `label_value: value`, the hover card's Value row and each tile's screen-reader label. Thousands are grouped with commas (`$28,452`) and `decimals` defaults to 0. The grouping is a treemap behaviour: a dumbbell's gap label, the other user of this field, prints no separators. `value_prefix` and `value_suffix` are validation errors on a treemap. |
@@ -925,9 +925,10 @@ in the data; on a treemap with no groups, any key in them is a validation error 
 `series_colors: {"": color}` idiom included), since there is no group for it to name.
 
 **Layout.** Squarified, and deterministic: the same data always draws the same tiles. Tiles are
-sorted by value, the largest first and top-left; equal values keep their CSV order. With groups,
-each group is one block: blocks are sorted by group total, largest first, ties broken by
-`series_order` and then by first appearance, and within a block its tiles are sorted as above.
+sorted by value, the largest first and top-left; equal values keep their CSV order, and values
+equal to 12 significant digits count as equal. With groups, each group is one block: blocks are
+sorted by group total, largest first, ties (to 12 significant digits, so `0.1 + 0.2` ties `0.3`)
+broken by `series_order` and then by first appearance, and within a block its tiles are sorted as above.
 A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas are proportional to
 value less those fixed gutters, which take relatively more from a small tile (a sliver can be left
 with no area at all). A group's header strip is taken out of its own block, so a tile in a group
@@ -942,12 +943,18 @@ picks that hue family, and a colour on none of the hue ramps (a raw hex such as 
 group's strip and every tile in it as written. With `shading: size`, tiles take the hue family's
 tonal tiers by rank, spread evenly from darkest to lightest: `700` → `100` with no groups, `600` →
 `100` with groups (the group's `700` is its header strip). Rank, not value, decides the shade, so a
-few large tiles do not wash every small one out to the same pale tier. With `shading: size` the `50`
-tier is never used, even when `series_colors` names it; with `shading: none`, a group's tiles are a
-`50` tier only when its `series_colors` sets one.
+few large tiles do not wash every small one out to the same pale tier.
 Text on a tile or strip is white or navy, whichever contrasts more with its fill. Past seven
-groups the hues repeat, so `tbl-chart validate` warns on more than seven groups with no
-`series_colors` set.
+groups the hues repeat, in the same order, from the eighth group in hue order: with
+`shading: size` such a group takes the same tiers and strip as the first group of its hue, and
+with `shading: none` its tiles are a lighter tier of the hue — `blue-200`, `amber-50`,
+`violet-200`, `green-100`, `red-200`, `rose-50`, `russet-300` for the 8th to 14th groups, then
+again from the 15th. A group with its own `series_colors` entry still counts toward that order.
+`tbl-chart validate` warns on more than seven groups with no `series_colors` set. With
+`shading: size` the `50` tier is never used, even when `series_colors` names it. With
+`shading: none`, a group's tiles are a `50` tier when its `series_colors` sets one, or, with no
+`series_colors` entry, when it is the 9th or 13th group in hue order or any seventh after either
+(16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
 `series_labels` renames a group in its strip, the key, the hover card and the screen-reader labels.
 
 **Tile labels.** A tile shows its name in bold above its number, centred, at the largest size from
