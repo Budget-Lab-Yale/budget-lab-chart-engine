@@ -114,7 +114,7 @@ describe("treemap render", () => {
     for (const t of q(none, "text.tbl-treemap-label")) expect(t.textContent).not.toMatch(/%|\$/);
   });
 
-  it("draws every label exactly as fitTileLabel fitted it, centred in its tile", () => {
+  it("draws every label exactly as fitTileLabel fitted it, top-left in its tile's inner box", () => {
     let inline = 0;
     for (const w of [375, 560, 720, 920]) {
       for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
@@ -131,23 +131,34 @@ describe("treemap render", () => {
             continue;
           }
           const spans = [...text!.children];
+          // Left-aligned at the inner box's left edge; each line's box stacks down from its top edge,
+          // the baseline centring the cap height in the line box.
+          expect(text!.getAttribute("text-anchor")).toBe("start");
+          const left = x + TM_GEOM.pad;
+          let top = y + TM_GEOM.pad;
+          const baseline = (size: number): number => top + (size * 1.2) / 2 + 0.35 * size;
           if (fit.mode === "stacked") {
             expect(spans.map((s) => s.textContent)).toEqual([...fit.nameLines, fit.number]);
             spans.forEach((s, i) => {
               const isNumber = i === spans.length - 1;
+              const size = isNumber ? fit.numberSize : fit.size;
               expect(num(s, "font-weight")).toBe(isNumber ? 500 : 700);
-              expect(num(s, "font-size")).toBe(isNumber ? fit.numberSize : fit.size);
-              expect(num(s, "x")).toBeCloseTo(x + rw / 2, 1);
-              expect(num(s, "y")).toBeGreaterThan(y);
-              expect(num(s, "y")).toBeLessThan(y + rh);
+              expect(num(s, "font-size")).toBe(size);
+              expect(num(s, "x")).toBeCloseTo(left, 1);
+              expect(num(s, "y")).toBeCloseTo(baseline(size), 1);
+              top += size * 1.2;
             });
           } else {
             inline++;
             expect(spans.map((s) => s.textContent)).toEqual([fit.name, ` ${fit.number}`]);
             expect(spans.map((s) => num(s, "font-weight"))).toEqual([700, 500]);
             expect(num(text!, "font-size")).toBe(fit.size);
-            expect(num(text!, "x")).toBeCloseTo(x + rw / 2, 1);
+            expect(num(text!, "x")).toBeCloseTo(left, 1);
+            expect(num(text!, "y")).toBeCloseTo(baseline(fit.size), 1);
+            top += fit.size * 1.2;
           }
+          // The block ends inside the inner box.
+          expect(top).toBeLessThanOrEqual(y + rh - TM_GEOM.pad + 0.01);
         }
       }
     }

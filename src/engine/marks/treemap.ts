@@ -190,29 +190,29 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
     }));
     const lab = t.label;
     if (lab.mode !== "none") {
-      const cx = r2((t.x0 + t.x1) / 2);
-      const cy = (t.y0 + t.y1) / 2;
+      // Top-left in the tile's inner box: left-aligned at the left padding, lines stacked down from
+      // the top padding, each baseline centring the cap height in its line box.
+      const left = r2(t.x0 + TM_GEOM.pad);
+      const top = t.y0 + TM_GEOM.pad;
+      const baseline = (lineTop: number, size: number): number => r2(lineTop + (size * LINE_HEIGHT) / 2 + CAP_CENTRE * size);
       const text = el("text", {
-        class: "tbl-treemap-label", "text-anchor": "middle", fill: contrastText(t.fill), "aria-hidden": "true",
+        class: "tbl-treemap-label", "text-anchor": "start", fill: contrastText(t.fill), "aria-hidden": "true",
       });
       if (lab.mode === "stacked") {
-        const boxH = lab.nameLines.length * lab.size * LINE_HEIGHT + (lab.number !== null ? lab.numberSize * LINE_HEIGHT : 0);
-        let top = cy - boxH / 2;
+        let lineTop = top;
         for (const line of lab.nameLines) {
-          const lh = lab.size * LINE_HEIGHT;
-          text.append(span(line, { x: cx, y: r2(top + lh / 2 + CAP_CENTRE * lab.size), "font-size": lab.size, "font-weight": 700 }));
-          top += lh;
+          text.append(span(line, { x: left, y: baseline(lineTop, lab.size), "font-size": lab.size, "font-weight": 700 }));
+          lineTop += lab.size * LINE_HEIGHT;
         }
         if (lab.number !== null) {
-          const lh = lab.numberSize * LINE_HEIGHT;
           text.append(span(lab.number, {
-            x: cx, y: r2(top + lh / 2 + CAP_CENTRE * lab.numberSize), "font-size": lab.numberSize, "font-weight": 500,
+            x: left, y: baseline(lineTop, lab.numberSize), "font-size": lab.numberSize, "font-weight": 500,
           }));
         }
       } else {
         // Inline: drawn exactly as fitTileLabel measured it, the name at 700 then " number" at 500.
-        text.setAttribute("x", String(cx));
-        text.setAttribute("y", String(r2(cy + CAP_CENTRE * lab.size)));
+        text.setAttribute("x", String(left));
+        text.setAttribute("y", String(baseline(top, lab.size)));
         text.setAttribute("font-size", String(lab.size));
         text.append(span(lab.name, { "font-weight": 700 }));
         if (lab.number !== null) text.append(span(` ${lab.number}`, { "font-weight": 500 }));

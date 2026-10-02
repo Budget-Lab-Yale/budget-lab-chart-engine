@@ -958,8 +958,9 @@ again from the 15th. A group with its own `series_colors` entry still counts tow
 (16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
 `series_labels` renames a group in its strip, the key, the hover card and the screen-reader labels.
 
-**Tile labels.** A tile shows its name in bold above its number, centred, at the largest size from
-20px down to 11px at which both fit; the name wraps at spaces, to at most three lines. Where no size
+**Tile labels.** A tile shows its name in bold above its number, left-aligned in the tile's top-left
+corner, 6px in from its top and left edges, at the largest size from 20px down to 11px at which both
+fit; the name wraps at spaces, to at most three lines. Where no size
 fits stacked, the name and number are tried on one line. Where that does not fit either, the tile
 is left unlabelled and listed in the key. A label is never truncated or ellipsised, and a tile never
 shows its number without its name.
