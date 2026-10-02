@@ -982,7 +982,10 @@ weight, at the tile labels' size, or the name alone where both do not fit. The s
 with 14px text and 22px with 12px. A group keeps its strip only when its block, as finally drawn,
 is at least two strips tall (52px, or 44px below 600px wide) and the name fits across it. Strips are decided on the blocks before any strip area
 is added and re-checked on the final blocks, so a block can lose its strip but never gain one. A
-group without a strip gets no strip area.
+group without a strip gets no strip area. When none of its tiles is labelled either, the group's
+name and share are written in its block's top-left instead, at the label size (name bold, share in
+medium weight) and fitted as a tile label is, in white or navy, whichever contrasts more with the
+group's colour; where they do not fit, nothing is written, and hovering a tile still names it.
 
 **Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
 280px and narrower, linear in between, and the treemap is never more than 460px tall. On screen it
@@ -1002,8 +1005,8 @@ keyboard-focusable.
 **Accessibility.** The chart's SVG is a `role="group"` labelled with the title. Each tile is a
 `role="img"` whose `aria-label` reads `[Group · ]Name, <share> of total, <value>` — `Housing, 33.4% of
 total, $28,452` — with both numbers whatever `label_value` says, so an unlabelled tile is
-described in full. The drawn tile and strip text is hidden from assistive technology so it is not
-read twice.
+described in full. All drawn text (tile labels, strips and group names) is hidden from assistive
+technology so it is not read twice.
 
 `tbl-chart validate` passes but warns on zero-value rows (naming them), on more than 30 tiles, when
 more than half the tiles are unlabelled at the 920px export width, and on more than seven

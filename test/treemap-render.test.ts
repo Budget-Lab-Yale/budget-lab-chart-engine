@@ -300,6 +300,80 @@ describe("treemap render", () => {
     expect(h(a[0]!) / h(a[1]!)).toBeCloseTo(13 / 12, 2);
   });
 
+  describe("a group with no labelled tile", () => {
+    const g = (rows: Array<[string, string, number]>) => rows.map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    const many = (group: string, n: number, value: number): Array<[string, string, number]> =>
+      Array.from({ length: n }, (_, i) => [group, `Category number ${i}`, value]);
+    const groupLabels = (svg: SVGSVGElement) => q(svg, "text.tbl-treemap-group-label");
+    /** A group's block: the union of its tiles (the outermost tiles reach the block's edges). */
+    const blockOf = (svg: SVGSVGElement, group: string) => {
+      const rs = q(svg, `g[data-series="${group}"] rect`);
+      return { x0: Math.min(...rs.map((r) => num(r, "x"))), y0: Math.min(...rs.map((r) => num(r, "y"))),
+        x1: Math.max(...rs.map((r) => num(r, "x") + num(r, "width"))), y1: Math.max(...rs.map((r) => num(r, "y") + num(r, "height"))) };
+    };
+
+    it("and no strip is named in its block's top-left: name 700 + share 500 at the label size, contrast on its base colour", () => {
+      // At 280px B is a full-width band under 44px tall (no strip) of eight tiles too narrow to label.
+      const spec = { ...GROUPED_SPEC, series_order: ["A", "B"] } as ChartSpec;
+      const { svg, colors } = render(spec, g([["A", "a1", 50], ["A", "a2", 40], ...many("B", 8, 1.25)]), 280);
+      expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A"]);
+      expect(q(svg, 'g[data-series="B"] text')).toHaveLength(0);
+      const labels = groupLabels(svg);
+      expect(labels).toHaveLength(1);
+      const l = labels[0]!;
+      const b = blockOf(svg, "B");
+      const fit = fitTileLabel("B", "10.0%", b.x1 - b.x0, b.y1 - b.y0, 12);
+      expect(fit.mode).toBe("inline");
+      expect([...l.children].map((s) => [s.textContent, num(s, "font-weight")])).toEqual([["B", 700], [" 10.0%", 500]]);
+      expect(num(l, "font-size")).toBe(12);
+      expect(num(l, "x")).toBeCloseTo(b.x0 + TM_GEOM.pad, 1);
+      expect(num(l, "y")).toBeCloseTo(b.y0 + TM_GEOM.pad + (12 * 1.2) / 2 + 0.35 * 12, 1);
+      expect(l.getAttribute("fill")).toBe(contrastText(colors.get("B")!));
+      expect(colors.get("B")).toBe(tokens.categorical[1]!.base);
+      expect(l.getAttribute("aria-hidden")).toBe("true");
+      // Hover passes through it to the tiles underneath.
+      expect(l.getAttribute("pointer-events")).toBe("none");
+      // Drawn above the tiles.
+      expect(q(svg, "g[role=img]").every((t) => t.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    });
+
+    it("stacks the name, wrapped, above the share where the block is narrow and tall", () => {
+      // A 64px column: "Other misc items" does not fit across a strip, so it has none, but wraps in the block.
+      const { svg } = render(GROUPED_SPEC, g([["A", "Alpha", 120], ["A", "Beta", 80], ...many("Other misc items", 10, 1.5)]), 920);
+      expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A"]);
+      const l = groupLabels(svg);
+      expect(l).toHaveLength(1);
+      expect([...l[0]!.children].map((s) => [s.textContent, num(s, "font-weight"), num(s, "font-size")]))
+        .toEqual([["Other", 700, 14], ["misc", 700, 14], ["items", 700, 14], ["7.0%", 500, 14]]);
+      const b = blockOf(svg, "Other misc items");
+      for (const s of l[0]!.children) expect(num(s, "x")).toBeCloseTo(b.x0 + TM_GEOM.pad, 1);
+    });
+
+    it("names the group by its series_labels label", () => {
+      const spec = { ...GROUPED_SPEC, series_order: ["A", "B"], series_labels: { B: "Bravo" } } as ChartSpec;
+      const { svg } = render(spec, g([["A", "a1", 50], ["A", "a2", 40], ...many("B", 8, 1.25)]), 280);
+      expect(groupLabels(svg)[0]!.firstElementChild!.textContent).toBe("Bravo");
+    });
+
+    it("draws nothing more when the group has a strip: the strip already names it", () => {
+      const { svg } = render(GROUPED_SPEC, g([["A", "Alpha", 100], ...many("B", 30, 1)]), 920);
+      expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "B"]);
+      expect(q(svg, 'g[data-series="B"] text')).toHaveLength(0);
+      expect(groupLabels(svg)).toHaveLength(0);
+    });
+
+    it("draws nothing when a tile in the group is labelled, or when the name does not fit the block", () => {
+      // B's one tile labels itself.
+      const one = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 40], ["B", "b1", 10]]), 280).svg;
+      expect(q(one, 'g[data-series="B"] text')).toHaveLength(1);
+      expect(groupLabels(one)).toHaveLength(0);
+      // A 3% band is far too short for any text.
+      const thin = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 47], ...many("B", 3, 1)]), 280).svg;
+      expect(q(thin, 'g[data-series="B"] text')).toHaveLength(0);
+      expect(groupLabels(thin)).toHaveLength(0);
+    });
+  });
+
   it("drops the strip of a block under two strips tall, even when its name fits", () => {
     const g = (rows: Array<[string, string, number]>) => rows.map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     // At 280px wide the second group is a full-width band: 10% of 350px is 35px (< 44), 15% is 52.5px.

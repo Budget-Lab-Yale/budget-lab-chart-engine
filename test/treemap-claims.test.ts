@@ -312,7 +312,7 @@ describe("treemap accessibility", () => {
     const { svg } = renderChart(TM, TWO, { width: 375 });
     expect(svg.getAttribute("role")).toBe("group");
     expect(svg.getAttribute("aria-label")).toBe("Outlays");
-    const hidden = q(svg, "text.tbl-treemap-label, text.tbl-treemap-strip-label");
+    const hidden = q(svg, "text.tbl-treemap-label, text.tbl-treemap-strip-label, text.tbl-treemap-group-label");
     expect(hidden.length).toBeGreaterThan(0);
     for (const t of hidden) expect(t.getAttribute("aria-hidden")).toBe("true");
     expect(q(svg, "text")).toHaveLength(hidden.length);

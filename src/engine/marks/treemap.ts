@@ -51,6 +51,8 @@ interface BuiltTile {
   label: TileLabel;
 }
 interface BuiltStrip { group: GroupRect; fill: string; label: StripLabel }
+/** A strip-less group none of whose tiles is labelled, named in its block's top-left instead. */
+interface BuiltGroupLabel { group: GroupRect; fill: string; label: Exclude<TileLabel, { mode: "none" }> }
 interface Built {
   width: number;
   areaH: number;
@@ -60,6 +62,7 @@ interface Built {
   layout: TreemapLayout;
   tiles: BuiltTile[];
   strips: BuiltStrip[];
+  groupLabels: BuiltGroupLabel[];
   groupNames: string[];
   colors: Map<string, string>;
 }
@@ -135,7 +138,15 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
     group: g, fill: stripFill(hueOf(g.group)),
     label: fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, size),
   }));
-  return { width, areaH, size, stripH, layout, tiles, strips, groupNames, colors };
+  // A group with no strip and no labelled tile is named (name + share) in its block's top-left,
+  // fitted like a tile label at the same size, in the contrast colour of the group's base fill.
+  const groupLabels: BuiltGroupLabel[] = [];
+  for (const g of layout.groups) {
+    if (g.strip || tiles.some((t) => t.datum.group === g.group && t.label.mode !== "none")) continue;
+    const label = fitTileLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, g.y1 - g.y0, size);
+    if (label.mode !== "none") groupLabels.push({ group: g, fill: contrastText(hueOf(g.group)), label });
+  }
+  return { width, areaH, size, stripH, layout, tiles, strips, groupLabels, groupNames, colors };
 }
 
 /** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone (there is no key),
@@ -170,6 +181,34 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
     return s;
   };
   const cfg = resolveTreemapConfig(spec);
+  /** A fitted label (a tile's, or a strip-less group's) top-left in the box whose top-left corner is
+   *  (x0, y0): left-aligned at the left padding, lines stacked down from the top padding, each
+   *  baseline centring the cap height in its line box. */
+  const labelText = (lab: Exclude<TileLabel, { mode: "none" }>, x0: number, y0: number, cls: string, fill: string,
+    extra: Record<string, string> = {}): SVGTextElement => {
+    const left = r2(x0 + TM_GEOM.pad);
+    const top = y0 + TM_GEOM.pad;
+    const baseline = (lineTop: number): number => r2(lineTop + (lab.size * LINE_HEIGHT) / 2 + CAP_CENTRE * lab.size);
+    const text = el("text", { class: cls, "text-anchor": "start", fill, "aria-hidden": "true", ...extra });
+    if (lab.mode === "stacked") {
+      let lineTop = top;
+      for (const line of lab.nameLines) {
+        text.append(span(line, { x: left, y: baseline(lineTop), "font-size": lab.size, "font-weight": 700 }));
+        lineTop += lab.size * LINE_HEIGHT;
+      }
+      if (lab.number !== null) {
+        text.append(span(lab.number, { x: left, y: baseline(lineTop), "font-size": lab.size, "font-weight": 500 }));
+      }
+    } else {
+      // Inline: drawn exactly as fitTileLabel measured it, the name at 700 then " number" at 500.
+      text.setAttribute("x", String(left));
+      text.setAttribute("y", String(baseline(top)));
+      text.setAttribute("font-size", String(lab.size));
+      text.append(span(lab.name, { "font-weight": 700 }));
+      text.append(span(` ${lab.number}`, { "font-weight": 500 }));
+    }
+    return text;
+  };
 
   // role="group", not "img": an img's children are presentational, which would hide every tile's
   // own label from assistive technology.
@@ -191,36 +230,15 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
     g.append(el("rect", {
       class: "tbl-treemap-tile", x: t.x0, y: t.y0, width: r2(t.x1 - t.x0), height: r2(t.y1 - t.y0), fill: t.fill,
     }));
-    const lab = t.label;
-    if (lab.mode !== "none") {
-      // Top-left in the tile's inner box: left-aligned at the left padding, lines stacked down from
-      // the top padding, each baseline centring the cap height in its line box.
-      const left = r2(t.x0 + TM_GEOM.pad);
-      const top = t.y0 + TM_GEOM.pad;
-      const baseline = (lineTop: number, size: number): number => r2(lineTop + (size * LINE_HEIGHT) / 2 + CAP_CENTRE * size);
-      const text = el("text", {
-        class: "tbl-treemap-label", "text-anchor": "start", fill: contrastText(t.fill), "aria-hidden": "true",
-      });
-      if (lab.mode === "stacked") {
-        let lineTop = top;
-        for (const line of lab.nameLines) {
-          text.append(span(line, { x: left, y: baseline(lineTop, lab.size), "font-size": lab.size, "font-weight": 700 }));
-          lineTop += lab.size * LINE_HEIGHT;
-        }
-        if (lab.number !== null) {
-          text.append(span(lab.number, { x: left, y: baseline(lineTop, lab.size), "font-size": lab.size, "font-weight": 500 }));
-        }
-      } else {
-        // Inline: drawn exactly as fitTileLabel measured it, the name at 700 then " number" at 500.
-        text.setAttribute("x", String(left));
-        text.setAttribute("y", String(baseline(top, lab.size)));
-        text.setAttribute("font-size", String(lab.size));
-        text.append(span(lab.name, { "font-weight": 700 }));
-        text.append(span(` ${lab.number}`, { "font-weight": 500 }));
-      }
-      g.append(text);
+    if (t.label.mode !== "none") {
+      g.append(labelText(t.label, t.x0, t.y0, "tbl-treemap-label", contrastText(t.fill)));
     }
     svg.append(g);
+  }
+
+  // Above the tiles; pointer events pass through to the tile underneath for hover.
+  for (const gl of b.groupLabels) {
+    svg.append(labelText(gl.label, gl.group.x0, gl.group.y0, "tbl-treemap-group-label", gl.fill, { "pointer-events": "none" }));
   }
 
   for (const s of b.strips) {
