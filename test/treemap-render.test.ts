@@ -7,7 +7,8 @@ import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { TREEMAP_CLASS, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
-import { contrastText, fitTileLabel, stripFill } from "../src/engine/treemap-labels";
+import { contrastText, fitTileLabel, stripFill, treemapStripHeight } from "../src/engine/treemap-labels";
+import { timelineTextWidth } from "../src/engine/timeline-text";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -189,13 +190,48 @@ describe("treemap render", () => {
     strips.forEach((s, i) => {
       const fill = stripFill(colors.get(s.getAttribute("data-series")!)!);
       expect(s.getAttribute("fill")).toBe(fill);
-      expect(num(s, "height")).toBe(TM_GEOM.stripH);
       expect(labels[i]!.getAttribute("fill")).toBe(contrastText(fill));
       expect(num(labels[i]!, "x")).toBe(num(s, "x") + TM_GEOM.stripPad);
     });
     expect(colors.get("Mandatory")).toBe(tokens.categorical[0]!.base);
     expect(strips[0]!.getAttribute("fill")).toBe(tokens.scales.blue["700"]);
     expect([...labels[0]!.children].map((s) => [s.textContent, num(s, "font-weight")])).toEqual([["Mandatory", 700], [" 58.9%", 500]]);
+  });
+
+  it("draws strip text at the tile label size, in a strip that grows with it: 26px at 14px, 22px at 12px", () => {
+    for (const [w, size, stripH] of [[920, 14, 26], [600, 14, 26], [599, 12, 22], [375, 12, 22]] as const) {
+      const { svg } = render(GROUPED_SPEC, GROUPED, w);
+      const strips = q(svg, "rect.tbl-treemap-strip");
+      expect(strips.length).toBeGreaterThan(0);
+      for (const s of strips) expect(num(s, "height")).toBe(stripH);
+      expect(treemapStripHeight(size)).toBe(stripH);
+      const labels = q(svg, "text.tbl-treemap-strip-label");
+      expect(labels).toHaveLength(strips.length);
+      labels.forEach((l, i) => {
+        expect(num(l, "font-size")).toBe(size);
+        // The baseline centres the cap height (0.7 em) in the strip.
+        expect(num(l, "y")).toBeCloseTo(num(strips[i]!, "y") + stripH / 2 + 0.35 * size, 1);
+        // The name fits the strip at that size (measured as drawn: name 700, share 500).
+        const [name, share] = [...l.children].map((c) => c.textContent ?? "");
+        const width = timelineTextWidth(name!, size, 700) + (share ? timelineTextWidth(share, size, 500) : 0);
+        expect(width).toBeLessThanOrEqual(num(strips[i]!, "width") - 2 * TM_GEOM.stripPad);
+      });
+      // Tiles of a strip group start below its strip.
+      for (const s of strips) {
+        const top = Math.min(...q(svg, `g[data-series="${s.getAttribute("data-series")}"] rect`).map((r) => num(r, "y")));
+        expect(top).toBeGreaterThanOrEqual(num(s, "y") + stripH - 0.01);
+      }
+    }
+  });
+
+  it("at 920 a block 44-52px tall has no strip: the floor is two of its 26px strips", () => {
+    const g = (rows: Array<[string, string, number]>) => rows.map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    // A takes a left column; C and B share the right one, B a band at its bottom about 48px tall.
+    const { svg } = render(GROUPED_SPEC, g([["A", "a1", 800], ["C", "c1", 176], ["B", "b1", 24]]), 920);
+    const b = q(svg, 'g[data-series="B"] rect')[0]!;
+    expect(num(b, "height")).toBeGreaterThan(44);
+    expect(num(b, "height")).toBeLessThan(52);
+    expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "C"]);
   });
 
   it("drops the strip of a block under two strips tall, even when its name fits", () => {

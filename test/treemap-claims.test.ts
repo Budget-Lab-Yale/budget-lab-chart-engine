@@ -139,16 +139,33 @@ describe("tile label sizes", () => {
     ["Healthcare", 6159], ["Entertainment", 3635], ["Cash contributions", 2531], ["Apparel and services", 2041],
     ["Education", 1656], ["Other", 1500], ["Personal care", 950], ["Reading", 117],
   ]);
-  // An inline label carries its size on the <text>, a stacked one on each <tspan>.
-  const drawn = (svg: SVGSVGElement): Array<[string, string]> =>
-    q(svg, "text.tbl-treemap-label tspan").map((s) => [(s.getAttribute("font-size") ?? s.parentElement!.getAttribute("font-size"))!, s.getAttribute("font-weight")!]);
+  // The same tiles in three groups.
+  const MANY_GROUPED = rows(MANY.map((r, i): [string, string, number] => [["Core", "Other", "Small"][Math.min(2, Math.floor(i / 4))]!, r.category as string, Number(r.amount)]));
+  // Every drawn text span: an inline tile label and a strip label carry the size on the <text>, a
+  // stacked tile label on each <tspan>.
+  const drawn = (svg: SVGSVGElement, sel = "text"): Array<[string, string]> =>
+    q(svg, `${sel} tspan`).map((s) => [(s.getAttribute("font-size") ?? s.parentElement!.getAttribute("font-size"))!, s.getAttribute("font-weight")!]);
 
   it("one size in a whole chart: 14px at 600px wide and over, 12px below; the name 700, its number 500 at that size", () => {
     for (const [w, size] of [[920, "14"], [600, "14"], [599, "12"], [375, "12"]] as const) {
-      const spans = drawn(renderChart(FLAT, MANY, { width: w }).svg);
-      expect(spans.length).toBeGreaterThan(4);
-      expect(new Set(spans.map(([s]) => s))).toEqual(new Set([size]));
-      expect(new Set(spans.map(([, wt]) => wt))).toEqual(new Set(["700", "500"]));
+      for (const [spec, data] of [[FLAT, MANY], [TM, MANY_GROUPED]] as const) {
+        const { svg } = renderChart(spec, data, { width: w });
+        const spans = drawn(svg);
+        expect(drawn(svg, "text.tbl-treemap-label").length).toBeGreaterThan(4);
+        expect(new Set(spans.map(([s]) => s))).toEqual(new Set([size]));
+        expect(new Set(spans.map(([, wt]) => wt))).toEqual(new Set(["700", "500"]));
+      }
+    }
+  });
+
+  it("group strip text is the tile labels' size too: name 700, share 500", () => {
+    for (const [w, size] of [[920, "14"], [375, "12"]] as const) {
+      const strips = q(renderChart(TM, MANY_GROUPED, { width: w }).svg, "text.tbl-treemap-strip-label");
+      expect(strips.length).toBeGreaterThan(0);
+      for (const s of strips) {
+        expect(s.getAttribute("font-size")).toBe(size);
+        expect([...s.children].map((c) => c.getAttribute("font-weight"))).toEqual(s.children.length === 2 ? ["700", "500"] : ["700"]);
+      }
     }
   });
 });

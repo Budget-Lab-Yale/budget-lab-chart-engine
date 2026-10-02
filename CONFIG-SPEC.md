@@ -968,10 +968,11 @@ to make it fit, so a smaller tile
 never has larger text than a bigger one. A label is never truncated or ellipsised, and a tile never
 shows its number without its name.
 
-**Header strips.** With groups, each block opens with a 22px strip in the group's `700` tier (or its
-off-ramp `series_colors` colour, as written): the group's name in bold and its share, or the name
-alone where both do not fit. A group keeps its strip only when its block, as finally drawn, is at
-least 44px tall and the name fits across it. Strips are decided on the blocks before any strip area
+**Header strips.** With groups, each block opens with a strip in the group's `700` tier (or its
+off-ramp `series_colors` colour, as written): the group's name in bold and its share in medium
+weight, at the tile labels' size, or the name alone where both do not fit. The strip is 26px tall
+with 14px text and 22px with 12px. A group keeps its strip only when its block, as finally drawn,
+is at least two strips tall (52px, or 44px below 600px wide) and the name fits across it. Strips are decided on the blocks before any strip area
 is added and re-checked on the final blocks, so a block can lose its strip but never gain one. A
 group without a strip gets no strip area.
 

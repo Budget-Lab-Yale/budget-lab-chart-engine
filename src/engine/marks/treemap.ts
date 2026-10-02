@@ -18,8 +18,8 @@ import {
 } from "../../spec/treemap";
 import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TreemapLayout } from "../treemap-layout";
 import {
-  tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel,
-  TM_LINE_HEIGHT as LINE_HEIGHT, TM_STRIP_TEXT as STRIP_TEXT,
+  tileFill, stripFill, contrastText, fitTileLabels, fitStripLabel, treemapLabelSize, treemapStripHeight,
+  TM_LINE_HEIGHT as LINE_HEIGHT,
   type TileLabel, type StripLabel,
 } from "../treemap-labels";
 
@@ -54,6 +54,9 @@ interface BuiltStrip { group: GroupRect; fill: string; label: StripLabel }
 interface Built {
   width: number;
   areaH: number;
+  /** The chart's one text size (tile labels and strip text) and the strip height it implies. */
+  size: number;
+  stripH: number;
   layout: TreemapLayout;
   tiles: BuiltTile[];
   strips: BuiltStrip[];
@@ -95,12 +98,16 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   const valueText = (v: number): string => formatTreemapValue(v, spec.value_format);
 
   const areaH = treemapAreaHeight(width);
+  // Strip text is the tile labels' size, and the strip's height follows it.
+  const size = treemapLabelSize(width);
+  const stripH = treemapStripHeight(size);
   // A group keeps its strip only if its block is at least two strips tall and the strip has text.
   const layout = layoutTreemap(data, width, areaH, {
     groupOrder: groupNames,
+    stripH,
     stripFits: (g) =>
-      g.y1 - g.y0 >= 2 * TM_GEOM.stripH &&
-      fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0).mode !== "none",
+      g.y1 - g.y0 >= 2 * stripH &&
+      fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, size).mode !== "none",
   });
 
   const groupSize = new Map<string | null, number>();
@@ -123,9 +130,9 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   });
   const strips: BuiltStrip[] = layout.groups.filter((g) => g.strip).map((g) => ({
     group: g, fill: stripFill(hueOf(g.group)),
-    label: fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0),
+    label: fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, size),
   }));
-  return { width, areaH, layout, tiles, strips, groupNames, colors };
+  return { width, areaH, size, stripH, layout, tiles, strips, groupNames, colors };
 }
 
 /** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone (there is no key),
@@ -216,13 +223,13 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
   for (const s of b.strips) {
     const g = s.group;
     svg.append(el("rect", {
-      class: "tbl-treemap-strip", x: g.x0, y: g.y0, width: r2(g.x1 - g.x0), height: TM_GEOM.stripH, fill: s.fill,
+      class: "tbl-treemap-strip", x: g.x0, y: g.y0, width: r2(g.x1 - g.x0), height: b.stripH, fill: s.fill,
       "data-series": g.group,
     }));
     if (s.label.mode === "none") continue;
     const text = el("text", {
       class: "tbl-treemap-strip-label", x: r2(g.x0 + TM_GEOM.stripPad),
-      y: r2(g.y0 + TM_GEOM.stripH / 2 + CAP_CENTRE * STRIP_TEXT), "font-size": STRIP_TEXT,
+      y: r2(g.y0 + b.stripH / 2 + CAP_CENTRE * b.size), "font-size": b.size,
       fill: contrastText(s.fill), "aria-hidden": "true",
     });
     text.append(span(s.label.name, { "font-weight": 700 }));

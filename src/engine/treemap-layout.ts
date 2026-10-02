@@ -5,6 +5,8 @@
 import { d3 } from "./vendor";
 import type { TreemapDatum } from "../spec/treemap";
 
+/** `stripH` is the header strip's height at 12px strip text, and layoutTreemap's default; the engine
+ *  scales it with the chart's label size (treemapStripHeight). */
 export const TM_GEOM = { tileGutter: 2, groupGutter: 4, stripH: 22, pad: 6, stripPad: 6,
   aspectWide: 2.0, aspectNarrow: 0.8, wideAt: 720, narrowAt: 280, maxHeight: 460, minLiveWidth: 280 } as const;
 
@@ -65,11 +67,13 @@ const CONVERGED_PX = 1e-6;
  * `stripFits` decides each group's strip from its block: asked first of every uncompensated block,
  * then again of each compensated final block that holds a strip. A strip whose final block fails is
  * dropped (with its extra area) and the layout re-solved, so every returned strip fits its final
- * block. Absent, every group reserves the strip. `gutters` is for tests only (0 isolates the
- * proportionality from the fixed gutters); every caller in the engine uses TM_GEOM's.
+ * block. Absent, every group reserves the strip. `stripH` is the strip's height (default
+ * TM_GEOM.stripH). `gutters` is for tests only (0 isolates the proportionality from the fixed
+ * gutters); every caller in the engine uses TM_GEOM's.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,
-  opts: { groupOrder: string[]; stripFits?: (g: GroupRect) => boolean; gutters?: { tile: number; group: number } }): TreemapLayout {
+  opts: { groupOrder: string[]; stripFits?: (g: GroupRect) => boolean; stripH?: number; gutters?: { tile: number; group: number } }): TreemapLayout {
+  const stripH = opts.stripH ?? TM_GEOM.stripH;
   const tileGutter = opts.gutters?.tile ?? TM_GEOM.tileGutter;
   const groupGutter = opts.gutters?.group ?? TM_GEOM.groupGutter;
   const grouped = data.some((d) => d.group !== null);
@@ -139,7 +143,7 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
       .tile(tile)
       .size([width, height])
       .paddingInner((n: { depth: number }) => (grouped && n.depth === 0 ? groupGutter : tileGutter))
-      .paddingTop((n: { depth: number; data: Node }) => (n.depth === 1 && grouped && strips.has(n.data.group!) ? TM_GEOM.stripH : 0))(root);
+      .paddingTop((n: { depth: number; data: Node }) => (n.depth === 1 && grouped && strips.has(n.data.group!) ? stripH : 0))(root);
 
   const totalOf = (g: string): number => data.reduce((s, d) => (d.group === g ? s + d.value : s), 0);
   type GNode = { data: Node; x0: number; y0: number; x1: number; y1: number };
@@ -149,7 +153,7 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
 
   // The strip takes stripH off the region its block's tiles are laid out in, whose width is the
   // block's plus one tile gutter (d3 extends a parent's tiling region half a gutter past each side).
-  const stripArea = (n: GNode): number => TM_GEOM.stripH * (n.x1 - n.x0 + tileGutter);
+  const stripArea = (n: GNode): number => stripH * (n.x1 - n.x0 + tileGutter);
   // Solve the compensation for a strip set. The root's tiling region (the frame, extended half a
   // group gutter past each edge) is shared by value: each tile's value at one area-per-unit factor,
   // plus each strip group's strip. So factor = (region - all strips) / tiles' total, and a strip

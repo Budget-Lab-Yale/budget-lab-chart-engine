@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  TM_LABEL_SIZES, treemapLabelSize, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel,
+  TM_LABEL_SIZES, treemapLabelSize, treemapStripHeight, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel,
   stripFill, type TileLabel, type LabelTile,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
@@ -253,22 +253,36 @@ describe("fitStripLabel", () => {
     expect(spad).toBe(6);
   });
   const avail = (bw: number): number => bw - 2 * spad;
-  const full = (n: string, s: string): number => timelineTextWidth(n, 12, 700) + timelineTextWidth(` ${s}`, 12, 500);
+  const full = (n: string, s: string, size: number): number => timelineTextWidth(n, size, 700) + timelineTextWidth(` ${s}`, size, 500);
   it("shows name and share when both fit", () => {
-    expect(fitStripLabel("Housing", "33.4%", 300)).toEqual({ mode: "full", name: "Housing", share: "33.4%" });
+    expect(fitStripLabel("Housing", "33.4%", 300, 14)).toEqual({ mode: "full", name: "Housing", share: "33.4%" });
   });
   it("drops the share first, then the label", () => {
     const name = "Transportation";
-    const nameW = timelineTextWidth(name, 12, 700);
-    // Wide enough for the name alone, not for name + share.
-    const bw = Math.ceil(nameW + 2 * spad) + 1;
-    expect(full(name, "17.0%")).toBeGreaterThan(avail(bw));
-    expect(fitStripLabel(name, "17.0%", bw)).toEqual({ mode: "name", name });
-    expect(fitStripLabel(name, "17.0%", Math.floor(nameW + 2 * spad) - 1)).toEqual({ mode: "none" });
+    for (const size of [12, 14]) {
+      const nameW = timelineTextWidth(name, size, 700);
+      // Wide enough for the name alone, not for name + share.
+      const bw = Math.ceil(nameW + 2 * spad) + 1;
+      expect(full(name, "17.0%", size)).toBeGreaterThan(avail(bw));
+      expect(fitStripLabel(name, "17.0%", bw, size)).toEqual({ mode: "name", name });
+      expect(fitStripLabel(name, "17.0%", Math.floor(nameW + 2 * spad) - 1, size)).toEqual({ mode: "none" });
+    }
   });
-  it("measures exactly at the boundary (name + share at 12px within blockWidth - 2*stripPad)", () => {
-    const bw = full("Food", "13.0%") + 2 * spad;
-    expect(fitStripLabel("Food", "13.0%", bw + 1e-9).mode).toBe("full"); // float slack only
-    expect(fitStripLabel("Food", "13.0%", bw - 0.01).mode).toBe("name");
+  it("measures at the given size, exactly at the boundary (name + share within blockWidth - 2*stripPad)", () => {
+    for (const size of [12, 14]) {
+      const bw = full("Food", "13.0%", size) + 2 * spad;
+      expect(fitStripLabel("Food", "13.0%", bw + 1e-9, size).mode).toBe("full"); // float slack only
+      expect(fitStripLabel("Food", "13.0%", bw - 0.01, size).mode).toBe("name");
+    }
+    // A width that holds the text at 12px but not at 14px.
+    const bw12 = full("Food", "13.0%", 12) + 2 * spad;
+    expect(fitStripLabel("Food", "13.0%", bw12, 14).mode).toBe("name");
+  });
+});
+
+describe("treemapStripHeight", () => {
+  it("is 22px at 12px text, scaled with the text and rounded: 26px at 14px", () => {
+    expect(treemapStripHeight(12)).toBe(22);
+    expect(treemapStripHeight(14)).toBe(26);
   });
 });

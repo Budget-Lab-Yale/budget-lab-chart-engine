@@ -16,10 +16,15 @@ export function treemapLabelSize(chartWidth: number): number {
   return chartWidth >= TM_LABEL_SIZES.wideAt ? TM_LABEL_SIZES.wide : TM_LABEL_SIZES.narrow;
 }
 
-/** Text-layout constants shared with the drawing (marks/treemap), so what is measured here is what
- *  is drawn there. Line height is a factor of the font size. */
+/** Text-layout constant shared with the drawing (marks/treemap), so what is measured here is what
+ *  is drawn there: line height as a factor of the font size. */
 export const TM_LINE_HEIGHT = 1.2;
-export const TM_STRIP_TEXT = 12;
+
+/** Header strip height for strip text at `size` px: TM_GEOM.stripH (22px) at 12px text, scaled with
+ *  the text and rounded to a whole pixel (26px at 14px), so the text keeps its proportions in it. */
+export function treemapStripHeight(size: number): number {
+  return Math.round((size * TM_GEOM.stripH) / 12);
+}
 const MAX_NAME_LINES = 3;
 
 // Usable tiers darkest-first. 50 is excluded (too close to the white gutters); grouped tiles stop at
@@ -156,12 +161,13 @@ export function fitTileLabels(tiles: LabelTile[], chartWidth: number): TileLabel
 
 export type StripLabel = { mode: "full"; name: string; share: string } | { mode: "name"; name: string } | { mode: "none" };
 
-/** Header strip text at 12px (spec §5): name (700) + " " + share (500), else the name alone, else
- *  nothing. Judges width only; whether the block is tall enough for a strip is the caller's call. */
-export function fitStripLabel(name: string, share: string, blockWidth: number): StripLabel {
+/** Header strip text at `size` px, the chart's tile label size: name (700) + " " + share (500), else
+ *  the name alone, else nothing. Judges width only; whether the block is tall enough for a strip is
+ *  the caller's call. */
+export function fitStripLabel(name: string, share: string, blockWidth: number, size: number): StripLabel {
   const avail = blockWidth - 2 * TM_GEOM.stripPad;
-  const nameW = timelineTextWidth(name, TM_STRIP_TEXT, 700);
-  if (nameW + timelineTextWidth(` ${share}`, TM_STRIP_TEXT, 500) <= avail) return { mode: "full", name, share };
+  const nameW = timelineTextWidth(name, size, 700);
+  if (nameW + timelineTextWidth(` ${share}`, size, 500) <= avail) return { mode: "full", name, share };
   if (nameW <= avail) return { mode: "name", name };
   return { mode: "none" };
 }
