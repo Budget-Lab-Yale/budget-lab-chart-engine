@@ -1,6 +1,6 @@
 // Treemap spec helpers: config defaults, column roles, row parsing, data validation and warnings,
 // and number formatting. Pure and DOM-free. Must not import src/engine/* (module-graph rule), nor
-// d3 (nothing in src/spec does), so the thousands grouping of `formatTreemapValue` is done by hand.
+// d3 (nothing in src/spec does), so `formatTreemapValue` groups thousands with Intl instead.
 import type { ChartSpec, TreemapTooltipRow, ValueFormat } from "./types";
 import type { TidyRow } from "../data/index";
 import { resolveColumns } from "./columns";
@@ -149,14 +149,15 @@ export function treemapDataWarnings(spec: ChartSpec, rows: TidyRow[]): string[] 
   return warnings;
 }
 
-/** `prefix + <v with thousands grouping, decimals places> + suffix`. Decimals default 0 (unlike
- *  `value_format` elsewhere, which defaults to 2 and prints no separators). */
+/** `prefix + <v with thousands grouping, decimals places> + suffix`. Decimals default 0 (unlike a
+ *  dumbbell's gap label, which defaults to 1 and prints no separators). Intl, pinned to en-US, rather
+ *  than toFixed: toFixed switches to exponent notation at 1e21, and every finite value must print in
+ *  full. The minus goes before the prefix, and a value that rounds to zero prints no minus. */
 export function formatTreemapValue(v: number, fmt: ValueFormat | undefined): string {
-  const fixed = Math.abs(v).toFixed(fmt?.decimals ?? 0);
-  const sign = v < 0 && Number(fixed) !== 0 ? "-" : "";
-  const [int, frac] = fixed.split(".");
-  const grouped = int!.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}${fmt?.prefix ?? ""}${grouped}${frac !== undefined ? "." + frac : ""}${fmt?.suffix ?? ""}`;
+  const d = fmt?.decimals ?? 0;
+  const digits = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: true });
+  const sign = v < 0 && /[1-9]/.test(digits) ? "-" : "";
+  return `${sign}${fmt?.prefix ?? ""}${digits}${fmt?.suffix ?? ""}`;
 }
 
 /** A 0-1 share as a percentage: 0.334 -> "33.4%". */

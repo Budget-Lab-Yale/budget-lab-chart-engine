@@ -171,14 +171,28 @@ export function keyEntries(args: { groups: Array<{ name: string; share: string; 
 /** Wrap key entries into lines of ≤ width at 12px. Line 0 opens with TM_KEY_PREFIX, one atomic unit
  *  drawn (and measured) at 700; everything else is measured at 500. Whole entries follow, joined by
  *  " · " while they fit; at a break the separator is dropped, so no line starts or ends with it. Only
- *  an entry wider than a whole line breaks, at its own spaces, starting on a fresh line. A single word
- *  (or the prefix) wider than `width` overflows its line: no truncation anywhere. */
+ *  an entry wider than a whole line breaks, at its own spaces, starting on a fresh line; a single word
+ *  wider than a whole line is cut into chunks that each fit (no hyphen is added). Nothing is
+ *  truncated. Only the atomic prefix can overflow, and only at a width below its own (~110px). */
 export function wrapKey(entries: string[], width: number): string[] {
   if (entries.length === 0) return [];
   const lines: string[] = [];
   const fits = (text: string): boolean => {
     const bold = lines.length === 0 ? TM_KEY_PREFIX : "";
     return timelineTextWidth(bold, TM_KEY_TEXT, 700) + timelineTextWidth(text.slice(bold.length), TM_KEY_TEXT, 500) <= width;
+  };
+  /** Starts `word` on a fresh line. A word wider than the line is cut, by code point, into the
+   *  longest chunks that fit (at least one character each); the last chunk is returned as the
+   *  line in progress. */
+  const hardBreak = (word: string): string => {
+    let rest = Array.from(word);
+    while (rest.length > 1 && !fits(rest.join(""))) {
+      let n = 1;
+      while (n < rest.length - 1 && fits(rest.slice(0, n + 1).join(""))) n++;
+      lines.push(rest.slice(0, n).join(""));
+      rest = rest.slice(n);
+    }
+    return rest.join("");
   };
   let line = TM_KEY_PREFIX;
   for (const entry of entries) {
@@ -196,12 +210,12 @@ export function wrapKey(entries: string[], width: number): string[] {
     line = "";
     for (const word of entry.split(" ")) {
       const joined = line ? `${line} ${word}` : word;
-      if (line && !fits(joined)) {
-        lines.push(line);
-        line = word;
-      } else {
+      if (fits(joined)) {
         line = joined;
+        continue;
       }
+      if (line) lines.push(line);
+      line = hardBreak(word);
     }
   }
   lines.push(line);

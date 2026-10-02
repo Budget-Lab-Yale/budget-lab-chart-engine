@@ -1089,11 +1089,23 @@ function validateTimelineKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResul
   return { valid: errors.length === 0, errors };
 }
 
-/** series_order / series_colors / series_labels keys must name groups present in the data. */
+/** series_order / series_colors / series_labels keys must name groups present in the data. A flat
+ *  treemap has no groups, so any key there is an error: the bar chart's `{"": color}` idiom would
+ *  otherwise validate and then be ignored (a flat treemap is always blue). */
 function validateTreemapKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
   const cols = treemapColumns(spec, rows);
+  if (!cols.group) {
+    const keyed: Array<[string, string[]]> = [
+      ["series_order", spec.series_order ?? []],
+      ["series_colors", Object.keys(spec.series_colors ?? {})],
+      ["series_labels", Object.keys(spec.series_labels ?? {})],
+    ];
+    const errors = keyed.flatMap(([field, keys]) =>
+      keys.map((k) => `${field} key ${JSON.stringify(k)} is not allowed: this treemap has no groups (columns.series)`));
+    return { valid: errors.length === 0, errors };
+  }
   const seriesSeen = new Set<string>();
-  for (const r of rows) seriesSeen.add(cols.group ? ((r[cols.group] as string) ?? "") : SINGLE_SERIES_KEY);
+  for (const r of rows) seriesSeen.add((r[cols.group] as string) ?? "");
   const errors = [
     ...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"),
     ...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"),

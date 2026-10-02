@@ -8,11 +8,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { validateSpec } from "../src/spec/validate";
+import { validateSpec, validateChartData } from "../src/spec/validate";
+import { timelineTextWidth } from "../src/engine/timeline-text";
+import { layoutTreemap } from "../src/engine/treemap-layout";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { tokens } from "../src/theme/tokens";
-import { TM_KEY_PREFIX, TM_NAME_SIZES } from "../src/engine/treemap-labels";
+import { TM_KEY_PREFIX, TM_NAME_SIZES, fitTileLabel } from "../src/engine/treemap-labels";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -112,12 +114,25 @@ describe("series_labels on a treemap", () => {
 });
 
 describe("tile label sizes", () => {
-  it("run from 20px down to 11px", () => {
+  it("run from 20px down to 11px: narrowing a tile steps the name through exactly those sizes", () => {
     expect([...TM_NAME_SIZES]).toEqual([20, 17, 15, 13, 12, 11]);
+    const seen = new Set<number>();
+    for (let w = 200; w >= 10; w -= 0.25) {
+      const l = fitTileLabel("Housing", null, w, 400);
+      if (l.mode === "stacked") seen.add(l.size);
+    }
+    expect([...seen].sort((x, y) => y - x)).toEqual([20, 17, 15, 13, 12, 11]);
   });
 });
 
 describe("treemap.shading", () => {
+  it("none: every tile is its group's colour as resolved — a series_colors value as written, a tier included", () => {
+    const { svg } = renderChart({ ...TM, series_colors: { A: "violet-300", B: "#5B4B8A" }, treemap: { shading: "none" } } as ChartSpec, TWO, { width: 920 });
+    expect(tileFills(svg, "A")).toEqual(Array(3).fill(tokens.scales.violet["300"]));
+    expect(tokens.scales.violet["300"]).not.toBe(tokens.categorical.find((c) => c.key === "violet")!.base);
+    expect(tileFills(svg, "B")).toEqual(Array(3).fill("#5B4B8A"));
+  });
+
   it("none: every tile is its group's base hue; flat data is blue", () => {
     const grouped = renderChart({ ...TM, treemap: { shading: "none" } } as ChartSpec, TWO, { width: 920 }).svg;
     expect(tileFills(grouped, "A")).toEqual(Array(3).fill(tokens.categorical[0]!.base));
@@ -142,6 +157,61 @@ describe("the key's number follows label_value", () => {
     expect(key()).toBe(`${TM_KEY_PREFIX} Tiny one 0.0% · Tiny two 0.0%`);
     expect(key("none")).toBe(`${TM_KEY_PREFIX} Tiny one 0.0% · Tiny two 0.0%`);
     expect(key("value")).toBe(`${TM_KEY_PREFIX} Tiny one $1 · Tiny two $1`);
+  });
+});
+
+describe("the key wraps to the chart's width", () => {
+  it("cuts a name with no spaces that is wider than the line, so every key line fits at 280px", () => {
+    const word = "W".repeat(100);
+    const { svg } = renderChart(FLAT, flatRows([["Big", 1_000_000], [word, 1]]), { width: 280 });
+    const lines = q(svg, "text.tbl-treemap-key");
+    expect(lines.length).toBeGreaterThan(3);
+    lines.forEach((t, i) => {
+      const bold = i === 0 ? TM_KEY_PREFIX : "";
+      const text = t.textContent ?? "";
+      expect(timelineTextWidth(bold, 12, 700) + timelineTextWidth(text.slice(bold.length), 12, 500)).toBeLessThanOrEqual(280);
+    });
+    expect(lines.slice(1).map((t) => t.textContent).join("")).toContain(word);
+  });
+});
+
+describe("tile areas: proportional to value, less the gutters", () => {
+  const area = (svg: SVGSVGElement, name: string): number => {
+    const r = q(svg, "g[role=img]").find((g) => g.getAttribute("aria-label")!.split(", ")[0] === name)!.querySelector("rect")!;
+    return Number(r.getAttribute("width")) * Number(r.getAttribute("height"));
+  };
+  it("the fixed gutters take relatively more from a smaller tile", () => {
+    const vals: Array<[string, number]> = [["a", 600], ["b", 300], ["c", 60], ["d", 10]];
+    const { svg } = renderChart(FLAT, flatRows(vals), { width: 920 });
+    const perUnit = vals.map(([n, v]) => area(svg, n) / v);
+    for (let i = 1; i < perUnit.length; i++) expect(perUnit[i]!).toBeLessThan(perUnit[i - 1]!);
+    expect(perUnit[0]! / perUnit[3]!).toBeGreaterThan(1.02);
+    expect(perUnit[0]! / perUnit[3]!).toBeLessThan(1.15);
+  });
+  it("a sliver can be left with no area at all", () => {
+    const { svg } = renderChart(FLAT, flatRows([["Big", 1_000_000], ["Tiny", 1]]), { width: 920 });
+    expect(area(svg, "Tiny")).toBe(0);
+  });
+  it("a tile in a group with a strip is smaller than an equal-valued tile in a group without one", () => {
+    const data = [["A", "a1"], ["A", "a2"], ["B", "b1"], ["B", "b2"]].map(([group, name], index) =>
+      ({ index, name: name!, group: group!, value: 100, row: {} as TidyRow }));
+    const l = layoutTreemap(data, 920, 460, { groupOrder: ["A", "B"], stripFits: (g) => g.group === "A" });
+    const a = (n: string) => { const t = l.tiles.find((x) => x.datum.name === n)!; return (t.x1 - t.x0) * (t.y1 - t.y0); };
+    expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false]]);
+    expect(a("a1")).toBeLessThan(a("b1") * 0.97);
+  });
+});
+
+describe("series_order: [] is no filter", () => {
+  it("validates and draws every series on a bar chart", () => {
+    const spec = { chartType: "bar", title: "b", xAxisType: "categorical", data: "d.csv", series_order: [] } as unknown as ChartSpec;
+    const r = [{ time: "A", series: "S1", value: "3" }, { time: "A", series: "S2", value: "5" }] as unknown as TidyRow[];
+    expect(validateSpec(spec)).toEqual({ valid: true, errors: [] });
+    expect(validateChartData(spec, r)).toEqual({ valid: true, errors: [] });
+    const { svg } = renderChart(spec, r, { width: 720, height: 400 });
+    expect(q(svg, 'g[aria-label="bar"] rect')).toHaveLength(2);
+    const listed = renderChart({ ...spec, series_order: ["S1"] } as ChartSpec, r, { width: 720, height: 400 }).svg;
+    expect(q(listed, 'g[aria-label="bar"] rect')).toHaveLength(1);
   });
 });
 

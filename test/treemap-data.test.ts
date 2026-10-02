@@ -103,6 +103,19 @@ describe("validateChartData wiring", () => {
     expect(r.errors[2]).toContain(`series_labels names series ["R"]`);
   });
 
+  it("rejects every series_order / series_colors / series_labels key on a flat treemap, the \"\" key included", () => {
+    const rows = [row("A", "1"), row("B", "2")];
+    const r = validateChartData(spec({ series_order: [""], series_colors: { "": "red" }, series_labels: { "": "Everything", X: "x" } }), rows);
+    expect(r.valid).toBe(false);
+    expect(r.errors).toEqual([
+      `series_order key "" is not allowed: this treemap has no groups (columns.series)`,
+      `series_colors key "" is not allowed: this treemap has no groups (columns.series)`,
+      `series_labels key "" is not allowed: this treemap has no groups (columns.series)`,
+      `series_labels key "X" is not allowed: this treemap has no groups (columns.series)`,
+    ]);
+    expect(validateChartData(spec({ series_order: [] }), rows)).toEqual({ valid: true, errors: [] });
+  });
+
   it("accepts valid group keys", () => {
     const rows = [row("A", "1", "X"), row("B", "2", "Y")];
     expect(validateChartData(grouped({ series_order: ["Y", "X"], series_colors: { X: "blue" } }), rows)).toEqual({ valid: true, errors: [] });
@@ -155,6 +168,13 @@ describe("formatters", () => {
     expect(formatTreemapValue(1234567, undefined)).toBe("1,234,567");
     expect(formatTreemapValue(999, undefined)).toBe("999");
     expect(formatTreemapValue(1000, { decimals: 2 })).toBe("1,000.00");
+  });
+
+  it("never prints an exponent, at any finite magnitude", () => {
+    expect(formatTreemapValue(1e21, { prefix: "$", decimals: 2 })).toBe("$1,000,000,000,000,000,000,000.00");
+    expect(formatTreemapValue(-1e21, { prefix: "$" })).toBe("-$1,000,000,000,000,000,000,000");
+    expect(formatTreemapValue(1e-7, { decimals: 2 })).toBe("0.00");
+    for (const v of [1e21, 1.5e30, 9.99e300, Number.MAX_VALUE]) expect(formatTreemapValue(v, { decimals: 1 })).not.toMatch(/e/i);
   });
 
   it("puts the minus before the prefix and never prints a negative zero", () => {

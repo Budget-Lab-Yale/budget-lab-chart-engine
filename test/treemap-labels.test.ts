@@ -327,6 +327,15 @@ describe("wrapKey", () => {
     expect(pieces(lines).flat()).not.toContain(long);
     lines.forEach((line, i) => expect(lineWidth(line, i)).toBeLessThanOrEqual(200));
   });
+  it("hard-breaks a single word wider than the line into chunks, each within the width", () => {
+    const word = "W".repeat(100);
+    const lines = wrapKey([`${word} 0.0%`, "Education 2.0%"], 280);
+    expect(lines.length).toBeGreaterThan(3);
+    lines.forEach((line, i) => expect(lineWidth(line, i)).toBeLessThanOrEqual(280));
+    // Only the over-wide word is split: its chunks rejoin to the word, and the rest stays whole.
+    expect(lines.slice(1).join("").includes(word)).toBe(true);
+    expect(pieces(lines).flat()).toContain("Education 2.0%");
+  });
   it("loses no text apart from separators dropped at breaks", () => {
     for (const width of widths) {
       const lines = wrapKey(entries, width);

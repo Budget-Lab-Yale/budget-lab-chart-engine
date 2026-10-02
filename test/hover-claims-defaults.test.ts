@@ -565,3 +565,35 @@ describe("waterfall value pills survive a single-valued series column", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// CONFIG-SPEC `tooltip_decimals`: a waterfall's hover delta takes the running-total labels'
+// precision (`valueLabels.decimals`, else the fewest decimals the data needs, at most 2), never
+// `tooltip_decimals`, so the pill and the always-on label cannot disagree. A plain bar's pill is the
+// control: there `tooltip_decimals` applies.
+// ---------------------------------------------------------------------------
+
+describe("tooltip_decimals does not reach a waterfall's hover delta", () => {
+  const rows = [["Up", "5"], ["Down", "-3"]].map(([step, value]) => ({ step, value })) as unknown as TidyRow[];
+  const wf = (extra: Record<string, unknown>): ChartSpec =>
+    spec({ chartType: "waterfall", xAxisType: "categorical", columns: { x: "step", value: "value" }, ...extra });
+  const pill = (s: ChartSpec, r: TidyRow[] = rows): string[] => {
+    const m = mountHover(s, r);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    return Array.from(m.svgs[0]!.querySelectorAll(".tbl-coord-pill-text")).map((t) => t.textContent ?? "");
+  };
+
+  it("waterfall: tooltip_decimals 3 still prints the data's own precision", () => {
+    expect(pill(wf({}))).toEqual(["+5"]);
+    expect(pill(wf({ tooltip_decimals: 3 }))).toEqual(["+5"]);
+  });
+
+  it("waterfall: valueLabels.decimals sets it", () => {
+    expect(pill(wf({ tooltip_decimals: 3, valueLabels: { decimals: 1 } }))).toEqual(["+5.0"]);
+  });
+
+  it("control: a plain bar's pill does take tooltip_decimals", () => {
+    const bar = spec({ chartType: "bar", xAxisType: "categorical", columns: { x: "step", value: "value" }, tooltip_decimals: 3 });
+    expect(pill(bar)).toEqual(["5.000"]);
+  });
+});
