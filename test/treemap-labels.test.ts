@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  TM_LABEL_SIZES, treemapLabelSize, treemapStripHeight, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel,
-  stripFill, fitNumberOnly, type TileLabel, type LabelTile,
+  TM_LABEL_SIZES, treemapLabelSize, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels,
+  type TileLabel, type LabelTile,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
 import { timelineTextWidth } from "../src/engine/timeline-text";
@@ -9,43 +9,32 @@ import { tokens } from "../src/theme/tokens";
 
 const WHITE = tokens.structural.background;
 const NAVY = tokens.structural.text_heading;
-const FLAT_TIERS = ["700", "600", "500", "400", "300", "200", "100"];
-const GROUPED_TIERS = ["600", "500", "400", "300", "200", "100"];
+const TIERS = ["700", "600", "500", "400", "300", "200", "100"];
 const pad = TM_GEOM.pad;
 
 describe("treemapTier", () => {
   it("gives a single tile the darkest usable tier", () => {
-    expect(treemapTier(0, 1, false)).toBe("700");
-    expect(treemapTier(0, 1, true)).toBe("600");
+    expect(treemapTier(0, 1)).toBe("700");
   });
-  it("spreads 7 flat tiles over 700..100, each tier once, largest darkest", () => {
-    expect([0, 1, 2, 3, 4, 5, 6].map((r) => treemapTier(r, 7, false))).toEqual(FLAT_TIERS);
-  });
-  it("spreads 6 grouped tiles over 600..100 (700 is the header strip's)", () => {
-    expect([0, 1, 2, 3, 4, 5].map((r) => treemapTier(r, 6, true))).toEqual(GROUPED_TIERS);
+  it("spreads 7 tiles over 700..100, each tier once, largest darkest", () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((r) => treemapTier(r, 7))).toEqual(TIERS);
   });
   it("uses round(r(k-1)/(n-1)): the end ranks hit the end tiers", () => {
-    expect(treemapTier(0, 2, false)).toBe("700");
-    expect(treemapTier(1, 2, false)).toBe("100");
+    expect(treemapTier(0, 2)).toBe("700");
+    expect(treemapTier(1, 2)).toBe("100");
     // r=3, n=20, k=7: round(18/19) = 1.
-    expect(treemapTier(3, 20, false)).toBe("600");
+    expect(treemapTier(3, 20)).toBe("600");
   });
   it("is monotone non-increasing in darkness over 20 tiles, ending at the lightest", () => {
-    for (const grouped of [false, true]) {
-      const tiers = grouped ? GROUPED_TIERS : FLAT_TIERS;
-      const idx = Array.from({ length: 20 }, (_, r) => tiers.indexOf(treemapTier(r, 20, grouped)));
-      expect(idx.every((i) => i >= 0)).toBe(true);
-      for (let r = 1; r < 20; r++) expect(idx[r]!).toBeGreaterThanOrEqual(idx[r - 1]!);
-      expect(idx[0]).toBe(0);
-      expect(idx[19]).toBe(tiers.length - 1);
-    }
+    const idx = Array.from({ length: 20 }, (_, r) => TIERS.indexOf(treemapTier(r, 20)));
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    for (let r = 1; r < 20; r++) expect(idx[r]!).toBeGreaterThanOrEqual(idx[r - 1]!);
+    expect(idx[0]).toBe(0);
+    expect(idx[19]).toBe(TIERS.length - 1);
   });
   it("never uses the 50 tier", () => {
     for (let n = 1; n <= 30; n++) {
-      for (let r = 0; r < n; r++) {
-        expect(treemapTier(r, n, false)).not.toBe("50");
-        expect(treemapTier(r, n, true)).not.toBe("50");
-      }
+      for (let r = 0; r < n; r++) expect(treemapTier(r, n)).not.toBe("50");
     }
   });
 });
@@ -53,30 +42,19 @@ describe("treemapTier", () => {
 describe("tileFill", () => {
   const scales = tokens.scales as Record<string, Record<string, string>>;
   it("shades a categorical base hue along its own tonal ramp", () => {
-    expect(tileFill("#0072B2", 0, 7, false, "size")).toBe(scales.blue!["700"]);
-    expect(tileFill("#0072B2", 6, 7, false, "size")).toBe(scales.blue!["100"]);
-    expect(tileFill("#E69F00", 0, 3, true, "size")).toBe(scales.amber!["600"]);
-    expect(tileFill("#E69F00", 2, 3, true, "size")).toBe(scales.amber!["100"]);
+    expect(tileFill("#0072B2", 0, 7, "size")).toBe(scales.blue!["700"]);
+    expect(tileFill("#0072B2", 6, 7, "size")).toBe(scales.blue!["100"]);
+    expect(tileFill("#E69F00", 0, 3, "size")).toBe(scales.amber!["700"]);
+    expect(tileFill("#E69F00", 2, 3, "size")).toBe(scales.amber!["100"]);
   });
   it("is case-insensitive on the base hex", () => {
-    expect(tileFill("#0072b2", 0, 1, false, "size")).toBe(scales.blue!["700"]);
+    expect(tileFill("#0072b2", 0, 1, "size")).toBe(scales.blue!["700"]);
   });
   it("uses the base hex itself for every tile with shading none", () => {
-    for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, true, "none")).toBe("#8856BF");
+    for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, "none")).toBe("#8856BF");
   });
   it("uses a raw series colour off every ramp flat for every tile (no mixing)", () => {
-    for (let r = 0; r < 5; r++) expect(tileFill("#123456", r, 5, true, "size")).toBe("#123456");
-  });
-});
-
-describe("stripFill", () => {
-  const scales = tokens.scales as Record<string, Record<string, string>>;
-  it("is the hue family's 700 tier", () => {
-    expect(stripFill("#0072B2")).toBe(scales.blue!["700"]);
-    expect(stripFill("#E69F00")).toBe(scales.amber!["700"]);
-  });
-  it("is a raw series colour off every ramp, as-is", () => {
-    expect(stripFill("#123456")).toBe("#123456");
+    for (let r = 0; r < 5; r++) expect(tileFill("#123456", r, 5, "size")).toBe("#123456");
   });
 });
 
@@ -292,56 +270,5 @@ describe("fitTileLabels: one size, top-down per group", () => {
     expect([...modes].sort()).toEqual(["inline", "none", "stacked"]);
     // The walk really stopped short of tiles that would have fitted on their own.
     expect(cut).toBeGreaterThan(10);
-  });
-});
-
-describe("fitNumberOnly", () => {
-  it("is the number alone (no name lines) where it fits at the size, else none", () => {
-    expect(fitNumberOnly("13.5%", 200, 100, 14)).toEqual({ mode: "stacked", size: 14, nameLines: [], number: "13.5%" });
-    const w = Math.ceil(timelineTextWidth("13.5%", 14, 500)) + 2 * pad;
-    expect(fitNumberOnly("13.5%", w, 100, 14).mode).toBe("stacked");
-    expect(fitNumberOnly("13.5%", w - 1, 100, 14)).toEqual({ mode: "none" });
-    expect(fitNumberOnly("13.5%", 200, 14 * 1.2 + 2 * pad - 0.1, 14)).toEqual({ mode: "none" });
-    expect(fitNumberOnly(null, 200, 100, 14)).toEqual({ mode: "none" });
-  });
-});
-
-describe("fitStripLabel", () => {
-  const spad = TM_GEOM.stripPad;
-  it("pads the strip text by its own constant, 6px", () => {
-    expect(spad).toBe(6);
-  });
-  const avail = (bw: number): number => bw - 2 * spad;
-  const full = (n: string, s: string, size: number): number => timelineTextWidth(n, size, 700) + timelineTextWidth(` ${s}`, size, 500);
-  it("shows name and share when both fit", () => {
-    expect(fitStripLabel("Housing", "33.4%", 300, 14)).toEqual({ mode: "full", name: "Housing", share: "33.4%" });
-  });
-  it("drops the share first, then the label", () => {
-    const name = "Transportation";
-    for (const size of [12, 14]) {
-      const nameW = timelineTextWidth(name, size, 700);
-      // Wide enough for the name alone, not for name + share.
-      const bw = Math.ceil(nameW + 2 * spad) + 1;
-      expect(full(name, "17.0%", size)).toBeGreaterThan(avail(bw));
-      expect(fitStripLabel(name, "17.0%", bw, size)).toEqual({ mode: "name", name });
-      expect(fitStripLabel(name, "17.0%", Math.floor(nameW + 2 * spad) - 1, size)).toEqual({ mode: "none" });
-    }
-  });
-  it("measures at the given size, exactly at the boundary (name + share within blockWidth - 2*stripPad)", () => {
-    for (const size of [12, 14]) {
-      const bw = full("Food", "13.0%", size) + 2 * spad;
-      expect(fitStripLabel("Food", "13.0%", bw + 1e-9, size).mode).toBe("full"); // float slack only
-      expect(fitStripLabel("Food", "13.0%", bw - 0.01, size).mode).toBe("name");
-    }
-    // A width that holds the text at 12px but not at 14px.
-    const bw12 = full("Food", "13.0%", 12) + 2 * spad;
-    expect(fitStripLabel("Food", "13.0%", bw12, 14).mode).toBe("name");
-  });
-});
-
-describe("treemapStripHeight", () => {
-  it("is 22px at 12px text, scaled with the text and rounded: 26px at 14px", () => {
-    expect(treemapStripHeight(12)).toBe(22);
-    expect(treemapStripHeight(14)).toBe(26);
   });
 });

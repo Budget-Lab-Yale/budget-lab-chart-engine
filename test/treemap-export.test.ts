@@ -31,14 +31,14 @@ describe("treemap export", () => {
     expect(inner(buildExportSvg(SPEC, TINY)).querySelectorAll("text.tbl-treemap-label").length).toBeLessThan(TINY.length);
   });
 
-  it("carries a strip-less group's name, drawn in its block when none of its tiles is labelled", () => {
+  it("re-renders grouped data the same way", () => {
     const spec = { ...SPEC, columns: { x: "category", value: "amount", series: "group" } } as ChartSpec;
     const rows = [["A", "Alpha", 120], ["A", "Beta", 80], ...Array.from({ length: 10 }, (_, i) => ["Other misc items", `Category number ${i}`, 1.5])]
       .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     const direct = renderTreemap(spec, rows, { width: INNER_W }).svg;
     const exported = inner(buildExportSvg(spec, rows));
     expect(exported.innerHTML).toBe(direct.innerHTML);
-    expect(exported.querySelectorAll("text.tbl-treemap-group-label")).toHaveLength(1);
+    expect(exported.querySelectorAll("g[data-series]")).toHaveLength(rows.length);
   });
 
   it("keeps the 1000px frame, places the treemap at the margin at full inner width, and draws no legend", () => {

@@ -22,43 +22,28 @@ export function treemapLabelSize(chartWidth: number): number {
  *  is drawn there: line height as a factor of the font size. */
 export const TM_LINE_HEIGHT = 1.2;
 
-/** Header strip height for strip text at `size` px: TM_GEOM.stripH (22px) at 12px text, scaled with
- *  the text and rounded to a whole pixel (26px at 14px), so the text keeps its proportions in it. */
-export function treemapStripHeight(size: number): number {
-  return Math.round((size * TM_GEOM.stripH) / 12);
-}
 const MAX_NAME_LINES = 3;
 
-// Usable tiers darkest-first. 50 is excluded (too close to the white gutters); grouped tiles stop at
-// 600 because 700 is the group's header strip.
-const FLAT_TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
-const GROUPED_TIERS = ["600", "500", "400", "300", "200", "100"] as const;
+// Usable tiers darkest-first. 50 is excluded (too close to the white gutters).
+const TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
 
-/** Tier for rank r of n (spec §4): flat 700→100, grouped 600→100. Returns the tier key, e.g. "500". */
-export function treemapTier(rank: number, n: number, grouped: boolean): string {
-  const tiers = grouped ? GROUPED_TIERS : FLAT_TIERS;
-  const k = tiers.length;
+/** Tier for rank r of n tiles in a group (spec §4; flat data is one group): 700→100. Returns the tier
+ *  key, e.g. "500". */
+export function treemapTier(rank: number, n: number): string {
+  const k = TIERS.length;
   const i = Math.round((rank * (k - 1)) / Math.max(1, n - 1));
-  return tiers[Math.min(k - 1, Math.max(0, i))]!;
+  return TIERS[Math.min(k - 1, Math.max(0, i))]!;
 }
 
 /** Fill hex for a tile: tonal tier of its group's hue family, or the group's base hex when shading "none".
  *  A base on no tonal ramp (a raw `series_colors` hex) is used flat for every tile: there is no
  *  palette step to take, and mixing towards white would put an off-palette colour on the chart. */
-export function tileFill(hueBase: string, rank: number, n: number, grouped: boolean, shading: "size" | "none"): string {
+export function tileFill(hueBase: string, rank: number, n: number, shading: "size" | "none"): string {
   if (shading === "none") return hueBase;
   const ramp = locateOnRamp(hueBase);
   if (!ramp) return hueBase;
   const scale = (tokens.scales as Record<string, Record<string, string>>)[ramp.family];
-  return scale?.[treemapTier(rank, n, grouped)] ?? hueBase;
-}
-
-/** Header strip fill: the hue family's 700 tier, or the base as-is when it is off every ramp
- *  (the same rule as tileFill). */
-export function stripFill(hueBase: string): string {
-  const ramp = locateOnRamp(hueBase);
-  if (!ramp) return hueBase;
-  return (tokens.scales as Record<string, Record<string, string>>)[ramp.family]?.["700"] ?? hueBase;
+  return scale?.[treemapTier(rank, n)] ?? hueBase;
 }
 
 /** CSS4 space/slash syntax (`rgb(0 0 0 / 10%)`, `hsl(0 0% 0%)`) to the comma form d3.color reads
@@ -151,16 +136,6 @@ export function fitTileLabel(name: string, number: string | null, w: number, h: 
   return { mode: "none" };
 }
 
-/** A tile's number alone (500) at `size`, as a stacked label with no name lines, where it fits the
- *  inner box; none when it does not or when there is no number. For a tile whose name is already
- *  shown by its group's strip. */
-export function fitNumberOnly(number: string | null, w: number, h: number, size: number): TileLabel {
-  const iw = w - 2 * TM_GEOM.pad;
-  const ih = h - 2 * TM_GEOM.pad;
-  if (number === null || timelineTextWidth(number, size, 500) > iw || size * TM_LINE_HEIGHT > ih) return { mode: "none" };
-  return { mode: "stacked", size, nameLines: [], number };
-}
-
 /** A tile as label fitting sees it: its text, its group (null when flat), its value, its full size. */
 export interface LabelTile { name: string; number: string | null; group: string | null; value: number; w: number; h: number }
 
@@ -187,17 +162,4 @@ export function fitTileLabels(tiles: LabelTile[], size: number): TileLabel[] {
     }
   }
   return out;
-}
-
-export type StripLabel = { mode: "full"; name: string; share: string } | { mode: "name"; name: string } | { mode: "none" };
-
-/** Header strip text at `size` px, the chart's tile label size: name (700) + " " + share (500), else
- *  the name alone, else nothing. Judges width only; whether the block is tall enough for a strip is
- *  the caller's call. */
-export function fitStripLabel(name: string, share: string, blockWidth: number, size: number): StripLabel {
-  const avail = blockWidth - 2 * TM_GEOM.stripPad;
-  const nameW = timelineTextWidth(name, size, 700);
-  if (nameW + timelineTextWidth(` ${share}`, size, 500) <= avail) return { mode: "full", name, share };
-  if (nameW <= avail) return { mode: "name", name };
-  return { mode: "none" };
 }

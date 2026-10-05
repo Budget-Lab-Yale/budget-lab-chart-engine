@@ -36,10 +36,14 @@ const tileFill = (svg: SVGSVGElement, name: string): string =>
     .querySelector("rect")!.getAttribute("fill")!;
 const tileFills = (svg: SVGSVGElement, group: string): string[] =>
   q(svg, "g[role=img]").filter((g) => g.getAttribute("data-series") === group).map((g) => g.querySelector("rect")!.getAttribute("fill")!);
-const stripFillOf = (svg: SVGSVGElement, group: string): string | null =>
-  q(svg, "rect.tbl-treemap-strip").find((s) => s.getAttribute("data-series") === group)?.getAttribute("fill") ?? null;
+/** The fill of a group's largest tile (its darkest under shading: size). */
+const topFillOf = (svg: SVGSVGElement, group: string): string | null => tileFills(svg, group)[0] ?? null;
+/** The group of the tile at the area's top-left corner: the group laid out first. */
+const firstGroup = (svg: SVGSVGElement): string | null =>
+  q(svg, "g[role=img]").find((g) => { const r = g.querySelector("rect")!; return r.getAttribute("x") === "0" && r.getAttribute("y") === "0"; })!
+    .getAttribute("data-series");
 
-// Two large groups whose strips fit at 920, each with three tiles.
+// Two large groups, each with three tiles.
 const TWO = rows([
   ["A", "a1", 300], ["A", "a2", 200], ["A", "a3", 100],
   ["B", "b1", 250], ["B", "b2", 150], ["B", "b3", 80],
@@ -54,46 +58,45 @@ describe("series_order on a treemap: hue order and tie-break only", () => {
 
   it("sets the hue order: listed groups take blue, amber, … in series_order order", () => {
     const def = renderChart(TM, TWO, { width: 920 }).svg;
-    expect(stripFillOf(def, "A")).toBe(tokens.scales.blue["700"]);
-    expect(stripFillOf(def, "B")).toBe(tokens.scales.amber["700"]);
+    expect(topFillOf(def, "A")).toBe(tokens.scales.blue["700"]);
+    expect(topFillOf(def, "B")).toBe(tokens.scales.amber["700"]);
     const swapped = renderChart({ ...TM, series_order: ["B", "A"] } as ChartSpec, TWO, { width: 920 }).svg;
-    expect(stripFillOf(swapped, "B")).toBe(tokens.scales.blue["700"]);
-    expect(stripFillOf(swapped, "A")).toBe(tokens.scales.amber["700"]);
+    expect(topFillOf(swapped, "B")).toBe(tokens.scales.blue["700"]);
+    expect(topFillOf(swapped, "A")).toBe(tokens.scales.amber["700"]);
   });
 
   it("does not set the layout order: the larger group is drawn first whatever series_order says", () => {
     const { svg } = renderChart({ ...TM, series_order: ["B", "A"] } as ChartSpec, TWO, { width: 920 });
-    expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "B"]);
+    expect(firstGroup(svg)).toBe("A");
   });
 
   it("breaks a tie between equal group totals", () => {
     const tied = rows([["A", "a1", 300], ["A", "a2", 200], ["B", "b1", 300], ["B", "b2", 200]]);
-    const first = (spec: ChartSpec) => q(renderChart(spec, tied, { width: 920 }).svg, "rect.tbl-treemap-strip")[0]!.getAttribute("data-series");
+    const first = (spec: ChartSpec) => firstGroup(renderChart(spec, tied, { width: 920 }).svg);
     expect(first(TM)).toBe("A");
     expect(first({ ...TM, series_order: ["B", "A"] } as ChartSpec)).toBe("B");
   });
 
   it("breaks a tie between decimal totals that float addition makes unequal (0.1 + 0.2 vs 0.3)", () => {
     const tied = rows([["A", "a1", 0.1], ["A", "a2", 0.2], ["B", "b1", 0.3]]);
-    const first = (spec: ChartSpec) => q(renderChart(spec, tied, { width: 920 }).svg, "rect.tbl-treemap-strip")[0]!.getAttribute("data-series");
+    const first = (spec: ChartSpec) => firstGroup(renderChart(spec, tied, { width: 920 }).svg);
     expect(first(TM)).toBe("A");
     expect(first({ ...TM, series_order: ["B", "A"] } as ChartSpec)).toBe("B");
   });
 });
 
 describe("series_colors on a treemap", () => {
-  it("a hue name or one of its tiers picks that hue family: its tiers shade the tiles, 700 fills the strip", () => {
+  it("a hue name or one of its tiers picks that hue family: its tiers shade the tiles, the largest 700", () => {
     const { svg } = renderChart({ ...TM, series_colors: { A: "violet-300", B: "green" } } as ChartSpec, TWO, { width: 920 });
-    expect(stripFillOf(svg, "A")).toBe(tokens.scales.violet["700"]);
-    expect(stripFillOf(svg, "B")).toBe(tokens.scales.green["700"]);
+    expect(topFillOf(svg, "A")).toBe(tokens.scales.violet["700"]);
+    expect(topFillOf(svg, "B")).toBe(tokens.scales.green["700"]);
     const violet = Object.values(tokens.scales.violet) as string[];
     for (const f of tileFills(svg, "A")) expect(violet).toContain(f);
     expect(new Set(tileFills(svg, "A")).size).toBe(3);
   });
 
-  it("a colour on no hue ramp fills the group's strip and every tile as written", () => {
+  it("a colour on no hue ramp fills every tile in the group as written", () => {
     const { svg } = renderChart({ ...TM, series_colors: { A: "#5B4B8A" } } as ChartSpec, TWO, { width: 920 });
-    expect(stripFillOf(svg, "A")).toBe("#5B4B8A");
     expect(tileFills(svg, "A")).toEqual(["#5B4B8A", "#5B4B8A", "#5B4B8A"]);
   });
 
@@ -101,8 +104,7 @@ describe("series_colors on a treemap", () => {
     const eight = rows(Array.from({ length: 8 }, (_, i): [string, string, number] => [`G${i}`, `t${i}`, 100 - i]));
     const { svg } = renderChart(TM, eight, { width: 920 });
     expect(tileFills(svg, "G7")).toEqual(tileFills(svg, "G0"));
-    expect(stripFillOf(svg, "G7")).not.toBeNull();
-    expect(stripFillOf(svg, "G7")).toBe(stripFillOf(svg, "G0"));
+    expect(tileFills(svg, "G7")).toEqual([tokens.scales.blue["700"]]);
   });
 });
 
@@ -117,10 +119,9 @@ describe("layout sort ties: equal to 12 significant digits", () => {
 });
 
 describe("series_labels on a treemap", () => {
-  it("renames a group in its strip, the hover card and the screen-reader labels", () => {
+  it("renames a group in the hover card and the screen-reader labels", () => {
     const spec = { ...TM, series_labels: { A: "Alpha group", B: "Beta group" } } as ChartSpec;
     const { svg } = renderChart(spec, TWO, { width: 920 });
-    expect(q(svg, "text.tbl-treemap-strip-label").map((t) => t.firstElementChild!.textContent)).toEqual(["Alpha group", "Beta group"]);
     const aria = q(svg, "g[role=img]").map((g) => g.getAttribute("aria-label")!);
     expect(aria.filter((a) => a.startsWith("Beta group · b"))).toHaveLength(3);
     expect(aria.some((a) => /^[AB] · /.test(a))).toBe(false);
@@ -142,8 +143,8 @@ describe("tile label sizes", () => {
   ]);
   // The same tiles in three groups.
   const MANY_GROUPED = rows(MANY.map((r, i): [string, string, number] => [["Core", "Other", "Small"][Math.min(2, Math.floor(i / 4))]!, r.category as string, Number(r.amount)]));
-  // Every drawn text span: an inline tile label and a strip label carry the size on the <text>, a
-  // stacked tile label on each <tspan>.
+  // Every drawn text span: an inline tile label carries the size on the <text>, a stacked one on each
+  // <tspan>.
   const drawn = (svg: SVGSVGElement, sel = "text"): Array<[string, string]> =>
     q(svg, `${sel} tspan`).map((s) => [(s.getAttribute("font-size") ?? s.parentElement!.getAttribute("font-size"))!, s.getAttribute("font-weight")!]);
 
@@ -159,19 +160,6 @@ describe("tile label sizes", () => {
         expect(q(svg, "text.tbl-treemap-label").length).toBeGreaterThanOrEqual(2);
         expect(new Set(spans.map(([s]) => s))).toEqual(new Set([size]));
         expect(new Set(spans.map(([, wt]) => wt))).toEqual(new Set(["700", "500"]));
-      }
-    }
-  });
-
-  it("group strip text is the tile labels' size too: name 700, share 500", () => {
-    for (const w of [920, 375]) {
-      const choice = treemapChoice(TM, MANY_GROUPED, w);
-      const size = String(choice.candidates[choice.chosen]!.size);
-      const strips = q(renderChart(TM, MANY_GROUPED, { width: w }).svg, "text.tbl-treemap-strip-label");
-      expect(strips.length).toBeGreaterThan(0);
-      for (const s of strips) {
-        expect(s.getAttribute("font-size")).toBe(size);
-        expect([...s.children].map((c) => c.getAttribute("font-weight"))).toEqual(s.children.length === 2 ? ["700", "500"] : ["700"]);
       }
     }
   });
@@ -200,8 +188,7 @@ describe("treemap.shading", () => {
       ...Array.from({ length: 12 }, (_, i): [string, string, number] => ["B", `b${i}`, 90 - i]),
     ]);
     const flatMany = flatRows(Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 100 - i]));
-    const allFills = (svg: SVGSVGElement): string[] =>
-      [...q(svg, "rect.tbl-treemap-tile"), ...q(svg, "rect.tbl-treemap-strip")].map((r) => r.getAttribute("fill")!);
+    const allFills = (svg: SVGSVGElement): string[] => q(svg, "rect.tbl-treemap-tile").map((r) => r.getAttribute("fill")!);
     // shading: size (default), grouped and flat, a 50-tier series_colors included: no fill is a 50 tier.
     for (const svg of [
       renderChart(TM, many, { width: 920 }).svg,
@@ -211,10 +198,9 @@ describe("treemap.shading", () => {
     // shading: none: the default hues are not 50 tiers, so without series_colors none appears ...
     const none = { ...TM, treemap: { shading: "none" } } as ChartSpec;
     for (const f of allFills(renderChart(none, many, { width: 920 }).svg)) expect(fifties.has(f)).toBe(false);
-    // ... and a series_colors 50 tier fills its group's tiles as written (its strip stays 700).
+    // ... and a series_colors 50 tier fills its group's tiles as written.
     const svg = renderChart({ ...none, series_colors: { A: "blue-50" } } as ChartSpec, many, { width: 920 }).svg;
     expect(new Set(tileFills(svg, "A"))).toEqual(new Set([tokens.scales.blue["50"]]));
-    expect(stripFillOf(svg, "A")).toBe(tokens.scales.blue["700"]);
   });
 
   it("none, no series_colors, past seven groups: the 8th-14th groups take the palette's lighter repeats, amber-50 and rose-50 among them", () => {
@@ -236,12 +222,14 @@ describe("treemap.shading", () => {
     // shading: size never draws those 50 tiers: the repeat takes its hue family's tiers.
     const fifties = new Set(Object.values(tokens.scales).map((s) => (s as Record<string, string>)["50"]));
     const sized = renderChart(TM, groups(13), { width: 920 }).svg;
-    for (const r of [...q(sized, "rect.tbl-treemap-tile"), ...q(sized, "rect.tbl-treemap-strip")]) expect(fifties.has(r.getAttribute("fill")!)).toBe(false);
+    for (const r of q(sized, "rect.tbl-treemap-tile")) expect(fifties.has(r.getAttribute("fill")!)).toBe(false);
   });
 
-  it("size (default) with groups: tiles run 600 → 100 by rank, the 700 tier is the strip's", () => {
+  it("size (default) with groups: each group's tiles run 700 → 100 by rank, as flat data's do", () => {
     const { svg } = renderChart(TM, TWO, { width: 920 });
-    expect(tileFills(svg, "A")).toEqual([tokens.scales.blue["600"], tokens.scales.blue["300"], tokens.scales.blue["100"]]);
+    expect(tileFills(svg, "A")).toEqual([tokens.scales.blue["700"], tokens.scales.blue["400"], tokens.scales.blue["100"]]);
+    const flat = renderChart(FLAT, flatRows([["x", 5], ["y", 3], ["z", 1]]), { width: 920 }).svg;
+    expect(["x", "y", "z"].map((n) => tileFill(flat, n))).toEqual([tokens.scales.blue["700"], tokens.scales.blue["400"], tokens.scales.blue["100"]]);
   });
 });
 
@@ -275,12 +263,11 @@ describe("tile areas: proportional to value, less the gutters", () => {
     const { svg } = renderChart(FLAT, flatRows([["Big", 1_000_000], ["Tiny", 1]]), { width: 920 });
     expect(area(svg, "Tiny")).toBe(0);
   });
-  it("a header strip costs its group's tiles nothing: equal values draw equal tiles, strip or not, less the gutters", () => {
-    const data = [["A", "a1"], ["A", "a2"], ["B", "b1"], ["B", "b2"]].map(([group, name], index) =>
-      ({ index, name: name!, group: group!, value: 100, row: {} as TidyRow }));
+  it("one area per unit of value across groups: equal values draw equal tiles in different groups, less the gutters", () => {
+    const data = [["A", "a1", 100], ["A", "a2", 300], ["B", "b1", 100], ["B", "b2", 50]].map(([group, name, value], index) =>
+      ({ index, name: name as string, group: group as string, value: value as number, row: {} as TidyRow }));
     const at = (gutters?: { tile: number; group: number }) => {
-      const l = layoutTreemap(data, 920, 460, { groupOrder: ["A", "B"], stripFits: (g) => g.group === "A", ...(gutters ? { gutters } : {}) });
-      expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false]]);
+      const l = layoutTreemap(data, 920, 460, { groupOrder: ["A", "B"], ...(gutters ? { gutters } : {}) });
       return (n: string) => { const t = l.tiles.find((x) => x.datum.name === n)!; return (t.x1 - t.x0) * (t.y1 - t.y0); };
     };
     const exact = at({ tile: 0, group: 0 });
@@ -319,7 +306,7 @@ describe("treemap accessibility", () => {
     const { svg } = renderChart(TM, TWO, { width: 375 });
     expect(svg.getAttribute("role")).toBe("group");
     expect(svg.getAttribute("aria-label")).toBe("Outlays");
-    const hidden = q(svg, "text.tbl-treemap-label, text.tbl-treemap-strip-label, text.tbl-treemap-group-label");
+    const hidden = q(svg, "text.tbl-treemap-label");
     expect(hidden.length).toBeGreaterThan(0);
     for (const t of hidden) expect(t.getAttribute("aria-hidden")).toBe("true");
     expect(q(svg, "text")).toHaveLength(hidden.length);
