@@ -20,7 +20,7 @@ import {
   layoutTreemap, treemapAreaHeight, TM_GEOM, TM_RETILINGS, type GroupRect, type TreemapLayout, type TreemapTiling,
 } from "../treemap-layout";
 import {
-  tileFill, stripFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel, treemapLabelSize, treemapStripHeight,
+  tileFill, stripFill, contrastText, fitTileLabel, fitTileLabels, fitNumberOnly, fitStripLabel, treemapLabelSize, treemapStripHeight,
   TM_LABEL_SIZES, TM_LINE_HEIGHT as LINE_HEIGHT,
   type TileLabel, type StripLabel,
 } from "../treemap-labels";
@@ -71,47 +71,68 @@ interface Built {
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
-/** One way to draw a chart: the tiling of the whole frame (flat data only) and the one label size. */
+/** One way to draw a chart: the tiling of the whole frame (flat data's tiles, or grouped data's
+ *  group blocks) and the one label size. */
 export interface TreemapCandidate { tiling: TreemapTiling; size: number }
+/** A candidate's counts: tiles labelled, groups named (a strip or an in-block name), their sum. */
+export type ScoredCandidate = TreemapCandidate & { labelled: number; named: number; score: number };
+
+/** How candidates are ranked. INTERNAL: a temporary A/B switch (RenderOptions.treemapGroupRule), not
+ *  in the spec, deleted once one is chosen. "names-first": most groups named, then most tiles
+ *  labelled. "most-labels": most tiles labelled + groups named. "narrow-only": names-first, but a
+ *  grouped chart at least 600px wide keeps squarified group blocks (the size step is unchanged).
+ *  Ties always go to the earlier candidate. Flat charts name no groups, so every rule ranks them by
+ *  tiles labelled alone. */
+export type TreemapGroupRule = "names-first" | "most-labels" | "narrow-only";
+const DEFAULT_GROUP_RULE: TreemapGroupRule = "names-first";
+const NARROW_ONLY_BELOW = 600;
 
 /** The candidates in their fixed order: every tiling at the base size (treemapLabelSize), then, on a
- *  chart narrower than TM_LABEL_SIZES.smallBelow, every tiling again at TM_LABEL_SIZES.small. Grouped
- *  data keeps its squarified group blocks (each re-tiled on its own where that saves its largest
- *  label, layoutTreemap), so it takes part in the size step only. */
-function candidates(grouped: boolean, width: number): TreemapCandidate[] {
-  const tilings: TreemapTiling[] = grouped ? ["squarify"] : ["squarify", ...TM_RETILINGS];
+ *  chart narrower than TM_LABEL_SIZES.smallBelow, every tiling again at TM_LABEL_SIZES.small. With
+ *  groups the tiling arranges the group blocks; each block's tiles stay squarified (and rescued
+ *  where that saves its largest label, layoutTreemap). */
+function candidates(width: number, grouped: boolean, rule: TreemapGroupRule): TreemapCandidate[] {
+  const squareOnly = rule === "narrow-only" && grouped && width >= NARROW_ONLY_BELOW;
+  const tilings: TreemapTiling[] = squareOnly ? ["squarify"] : ["squarify", ...TM_RETILINGS];
   const sizes = [treemapLabelSize(width), ...(width < TM_LABEL_SIZES.smallBelow ? [TM_LABEL_SIZES.small] : [])];
   return sizes.flatMap((size) => tilings.map((tiling) => ({ tiling, size })));
 }
 
-/** Every candidate with the number of tiles it labels, and the index of the one drawn: the most
- *  labelled tiles, ties to the earlier candidate. Exported for tests. */
-export function treemapChoice(spec: ChartSpec, rows: TidyRow[], width: number):
-  { candidates: Array<TreemapCandidate & { labelled: number }>; chosen: number } {
-  return choose(spec, rows, width).choice;
+/** The index of the best candidate under `rule`; ties to the earlier one. Exported for tests. */
+export function rankCandidates(scores: Array<{ named: number; labelled: number }>, rule: TreemapGroupRule): number {
+  const better = (a: { named: number; labelled: number }, b: { named: number; labelled: number }): boolean =>
+    rule === "most-labels" ? a.named + a.labelled > b.named + b.labelled
+      : a.named > b.named || (a.named === b.named && a.labelled > b.labelled);
+  let best = 0;
+  scores.forEach((s, i) => {
+    if (better(s, scores[best]!)) best = i;
+  });
+  return best;
 }
 
-function choose(spec: ChartSpec, rows: TidyRow[], width: number):
-  { built: Built; choice: { candidates: Array<TreemapCandidate & { labelled: number }>; chosen: number } } {
+/** Every candidate with its counts, and the index of the one drawn under `rule`. Exported for tests. */
+export function treemapChoice(spec: ChartSpec, rows: TidyRow[], width: number, rule: TreemapGroupRule = DEFAULT_GROUP_RULE):
+  { candidates: ScoredCandidate[]; chosen: number } {
+  return choose(spec, rows, width, rule).choice;
+}
+
+function choose(spec: ChartSpec, rows: TidyRow[], width: number, rule: TreemapGroupRule):
+  { built: Built; choice: { candidates: ScoredCandidate[]; chosen: number } } {
   const grouped = treemapData(spec, rows).some((d) => d.group !== null);
-  let best: Built | null = null;
-  let chosen = 0;
-  const scored = candidates(grouped, width).map((cand, i) => {
-    const b = buildAt(spec, rows, width, cand);
+  const builds = candidates(width, grouped, rule).map((cand) => ({ cand, b: buildAt(spec, rows, width, cand) }));
+  const scored = builds.map(({ cand, b }): ScoredCandidate => {
     const labelled = b.tiles.filter((t) => t.label.mode !== "none").length;
-    if (!best || labelled > best.tiles.filter((t) => t.label.mode !== "none").length) {
-      best = b;
-      chosen = i;
-    }
-    return { ...cand, labelled };
+    const named = b.strips.length + b.groupLabels.length;
+    return { ...cand, labelled, named, score: labelled + named };
   });
-  return { built: best!, choice: { candidates: scored, chosen } };
+  const chosen = rankCandidates(scored, rule);
+  return { built: builds[chosen]!.b, choice: { candidates: scored, chosen } };
 }
 
 /** The one place a spec + rows + width becomes geometry, colours and labels, so the render and the
  *  warnings can never disagree: the chosen candidate's build. */
-function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
-  return choose(spec, rows, width).built;
+function build(spec: ChartSpec, rows: TidyRow[], width: number, rule: TreemapGroupRule = DEFAULT_GROUP_RULE): Built {
+  return choose(spec, rows, width, rule).built;
 }
 
 /** A spec + rows + width drawn as one candidate. */
@@ -169,6 +190,14 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
     name: t.datum.name, number: numberOf(t.datum.value), group: t.datum.group, value: t.datum.value,
     w: t.x1 - t.x0, h: t.y1 - t.y0,
   })), size);
+  // A group's only tile, named as the group's strip names it, would show that name twice: it shows
+  // only its number (nothing with label_value: none).
+  layout.tiles.forEach((t, i) => {
+    const g = t.datum.group;
+    if (g === null || groupSize.get(g) !== 1 || t.datum.name !== labelOf(g)) return;
+    if (!layout.groups.some((x) => x.group === g && x.strip)) return;
+    labels[i] = fitNumberOnly(numberOf(t.datum.value), t.x1 - t.x0, t.y1 - t.y0, size);
+  });
   const tiles: BuiltTile[] = layout.tiles.map((t, i) => {
     const d = t.datum;
     return {
@@ -313,7 +342,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
 }
 
 export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
-  const b = build(spec, rows, opts.width ?? 720);
+  const b = build(spec, rows, opts.width ?? 720, opts.treemapGroupRule);
   const svg = draw(opts.document ?? document, spec, b);
   const treemapTiles: TreemapTileInfo[] = b.tiles.map((t) => ({
     name: t.datum.name, group: t.datum.group, groupLabel: t.groupLabel, value: t.datum.value, share: t.share,

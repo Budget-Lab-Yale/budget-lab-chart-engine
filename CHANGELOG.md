@@ -11,11 +11,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tiles
   shaded by size rank in each group's hue. Labels top-left at one size per chart (14px, 12px below
   600px wide), placed largest first within each group and stopping at the first that does not fit,
-  so a group never labels a tile while leaving a larger one bare. A chart with no groups is drawn
-  squarified, as rows, as columns or as a balanced split, whichever labels the most tiles, and below
-  400px wide at 11px when that labels more; a grouped chart keeps squarified group blocks, takes the
-  11px step only, and re-lays out a group inside its own block (rows, columns or a balanced split)
-  where that lets its largest tile's label fit. A header strip per group where it fits, its text at
+  so a group never labels a tile while leaving a larger one bare. The tiles (or, with groups, the
+  group blocks) are drawn squarified, as rows, as columns or as a balanced split, whichever names
+  the most groups and then labels the most tiles, and below 400px wide at 11px when that names or
+  labels more; a group whose largest tile cannot hold its label is re-laid out inside its own block
+  (rows, columns or a balanced split) where that lets it fit, and a one-tile group named like its
+  tile shows only the number in the tile. A header strip per group where it fits, its text at
   the label size and its area added to the group's block; a strip-less group with no labelled tile
   is named inside its block where the name fits. A tile left unlabelled is named by its hover card
   and screen-reader label. New `treemap:` block (`label_value`, `shading`, `share_decimals`,

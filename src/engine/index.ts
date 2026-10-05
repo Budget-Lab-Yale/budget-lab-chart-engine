@@ -150,6 +150,11 @@ export interface RenderOptions {
    *  `width` (TimelineLayoutInput.budgetWidth). Set by the PNG export's portrait frame
    *  (timelineExportFrame); absent everywhere else. */
   timelineBudgetWidth?: number;
+  /** Treemap only, INTERNAL and TEMPORARY: how grouped charts rank layout candidates (TreemapGroupRule
+   *  in marks/treemap.ts). Not in the spec schema or CONFIG-SPEC; it exists for a scratch A/B page
+   *  and is deleted once a rule is chosen. Honoured by renderChart only; the live mount, the PNG
+   *  export and the warnings use the default, "names-first". */
+  treemapGroupRule?: "names-first" | "most-labels" | "narrow-only";
 }
 
 export interface LegendItem {

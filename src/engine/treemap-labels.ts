@@ -151,6 +151,16 @@ export function fitTileLabel(name: string, number: string | null, w: number, h: 
   return { mode: "none" };
 }
 
+/** A tile's number alone (500) at `size`, as a stacked label with no name lines, where it fits the
+ *  inner box; none when it does not or when there is no number. For a tile whose name is already
+ *  shown by its group's strip. */
+export function fitNumberOnly(number: string | null, w: number, h: number, size: number): TileLabel {
+  const iw = w - 2 * TM_GEOM.pad;
+  const ih = h - 2 * TM_GEOM.pad;
+  if (number === null || timelineTextWidth(number, size, 500) > iw || size * TM_LINE_HEIGHT > ih) return { mode: "none" };
+  return { mode: "stacked", size, nameLines: [], number };
+}
+
 /** A tile as label fitting sees it: its text, its group (null when flat), its value, its full size. */
 export interface LabelTile { name: string; number: string | null; group: string | null; value: number; w: number; h: number }
 

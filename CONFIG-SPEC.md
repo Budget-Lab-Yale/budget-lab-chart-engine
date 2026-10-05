@@ -940,16 +940,18 @@ the largest down, full-height columns from the left, and a balanced split by val
 under which the largest tile's label fits is kept (squarified if none). The block's position and
 size never change, and tile areas stay proportional to value as above.
 
-**Choosing the layout and size.** With no groups, the chart is drawn in whichever of these labels
-the most tiles (under the rule in **Tile labels**), the earlier one winning a tie: squarified,
-full-width rows from the largest down, full-height columns from the left, or a balanced split by
-value, each at the base size (14px, or 12px below 600px wide); then, on a chart narrower than 400px
-only, the same four again at 11px. So a narrow chart can be drawn as rows or columns rather than
-near-squares, and in 11px text only when that labels more tiles than the base size does. Every one
-shares the area by value, so tile areas stay proportional as above. With groups, the blocks are
-always squarified (a group can still be re-laid out inside its block, as above), and on a chart
-narrower than 400px the whole chart, strips included, is drawn at 11px only when that labels more
-tiles.
+**Choosing the layout and size.** The chart is drawn in whichever of these candidates names the
+most groups and, among those, labels the most tiles (under the rule in **Tile labels**), the
+earlier one winning a tie: squarified, full-width rows from the largest down, full-height columns
+from the left, or a balanced split by value, each at the base size (14px, or 12px below 600px
+wide); then, on a chart narrower than 400px only, the same four again at 11px. With no groups the
+four arrange the tiles themselves (and no groups are named, so the most tiles labelled wins); with
+groups they arrange the group blocks, and each block's tiles are squarified (or re-laid out inside
+the block, as above). A group counts as named when it has a header strip or its name is written in
+its block (see **Header strips**). So a chart can be drawn as rows or columns rather than
+near-squares, and in 11px text only when that names or labels more than the base size does. Every
+candidate shares the area by value, with the strip compensation above, so tile areas stay
+proportional.
 
 **Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
 rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first
@@ -999,7 +1001,9 @@ of its tiles is labelled either, the group's name is written in its block's top-
 its number as `label_value` says (its share, its value, or nothing with `none`), at the label size
 (name bold, number in medium weight) and fitted as a tile label is, in white or navy, whichever
 contrasts more with the tile it is drawn on; where it does not fit, nothing is written, and hovering
-a tile still names it.
+a tile still names it. A group of one tile whose name is the group's name as its strip shows it
+draws only the tile's number in the tile (nothing with `label_value: none`), so the name is not
+shown twice.
 
 **Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
 280px and narrower, linear in between, and the treemap is never more than 460px tall. On screen it

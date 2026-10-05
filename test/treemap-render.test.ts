@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
-import { TREEMAP_CLASS, treemapChoice, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
+import { TREEMAP_CLASS, rankCandidates, treemapChoice, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
 import { contrastText, fitTileLabel, stripFill, treemapStripHeight } from "../src/engine/treemap-labels";
 import { timelineTextWidth } from "../src/engine/timeline-text";
@@ -123,6 +123,8 @@ describe("treemap render", () => {
           const [x, y, rw, rh] = ["x", "y", "width", "height"].map((a) => num(rect, a)) as [number, number, number, number];
           const name = g.getAttribute("aria-label")!.split(", ")[0]!.split(" · ").pop()!;
           const share = g.getAttribute("aria-label")!.split(", ")[1]!.replace(" of total", "");
+          // A group's only tile named as its group shows its number alone (tested separately).
+          if (g.getAttribute("data-series") === name && tiles(svg).filter((x) => x.getAttribute("data-series") === name).length === 1) continue;
           const fit = fitTileLabel(name, share, rw, rh, size);
           const text = g.querySelector("text");
           if (fit.mode === "none") {
@@ -278,6 +280,30 @@ describe("treemap render", () => {
     expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "C"]);
   });
 
+  it("a one-tile group whose tile has the group's name shows only the tile's number: the strip already names it", () => {
+    // In the fixture, Net interest is one tile named Net interest.
+    for (const [labelValue, want] of [["share", ["13.5%"]], ["value", ["$881"]], ["none", null]] as const) {
+      const spec = { ...GROUPED_SPEC, treemap: { label_value: labelValue } } as ChartSpec;
+      const { svg } = render(spec, GROUPED, 920, { treemapGroupRule: "narrow-only" });
+      expect(q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toContain("Net interest");
+      const text = tileOf(svg, "Net interest").querySelector("text");
+      if (want === null) {
+        expect(text).toBeNull();
+        continue;
+      }
+      expect([...text!.children].map((s) => [s.textContent, num(s, "font-weight")])).toEqual([[want[0], 500]]);
+      const r = tileOf(svg, "Net interest").querySelector("rect")!;
+      expect(num(text!.firstElementChild!, "x")).toBeCloseTo(num(r, "x") + TM_GEOM.pad, 1);
+    }
+    // Renamed by series_labels so the names differ: the tile shows its name again.
+    const renamed = render({ ...GROUPED_SPEC, series_labels: { "Net interest": "Interest" } } as ChartSpec, GROUPED, 920, { treemapGroupRule: "narrow-only" }).svg;
+    expect(tileOf(renamed, "Net interest").querySelector("text")!.firstElementChild!.textContent).toBe("Net interest");
+    // A one-tile group with a different name keeps it.
+    const other = ([["A", "Alpha", 300], ["A", "Beta", 200], ["B", "Bravo", 250]] as const)
+      .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    expect(tileOf(render(GROUPED_SPEC, other, 920).svg, "Bravo").querySelector("text")!.firstElementChild!.textContent).toBe("Bravo");
+  });
+
   it("re-tiles a group whose largest tile cannot hold its label: full-width rows inside the same block, every tile labelled", () => {
     // Squarified, A's largest tile is a 126px-wide cell, too narrow for "Intergovernmental" at 14px,
     // so the whole group would go unlabelled. Sliced into rows, every tile fits.
@@ -383,9 +409,10 @@ describe("treemap render", () => {
     });
 
     it("draws nothing when a tile in the group is labelled, or when the name does not fit the block", () => {
-      // B's one tile labels itself.
-      const one = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 40], ["B", "b1", 10]]), 280).svg;
-      expect(q(one, 'g[data-series="B"] text')).toHaveLength(1);
+      // The second group's one tile labels itself. (A name too wide for a strip on a narrow column
+      // keeps every arrangement from naming it by a strip instead.)
+      const one = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 40], ["Second group", "b1", 10]]), 280).svg;
+      expect(q(one, 'g[data-series="Second group"] text')).toHaveLength(1);
       expect(groupLabels(one)).toHaveLength(0);
       // A 3% band is far too short for any text.
       const thin = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 47], ...many("B", 3, 1)]), 280).svg;
@@ -397,10 +424,11 @@ describe("treemap render", () => {
   it("drops the strip of a block under two strips tall, even when its name fits", () => {
     const g = (rows: Array<[string, string, number]>) => rows.map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     // At 280px wide the second group is a full-width band: 10% of 350px is 35px (< 44), 15% is 52.5px.
-    const short = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 40], ["B", "b1", 10]]), 280).svg;
+    // (Its name is too wide for a strip across a narrow column, so no other arrangement names it.)
+    const short = render(GROUPED_SPEC, g([["A", "a1", 50], ["A", "a2", 40], ["Second group", "b1", 10]]), 280).svg;
     expect(q(short, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A"]);
-    const tall = render(GROUPED_SPEC, g([["A", "a1", 45], ["A", "a2", 40], ["B", "b1", 15]]), 280).svg;
-    expect(q(tall, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "B"]);
+    const tall = render(GROUPED_SPEC, g([["A", "a1", 45], ["A", "a2", 40], ["Second group", "b1", 15]]), 280).svg;
+    expect(q(tall, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series"))).toEqual(["A", "Second group"]);
   });
 
   it("shows 100.0% on a one-tile chart", () => {
@@ -460,9 +488,38 @@ describe("candidate selection: the tiling and size that label the most tiles", (
     expect(names(920)).toEqual(["squarify@14", "slice@14", "dice@14", "binary@14"]);
     expect(names(400)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12"]);
     expect(names(399)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12", "squarify@11", "slice@11", "dice@11", "binary@11"]);
-    // Grouped charts keep their group blocks: they take part in the size step only.
-    expect(treemapChoice(GROUPED_SPEC, GROUPED, 920).candidates.map((c) => `${c.tiling}@${c.size}`)).toEqual(["squarify@14"]);
-    expect(treemapChoice(GROUPED_SPEC, GROUPED, 375).candidates.map((c) => `${c.tiling}@${c.size}`)).toEqual(["squarify@12", "squarify@11"]);
+    // Grouped charts take the same candidates, the tiling arranging their group blocks.
+    expect(treemapChoice(GROUPED_SPEC, GROUPED, 920).candidates.map((c) => `${c.tiling}@${c.size}`))
+      .toEqual(["squarify@14", "slice@14", "dice@14", "binary@14"]);
+    expect(treemapChoice(GROUPED_SPEC, GROUPED, 375).candidates.map((c) => `${c.tiling}@${c.size}`))
+      .toEqual(["squarify@12", "slice@12", "dice@12", "binary@12", "squarify@11", "slice@11", "dice@11", "binary@11"]);
+  });
+
+  it("scores labelled tiles plus named groups (a strip or an in-block name), and counts what is drawn", () => {
+    for (const [spec, rows, w] of [[GROUPED_SPEC, GROUPED, 375], [GROUPED_SPEC, GROUPED, 920], [FLAT_SPEC, BLS, 340]] as const) {
+      const choice = treemapChoice(spec, rows, w);
+      for (const c of choice.candidates) expect(c.score).toBe(c.labelled + c.named);
+      const chosen = choice.candidates[choice.chosen]!;
+      const { svg } = render(spec, rows, w);
+      expect(labelledCount(svg)).toBe(chosen.labelled);
+      expect(q(svg, "rect.tbl-treemap-strip").length + q(svg, "text.tbl-treemap-group-label").length).toBe(chosen.named);
+    }
+    // Flat data has no groups to name.
+    for (const c of treemapChoice(FLAT_SPEC, BLS, 340).candidates) expect(c.named).toBe(0);
+  });
+
+  it("the grouped fixture at 375 names Net interest once its blocks are rows (Other spending, 0.5%, stays too small)", () => {
+    const choice = treemapChoice(GROUPED_SPEC, GROUPED, 375);
+    // squarify@12 leaves Net interest a 43px column with no name at all.
+    expect(choice.candidates[0]!.named).toBe(2);
+    expect(Math.max(...choice.candidates.map((c) => c.named))).toBe(3);
+    expect(choice.candidates[choice.chosen]!.named).toBe(3);
+    const { svg } = render(GROUPED_SPEC, GROUPED, 375);
+    const named = new Set([
+      ...q(svg, "rect.tbl-treemap-strip").map((s) => s.getAttribute("data-series")),
+      ...q(svg, "text.tbl-treemap-group-label").map((t) => t.firstElementChild!.textContent),
+    ]);
+    expect(named).toEqual(new Set(["Mandatory", "Discretionary", "Net interest"]));
   });
 
   it("BLS at 280 and 340 labels far more than the one tile squarify@12 manages", () => {
@@ -470,28 +527,74 @@ describe("candidate selection: the tiling and size that label the most tiles", (
       const choice = treemapChoice(FLAT_SPEC, BLS, w);
       expect(choice.candidates[0]!.labelled).toBe(1);
       const chosen = choice.candidates[choice.chosen]!;
-      expect(chosen).toEqual(want);
+      expect(chosen).toMatchObject(want);
       const { svg } = render(FLAT_SPEC, BLS, w);
       expect(labelledCount(svg)).toBe(chosen.labelled);
       expect(labelSizes(svg)).toEqual(new Set([String(chosen.size)]));
     }
   });
 
-  it("a wide chart keeps squarify at 14px", () => {
-    for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
-      const choice = treemapChoice(spec, rows, 920);
-      expect(choice.chosen).toBe(0);
-      expect(choice.candidates[0]).toMatchObject({ tiling: "squarify", size: 14 });
-    }
+  it("a wide flat chart keeps squarify at 14px", () => {
+    const choice = treemapChoice(FLAT_SPEC, BLS, 920);
+    expect(choice.chosen).toBe(0);
+    expect(choice.candidates[0]).toMatchObject({ tiling: "squarify", size: 14 });
+  });
+
+  describe("the group rule (INTERNAL switch for the A/B page): which candidate the grouped fixture takes", () => {
+    const pick = (w: number, rule?: "names-first" | "most-labels" | "narrow-only") => {
+      const c = treemapChoice(GROUPED_SPEC, GROUPED, w, rule);
+      const x = c.candidates[c.chosen]!;
+      return `${x.tiling}@${x.size} ${x.named}+${x.labelled}`;
+    };
+    // Scores at 920: squarify 3 named + 7 labelled, slice 3 + 9, dice 3 + 7, binary 3 + 7.
+    // At 375: squarify 2 + 5, slice 3 + 7, dice 2 + 6, binary 3 + 7 (the 11px set the same).
+    it("names-first (the default): most groups named, then most tiles labelled; slice at both widths", () => {
+      expect(pick(920)).toBe("slice@14 3+9");
+      expect(pick(920, "names-first")).toBe("slice@14 3+9");
+      expect(pick(375)).toBe("slice@12 3+7");
+    });
+    it("most-labels: labelled tiles + named groups; slice at both widths", () => {
+      expect(pick(920, "most-labels")).toBe("slice@14 3+9");
+      expect(pick(375, "most-labels")).toBe("slice@12 3+7");
+    });
+    it("narrow-only: squarify blocks at 600px and wider (size step unchanged), names-first below", () => {
+      expect(pick(920, "narrow-only")).toBe("squarify@14 3+7");
+      expect(treemapChoice(GROUPED_SPEC, GROUPED, 600, "narrow-only").candidates.map((c) => c.tiling)).toEqual(["squarify"]);
+      expect(treemapChoice(GROUPED_SPEC, GROUPED, 599, "narrow-only").candidates.map((c) => c.tiling)).toEqual(["squarify", "slice", "dice", "binary"]);
+      expect(pick(375, "narrow-only")).toBe("slice@12 3+7");
+      // Flat charts are not restricted: Ruling 32 holds at every width.
+      expect(treemapChoice(FLAT_SPEC, BLS, 920, "narrow-only").candidates.map((c) => c.tiling)).toEqual(["squarify", "slice", "dice", "binary"]);
+    });
+    it("renderChart draws what the rule picks", () => {
+      const stripRows = (rule?: "names-first" | "most-labels" | "narrow-only") =>
+        q(render(GROUPED_SPEC, GROUPED, 920, rule ? { treemapGroupRule: rule } : {}).svg, "rect.tbl-treemap-strip").map((s) => num(s, "width"));
+      // slice: every strip spans the chart; squarify: they do not.
+      expect(stripRows()).toEqual([920, 920, 920]);
+      expect(stripRows("most-labels")).toEqual([920, 920, 920]);
+      expect(stripRows("narrow-only").every((wd) => wd < 920)).toBe(true);
+    });
+    it("names-first ranks named groups above labelled tiles; most-labels sums them (constructed scores)", () => {
+      // Three candidates' worth of data is hard to construct; check the rankings directly.
+      expect(rankCandidates([{ named: 2, labelled: 9 }, { named: 3, labelled: 5 }], "names-first")).toBe(1);
+      expect(rankCandidates([{ named: 2, labelled: 9 }, { named: 3, labelled: 5 }], "most-labels")).toBe(0);
+      expect(rankCandidates([{ named: 3, labelled: 5 }, { named: 3, labelled: 5 }], "names-first")).toBe(0);
+      expect(rankCandidates([{ named: 2, labelled: 6 }, { named: 3, labelled: 5 }], "most-labels")).toBe(0);
+    });
   });
 
   it("ties go to the earlier candidate: every candidate labels all three tiles, squarify wins", () => {
     const choice = treemapChoice(FLAT_SPEC, rowsOf([["Alpha", 5], ["Beta", 4], ["Gamma", 3]]), 920);
     expect(choice.candidates.map((c) => c.labelled)).toEqual([3, 3, 3, 3]);
     expect(choice.chosen).toBe(0);
+    // Grouped: two large groups, each tile labelled and each group with a strip, under every arrangement.
+    const two = ([["A", "a1", 300], ["A", "a2", 200], ["B", "b1", 250], ["B", "b2", 150]] as const)
+      .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    const g = treemapChoice(GROUPED_SPEC, two, 920);
+    expect(g.candidates.map((c) => c.score)).toEqual([6, 6, 6, 6]);
+    expect(g.chosen).toBe(0);
   });
 
-  it("property: the chosen candidate is the first with the most labelled tiles, and the chart draws it at one size (150 charts)", () => {
+  it("property: under each rule the chosen candidate is the first ranked best, and the chart draws it at one size (150 charts)", () => {
     let s = 3;
     const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
     const words = ["Housing", "Food", "Transportation", "Health care", "Education", "Personal insurance and pensions", "Other"];
@@ -504,12 +607,15 @@ describe("candidate selection: the tiling and size that label the most tiles", (
       })) as TidyRow[];
       const w = [280, 320, 360, 399, 400, 560, 920][c % 7]!;
       const spec = grouped ? GROUPED_SPEC : FLAT_SPEC;
-      const choice = treemapChoice(spec, rows, w);
-      expect(choice.chosen).toBe(firstMax(choice.candidates.map((x) => x.labelled)));
+      const rule = (["names-first", "most-labels", "narrow-only"] as const)[c % 3]!;
+      const choice = treemapChoice(spec, rows, w, rule);
+      const keys = choice.candidates.map((x) => (rule === "most-labels" ? x.score : x.named * 1000 + x.labelled));
+      expect(choice.chosen).toBe(firstMax(keys));
+      if (rule === "narrow-only" && grouped && w >= 600) for (const x of choice.candidates) expect(x.tiling).toBe("squarify");
       const chosen = choice.candidates[choice.chosen]!;
       picked.add(`${chosen.tiling}@${chosen.size === 11 ? 11 : "base"}`);
       if (chosen.size === 11) expect(w).toBeLessThan(400);
-      const { svg } = render(spec, rows, w);
+      const { svg } = render(spec, rows, w, { treemapGroupRule: rule });
       expect(labelledCount(svg)).toBe(chosen.labelled);
       const sizes = labelSizes(svg);
       expect(sizes.size).toBeLessThanOrEqual(1);

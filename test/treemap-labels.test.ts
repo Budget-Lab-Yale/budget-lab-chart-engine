@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   TM_LABEL_SIZES, treemapLabelSize, treemapStripHeight, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel,
-  stripFill, type TileLabel, type LabelTile,
+  stripFill, fitNumberOnly, type TileLabel, type LabelTile,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
 import { timelineTextWidth } from "../src/engine/timeline-text";
@@ -292,6 +292,17 @@ describe("fitTileLabels: one size, top-down per group", () => {
     expect([...modes].sort()).toEqual(["inline", "none", "stacked"]);
     // The walk really stopped short of tiles that would have fitted on their own.
     expect(cut).toBeGreaterThan(10);
+  });
+});
+
+describe("fitNumberOnly", () => {
+  it("is the number alone (no name lines) where it fits at the size, else none", () => {
+    expect(fitNumberOnly("13.5%", 200, 100, 14)).toEqual({ mode: "stacked", size: 14, nameLines: [], number: "13.5%" });
+    const w = Math.ceil(timelineTextWidth("13.5%", 14, 500)) + 2 * pad;
+    expect(fitNumberOnly("13.5%", w, 100, 14).mode).toBe("stacked");
+    expect(fitNumberOnly("13.5%", w - 1, 100, 14)).toEqual({ mode: "none" });
+    expect(fitNumberOnly("13.5%", 200, 14 * 1.2 + 2 * pad - 0.1, 14)).toEqual({ mode: "none" });
+    expect(fitNumberOnly(null, 200, 100, 14)).toEqual({ mode: "none" });
   });
 });
 
