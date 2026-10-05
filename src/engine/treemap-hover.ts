@@ -1,6 +1,7 @@
 // Treemap hover (spec §6), live only: the hovered tile gets a 2px navy outline drawn above its
-// neighbours, every other tile dims to 0.85, and the shared tooltip card names the tile with its
-// Value, Share and the `treemap.tooltip` rows. Leaving the tile restores the static render exactly,
+// neighbours, every other tile dims to 0.85, and the shared tooltip card names the tile with the
+// built-in rows `treemap.tooltip_values` selects, the `treemap.tooltip` rows and the
+// `treemap.tooltip_note` cell. Leaving the tile restores the static render exactly,
 // so a later redraw (or the PNG export, which re-renders from the spec) never sees hover state. The
 // card lives outside the svg, so the caller hides it through the returned function on every redraw
 // and on unmount (the old tile's pointerleave never fires once its svg is gone).

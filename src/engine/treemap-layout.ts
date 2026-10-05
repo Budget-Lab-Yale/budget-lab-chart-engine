@@ -81,15 +81,15 @@ const FRAME_TILE = {
  * isolates the proportionality from the fixed gutters); every caller in the engine uses TM_GEOM's.
  *
  * `labelFits` rescues a group whose first tile in layout order (the sort above: values at 12
- * significant digits, ties by CSV order) cannot hold its label: asked of that tile once the blocks are laid out, and if it fails, the group's tiles alone
- * are laid out again inside the same block by each of TM_RETILINGS in turn, keeping the first under
+ * significant digits, ties by CSV order) cannot hold its label: asked of that tile once the blocks
+ * are laid out, and if it fails, the group's tiles alone are laid out again inside the same block by each of TM_RETILINGS in turn, keeping the first under
  * which it passes, else squarify. Blocks never move and every tiling shares the block by value, so
  * areas stay proportional exactly as under squarify. Flat data is never re-tiled this way, so it is
  * not asked there.
  *
- * `tiling` lays the whole frame out by that tiling instead of squarify, in sort order: the tiles of
- * flat data, or the group blocks of grouped data (each block's tiles are still squarified, and
- * rescued as above). Every tiling shares the frame by value. The caller (marks/treemap) picks it
+ * `tiling` lays the whole frame out by that tiling instead of d3's default squarify, in sort
+ * order: the tiles of flat data, or the group blocks of grouped data (each block's tiles are still
+ * squarified at d3's default ratio, and rescued as above). Every tiling shares the frame by value. The caller (marks/treemap) picks it
  * among candidates by how much each lets it label.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,

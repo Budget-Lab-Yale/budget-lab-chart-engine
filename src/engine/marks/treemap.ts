@@ -106,7 +106,9 @@ function choose(spec: ChartSpec, rows: TidyRow[], width: number):
 /** Ruling 45. Within each size step, the squarify variant that labels the most tiles (the earlier
  *  on a tie), unless the best of the other tilings labels at least NON_SQUARIFY_MARGIN more; then,
  *  across size steps in order, the first step winner that labels the most (so the 11px step is taken
- *  only when it labels more than the base size). Deterministic. Exported for tests. */
+ *  only when it labels more than the base size). Deterministic. Exported for tests.
+ *  Precondition: every size step in `scored` holds at least one squarify variant, as candidates()
+ *  always produces; a step without one throws (firstMax reduces an empty list). */
 export function pickCandidate(scored: ScoredCandidate[]): number {
   const firstMax = (ii: number[]): number => ii.reduce((a, b) => (scored[b]!.labelled > scored[a]!.labelled ? b : a));
   let best = -1;

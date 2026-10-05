@@ -416,7 +416,7 @@ describe("treemap render", () => {
   });
 });
 
-describe("candidate selection: the tiling and size that label the most tiles", () => {
+describe("candidate selection: squarify first, another tiling only by labelling at least 2 more (Ruling 45)", () => {
   /** Every drawn tile label's font size (an inline one carries it on the <text>, a stacked one on its tspans). */
   const labelSizes = (svg: SVGSVGElement): Set<string> => new Set(q(svg, "text.tbl-treemap-label").map((t) =>
     t.getAttribute("font-size") ?? t.firstElementChild!.getAttribute("font-size")!));
@@ -553,7 +553,7 @@ describe("candidate selection: the tiling and size that label the most tiles", (
     expect(g.chosen).toBe(0);
   });
 
-  it("property: the chosen candidate is the first that labels the most tiles, drawn at one size (150 charts)", () => {
+  it("property: the chosen candidate follows the squarify-first rule, drawn at one size (150 charts)", () => {
     let s = 3;
     const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
     const words = ["Housing", "Food", "Transportation", "Health care", "Education", "Personal insurance and pensions", "Other"];

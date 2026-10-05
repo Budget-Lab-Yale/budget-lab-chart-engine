@@ -565,8 +565,8 @@ export const CHART_SPEC_SCHEMA = {
         shading: { type: "string", enum: ["size", "none"] },
         share_decimals: { type: "integer", minimum: 0, maximum: 3 },
         tooltip_values: { type: "string", enum: ["both", "share", "value", "none"] },
-        share_label: { type: "string" },
-        value_label: { type: "string" },
+        share_label: { type: "string", minLength: 1 },
+        value_label: { type: "string", minLength: 1 },
         tooltip_note: { type: "string", minLength: 1 },
         tooltip: {
           type: "array",

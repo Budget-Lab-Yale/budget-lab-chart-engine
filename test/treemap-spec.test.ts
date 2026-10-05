@@ -72,6 +72,9 @@ describe("treemap - structural validation", () => {
     expect(validateSpec({ ...TM, treemap: { tooltip_values: "all" } }).valid).toBe(false);
     expect(validateSpec({ ...TM, treemap: { share_label: 3 } }).valid).toBe(false);
     expect(validateSpec({ ...TM, treemap: { value_label: true } }).valid).toBe(false);
+    // An empty label would draw a bare ": 24.4%" row.
+    expect(validateSpec({ ...TM, treemap: { share_label: "" } }).valid).toBe(false);
+    expect(validateSpec({ ...TM, treemap: { value_label: "" } }).valid).toBe(false);
   });
 
   it("accepts tooltip_note as a column name; rejects a non-string or empty one", () => {
@@ -105,11 +108,11 @@ describe("treemap - config and columns", () => {
 
   it("honours authored options, including share_decimals 0", () => {
     const spec = { ...TM, treemap: {
-      label_value: "none", shading: "none", share_decimals: 0, tooltip_values: "share", share_label: "", value_label: "Outlays",
+      label_value: "none", shading: "none", share_decimals: 0, tooltip_values: "share", share_label: "Of total", value_label: "Outlays",
       tooltip: [{ column: "c" }], tooltip_note: "n",
     } } as ChartSpec;
     expect(resolveTreemapConfig(spec)).toEqual({
-      labelValue: "none", shading: "none", shareDecimals: 0, tooltipValues: "share", shareLabel: "", valueLabel: "Outlays",
+      labelValue: "none", shading: "none", shareDecimals: 0, tooltipValues: "share", shareLabel: "Of total", valueLabel: "Outlays",
       tooltip: [{ column: "c" }], tooltipNote: "n",
     });
   });
