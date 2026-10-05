@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Treemap live mount (spec §6): sizing at the card width with a 280px floor, re-flow on resize
-// through the ordinary draw() path, no legend or y-axis overlay, and the per-tile hover card.
+// through the ordinary draw() path, no y-axis overlay, and the per-tile hover card.
 import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -129,12 +129,12 @@ describe("treemap live mount: sizing", () => {
     expect(num(svg, "height")).toBe(treemapHeight(FLAT_SPEC, BLS, 280));
   });
 
-  it("draws no legend and no sticky y-axis overlay", () => {
-    const host = mountAt(900, HOVER_SPEC, HOVER_ROWS);
-    expect(host.querySelector(".figure-legend-slot")!.childElementCount).toBe(0);
-    expect(host.querySelector(".figure-legend-slot--right")).toBeNull();
-    expect(host.querySelector(".tbl-legend")).toBeNull();
-    expect(host.querySelector(".figure-y-axis-overlay")).toBeNull();
+  it("draws no sticky y-axis overlay, and no legend for flat data (grouped legends: treemap-legend.test.ts)", () => {
+    const flat = mountAt(900);
+    expect(flat.querySelector(".figure-legend-slot")!.childElementCount).toBe(0);
+    expect(flat.querySelector(".figure-legend-slot--right")).toBeNull();
+    expect(flat.querySelector(".tbl-legend")).toBeNull();
+    for (const host of [flat, mountAt(900, HOVER_SPEC, HOVER_ROWS)]) expect(host.querySelector(".figure-y-axis-overlay")).toBeNull();
   });
 
   it("re-flows on resize (900 → 340 → 900) and the round trip reproduces the first draw byte-for-byte", async () => {

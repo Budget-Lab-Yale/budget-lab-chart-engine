@@ -298,9 +298,8 @@ describe("treemap render", () => {
     expect(tileOf(svg, "Tiny").querySelector("text")).toBeNull();
   });
 
-  it("draws no legend and returns per-tile hover info in DOM order", () => {
+  it("returns per-tile hover info in DOM order", () => {
     const res = render(GROUPED_SPEC, GROUPED);
-    expect(res.legendItems).toBeNull();
     const rects = q(res.svg, "rect.tbl-treemap-tile");
     expect(res.treemapTiles).toHaveLength(rects.length);
     res.treemapTiles!.forEach((t, i) => {

@@ -247,8 +247,9 @@ export interface RenderResult {
   /** `overlays[].tooltip: true` lines drawn in this frame — one hover-tooltip row each. Empty when
    *  no overlay opted in. See PaneResult.overlayTooltips. */
   overlayTooltips: OverlayTooltipLine[];
-  /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
-   *  (stacked charts only). render-live uses it to order the vertical legend column. */
+  /** Top-to-bottom order of the interactive series in the RIGHT legend column: the visual stack
+   *  order on a stacked chart, the group order on a treemap. render-live and the PNG export order the
+   *  vertical legend column by it; absent, the column reverses the series order. */
   legendVisualOrder?: string[];
   /** Stacked charts only. Mirrors MarkLayers.netMode — see spec/bar-stack.ts. */
   netMode?: NetMode;

@@ -791,10 +791,11 @@ function timelineSpecErrors(spec: Record<string, unknown>): string[] {
 export const TREEMAP_ALLOWED_FIELDS: readonly string[] = [
   "chartType", "title", "subtitle", "note", "source", "xAxisType", "data", "tags", "columns",
   "series_order", "series_colors", "series_labels", "value_format", "tooltip_decimals", "chrome", "treemap",
+  "legend", "legendPosition", "series_legend",
 ];
 
 export const TREEMAP_REJECTED_FIELDS: readonly string[] = [
-  "legend", "legendPosition", "series_legend", "value_prefix", "value_suffix", "annotations", "overlays",
+  "value_prefix", "value_suffix", "annotations", "overlays",
   "title_selectors", "x_axis_title", "x_axis_ticks", "y_axis_title", "tooltip_series_name",
   "tooltip_x_format", "tooltip_x_label", "tooltip_y_label", "xAxisPolicy", "yAxisPolicy",
   "series_patterns", "bar_color", "category_colors", "series_styles", "section_order", "section_labels",

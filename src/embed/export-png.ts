@@ -346,7 +346,8 @@ export function buildExportSvg(
   const isSingleHorizontalBar =
     !isFigure && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   const isTimeline = !isFigure && spec.chartType === "timeline";
-  // A treemap has no legend and no portrait frame: always the full inner width, frame height = content.
+  // A treemap has no portrait frame: frame height = content. Its legend (grouped data) takes the
+  // ordinary top/right paths below; treemapExportChartWidth mirrors the width they leave it.
   const isTreemap = !isFigure && spec.chartType === "treemap";
 
   // Pre-render to read legend items + axis title (rendered for real again below at the

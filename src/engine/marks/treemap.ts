@@ -1,15 +1,18 @@
 // chartType: treemap — rows to drawable data, the squarified layout (treemap-layout), colour and label
-// fitting (treemap-labels), drawn as hand-built SVG: one tile per drawn row. There is no key: an
-// unlabelled tile is named by its aria-label and the hover card. The live mount and the PNG export
-// both call renderTreemap at their width; nothing here is live-only. All text is SVG <text> (HTML
-// inside an SVG does not rasterise).
+// fitting (treemap-labels), drawn as hand-built SVG: one tile per drawn row. Groups are named by the
+// engine's standard legend (legendItems, placed and highlighted by render-live, drawn by the PNG
+// export); an unlabelled tile is named by its aria-label and the hover card. The live mount and the
+// PNG export both call renderTreemap at their width; nothing here is live-only. All text is SVG
+// <text> (HTML inside an SVG does not rasterise).
 //
 // Imports buildColorMap back from ../index, which imports renderTreemap from here: the same safe
 // ES-module cycle as marks/timeline.ts (both references resolve at call time).
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
 import { buildColorMap } from "../index";
-import type { RenderOptions, RenderResult } from "../index";
+import type { LegendItem, RenderOptions, RenderResult } from "../index";
+import { resolveLegendPosition, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
+import { INNER_W } from "../../embed/figure-chrome";
 import type { ChartSpec } from "../../spec/types";
 import type { TidyRow } from "../../data/index";
 import {
@@ -25,8 +28,6 @@ import {
 const SVG_NS = "http://www.w3.org/2000/svg";
 export const TREEMAP_CLASS = "tbl-treemap";
 
-/** The PNG export's chart width; the unlabelled-tiles warning is judged there. */
-const EXPORT_WIDTH = 920;
 /** Baseline below a line box's centre that centres Figtree's cap height (0.7 em) in the box. */
 const CAP_CENTRE = 0.35;
 
@@ -55,6 +56,8 @@ interface Built {
   tiles: BuiltTile[];
   groupNames: string[];
   colors: Map<string, string>;
+  /** One legend row per group, in groupNames order (empty for flat data). */
+  keyRows: LegendItem[];
 }
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
@@ -161,7 +164,10 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
       label: labels[i]!,
     };
   });
-  return { width, areaH, tiles, groupNames, colors };
+  const keyRows: LegendItem[] = groupNames.map((g) => ({
+    series: g, label: labelOf(g), color: colors.get(g), dashed: false, markerShape: "rect",
+  }));
+  return { width, areaH, tiles, groupNames, colors, keyRows };
 }
 
 /** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone (there is no key),
@@ -170,9 +176,23 @@ export function treemapHeight(_spec: ChartSpec, _rows: TidyRow[], width: number)
   return treemapAreaHeight(width);
 }
 
-/** Non-fatal warnings at `width` (the export width by default): the data warnings, plus more than half
- *  the tiles unlabelled (the hover card and each tile's aria-label still name them). */
-export function treemapWarnings(spec: ChartSpec, rows: TidyRow[], width: number = EXPORT_WIDTH): string[] {
+/** Whether the legend draws its group rows: grouped data with more than one group, unless `legend:
+ *  false` or `series_legend: false` (the engine's rule for a lone series, buildLegendItems). */
+function legendShown(spec: ChartSpec, groupCount: number): boolean {
+  return spec.legend !== false && spec.series_legend !== false && groupCount > 1;
+}
+
+/** The chart width the PNG export draws a treemap at: the full inner width, less the right-hand
+ *  legend column when the export puts the legend there (export-png's rightLegend rule). */
+export function treemapExportChartWidth(spec: ChartSpec, rows: TidyRow[]): number {
+  const groups = new Set(treemapData(spec, rows).map((d) => d.group).filter((g) => g !== null)).size;
+  const right = legendShown(spec, groups) && resolveLegendPosition(spec, groups, rows) === "right";
+  return right ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+}
+
+/** Non-fatal warnings at `width` (by default the export's chart width): the data warnings, plus more
+ *  than half the tiles unlabelled (the hover card and each tile's aria-label still name them). */
+export function treemapWarnings(spec: ChartSpec, rows: TidyRow[], width: number = treemapExportChartWidth(spec, rows)): string[] {
   const out = treemapDataWarnings(spec, rows);
   const { tiles } = build(spec, rows, width);
   const unlabelled = tiles.filter((t) => t.label.mode === "none").length;
@@ -264,7 +284,10 @@ export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOpti
   // Last, as on every chart type: nothing below touches the SVG.
   if (opts.hooks?.afterRender) opts.hooks.afterRender(svg, { phase: opts.phase ?? "live" });
   return {
-    svg, legendItems: null, seriesKeyRows: [], seriesLabels: spec.series_labels ?? {}, seriesOrder: b.groupNames,
+    svg, legendItems: legendShown(spec, b.groupNames.length) ? b.keyRows : null, seriesKeyRows: b.keyRows,
+    // A right-hand column lists the groups in the same order as a top legend (not reversed).
+    legendVisualOrder: b.groupNames,
+    seriesLabels: spec.series_labels ?? {}, seriesOrder: b.groupNames,
     dashedNames: new Set(), colors: b.colors, valueAffixes: { prefix: "", suffix: "" }, xAxisTitle: null,
     dataInScope: [], overlayTooltips: [], treemapTiles,
   };

@@ -368,6 +368,14 @@ describe("runValidate — treemap warnings", () => {
     expect(result.message).toMatch(/warning: treemap: 6 of 7 tiles are unlabelled at 920px wide/);
   });
 
+  it("judges a grouped treemap with a right-hand legend at the narrower width the export draws it at (744px)", async () => {
+    const rows = [["A", "Big", 1_000_000], ["B", "Big two", 1_000_000], ...Array.from({ length: 6 }, (_, i) => ["B", `Tiny${i}`, 1])];
+    const specPath = treemapSpec("group,category,amount\n" + rows.map((r) => r.join(",")).join("\n") + "\n", ["  series: group", "legendPosition: right"]);
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/warning: treemap: 6 of 8 tiles are unlabelled at 744px wide/);
+  });
+
   it("prints no warnings for a well-labelled treemap", async () => {
     const specPath = treemapSpec(csv([["Alpha", 500], ["Beta", 300], ["Gamma", 200]]));
     const result = await runValidate(specPath);

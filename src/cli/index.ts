@@ -28,8 +28,7 @@ import type { ChartSpec } from "../spec/types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 import { timelineWarnings, timelineExportChartWidth } from "../engine/marks/timeline";
-import { treemapWarnings } from "../engine/marks/treemap";
-import { INNER_W } from "../embed/figure-chrome";
+import { treemapWarnings, treemapExportChartWidth } from "../engine/marks/treemap";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -196,9 +195,9 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
     typedSpec.chartType === "timeline"
       ? timelineWarnings(typedSpec, rows, timelineExportChartWidth(typedSpec, rows))
       : typedSpec.chartType === "treemap"
-        // Includes the data warnings (>30 tiles, zero-value rows; negatives are validation errors); a
-        // treemap always exports at INNER_W.
-        ? treemapWarnings(typedSpec, rows, INNER_W)
+        // Includes the data warnings (>30 tiles, zero-value rows; negatives are validation errors),
+        // at the width the export draws the treemap at.
+        ? treemapWarnings(typedSpec, rows, treemapExportChartWidth(typedSpec, rows))
         : [];
   return {
     exitCode: 0,

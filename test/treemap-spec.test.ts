@@ -19,7 +19,7 @@ describe("treemap - structural validation", () => {
       columns: { x: "name", value: "amount", series: "group" },
       series_order: ["a"], series_colors: { a: "blue" }, series_labels: { a: "A" },
       value_format: { decimals: 0, prefix: "$" }, tooltip_decimals: 1,
-      chrome: { tooltip: false },
+      chrome: { tooltip: false }, legend: true, legendPosition: "right", series_legend: false,
       treemap: {
         label_value: "value", shading: "none", share_decimals: 3,
         tooltip: [{ column: "c", label: "C", format: { decimals: 1, suffix: " pp" } }, { column: "d" }],
@@ -29,7 +29,7 @@ describe("treemap - structural validation", () => {
   });
 
   it.each([
-    ["legend", true], ["legendPosition", "top"], ["series_legend", true], ["value_prefix", "$"],
+    ["value_prefix", "$"],
     ["value_suffix", "%"], ["annotations", { xAxis: [] }], ["overlays", []], ["x_axis_title", "Year"],
     ["yAxisPolicy", { min: 0 }], ["orientation", "horizontal"], ["small_multiples", {}],
     ["shading", []], ["projected_field", "p"], ["timeline", {}],
