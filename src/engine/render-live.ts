@@ -12,6 +12,7 @@ import { resolveColumns } from "../spec/columns.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
+  legendInRightColumn,
   legendSeriesCount,
   orderForRightLegend,
   resolveLegendPosition,
@@ -1534,16 +1535,26 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // on this throwaway probe, once more on the real draw() below. Every other hook is a pure
   // formatter, unaffected by running against output nobody sees.
   let prelimSeriesCount = 1;
+  let prelimLegendItems: NonNullable<ReturnType<typeof renderChart>["legendItems"]> = [];
   try {
     const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
     const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: prelimHooks });
     prelimSeriesCount = legendSeriesCount(prelim.legendItems ?? []);
+    prelimLegendItems = prelim.legendItems ?? [];
   } catch {
     // Ignore — draw() will surface the error.
   }
+  // The spec's legend position. A TREEMAP takes the export's rule (legendInRightColumn): with no
+  // legend rows — flat data, one group, `series_legend: false` — there is no column to reserve, so
+  // it draws at the card's full width, as its PNG does. Treemap-only by design: every other chart
+  // type keeps its existing resolution (a right column's width is reserved even with no rows).
+  const specPos = (): "top" | "right" =>
+    spec.chartType === "treemap"
+      ? (legendInRightColumn(spec, prelimLegendItems, 0, rows) ? "right" : "top")
+      : resolveLegendPosition(spec, prelimSeriesCount, rows);
   // Fall back to top if the card is too narrow for the right-legend column.
   const resolvedPos = (): "top" | "right" => {
-    const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
+    const pos = specPos();
     if (pos === "right" && (card.clientWidth || initialWidth || 720) < LEGEND_RIGHT_MIN_CARD_WIDTH) {
       return "top";
     }
@@ -1584,7 +1595,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
         const cardW = card.clientWidth;
-        const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
+        const pos = specPos();
         const effectivePos: "top" | "right" =
           pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
         draw(cardW, effectivePos, "resize");

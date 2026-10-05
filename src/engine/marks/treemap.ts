@@ -11,7 +11,7 @@ import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
 import { buildColorMap } from "../index";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
-import { resolveLegendPosition, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
+import { legendInRightColumn, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
 import { INNER_W } from "../../embed/figure-chrome";
 import type { ChartSpec } from "../../spec/types";
 import type { TidyRow } from "../../data/index";
@@ -106,10 +106,10 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   return choose(spec, rows, width).built;
 }
 
-/** A spec + rows + width drawn as one candidate. */
-function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapCandidate): Built {
-  const cfg = resolveTreemapConfig(spec);
-  const data = treemapData(spec, rows);
+/** The groups in hue order, their resolved colours and their legend rows — width-independent. */
+function treemapGroups(spec: ChartSpec, data: TreemapDatum[]): {
+  groupNames: string[]; colors: Map<string, string>; keyRows: LegendItem[]; labelOf: (g: string) => string;
+} {
   const grouped = data.some((d) => d.group !== null);
   // Own-property lookups only: a group named "constructor", "toString" or "__proto__" must not
   // find the inherited Object.prototype member (author maps are ordinary objects).
@@ -129,6 +129,17 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
     if (c !== undefined) colorCfg[g] = c;
   }
   const colors = buildColorMap(groupNames, spec.series_colors ? colorCfg : undefined);
+  const keyRows: LegendItem[] = groupNames.map((g) => ({
+    series: g, label: labelOf(g), color: colors.get(g), dashed: false, markerShape: "rect",
+  }));
+  return { groupNames, colors, keyRows, labelOf };
+}
+
+/** A spec + rows + width drawn as one candidate. */
+function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapCandidate): Built {
+  const cfg = resolveTreemapConfig(spec);
+  const data = treemapData(spec, rows);
+  const { groupNames, colors, keyRows, labelOf } = treemapGroups(spec, data);
   const flatHue = tokens.categorical[0]!.base;
   const hueOf = (g: string | null): string => (g === null ? flatHue : colors.get(g) ?? flatHue);
 
@@ -164,9 +175,6 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
       label: labels[i]!,
     };
   });
-  const keyRows: LegendItem[] = groupNames.map((g) => ({
-    series: g, label: labelOf(g), color: colors.get(g), dashed: false, markerShape: "rect",
-  }));
   return { width, areaH, tiles, groupNames, colors, keyRows };
 }
 
@@ -182,12 +190,17 @@ function legendShown(spec: ChartSpec, groupCount: number): boolean {
   return spec.legend !== false && spec.series_legend !== false && groupCount > 1;
 }
 
+/** The legend rows renderTreemap returns as `legendItems` (none when the legend is not drawn). */
+function treemapLegendRows(spec: ChartSpec, keyRows: LegendItem[]): LegendItem[] | null {
+  return legendShown(spec, keyRows.length) ? keyRows : null;
+}
+
 /** The chart width the PNG export draws a treemap at: the full inner width, less the right-hand
- *  legend column when the export puts the legend there (export-png's rightLegend rule). */
+ *  legend column when the export puts the legend there — the export's own rule
+ *  (legendInRightColumn) on the legend rows the export will see. A treemap has no shape legend. */
 export function treemapExportChartWidth(spec: ChartSpec, rows: TidyRow[]): number {
-  const groups = new Set(treemapData(spec, rows).map((d) => d.group).filter((g) => g !== null)).size;
-  const right = legendShown(spec, groups) && resolveLegendPosition(spec, groups, rows) === "right";
-  return right ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+  const items = treemapLegendRows(spec, treemapGroups(spec, treemapData(spec, rows)).keyRows) ?? [];
+  return legendInRightColumn(spec, items, 0, rows) ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 }
 
 /** Non-fatal warnings at `width` (by default the export's chart width): the data warnings, plus more
@@ -284,7 +297,7 @@ export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOpti
   // Last, as on every chart type: nothing below touches the SVG.
   if (opts.hooks?.afterRender) opts.hooks.afterRender(svg, { phase: opts.phase ?? "live" });
   return {
-    svg, legendItems: legendShown(spec, b.groupNames.length) ? b.keyRows : null, seriesKeyRows: b.keyRows,
+    svg, legendItems: treemapLegendRows(spec, b.keyRows), seriesKeyRows: b.keyRows,
     // A right-hand column lists the groups in the same order as a top legend (not reversed).
     legendVisualOrder: b.groupNames,
     seriesLabels: spec.series_labels ?? {}, seriesOrder: b.groupNames,

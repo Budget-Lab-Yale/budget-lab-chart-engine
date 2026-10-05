@@ -155,6 +155,47 @@ describe("treemap legend, live", () => {
     expect(Number(svgOf(host).getAttribute("width"))).toBe(RIGHT_W);
   });
 
+  it("legendPosition: right with no legend rows (flat, one group, series_legend: false) draws at the full card width, as the PNG does", () => {
+    const one = GROUPED.filter((r) => r.group === "Mandatory");
+    const cases: Array<[ChartSpec, TidyRow[]]> = [
+      [{ ...FLAT_SPEC, legendPosition: "right" } as ChartSpec, BLS],
+      [{ ...SPEC, legendPosition: "right" } as ChartSpec, one],
+      [{ ...SPEC, series_legend: false, legendPosition: "right" } as ChartSpec, GROUPED],
+    ];
+    for (const [spec, rows] of cases) {
+      const host = mount(spec, INNER_W, rows);
+      expect(host.querySelector(".tbl-legend")).toBeNull();
+      expect(host.querySelector(".figure-body--legend-right")).toBeNull();
+      const live = svgOf(host);
+      const png = buildExportSvg(spec, rows).querySelector<SVGSVGElement>(`svg.${TREEMAP_CLASS}`)!;
+      expect(Number(live.getAttribute("width"))).toBe(INNER_W);
+      expect(Number(png.getAttribute("width"))).toBe(INNER_W);
+      // The same layout on both paths: every tile at the same place and size.
+      const boxes = (svg: SVGSVGElement) => q(svg, "rect.tbl-treemap-tile").map((r) => ["x", "y", "width", "height"].map((a) => r.getAttribute(a)).join(","));
+      expect(boxes(live)).toEqual(boxes(png));
+    }
+  });
+
+  it("the no-rows fallback is treemap-only: a non-treemap chart's right legend is unchanged", () => {
+    // A two-series stacked chart keeps its right-hand column.
+    const stacked = { chartType: "stacked", title: "S", xAxisType: "categorical", data: "inline", legendPosition: "right" } as ChartSpec;
+    const sRows = [{ time: "X", series: "A", value: "3" }, { time: "X", series: "B", value: "2" }] as TidyRow[];
+    const a = document.createElement("div");
+    document.body.append(a);
+    mountChart(a, { spec: stacked, rows: sRows, width: INNER_W });
+    expect(a.querySelector(".figure-body--legend-right")).not.toBeNull();
+    // A single-series line (no legend rows) with legendPosition: right still reserves the column's
+    // width live, exactly as before this fix: pre-existing behaviour on non-treemap chart types,
+    // pinned here so the treemap fallback provably does not reach them.
+    const line = { chartType: "line", title: "L", xAxisType: "categorical", data: "inline", legendPosition: "right" } as ChartSpec;
+    const lRows = [{ time: "X", series: "A", value: "3" }, { time: "Y", series: "A", value: "2" }] as TidyRow[];
+    const b = document.createElement("div");
+    document.body.append(b);
+    mountChart(b, { spec: line, rows: lRows, width: INNER_W });
+    expect(b.querySelector(".tbl-legend")).toBeNull();
+    expect(Number(b.querySelector("svg.tblchart")!.getAttribute("width"))).toBe(RIGHT_W);
+  });
+
   it("legendPosition: right falls back to the top on a card too narrow for the column", () => {
     const host = mount({ ...SPEC, legendPosition: "right" } as ChartSpec, 500);
     expect(host.querySelector(".figure-legend-slot--right")).toBeNull();

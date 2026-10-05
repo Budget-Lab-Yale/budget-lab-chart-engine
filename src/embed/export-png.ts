@@ -17,9 +17,8 @@ import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWid
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
-  legendSeriesCount,
+  legendInRightColumn,
   orderForRightLegend,
-  resolveLegendPosition,
 } from "../engine/legend-layout.js";
 import {
   W,
@@ -416,8 +415,7 @@ export function buildExportSvg(
     !isFigure &&
     (tlFrame
       ? tlFrame.rightLegend
-      : (legendItems.length > 0 || shapeLegendItems.length > 0) &&
-        resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right");
+      : legendInRightColumn(spec, legendItems, shapeLegendItems.length, rows));
   const chartW = tlFrame ? tlFrame.chartW : rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---

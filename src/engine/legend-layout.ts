@@ -34,6 +34,22 @@ export function legendSeriesCount(items: readonly LegendItem[]): number {
 }
 
 /**
+ * Whether a legend goes in a right-hand column: it has rows to show (colour rows, or `shapeRows`
+ * rows of the neutral shape legend) and its position resolves to "right". A legend with no rows
+ * takes no column. The PNG export's rule (embed/export-png.ts); a treemap shares it for its export
+ * width (marks/treemap.ts) and its live card (render-live.ts, treemaps only).
+ */
+export function legendInRightColumn(
+  spec: ChartSpec,
+  legendItems: readonly LegendItem[],
+  shapeRows: number,
+  rows: TidyRow[],
+): boolean {
+  return (legendItems.length > 0 || shapeRows > 0) &&
+    resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right";
+}
+
+/**
  * "top" or "right" for this spec.
  *
  * `legend: false` suppresses the legend entirely (buildLegendItems returns null), so no right
