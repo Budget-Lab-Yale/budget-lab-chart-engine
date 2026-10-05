@@ -53,6 +53,14 @@ NAMED.sky = tokens.brand.sky;
 
 export const TBL_COLORS: Readonly<Record<string, string>> = NAMED;
 
+/** Whether `value` is a palette name: an OWN key of TBL_COLORS. `in` and plain indexing also reach
+ *  Object.prototype, so "constructor", "toString" or "__proto__" passed as palette names and
+ *  resolved to a function or an object (Ruling 44). Every lookup by an author's string goes
+ *  through this. */
+export function isPaletteName(value: string): boolean {
+  return Object.hasOwn(TBL_COLORS, value);
+}
+
 // ---------------------------------------------------------------------------
 // Is this a color the engine can paint?
 // ---------------------------------------------------------------------------
@@ -101,7 +109,7 @@ function isCssColor(value: string): boolean {
 /** True when a spec's color reference resolves to something paintable: a palette name, or a CSS
  *  color the engine passes through untouched. */
 export function isColorRef(value: string): boolean {
-  return value in TBL_COLORS || isCssColor(value);
+  return isPaletteName(value) || isCssColor(value);
 }
 
 /** The subset of the above that a HATCH can be grounded over — narrower, because PAINTING a colour and
@@ -122,7 +130,7 @@ export function isColorRef(value: string): boolean {
  *  Plot's table, so it is refused earlier and never reaches here. */
 export function isHatchGroundable(value: string): boolean {
   // A palette name resolves to a hex before any hatch is derived, so the name itself is groundable.
-  if (value in TBL_COLORS) return true;
+  if (isPaletteName(value)) return true;
   const v = value.toLowerCase().trim();
   if (CSS_HEX_RE.test(v)) return true;
   // The LEGACY comma syntax only: d3-color reads `rgb(0,114,178)` and not `rgb(0 114 178)`.

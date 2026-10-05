@@ -12,6 +12,8 @@ import { describe, it, expect } from "vitest";
 import { validateSpec } from "../src/spec/validate";
 import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
+import { isColorRef } from "../src/spec/color-ref";
+import { resolveColor } from "../src/engine/palette";
 import type { TidyRow } from "../src/data/index";
 
 const ROWS: TidyRow[] = [
@@ -204,5 +206,29 @@ describe("the message points at the mistake", () => {
     const r = validateSpec({ ...BAR, bar_color: "" });
     expect(r.valid).toBe(false);
     expect(r.errors.join("\n")).toMatch(/empty/);
+  });
+});
+
+describe("Object.prototype keys are not palette names (Ruling 44)", () => {
+  const KEYS = ["constructor", "toString", "__proto__", "valueOf", "hasOwnProperty"];
+  const LINE = { chartType: "line", title: "T", xAxisType: "categorical", data: "d.csv" } as ChartSpec;
+  const TREEMAP = {
+    chartType: "treemap", title: "T", xAxisType: "categorical", data: "d.csv",
+    columns: { x: "category", value: "amount", series: "group" },
+  } as ChartSpec;
+  it("isColorRef rejects them and resolveColor passes them through as the same string", () => {
+    for (const k of KEYS) {
+      expect(isColorRef(k), k).toBe(false);
+      expect(resolveColor(k), k).toBe(k);
+    }
+  });
+  it("validation rejects them as a series colour on a line chart and on a treemap", () => {
+    for (const k of KEYS) {
+      for (const spec of [LINE, TREEMAP]) {
+        const r = validateSpec({ ...spec, series_colors: { A: k } } as ChartSpec);
+        expect(r.valid, `${spec.chartType} ${k}`).toBe(false);
+        expect(r.errors.join(" ")).toContain(k);
+      }
+    }
   });
 });

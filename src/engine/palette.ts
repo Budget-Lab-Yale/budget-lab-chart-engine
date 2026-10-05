@@ -5,7 +5,7 @@
 // lighter blue, a 10th a lighter amber, etc. The light tier is computed in
 // sync-theme.mjs from each hue's tonal scale — see theme/tokens.ts.
 import { tokens } from "../theme/tokens";
-import { TBL_COLORS } from "../spec/color-ref";
+import { TBL_COLORS, isPaletteName } from "../spec/color-ref";
 import { d3 } from "./vendor";
 
 export { TBL_COLORS };
@@ -35,7 +35,7 @@ export function tblColorScale(n: number): string[] {
  * unchanged. Undefined/empty passes through so callers can `?? fallback`. */
 export function resolveColor(value: string | undefined): string | undefined {
   if (!value) return value;
-  return TBL_COLORS[value] ?? value;
+  return isPaletteName(value) ? TBL_COLORS[value] : value;
 }
 
 /** `resolveColor` with a default: the shape almost every caller wants, since a color ref is
