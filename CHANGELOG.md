@@ -12,16 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   area is proportional to value at one scale across the chart, less the gutters; tiles shaded by
   size rank within a band around their colour (each group's, or blue with no groups): the four
   tonal tiers nearest it plus the CIELAB midpoint of each adjacent pair, seven shades in all (blue:
-  500, 450, … 200), so the legend chip's shade lies within its group's tiles. The midpoints are
-  computed, not palette tokens, and cannot be specified. Labels top-left at one size
+  500, 450, … 200); a one-tile group is drawn in its colour as resolved, the legend chip's. The
+  midpoints are computed, not palette tokens, and cannot be specified. Labels top-left at one size
   per chart (14px, 12px below 600px wide), placed largest first within each group and stopping at
-  the first that does not fit, so a group never labels a tile while leaving a larger one bare. The tiles of flat data
-  are drawn squarified, as rows, as columns or as a balanced split, whichever labels the most
-  tiles; grouped data's blocks are squarified at 600px and wider and compete the same way below;
-  below 400px wide 11px text competes too. A group whose largest tile cannot hold its label is
-  re-laid out inside its own block (rows, columns or a balanced split) where that lets it fit.
-  Groups are named by the standard legend (top, or `legendPosition: right`; `legend` and
-  `series_legend` work as on other charts), whose rows highlight their group's tiles. A tile left
+  the first that does not fit, so a group never labels a tile while leaving a larger one bare. The
+  tiles of flat data are drawn squarified, as rows, as columns or as a balanced split, whichever
+  labels the most tiles; grouped data's blocks are squarified at 600px and wider and compete the
+  same way below; below 400px wide 11px text competes too. A group whose largest tile cannot hold
+  its label is re-laid out inside its own block (rows, columns or a balanced split) where that lets
+  it fit. Groups are named by the standard legend (top, or `legendPosition: right`, which reserves
+  no column when there are no legend rows; `legend` and `series_legend` work as on other charts),
+  whose rows highlight their group's tiles. A tile left
   unlabelled is named by its hover card and screen-reader label. New `treemap:` block
   (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap, `value_format`
   groups thousands, and `series_order` sets hue order and breaks ties between equal group totals,

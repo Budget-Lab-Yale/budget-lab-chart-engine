@@ -958,32 +958,33 @@ appearance. Data with no groups is blue. That, and breaking ties between equal g
 order. `series_colors` sets a group's colour: a hue name or one of its tiers (`green`, `violet-300`)
 picks that hue family, and a colour on none of the hue ramps (a raw hex such as `#5B4B8A`) fills
 every tile in the group as written. With `shading: size`, tiles are shaded by rank, the largest
-darkest, within a band around their colour as resolved — a group's `series_colors` value, else the
-palette's colour; with no groups, blue — ranking within each group, or among all tiles with no
-groups. The band is four tonal tiers, the tier that colour sits nearest on its hue's ramp, one tier
-darker and two lighter — `500` to `200` for blue, which sits nearest `blue-400` — and at either end
-of the ramp it keeps four tiers (`300` to `50` for a colour nearest `100` or `50`; `700` to `400`
-for one nearest `600` or `700`). Between each pair of adjacent tiers the engine adds a half-step,
-their midpoint in CIELAB, so a band is seven shades: blue's run `500`, 450, `400`, 350, `300`, 250,
-`200`. Ranks spread evenly over the seven, rank *r* of *n* taking shade round(*r* × 6 / (*n* − 1)),
-darkest first: seven tiles take one shade each, two take the darkest and the lightest. Rank, not
-value, decides the shade, so a few large tiles do not wash every small one out to the same pale
-shade. The half-steps are not palette tokens: the engine computes them, and none has a name a figure
-could set (`blue-450` is rejected at load, as any unknown colour name is). House style asks that the
-colours a figure specifies be palette tokens; colours the engine computes from them, as here, need
-not be.
-Text on a tile is white or navy, whichever contrasts more with its fill. Past seven
-groups the hues repeat, in the same order, from the eighth group in hue order, as a lighter tier of
-the hue — `blue-200`, `amber-50`, `violet-200`, `green-100`, `red-200`, `rose-50`, `russet-300` for
-the 8th to 14th groups, then again from the 15th. With `shading: none` that tier is its tiles'
-colour; with `shading: size` its tiles take the band around it, which is lighter than the first
-group of its hue's for blue, violet, green, red and russet, and the same band for amber and rose
-(their palette colours already sit at the light end). A group with its own `series_colors` entry
-still counts toward that order. `tbl-chart validate` warns on more than seven groups with no
+darkest, with shades taken from a band around their colour as resolved — a group's `series_colors`
+value, else the palette's colour; with no groups, blue — ranking within each group, or among all
+tiles with no groups. The band is four tonal tiers on the colour's hue ramp: the tier the colour
+sits nearest in lightness, one tier darker and two lighter, shifted inward where the ramp runs out
+so it keeps four tiers — `500` to `200` for blue, which sits nearest `blue-400`; `300` to `50` for a
+colour nearest `200`, `100` or `50`; `700` to `400` for one nearest `600` or `700`. Between each
+pair of adjacent tiers the engine adds a half-step, their midpoint in CIELAB, so a band is seven
+shades: blue's run `500`, 450, `400`, 350, `300`, 250, `200`. Ranks spread evenly over the seven,
+rank *r* of *n* taking shade round(*r* × 6 / (*n* − 1)), darkest first: seven tiles take one shade
+each, two take the darkest and the lightest. A group of exactly one tile — or data with no groups
+and one tile — takes no shade from the band: it is drawn in its colour as resolved, the legend
+chip's colour. Rank, not value, decides the shade, so a few large tiles do not wash every small one
+out to the same pale shade. The half-steps are not palette tokens: the engine computes them, and
+none has a name a figure could set (`blue-450` is rejected at load, as any unknown colour name is).
+House style asks that the colours a figure specifies be palette tokens; colours the engine computes
+from them, as here, need not be. Text on a tile is white or navy, whichever contrasts more with its
+fill. Past seven groups the hues repeat, in the same order, from the eighth group in hue order, as a
+lighter tier of the hue — `blue-200`, `amber-50`, `violet-200`, `green-100`, `red-200`, `rose-50`,
+`russet-300` for the 8th to 14th groups, then again from the 15th. With `shading: none` that tier is
+its tiles' colour; with `shading: size` its tiles take the band around it, which is lighter than the
+first group of its hue's for blue, violet, green, red and russet, and the same band for amber and
+rose (their palette colours already sit at the light end). A group with its own `series_colors`
+entry still counts toward that order. `tbl-chart validate` warns on more than seven groups with no
 `series_colors` set. With `shading: size`, data with no groups stays within blue's band, so it never
-uses the blue ramp's `700`, `600`, `100` or `50` tiers, and a group uses a `50` tier only where its
-band reaches it — the default amber and rose groups, the lighter repeats except russet's
-(`russet-300`, whose band is `400` to `100`), and any colour nearest `100` or `50`. With
+uses the blue ramp's `700`, `600`, `100` or `50` tiers, and a group uses a `50` tier only when its
+colour sits nearest `200`, `100` or `50` — among the palette's colours, the default amber and rose
+groups and every lighter repeat except russet's (`russet-300`, whose band is `400` to `100`). With
 `shading: none`, a group's tiles are a `50` tier when its `series_colors` sets one, or, with no
 `series_colors` entry, when it is the 9th or 13th group in hue order or any seventh after either
 (16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
@@ -992,15 +993,19 @@ band reaches it — the default amber and rose groups, the lighter repeats excep
 **Groups and the legend.** With two or more groups, the chart's legend names them, as on other
 charts: one row per group, in hue order, each labelled by `series_labels` (else the group's name)
 beside a chip of the group's colour as resolved — its `series_colors` value, else the palette's
-colour — the colour its tiles' band is built around, so the chip's shade lies within the range its
-tiles are drawn in. Data with no groups, or a single group, draws no legend. `legend: false` hides
-it; `series_legend: false` drops the group rows, and with no other rows on a treemap that hides it
-too. The legend sits above the treemap; `legendPosition: right`
-puts it in a column beside the treemap instead, the rows in the same order, on a card wide enough
-for the column (see `legendPosition`), the treemap laid out at the narrower width that leaves — in
-the PNG export as on screen. Hovering a row dims every other group's tiles, clicking a row (or a
-tile) pins its group, and the reset button beside the legend clears the pins. The tile hover (see
-**Hover**) works alongside it: leaving a tile restores whatever the legend had set.
+colour — the colour its tiles' band is built around. A group of two or more tiles is drawn from the
+band's darkest shade to its lightest (a colour on no ramp: every tile in it), and the chip lies between them in lightness for every palette
+colour except `navy`, which borrows blue's ramp and is darker than its darkest tier; a one-tile
+group is the chip's own colour. Data with no groups, or a single group, draws no legend.
+`legend: false` hides it; `series_legend: false` drops the group rows, and with no other rows on a
+treemap that hides it too. The legend sits above the treemap; `legendPosition: right` puts it in a
+column beside the treemap instead, the rows in the same order, on a card wide enough for the column
+(see `legendPosition`), the treemap laid out at the narrower width that leaves — in the PNG export
+as on screen. `legendPosition: right` with no legend rows to show (data with no groups, a single
+group, or `series_legend: false`) reserves no column: the treemap takes the card's full width, on
+screen as in the PNG. Hovering a row dims every other group's tiles, clicking a row (or a tile) pins
+its group, and the reset button beside the legend clears the pins. The tile hover (see **Hover**)
+works alongside it: leaving a tile restores whatever the legend had set.
 
 **Tile labels.** Every label in a chart is drawn at one size: 14px on a chart at least 600px wide,
 12px on a narrower one (so the 920px PNG is 14px), or 11px below 400px wide where that labels more
@@ -1008,7 +1013,8 @@ tiles (see **Choosing the layout and size**). A tile shows its name in bold abov
 the number at the same size in medium weight, left-aligned in the tile's top-left corner and fitted
 inside a 6px padding on every side; the name wraps at spaces, to at most three lines. Where that
 does not fit, the name and number are tried on one line. Tiles are labelled largest first within
-each group (with no groups, among all tiles; equal values in layout order), and labelling stops at
+each group (with no groups, among all tiles; values equal to 12 significant digits, as in
+**Layout**, in layout order), and labelling stops at
 the first tile whose label does not fit: that tile and every smaller one in its group are left
 unlabelled, so a group never labels a tile while leaving a larger one of its own bare. Groups are
 labelled independently, so a tile in one group can be labelled while a larger one in another is
