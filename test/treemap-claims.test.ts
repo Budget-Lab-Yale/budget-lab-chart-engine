@@ -119,9 +119,10 @@ describe("layout sort ties: equal to 12 significant digits", () => {
 });
 
 describe("series_labels on a treemap", () => {
-  it("renames a group in the hover card and the screen-reader labels", () => {
+  it("renames a group in the legend, the hover card and the screen-reader labels", () => {
     const spec = { ...TM, series_labels: { A: "Alpha group", B: "Beta group" } } as ChartSpec;
-    const { svg } = renderChart(spec, TWO, { width: 920 });
+    const { svg, legendItems } = renderChart(spec, TWO, { width: 920 });
+    expect(legendItems!.map((i) => i.label)).toEqual(["Alpha group", "Beta group"]);
     const aria = q(svg, "g[role=img]").map((g) => g.getAttribute("aria-label")!);
     expect(aria.filter((a) => a.startsWith("Beta group · b"))).toHaveLength(3);
     expect(aria.some((a) => /^[AB] · /.test(a))).toBe(false);
@@ -130,6 +131,7 @@ describe("series_labels on a treemap", () => {
     mountChart(host, { spec, rows: TWO, width: 920 });
     q(host, "svg.tbl-treemap g[role=img]")[0]!.dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10 }));
     expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("Alpha group · a1");
+    expect(q(host, ".tbl-legend-item").map((b) => b.textContent)).toEqual(["Alpha group", "Beta group"]);
   });
 });
 

@@ -633,9 +633,9 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
 | `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, but the gap never changes **whether** a label is drawn: the ~25px fit threshold is a judgement about a segment's share of the data, applied once to the un-gapped extent, and a rect that cleared it is at worst 13px after the maximum gap — still room for a 10px glyph. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
-| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it. **Four routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top`, at mount and on every resize (a card narrowed below it moves the legend to the top, and one widened past it again moves the legend back to the right column); a `small_multiples` figure has only a top legend slot, in the export as on screen; and a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)). **Otherwise the PNG export follows this field**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. A treemap draws no legend and rejects this field, as it does `legend` and `series_legend`. |
-| `series_legend` | boolean | Set `false` to drop the **series rows** from the legend while keeping the rows overlays and annotations opted into with `legend: true`. For a chart whose colour channel does not need naming because the points are identified some other way — a `columns.point_label`, or a single highlighted observation the note explains. Distinct from `legend: false` directly below, which removes the whole box (and, having nowhere to put them, pushes overlay labels back in-frame). Because the box survives, click-to-pin/dim still works for the rows that remain. One caveat, and it is per DIMENSION rather than per legend: colour/annotation rows and shape rows are selected independently, and each dims only on a strict subset of its own dimension. So selecting a row that is the only one left in **its** dimension dims nothing — which `series_legend: false` makes reachable on a dual-encoding point chart, where it strips the colour rows but **not** the shape rows (those follow the top-level `legend` only), leaving a lone overlay row in the colour/annotation dimension beside two live shape rows. The same is already true of a single-series scatter with one keyed overlay. Not chart-type specific, except that a treemap, which draws no legend, rejects it. Default true. |
-| `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend; a treemap has none and rejects the field. |
+| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it. **Four routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top`, at mount and on every resize (a card narrowed below it moves the legend to the top, and one widened past it again moves the legend back to the right column); a `small_multiples` figure has only a top legend slot, in the export as on screen; and a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)). **Otherwise the PNG export follows this field**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. |
+| `series_legend` | boolean | Set `false` to drop the **series rows** from the legend while keeping the rows overlays and annotations opted into with `legend: true`. For a chart whose colour channel does not need naming because the points are identified some other way — a `columns.point_label`, or a single highlighted observation the note explains. Distinct from `legend: false` directly below, which removes the whole box (and, having nowhere to put them, pushes overlay labels back in-frame). Because the box survives, click-to-pin/dim still works for the rows that remain. One caveat, and it is per DIMENSION rather than per legend: colour/annotation rows and shape rows are selected independently, and each dims only on a strict subset of its own dimension. So selecting a row that is the only one left in **its** dimension dims nothing — which `series_legend: false` makes reachable on a dual-encoding point chart, where it strips the colour rows but **not** the shape rows (those follow the top-level `legend` only), leaving a lone overlay row in the colour/annotation dimension beside two live shape rows. The same is already true of a single-series scatter with one keyed overlay. Not chart-type specific. Default true. |
+| `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend, a grouped treemap included. |
 | `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed — on a treemap, the hovered tile's outline and the dimming of the other tiles stay. Applies to any chart type that has a tooltip — which is a real restriction, not a formality: on a chart whose hover is the coordinated cursor or the value pills rather than a card (see `small_multiples.coordinated_cursor` and `barStack.hover`) there is no card to suppress and this switch is a no-op, pills included. Use `chrome.valuePills` for those. Default true. Not bar-specific. The card itself is capped at 320px wide and **wraps** a row label longer than that onto further lines rather than clipping it — including a label with no space or hyphen to break at, which is broken mid-word rather than run out through the border. A row's value is joined to its label by a non-breaking space, so a wrap does not separate them. A long series name, category name, overlay label or (on a `scatter`) axis title therefore makes the card taller, never wider, and never leaves its number outside the card. Wrapping is live-DOM CSS: a PNG export has no card, so nothing about it changes in a download. |
 | `chrome.valuePills` | boolean | Turn off the per-segment value pills a reader sees hovering a band (bar, stacked-bar), and the legend-gesture value pills (bar, stacked-bar, dot-plot). On a **faceted** figure it also covers the coordinated cursor's per-series pills, on the hovered pane as well as on the echoed panes. Only the pills go: the guide line, the band/bin highlight, the per-series hover dots, the hovered pane's category echo, and hit-testing are untouched. Default true — **except where `valueLabels.show` has painted the numbers into EVERY segment** (a stacked chart that is not diverging, not a small-multiples pane, and with no segment too thin for its label), where the default flips to **off** so the hover does not repeat them. One skipped segment label keeps the default at true for the whole chart, so that segment still gets a number. That is a change of default, not an override: `true` here still wins and shows both, and `false` still suppresses them anywhere. |
 
@@ -904,12 +904,13 @@ row (a zero value draws none), its area proportional to its value less the gutte
 below). It suits many categories of very different sizes, where a stacked bar gets
 crowded. Map the tile's name with `columns.x`, its size with `columns.value`, and an optional
 **group** with `columns.series` (one level of grouping only).
-It requires `xAxisType: categorical` and has no axes and no legend. The `treemap:` block is a
-validation error on every other chart type.
+It requires `xAxisType: categorical` and has no axes. With two or more groups, a legend names them
+(see **Groups and the legend** below). The `treemap:` block is a validation error on every other
+chart type.
 
 | field | type | notes |
 |---|---|---|
-| `treemap.label_value` | enum | The number drawn with each tile's name (and with a group's name written inside its block, see **Header strips**): `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card and the tile's screen-reader label). |
+| `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card and the tile's screen-reader label). |
 | `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's colour as resolved — its `series_colors` value as written (a tier such as `violet-300` included), else the palette's colour for it: its hue's base colour for the first seven groups, a lighter tier of the hue from the eighth on (see **Groups and colour** below); flat data is blue. Distinct from the top-level `shading`, which a treemap rejects. |
 | `treemap.share_decimals` | integer | Decimal places on every share, 0–3. Default 1. |
 | `treemap.tooltip` | array | Extra hover-card rows, in order, after Value and Share. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
@@ -930,42 +931,39 @@ sorted by value, the largest first and top-left; equal values keep their CSV ord
 equal to 12 significant digits count as equal. With groups, each group is one block: blocks are
 sorted by group total, largest first, ties (to 12 significant digits, so `0.1 + 0.2` ties `0.3`)
 broken by `series_order` and then by first appearance, and within a block its tiles are sorted as
-above. A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas are proportional to
-value less those fixed gutters, which take relatively more from a small tile (a sliver can be left
-with no area at all). A group's header strip is added to its block: the block is enlarged by the
-strip's area, so a tile's area per unit of value is the same in every group, with a strip or without
-one, less the gutters. When a group's largest tile cannot hold its label (see **Tile labels**), that
-group's tiles alone are laid out again inside the same block, trying in turn full-width rows from
-the largest down, full-height columns from the left, and a balanced split by value, and the first
-under which the largest tile's label fits is kept (squarified if none). The block's position and
-size never change, and tile areas stay proportional to value as above.
+above. A 2px gutter separates tiles and a 4px one separates group blocks. Tile areas are
+proportional to value at one scale across the whole chart, groups included, less those fixed
+gutters, which take relatively more from a small tile (a sliver can be left with no area at all).
+When a group's largest tile cannot hold its label (see **Tile labels**), that group's tiles alone
+are laid out again inside the same block, trying in turn full-width rows from the largest down,
+full-height columns from the left, and a balanced split by value, and the first under which the
+largest tile's label fits is kept (squarified if none). The block's position and size never
+change, and tile areas stay proportional to value as above.
 
-**Choosing the layout and size.** The chart is drawn in whichever of these candidates names the
-most groups and, among those, labels the most tiles (under the rule in **Tile labels**), the
-earlier one winning a tie: squarified, full-width rows from the largest down, full-height columns
-from the left, or a balanced split by value, each at the base size (14px, or 12px below 600px
-wide); then, on a chart narrower than 400px only, the same four again at 11px. With no groups the
-four arrange the tiles themselves (and no groups are named, so the most tiles labelled wins); with
-groups they arrange the group blocks, and each block's tiles are squarified (or re-laid out inside
-the block, as above). A group counts as named when it has a header strip or its name is written in
-its block (see **Header strips**). So a chart can be drawn as rows or columns rather than
-near-squares, and in 11px text only when that names or labels more than the base size does. Every
-candidate shares the area by value, with the strip compensation above, so tile areas stay
-proportional.
+**Choosing the layout and size.** The chart is drawn in whichever of these candidates labels the
+most tiles (under the rule in **Tile labels**), the earlier one winning a tie: squarified,
+full-width rows from the largest down, full-height columns from the left, or a balanced split by
+value, each at the base size (14px, or 12px below 600px wide); then, on a chart narrower than
+400px only, the same four again at 11px. With no groups the four arrange the tiles themselves.
+With groups they arrange the group blocks, and only on a chart narrower than 600px: at 600px and
+wider the blocks are always squarified. A block's tiles are squarified whatever arranges the
+blocks (or re-laid out inside the block, as above). So a chart can be drawn as rows or columns
+rather than near-squares, and in 11px text only when that labels more tiles than the base size
+does. Every candidate shares the area by value, so tile areas stay proportional.
 
 **Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
 rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first
 appearance. Data with no groups is blue. That, and breaking ties between equal group totals, is all
 `series_order` does on a treemap: it does not filter (every group draws) and does not set the layout
 order. `series_colors` sets a group's colour: a hue name or one of its tiers (`green`, `violet-300`)
-picks that hue family, and a colour on none of the hue ramps (a raw hex such as `#5B4B8A`) fills the
-group's strip and every tile in it as written. With `shading: size`, tiles take the hue family's
-tonal tiers by rank, spread evenly from darkest to lightest: `700` → `100` with no groups, `600` →
-`100` with groups (the group's `700` is its header strip). Rank, not value, decides the shade, so a
-few large tiles do not wash every small one out to the same pale tier.
-Text on a tile or strip is white or navy, whichever contrasts more with its fill. Past seven
+picks that hue family, and a colour on none of the hue ramps (a raw hex such as `#5B4B8A`) fills
+every tile in the group as written. With `shading: size`, each group's tiles (with no groups, all
+tiles) take the hue family's tonal tiers by rank, spread evenly from darkest to lightest, `700` →
+`100`. Rank, not value, decides the shade, so a few large tiles do not wash every small one out to
+the same pale tier.
+Text on a tile is white or navy, whichever contrasts more with its fill. Past seven
 groups the hues repeat, in the same order, from the eighth group in hue order: with
-`shading: size` such a group takes the same tiers and strip as the first group of its hue, and
+`shading: size` such a group takes the same tiers as the first group of its hue, and
 with `shading: none` its tiles are a lighter tier of the hue — `blue-200`, `amber-50`,
 `violet-200`, `green-100`, `red-200`, `rose-50`, `russet-300` for the 8th to 14th groups, then
 again from the 15th. A group with its own `series_colors` entry still counts toward that order.
@@ -974,7 +972,19 @@ again from the 15th. A group with its own `series_colors` entry still counts tow
 `shading: none`, a group's tiles are a `50` tier when its `series_colors` sets one, or, with no
 `series_colors` entry, when it is the 9th or 13th group in hue order or any seventh after either
 (16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
-`series_labels` renames a group in its strip, the hover card and the screen-reader labels.
+`series_labels` renames a group in the legend, the hover card and the screen-reader labels.
+
+**Groups and the legend.** With two or more groups, the chart's legend names them, as on other
+charts: one row per group, in hue order, each labelled by `series_labels` (else the group's name)
+beside a chip of the group's colour as resolved — its `series_colors` value, else the palette's
+colour — the colour its tiles are shaded from. Data with no groups, or a single group, draws no
+legend. `legend: false` hides it; `series_legend: false` drops the group rows, and with no other
+rows on a treemap that hides it too. The legend sits above the treemap; `legendPosition: right`
+puts it in a column beside the treemap instead, the rows in the same order, on a card wide enough
+for the column (see `legendPosition`), the treemap laid out at the narrower width that leaves — in
+the PNG export as on screen. Hovering a row dims every other group's tiles, clicking a row (or a
+tile) pins its group, and the reset button beside the legend clears the pins. The tile hover (see
+**Hover**) works alongside it: leaving a tile restores whatever the legend had set.
 
 **Tile labels.** Every label in a chart is drawn at one size: 14px on a chart at least 600px wide,
 12px on a narrower one (so the 920px PNG is 14px), or 11px below 400px wide where that labels more
@@ -990,27 +1000,13 @@ not. An unlabelled tile is still named by its hover card and screen-reader label
 drawn smaller to make it fit, never truncated or ellipsised, and a tile never shows its number
 without its name.
 
-**Header strips.** With groups, each block opens with a strip in the group's `700` tier (or its
-off-ramp `series_colors` colour, as written): the group's name in bold and its share in medium
-weight, at the tile labels' size, or the name alone where both do not fit. The strip is 26px tall
-with 14px text and 22px with 12px. A group keeps its strip only when its block, as finally drawn,
-is at least two strips tall (52px, or 44px below 600px wide) and the name fits across it. Strips
-are decided on the blocks before any strip area is added and re-checked on the final blocks, so a
-block can lose its strip but never gain one. A group without a strip gets no strip area. When none
-of its tiles is labelled either, the group's name is written in its block's top-left instead, with
-its number as `label_value` says (its share, its value, or nothing with `none`), at the label size
-(name bold, number in medium weight) and fitted as a tile label is, in white or navy, whichever
-contrasts more with the tile it is drawn on; where it does not fit, nothing is written, and hovering
-a tile still names it. A group of one tile whose name is the group's name as its strip shows it
-draws only the tile's number in the tile (nothing with `label_value: none`), so the name is not
-shown twice.
-
 **Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
 280px and narrower, linear in between, and the treemap is never more than 460px tall. On screen it
-renders at the card's own width (a card narrower than 280px gets a 280px chart) and is laid out
-afresh on every resize, so a tile can gain or lose its label. The **PNG export** re-renders at the
-full 920px chart width — there is no legend column — through the same layout and labelling, and
-sizes the image's height to the treemap; the PNG can therefore label different tiles than a
+renders at the width the card leaves it (the card's own, less the column of a right-hand legend),
+never narrower than 280px, and is laid out afresh on every resize, so a tile can gain or lose its
+label. The **PNG export** re-renders at the full 920px chart width, or 744px beside a right-hand
+legend, through the same layout and labelling, and sizes the image's height to the treemap (or to
+a right-hand legend column taller than it); the PNG can therefore label different tiles than a
 narrower screen does.
 
 **Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
@@ -1024,20 +1020,19 @@ keyboard-focusable.
 **Accessibility.** The chart's SVG is a `role="group"` labelled with the title. Each tile is a
 `role="img"` whose `aria-label` reads `[Group · ]Name, <share> of total, <value>` — `Housing, 33.4% of
 total, $28,452` — with both numbers whatever `label_value` says, so an unlabelled tile is
-described in full. All drawn text (tile labels, strips and group names) is hidden from assistive
-technology so it is not read twice.
+described in full. The tile labels are hidden from assistive technology so they are not read twice.
 
 `tbl-chart validate` passes but warns on zero-value rows (naming them), on more than 30 tiles, when
-more than half the tiles are unlabelled at the 920px export width, and on more than seven
-groups with no `series_colors` set.
+more than half the tiles are unlabelled at the export's chart width (920px, or 744px beside a
+right-hand legend), and on more than seven groups with no `series_colors` set.
 
 **Accepted fields.** A treemap accepts only `chartType`, `title`, `subtitle`, `note`, `source`,
 `xAxisType`, `data`, `tags`, `columns` (roles `x`, `value`, `series`), `series_order`,
 `series_colors`, `series_labels`, `value_format`, `tooltip_decimals`, `chrome` (`chrome.tooltip`
-only) and `treemap`. Every other field is a validation error — among them `legend`,
-`legendPosition` and `series_legend` (a treemap draws no legend), `value_prefix` and `value_suffix`
-(use `value_format`), `annotations`, `overlays`, `small_multiples`, the top-level `shading`, every
-axis field and every other chart type's options — as is any other column role.
+only), `legend`, `legendPosition`, `series_legend` and `treemap`. Every other field is a validation
+error — among them `value_prefix` and `value_suffix` (use `value_format`), `annotations`,
+`overlays`, `small_multiples`, the top-level `shading`, every axis field and every other chart
+type's options — as is any other column role.
 
 ```yaml
 chartType: treemap
@@ -1157,7 +1152,7 @@ on a timeline or a treemap, its content's height, as on screen), where the live 
 the card. So
 the SVG handed to the hook usually differs in size between the two paths, and a hook that positions
 or sizes anything off it then lands at different coordinates in the PNG than on screen. The two can
-match — a horizontal timeline with no right-hand legend, or a treemap, drawn live at 920px, hands the
+match — a horizontal timeline or a treemap with no right-hand legend, drawn live at 920px, hands the
 hook the same-sized SVG on both paths — so a hook should assume neither outcome. (A consumer can also
 branch on `ctx.phase` and differ on purpose — but the size difference applies even to a hook that
 does not.) Keep an

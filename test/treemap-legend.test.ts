@@ -215,6 +215,20 @@ describe("treemap legend, PNG export", () => {
     }
   });
 
+  it("grows the frame to a right-hand column taller than the treemap, which keeps its own height", () => {
+    const many = Array.from({ length: 24 }, (_, i) => ({ group: `Group ${i}`, category: `c${i}`, amount: String(100 - i) })) as TidyRow[];
+    const spec = { ...SPEC, series_order: [], legendPosition: "right" } as ChartSpec;
+    const root = buildExportSvg(spec, many);
+    const t = inner(root);
+    expect(Number(t.getAttribute("height"))).toBe(RIGHT_W / 2);
+    const legend = rootTexts(root).filter((x) => /^Group \d+$/.test(x.textContent!.trim()));
+    expect(legend).toHaveLength(24);
+    const lowest = Math.max(...legend.map((x) => Number(x.getAttribute("y"))));
+    // The column runs past the treemap's bottom, and the frame still holds it.
+    expect(lowest).toBeGreaterThan(Number(t.getAttribute("y")) + RIGHT_W / 2);
+    expect(Number(root.getAttribute("height"))).toBeGreaterThan(lowest);
+  });
+
   it("draws no legend for flat data, legend: false or series_legend: false", () => {
     for (const [spec, rows] of [[FLAT_SPEC, BLS], [{ ...SPEC, legend: false }, GROUPED], [{ ...SPEC, series_legend: false, legendPosition: "right" }, GROUPED]] as const) {
       const root = buildExportSvg(spec as ChartSpec, rows);
