@@ -9,10 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Added
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tile
-  area is proportional to value at one scale across the chart, less the gutters; tiles shaded
-  700 → 100 by size rank in each group's hue. Labels top-left at one size per chart (14px, 12px
-  below 600px wide), placed largest first within each group and stopping at the first that does
-  not fit, so a group never labels a tile while leaving a larger one bare. The tiles of flat data
+  area is proportional to value at one scale across the chart, less the gutters; tiles shaded by
+  size rank, 700 → 100 with no groups and within a four-tier band around each group's colour with
+  groups, so the legend chip's shade lies within its group's tiles. Labels top-left at one size
+  per chart (14px, 12px below 600px wide), placed largest first within each group and stopping at
+  the first that does not fit, so a group never labels a tile while leaving a larger one bare. The tiles of flat data
   are drawn squarified, as rows, as columns or as a balanced split, whichever labels the most
   tiles; grouped data's blocks are squarified at 600px and wider and compete the same way below;
   below 400px wide 11px text competes too. A group whose largest tile cannot hold its label is

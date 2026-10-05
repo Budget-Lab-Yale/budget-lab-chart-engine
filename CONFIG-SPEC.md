@@ -957,29 +957,37 @@ appearance. Data with no groups is blue. That, and breaking ties between equal g
 `series_order` does on a treemap: it does not filter (every group draws) and does not set the layout
 order. `series_colors` sets a group's colour: a hue name or one of its tiers (`green`, `violet-300`)
 picks that hue family, and a colour on none of the hue ramps (a raw hex such as `#5B4B8A`) fills
-every tile in the group as written. With `shading: size`, each group's tiles (with no groups, all
-tiles) take the hue family's tonal tiers by rank, spread evenly from darkest to lightest, `700` →
-`100`. Rank, not value, decides the shade, so a few large tiles do not wash every small one out to
-the same pale tier.
+every tile in the group as written. With `shading: size`, tiles take tonal tiers by rank, spread
+evenly from darkest to lightest, the largest darkest. With no groups they run the blue ramp `700` →
+`100`. With groups, each group's tiles run a band of four tiers around the group's colour as
+resolved (its `series_colors` value, else the palette's colour): the tier that colour sits nearest
+on its hue's ramp, one tier darker and two lighter — `500` to `200` for the blue default, which sits
+nearest `blue-400`. At either end of the ramp the band keeps four tiers (`300` to `50` for a colour
+nearest `100` or `50`; `700` to `400` for one nearest `600` or `700`). Rank, not value, decides
+the shade, so a few large tiles do not wash every small one out to the same pale tier.
 Text on a tile is white or navy, whichever contrasts more with its fill. Past seven
-groups the hues repeat, in the same order, from the eighth group in hue order: with
-`shading: size` such a group takes the same tiers as the first group of its hue, and
-with `shading: none` its tiles are a lighter tier of the hue — `blue-200`, `amber-50`,
-`violet-200`, `green-100`, `red-200`, `rose-50`, `russet-300` for the 8th to 14th groups, then
-again from the 15th. A group with its own `series_colors` entry still counts toward that order.
-`tbl-chart validate` warns on more than seven groups with no `series_colors` set. With
-`shading: size` the `50` tier is never used, even when `series_colors` names it. With
-`shading: none`, a group's tiles are a `50` tier when its `series_colors` sets one, or, with no
-`series_colors` entry, when it is the 9th or 13th group in hue order or any seventh after either
-(16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
+groups the hues repeat, in the same order, from the eighth group in hue order, as a lighter tier of
+the hue — `blue-200`, `amber-50`, `violet-200`, `green-100`, `red-200`, `rose-50`, `russet-300` for
+the 8th to 14th groups, then again from the 15th. With `shading: none` that tier is its tiles'
+colour; with `shading: size` its tiles take the band around it, which is lighter than the first
+group of its hue's for blue, violet, green, red and russet, and the same band for amber and rose
+(their palette colours already sit at the light end). A group with its own `series_colors` entry
+still counts toward that order. `tbl-chart validate` warns on more than seven groups with no
+`series_colors` set. With `shading: size`, data with no groups never uses the `50` tier, and a
+group uses it only where its band reaches it — the default amber and rose groups, the lighter
+repeats, and any colour nearest `100` or `50`. With `shading: none`, a group's tiles are a `50`
+tier when its `series_colors` sets one, or, with no `series_colors` entry, when it is the 9th or
+13th group in hue order or any seventh after either (16th, 20th, …): the palette's `amber-50` and
+`rose-50` repeats.
 `series_labels` renames a group in the legend, the hover card and the screen-reader labels.
 
 **Groups and the legend.** With two or more groups, the chart's legend names them, as on other
 charts: one row per group, in hue order, each labelled by `series_labels` (else the group's name)
 beside a chip of the group's colour as resolved — its `series_colors` value, else the palette's
-colour — the colour its tiles are shaded from. Data with no groups, or a single group, draws no
-legend. `legend: false` hides it; `series_legend: false` drops the group rows, and with no other
-rows on a treemap that hides it too. The legend sits above the treemap; `legendPosition: right`
+colour — the colour its tiles' band is built around, so the chip's shade lies within the range its
+tiles are drawn in. Data with no groups, or a single group, draws no legend. `legend: false` hides
+it; `series_legend: false` drops the group rows, and with no other rows on a treemap that hides it
+too. The legend sits above the treemap; `legendPosition: right`
 puts it in a column beside the treemap instead, the rows in the same order, on a card wide enough
 for the column (see `legendPosition`), the treemap laid out at the narrower width that leaves — in
 the PNG export as on screen. Hovering a row dims every other group's tiles, clicking a row (or a

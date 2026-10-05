@@ -13,6 +13,7 @@ import { renderTreemap, treemapExportChartWidth, treemapWarnings, TREEMAP_CLASS 
 import { INNER_W, MARGIN } from "../src/embed/figure-chrome";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../src/engine/legend-layout";
 import { tokens } from "../src/theme/tokens";
+import { locateOnRamp } from "../src/engine/palette";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -76,6 +77,35 @@ describe("renderTreemap legendItems", () => {
     expect(renderChart({ ...SPEC, series_legend: false } as ChartSpec, GROUPED, { width: 920 }).legendItems).toBeNull();
     const one = GROUPED.filter((r) => r.group === "Mandatory");
     expect(renderChart(SPEC, one, { width: 920 }).legendItems).toBeNull();
+  });
+
+  it("property: every grouped tile under shading: size lies within 2 tiers of its legend chip on the chip's ramp, 3 for a chip at a ramp end (200 charts)", () => {
+    let s = 17;
+    const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const refs = ["blue", "amber-50", "violet-300", "green-700", "red", "rose-600", "russet-100", "blue-200"];
+    let maxGap = 0;
+    let endGap = 0;
+    for (let c = 0; c < 200; c++) {
+      const groups = 2 + Math.floor(rand() * 14);
+      const rows = Array.from({ length: groups + Math.floor(rand() * 20) }, (_, i) => ({
+        group: `G${i < groups ? i : Math.floor(rand() * groups)}`, category: `t${i}`, amount: String(1 + Math.floor(rand() * 500)),
+      })) as TidyRow[];
+      const series_colors = c % 3 === 0 ? { G0: refs[c % refs.length]!, G1: refs[(c + 3) % refs.length]! } : undefined;
+      const spec = { ...SPEC, series_order: [], ...(series_colors ? { series_colors } : {}) } as ChartSpec;
+      const res = renderChart(spec, rows, { width: [375, 599, 920][c % 3]! });
+      const chip = new Map(res.legendItems!.map((i) => [i.series, locateOnRamp(i.color!)!]));
+      for (const g of q(res.svg, "g[data-series]")) {
+        const at = chip.get(g.getAttribute("data-series")!)!;
+        const tile = locateOnRamp(g.querySelector("rect")!.getAttribute("fill")!)!;
+        expect(tile.family).toBe(at.family);
+        const gap = Math.abs(tile.index - at.index);
+        // A band clamped at either end keeps its 4 tiers, so it reaches one tier further from a chip there.
+        if (at.index === 0 || at.index === at.tiers.length - 1) endGap = Math.max(endGap, gap);
+        else maxGap = Math.max(maxGap, gap);
+      }
+    }
+    expect(maxGap).toBe(2);
+    expect(endGap).toBe(3);
   });
 
   it("keeps the group order in a right-hand column (no reversal)", () => {

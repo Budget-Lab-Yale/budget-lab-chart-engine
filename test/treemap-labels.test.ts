@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  TM_LABEL_SIZES, treemapLabelSize, treemapTier, tileFill, contrastText, fitTileLabel, fitTileLabels,
+  TM_LABEL_SIZES, treemapLabelSize, treemapTier, treemapBand, tileFill, contrastText, fitTileLabel, fitTileLabels,
   type TileLabel, type LabelTile,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
@@ -39,22 +39,53 @@ describe("treemapTier", () => {
   });
 });
 
+describe("treemapBand", () => {
+  const scales = tokens.scales as Record<string, Record<string, string>>;
+  const tiers = (family: string, keys: string[]) => keys.map((k) => scales[family]![k]!);
+  it("is the 4 tiers around a colour's place on its ramp, one darker and two lighter, darkest first", () => {
+    // The categorical blue base sits nearest blue-400.
+    expect(treemapBand("#0072B2")).toEqual(tiers("blue", ["500", "400", "300", "200"]));
+    expect(treemapBand("#0072b2")).toEqual(tiers("blue", ["500", "400", "300", "200"]));
+  });
+  it("gives a light repeat (group 8 on) and a series_colors tier their own band", () => {
+    expect(treemapBand(scales.blue!["200"]!)).toEqual(tiers("blue", ["300", "200", "100", "50"]));
+    expect(treemapBand(scales.violet!["300"]!)).toEqual(tiers("violet", ["400", "300", "200", "100"]));
+  });
+  it("is clamped at either end of the ramp and keeps 4 tiers", () => {
+    expect(treemapBand(scales.blue!["700"]!)).toEqual(tiers("blue", ["700", "600", "500", "400"]));
+    expect(treemapBand(scales.amber!["600"]!)).toEqual(tiers("amber", ["700", "600", "500", "400"]));
+    expect(treemapBand(scales.green!["50"]!)).toEqual(tiers("green", ["300", "200", "100", "50"]));
+    expect(treemapBand(scales.rose!["100"]!)).toEqual(tiers("rose", ["300", "200", "100", "50"]));
+  });
+  it("is null for a colour on no ramp", () => {
+    expect(treemapBand("#123456")).toBeNull();
+  });
+});
+
 describe("tileFill", () => {
   const scales = tokens.scales as Record<string, Record<string, string>>;
-  it("shades a categorical base hue along its own tonal ramp", () => {
-    expect(tileFill("#0072B2", 0, 7, "size")).toBe(scales.blue!["700"]);
-    expect(tileFill("#0072B2", 6, 7, "size")).toBe(scales.blue!["100"]);
-    expect(tileFill("#E69F00", 0, 3, "size")).toBe(scales.amber!["700"]);
-    expect(tileFill("#E69F00", 2, 3, "size")).toBe(scales.amber!["100"]);
+  it("flat: shades a categorical base hue 700 → 100 along its own tonal ramp", () => {
+    expect(tileFill("#0072B2", 0, 7, "size", false)).toBe(scales.blue!["700"]);
+    expect(tileFill("#0072B2", 6, 7, "size", false)).toBe(scales.blue!["100"]);
+    expect(tileFill("#E69F00", 0, 3, "size", false)).toBe(scales.amber!["700"]);
+    expect(tileFill("#E69F00", 2, 3, "size", false)).toBe(scales.amber!["100"]);
+  });
+  it("grouped: shades by rank across the colour's band, largest darkest", () => {
+    const band = treemapBand("#0072B2")!;
+    expect([0, 1, 2, 3].map((r) => tileFill("#0072B2", r, 4, "size", true))).toEqual(band);
+    expect(tileFill("#0072B2", 0, 1, "size", true)).toBe(band[0]);
+    // Ranks spread evenly over the 4 tiers: round(r * 3 / (n - 1)).
+    expect([0, 1, 2].map((r) => tileFill("#0072B2", r, 3, "size", true))).toEqual([band[0], band[2], band[3]]);
+    expect(Array.from({ length: 9 }, (_, r) => tileFill("#0072B2", r, 9, "size", true)).every((f) => band.includes(f))).toBe(true);
   });
   it("is case-insensitive on the base hex", () => {
-    expect(tileFill("#0072b2", 0, 1, "size")).toBe(scales.blue!["700"]);
+    expect(tileFill("#0072b2", 0, 1, "size", false)).toBe(scales.blue!["700"]);
   });
   it("uses the base hex itself for every tile with shading none", () => {
-    for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, "none")).toBe("#8856BF");
+    for (const grouped of [false, true]) for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, "none", grouped)).toBe("#8856BF");
   });
   it("uses a raw series colour off every ramp flat for every tile (no mixing)", () => {
-    for (let r = 0; r < 5; r++) expect(tileFill("#123456", r, 5, "size")).toBe("#123456");
+    for (const grouped of [false, true]) for (let r = 0; r < 5; r++) expect(tileFill("#123456", r, 5, "size", grouped)).toBe("#123456");
   });
 });
 

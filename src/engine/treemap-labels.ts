@@ -24,22 +24,44 @@ export const TM_LINE_HEIGHT = 1.2;
 
 const MAX_NAME_LINES = 3;
 
-// Usable tiers darkest-first. 50 is excluded (too close to the white gutters).
+// Usable tiers darkest-first for flat data. 50 is excluded (too close to the white gutters).
 const TIERS = ["700", "600", "500", "400", "300", "200", "100"] as const;
 
-/** Tier for rank r of n tiles in a group (spec §4; flat data is one group): 700→100. Returns the tier
- *  key, e.g. "500". */
+/** The step for rank r of n across k shades, darkest (0) first: ranks spread evenly. */
+const step = (rank: number, n: number, k: number): number =>
+  Math.min(k - 1, Math.max(0, Math.round((rank * (k - 1)) / Math.max(1, n - 1))));
+
+/** Tier for rank r of n tiles in a flat chart (spec §4): 700→100. Returns the tier key, e.g. "500". */
 export function treemapTier(rank: number, n: number): string {
-  const k = TIERS.length;
-  const i = Math.round((rank * (k - 1)) / Math.max(1, n - 1));
-  return TIERS[Math.min(k - 1, Math.max(0, i))]!;
+  return TIERS[step(rank, n, TIERS.length)]!;
 }
 
-/** Fill hex for a tile: tonal tier of its group's hue family, or the group's base hex when shading "none".
- *  A base on no tonal ramp (a raw `series_colors` hex) is used flat for every tile: there is no
- *  palette step to take, and mixing towards white would put an off-palette colour on the chart. */
-export function tileFill(hueBase: string, rank: number, n: number, shading: "size" | "none"): string {
+/** Tiers in a group's band. */
+const BAND = 4;
+
+/** A group's shading band (Ruling 37): the BAND tonal tiers nearest its resolved colour on its ramp,
+ *  one tier darker and two lighter than the colour's own (clamped at either end of the ramp, still
+ *  BAND tiers), as hexes darkest first. So the legend chip, which is that colour, lies inside the
+ *  range its tiles are drawn in. Null for a colour on no ramp. */
+export function treemapBand(color: string): string[] | null {
+  const ramp = locateOnRamp(color);
+  if (!ramp) return null;
+  const { tiers, index } = ramp; // lightest (50) first
+  const lo = Math.max(0, Math.min(tiers.length - BAND, index - 2));
+  return tiers.slice(lo, lo + BAND).reverse();
+}
+
+/** Fill hex for a tile under `shading: size`: flat data runs its hue's tiers 700→100 by rank; a
+ *  group's tiles run its band (treemapBand) by rank within the group. `shading: none` is the
+ *  colour itself. A colour on no tonal ramp (a raw `series_colors` hex) is used flat for every
+ *  tile: there is no palette step to take, and mixing towards white would put an off-palette colour
+ *  on the chart. */
+export function tileFill(hueBase: string, rank: number, n: number, shading: "size" | "none", grouped: boolean): string {
   if (shading === "none") return hueBase;
+  if (grouped) {
+    const band = treemapBand(hueBase);
+    return band ? band[step(rank, n, band.length)]! : hueBase;
+  }
   const ramp = locateOnRamp(hueBase);
   if (!ramp) return hueBase;
   const scale = (tokens.scales as Record<string, Record<string, string>>)[ramp.family];

@@ -249,13 +249,14 @@ describe("treemap render", () => {
     }
   });
 
-  it("grouped tiles shade 700 → 100 by rank within their group, the largest darkest", () => {
+  it("grouped tiles shade by rank across their group's 4-tier band, the largest darkest", () => {
     const two = ([["A", "a1", 300], ["A", "a2", 200], ["A", "a3", 100], ["B", "b1", 250], ["B", "b2", 150]] as const)
       .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     const { svg } = render(GROUPED_SPEC, two, 920);
     const fill = (n: string) => tileOf(svg, n).querySelector("rect")!.getAttribute("fill");
-    expect(["a1", "a2", "a3"].map(fill)).toEqual([tokens.scales.blue["700"], tokens.scales.blue["400"], tokens.scales.blue["100"]]);
-    expect(["b1", "b2"].map(fill)).toEqual([tokens.scales.amber["700"], tokens.scales.amber["100"]]);
+    // Blue's base sits at blue-400: band 500, 400, 300, 200. Amber's sits at amber-100: band 300 … 50.
+    expect(["a1", "a2", "a3"].map(fill)).toEqual([tokens.scales.blue["500"], tokens.scales.blue["300"], tokens.scales.blue["200"]]);
+    expect(["b1", "b2"].map(fill)).toEqual([tokens.scales.amber["300"], tokens.scales.amber["50"]]);
   });
 
   it("re-tiles a group whose largest tile cannot hold its label: full-width rows inside the same block, every tile labelled", () => {
@@ -471,7 +472,7 @@ describe("group names that are Object.prototype keys", () => {
       expect(new Set(groupNames(svg))).toEqual(new Set(want));
       for (const f of q(svg, "rect.tbl-treemap-tile").map((r) => r.getAttribute("fill")!)) expect(f).toMatch(/^#[0-9A-F]{6}$/i);
       if (spec.series_colors) {
-        expect(tileOf(svg, "constructor one").querySelector("rect")!.getAttribute("fill")).toBe(tokens.scales.green["700"]);
+        expect(tileOf(svg, "constructor one").querySelector("rect")!.getAttribute("fill")).toBe(tokens.scales.green["400"]);
       }
       expect(tileOf(svg, "toString one").getAttribute("aria-label")).toMatch(new RegExp(`^${want[1]} · toString one, `));
 

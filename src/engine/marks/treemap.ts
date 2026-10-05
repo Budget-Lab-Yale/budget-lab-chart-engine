@@ -160,7 +160,7 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
       datum: d, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1,
       groupLabel: d.group !== null ? labelOf(d.group) : null,
       share: total > 0 ? d.value / total : 0,
-      fill: tileFill(hueOf(d.group), t.rank, groupSize.get(d.group) ?? 1, cfg.shading),
+      fill: tileFill(hueOf(d.group), t.rank, groupSize.get(d.group) ?? 1, cfg.shading, grouped),
       label: labels[i]!,
     };
   });
