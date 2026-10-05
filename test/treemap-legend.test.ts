@@ -97,9 +97,15 @@ describe("renderTreemap legendItems", () => {
       const chip = new Map(res.legendItems!.map((i) => [i.series, i.color!]));
       for (const g of q(res.svg, "g[data-series]")) {
         const color = chip.get(g.getAttribute("data-series")!)!;
+        const fill = g.querySelector("rect")!.getAttribute("fill")!;
+        // A one-tile group is drawn in the chip's own colour.
+        if (q(res.svg, `g[data-series="${g.getAttribute("data-series")}"]`).length === 1) {
+          expect(fill).toBe(color);
+          continue;
+        }
         const at = locateOnRamp(color)!;
         const shades = treemapShades(color)!;
-        const i = shades.indexOf(g.querySelector("rect")!.getAttribute("fill")!);
+        const i = shades.indexOf(fill);
         expect(i).toBeGreaterThanOrEqual(0);
         // Shade i (darkest first) sits i/2 tiers lighter than the band's darkest tier: half-steps between tiers.
         const darkest = locateOnRamp(shades[0]!)!;

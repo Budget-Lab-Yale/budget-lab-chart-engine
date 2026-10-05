@@ -34,9 +34,13 @@ interface Node { group?: string; order?: number; datum?: TreemapDatum; children?
 /** The raw value (a tile) or raw total (a group, summed in data order) the sort compares. */
 const rawOf = (n: Node): number => n.datum?.value ?? n.raw ?? 0;
 
-/** The sort key: rawOf at 12 significant digits, so a total summed in floating point (0.1 + 0.2)
- *  ties its decimal equal (0.3) and the tie-break decides. Sort only; geometry uses the exact values. */
-const sortKey = (n: Node): number => Number(rawOf(n).toPrecision(12));
+/** A value at 12 significant digits: the tie rule for every treemap ordering (the layout's sort and
+ *  label fitting's visiting order), so a total summed in floating point (0.1 + 0.2) ties its decimal
+ *  equal (0.3) and the tie-break decides. Ordering only; geometry uses the exact values. */
+export const treemapTieKey = (v: number): number => Number(v.toPrecision(12));
+
+/** The sort key: rawOf under the tie rule. */
+const sortKey = (n: Node): number => treemapTieKey(rawOf(n));
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 

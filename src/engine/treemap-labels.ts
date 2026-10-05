@@ -4,7 +4,7 @@
 import { tokens } from "../theme/tokens";
 import { locateOnRamp } from "./palette";
 import { timelineTextWidth } from "./timeline-text";
-import { TM_GEOM } from "./treemap-layout";
+import { TM_GEOM, treemapTieKey } from "./treemap-layout";
 import { d3 } from "./vendor";
 
 /** Label text size (px), one per chart: `wide` on a chart at least `wideAt` px wide, else `narrow`
@@ -60,10 +60,11 @@ export function treemapShades(color: string): string[] | null {
 
 /** Fill hex for a tile under `shading: size`: its colour's 7 shades (treemapShades) by rank, the
  *  largest darkest — rank within the group, or among all tiles with no groups (whose colour is
- *  blue). `shading: none` is the colour itself. A colour on no tonal ramp (a raw `series_colors`
- *  hex) is used flat for every tile: it has no band to shade within. */
+ *  blue). A group (or a flat chart) of exactly one tile is the colour itself, so it matches its
+ *  legend chip (Ruling 40); so is every tile under `shading: none`. A colour on no tonal ramp (a raw
+ *  `series_colors` hex) is used flat for every tile: it has no band to shade within. */
 export function tileFill(hueBase: string, rank: number, n: number, shading: "size" | "none"): string {
-  if (shading === "none") return hueBase;
+  if (shading === "none" || n <= 1) return hueBase;
   const shades = treemapShades(hueBase);
   return shades ? shades[step(rank, n, shades.length)]! : hueBase;
 }
@@ -163,7 +164,7 @@ export interface LabelTile { name: string; number: string | null; group: string 
 
 /** Every tile's label, in input (layout) order, all at `size` (the chart's treemapLabelSize), never
  *  smaller. Top-down per group (flat data is one group): its tiles are visited by value, largest
- *  first (ties: input order), and each is labelled while its label fits; the first that does not, and
+ *  first (values equal to 12 significant digits: input order), and each is labelled while its label fits; the first that does not, and
  *  every tile after it in that group, is unlabelled. So within a group no unlabelled tile is larger
  *  than a labelled one; groups are not compared with each other. */
 export function fitTileLabels(tiles: LabelTile[], size: number): TileLabel[] {
@@ -175,7 +176,9 @@ export function fitTileLabels(tiles: LabelTile[], size: number): TileLabel[] {
     else byGroup.set(t.group, [i]);
   });
   for (const members of byGroup.values()) {
-    members.sort((a, b) => tiles[b]!.value - tiles[a]!.value || a - b);
+    // The layout's tie rule (12 significant digits), so tiles it treats as equal are visited in its
+    // order, not by a float difference past the 12th digit.
+    members.sort((a, b) => treemapTieKey(tiles[b]!.value) - treemapTieKey(tiles[a]!.value) || a - b);
     for (const i of members) {
       const t = tiles[i]!;
       const label = fitTileLabel(t.name, t.number, t.w, t.h, size);

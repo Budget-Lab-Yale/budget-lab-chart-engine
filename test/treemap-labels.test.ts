@@ -87,7 +87,9 @@ describe("tileFill", () => {
   const blue = treemapShades("#0072B2")!;
   it("shades by rank across the colour's 7 shades, largest darkest, each shade once for 7 tiles", () => {
     expect(Array.from({ length: 7 }, (_, r) => tileFill("#0072B2", r, 7, "size"))).toEqual(blue);
-    expect(tileFill("#0072B2", 0, 1, "size")).toBe(blue[0]);
+    // One tile: the colour itself (Ruling 40), the legend chip's colour.
+    expect(tileFill("#0072B2", 0, 1, "size")).toBe("#0072B2");
+    expect(tileFill("#E69F00", 0, 1, "size")).toBe("#E69F00");
     // Ranks spread evenly over the 7 shades: round(r * 6 / (n - 1)).
     expect([0, 1, 2].map((r) => tileFill("#0072B2", r, 3, "size"))).toEqual([blue[0], blue[3], blue[6]]);
     expect([0, 1].map((r) => tileFill("#0072B2", r, 2, "size"))).toEqual([blue[0], blue[6]]);
@@ -112,7 +114,7 @@ describe("tileFill", () => {
     expect([0, 1, 2].map((r) => tileFill("#E69F00", r, 3, "size"))).toEqual([amber[0], amber[3], amber[6]]);
   });
   it("is case-insensitive on the base hex", () => {
-    expect(tileFill("#0072b2", 0, 1, "size")).toBe(blue[0]);
+    expect(tileFill("#0072b2", 0, 2, "size")).toBe(blue[0]);
   });
   it("uses the base hex itself for every tile with shading none", () => {
     for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, "none")).toBe("#8856BF");

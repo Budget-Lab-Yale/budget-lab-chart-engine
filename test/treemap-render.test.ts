@@ -9,6 +9,7 @@ import { TREEMAP_CLASS, treemapChoice, treemapHeight, treemapWarnings } from "..
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
 import { contrastText, fitTileLabel, treemapShades } from "../src/engine/treemap-labels";
 import { tokens } from "../src/theme/tokens";
+import { d3 } from "../src/engine/vendor";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -247,6 +248,64 @@ describe("treemap render", () => {
       const text = tileOf(render(spec, GROUPED, 920).svg, "Net interest").querySelector("text")!;
       expect([...text.children].map((s) => s.textContent!.trim())).toEqual([...want]);
     }
+  });
+
+  it("property: within every group (flat data is one), a smaller tile is never darker than a larger one (300 charts)", () => {
+    let s = 41;
+    const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const refs = ["blue", "amber-50", "violet-300", "green-700", "red", "rose-600", "russet-100", "blue-200"];
+    let pairs = 0;
+    for (let c = 0; c < 300; c++) {
+      const grouped = c % 2 === 0;
+      const groups = 1 + Math.floor(rand() * 6);
+      const n = 1 + Math.floor(rand() * 30);
+      const rows = Array.from({ length: n }, (_, i) => ({
+        group: `G${i % groups}`, category: `t${i}`, amount: String(1 + Math.floor(rand() * (c % 3 === 0 ? 5 : 1000))),
+      })) as TidyRow[];
+      const spec = grouped
+        ? ({ ...GROUPED_SPEC, series_order: [], ...(c % 4 === 0 ? { series_colors: { G0: refs[c % refs.length]! } } : {}) } as ChartSpec)
+        : FLAT_SPEC;
+      const tiles = renderChart(spec, rows, { width: [375, 599, 920][c % 3]! }).treemapTiles!;
+      const byGroup = new Map<string | null, typeof tiles>();
+      for (const t of tiles) byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
+      for (const members of byGroup.values()) {
+        const sorted = [...members].sort((a, b) => b.value - a.value);
+        for (let i = 1; i < sorted.length; i++) {
+          // Equal values may sit on either side of a shade boundary; a strictly smaller one may not be darker.
+          if (sorted[i]!.value === sorted[i - 1]!.value) continue;
+          expect(d3.lab(sorted[i]!.fill).l).toBeGreaterThanOrEqual(d3.lab(sorted[i - 1]!.fill).l - 1e-9);
+          pairs++;
+        }
+      }
+    }
+    expect(pairs).toBeGreaterThan(1000);
+  });
+
+  it("a group or a flat chart with exactly one tile draws it in its colour as resolved: the legend chip", () => {
+    const one = ([["A", "a1", 300], ["B", "b1", 200], ["B", "b2", 100]] as const)
+      .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    const res = renderChart(GROUPED_SPEC, one, { width: 920 });
+    const fill = (n: string) => tileOf(res.svg, n).querySelector("rect")!.getAttribute("fill");
+    expect(fill("a1")).toBe(tokens.categorical[0]!.base);
+    expect(fill("a1")).toBe(res.legendItems!.find((i) => i.series === "A")!.color);
+    // A two-tile group still runs its band's ends.
+    const amber = treemapShades(tokens.categorical[1]!.base)!;
+    expect(["b1", "b2"].map(fill)).toEqual([amber[0], amber[6]]);
+    // A series_colors tier is drawn as written on a one-tile group.
+    const tier = renderChart({ ...GROUPED_SPEC, series_colors: { A: "violet-300" } } as ChartSpec, one, { width: 920 });
+    expect(tileOf(tier.svg, "a1").querySelector("rect")!.getAttribute("fill")).toBe(tokens.scales.violet["300"]);
+    // Flat data with one tile: blue as resolved.
+    const flat = renderChart(FLAT_SPEC, rowsOf([["Only", 5]]), { width: 920 });
+    expect(tileOf(flat.svg, "Only").querySelector("rect")!.getAttribute("fill")).toBe(tokens.categorical[0]!.base);
+  });
+
+  it("labelling visits tiles equal to 12 significant digits in layout (CSV) order, so the first unfit one stops it", () => {
+    const long = "W".repeat(100);
+    const res = renderChart(FLAT_SPEC, rowsOf([[long, 1], ["B", 1.0000000000001]]), { width: 920 });
+    // Layout keeps CSV order for the tie ...
+    expect(res.treemapTiles!.map((t) => t.name)).toEqual([long, "B"]);
+    // ... and the long name cannot be labelled, so B, its equal, is not labelled either.
+    expect(q(res.svg, "text.tbl-treemap-label")).toHaveLength(0);
   });
 
   it("grouped tiles shade by rank across their group's 7 shades (4-tier band plus midpoints), the largest darkest", () => {

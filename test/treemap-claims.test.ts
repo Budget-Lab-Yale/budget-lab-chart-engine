@@ -15,6 +15,8 @@ import { renderChart, renderFigure } from "../src/engine/index";
 import { treemapChoice } from "../src/engine/marks/treemap";
 import { mountChart } from "../src/engine/render-live";
 import { tokens } from "../src/theme/tokens";
+import { TBL_COLORS } from "../src/spec/color-ref";
+import { d3 } from "../src/engine/vendor";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -106,9 +108,9 @@ describe("series_colors on a treemap", () => {
   it("past seven groups without series_colors the hues repeat: an eighth group shades in the band around its lighter colour", () => {
     const eight = rows(Array.from({ length: 8 }, (_, i): [string, string, number] => [`G${i}`, `t${i}`, 100 - i]));
     const { svg } = renderChart(TM, eight, { width: 920 });
-    // G0 is blue (band 500 … 200), G7 the lighter repeat blue-200 (band 300 … 50); one tile each, so the darkest.
-    expect(tileFills(svg, "G0")).toEqual([tokens.scales.blue["500"]]);
-    expect(tileFills(svg, "G7")).toEqual([tokens.scales.blue["300"]]);
+    // G0 is blue, G7 the lighter repeat blue-200; one tile each, so each is drawn in that colour.
+    expect(tileFills(svg, "G0")).toEqual([tokens.categorical[0]!.base]);
+    expect(tileFills(svg, "G7")).toEqual([tokens.scales.blue["200"]]);
     // Each repeat's band is lighter than its hue's first group's, except amber's and rose's, which are the same.
     const scales = tokens.scales as Record<string, Record<string, string>>;
     const repeats = ["blue-200", "amber-50", "violet-200", "green-100", "red-200", "rose-50", "russet-300"];
@@ -239,10 +241,10 @@ describe("treemap.shading", () => {
     // A group with its own series_colors entry still counts toward the order.
     const own = renderChart({ ...none, series_colors: { G0: "green" } } as ChartSpec, groups(9), { width: 920 }).svg;
     expect(tileFills(own, "G8")).toEqual([tokens.scales.amber["50"]]);
-    // shading: size: each repeat shades in the band around its lighter colour (a one-tile group: its darkest).
+    // shading: size: a one-tile group is drawn in its colour as resolved, the lighter repeat itself.
     const sized = renderChart(TM, groups(13), { width: 920 }).svg;
-    for (let i = 7; i < 13; i++) expect(tileFills(sized, `G${i}`)).toEqual([treemapBand(light[i - 7]!)![0]]);
-    expect(tileFills(sized, "G7")).toEqual([tokens.scales.blue["300"]]);
+    for (let i = 7; i < 13; i++) expect(tileFills(sized, `G${i}`)).toEqual([light[i - 7]]);
+    expect(tileFills(sized, "G7")).toEqual([tokens.scales.blue["200"]]);
   });
 
   it("size (default) with groups: each group's tiles run its 7 shades by rank; flat data runs blue's, the same", () => {
@@ -270,16 +272,37 @@ describe("treemap.shading", () => {
     expect(new Set(fills)).toEqual(new Set(blue));
   });
 
-  it("size: the lighter repeats' bands reach the 50 tier, except russet-300's (400 to 100)", () => {
+  it("the band: nearest tier, one darker and two lighter, kept at four tiers at the ramp's ends; 50 only for a colour nearest 200, 100 or 50", () => {
     const scales = tokens.scales as Record<string, Record<string, string>>;
-    for (const ref of ["blue-200", "amber-50", "violet-200", "green-100", "red-200", "rose-50", "russet-300"]) {
-      const [h, k] = ref.split("-");
-      const shades = treemapShades(scales[h!]![k!]!)!;
-      if (h === "russet") {
-        expect(shades[0]).toBe(scales.russet!["400"]);
-        expect(shades[6]).toBe(scales.russet!["100"]);
-      } else expect(shades[6]).toBe(scales[h!]!["50"]);
+    const order = ["50", "100", "200", "300", "400", "500", "600", "700"];
+    for (const [family, scale] of Object.entries(scales)) {
+      order.forEach((tier, i) => {
+        const ends = [treemapShades(scale[tier]!)![0], treemapShades(scale[tier]!)![6]];
+        // Stated: 300 to 50 for 200/100/50; 700 to 400 for 600/700; else one darker, two lighter.
+        const [dark, light] = i <= 2 ? ["300", "50"] : i >= 6 ? ["700", "400"] : [order[i + 1]!, order[i - 2]!];
+        expect(ends, `${family}-${tier}`).toEqual([scale[dark], scale[light]]);
+        expect(treemapShades(scale[tier]!)!.includes(scale["50"]!), `${family}-${tier}`).toBe(i <= 2);
+      });
     }
+    // The palette's own colours: of the seven defaults only amber and rose reach 50 ...
+    const reaches = (hex: string, family: string) => treemapShades(hex)!.includes(scales[family]!["50"]!);
+    expect(tokens.categorical.filter((c) => reaches(c.base, c.key)).map((c) => c.key)).toEqual(["amber", "rose"]);
+    // ... and of the lighter repeats every one but russet's (russet-300: band 400 to 100).
+    const repeats = ["blue-200", "amber-50", "violet-200", "green-100", "red-200", "rose-50", "russet-300"];
+    expect(repeats.filter((r) => { const [h, k] = r.split("-"); return reaches(scales[h!]![k!]!, h!); })).toEqual(repeats.slice(0, 6));
+    const russet = treemapShades(scales.russet!["300"]!)!;
+    expect([russet[0], russet[6]]).toEqual([scales.russet!["400"], scales.russet!["100"]]);
+  });
+
+  it("the legend chip lies between its band's darkest and lightest shade in lightness for every named palette colour but navy", () => {
+    const outside: string[] = [];
+    for (const [name, hex] of Object.entries(TBL_COLORS)) {
+      const shades = treemapShades(hex);
+      if (!shades) continue; // black, grey: on no ramp, drawn flat
+      const L = d3.lab(hex).l;
+      if (L < d3.lab(shades[0]!).l - 1e-9 || L > d3.lab(shades[6]!).l + 1e-9) outside.push(name);
+    }
+    expect(outside).toEqual(["navy"]);
   });
 
   it("the half-step shades have no name a figure could set: series_colors blue-450 is rejected at load", () => {
