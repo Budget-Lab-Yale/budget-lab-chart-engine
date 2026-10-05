@@ -21,8 +21,9 @@ export function treemapAreaHeight(width: number): number {
 /** `rank` is the tile's index within its group (overall when flat) by the layout sort, 0 = largest. */
 export interface TileRect { datum: TreemapDatum; x0: number; y0: number; x1: number; y1: number; rank: number }
 /** How tiles are laid out in their region: squarified, or one of these alternatives, which a group
- *  tries in this order when its largest tile's label does not fit under squarify, and which flat
- *  data can take for the whole frame (layoutTreemap `tiling`). */
+ *  tries in this order when its largest tile's label does not fit under squarify, and which the
+ *  whole frame can take (layoutTreemap `tiling`: the tiles of flat data, the group blocks of grouped
+ *  data). */
 export const TM_RETILINGS = ["slice", "dice", "binary"] as const;
 export type TreemapTiling = "squarify" | (typeof TM_RETILINGS)[number];
 /** A group's whole block, header strip included. `strip`: the block reserves the header strip.
@@ -89,9 +90,10 @@ const CONVERGED_PX = 1e-6;
  * the block by value, so areas stay proportional exactly as under squarify. Flat data is never
  * re-tiled this way, so it is not asked there.
  *
- * `tiling` (flat data only; ignored with groups) lays the whole frame out by that tiling instead of
- * squarify, tiles in sort order; every tiling shares the frame by value. The caller (marks/treemap)
- * picks it among candidates by how many tiles each lets it label.
+ * `tiling` lays the whole frame out by that tiling instead of squarify, in sort order: the tiles of
+ * flat data, or the group blocks of grouped data (each block's tiles are still squarified, and
+ * rescued as above). Every tiling shares the frame by value, and the strip compensation holds under
+ * each. The caller (marks/treemap) picks it among candidates by how much each lets it label.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,
   opts: {
@@ -158,14 +160,68 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   type TNode = { depth: number; value: number; children?: TNode[] };
   const tile = (node: TNode, x0: number, y0: number, x1: number, y1: number): void => {
     if (node.depth === 0) {
-      const alt = !grouped && opts.tiling && opts.tiling !== "squarify" ? RETILE[opts.tiling] : null;
-      return alt ? alt(node, x0, y0, x1, y1) : d3.treemapResquarify(node, x0, y0, x1, y1);
+      // Like resquarify, binary keeps the partition its first run chose (binaryPlan): the
+      // compensation re-runs it with slightly different weights, and a split that flipped between
+      // rounds would never settle. Slice and dice have no decisions to keep.
+      if (opts.tiling === "binary") return binaryPlanned(node, x0, y0, x1, y1);
+      if (opts.tiling === "slice" || opts.tiling === "dice") return RETILE[opts.tiling](node, x0, y0, x1, y1);
+      return d3.treemapResquarify(node, x0, y0, x1, y1);
     }
     const own = node.value;
     node.value = node.children!.reduce((s, c) => s + c.value, 0);
     d3.treemapSquarify(node, x0, y0, x1, y1);
     node.value = own;
   };
+  // d3.treemapBinary, with its decisions (split index, split direction) recorded on the first run and
+  // replayed on every later one. The first run is exactly d3's.
+  let binaryPlan: Array<[number, boolean]> | null = null;
+  const binaryPlanned = (parent: TNode, px0: number, py0: number, px1: number, py1: number): void => {
+    type BNode = TNode & { x0: number; y0: number; x1: number; y1: number };
+    const nodes = parent.children as BNode[];
+    const sums = [0];
+    for (const c of nodes) sums.push(sums[sums.length - 1]! + c.value);
+    const record = binaryPlan === null;
+    const plan: Array<[number, boolean]> = binaryPlan ?? [];
+    let step = 0;
+    const partition = (i: number, j: number, value: number, x0: number, y0: number, x1: number, y1: number): void => {
+      if (i >= j - 1) {
+        Object.assign(nodes[i]!, { x0, y0, x1, y1 });
+        return;
+      }
+      let k: number;
+      let wide: boolean;
+      if (record) {
+        const valueOffset = sums[i]!;
+        const valueTarget = value / 2 + valueOffset;
+        k = i + 1;
+        let hi = j - 1;
+        while (k < hi) {
+          const mid = (k + hi) >>> 1;
+          if (sums[mid]! < valueTarget) k = mid + 1;
+          else hi = mid;
+        }
+        if (valueTarget - sums[k - 1]! < sums[k]! - valueTarget && i + 1 < k) --k;
+        wide = x1 - x0 > y1 - y0;
+        plan.push([k, wide]);
+      } else {
+        [k, wide] = plan[step++]!;
+      }
+      const valueLeft = sums[k]! - sums[i]!;
+      const valueRight = value - valueLeft;
+      if (wide) {
+        const xk = value ? (x0 * valueRight + x1 * valueLeft) / value : x1;
+        partition(i, k, valueLeft, x0, y0, xk, y1);
+        partition(k, j, valueRight, xk, y0, x1, y1);
+      } else {
+        const yk = value ? (y0 * valueRight + y1 * valueLeft) / value : y1;
+        partition(i, k, valueLeft, x0, y0, x1, yk);
+        partition(k, j, valueRight, x0, yk, x1, y1);
+      }
+    };
+    partition(0, nodes.length, parent.value, px0, py0, px1, py1);
+    binaryPlan = plan;
+  };
+
   const run = (strips: Set<string>) =>
     d3.treemap()
       .tile(tile)

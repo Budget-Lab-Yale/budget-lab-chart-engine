@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TileRect, type TreemapLayout } from "../src/engine/treemap-layout";
 import type { TreemapDatum } from "../src/spec/treemap";
+import { d3 } from "../src/engine/vendor";
 
 function flat(values: number[]): TreemapDatum[] {
   return values.map((value, index) => ({ index, name: `t${index}`, group: null, value, row: {} }));
@@ -307,6 +308,43 @@ describe("layoutTreemap: grouped", () => {
       }
     });
 
+    it.each(["slice", "dice", "binary"] as const)("arranges the group blocks by %s, and the compensation stays exact (gutters 0)", (tiling) => {
+      // At 100x scale the output's 2-decimal rounding vanishes and what remains is the solve's error.
+      for (const [w, h, stripH, tol] of [[920, 460, 26, 3e-4], [375, 354, 22, 3e-4], [92000, 46000, 2600, 2e-6], [37500, 35400, 2200, 2e-6]] as const) {
+        const l = layoutTreemap(mixed, w, h, { groupOrder: [], stripFits: fits, stripH, tiling, gutters: { tile: 0, group: 0 } });
+        expect(l.groups.map((g) => [g.group, g.strip])).toEqual([["A", true], ["B", false], ["C", true], ["D", false]]);
+        if (tiling === "slice") for (const g of l.groups) expect([g.x0, g.x1]).toEqual([0, w]);
+        if (tiling === "dice") for (const g of l.groups) expect([g.y0, g.y1]).toEqual([0, h]);
+        // Every arrangement differs from squarify's.
+        const sq = layoutTreemap(mixed, w, h, { groupOrder: [], stripFits: fits, stripH, gutters: { tile: 0, group: 0 } });
+        expect(l.groups.map(coords)).not.toEqual(sq.groups.map(coords));
+        const strips = l.groups.filter((g) => g.strip).reduce((s, g) => s + (g.x1 - g.x0) * stripH, 0);
+        const k = (w * h - strips) / l.total;
+        for (const t of l.tiles) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(2e-3);
+        for (const g of ["A", "B", "C", "D"]) expect(Math.abs(perUnit(l, g) - k) / k).toBeLessThan(tol);
+      }
+    });
+
+    it("property: every arrangement converges to exact compensation (gutters 0, 120 random charts each)", () => {
+      let s = 9;
+      const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+      for (let c = 0; c < 120; c++) {
+        const d = grouped(Array.from({ length: 4 + Math.floor(rand() * 16) }, (): [string, number] => [`G${Math.floor(rand() * 6)}`, 1 + Math.floor(rand() ** 2 * 100)]));
+        const w = 280 + Math.floor(rand() * 640);
+        const h = treemapAreaHeight(w);
+        for (const tiling of ["squarify", "slice", "dice", "binary"] as const) {
+          const l = layoutTreemap(d, w, h, { groupOrder: [], stripFits: (g) => g.y1 - g.y0 >= 44 && g.x1 - g.x0 >= 60, tiling, gutters: { tile: 0, group: 0 } });
+          const strips = l.groups.filter((g) => g.strip).reduce((sum, g) => sum + (g.x1 - g.x0) * TM_GEOM.stripH, 0);
+          const k = (w * h - strips) / l.total;
+          for (const g of l.groups) {
+            if (g.total / l.total < 0.02) continue;
+            expect(Math.abs(perUnit(l, g.group) - k) / k).toBeLessThan(1e-3);
+          }
+          for (const g of l.groups.filter((x) => x.strip)) expect(g.y1 - g.y0).toBeGreaterThanOrEqual(44);
+        }
+      }
+    });
+
     it("with the real gutters, a strip group's tiles are within 2% per unit of a strip-less group's", () => {
       const l = layoutTreemap(mixed, 920, 460, { groupOrder: [], stripFits: fits });
       const a = perUnit(l, "A");
@@ -539,9 +577,14 @@ describe("layoutTreemap: whole-frame tilings for flat data", () => {
     expect(Math.abs(l.tiles.reduce((s, t) => s + area(t), 0) - W * H) / (W * H)).toBeLessThan(1e-4);
   });
 
-  it("is ignored with groups (a grouped chart keeps its group blocks squarified)", () => {
-    const g = grouped([["A", 40], ["A", 20], ["B", 30], ["B", 10]]);
-    expect(layoutTreemap(g, 920, 460, { groupOrder: [], tiling: "slice" })).toEqual(layoutTreemap(g, 920, 460, { groupOrder: [] }));
+  it("matches d3's treemapBinary for flat data", () => {
+    const h = d3.hierarchy({ children: [40, 25, 15, 10, 6, 4].map((v) => ({ v })) })
+      .sum((d: { v?: number }) => (d.v ?? 0) / 40);
+    const d3l = d3.treemap().tile(d3.treemapBinary).size([W, H]).paddingInner(TM_GEOM.tileGutter)(h);
+    const want = d3l.leaves().map((n: { x0: number; y0: number; x1: number; y1: number }) =>
+      [n.x0, n.y0, n.x1, n.y1].map((v) => Math.round(v * 100) / 100));
+    const got = byRank(at("binary")).map(coords);
+    got.forEach((c, i) => c.forEach((v, j) => expect(v).toBeCloseTo(want[i]![j]!, 1)));
   });
 
   it("is deterministic", () => {
