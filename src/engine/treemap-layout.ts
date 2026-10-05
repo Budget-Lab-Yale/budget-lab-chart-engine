@@ -148,8 +148,9 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
     type Kid = LNode & { value: number };
     for (const n of groupNodes() as Array<GNode & { value: number; children: Kid[] }>) {
       const kids = n.children;
-      // Largest by raw value; on a tie the first in layout order (strict >).
-      const largest = kids.reduce((a, b) => (b.data.datum!.value > a.data.datum!.value ? b : a));
+      // The group's first tile in layout order: the sort above (treemapTieKey, then CSV order), the
+      // same order label fitting visits, so a tie past the 12th digit targets the tile labelled first.
+      const largest = kids[0]!;
       if (opts.labelFits(tileRect(largest))) continue;
       const squarified = kids.map(({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }));
       // The region d3 tiled this block's tiles in: the block extended half a tile gutter past each

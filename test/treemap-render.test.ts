@@ -299,6 +299,15 @@ describe("treemap render", () => {
     expect(tileOf(flat.svg, "Only").querySelector("rect")!.getAttribute("fill")).toBe(tokens.categorical[0]!.base);
   });
 
+  it("rescue targets the group's first tile under the same 12-significant-digit tie rule, so a tie that cannot fit is re-tiled", () => {
+    const rows = ([["A", "WWWWWWWWWW", 1], ["A", "B", 1.0000000000001], ["Other", "C0", 2]] as const)
+      .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
+    const { svg } = render(GROUPED_SPEC, rows, 600);
+    // Squarified, A's tiles are 148px columns too narrow for the long name; re-tiled as full-width
+    // rows inside the same block, both are labelled.
+    for (const n of ["WWWWWWWWWW", "B", "C0"]) expect(tileOf(svg, n).querySelector("text.tbl-treemap-label"), n).not.toBeNull();
+  });
+
   it("labelling visits tiles equal to 12 significant digits in layout (CSV) order, so the first unfit one stops it", () => {
     const long = "W".repeat(100);
     const res = renderChart(FLAT_SPEC, rowsOf([[long, 1], ["B", 1.0000000000001]]), { width: 920 });
