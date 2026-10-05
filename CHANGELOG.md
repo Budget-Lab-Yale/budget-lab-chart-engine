@@ -26,9 +26,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `series_legend` work as on other charts), whose rows highlight their group's tiles. A tile left
   unlabelled is named by its hover card and screen-reader label. New `treemap:` block
   (`label_value`, `shading`, `share_decimals`, `tooltip_values`, `share_label`, `value_label`,
-  `tooltip_note`, `tooltip` rows). On a treemap, `value_format` groups thousands, and `series_order`
-  sets hue order and breaks ties between equal group totals, without filtering. Hover card on
-  screen; the PNG export re-renders at 920px (744px beside a right-hand legend).
+  `tooltip_group`, `tooltip_note`, `tooltip` rows). On a treemap, `value_format` groups thousands,
+  and `series_order` sets hue order and breaks ties between equal group totals, without filtering.
+  Hover card on screen; the PNG export re-renders at 920px (744px beside a right-hand legend).
   `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly unlabelled tiles at the
   export width, or more than seven groups without `series_colors`. The `treemap:` block is rejected
   on every other chart type, so no existing spec changes. See CONFIG-SPEC "Treemap options".

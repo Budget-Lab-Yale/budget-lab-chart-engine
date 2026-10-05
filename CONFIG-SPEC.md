@@ -916,6 +916,7 @@ chart type.
 | `treemap.tooltip_values` | enum | Which built-in rows the hover card shows: `both` (default — Value, then Share) \| `share` \| `value` \| `none` (the card keeps its header and the `treemap.tooltip` rows). The tile's screen-reader label keeps both numbers whatever this says. |
 | `treemap.value_label` | string | Label of the hover card's Value row. Default `Value`. An empty string is a validation error. |
 | `treemap.share_label` | string | Label of the hover card's Share row. Default `Share`. An empty string is a validation error. |
+| `treemap.tooltip_group` | boolean | Whether the hover card's header names the tile's group after the tile (`Medicare · Mandatory`). Default `true`; `false` shows the tile's name alone. No effect on data with no groups, whose header is the name alone either way. The tile's screen-reader label keeps its group-first wording regardless. |
 | `treemap.tooltip_note` | string | A column whose cell closes the hover card: below a divider, after every row, in regular (not bold) weight, printed exactly as the CSV holds it and wrapping within the card. A blank cell draws no note and no divider for that tile. Must be a column in the data (a validation error names it otherwise). Shown with any `treemap.tooltip_values`, `none` included. |
 | `treemap.tooltip` | array | Extra hover-card rows, in order, after the built-in rows. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
 | `value_format` | object | `{decimals, prefix, suffix}` for every value a treemap prints: tile labels with `label_value: value`, the hover card's Value row and each tile's screen-reader label. Thousands are grouped with commas (`$28,452`) and `decimals` defaults to 0. The grouping is a treemap behaviour: a dumbbell's gap label, the other user of this field, prints no separators. `value_prefix` and `value_suffix` are validation errors on a treemap. |
@@ -1043,14 +1044,15 @@ a right-hand legend column taller than it); the PNG can therefore label differen
 narrower screen does.
 
 **Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
-hover card: the tile's name, prefixed by its group's name with groups (`Mandatory · Medicare`), then
+hover card: a header of the tile's name, followed with groups by its group's name as `series_labels`
+gives it (`Medicare · Mandatory`; `treemap.tooltip_group: false` leaves the name alone), then
 **Value** (`value_format`, at `tooltip_decimals`) and **Share** — the rows `treemap.tooltip_values`
-selects, labelled by `treemap.value_label` and `treemap.share_label` — the `treemap.tooltip`
-rows, and last, below a divider, the `treemap.tooltip_note` cell where it is not blank.
-`chrome.tooltip: false` removes the card; the outline and dimming stay. Like every tooltip, the hover
-is screen-only and absent from the PNG. A treemap's hover does not call `hooks.tooltip` and fires no
-`onHover` / `tbl-hover` (see [Customisation](#customisation)), and it is pointer-only: tiles are not
-keyboard-focusable.
+selects, labelled by `treemap.value_label` and `treemap.share_label` — the `treemap.tooltip` rows,
+and last, below a divider, the `treemap.tooltip_note` cell where it is not blank.
+`chrome.tooltip: false` removes the card; the outline and dimming stay. Like every tooltip, the
+hover is screen-only and absent from the PNG. A treemap's hover does not call `hooks.tooltip` and
+fires no `onHover` / `tbl-hover` (see [Customisation](#customisation)), and it is pointer-only:
+tiles are not keyboard-focusable.
 
 **Accessibility.** The chart's SVG is a `role="group"` labelled with the title. Each tile is a
 `role="img"` whose `aria-label` reads `[Group · ]Name, <share> of total, <value>` — `Housing, 33.4% of
