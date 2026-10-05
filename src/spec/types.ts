@@ -833,11 +833,11 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right" — where the ≥5 count is of the series rows
    * the legend actually SHOWS (`series_legend: false` removes them).
    *
-   * Four routes ignore this field entirely, an explicit value included: `legend: false` resolves
-   * "top" before the field is read (unobservable — nothing is drawn), a card narrower than
-   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" at mount (a card narrowed AFTER mounting keeps
-   * its right column — the resize path re-resolves but does not tear one down), a `small_multiples`
-   * figure has only a top legend slot, and the PNG export always draws the legend above the chart.
+   * Five routes ignore this field entirely, an explicit value included (CONFIG-SPEC `legendPosition`
+   * is the authority): `legend: false` resolves "top" before the field is read; a card narrower than
+   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top", at mount and on resize; a `small_multiples`
+   * figure has only a top legend slot; a vertical timeline's PNG export puts the legend on top; and a
+   * treemap with no legend rows takes no column, live as in the PNG.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */
   legendPosition?: "top" | "right";

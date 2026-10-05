@@ -57,9 +57,11 @@ describe("treemapShades", () => {
     // Pinned, so a change of interpolator or rounding is caught: 500, 450, 400, 350, 300, 250, 200.
     expect(shades).toEqual(["#005794", "#0063A1", "#0070AF", "#227CBD", "#3689CB", "#4896D9", "#58A3E7"]);
   });
-  it("is strictly monotonic in L*, darkest first, the midpoint halfway in L* between its neighbours", () => {
-    for (const c of tokens.categorical) {
-      const shades = treemapShades(c.base)!;
+  it("is strictly monotonic in L*, darkest first, the midpoint halfway in L* between its neighbours, for every tier of every ramp and every base hue", () => {
+    const colours = [...tokens.categorical.map((c) => c.base), ...Object.values(scales).flatMap((s) => Object.values(s))];
+    expect(colours.length).toBeGreaterThan(50);
+    for (const c of colours) {
+      const shades = treemapShades(c)!;
       for (let i = 1; i < shades.length; i++) expect(L(shades[i]!)).toBeGreaterThan(L(shades[i - 1]!));
       for (const i of [1, 3, 5]) expect(Math.abs(L(shades[i]!) - (L(shades[i - 1]!) + L(shades[i + 1]!)) / 2)).toBeLessThan(0.5);
     }

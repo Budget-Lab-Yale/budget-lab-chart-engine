@@ -34,7 +34,8 @@ const BAND = 4;
 /** A colour's shading band (Ruling 37): the BAND tonal tiers nearest it on its ramp,
  *  one tier darker and two lighter than the colour's own (clamped at either end of the ramp, still
  *  BAND tiers), as hexes darkest first. So the legend chip, which is that colour, lies inside the
- *  range its tiles are drawn in. Null for a colour on no ramp. */
+ *  range its tiles are drawn in — except `navy`, which borrows blue's ramp and is darker than
+ *  blue-700. Null for a colour on no ramp. */
 export function treemapBand(color: string): string[] | null {
   const ramp = locateOnRamp(color);
   if (!ramp) return null;

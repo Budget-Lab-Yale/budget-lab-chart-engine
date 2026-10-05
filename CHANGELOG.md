@@ -13,8 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   size rank within a band around their colour (each group's, or blue with no groups): the four
   tonal tiers nearest it plus the CIELAB midpoint of each adjacent pair, seven shades in all (blue:
   500, 450, … 200); a one-tile group is drawn in its colour as resolved, the legend chip's. The
-  midpoints are computed, not palette tokens, and cannot be specified. Labels top-left at one size
-  per chart (14px, 12px below 600px wide), placed largest first within each group and stopping at
+  midpoints are computed, not palette tokens, and have no name a figure could set (a raw hex equal
+  to one is accepted, and fills its group flat). Labels top-left at one size per chart (14px, 12px
+  below 600px wide), placed largest first within each group and stopping at
   the first that does not fit, so a group never labels a tile while leaving a larger one bare. The
   tiles of flat data are drawn squarified, as rows, as columns or as a balanced split, whichever
   labels the most tiles; grouped data's blocks are squarified at 600px and wider and compete the

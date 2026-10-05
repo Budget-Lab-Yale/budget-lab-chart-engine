@@ -305,6 +305,18 @@ describe("treemap.shading", () => {
     expect(outside).toEqual(["navy"]);
   });
 
+  it("a raw hex equal to a half-step is accepted like any raw hex and, on no ramp, fills its group flat", () => {
+    const mid = treemapShades(tokens.categorical[0]!.base)![1]!;
+    expect(validateSpec({ ...TM, series_colors: { A: mid } } as ChartSpec)).toEqual({ valid: true, errors: [] });
+    const { svg } = renderChart({ ...TM, series_colors: { A: mid } } as ChartSpec, TWO, { width: 920 });
+    expect(tileFills(svg, "A")).toEqual([mid, mid, mid]);
+  });
+
+  it("with shading: none a group of two or more tiles is drawn entirely in the chip's colour", () => {
+    const res = renderChart({ ...TM, treemap: { shading: "none" } } as ChartSpec, TWO, { width: 920 });
+    for (const g of ["A", "B"]) expect(new Set(tileFills(res.svg, g))).toEqual(new Set([res.legendItems!.find((i) => i.series === g)!.color]));
+  });
+
   it("the half-step shades have no name a figure could set: series_colors blue-450 is rejected at load", () => {
     const bad = validateSpec({ ...TM, series_colors: { A: "blue-450" } } as ChartSpec);
     expect(bad.valid).toBe(false);

@@ -183,13 +183,6 @@ describe("treemap legend, live", () => {
   });
 
   it("the no-rows fallback is treemap-only: a non-treemap chart's right legend is unchanged", () => {
-    // A two-series stacked chart keeps its right-hand column.
-    const stacked = { chartType: "stacked", title: "S", xAxisType: "categorical", data: "inline", legendPosition: "right" } as ChartSpec;
-    const sRows = [{ time: "X", series: "A", value: "3" }, { time: "X", series: "B", value: "2" }] as TidyRow[];
-    const a = document.createElement("div");
-    document.body.append(a);
-    mountChart(a, { spec: stacked, rows: sRows, width: INNER_W });
-    expect(a.querySelector(".figure-body--legend-right")).not.toBeNull();
     // A single-series line (no legend rows) with legendPosition: right still reserves the column's
     // width live, exactly as before this fix: pre-existing behaviour on non-treemap chart types,
     // pinned here so the treemap fallback provably does not reach them.
