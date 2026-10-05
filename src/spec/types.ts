@@ -60,6 +60,9 @@ export interface TreemapConfig {
   share_label?: string;
   /** Label of the hover card's Value row. Default "Value". */
   value_label?: string;
+  /** A column whose cell, for the hovered tile, closes the hover card: below a divider, in regular
+   *  weight, verbatim. A blank cell shows no note (and no divider). Must be a column in the data. */
+  tooltip_note?: string;
   /** Extra hover rows, in order, after the built-in rows. */
   tooltip?: TreemapTooltipRow[];
 }

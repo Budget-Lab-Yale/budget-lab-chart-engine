@@ -8,6 +8,7 @@ import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { treemapHeight } from "../src/engine/marks/treemap";
 import { treemapAreaHeight } from "../src/engine/treemap-layout";
 import { tokens } from "../src/theme/tokens";
+import { CHART_CSS } from "../src/embed/styles";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -246,6 +247,47 @@ describe("treemap live mount: hover", () => {
       const aria = tileNamed(svgOf(mountAt(900, spec)), "Housing").parentElement!.getAttribute("aria-label")!;
       expect(aria, mode).toMatch(/^Housing, \d+\.\d% of total, \$28,452$/);
     }
+  });
+
+  describe("tooltip_note", () => {
+    const NOTE_ROWS = [
+      { group: "A", category: "Plain", amount: "300", note: "Includes <OASI> & DI" },
+      { group: "A", category: "Blank", amount: "200", note: "   " },
+      { group: "A", category: "Missing", amount: "100" },
+    ] as unknown as TidyRow[];
+    const spec = (treemap: object = {}) => ({
+      chartType: "treemap", title: "T", xAxisType: "categorical", data: "d.csv",
+      columns: { x: "category", value: "amount", series: "group" },
+      treemap: { tooltip_note: "note", tooltip: [{ column: "amount", label: "Raw" }], ...treemap },
+    }) as ChartSpec;
+    const hover = (s: ChartSpec, name: string): HTMLElement => {
+      document.body.replaceChildren();
+      enter(tileNamed(svgOf(mountAt(900, s, NOTE_ROWS)), name).parentElement!);
+      return tip()!;
+    };
+    it("draws the cell last, below the built-in and configured rows, verbatim and escaped, in its own divided block", () => {
+      const card = hover(spec(), "Plain");
+      const kids = [...card.children];
+      const note = kids.at(-1)!;
+      expect(note.className).toBe("tbl-tooltip-note");
+      expect(kids.slice(1, -1).every((k) => k.classList.contains("tbl-tooltip-row"))).toBe(true);
+      expect(cardRows()).toEqual(["Value: 300", "Share: 50.0%", "Raw: 300"]);
+      expect(note.textContent).toBe("Includes <OASI> & DI");
+      expect(note.innerHTML).toBe("Includes &lt;OASI&gt; &amp; DI");
+      expect(note.querySelector("*")).toBeNull();
+    });
+    it("a blank or missing cell draws no note (and so no divider)", () => {
+      for (const name of ["Blank", "Missing"]) expect(hover(spec(), name).querySelector(".tbl-tooltip-note"), name).toBeNull();
+    });
+    it("works with tooltip_values none: the note follows the header and the configured rows", () => {
+      const card = hover(spec({ tooltip_values: "none", tooltip: [] }), "Plain");
+      expect([...card.children].map((k) => k.className)).toEqual(["tbl-tooltip-head", "tbl-tooltip-note"]);
+    });
+    it("the note's style is a top rule in the card's rule colour, regular weight, wrapping inside the card", () => {
+      const rule = /\.tbl-tooltip-note\s*\{([^}]*)\}/.exec(CHART_CSS)![1]!;
+      expect(rule).toContain("border-top: 1px solid var(--tbl-tooltip-rule)");
+      expect(rule).toContain("font-weight: var(--tw-body)");
+    });
   });
 
   it("custom built-in row labels are escaped", () => {

@@ -567,6 +567,7 @@ export const CHART_SPEC_SCHEMA = {
         tooltip_values: { type: "string", enum: ["both", "share", "value", "none"] },
         share_label: { type: "string" },
         value_label: { type: "string" },
+        tooltip_note: { type: "string", minLength: 1 },
         tooltip: {
           type: "array",
           items: {

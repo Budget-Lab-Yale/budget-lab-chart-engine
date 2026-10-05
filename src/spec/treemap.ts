@@ -13,6 +13,7 @@ export interface ResolvedTreemapConfig {
   shareLabel: string;
   valueLabel: string;
   tooltip: TreemapTooltipRow[];
+  tooltipNote: string | null;
 }
 
 export const TREEMAP_TILE_WARN_COUNT = 30;
@@ -28,6 +29,7 @@ export function resolveTreemapConfig(spec: ChartSpec): ResolvedTreemapConfig {
     shareLabel: t.share_label ?? "Share",
     valueLabel: t.value_label ?? "Value",
     tooltip: t.tooltip ?? [],
+    tooltipNote: t.tooltip_note ?? null,
   };
 }
 
@@ -95,6 +97,8 @@ export function treemapDataErrors(spec: ChartSpec, rows: TidyRow[]): string[] {
   (spec.treemap?.tooltip ?? []).forEach((t, i) => {
     if (!present.has(t.column)) errors.push(`treemap.tooltip[${i}].column ${JSON.stringify(t.column)} is not a column in the data`);
   });
+  const note = spec.treemap?.tooltip_note;
+  if (note != null && !present.has(note)) errors.push(`treemap.tooltip_note ${JSON.stringify(note)} is not a column in the data`);
   if (errors.length) return errors;
 
   const firstRow = new Map<string, number>();

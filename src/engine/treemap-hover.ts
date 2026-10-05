@@ -38,6 +38,13 @@ function cardHtml(t: TreemapTileInfo, spec: ChartSpec): string {
     const n = Number(text);
     html += rowHtml(row.label ?? row.column, row.format && Number.isFinite(n) ? formatTreemapValue(n, row.format) : text);
   }
+  // treemap.tooltip_note: the cell closes the card, below a divider (.tbl-tooltip-note, styles.ts);
+  // a blank cell adds nothing, divider included.
+  if (cfg.tooltipNote !== null) {
+    const cell = t.row[cfg.tooltipNote];
+    const note = cell == null ? "" : String(cell);
+    if (note.trim() !== "") html += `<div class="tbl-tooltip-note">${escapeHtml(note)}</div>`;
+  }
   return html;
 }
 

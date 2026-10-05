@@ -78,6 +78,12 @@ describe("treemapDataErrors", () => {
     expect(treemapDataErrors(s, [row("A", "1")])).toEqual([`treemap.tooltip[1].column "nope" is not a column in the data`]);
   });
 
+  it("rejects a tooltip_note column missing from the data, naming it", () => {
+    expect(treemapDataErrors(spec({ treemap: { tooltip_note: "nope" } }), [row("A", "1")]))
+      .toEqual([`treemap.tooltip_note "nope" is not a column in the data`]);
+    expect(treemapDataErrors(spec({ treemap: { tooltip_note: "amount" } }), [row("A", "1")])).toEqual([]);
+  });
+
   it("reports a missing name or value column", () => {
     const errs = treemapDataErrors(spec(), [{ other: "a" }]);
     expect(errs).toHaveLength(2);
