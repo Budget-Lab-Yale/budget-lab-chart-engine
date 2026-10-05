@@ -7,11 +7,13 @@ import { timelineTextWidth } from "./timeline-text";
 import { TM_GEOM } from "./treemap-layout";
 import { d3 } from "./vendor";
 
-/** Label text size (px), one per chart: `wide` on a chart at least `wideAt` px wide, else `narrow`.
- *  A tile label's name (700) and number (500) are both drawn at it. */
-export const TM_LABEL_SIZES = { wide: 14, narrow: 12, wideAt: 600 } as const;
+/** Label text size (px), one per chart: `wide` on a chart at least `wideAt` px wide, else `narrow`
+ *  (the base size). On a chart narrower than `smallBelow`, `small` is also a candidate, taken only
+ *  when it labels more tiles (marks/treemap). A tile label's name (700) and number (500) are both
+ *  drawn at the chart's size. */
+export const TM_LABEL_SIZES = { wide: 14, narrow: 12, wideAt: 600, small: 11, smallBelow: 400 } as const;
 
-/** The one label text size for a chart `chartWidth` px wide. */
+/** The base label text size for a chart `chartWidth` px wide. */
 export function treemapLabelSize(chartWidth: number): number {
   return chartWidth >= TM_LABEL_SIZES.wideAt ? TM_LABEL_SIZES.wide : TM_LABEL_SIZES.narrow;
 }

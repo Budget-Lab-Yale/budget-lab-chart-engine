@@ -11,6 +11,7 @@ import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { layoutTreemap } from "../src/engine/treemap-layout";
 import { renderChart, renderFigure } from "../src/engine/index";
+import { treemapChoice } from "../src/engine/marks/treemap";
 import { mountChart } from "../src/engine/render-live";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
@@ -147,9 +148,13 @@ describe("tile label sizes", () => {
     q(svg, `${sel} tspan`).map((s) => [(s.getAttribute("font-size") ?? s.parentElement!.getAttribute("font-size"))!, s.getAttribute("font-weight")!]);
 
   it("one size in a whole chart: 14px at 600px wide and over, 12px below; the name 700, its number 500 at that size", () => {
-    for (const [w, size] of [[920, "14"], [600, "14"], [599, "12"], [375, "12"]] as const) {
+    for (const [w, base] of [[920, "14"], [600, "14"], [599, "12"], [400, "12"], [375, "12"], [280, "12"]] as const) {
       for (const [spec, data] of [[FLAT, MANY], [TM, MANY_GROUPED]] as const) {
         const { svg } = renderChart(spec, data, { width: w });
+        // The base size, or below 400px wide 11px where that labels more tiles.
+        const choice = treemapChoice(spec, data, w);
+        const size = String(choice.candidates[choice.chosen]!.size);
+        expect(w < 400 ? [base, "11"] : [base]).toContain(size);
         const spans = drawn(svg);
         expect(q(svg, "text.tbl-treemap-label").length).toBeGreaterThanOrEqual(2);
         expect(new Set(spans.map(([s]) => s))).toEqual(new Set([size]));
@@ -159,7 +164,9 @@ describe("tile label sizes", () => {
   });
 
   it("group strip text is the tile labels' size too: name 700, share 500", () => {
-    for (const [w, size] of [[920, "14"], [375, "12"]] as const) {
+    for (const w of [920, 375]) {
+      const choice = treemapChoice(TM, MANY_GROUPED, w);
+      const size = String(choice.candidates[choice.chosen]!.size);
       const strips = q(renderChart(TM, MANY_GROUPED, { width: w }).svg, "text.tbl-treemap-strip-label");
       expect(strips.length).toBeGreaterThan(0);
       for (const s of strips) {

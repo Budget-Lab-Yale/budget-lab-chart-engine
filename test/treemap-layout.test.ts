@@ -384,20 +384,18 @@ describe("layoutTreemap: a group re-tiled so its largest tile's label fits", () 
     expect(base.groups.every((g) => g.tiling === "squarify")).toBe(true);
   });
 
-  it("tries slice (largest first, full-width rows), dice (full-height columns), sliceDice, binary, in that order", () => {
+  it("tries slice (largest first, full-width rows), dice (full-height columns), binary, in that order", () => {
     const a = blockOf(base, "A");
     const seen = tried(() => false);
-    expect(seen).toHaveLength(5);
+    expect(seen).toHaveLength(4);
     // squarify's cell, as drawn without labelFits.
     expect(seen[0]).toEqual((({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }))(largestOf(base, "A")));
     // slice: the largest tile is the top row, the block's full width.
     expect([seen[1]!.x0, seen[1]!.y0, seen[1]!.x1]).toEqual([a.x0, tileTop(base, "A"), a.x1]);
     // dice: the largest tile is the left column, the block's full height below the strip.
     expect([seen[2]!.x0, seen[2]!.y0, seen[2]!.y1]).toEqual([a.x0, tileTop(base, "A"), a.y1]);
-    // sliceDice slices at a group's depth: the same rows as slice.
-    expect(seen[3]).toEqual(seen[1]);
     // binary differs from all of them.
-    for (const i of [0, 1, 2]) expect(seen[4]).not.toEqual(seen[i]);
+    for (const i of [0, 1, 2]) expect(seen[3]).not.toEqual(seen[i]);
   });
 
   it("takes the first tiling under which the label fits, and keeps squarify when none does", () => {
@@ -407,7 +405,7 @@ describe("layoutTreemap: a group re-tiled so its largest tile's label fits", () 
     const tilingFor = (fits: (t: TileRect) => boolean) => blockOf(layoutTreemap(data, 920, 460, { ...o, labelFits: fits }), "A").tiling;
     expect(tilingFor(same(seen[1]!))).toBe("slice");
     expect(tilingFor(same(seen[2]!))).toBe("dice");
-    expect(tilingFor(same(seen[4]!))).toBe("binary");
+    expect(tilingFor(same(seen[3]!))).toBe("binary");
     // Full-width or full-height both pass: slice is first.
     expect(tilingFor((t) => t.datum.group !== "A" || !(t.x1 === seen[0]!.x1 && t.y1 === seen[0]!.y1))).toBe("slice");
     // Nothing fits: squarify stays, tile for tile.
@@ -443,7 +441,7 @@ describe("layoutTreemap: a group re-tiled so its largest tile's label fits", () 
     const k = (920 * 460 - strips) / sq.total;
     const seen: string[] = [];
     // Accept the n-th alternative tiling for A, rejecting the ones before it.
-    for (let n = 1; n <= 4; n++) {
+    for (let n = 1; n <= 3; n++) {
       let calls = 0;
       const l = layoutTreemap(data, 920, 460, { ...o, gutters: g0, labelFits: (t) => t.datum.group !== "A" || calls++ === n });
       seen.push(blockOf(l, "A").tiling);
@@ -452,7 +450,7 @@ describe("layoutTreemap: a group re-tiled so its largest tile's label fits", () 
       const sum = ts.reduce((s, t) => s + area(t), 0) / ts.reduce((s, t) => s + t.datum.value, 0);
       expect(Math.abs(sum - k) / k).toBeLessThan(1e-4);
     }
-    expect(seen).toEqual(["slice", "dice", "sliceDice", "binary"]);
+    expect(seen).toEqual(["slice", "dice", "binary"]);
   });
 
   it("property: re-tiling never moves a block and keeps areas proportional (gutters 0, 200 random charts)", () => {
@@ -503,5 +501,50 @@ describe("layoutTreemap: a group re-tiled so its largest tile's label fits", () 
   it("is deterministic", () => {
     const opts = { ...o, labelFits: (t: TileRect) => t.datum.group !== "A" || t.x1 - t.x0 > 400 };
     expect(layoutTreemap(data, 920, 460, opts)).toEqual(layoutTreemap(data, 920, 460, opts));
+  });
+});
+
+describe("layoutTreemap: whole-frame tilings for flat data", () => {
+  const f = flat([40, 25, 15, 10, 6, 4]);
+  const W = 375;
+  const H = treemapAreaHeight(375);
+  const at = (tiling?: "squarify" | "slice" | "dice" | "binary", gutters?: { tile: number; group: number }) =>
+    layoutTreemap(f, W, H, { groupOrder: [], ...(tiling ? { tiling } : {}), ...(gutters ? { gutters } : {}) });
+
+  it("squarify is the default", () => {
+    expect(at("squarify")).toEqual(at());
+  });
+
+  it("slice: full-width rows, largest on top; dice: full-height columns, largest on the left", () => {
+    const rows = byRank(at("slice"));
+    expect(rows.map((t) => t.datum.value)).toEqual([40, 25, 15, 10, 6, 4]);
+    for (const t of rows) expect([t.x0, t.x1]).toEqual([0, W]);
+    for (let i = 1; i < rows.length; i++) expect(rows[i]!.y0).toBeGreaterThan(rows[i - 1]!.y1);
+    expect(rows[0]!.y0).toBe(0);
+    expect(rows[rows.length - 1]!.y1).toBeCloseTo(H, 1);
+    const cols = byRank(at("dice"));
+    for (const t of cols) expect([t.y0, t.y1]).toEqual([0, H]);
+    for (let i = 1; i < cols.length; i++) expect(cols[i]!.x0).toBeGreaterThan(cols[i - 1]!.x1);
+  });
+
+  it("binary differs from squarify, slice and dice", () => {
+    const all = (l: TreemapLayout) => byRank(l).map(coords);
+    for (const other of ["squarify", "slice", "dice"] as const) expect(all(at("binary"))).not.toEqual(all(at(other)));
+  });
+
+  it.each(["squarify", "slice", "dice", "binary"] as const)("%s: areas are exactly proportional to value with gutters 0", (tiling) => {
+    const l = at(tiling, { tile: 0, group: 0 });
+    const k = (W * H) / l.total;
+    for (const t of l.tiles) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(2e-3);
+    expect(Math.abs(l.tiles.reduce((s, t) => s + area(t), 0) - W * H) / (W * H)).toBeLessThan(1e-4);
+  });
+
+  it("is ignored with groups (a grouped chart keeps its group blocks squarified)", () => {
+    const g = grouped([["A", 40], ["A", 20], ["B", 30], ["B", 10]]);
+    expect(layoutTreemap(g, 920, 460, { groupOrder: [], tiling: "slice" })).toEqual(layoutTreemap(g, 920, 460, { groupOrder: [] }));
+  });
+
+  it("is deterministic", () => {
+    for (const tiling of ["slice", "dice", "binary"] as const) expect(at(tiling)).toEqual(at(tiling));
   });
 });

@@ -924,7 +924,8 @@ warns, naming its row. Keys of `series_order`, `series_colors` and `series_label
 in the data; on a treemap with no groups, any key in them is a validation error (the bar chart's
 `series_colors: {"": color}` idiom included), since there is no group for it to name.
 
-**Layout.** Squarified, and deterministic: the same data always draws the same tiles. Tiles are
+**Layout.** Squarified unless another layout labels more tiles (see **Choosing the layout and
+size** below), and deterministic: the same data always draws the same tiles. Tiles are
 sorted by value, the largest first and top-left; equal values keep their CSV order, and values
 equal to 12 significant digits count as equal. With groups, each group is one block: blocks are
 sorted by group total, largest first, ties (to 12 significant digits, so `0.1 + 0.2` ties `0.3`)
@@ -937,8 +938,18 @@ one, less the gutters. When a group's largest tile cannot hold its label (see **
 group's tiles alone are laid out again inside the same block, trying in turn full-width rows from
 the largest down, full-height columns from the left, and a balanced split by value, and the first
 under which the largest tile's label fits is kept (squarified if none). The block's position and
-size never change, and tile areas stay proportional to value as above. Data with no groups is
-always squarified.
+size never change, and tile areas stay proportional to value as above.
+
+**Choosing the layout and size.** With no groups, the chart is drawn in whichever of these labels
+the most tiles (under the rule in **Tile labels**), the earlier one winning a tie: squarified,
+full-width rows from the largest down, full-height columns from the left, or a balanced split by
+value, each at the base size (14px, or 12px below 600px wide); then, on a chart narrower than 400px
+only, the same four again at 11px. So a narrow chart can be drawn as rows or columns rather than
+near-squares, and in 11px text only when that labels more tiles than the base size does. Every one
+shares the area by value, so tile areas stay proportional as above. With groups, the blocks are
+always squarified (a group can still be re-laid out inside its block, as above), and on a chart
+narrower than 400px the whole chart, strips included, is drawn at 11px only when that labels more
+tiles.
 
 **Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
 rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first
@@ -964,7 +975,8 @@ again from the 15th. A group with its own `series_colors` entry still counts tow
 `series_labels` renames a group in its strip, the hover card and the screen-reader labels.
 
 **Tile labels.** Every label in a chart is drawn at one size: 14px on a chart at least 600px wide,
-12px on a narrower one (so the 920px PNG is 14px). A tile shows its name in bold above its number,
+12px on a narrower one (so the 920px PNG is 14px), or 11px below 400px wide where that labels more
+tiles (see **Choosing the layout and size**). A tile shows its name in bold above its number,
 the number at the same size in medium weight, left-aligned in the tile's top-left corner and fitted
 inside a 6px padding on every side; the name wraps at spaces, to at most three lines. Where that
 does not fit, the name and number are tried on one line. Tiles are labelled largest first within

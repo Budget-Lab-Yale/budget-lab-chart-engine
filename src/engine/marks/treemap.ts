@@ -16,10 +16,12 @@ import {
   resolveTreemapConfig, treemapData, treemapDataWarnings, formatTreemapShare, formatTreemapValue,
   type TreemapDatum,
 } from "../../spec/treemap";
-import { layoutTreemap, treemapAreaHeight, TM_GEOM, type GroupRect, type TreemapLayout } from "../treemap-layout";
+import {
+  layoutTreemap, treemapAreaHeight, TM_GEOM, TM_RETILINGS, type GroupRect, type TreemapLayout, type TreemapTiling,
+} from "../treemap-layout";
 import {
   tileFill, stripFill, contrastText, fitTileLabel, fitTileLabels, fitStripLabel, treemapLabelSize, treemapStripHeight,
-  TM_LINE_HEIGHT as LINE_HEIGHT,
+  TM_LABEL_SIZES, TM_LINE_HEIGHT as LINE_HEIGHT,
   type TileLabel, type StripLabel,
 } from "../treemap-labels";
 
@@ -69,9 +71,51 @@ interface Built {
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
+/** One way to draw a chart: the tiling of the whole frame (flat data only) and the one label size. */
+export interface TreemapCandidate { tiling: TreemapTiling; size: number }
+
+/** The candidates in their fixed order: every tiling at the base size (treemapLabelSize), then, on a
+ *  chart narrower than TM_LABEL_SIZES.smallBelow, every tiling again at TM_LABEL_SIZES.small. Grouped
+ *  data keeps its squarified group blocks (each re-tiled on its own where that saves its largest
+ *  label, layoutTreemap), so it takes part in the size step only. */
+function candidates(grouped: boolean, width: number): TreemapCandidate[] {
+  const tilings: TreemapTiling[] = grouped ? ["squarify"] : ["squarify", ...TM_RETILINGS];
+  const sizes = [treemapLabelSize(width), ...(width < TM_LABEL_SIZES.smallBelow ? [TM_LABEL_SIZES.small] : [])];
+  return sizes.flatMap((size) => tilings.map((tiling) => ({ tiling, size })));
+}
+
+/** Every candidate with the number of tiles it labels, and the index of the one drawn: the most
+ *  labelled tiles, ties to the earlier candidate. Exported for tests. */
+export function treemapChoice(spec: ChartSpec, rows: TidyRow[], width: number):
+  { candidates: Array<TreemapCandidate & { labelled: number }>; chosen: number } {
+  return choose(spec, rows, width).choice;
+}
+
+function choose(spec: ChartSpec, rows: TidyRow[], width: number):
+  { built: Built; choice: { candidates: Array<TreemapCandidate & { labelled: number }>; chosen: number } } {
+  const grouped = treemapData(spec, rows).some((d) => d.group !== null);
+  let best: Built | null = null;
+  let chosen = 0;
+  const scored = candidates(grouped, width).map((cand, i) => {
+    const b = buildAt(spec, rows, width, cand);
+    const labelled = b.tiles.filter((t) => t.label.mode !== "none").length;
+    if (!best || labelled > best.tiles.filter((t) => t.label.mode !== "none").length) {
+      best = b;
+      chosen = i;
+    }
+    return { ...cand, labelled };
+  });
+  return { built: best!, choice: { candidates: scored, chosen } };
+}
+
 /** The one place a spec + rows + width becomes geometry, colours and labels, so the render and the
- *  warnings can never disagree. */
+ *  warnings can never disagree: the chosen candidate's build. */
 function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
+  return choose(spec, rows, width).built;
+}
+
+/** A spec + rows + width drawn as one candidate. */
+function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapCandidate): Built {
   const cfg = resolveTreemapConfig(spec);
   const data = treemapData(spec, rows);
   const grouped = data.some((d) => d.group !== null);
@@ -102,7 +146,7 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
 
   const areaH = treemapAreaHeight(width);
   // Strip text is the tile labels' size, and the strip's height follows it.
-  const size = treemapLabelSize(width);
+  const size = cand.size;
   const stripH = treemapStripHeight(size);
   const numberOf = (v: number): string | null =>
     cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
@@ -110,6 +154,7 @@ function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
   // group whose largest tile cannot hold its label is re-tiled inside its block where that helps.
   const layout = layoutTreemap(data, width, areaH, {
     groupOrder: groupNames,
+    tiling: cand.tiling,
     stripH,
     stripFits: (g) =>
       g.y1 - g.y0 >= 2 * stripH &&

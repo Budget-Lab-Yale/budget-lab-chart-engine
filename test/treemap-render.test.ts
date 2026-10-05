@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
-import { TREEMAP_CLASS, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
+import { TREEMAP_CLASS, treemapChoice, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
 import { contrastText, fitTileLabel, stripFill, treemapStripHeight } from "../src/engine/treemap-labels";
 import { timelineTextWidth } from "../src/engine/timeline-text";
@@ -116,12 +116,14 @@ describe("treemap render", () => {
     for (const w of [375, 560, 720, 920]) {
       for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED], [FLAT_SPEC, INLINE]] as const) {
         const { svg } = render(spec, rows, w);
+        const choice = treemapChoice(spec, rows, w);
+        const size = choice.candidates[choice.chosen]!.size;
         for (const g of tiles(svg)) {
           const rect = g.querySelector("rect")!;
           const [x, y, rw, rh] = ["x", "y", "width", "height"].map((a) => num(rect, a)) as [number, number, number, number];
           const name = g.getAttribute("aria-label")!.split(", ")[0]!.split(" · ").pop()!;
           const share = g.getAttribute("aria-label")!.split(", ")[1]!.replace(" of total", "");
-          const fit = fitTileLabel(name, share, rw, rh, w >= 600 ? 14 : 12);
+          const fit = fitTileLabel(name, share, rw, rh, size);
           const text = g.querySelector("text");
           if (fit.mode === "none") {
             expect(text).toBeNull();
@@ -425,6 +427,80 @@ describe("treemap render", () => {
       const { svg } = render(spec, rows, w);
       expect(treemapHeight(spec, rows, w)).toBe(num(svg, "height"));
     }
+  });
+});
+
+describe("candidate selection: the tiling and size that label the most tiles", () => {
+  /** Every drawn tile label's font size (an inline one carries it on the <text>, a stacked one on its tspans). */
+  const labelSizes = (svg: SVGSVGElement): Set<string> => new Set(q(svg, "text.tbl-treemap-label").map((t) =>
+    t.getAttribute("font-size") ?? t.firstElementChild!.getAttribute("font-size")!));
+  const labelledCount = (svg: SVGSVGElement): number => tiles(svg).filter((g) => g.querySelector("text")).length;
+  const firstMax = (counts: number[]): number => counts.indexOf(Math.max(...counts));
+
+  it("offers squarify, slice, dice, binary at the base size, then the same at 11px only below 400px wide", () => {
+    const names = (w: number) => treemapChoice(FLAT_SPEC, BLS, w).candidates.map((c) => `${c.tiling}@${c.size}`);
+    expect(names(920)).toEqual(["squarify@14", "slice@14", "dice@14", "binary@14"]);
+    expect(names(400)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12"]);
+    expect(names(399)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12", "squarify@11", "slice@11", "dice@11", "binary@11"]);
+    // Grouped charts keep their group blocks: they take part in the size step only.
+    expect(treemapChoice(GROUPED_SPEC, GROUPED, 920).candidates.map((c) => `${c.tiling}@${c.size}`)).toEqual(["squarify@14"]);
+    expect(treemapChoice(GROUPED_SPEC, GROUPED, 375).candidates.map((c) => `${c.tiling}@${c.size}`)).toEqual(["squarify@12", "squarify@11"]);
+  });
+
+  it("BLS at 280 and 340 labels far more than the one tile squarify@12 manages", () => {
+    for (const [w, want] of [[280, { tiling: "squarify", size: 11, labelled: 5 }], [340, { tiling: "squarify", size: 11, labelled: 7 }]] as const) {
+      const choice = treemapChoice(FLAT_SPEC, BLS, w);
+      expect(choice.candidates[0]!.labelled).toBe(1);
+      const chosen = choice.candidates[choice.chosen]!;
+      expect(chosen).toEqual(want);
+      const { svg } = render(FLAT_SPEC, BLS, w);
+      expect(labelledCount(svg)).toBe(chosen.labelled);
+      expect(labelSizes(svg)).toEqual(new Set([String(chosen.size)]));
+    }
+  });
+
+  it("a wide chart keeps squarify at 14px", () => {
+    for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
+      const choice = treemapChoice(spec, rows, 920);
+      expect(choice.chosen).toBe(0);
+      expect(choice.candidates[0]).toMatchObject({ tiling: "squarify", size: 14 });
+    }
+  });
+
+  it("ties go to the earlier candidate: every candidate labels all three tiles, squarify wins", () => {
+    const choice = treemapChoice(FLAT_SPEC, rowsOf([["Alpha", 5], ["Beta", 4], ["Gamma", 3]]), 920);
+    expect(choice.candidates.map((c) => c.labelled)).toEqual([3, 3, 3, 3]);
+    expect(choice.chosen).toBe(0);
+  });
+
+  it("property: the chosen candidate is the first with the most labelled tiles, and the chart draws it at one size (150 charts)", () => {
+    let s = 3;
+    const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const words = ["Housing", "Food", "Transportation", "Health care", "Education", "Personal insurance and pensions", "Other"];
+    const picked = new Set<string>();
+    for (let c = 0; c < 150; c++) {
+      const grouped = c % 3 === 2;
+      const rows = Array.from({ length: 3 + Math.floor(rand() * 15) }, (_, i) => ({
+        group: `G${Math.floor(rand() * 3)}`, category: `${words[Math.floor(rand() * words.length)]} ${i}`,
+        amount: String(Math.round(1 + rand() ** 2 * 1000)),
+      })) as TidyRow[];
+      const w = [280, 320, 360, 399, 400, 560, 920][c % 7]!;
+      const spec = grouped ? GROUPED_SPEC : FLAT_SPEC;
+      const choice = treemapChoice(spec, rows, w);
+      expect(choice.chosen).toBe(firstMax(choice.candidates.map((x) => x.labelled)));
+      const chosen = choice.candidates[choice.chosen]!;
+      picked.add(`${chosen.tiling}@${chosen.size === 11 ? 11 : "base"}`);
+      if (chosen.size === 11) expect(w).toBeLessThan(400);
+      const { svg } = render(spec, rows, w);
+      expect(labelledCount(svg)).toBe(chosen.labelled);
+      const sizes = labelSizes(svg);
+      expect(sizes.size).toBeLessThanOrEqual(1);
+      for (const size of sizes) expect(size).toBe(String(chosen.size));
+      // Strip text, when there is any, is the same one size.
+      for (const st of q(svg, "text.tbl-treemap-strip-label")) expect(st.getAttribute("font-size")).toBe(String(chosen.size));
+    }
+    // More than squarify at the base size gets chosen across these charts.
+    expect(picked.size).toBeGreaterThan(2);
   });
 });
 

@@ -20,9 +20,10 @@ export function treemapAreaHeight(width: number): number {
 
 /** `rank` is the tile's index within its group (overall when flat) by the layout sort, 0 = largest. */
 export interface TileRect { datum: TreemapDatum; x0: number; y0: number; x1: number; y1: number; rank: number }
-/** How a group's tiles are laid out inside its block: squarified, or one of the re-tilings tried,
- *  in this order, when the largest tile's label does not fit under squarify (layoutTreemap). */
-export const TM_RETILINGS = ["slice", "dice", "sliceDice", "binary"] as const;
+/** How tiles are laid out in their region: squarified, or one of these alternatives, which a group
+ *  tries in this order when its largest tile's label does not fit under squarify, and which flat
+ *  data can take for the whole frame (layoutTreemap `tiling`). */
+export const TM_RETILINGS = ["slice", "dice", "binary"] as const;
 export type TreemapTiling = "squarify" | (typeof TM_RETILINGS)[number];
 /** A group's whole block, header strip included. `strip`: the block reserves the header strip.
  *  `tiling`: how its tiles are laid out inside it. */
@@ -53,12 +54,10 @@ function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, 
 }
 
 
-/** The d3 tiling for each re-tiling. "slice" stacks full-width rows top to bottom and "dice" lays
- *  full-height columns left to right, both in the group's sort order (largest first); "sliceDice"
- *  alternates by depth, which for a group block (depth 1) is slice; "binary" splits by value. */
-const RETILE = {
-  slice: d3.treemapSlice, dice: d3.treemapDice, sliceDice: d3.treemapSliceDice, binary: d3.treemapBinary,
-} as const;
+/** The d3 tiling for each alternative. "slice" stacks full-width rows top to bottom and "dice" lays
+ *  full-height columns left to right, both in sort order (largest first); "binary" splits by value
+ *  into a balanced binary tree. (d3's sliceDice is not offered: at one level it is slice or dice.) */
+const RETILE = { slice: d3.treemapSlice, dice: d3.treemapDice, binary: d3.treemapBinary } as const;
 
 /** Fixed-point cap for the strip compensation (deterministic whether or not it converges first). */
 const MAX_COMPENSATION_ROUNDS = 50;
@@ -88,12 +87,16 @@ const CONVERGED_PX = 1e-6;
  * laid out again inside the same block (below the same strip) by each of TM_RETILINGS in turn,
  * keeping the first under which it passes, else squarify. Blocks never move and every tiling shares
  * the block by value, so areas stay proportional exactly as under squarify. Flat data is never
- * re-tiled (re-tiling the whole chart would change its whole look), so it is not asked there.
+ * re-tiled this way, so it is not asked there.
+ *
+ * `tiling` (flat data only; ignored with groups) lays the whole frame out by that tiling instead of
+ * squarify, tiles in sort order; every tiling shares the frame by value. The caller (marks/treemap)
+ * picks it among candidates by how many tiles each lets it label.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,
   opts: {
     groupOrder: string[]; stripFits?: (g: GroupRect) => boolean; stripH?: number;
-    labelFits?: (largest: TileRect) => boolean; gutters?: { tile: number; group: number };
+    labelFits?: (largest: TileRect) => boolean; tiling?: TreemapTiling; gutters?: { tile: number; group: number };
   }): TreemapLayout {
   const stripH = opts.stripH ?? TM_GEOM.stripH;
   const tileGutter = opts.gutters?.tile ?? TM_GEOM.tileGutter;
@@ -154,7 +157,10 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   // (below the strip) by their own values alone, so there the group's value is its tiles' sum.
   type TNode = { depth: number; value: number; children?: TNode[] };
   const tile = (node: TNode, x0: number, y0: number, x1: number, y1: number): void => {
-    if (node.depth === 0) return d3.treemapResquarify(node, x0, y0, x1, y1);
+    if (node.depth === 0) {
+      const alt = !grouped && opts.tiling && opts.tiling !== "squarify" ? RETILE[opts.tiling] : null;
+      return alt ? alt(node, x0, y0, x1, y1) : d3.treemapResquarify(node, x0, y0, x1, y1);
+    }
     const own = node.value;
     node.value = node.children!.reduce((s, c) => s + c.value, 0);
     d3.treemapSquarify(node, x0, y0, x1, y1);

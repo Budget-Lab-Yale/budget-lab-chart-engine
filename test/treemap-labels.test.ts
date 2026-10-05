@@ -205,7 +205,7 @@ describe("fitTileLabel (one size)", () => {
 
 describe("treemapLabelSize", () => {
   it("is 14px on a chart at least 600px wide, else 12px", () => {
-    expect(TM_LABEL_SIZES).toEqual({ wide: 14, narrow: 12, wideAt: 600 });
+    expect(TM_LABEL_SIZES).toEqual({ wide: 14, narrow: 12, wideAt: 600, small: 11, smallBelow: 400 });
     expect([280, 599, 599.99, 600, 920].map(treemapLabelSize)).toEqual([12, 12, 12, 14, 14]);
   });
 });
