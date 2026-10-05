@@ -195,6 +195,21 @@ describe("treemap legend, live", () => {
     expect(Number(b.querySelector("svg.tblchart")!.getAttribute("width"))).toBe(RIGHT_W);
   });
 
+  it("a repeated series_order entry counts once: one legend row and one hue per group (Ruling 43)", () => {
+    const two = [{ group: "A", category: "a1", amount: "300" }, { group: "A", category: "a2", amount: "100" },
+      { group: "B", category: "b1", amount: "200" }] as TidyRow[];
+    const res = renderChart({ ...SPEC, series_order: ["A", "A", "B"] } as ChartSpec, two, { width: INNER_W });
+    expect(res.legendItems!.map((i) => i.series)).toEqual(["A", "B"]);
+    expect(res.legendItems!.map((i) => i.color)).toEqual([tokens.categorical[0]!.base, tokens.categorical[1]!.base]);
+    // A single group listed twice draws no legend, so legendPosition: right takes no column, live or PNG.
+    const one = two.filter((r) => r.group === "A");
+    const spec = { ...SPEC, series_order: ["A", "A"], legendPosition: "right" } as ChartSpec;
+    expect(renderChart(spec, one, { width: INNER_W }).legendItems).toBeNull();
+    const host = mount(spec, INNER_W, one);
+    expect(Number(svgOf(host).getAttribute("width"))).toBe(INNER_W);
+    expect(Number(buildExportSvg(spec, one).querySelector(`svg.${TREEMAP_CLASS}`)!.getAttribute("width"))).toBe(INNER_W);
+  });
+
   it("legendPosition: right falls back to the top on a card too narrow for the column", () => {
     const host = mount({ ...SPEC, legendPosition: "right" } as ChartSpec, 500);
     expect(host.querySelector(".figure-legend-slot--right")).toBeNull();

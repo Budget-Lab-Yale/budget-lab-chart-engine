@@ -299,6 +299,18 @@ describe("treemap render", () => {
     expect(tileOf(flat.svg, "Only").querySelector("rect")!.getAttribute("fill")).toBe(tokens.categorical[0]!.base);
   });
 
+  it("extreme magnitudes draw finite rects live and in the PNG (Ruling 43)", () => {
+    const rows = ([["A", "Huge", "1e282"], ["B", "Small", "1e-36"], ["B", "Tiny", "1e-267"]] as const)
+      .map(([group, category, amount]) => ({ group, category, amount }) as TidyRow);
+    const finite = (svg: SVGSVGElement) => {
+      const rects = q(svg, "rect.tbl-treemap-tile");
+      expect(rects).toHaveLength(3);
+      for (const r of rects) for (const a of ["x", "y", "width", "height"]) expect(Number.isFinite(num(r, a)), `${a}=${r.getAttribute(a)}`).toBe(true);
+    };
+    finite(render(GROUPED_SPEC, rows, 920).svg);
+    finite(buildExportSvg(GROUPED_SPEC, rows).querySelector<SVGSVGElement>(`svg.${TREEMAP_CLASS}`)!);
+  });
+
   it("rescue targets the group's first tile under the same 12-significant-digit tie rule, so a tie that cannot fit is re-tiled", () => {
     const rows = ([["A", "WWWWWWWWWW", 1], ["A", "B", 1.0000000000001], ["Other", "C0", 2]] as const)
       .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);

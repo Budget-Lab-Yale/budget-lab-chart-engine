@@ -47,8 +47,13 @@ const r2 = (v: number): number => Math.round(v * 100) / 100;
 const clamp = (v: number, hi: number): number => Math.min(hi, Math.max(0, v));
 
 /** Rounded rect inside the `w` x `h` frame with x1 >= x0 and y1 >= y0. A sub-pixel tile never gets a
- *  negative size, and a collapsed one d3 centres past the frame sits at the frame edge with 0 size. */
+ *  negative size, and a collapsed one d3 centres past the frame sits at the frame edge with 0 size.
+ *  A non-finite coordinate (Ruling 43: a value so small beside the largest that, normalized, it
+ *  underflows to 0 or a subnormal, where d3's reciprocal scale overflows and 0 x Infinity is NaN)
+ *  makes the whole rect a zero-size one at the frame's bottom-right corner: such a tile has no
+ *  drawable area anyway, and every other tile keeps its exact geometry. */
 function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, h: number): { x0: number; y0: number; x1: number; y1: number } {
+  if (![n.x0, n.y0, n.x1, n.y1].every(Number.isFinite)) return { x0: w, y0: h, x1: w, y1: h };
   const x0 = clamp(r2(n.x0), w);
   const y0 = clamp(r2(n.y0), h);
   return { x0, y0, x1: Math.max(x0, clamp(r2(n.x1), w)), y1: Math.max(y0, clamp(r2(n.y1), h)) };
@@ -68,8 +73,8 @@ const RETILE = { slice: d3.treemapSlice, dice: d3.treemapDice, binary: d3.treema
  * whole chart, less the fixed gutters (exactly so with gutters 0). `gutters` is for tests only (0
  * isolates the proportionality from the fixed gutters); every caller in the engine uses TM_GEOM's.
  *
- * `labelFits` rescues a group whose largest tile (by value; ties: layout order) cannot hold its
- * label: asked of that tile once the blocks are laid out, and if it fails, the group's tiles alone
+ * `labelFits` rescues a group whose first tile in layout order (the sort above: values at 12
+ * significant digits, ties by CSV order) cannot hold its label: asked of that tile once the blocks are laid out, and if it fails, the group's tiles alone
  * are laid out again inside the same block by each of TM_RETILINGS in turn, keeping the first under
  * which it passes, else squarify. Blocks never move and every tiling shares the block by value, so
  * areas stay proportional exactly as under squarify. Flat data is never re-tiled this way, so it is

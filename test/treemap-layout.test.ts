@@ -14,6 +14,31 @@ const byRank = (l: TreemapLayout): TileRect[] => [...l.tiles].sort((a, b) => a.r
 const tilesOf = (l: TreemapLayout, g: string): TileRect[] => l.tiles.filter((t) => t.datum.group === g);
 const coords = (r: { x0: number; y0: number; x1: number; y1: number }): number[] => [r.x0, r.y0, r.x1, r.y1];
 
+describe("extreme magnitudes (Ruling 43)", () => {
+  // Normalized, Small is ~1e-318 (subnormal) and Tiny 0: d3's reciprocal scale overflows and 0 x Infinity is NaN.
+  const data: TreemapDatum[] = [
+    { index: 0, name: "Huge", group: "A", value: 1e282, row: {} },
+    { index: 1, name: "Small", group: "B", value: 1e-36, row: {} },
+    { index: 2, name: "Tiny", group: "B", value: 1e-267, row: {} },
+  ];
+  it("every tile and group coordinate is finite and inside the frame, under every frame tiling", () => {
+    for (const tiling of ["squarify", "slice", "dice", "binary"] as const) {
+      const l = layoutTreemap(data, 920, 460, { groupOrder: [], tiling, labelFits: () => false });
+      for (const r of [...l.tiles, ...l.groups]) {
+        for (const v of coords(r)) expect(Number.isFinite(v), `${tiling}`).toBe(true);
+        expect(r.x0).toBeGreaterThanOrEqual(0);
+        expect(r.x1).toBeLessThanOrEqual(920);
+        expect(r.y0).toBeGreaterThanOrEqual(0);
+        expect(r.y1).toBeLessThanOrEqual(460);
+      }
+      // Huge keeps (all but the gutter of) the whole frame; the others have no area.
+      const huge = l.tiles.find((t) => t.datum.name === "Huge")!;
+      expect(area(huge)).toBeGreaterThan(920 * 460 * 0.98);
+      for (const t of l.tiles.filter((t) => t.datum.name !== "Huge")) expect(area(t)).toBe(0);
+    }
+  });
+});
+
 describe("treemapAreaHeight", () => {
   it("caps at maxHeight on wide charts", () => {
     expect(treemapAreaHeight(920)).toBe(460);
