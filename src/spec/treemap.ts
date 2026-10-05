@@ -14,6 +14,7 @@ export interface ResolvedTreemapConfig {
   valueLabel: string;
   tooltip: TreemapTooltipRow[];
   tooltipNote: string | null;
+  tooltipGroup: boolean;
 }
 
 export const TREEMAP_TILE_WARN_COUNT = 30;
@@ -30,6 +31,7 @@ export function resolveTreemapConfig(spec: ChartSpec): ResolvedTreemapConfig {
     valueLabel: t.value_label ?? "Value",
     tooltip: t.tooltip ?? [],
     tooltipNote: t.tooltip_note ?? null,
+    tooltipGroup: t.tooltip_group ?? true,
   };
 }
 

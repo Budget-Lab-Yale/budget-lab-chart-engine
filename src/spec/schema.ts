@@ -568,6 +568,7 @@ export const CHART_SPEC_SCHEMA = {
         share_label: { type: "string", minLength: 1 },
         value_label: { type: "string", minLength: 1 },
         tooltip_note: { type: "string", minLength: 1 },
+        tooltip_group: { type: "boolean" },
         tooltip: {
           type: "array",
           items: {

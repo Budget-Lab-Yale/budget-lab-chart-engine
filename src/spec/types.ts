@@ -60,6 +60,9 @@ export interface TreemapConfig {
   share_label?: string;
   /** Label of the hover card's Value row. Default "Value". */
   value_label?: string;
+  /** Whether the hover card's header names the tile's group after its name ("Medicare ·
+   *  Mandatory"). Default true; false shows the tile name alone. No effect on flat data. */
+  tooltip_group?: boolean;
   /** A column whose cell, for the hovered tile, closes the hover card: below a divider, in regular
    *  weight, verbatim. A blank cell shows no note (and no divider). Must be a column in the data. */
   tooltip_note?: string;

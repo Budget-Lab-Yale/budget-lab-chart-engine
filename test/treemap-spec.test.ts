@@ -77,6 +77,12 @@ describe("treemap - structural validation", () => {
     expect(validateSpec({ ...TM, treemap: { value_label: "" } }).valid).toBe(false);
   });
 
+  it("accepts tooltip_group as a boolean inside the treemap block only", () => {
+    for (const v of [true, false]) expect(validateSpec({ ...TM, treemap: { tooltip_group: v } })).toEqual({ valid: true, errors: [] });
+    expect(validateSpec({ ...TM, treemap: { tooltip_group: "no" } }).valid).toBe(false);
+    expect(validateSpec({ ...TM, tooltip_group: false }).valid).toBe(false);
+  });
+
   it("accepts tooltip_note as a column name; rejects a non-string or empty one", () => {
     expect(validateSpec({ ...TM, treemap: { tooltip_note: "note" } })).toEqual({ valid: true, errors: [] });
     expect(validateSpec({ ...TM, treemap: { tooltip_note: 3 } }).valid).toBe(false);
@@ -102,18 +108,18 @@ describe("treemap - config and columns", () => {
   it("applies defaults", () => {
     expect(resolveTreemapConfig(TM)).toEqual({
       labelValue: "share", shading: "size", shareDecimals: 1, tooltipValues: "both", shareLabel: "Share", valueLabel: "Value", tooltip: [],
-      tooltipNote: null,
+      tooltipNote: null, tooltipGroup: true,
     });
   });
 
   it("honours authored options, including share_decimals 0", () => {
     const spec = { ...TM, treemap: {
       label_value: "none", shading: "none", share_decimals: 0, tooltip_values: "share", share_label: "Of total", value_label: "Outlays",
-      tooltip: [{ column: "c" }], tooltip_note: "n",
+      tooltip: [{ column: "c" }], tooltip_note: "n", tooltip_group: false,
     } } as ChartSpec;
     expect(resolveTreemapConfig(spec)).toEqual({
       labelValue: "none", shading: "none", shareDecimals: 0, tooltipValues: "share", shareLabel: "Of total", valueLabel: "Outlays",
-      tooltip: [{ column: "c" }], tooltipNote: "n",
+      tooltip: [{ column: "c" }], tooltipNote: "n", tooltipGroup: false,
     });
   });
 

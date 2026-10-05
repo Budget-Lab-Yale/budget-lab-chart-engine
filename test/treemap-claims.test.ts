@@ -146,7 +146,7 @@ describe("series_labels on a treemap", () => {
     document.body.append(host);
     mountChart(host, { spec, rows: TWO, width: 920 });
     q(host, "svg.tbl-treemap g[role=img]")[0]!.dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10 }));
-    expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("Alpha group · a1");
+    expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("a1 · Alpha group");
     expect(q(host, ".tbl-legend-item").map((b) => b.textContent)).toEqual(["Alpha group", "Beta group"]);
   });
 });

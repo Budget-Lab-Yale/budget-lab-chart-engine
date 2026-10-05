@@ -641,7 +641,7 @@ describe("group names that are Object.prototype keys", () => {
       const live = host.querySelector<SVGSVGElement>("svg.tbl-treemap")!;
       expect(new Set(groupNames(live))).toEqual(new Set(want));
       tileOf(live, "__proto__ one").dispatchEvent(new PointerEvent("pointerenter", { clientX: 10, clientY: 10 }));
-      expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("__proto__ · __proto__ one");
+      expect(document.querySelector(".tbl-tooltip .tbl-tooltip-head")!.textContent).toBe("__proto__ one · __proto__");
 
       const exported = buildExportSvg(spec, protoRows).querySelector<SVGSVGElement>(`svg.${TREEMAP_CLASS}`)!;
       expect(new Set(groupNames(exported))).toEqual(new Set(want));

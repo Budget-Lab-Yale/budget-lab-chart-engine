@@ -20,14 +20,17 @@ function rowHtml(label: string, value: string): string {
   return `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(label)}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(value)}</span></span></div>`;
 }
 
-/** The card's HTML for one tile: header `[Group · ]Name`, then the built-in Value and Share rows that
+/** The card's HTML for one tile: header `Name[ · Group]` (the group unless flat or
+ *  `tooltip_group: false`), then the built-in Value and Share rows that
  *  `treemap.tooltip_values` selects (labelled by `value_label` / `share_label`), and each configured
  *  `treemap.tooltip` row whose cell is not blank. A row with a `format` formats a numeric cell with
  *  it; every other cell (any cell of a row without `format`, e.g. a Year) prints verbatim. */
 function cardHtml(t: TreemapTileInfo, spec: ChartSpec): string {
   const cfg = resolveTreemapConfig(spec);
   const valueFmt = spec.tooltip_decimals != null ? { ...spec.value_format, decimals: spec.tooltip_decimals } : spec.value_format;
-  const head = t.groupLabel !== null ? `${t.groupLabel} · ${t.name}` : t.name;
+  // Tile name first, then its group (Ruling 48); `tooltip_group: false` drops the group. The tile's
+  // aria-label keeps its own group-first order.
+  const head = t.groupLabel !== null && cfg.tooltipGroup ? `${t.name} · ${t.groupLabel}` : t.name;
   let html = `<div class="tbl-tooltip-head">${escapeHtml(head)}</div>`;
   const values = cfg.tooltipValues;
   if (values === "both" || values === "value") html += rowHtml(cfg.valueLabel, formatTreemapValue(t.value, valueFmt));

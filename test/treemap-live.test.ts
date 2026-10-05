@@ -201,8 +201,9 @@ describe("treemap live mount: hover", () => {
 
     expect(cardShown()).toBe(true);
     const head = tip()!.querySelector(".tbl-tooltip-head")!;
-    expect(head.textContent).toBe("Mandatory & <co> · Social <Security>");
-    expect(head.innerHTML).toBe("Mandatory &amp; &lt;co&gt; · Social &lt;Security&gt;");
+    // Tile name first, then its group (series_labels), both escaped (Ruling 48).
+    expect(head.textContent).toBe("Social <Security> · Mandatory & <co>");
+    expect(head.innerHTML).toBe("Social &lt;Security&gt; · Mandatory &amp; &lt;co&gt;");
     // Value at tooltip_decimals (1), Share at share_decimals (2: 1461 / 3485), then the configured
     // rows in order: own format, text verbatim (label defaults to the column), numbers in rows with
     // no format verbatim (no value_format prefix, no grouping).
@@ -290,6 +291,28 @@ describe("treemap live mount: hover", () => {
     });
   });
 
+  it("tooltip_group: false drops the group from the header, which is then the tile name alone (escaped)", () => {
+    const spec = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, tooltip_group: false } } as ChartSpec;
+    enter(tileNamed(svgOf(mountAt(900, spec, HOVER_ROWS)), "Social <Security>").parentElement!);
+    const head = tip()!.querySelector(".tbl-tooltip-head")!;
+    expect(head.textContent).toBe("Social <Security>");
+    expect(head.innerHTML).toBe("Social &lt;Security&gt;");
+    // true is the default.
+    document.body.replaceChildren();
+    const on = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, tooltip_group: true } } as ChartSpec;
+    enter(tileNamed(svgOf(mountAt(900, on, HOVER_ROWS)), "Defense").parentElement!);
+    expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Defense · Discretionary");
+  });
+
+  it("the tile's screen-reader label keeps the group first, whatever the header shows", () => {
+    for (const tooltip_group of [true, false]) {
+      document.body.replaceChildren();
+      const spec = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, tooltip_group } } as ChartSpec;
+      const aria = tileNamed(svgOf(mountAt(900, spec, HOVER_ROWS)), "Defense").parentElement!.getAttribute("aria-label")!;
+      expect(aria.startsWith("Discretionary · Defense, ")).toBe(true);
+    }
+  });
+
   it("custom built-in row labels are escaped", () => {
     const spec = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, value_label: "<b>Spend</b> & co", share_label: "<i>%</i>" } } as ChartSpec;
     enter(tileNamed(svgOf(mountAt(900, spec, HOVER_ROWS)), "Defense").parentElement!);
@@ -309,7 +332,7 @@ describe("treemap live mount: hover", () => {
   it("a blank cell omits that row for that tile", () => {
     const svg = svgOf(mountAt(900, HOVER_SPEC, HOVER_ROWS));
     enter(tileNamed(svg, "Defense").parentElement!);
-    expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Discretionary · Defense");
+    expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Defense · Discretionary");
     expect(cardRows()).toEqual(["Value: $850.0", "Share: 24.39%", "note: Base budget", "<i>Year</i> & FY: 2023"]);
 
     enter(tileNamed(svg, "Medicare").parentElement!);
@@ -395,7 +418,7 @@ describe("treemap live mount: hover", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]!.parentElement).toBe(holder);
     expect(cards[0]!.style.opacity).toBe("1");
-    expect(cards[0]!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Mandatory & <co> · Medicare");
+    expect(cards[0]!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Medicare · Mandatory & <co>");
   });
 
   it("chrome.tooltip: false keeps the outline and dim but shows no card", () => {
