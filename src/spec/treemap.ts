@@ -9,6 +9,9 @@ export interface ResolvedTreemapConfig {
   labelValue: "share" | "value" | "none";
   shading: "size" | "none";
   shareDecimals: number;
+  tooltipValues: "both" | "share" | "value" | "none";
+  shareLabel: string;
+  valueLabel: string;
   tooltip: TreemapTooltipRow[];
 }
 
@@ -21,6 +24,9 @@ export function resolveTreemapConfig(spec: ChartSpec): ResolvedTreemapConfig {
     labelValue: t.label_value ?? "share",
     shading: t.shading ?? "size",
     shareDecimals: t.share_decimals ?? 1,
+    tooltipValues: t.tooltip_values ?? "both",
+    shareLabel: t.share_label ?? "Share",
+    valueLabel: t.value_label ?? "Value",
     tooltip: t.tooltip ?? [],
   };
 }

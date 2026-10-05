@@ -19,7 +19,8 @@ function rowHtml(label: string, value: string): string {
   return `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(label)}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(value)}</span></span></div>`;
 }
 
-/** The card's HTML for one tile: header `[Group · ]Name`, then Value, Share and each configured
+/** The card's HTML for one tile: header `[Group · ]Name`, then the built-in Value and Share rows that
+ *  `treemap.tooltip_values` selects (labelled by `value_label` / `share_label`), and each configured
  *  `treemap.tooltip` row whose cell is not blank. A row with a `format` formats a numeric cell with
  *  it; every other cell (any cell of a row without `format`, e.g. a Year) prints verbatim. */
 function cardHtml(t: TreemapTileInfo, spec: ChartSpec): string {
@@ -27,8 +28,9 @@ function cardHtml(t: TreemapTileInfo, spec: ChartSpec): string {
   const valueFmt = spec.tooltip_decimals != null ? { ...spec.value_format, decimals: spec.tooltip_decimals } : spec.value_format;
   const head = t.groupLabel !== null ? `${t.groupLabel} · ${t.name}` : t.name;
   let html = `<div class="tbl-tooltip-head">${escapeHtml(head)}</div>`;
-  html += rowHtml("Value", formatTreemapValue(t.value, valueFmt));
-  html += rowHtml("Share", formatTreemapShare(t.share, cfg.shareDecimals));
+  const values = cfg.tooltipValues;
+  if (values === "both" || values === "value") html += rowHtml(cfg.valueLabel, formatTreemapValue(t.value, valueFmt));
+  if (values === "both" || values === "share") html += rowHtml(cfg.shareLabel, formatTreemapShare(t.share, cfg.shareDecimals));
   for (const row of cfg.tooltip) {
     const cell = t.row[row.column];
     const text = cell == null ? "" : String(cell);

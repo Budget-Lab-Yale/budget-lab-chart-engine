@@ -223,6 +223,38 @@ describe("treemap live mount: hover", () => {
     expect(parts).toEqual(["tbl-tooltip-label=Value:", JSON.stringify("\u00a0"), "tbl-tooltip-value=$1,461.0"]);
   });
 
+  it("tooltip_values picks the built-in rows; share_label and value_label rename them; configured rows follow", () => {
+    const rowsFor = (treemap: object): string[] => {
+      document.body.replaceChildren();
+      const spec = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, ...treemap } } as ChartSpec;
+      enter(tileNamed(svgOf(mountAt(900, spec, HOVER_ROWS)), "Defense").parentElement!);
+      return cardRows();
+    };
+    const extra = ["note: Base budget", "<i>Year</i> & FY: 2023"];
+    expect(rowsFor({})).toEqual(["Value: $850.0", "Share: 24.39%", ...extra]);
+    expect(rowsFor({ tooltip_values: "both" })).toEqual(["Value: $850.0", "Share: 24.39%", ...extra]);
+    expect(rowsFor({ tooltip_values: "share" })).toEqual(["Share: 24.39%", ...extra]);
+    expect(rowsFor({ tooltip_values: "value" })).toEqual(["Value: $850.0", ...extra]);
+    expect(rowsFor({ tooltip_values: "none" })).toEqual(extra);
+    expect(rowsFor({ share_label: "Of all outlays", value_label: "Outlays" })).toEqual(["Outlays: $850.0", "Of all outlays: 24.39%", ...extra]);
+  });
+
+  it("custom built-in row labels are escaped", () => {
+    const spec = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, value_label: "<b>Spend</b> & co", share_label: "<i>%</i>" } } as ChartSpec;
+    enter(tileNamed(svgOf(mountAt(900, spec, HOVER_ROWS)), "Defense").parentElement!);
+    expect(cardRows().slice(0, 2)).toEqual(["<b>Spend</b> & co: $850.0", "<i>%</i>: 24.39%"]);
+    expect(tip()!.querySelector("b, i")).toBeNull();
+    expect(tip()!.innerHTML).toContain("&lt;b&gt;Spend&lt;/b&gt; &amp; co:");
+  });
+
+  it("tooltip_values none with no configured rows still shows the card with its header", () => {
+    const spec = { ...FLAT_SPEC, treemap: { tooltip_values: "none" } } as ChartSpec;
+    enter(tileNamed(svgOf(mountAt(900, spec)), "Housing").parentElement!);
+    expect(cardShown()).toBe(true);
+    expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Housing");
+    expect(cardRows()).toEqual([]);
+  });
+
   it("a blank cell omits that row for that tile", () => {
     const svg = svgOf(mountAt(900, HOVER_SPEC, HOVER_ROWS));
     enter(tileNamed(svg, "Defense").parentElement!);

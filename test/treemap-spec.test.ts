@@ -64,6 +64,16 @@ describe("treemap - structural validation", () => {
     expect(validateSpec({ ...TM, treemap: { tooltip: [{ label: "no column" }] } }).valid).toBe(false);
   });
 
+  it("accepts tooltip_values, share_label and value_label; rejects an unknown mode or a non-string label", () => {
+    for (const mode of ["both", "share", "value", "none"]) {
+      expect(validateSpec({ ...TM, treemap: { tooltip_values: mode, share_label: "Of total", value_label: "Outlays" } }), mode)
+        .toEqual({ valid: true, errors: [] });
+    }
+    expect(validateSpec({ ...TM, treemap: { tooltip_values: "all" } }).valid).toBe(false);
+    expect(validateSpec({ ...TM, treemap: { share_label: 3 } }).valid).toBe(false);
+    expect(validateSpec({ ...TM, treemap: { value_label: true } }).valid).toBe(false);
+  });
+
   it("allows only chrome.tooltip inside chrome", () => {
     expect(errs({ ...TM, chrome: { valuePills: true } })).toContain(`chrome.valuePills is not supported on chartType "treemap"`);
     expect(validateSpec({ ...TM, chrome: { tooltip: false } })).toEqual({ valid: true, errors: [] });
@@ -81,12 +91,20 @@ describe("treemap - structural validation", () => {
 
 describe("treemap - config and columns", () => {
   it("applies defaults", () => {
-    expect(resolveTreemapConfig(TM)).toEqual({ labelValue: "share", shading: "size", shareDecimals: 1, tooltip: [] });
+    expect(resolveTreemapConfig(TM)).toEqual({
+      labelValue: "share", shading: "size", shareDecimals: 1, tooltipValues: "both", shareLabel: "Share", valueLabel: "Value", tooltip: [],
+    });
   });
 
   it("honours authored options, including share_decimals 0", () => {
-    const spec = { ...TM, treemap: { label_value: "none", shading: "none", share_decimals: 0, tooltip: [{ column: "c" }] } } as ChartSpec;
-    expect(resolveTreemapConfig(spec)).toEqual({ labelValue: "none", shading: "none", shareDecimals: 0, tooltip: [{ column: "c" }] });
+    const spec = { ...TM, treemap: {
+      label_value: "none", shading: "none", share_decimals: 0, tooltip_values: "share", share_label: "", value_label: "Outlays",
+      tooltip: [{ column: "c" }],
+    } } as ChartSpec;
+    expect(resolveTreemapConfig(spec)).toEqual({
+      labelValue: "none", shading: "none", shareDecimals: 0, tooltipValues: "share", shareLabel: "", valueLabel: "Outlays",
+      tooltip: [{ column: "c" }],
+    });
   });
 
   it("resolves name / value / group, group optional", () => {
