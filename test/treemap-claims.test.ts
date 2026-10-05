@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData } from "../src/spec/validate";
 import { layoutTreemap } from "../src/engine/treemap-layout";
-import { treemapBand } from "../src/engine/treemap-labels";
+import { treemapBand, treemapShades, contrastText } from "../src/engine/treemap-labels";
 import { renderChart, renderFigure } from "../src/engine/index";
 import { treemapChoice } from "../src/engine/marks/treemap";
 import { mountChart } from "../src/engine/render-live";
@@ -87,12 +87,13 @@ describe("series_order on a treemap: hue order and tie-break only", () => {
 });
 
 describe("series_colors on a treemap", () => {
-  it("a hue name or one of its tiers picks that hue family: the tiles take the band around that colour, the largest darkest", () => {
+  it("a hue name or one of its tiers picks that hue family: the tiles take the shades around that colour, the largest darkest", () => {
     const { svg } = renderChart({ ...TM, series_colors: { A: "violet-300", B: "green" } } as ChartSpec, TWO, { width: 920 });
-    // violet-300: band 400 … 100. green (its base, at green-300): band 400 … 100.
-    expect(tileFills(svg, "A")).toEqual([tokens.scales.violet["400"], tokens.scales.violet["200"], tokens.scales.violet["100"]]);
+    // violet-300: band 400 … 100, so shades 400, 350, 300, 250, 200, 150, 100; three tiles take the
+    // 1st, 4th and 7th. green (its base, at green-300): band 400 … 100.
+    const violet = treemapShades(tokens.scales.violet["300"])!;
+    expect(tileFills(svg, "A")).toEqual([tokens.scales.violet["400"], violet[3], tokens.scales.violet["100"]]);
     expect(topFillOf(svg, "B")).toBe(tokens.scales.green["400"]);
-    const violet = Object.values(tokens.scales.violet) as string[];
     for (const f of tileFills(svg, "A")) expect(violet).toContain(f);
     expect(new Set(tileFills(svg, "A")).size).toBe(3);
   });
@@ -204,7 +205,7 @@ describe("treemap.shading", () => {
     ]);
     const flatMany = flatRows(Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 100 - i]));
     const allFills = (svg: SVGSVGElement): string[] => q(svg, "rect.tbl-treemap-tile").map((r) => r.getAttribute("fill")!);
-    // shading: size (default): flat data runs 700 → 100, never 50.
+    // shading: size (default): flat data runs blue's shades 500 → 200, never 50.
     for (const f of allFills(renderChart(FLAT, flatMany, { width: 920 }).svg)) expect(fifties.has(f)).toBe(false);
     // Grouped: blue's band (500 … 200) stops short of 50; amber's (its base is at amber-100) ends on it,
     // as does any band around a colour at the light end, a series_colors blue-50 included.
@@ -212,7 +213,8 @@ describe("treemap.shading", () => {
     for (const f of tileFills(sized, "A")) expect(fifties.has(f)).toBe(false);
     expect(tileFills(sized, "B").at(-1)).toBe(tokens.scales.amber["50"]);
     const light = renderChart({ ...TM, series_colors: { A: "blue-50" } } as ChartSpec, many, { width: 920 }).svg;
-    expect(new Set(tileFills(light, "A"))).toEqual(new Set(["300", "200", "100", "50"].map((t) => (tokens.scales.blue as Record<string, string>)[t])));
+    expect(new Set(tileFills(light, "A"))).toEqual(new Set(treemapShades(tokens.scales.blue["50"])));
+    expect(tileFills(light, "A").at(-1)).toBe(tokens.scales.blue["50"]);
     // shading: none: the default hues are not 50 tiers, so without series_colors none appears ...
     const none = { ...TM, treemap: { shading: "none" } } as ChartSpec;
     for (const f of allFills(renderChart(none, many, { width: 920 }).svg)) expect(fifties.has(f)).toBe(false);
@@ -243,11 +245,62 @@ describe("treemap.shading", () => {
     expect(tileFills(sized, "G7")).toEqual([tokens.scales.blue["300"]]);
   });
 
-  it("size (default) with groups: each group's tiles run its 4-tier band by rank; flat data runs 700 → 100", () => {
+  it("size (default) with groups: each group's tiles run its 7 shades by rank; flat data runs blue's, the same", () => {
+    const blue = treemapShades(tokens.categorical[0]!.base)!;
+    // 500, 450, 400, 350, 300, 250, 200: the band's tiers with a computed midpoint between each pair.
+    expect(blue.filter((_, i) => i % 2 === 0)).toEqual(["500", "400", "300", "200"].map((k) => (tokens.scales.blue as Record<string, string>)[k]));
     const { svg } = renderChart(TM, TWO, { width: 920 });
-    expect(tileFills(svg, "A")).toEqual([tokens.scales.blue["500"], tokens.scales.blue["300"], tokens.scales.blue["200"]]);
+    expect(tileFills(svg, "A")).toEqual([blue[0], blue[3], blue[6]]);
     const flat = renderChart(FLAT, flatRows([["x", 5], ["y", 3], ["z", 1]]), { width: 920 }).svg;
-    expect(["x", "y", "z"].map((n) => tileFill(flat, n))).toEqual([tokens.scales.blue["700"], tokens.scales.blue["400"], tokens.scales.blue["100"]]);
+    expect(["x", "y", "z"].map((n) => tileFill(flat, n))).toEqual([blue[0], blue[3], blue[6]]);
+  });
+
+  it("size: seven tiles take the seven shades once each, flat or in a group; flat data never uses blue's 700, 600, 100 or 50", () => {
+    const blue = treemapShades(tokens.categorical[0]!.base)!;
+    const seven = Array.from({ length: 7 }, (_, i): [string, number] => [`t${i}`, 100 - i * 10]);
+    const flat = renderChart(FLAT, flatRows(seven), { width: 920 }).svg;
+    expect(seven.map(([n]) => tileFill(flat, n))).toEqual(blue);
+    const grouped = renderChart(TM, rows([...seven.map(([n, v]): [string, string, number] => ["A", n, v]), ["B", "b1", 300], ["B", "b2", 200]]), { width: 920 }).svg;
+    expect(tileFills(grouped, "A")).toEqual(blue);
+    const outside = new Set(["700", "600", "100", "50"].map((k) => (tokens.scales.blue as Record<string, string>)[k]));
+    const thirty = flatRows(Array.from({ length: 30 }, (_, i): [string, number] => [`t${i}`, 300 - i]));
+    const fills = q(renderChart(FLAT, thirty, { width: 920 }).svg, "rect.tbl-treemap-tile").map((r) => r.getAttribute("fill")!);
+    expect(fills).toHaveLength(30);
+    for (const f of fills) expect(outside.has(f)).toBe(false);
+    expect(new Set(fills)).toEqual(new Set(blue));
+  });
+
+  it("size: the lighter repeats' bands reach the 50 tier, except russet-300's (400 to 100)", () => {
+    const scales = tokens.scales as Record<string, Record<string, string>>;
+    for (const ref of ["blue-200", "amber-50", "violet-200", "green-100", "red-200", "rose-50", "russet-300"]) {
+      const [h, k] = ref.split("-");
+      const shades = treemapShades(scales[h!]![k!]!)!;
+      if (h === "russet") {
+        expect(shades[0]).toBe(scales.russet!["400"]);
+        expect(shades[6]).toBe(scales.russet!["100"]);
+      } else expect(shades[6]).toBe(scales[h!]!["50"]);
+    }
+  });
+
+  it("the half-step shades have no name a figure could set: series_colors blue-450 is rejected at load", () => {
+    const bad = validateSpec({ ...TM, series_colors: { A: "blue-450" } } as ChartSpec);
+    expect(bad.valid).toBe(false);
+    expect(bad.errors.some((e) => e.includes("blue-450"))).toBe(true);
+    expect(validateSpec({ ...TM, series_colors: { A: "blue-400" } } as ChartSpec)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("size: label text is judged on each tile's own fill, computed midpoint shades included", () => {
+    const blue = treemapShades(tokens.categorical[0]!.base)!;
+    const seven = Array.from({ length: 7 }, (_, i): [string, number] => [`t${i}`, 100 - i * 10]);
+    const { svg } = renderChart(FLAT, flatRows(seven), { width: 920 });
+    const labelled = q(svg, "g[role=img]").filter((g) => g.querySelector("text.tbl-treemap-label"));
+    expect(labelled).toHaveLength(7);
+    for (const g of labelled) {
+      const fill = g.querySelector("rect")!.getAttribute("fill")!;
+      expect(g.querySelector("text.tbl-treemap-label")!.getAttribute("fill")).toBe(contrastText(fill));
+    }
+    // Both text colours occur among the midpoints alone, so the choice is per tile, not per band.
+    expect(new Set([1, 3, 5].map((i) => contrastText(blue[i]!)))).toEqual(new Set([tokens.structural.background, tokens.structural.text_heading]));
   });
 });
 

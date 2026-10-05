@@ -14,6 +14,7 @@ import { INNER_W, MARGIN } from "../src/embed/figure-chrome";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../src/engine/legend-layout";
 import { tokens } from "../src/theme/tokens";
 import { locateOnRamp } from "../src/engine/palette";
+import { treemapShades } from "../src/engine/treemap-labels";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -79,7 +80,7 @@ describe("renderTreemap legendItems", () => {
     expect(renderChart(SPEC, one, { width: 920 }).legendItems).toBeNull();
   });
 
-  it("property: every grouped tile under shading: size lies within 2 tiers of its legend chip on the chip's ramp, 3 for a chip at a ramp end (200 charts)", () => {
+  it("property: every grouped tile under shading: size is one of its chip's 7 shades, within 2 tiers of the chip on the chip's ramp, 3 for a chip at a ramp end (200 charts)", () => {
     let s = 17;
     const rand = (): number => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
     const refs = ["blue", "amber-50", "violet-300", "green-700", "red", "rose-600", "russet-100", "blue-200"];
@@ -93,12 +94,17 @@ describe("renderTreemap legendItems", () => {
       const series_colors = c % 3 === 0 ? { G0: refs[c % refs.length]!, G1: refs[(c + 3) % refs.length]! } : undefined;
       const spec = { ...SPEC, series_order: [], ...(series_colors ? { series_colors } : {}) } as ChartSpec;
       const res = renderChart(spec, rows, { width: [375, 599, 920][c % 3]! });
-      const chip = new Map(res.legendItems!.map((i) => [i.series, locateOnRamp(i.color!)!]));
+      const chip = new Map(res.legendItems!.map((i) => [i.series, i.color!]));
       for (const g of q(res.svg, "g[data-series]")) {
-        const at = chip.get(g.getAttribute("data-series")!)!;
-        const tile = locateOnRamp(g.querySelector("rect")!.getAttribute("fill")!)!;
-        expect(tile.family).toBe(at.family);
-        const gap = Math.abs(tile.index - at.index);
+        const color = chip.get(g.getAttribute("data-series")!)!;
+        const at = locateOnRamp(color)!;
+        const shades = treemapShades(color)!;
+        const i = shades.indexOf(g.querySelector("rect")!.getAttribute("fill")!);
+        expect(i).toBeGreaterThanOrEqual(0);
+        // Shade i (darkest first) sits i/2 tiers lighter than the band's darkest tier: half-steps between tiers.
+        const darkest = locateOnRamp(shades[0]!)!;
+        expect(darkest.family).toBe(at.family);
+        const gap = Math.abs(darkest.index - i / 2 - at.index);
         // A band clamped at either end keeps its 4 tiers, so it reaches one tier further from a chip there.
         if (at.index === 0 || at.index === at.tiers.length - 1) endGap = Math.max(endGap, gap);
         else maxGap = Math.max(maxGap, gap);

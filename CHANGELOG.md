@@ -10,8 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tile
   area is proportional to value at one scale across the chart, less the gutters; tiles shaded by
-  size rank, 700 → 100 with no groups and within a four-tier band around each group's colour with
-  groups, so the legend chip's shade lies within its group's tiles. Labels top-left at one size
+  size rank within a band around their colour (each group's, or blue with no groups): the four
+  tonal tiers nearest it plus the CIELAB midpoint of each adjacent pair, seven shades in all (blue:
+  500, 450, … 200), so the legend chip's shade lies within its group's tiles. The midpoints are
+  computed, not palette tokens, and cannot be specified. Labels top-left at one size
   per chart (14px, 12px below 600px wide), placed largest first within each group and stopping at
   the first that does not fit, so a group never labels a tile while leaving a larger one bare. The tiles of flat data
   are drawn squarified, as rows, as columns or as a balanced split, whichever labels the most

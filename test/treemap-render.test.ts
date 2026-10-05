@@ -7,7 +7,7 @@ import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { TREEMAP_CLASS, treemapChoice, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
-import { contrastText, fitTileLabel } from "../src/engine/treemap-labels";
+import { contrastText, fitTileLabel, treemapShades } from "../src/engine/treemap-labels";
 import { tokens } from "../src/theme/tokens";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -94,7 +94,7 @@ describe("treemap render", () => {
     }
     expect(fills).toEqual(new Set([WHITE, NAVY]));
     expect(tileOf(svg, "Housing").querySelector("text")!.getAttribute("fill")).toBe(WHITE);
-    expect(tileOf(svg, "Housing").querySelector("rect")!.getAttribute("fill")).toBe(tokens.scales.blue["700"]);
+    expect(tileOf(svg, "Housing").querySelector("rect")!.getAttribute("fill")).toBe(tokens.scales.blue["500"]);
   });
 
   it("shows the share by default, the formatted value with label_value: value, the name alone with none", () => {
@@ -249,13 +249,14 @@ describe("treemap render", () => {
     }
   });
 
-  it("grouped tiles shade by rank across their group's 4-tier band, the largest darkest", () => {
+  it("grouped tiles shade by rank across their group's 7 shades (4-tier band plus midpoints), the largest darkest", () => {
     const two = ([["A", "a1", 300], ["A", "a2", 200], ["A", "a3", 100], ["B", "b1", 250], ["B", "b2", 150]] as const)
       .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     const { svg } = render(GROUPED_SPEC, two, 920);
     const fill = (n: string) => tileOf(svg, n).querySelector("rect")!.getAttribute("fill");
-    // Blue's base sits at blue-400: band 500, 400, 300, 200. Amber's sits at amber-100: band 300 … 50.
-    expect(["a1", "a2", "a3"].map(fill)).toEqual([tokens.scales.blue["500"], tokens.scales.blue["300"], tokens.scales.blue["200"]]);
+    // Blue's base sits at blue-400: band 500, 400, 300, 200, so shades 500, 450, … 200, and three
+    // tiles take the 1st, 4th (the 400/300 midpoint) and 7th. Amber's sits at amber-100: band 300 … 50.
+    expect(["a1", "a2", "a3"].map(fill)).toEqual([tokens.scales.blue["500"], treemapShades(tokens.categorical[0]!.base)![3], tokens.scales.blue["200"]]);
     expect(["b1", "b2"].map(fill)).toEqual([tokens.scales.amber["300"], tokens.scales.amber["50"]]);
   });
 

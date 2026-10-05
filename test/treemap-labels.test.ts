@@ -1,43 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
-  TM_LABEL_SIZES, treemapLabelSize, treemapTier, treemapBand, tileFill, contrastText, fitTileLabel, fitTileLabels,
+  TM_LABEL_SIZES, treemapLabelSize, treemapBand, treemapShades, tileFill, contrastText, fitTileLabel, fitTileLabels,
   type TileLabel, type LabelTile,
 } from "../src/engine/treemap-labels";
 import { TM_GEOM } from "../src/engine/treemap-layout";
 import { timelineTextWidth } from "../src/engine/timeline-text";
 import { tokens } from "../src/theme/tokens";
+import { d3 } from "../src/engine/vendor";
 
 const WHITE = tokens.structural.background;
 const NAVY = tokens.structural.text_heading;
-const TIERS = ["700", "600", "500", "400", "300", "200", "100"];
 const pad = TM_GEOM.pad;
-
-describe("treemapTier", () => {
-  it("gives a single tile the darkest usable tier", () => {
-    expect(treemapTier(0, 1)).toBe("700");
-  });
-  it("spreads 7 tiles over 700..100, each tier once, largest darkest", () => {
-    expect([0, 1, 2, 3, 4, 5, 6].map((r) => treemapTier(r, 7))).toEqual(TIERS);
-  });
-  it("uses round(r(k-1)/(n-1)): the end ranks hit the end tiers", () => {
-    expect(treemapTier(0, 2)).toBe("700");
-    expect(treemapTier(1, 2)).toBe("100");
-    // r=3, n=20, k=7: round(18/19) = 1.
-    expect(treemapTier(3, 20)).toBe("600");
-  });
-  it("is monotone non-increasing in darkness over 20 tiles, ending at the lightest", () => {
-    const idx = Array.from({ length: 20 }, (_, r) => TIERS.indexOf(treemapTier(r, 20)));
-    expect(idx.every((i) => i >= 0)).toBe(true);
-    for (let r = 1; r < 20; r++) expect(idx[r]!).toBeGreaterThanOrEqual(idx[r - 1]!);
-    expect(idx[0]).toBe(0);
-    expect(idx[19]).toBe(TIERS.length - 1);
-  });
-  it("never uses the 50 tier", () => {
-    for (let n = 1; n <= 30; n++) {
-      for (let r = 0; r < n; r++) expect(treemapTier(r, n)).not.toBe("50");
-    }
-  });
-});
 
 describe("treemapBand", () => {
   const scales = tokens.scales as Record<string, Record<string, string>>;
@@ -62,30 +35,90 @@ describe("treemapBand", () => {
   });
 });
 
+describe("treemapShades", () => {
+  const scales = tokens.scales as Record<string, Record<string, string>>;
+  const L = (hex: string): number => d3.lab(hex).l;
+  /** The CIELAB midpoint of two colours, computed here independently of the engine's interpolator. */
+  const labMid = (a: string, b: string): string => {
+    const x = d3.lab(a);
+    const y = d3.lab(b);
+    return d3.lab((x.l + y.l) / 2, (x.a + y.a) / 2, (x.b + y.b) / 2).formatHex().toUpperCase();
+  };
+  it("is the band's 4 tiers with the CIELAB midpoint of each adjacent pair between them: 7 shades, darkest first", () => {
+    const shades = treemapShades("#0072B2")!;
+    const band = treemapBand("#0072B2")!;
+    expect(shades).toHaveLength(7);
+    // The ends are the band's end tiers; every other shade is a band tier, in order.
+    expect(shades[0]).toBe(scales.blue!["500"]);
+    expect(shades[6]).toBe(scales.blue!["200"]);
+    expect([shades[0], shades[2], shades[4], shades[6]]).toEqual(band);
+    // Between them, the Lab midpoints.
+    for (const i of [1, 3, 5]) expect(shades[i]).toBe(labMid(shades[i - 1]!, shades[i + 1]!));
+    // Pinned, so a change of interpolator or rounding is caught: 500, 450, 400, 350, 300, 250, 200.
+    expect(shades).toEqual(["#005794", "#0063A1", "#0070AF", "#227CBD", "#3689CB", "#4896D9", "#58A3E7"]);
+  });
+  it("is strictly monotonic in L*, darkest first, the midpoint halfway in L* between its neighbours", () => {
+    for (const c of tokens.categorical) {
+      const shades = treemapShades(c.base)!;
+      for (let i = 1; i < shades.length; i++) expect(L(shades[i]!)).toBeGreaterThan(L(shades[i - 1]!));
+      for (const i of [1, 3, 5]) expect(Math.abs(L(shades[i]!) - (L(shades[i - 1]!) + L(shades[i + 1]!)) / 2)).toBeLessThan(0.5);
+    }
+  });
+  it("computes the midpoints: none is a palette token", () => {
+    const palette = new Set(Object.values(scales).flatMap((s) => Object.values(s).map((h) => h.toUpperCase())));
+    for (const c of tokens.categorical) {
+      const shades = treemapShades(c.base)!;
+      for (const i of [0, 2, 4, 6]) expect(palette.has(shades[i]!)).toBe(true);
+      for (const i of [1, 3, 5]) expect(palette.has(shades[i]!)).toBe(false);
+    }
+  });
+  it("keeps 7 shades at either end of the ramp", () => {
+    expect(treemapShades(scales.green!["50"]!)!.filter((_, i) => i % 2 === 0)).toEqual(["300", "200", "100", "50"].map((k) => scales.green![k]));
+    expect(treemapShades(scales.amber!["700"]!)!.filter((_, i) => i % 2 === 0)).toEqual(["700", "600", "500", "400"].map((k) => scales.amber![k]));
+    expect(treemapShades(scales.amber!["700"]!)).toHaveLength(7);
+  });
+  it("is null for a colour on no ramp", () => {
+    expect(treemapShades("#123456")).toBeNull();
+  });
+});
+
 describe("tileFill", () => {
   const scales = tokens.scales as Record<string, Record<string, string>>;
-  it("flat: shades a categorical base hue 700 → 100 along its own tonal ramp", () => {
-    expect(tileFill("#0072B2", 0, 7, "size", false)).toBe(scales.blue!["700"]);
-    expect(tileFill("#0072B2", 6, 7, "size", false)).toBe(scales.blue!["100"]);
-    expect(tileFill("#E69F00", 0, 3, "size", false)).toBe(scales.amber!["700"]);
-    expect(tileFill("#E69F00", 2, 3, "size", false)).toBe(scales.amber!["100"]);
+  const blue = treemapShades("#0072B2")!;
+  it("shades by rank across the colour's 7 shades, largest darkest, each shade once for 7 tiles", () => {
+    expect(Array.from({ length: 7 }, (_, r) => tileFill("#0072B2", r, 7, "size"))).toEqual(blue);
+    expect(tileFill("#0072B2", 0, 1, "size")).toBe(blue[0]);
+    // Ranks spread evenly over the 7 shades: round(r * 6 / (n - 1)).
+    expect([0, 1, 2].map((r) => tileFill("#0072B2", r, 3, "size"))).toEqual([blue[0], blue[3], blue[6]]);
+    expect([0, 1].map((r) => tileFill("#0072B2", r, 2, "size"))).toEqual([blue[0], blue[6]]);
+    // r=3, n=20: round(18/19) = 1.
+    expect(tileFill("#0072B2", 3, 20, "size")).toBe(blue[1]);
   });
-  it("grouped: shades by rank across the colour's band, largest darkest", () => {
-    const band = treemapBand("#0072B2")!;
-    expect([0, 1, 2, 3].map((r) => tileFill("#0072B2", r, 4, "size", true))).toEqual(band);
-    expect(tileFill("#0072B2", 0, 1, "size", true)).toBe(band[0]);
-    // Ranks spread evenly over the 4 tiers: round(r * 3 / (n - 1)).
-    expect([0, 1, 2].map((r) => tileFill("#0072B2", r, 3, "size", true))).toEqual([band[0], band[2], band[3]]);
-    expect(Array.from({ length: 9 }, (_, r) => tileFill("#0072B2", r, 9, "size", true)).every((f) => band.includes(f))).toBe(true);
+  it("is monotone over 20 tiles, from the darkest shade to the lightest", () => {
+    const idx = Array.from({ length: 20 }, (_, r) => blue.indexOf(tileFill("#0072B2", r, 20, "size")));
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    for (let r = 1; r < 20; r++) expect(idx[r]!).toBeGreaterThanOrEqual(idx[r - 1]!);
+    expect(idx[0]).toBe(0);
+    expect(idx[19]).toBe(6);
+  });
+  it("flat data's blue never reaches the ramp's 700, 600, 100 or 50 tiers", () => {
+    const outside = new Set(["700", "600", "100", "50"].map((k) => scales.blue![k]));
+    for (let n = 1; n <= 30; n++) for (let r = 0; r < n; r++) expect(outside.has(tileFill("#0072B2", r, n, "size"))).toBe(false);
+  });
+  it("shades another hue within its own band: amber (its base nearest amber-100) runs 300 to 50", () => {
+    const amber = treemapShades("#E69F00")!;
+    expect(amber[0]).toBe(scales.amber!["300"]);
+    expect(amber[6]).toBe(scales.amber!["50"]);
+    expect([0, 1, 2].map((r) => tileFill("#E69F00", r, 3, "size"))).toEqual([amber[0], amber[3], amber[6]]);
   });
   it("is case-insensitive on the base hex", () => {
-    expect(tileFill("#0072b2", 0, 1, "size", false)).toBe(scales.blue!["700"]);
+    expect(tileFill("#0072b2", 0, 1, "size")).toBe(blue[0]);
   });
   it("uses the base hex itself for every tile with shading none", () => {
-    for (const grouped of [false, true]) for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, "none", grouped)).toBe("#8856BF");
+    for (let r = 0; r < 5; r++) expect(tileFill("#8856BF", r, 5, "none")).toBe("#8856BF");
   });
   it("uses a raw series colour off every ramp flat for every tile (no mixing)", () => {
-    for (const grouped of [false, true]) for (let r = 0; r < 5; r++) expect(tileFill("#123456", r, 5, "size", grouped)).toBe("#123456");
+    for (let r = 0; r < 5; r++) expect(tileFill("#123456", r, 5, "size")).toBe("#123456");
   });
 });
 
@@ -94,8 +127,14 @@ describe("contrastText", () => {
     expect(contrastText("#002B61")).toBe(WHITE);
     expect(contrastText("#95DAFF")).toBe(NAVY);
   });
-  it("puts navy on blue-100, the lightest tier a tile is drawn in", () => {
+  it("puts navy on blue-100", () => {
     expect(contrastText((tokens.scales as Record<string, Record<string, string>>).blue!["100"]!)).toBe(NAVY);
+  });
+  it("judges a computed midpoint shade on its own fill: white on blue's 450 and 350, navy on its 250", () => {
+    const blue = treemapShades("#0072B2")!;
+    expect(contrastText(blue[1]!)).toBe(WHITE);
+    expect(contrastText(blue[3]!)).toBe(WHITE);
+    expect(contrastText(blue[5]!)).toBe(NAVY);
   });
   it("puts navy on white and white on navy", () => {
     expect(contrastText("#FFFFFF")).toBe(NAVY);

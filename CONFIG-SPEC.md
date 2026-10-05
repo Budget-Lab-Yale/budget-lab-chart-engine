@@ -957,14 +957,21 @@ appearance. Data with no groups is blue. That, and breaking ties between equal g
 `series_order` does on a treemap: it does not filter (every group draws) and does not set the layout
 order. `series_colors` sets a group's colour: a hue name or one of its tiers (`green`, `violet-300`)
 picks that hue family, and a colour on none of the hue ramps (a raw hex such as `#5B4B8A`) fills
-every tile in the group as written. With `shading: size`, tiles take tonal tiers by rank, spread
-evenly from darkest to lightest, the largest darkest. With no groups they run the blue ramp `700` →
-`100`. With groups, each group's tiles run a band of four tiers around the group's colour as
-resolved (its `series_colors` value, else the palette's colour): the tier that colour sits nearest
-on its hue's ramp, one tier darker and two lighter — `500` to `200` for the blue default, which sits
-nearest `blue-400`. At either end of the ramp the band keeps four tiers (`300` to `50` for a colour
-nearest `100` or `50`; `700` to `400` for one nearest `600` or `700`). Rank, not value, decides
-the shade, so a few large tiles do not wash every small one out to the same pale tier.
+every tile in the group as written. With `shading: size`, tiles are shaded by rank, the largest
+darkest, within a band around their colour as resolved — a group's `series_colors` value, else the
+palette's colour; with no groups, blue — ranking within each group, or among all tiles with no
+groups. The band is four tonal tiers, the tier that colour sits nearest on its hue's ramp, one tier
+darker and two lighter — `500` to `200` for blue, which sits nearest `blue-400` — and at either end
+of the ramp it keeps four tiers (`300` to `50` for a colour nearest `100` or `50`; `700` to `400`
+for one nearest `600` or `700`). Between each pair of adjacent tiers the engine adds a half-step,
+their midpoint in CIELAB, so a band is seven shades: blue's run `500`, 450, `400`, 350, `300`, 250,
+`200`. Ranks spread evenly over the seven, rank *r* of *n* taking shade round(*r* × 6 / (*n* − 1)),
+darkest first: seven tiles take one shade each, two take the darkest and the lightest. Rank, not
+value, decides the shade, so a few large tiles do not wash every small one out to the same pale
+shade. The half-steps are not palette tokens: the engine computes them, and none has a name a figure
+could set (`blue-450` is rejected at load, as any unknown colour name is). House style asks that the
+colours a figure specifies be palette tokens; colours the engine computes from them, as here, need
+not be.
 Text on a tile is white or navy, whichever contrasts more with its fill. Past seven
 groups the hues repeat, in the same order, from the eighth group in hue order, as a lighter tier of
 the hue — `blue-200`, `amber-50`, `violet-200`, `green-100`, `red-200`, `rose-50`, `russet-300` for
@@ -973,12 +980,13 @@ colour; with `shading: size` its tiles take the band around it, which is lighter
 group of its hue's for blue, violet, green, red and russet, and the same band for amber and rose
 (their palette colours already sit at the light end). A group with its own `series_colors` entry
 still counts toward that order. `tbl-chart validate` warns on more than seven groups with no
-`series_colors` set. With `shading: size`, data with no groups never uses the `50` tier, and a
-group uses it only where its band reaches it — the default amber and rose groups, the lighter
-repeats, and any colour nearest `100` or `50`. With `shading: none`, a group's tiles are a `50`
-tier when its `series_colors` sets one, or, with no `series_colors` entry, when it is the 9th or
-13th group in hue order or any seventh after either (16th, 20th, …): the palette's `amber-50` and
-`rose-50` repeats.
+`series_colors` set. With `shading: size`, data with no groups stays within blue's band, so it never
+uses the blue ramp's `700`, `600`, `100` or `50` tiers, and a group uses a `50` tier only where its
+band reaches it — the default amber and rose groups, the lighter repeats except russet's
+(`russet-300`, whose band is `400` to `100`), and any colour nearest `100` or `50`. With
+`shading: none`, a group's tiles are a `50` tier when its `series_colors` sets one, or, with no
+`series_colors` entry, when it is the 9th or 13th group in hue order or any seventh after either
+(16th, 20th, …): the palette's `amber-50` and `rose-50` repeats.
 `series_labels` renames a group in the legend, the hover card and the screen-reader labels.
 
 **Groups and the legend.** With two or more groups, the chart's legend names them, as on other
