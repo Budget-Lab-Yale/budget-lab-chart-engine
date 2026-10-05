@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
-import { TREEMAP_CLASS, treemapChoice, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
+import { TREEMAP_CLASS, pickCandidate, treemapChoice, treemapHeight, treemapWarnings } from "../src/engine/marks/treemap";
 import { treemapAreaHeight, TM_GEOM } from "../src/engine/treemap-layout";
 import { contrastText, fitTileLabel, treemapShades } from "../src/engine/treemap-labels";
 import { tokens } from "../src/theme/tokens";
@@ -111,10 +111,15 @@ describe("treemap render", () => {
   it("draws every label exactly as fitTileLabel fitted it, top-left in its tile's inner box", () => {
     let inline = 0;
     let cut = 0;
-    // One large tile and eight small equal ones: at 720 the last two are short enough to go inline.
-    const INLINE = rowsOf([["Big", 500], ...Array.from({ length: 8 }, (_, i): [string, number] => [`Food ${i}`, 10])]);
+    // One large tile and eight small equal ones, as one group (so d3's default squarify lays them out
+    // at 600px and wider): at 720 the last two are short enough to go inline.
+    const INLINE = rowsOf([["Big", 500], ...Array.from({ length: 8 }, (_, i): [string, number] => [`Food ${i}`, 10])])
+      .map((r) => ({ ...r, group: "G" }) as TidyRow);
+    // The largest tile's one-word name fits no tile at any width, so labelling stops there and the
+    // smaller tiles, which would fit, are cut.
+    const CUT = rowsOf([["W".repeat(80), 100], ["B", 60], ["C", 40]]);
     for (const w of [375, 560, 720, 920]) {
-      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED], [FLAT_SPEC, INLINE]] as const) {
+      for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED], [GROUPED_SPEC, INLINE], [FLAT_SPEC, CUT]] as const) {
         const { svg } = render(spec, rows, w);
         const choice = treemapChoice(spec, rows, w);
         const size = choice.candidates[choice.chosen]!.size;
@@ -416,28 +421,99 @@ describe("candidate selection: the tiling and size that label the most tiles", (
   const labelSizes = (svg: SVGSVGElement): Set<string> => new Set(q(svg, "text.tbl-treemap-label").map((t) =>
     t.getAttribute("font-size") ?? t.firstElementChild!.getAttribute("font-size")!));
   const labelledCount = (svg: SVGSVGElement): number => tiles(svg).filter((g) => g.querySelector("text")).length;
-  const firstMax = (counts: number[]): number => counts.indexOf(Math.max(...counts));
+  /** Ruling 45, restated independently: within each size step the best squarify variant (first max
+   *  of squarify-1, squarify, squarify-2), unless the best of slice/dice/binary labels at least 2
+   *  more; across steps the first step winner that labels the most. */
+  const SQ = ["squarify-1", "squarify", "squarify-2"];
+  const expectedChoice = (cs: Array<{ tiling: string; size: number; labelled: number }>): number => {
+    const firstMaxOf = (ii: number[]): number => ii.reduce((a, b) => (cs[b]!.labelled > cs[a]!.labelled ? b : a));
+    let best = -1;
+    for (const size of [...new Set(cs.map((c) => c.size))]) {
+      const idx = cs.map((_, i) => i).filter((i) => cs[i]!.size === size);
+      const sq = idx.filter((i) => SQ.includes(cs[i]!.tiling));
+      const other = idx.filter((i) => !SQ.includes(cs[i]!.tiling));
+      let w = firstMaxOf(sq);
+      if (other.length > 0) {
+        const o = firstMaxOf(other);
+        if (cs[o]!.labelled >= cs[w]!.labelled + 2) w = o;
+      }
+      if (best < 0 || cs[w]!.labelled > cs[best]!.labelled) best = w;
+    }
+    return best;
+  };
 
-  it("flat: squarify, slice, dice, binary at the base size, then the same at 11px only below 400px wide", () => {
+  const ALL = (size: number): string[] => ["squarify-1", "squarify", "squarify-2", "slice", "dice", "binary"].map((t) => `${t}@${size}`);
+  it("flat: the squarify variants (ratio 1, φ, ratio 2), then slice, dice, binary at the base size, then the same at 11px only below 400px wide", () => {
     const names = (w: number) => treemapChoice(FLAT_SPEC, BLS, w).candidates.map((c) => `${c.tiling}@${c.size}`);
-    expect(names(920)).toEqual(["squarify@14", "slice@14", "dice@14", "binary@14"]);
-    expect(names(400)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12"]);
-    expect(names(399)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12", "squarify@11", "slice@11", "dice@11", "binary@11"]);
+    expect(names(920)).toEqual(ALL(14));
+    expect(names(400)).toEqual(ALL(12));
+    expect(names(399)).toEqual([...ALL(12), ...ALL(11)]);
   });
 
-  it("grouped: squarified blocks at 600px and wider; below, the four arrangements at the base size, then at 11px below 400px", () => {
+  it("grouped: squarified blocks at 600px and wider; below, the same six arrangements at the base size, then at 11px below 400px", () => {
     const names = (w: number) => treemapChoice(GROUPED_SPEC, GROUPED, w).candidates.map((c) => `${c.tiling}@${c.size}`);
     expect(names(920)).toEqual(["squarify@14"]);
     expect(names(600)).toEqual(["squarify@14"]);
-    expect(names(599)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12"]);
-    expect(names(399)).toEqual(["squarify@12", "slice@12", "dice@12", "binary@12", "squarify@11", "slice@11", "dice@11", "binary@11"]);
+    expect(names(599)).toEqual(ALL(12));
+    expect(names(399)).toEqual([...ALL(12), ...ALL(11)]);
+  });
+
+  it("pickCandidate: squarify unless another tiling labels at least 2 more at the same size; 11px only when it labels more", () => {
+    const at = (size: number, counts: number[]) =>
+      (["squarify-1", "squarify", "squarify-2", "slice", "dice", "binary"] as const).map((tiling, i) => ({ tiling, size, labelled: counts[i]! }));
+    // +1 is not enough: the best squarify variant (the first of the tied maxima) wins.
+    expect(pickCandidate([...at(12, [3, 4, 3, 5, 1, 4])])).toBe(1);
+    expect(pickCandidate([...at(12, [4, 4, 3, 5, 1, 4])])).toBe(0);
+    // +2 is: the first of the other tilings with the most.
+    expect(pickCandidate([...at(12, [3, 4, 3, 6, 1, 4])])).toBe(3);
+    expect(pickCandidate([...at(12, [3, 3, 3, 5, 1, 5])])).toBe(3);
+    expect(pickCandidate([...at(12, [3, 3, 3, 4, 1, 5])])).toBe(5);
+    // The 11px step wins only by labelling more than the base step's winner.
+    expect(pickCandidate([...at(12, [5, 4, 3, 6, 1, 4]), ...at(11, [5, 5, 5, 6, 1, 6])])).toBe(0);
+    expect(pickCandidate([...at(12, [5, 4, 3, 6, 1, 4]), ...at(11, [5, 6, 5, 6, 1, 6])])).toBe(7);
+    // ... and the 11px step applies the same margin within itself.
+    expect(pickCandidate([...at(12, [1, 1, 1, 2, 1, 1]), ...at(11, [3, 3, 3, 5, 1, 4])])).toBe(9);
+  });
+
+  it("rows win when they label at least 2 more than every squarify variant: seven equal tiles at 280", () => {
+    const seven = rowsOf(["Housing", "Transportation", "Food at home", "Health insurance", "Entertainment", "Apparel", "Education"]
+      .map((n): [string, number] => [n, 1000]));
+    const choice = treemapChoice(FLAT_SPEC, seven, 280);
+    const chosen = choice.candidates[choice.chosen]!;
+    expect(chosen).toMatchObject({ tiling: "slice", size: 12, labelled: 7 });
+    expect(Math.max(...choice.candidates.filter((c) => c.size === 12 && SQ.includes(c.tiling)).map((c) => c.labelled))).toBeLessThanOrEqual(5);
+  });
+
+  it("the squarify variants are each exercised: ratio 1 and ratio 2 win where they label more than d3's default", () => {
+    // BLS flat at 920: ratio 1 labels 9, the default 7, ratio 2 9 (ratio 1 is earlier).
+    const flat = treemapChoice(FLAT_SPEC, BLS, 920);
+    expect(flat.candidates.slice(0, 3).map((c) => c.labelled)).toEqual([9, 7, 9]);
+    expect(flat.candidates[flat.chosen]!.tiling).toBe("squarify-1");
+    // Grouped at 560 (blocks arranged): ratio 2 labels 9, the others 8.
+    const grouped = treemapChoice(GROUPED_SPEC, GROUPED, 560);
+    expect(grouped.candidates.slice(0, 3).map((c) => c.labelled)).toEqual([8, 8, 9]);
+    expect(grouped.candidates[grouped.chosen]!.tiling).toBe("squarify-2");
+  });
+
+  it("demo 24 (22 grants) at 375: every squarify variant labels 3 and the balanced split 6, so the split is drawn", () => {
+    const grants = rowsOf([["Medicaid", 650], ["Highway Planning", 293], ["Title I Education", 184], ["SNAP Administration", 132],
+      ["TANF", 102], ["CHIP", 83], ["Special Education", 69], ["Child Nutrition", 59], ["Public Housing Operating", 52],
+      ["Section 8 Vouchers", 46], ["Transit Formula", 41], ["Community Development", 37], ["Head Start", 34], ["WIC", 31],
+      ["LIHEAP", 29], ["Child Care Block Grant", 27], ["Foster Care", 25], ["Vocational Rehabilitation", 23],
+      ["Airport Improvement", 22], ["Homeland Security Grants", 21], ["Clean Water Revolving", 20], ["Drinking Water Revolving", 19]]);
+    const choice = treemapChoice({ ...FLAT_SPEC, value_format: { prefix: "$", suffix: "m" } } as ChartSpec, grants, 375);
+    expect(choice.candidates.map((c) => `${c.tiling}@${c.size}:${c.labelled}`)).toEqual([
+      "squarify-1@12:3", "squarify@12:3", "squarify-2@12:3", "slice@12:3", "dice@12:1", "binary@12:6",
+      "squarify-1@11:3", "squarify@11:3", "squarify-2@11:3", "slice@11:3", "dice@11:1", "binary@11:6",
+    ]);
+    expect(choice.candidates[choice.chosen]).toMatchObject({ tiling: "binary", size: 12 });
   });
 
   it("scores labelled tiles alone, and counts what is drawn", () => {
     for (const [spec, rows, w] of [[GROUPED_SPEC, GROUPED, 375], [GROUPED_SPEC, GROUPED, 920], [FLAT_SPEC, BLS, 340]] as const) {
       const choice = treemapChoice(spec, rows, w);
       for (const c of choice.candidates) expect(Object.keys(c).sort()).toEqual(["labelled", "size", "tiling"]);
-      expect(choice.chosen).toBe(firstMax(choice.candidates.map((c) => c.labelled)));
+      expect(choice.chosen).toBe(expectedChoice(choice.candidates));
       const chosen = choice.candidates[choice.chosen]!;
       const { svg } = render(spec, rows, w);
       expect(labelledCount(svg)).toBe(chosen.labelled);
@@ -445,9 +521,9 @@ describe("candidate selection: the tiling and size that label the most tiles", (
   });
 
   it("BLS at 280 and 340 labels far more than the one tile squarify@12 manages", () => {
-    for (const [w, want] of [[280, { tiling: "squarify", size: 11, labelled: 5 }], [340, { tiling: "squarify", size: 11, labelled: 7 }]] as const) {
+    for (const [w, want] of [[280, { tiling: "squarify-1", size: 11, labelled: 5 }], [340, { tiling: "squarify", size: 11, labelled: 7 }]] as const) {
       const choice = treemapChoice(FLAT_SPEC, BLS, w);
-      expect(choice.candidates[0]!.labelled).toBe(1);
+      expect(choice.candidates.find((c) => c.tiling === "squarify" && c.size === 12)!.labelled).toBe(1);
       const chosen = choice.candidates[choice.chosen]!;
       expect(chosen).toMatchObject(want);
       const { svg } = render(FLAT_SPEC, BLS, w);
@@ -456,23 +532,24 @@ describe("candidate selection: the tiling and size that label the most tiles", (
     }
   });
 
-  it("a wide chart keeps squarify at 14px, flat or grouped", () => {
+  it("a wide chart keeps a squarify variant at 14px, flat or grouped", () => {
     for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
       const choice = treemapChoice(spec, rows, 920);
-      expect(choice.chosen).toBe(0);
-      expect(choice.candidates[0]).toMatchObject({ tiling: "squarify", size: 14 });
+      expect(SQ).toContain(choice.candidates[choice.chosen]!.tiling);
+      expect(choice.candidates[choice.chosen]!.size).toBe(14);
     }
   });
 
   it("ties go to the earlier candidate: every candidate labels every tile, squarify wins", () => {
     const choice = treemapChoice(FLAT_SPEC, rowsOf([["Alpha", 5], ["Beta", 4], ["Gamma", 3]]), 920);
-    expect(choice.candidates.map((c) => c.labelled)).toEqual([3, 3, 3, 3]);
+    expect(choice.candidates.map((c) => c.labelled)).toEqual([3, 3, 3, 3, 3, 3]);
     expect(choice.chosen).toBe(0);
+    expect(choice.candidates[0]!.tiling).toBe("squarify-1");
     // Grouped, below 600px: two large groups, each tile labelled under every arrangement.
     const two = ([["A", "a1", 300], ["A", "a2", 200], ["B", "b1", 250], ["B", "b2", 150]] as const)
       .map(([group, category, amount]) => ({ group, category, amount: String(amount) }) as TidyRow);
     const g = treemapChoice(GROUPED_SPEC, two, 560);
-    expect(g.candidates.map((c) => c.labelled)).toEqual([4, 4, 4, 4]);
+    expect(g.candidates.map((c) => c.labelled)).toEqual([4, 4, 4, 4, 4, 4]);
     expect(g.chosen).toBe(0);
   });
 
@@ -490,7 +567,7 @@ describe("candidate selection: the tiling and size that label the most tiles", (
       const w = [280, 320, 360, 399, 400, 560, 920][c % 7]!;
       const spec = grouped ? GROUPED_SPEC : FLAT_SPEC;
       const choice = treemapChoice(spec, rows, w);
-      expect(choice.chosen).toBe(firstMax(choice.candidates.map((x) => x.labelled)));
+      expect(choice.chosen).toBe(expectedChoice(choice.candidates));
       if (grouped && w >= 600) for (const x of choice.candidates) expect(x.tiling).toBe("squarify");
       const chosen = choice.candidates[choice.chosen]!;
       picked.add(`${grouped ? "g" : "f"}:${chosen.tiling}@${chosen.size === 11 ? 11 : "base"}`);

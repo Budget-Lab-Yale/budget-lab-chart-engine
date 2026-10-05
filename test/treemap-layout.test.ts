@@ -481,7 +481,7 @@ describe("layoutTreemap: whole-frame tilings for flat data", () => {
   const f = flat([40, 25, 15, 10, 6, 4]);
   const W = 375;
   const H = treemapAreaHeight(375);
-  const at = (tiling?: "squarify" | "slice" | "dice" | "binary", gutters?: { tile: number; group: number }) =>
+  const at = (tiling?: "squarify-1" | "squarify" | "squarify-2" | "slice" | "dice" | "binary", gutters?: { tile: number; group: number }) =>
     layoutTreemap(f, W, H, { groupOrder: [], ...(tiling ? { tiling } : {}), ...(gutters ? { gutters } : {}) });
 
   it("squarify is the default", () => {
@@ -505,7 +505,16 @@ describe("layoutTreemap: whole-frame tilings for flat data", () => {
     for (const other of ["squarify", "slice", "dice"] as const) expect(all(at("binary"))).not.toEqual(all(at(other)));
   });
 
-  it.each(["squarify", "slice", "dice", "binary"] as const)("%s: areas are exactly proportional to value with gutters 0", (tiling) => {
+  it("the squarify ratio variants differ from d3's default and from each other", () => {
+    const all = (l: TreemapLayout) => byRank(l).map(coords);
+    const many = flat([28452, 13174, 10990, 9556, 6159, 3635, 2531, 2041, 1656, 117]);
+    const lay = (tiling: "squarify-1" | "squarify" | "squarify-2") => all(layoutTreemap(many, 920, 460, { groupOrder: [], tiling }));
+    expect(lay("squarify-1")).not.toEqual(lay("squarify"));
+    expect(lay("squarify-2")).not.toEqual(lay("squarify"));
+    expect(lay("squarify-1")).not.toEqual(lay("squarify-2"));
+  });
+
+  it.each(["squarify-1", "squarify", "squarify-2", "slice", "dice", "binary"] as const)("%s: areas are exactly proportional to value with gutters 0", (tiling) => {
     const l = at(tiling, { tile: 0, group: 0 });
     const k = (W * H) / l.total;
     for (const t of l.tiles) expect(Math.abs(area(t) / t.datum.value - k) / k).toBeLessThan(2e-3);

@@ -19,7 +19,7 @@ import {
   resolveTreemapConfig, treemapData, treemapDataWarnings, formatTreemapShare, formatTreemapValue,
   type TreemapDatum,
 } from "../../spec/treemap";
-import { layoutTreemap, treemapAreaHeight, TM_GEOM, TM_RETILINGS, type TreemapTiling } from "../treemap-layout";
+import { layoutTreemap, treemapAreaHeight, TM_GEOM, TM_RETILINGS, TM_SQUARIFY, type TreemapTiling } from "../treemap-layout";
 import {
   tileFill, contrastText, fitTileLabel, fitTileLabels, treemapLabelSize, TM_LABEL_SIZES, TM_LINE_HEIGHT as LINE_HEIGHT,
   type TileLabel,
@@ -71,19 +71,25 @@ export type ScoredCandidate = TreemapCandidate & { labelled: number };
 /** Grouped data keeps squarified group blocks on a chart at least this wide. */
 const GROUP_ARRANGE_BELOW = 600;
 
-/** The candidates in their fixed order: every tiling at the base size (treemapLabelSize), then, on a
- *  chart narrower than TM_LABEL_SIZES.smallBelow, every tiling again at TM_LABEL_SIZES.small. With
- *  groups the tiling arranges the group blocks, and only below GROUP_ARRANGE_BELOW (squarify alone
- *  above it); each block's tiles stay squarified (and rescued where that saves its largest label,
+/** A non-squarify candidate must label at least this many more tiles than the best squarify variant
+ *  at its size to be drawn (Ruling 45: squarify unless much better). */
+const NON_SQUARIFY_MARGIN = 2;
+const isSquarify = (t: TreemapTiling): boolean => (TM_SQUARIFY as readonly string[]).includes(t);
+
+/** The candidates in their fixed order: every tiling — the squarify variants (TM_SQUARIFY) first,
+ *  then TM_RETILINGS — at the base size (treemapLabelSize), then, on a chart narrower than
+ *  TM_LABEL_SIZES.smallBelow, every tiling again at TM_LABEL_SIZES.small. With groups the tiling
+ *  arranges the group blocks, and only below GROUP_ARRANGE_BELOW (d3's default squarify alone above
+ *  it); each block's tiles stay squarified (and rescued where that saves its largest label,
  *  layoutTreemap). */
 function candidates(width: number, grouped: boolean): TreemapCandidate[] {
-  const tilings: TreemapTiling[] = grouped && width >= GROUP_ARRANGE_BELOW ? ["squarify"] : ["squarify", ...TM_RETILINGS];
+  const tilings: TreemapTiling[] = grouped && width >= GROUP_ARRANGE_BELOW ? ["squarify"] : [...TM_SQUARIFY, ...TM_RETILINGS];
   const sizes = [treemapLabelSize(width), ...(width < TM_LABEL_SIZES.smallBelow ? [TM_LABEL_SIZES.small] : [])];
   return sizes.flatMap((size) => tilings.map((tiling) => ({ tiling, size })));
 }
 
-/** Every candidate with the tiles it labels, and the index of the one drawn: the first that labels
- *  the most. Exported for tests. */
+/** Every candidate with the tiles it labels, and the index of the one drawn (pickCandidate).
+ *  Exported for tests. */
 export function treemapChoice(spec: ChartSpec, rows: TidyRow[], width: number): { candidates: ScoredCandidate[]; chosen: number } {
   return choose(spec, rows, width).choice;
 }
@@ -93,11 +99,29 @@ function choose(spec: ChartSpec, rows: TidyRow[], width: number):
   const grouped = treemapData(spec, rows).some((d) => d.group !== null);
   const builds = candidates(width, grouped).map((cand) => ({ cand, b: buildAt(spec, rows, width, cand) }));
   const scored = builds.map(({ cand, b }): ScoredCandidate => ({ ...cand, labelled: b.tiles.filter((t) => t.label.mode !== "none").length }));
-  let chosen = 0;
-  scored.forEach((s, i) => {
-    if (s.labelled > scored[chosen]!.labelled) chosen = i;
-  });
+  const chosen = pickCandidate(scored);
   return { built: builds[chosen]!.b, choice: { candidates: scored, chosen } };
+}
+
+/** Ruling 45. Within each size step, the squarify variant that labels the most tiles (the earlier
+ *  on a tie), unless the best of the other tilings labels at least NON_SQUARIFY_MARGIN more; then,
+ *  across size steps in order, the first step winner that labels the most (so the 11px step is taken
+ *  only when it labels more than the base size). Deterministic. Exported for tests. */
+export function pickCandidate(scored: ScoredCandidate[]): number {
+  const firstMax = (ii: number[]): number => ii.reduce((a, b) => (scored[b]!.labelled > scored[a]!.labelled ? b : a));
+  let best = -1;
+  for (const size of [...new Set(scored.map((c) => c.size))]) {
+    const idx = scored.map((_, i) => i).filter((i) => scored[i]!.size === size);
+    const sq = idx.filter((i) => isSquarify(scored[i]!.tiling));
+    const other = idx.filter((i) => !isSquarify(scored[i]!.tiling));
+    let winner = firstMax(sq);
+    if (other.length > 0) {
+      const o = firstMax(other);
+      if (scored[o]!.labelled >= scored[winner]!.labelled + NON_SQUARIFY_MARGIN) winner = o;
+    }
+    if (best < 0 || scored[winner]!.labelled > scored[best]!.labelled) best = winner;
+  }
+  return best;
 }
 
 /** The one place a spec + rows + width becomes geometry, colours and labels, so the render and the

@@ -23,7 +23,10 @@ export interface TileRect { datum: TreemapDatum; x0: number; y0: number; x1: num
  *  whole frame can take (layoutTreemap `tiling`: the tiles of flat data, the group blocks of grouped
  *  data). */
 export const TM_RETILINGS = ["slice", "dice", "binary"] as const;
-export type TreemapTiling = "squarify" | (typeof TM_RETILINGS)[number];
+/** The squarify variants the whole frame can take (Ruling 45), in candidate order: aspect-ratio
+ *  target 1 (squarest), d3's default (the golden ratio φ), and 2. */
+export const TM_SQUARIFY = ["squarify-1", "squarify", "squarify-2"] as const;
+export type TreemapTiling = (typeof TM_SQUARIFY)[number] | (typeof TM_RETILINGS)[number];
 /** A group's block. `tiling`: how its tiles are laid out inside it. */
 export interface GroupRect { group: string; total: number; x0: number; y0: number; x1: number; y1: number; tiling: TreemapTiling }
 export interface TreemapLayout { width: number; height: number; tiles: TileRect[]; groups: GroupRect[]; total: number }
@@ -64,6 +67,10 @@ function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, 
  *  full-height columns left to right, both in sort order (largest first); "binary" splits by value
  *  into a balanced binary tree. (d3's sliceDice is not offered: at one level it is slice or dice.) */
 const RETILE = { slice: d3.treemapSlice, dice: d3.treemapDice, binary: d3.treemapBinary } as const;
+/** Every frame tiling by name. */
+const FRAME_TILE = {
+  ...RETILE, squarify: d3.treemapSquarify, "squarify-1": d3.treemapSquarify.ratio(1), "squarify-2": d3.treemapSquarify.ratio(2),
+} as const;
 
 /**
  * Squarified layout (spec §3). Sort: tiles by value desc, ties by CSV `index`; groups by total desc,
@@ -133,7 +140,7 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   // The root takes the chosen tiling; a group's tiles are always squarified first (the rescue below
   // may re-tile them).
   type TNode = { depth: number };
-  const rootTiling = opts.tiling && opts.tiling !== "squarify" ? RETILE[opts.tiling] : d3.treemapSquarify;
+  const rootTiling = FRAME_TILE[opts.tiling ?? "squarify"];
   d3.treemap()
     .tile((node: TNode, x0: number, y0: number, x1: number, y1: number) =>
       (node.depth === 0 ? rootTiling : d3.treemapSquarify)(node, x0, y0, x1, y1))
