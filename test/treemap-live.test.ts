@@ -239,6 +239,15 @@ describe("treemap live mount: hover", () => {
     expect(rowsFor({ share_label: "Of all outlays", value_label: "Outlays" })).toEqual(["Outlays: $850.0", "Of all outlays: 24.39%", ...extra]);
   });
 
+  it("tooltip_values leaves the screen-reader label with both numbers", () => {
+    for (const mode of ["none", "share", "value"]) {
+      document.body.replaceChildren();
+      const spec = { ...FLAT_SPEC, treemap: { tooltip_values: mode } } as ChartSpec;
+      const aria = tileNamed(svgOf(mountAt(900, spec)), "Housing").parentElement!.getAttribute("aria-label")!;
+      expect(aria, mode).toMatch(/^Housing, \d+\.\d% of total, \$28,452$/);
+    }
+  });
+
   it("custom built-in row labels are escaped", () => {
     const spec = { ...HOVER_SPEC, treemap: { ...HOVER_SPEC.treemap, value_label: "<b>Spend</b> & co", share_label: "<i>%</i>" } } as ChartSpec;
     enter(tileNamed(svgOf(mountAt(900, spec, HOVER_ROWS)), "Defense").parentElement!);

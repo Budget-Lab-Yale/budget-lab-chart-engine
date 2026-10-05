@@ -17,20 +17,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   accepted, and fills its group flat). Labels top-left at one size per chart (14px, 12px below 600px
   wide), placed largest first within each group and stopping at the first that does not fit, so a
   group never labels a tile while leaving a larger one bare. The tiles of flat data are drawn
-  squarified, as rows, as columns or as a balanced split, whichever labels the most tiles; grouped
-  data's blocks are squarified at 600px and wider and compete the same way below; below 400px wide
-  11px text competes too. A group whose largest tile cannot hold its label is re-laid out inside its
-  own block (rows, columns or a balanced split) where that lets it fit. Groups are named by the
-  standard legend (top, or `legendPosition: right`, which reserves no column when there are no
-  legend rows; `legend` and `series_legend` work as on other charts), whose rows highlight their
-  group's tiles. A tile left unlabelled is named by its hover card and screen-reader label. New
-  `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap,
-  `value_format` groups thousands, and `series_order` sets hue order and breaks ties between equal
-  group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px (744px
-  beside a right-hand legend). `tbl-chart validate` warns on zero-value rows, more than 30 tiles,
-  mostly unlabelled tiles at the export width, or more than seven groups without `series_colors`.
-  The `treemap:` block is rejected on every other chart type, so no existing spec changes. See
-  CONFIG-SPEC "Treemap options".
+  squarified (aiming at aspect ratio 1, d3's default or 2, whichever labels the most), or as rows,
+  columns or a balanced split only when that labels at least 2 more tiles; grouped data's blocks are
+  squarified at 600px and wider and compete the same way below; below 400px wide 11px text competes
+  too. A group whose largest tile cannot hold its label is re-laid out inside its own block (rows,
+  columns or a balanced split) where that lets it fit. Groups are named by the standard legend (top,
+  or `legendPosition: right`, which reserves no column when there are no legend rows; `legend` and
+  `series_legend` work as on other charts), whose rows highlight their group's tiles. A tile left
+  unlabelled is named by its hover card and screen-reader label. New `treemap:` block
+  (`label_value`, `shading`, `share_decimals`, `tooltip_values`, `share_label`, `value_label`,
+  `tooltip` rows). On a treemap, `value_format` groups thousands, and `series_order` sets hue order
+  and breaks ties between equal group totals, without filtering. Hover card on screen; the PNG
+  export re-renders at 920px (744px beside a right-hand legend). `tbl-chart validate` warns on
+  zero-value rows, more than 30 tiles, mostly unlabelled tiles at the export width, or more than
+  seven groups without `series_colors`. The `treemap:` block is rejected on every other chart type,
+  so no existing spec changes. See CONFIG-SPEC "Treemap options".
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated

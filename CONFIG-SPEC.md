@@ -913,7 +913,10 @@ chart type.
 | `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card and the tile's screen-reader label). |
 | `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's colour as resolved — its `series_colors` value as written (a tier such as `violet-300` included), else the palette's colour for it: its hue's base colour for the first seven groups, a lighter tier of the hue from the eighth on (see **Groups and colour** below); flat data is blue. Distinct from the top-level `shading`, which a treemap rejects. |
 | `treemap.share_decimals` | integer | Decimal places on every share, 0–3. Default 1. |
-| `treemap.tooltip` | array | Extra hover-card rows, in order, after Value and Share. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
+| `treemap.tooltip_values` | enum | Which built-in rows the hover card shows: `both` (default — Value, then Share) \| `share` \| `value` \| `none` (the card keeps its header and the `treemap.tooltip` rows). The tile's screen-reader label keeps both numbers whatever this says. |
+| `treemap.value_label` | string | Label of the hover card's Value row. Default `Value`. |
+| `treemap.share_label` | string | Label of the hover card's Share row. Default `Share`. |
+| `treemap.tooltip` | array | Extra hover-card rows, in order, after the built-in rows. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
 | `value_format` | object | `{decimals, prefix, suffix}` for every value a treemap prints: tile labels with `label_value: value`, the hover card's Value row and each tile's screen-reader label. Thousands are grouped with commas (`$28,452`) and `decimals` defaults to 0. The grouping is a treemap behaviour: a dumbbell's gap label, the other user of this field, prints no separators. `value_prefix` and `value_suffix` are validation errors on a treemap. |
 | `tooltip_decimals` | integer | Decimal places on the hover card's Value row. Default `value_format.decimals`, else 0. |
 
@@ -925,8 +928,8 @@ warns, naming its row. Keys of `series_order`, `series_colors` and `series_label
 in the data; on a treemap with no groups, any key in them is a validation error (the bar chart's
 `series_colors: {"": color}` idiom included), since there is no group for it to name.
 
-**Layout.** Squarified unless another layout labels more tiles (see **Choosing the layout and
-size** below), and deterministic: the same data always draws the same tiles. Tiles are
+**Layout.** Squarified unless another layout labels at least 2 more tiles (see **Choosing the
+layout and size** below), and deterministic: the same data always draws the same tiles. Tiles are
 sorted by value, the largest first and top-left; equal values keep their CSV order, and values
 equal to 12 significant digits count as equal. With groups, each group is one block: blocks are
 sorted by group total, largest first, ties (to 12 significant digits, so `0.1 + 0.2` ties `0.3`)
@@ -941,16 +944,19 @@ from the largest down, full-height columns from the left, and a balanced split b
 first under which that tile's label fits is kept (squarified if none). The block's position and
 size never change, and tile areas stay proportional to value as above.
 
-**Choosing the layout and size.** The chart is drawn in whichever of these candidates labels the
-most tiles (under the rule in **Tile labels**), the earlier one winning a tie: squarified,
-full-width rows from the largest down, full-height columns from the left, or a balanced split by
-value, each at the base size (14px, or 12px below 600px wide); then, on a chart narrower than
-400px only, the same four again at 11px. With no groups the four arrange the tiles themselves.
-With groups they arrange the group blocks, and only on a chart narrower than 600px: at 600px and
-wider the blocks are always squarified. A block's tiles are squarified whatever arranges the
-blocks (or re-laid out inside the block, as above). So a chart can be drawn as rows or columns
-rather than near-squares, and in 11px text only when that labels more tiles than the base size
-does. Every candidate shares the area by value, so tile areas stay proportional.
+**Choosing the layout and size.** Six layouts are tried, in this order, at the base size (14px, or
+12px below 600px wide): three squarified ones, aiming at tiles with an aspect ratio of 1 (square),
+of d3's default (the golden ratio, about 1.6) and of 2; then full-width rows from the largest down,
+full-height columns from the left, and a balanced split by value. Each is scored by the tiles it
+labels (under the rule in **Tile labels**). The squarified layout that labels the most is taken,
+the earlier on a tie, unless rows, columns or the split label at least 2 more tiles than it; then
+the first of those with the most is taken instead. On a chart narrower than 400px the six are tried
+again at 11px under the same rule, and the 11px pick is drawn only when it labels more tiles than
+the base size's. With no groups the layouts arrange the tiles themselves. With groups they arrange
+the group blocks, and only on a chart narrower than 600px: at 600px and wider the blocks are always
+squarified at d3's default ratio. A block's own tiles are squarified at d3's default ratio whatever
+arranges the blocks (or re-laid out inside the block, as above). Every layout shares the area by
+value, so tile areas stay proportional.
 
 **Groups and colour.** Groups take the categorical hues in turn — blue, amber, violet, green, red,
 rose, russet — first the groups `series_order` lists, in its order, then the rest in order of first
@@ -1037,7 +1043,9 @@ narrower screen does.
 
 **Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
 hover card: the tile's name, prefixed by its group's name with groups (`Mandatory · Medicare`), then
-**Value** (`value_format`, at `tooltip_decimals`), **Share**, and the `treemap.tooltip` rows.
+**Value** (`value_format`, at `tooltip_decimals`) and **Share** — the rows `treemap.tooltip_values`
+selects, labelled by `treemap.value_label` and `treemap.share_label` — and the `treemap.tooltip`
+rows.
 `chrome.tooltip: false` removes the card; the outline and dimming stay. Like every tooltip, the hover
 is screen-only and absent from the PNG. A treemap's hover does not call `hooks.tooltip` and fires no
 `onHover` / `tbl-hover` (see [Customisation](#customisation)), and it is pointer-only: tiles are not
