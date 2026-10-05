@@ -62,6 +62,9 @@ describe("treemap - structural validation", () => {
     expect(validateSpec({ ...TM, treemap: { share_decimals: 1.5 } }).valid).toBe(false);
     expect(validateSpec({ ...TM, treemap: { rows: 2 } }).valid).toBe(false);
     expect(validateSpec({ ...TM, treemap: { tooltip: [{ label: "no column" }] } }).valid).toBe(false);
+    // An empty row label would draw a bare ": value" row, as share_label / value_label would.
+    expect(validateSpec({ ...TM, treemap: { tooltip: [{ column: "c", label: "" }] } }).valid).toBe(false);
+    expect(validateSpec({ ...TM, treemap: { tooltip: [{ column: "c", label: "C" }] } }).valid).toBe(true);
   });
 
   it("accepts tooltip_values, share_label and value_label; rejects an unknown mode or a non-string label", () => {

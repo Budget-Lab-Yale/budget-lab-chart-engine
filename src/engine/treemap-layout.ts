@@ -69,12 +69,15 @@ function rect(n: { x0: number; y0: number; x1: number; y1: number }, w: number, 
 const RETILE = { slice: d3.treemapSlice, dice: d3.treemapDice, binary: d3.treemapBinary } as const;
 /** Every frame tiling by name. */
 const FRAME_TILE = {
-  ...RETILE, squarify: d3.treemapSquarify, "squarify-1": d3.treemapSquarify.ratio(1), "squarify-2": d3.treemapSquarify.ratio(2),
+  ...RETILE,
+  squarify: d3.treemapSquarify,
+  "squarify-1": d3.treemapSquarify.ratio(1),
+  "squarify-2": d3.treemapSquarify.ratio(2),
 } as const;
 
 /**
- * Squarified layout (spec §3). Sort: tiles by value desc, ties by CSV `index`; groups by total desc,
- * ties by `opts.groupOrder` position (listed groups first), then first appearance in `data`.
+ * Squarified layout (spec §3). Sort: tiles by value desc, ties by CSV `index`; groups by total
+ * desc, ties by `opts.groupOrder` position (listed groups first), then first appearance in `data`.
  * Gutters: `groupGutter` between group blocks, `tileGutter` between tiles; no outer padding, so the
  * outermost tiles reach the frame edges. Every tile's area is its value times one factor across the
  * whole chart, less the fixed gutters (exactly so with gutters 0). `gutters` is for tests only (0
@@ -82,15 +85,15 @@ const FRAME_TILE = {
  *
  * `labelFits` rescues a group whose first tile in layout order (the sort above: values at 12
  * significant digits, ties by CSV order) cannot hold its label: asked of that tile once the blocks
- * are laid out, and if it fails, the group's tiles alone are laid out again inside the same block by each of TM_RETILINGS in turn, keeping the first under
- * which it passes, else squarify. Blocks never move and every tiling shares the block by value, so
- * areas stay proportional exactly as under squarify. Flat data is never re-tiled this way, so it is
- * not asked there.
+ * are laid out, and if it fails, the group's tiles alone are laid out again inside the same block
+ * by each of TM_RETILINGS in turn, keeping the first under which it passes, else squarify. Blocks
+ * never move and every tiling shares the block by value, so areas stay proportional exactly as
+ * under squarify. Flat data is never re-tiled this way, so it is not asked there.
  *
  * `tiling` lays the whole frame out by that tiling instead of d3's default squarify, in sort
  * order: the tiles of flat data, or the group blocks of grouped data (each block's tiles are still
- * squarified at d3's default ratio, and rescued as above). Every tiling shares the frame by value. The caller (marks/treemap) picks it
- * among candidates by how much each lets it label.
+ * squarified at d3's default ratio, and rescued as above). Every tiling shares the frame by value.
+ * The caller (marks/treemap) picks it among candidates by how much each lets it label.
  */
 export function layoutTreemap(data: TreemapDatum[], width: number, height: number,
   opts: {

@@ -54,7 +54,7 @@ export interface TreemapConfig {
   /** Decimals on a share percentage, integer 0-3. Default 1. */
   share_decimals?: number;
   /** Which built-in hover-card rows show: `both` (default: Value then Share), `share`, `value`, or
-   *  `none` (the card keeps its header and the `tooltip` rows). */
+   *  `none` (the card keeps its header, the `tooltip` rows and the `tooltip_note` cell). */
   tooltip_values?: "both" | "share" | "value" | "none";
   /** Label of the hover card's Share row. Default "Share". */
   share_label?: string;

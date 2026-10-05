@@ -577,7 +577,7 @@ export const CHART_SPEC_SCHEMA = {
             required: ["column"],
             properties: {
               column: { type: "string", minLength: 1 },
-              label: { type: "string" },
+              label: { type: "string", minLength: 1 },
               format: VALUE_FORMAT,
             },
           },
