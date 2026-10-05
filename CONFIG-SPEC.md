@@ -909,7 +909,7 @@ validation error on every other chart type.
 
 | field | type | notes |
 |---|---|---|
-| `treemap.label_value` | enum | The number drawn with each tile's name: `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card and the tile's screen-reader label). |
+| `treemap.label_value` | enum | The number drawn with each tile's name (and with a group's name written inside its block, see **Header strips**): `share` (default — the tile's percentage of the grand total) \| `value` (the tile's value, formatted by `value_format`) \| `none` (the name alone; the share still appears in the hover card and the tile's screen-reader label). |
 | `treemap.shading` | enum | `size` (default): tiles are shaded by size rank within their group (among all tiles, with no groups), largest darkest — see **Groups and colour** below. `none`: every tile is its group's colour as resolved — its `series_colors` value as written (a tier such as `violet-300` included), else the palette's colour for it: its hue's base colour for the first seven groups, a lighter tier of the hue from the eighth on (see **Groups and colour** below); flat data is blue. Distinct from the top-level `shading`, which a treemap rejects. |
 | `treemap.share_decimals` | integer | Decimal places on every share, 0–3. Default 1. |
 | `treemap.tooltip` | array | Extra hover-card rows, in order, after Value and Share. Each `{column, label?, format?}`. `column` must be a column in the data; `label` defaults to the column name. Without `format` the cell prints exactly as the CSV holds it, numbers included (a year `2024` prints `2024`). With `format` (`{decimals, prefix, suffix}`, formatted as `value_format` is on a treemap), a numeric cell is formatted and a text cell still prints as written. A blank cell drops that row from that tile's card. |
@@ -995,10 +995,11 @@ with 14px text and 22px with 12px. A group keeps its strip only when its block, 
 is at least two strips tall (52px, or 44px below 600px wide) and the name fits across it. Strips
 are decided on the blocks before any strip area is added and re-checked on the final blocks, so a
 block can lose its strip but never gain one. A group without a strip gets no strip area. When none
-of its tiles is labelled either, the group's name and share are written in its block's top-left
-instead, at the label size (name bold, share in medium weight) and fitted as a tile label is, in
-white or navy, whichever contrasts more with the group's colour; where they do not fit, nothing is
-written, and hovering a tile still names it.
+of its tiles is labelled either, the group's name is written in its block's top-left instead, with
+its number as `label_value` says (its share, its value, or nothing with `none`), at the label size
+(name bold, number in medium weight) and fitted as a tile label is, in white or navy, whichever
+contrasts more with the tile it is drawn on; where it does not fit, nothing is written, and hovering
+a tile still names it.
 
 **Size.** The treemap's height follows its width: width ÷ height is 2.0 at 720px and wider, 0.8 at
 280px and narrower, linear in between, and the treemap is never more than 460px tall. On screen it

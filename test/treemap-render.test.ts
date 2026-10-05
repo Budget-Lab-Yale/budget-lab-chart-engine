@@ -314,7 +314,7 @@ describe("treemap render", () => {
         x1: Math.max(...rs.map((r) => num(r, "x") + num(r, "width"))), y1: Math.max(...rs.map((r) => num(r, "y") + num(r, "height"))) };
     };
 
-    it("and no strip is named in its block's top-left: name 700 + share 500 at the label size, contrast on its base colour", () => {
+    it("and no strip is named in its block's top-left: name 700 + share 500 at the label size, contrast on the tile under it", () => {
       // At 280px B is a full-width band under 44px tall (no strip) of eight tiles too narrow to label.
       const spec = { ...GROUPED_SPEC, series_order: ["A", "B"] } as ChartSpec;
       const { svg, colors } = render(spec, g([["A", "a1", 50], ["A", "a2", 40], ...many("B", 8, 1.25)]), 280);
@@ -330,8 +330,16 @@ describe("treemap render", () => {
       expect(num(l, "font-size")).toBe(12);
       expect(num(l, "x")).toBeCloseTo(b.x0 + TM_GEOM.pad, 1);
       expect(num(l, "y")).toBeCloseTo(b.y0 + TM_GEOM.pad + (12 * 1.2) / 2 + 0.35 * 12, 1);
-      expect(l.getAttribute("fill")).toBe(contrastText(colors.get("B")!));
+      // B is amber. Its base colour would take navy text, but the label sits on B's largest tile,
+      // the dark 600 tier, which takes white (Ruling 33).
       expect(colors.get("B")).toBe(tokens.categorical[1]!.base);
+      expect(contrastText(colors.get("B")!)).toBe(NAVY);
+      const under = q(svg, 'g[data-series="B"] rect').find((r) =>
+        num(r, "x") <= num(l, "x") && num(l, "x") <= num(r, "x") + num(r, "width") &&
+        num(r, "y") <= b.y0 + TM_GEOM.pad && b.y0 + TM_GEOM.pad <= num(r, "y") + num(r, "height"))!;
+      expect(under.getAttribute("fill")).toBe(tokens.scales.amber["600"]);
+      expect(l.getAttribute("fill")).toBe(contrastText(under.getAttribute("fill")!));
+      expect(l.getAttribute("fill")).toBe(WHITE);
       expect(l.getAttribute("aria-hidden")).toBe("true");
       // Hover passes through it to the tiles underneath.
       expect(l.getAttribute("pointer-events")).toBe("none");
@@ -349,6 +357,16 @@ describe("treemap render", () => {
         .toEqual([["Other", 700, 14], ["misc", 700, 14], ["items", 700, 14], ["7.0%", 500, 14]]);
       const b = blockOf(svg, "Other misc items");
       for (const s of l[0]!.children) expect(num(s, "x")).toBeCloseTo(b.x0 + TM_GEOM.pad, 1);
+    });
+
+    it("follows label_value: the group's value with value, its name alone with none", () => {
+      const rows = g([["A", "a1", 50], ["A", "a2", 40], ...many("B", 8, 1.25)]);
+      const text = (labelValue: "share" | "value" | "none") =>
+        [...groupLabels(render({ ...GROUPED_SPEC, treemap: { label_value: labelValue } } as ChartSpec, rows, 280).svg)[0]!.children]
+          .map((s) => [s.textContent, num(s, "font-weight")]);
+      expect(text("share")).toEqual([["B", 700], [" 10.0%", 500]]);
+      expect(text("value")).toEqual([["B", 700], [" $10", 500]]);
+      expect(text("none")).toEqual([["B", 700]]);
     });
 
     it("names the group by its series_labels label", () => {

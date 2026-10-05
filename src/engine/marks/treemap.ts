@@ -183,13 +183,20 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
     group: g, fill: stripFill(hueOf(g.group)),
     label: fitStripLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, size),
   }));
-  // A group with no strip and no labelled tile is named (name + share) in its block's top-left,
-  // fitted like a tile label at the same size, in the contrast colour of the group's base fill.
+  // A group with no strip and no labelled tile is named in its block's top-left, with its number as
+  // label_value says (share, value, or none), fitted like a tile label at the same size. Its colour
+  // contrasts with the tile it is drawn on: the one under the label's top-left corner (the group's
+  // largest under squarify), else the group's largest.
   const groupLabels: BuiltGroupLabel[] = [];
   for (const g of layout.groups) {
-    if (g.strip || tiles.some((t) => t.datum.group === g.group && t.label.mode !== "none")) continue;
-    const label = fitTileLabel(labelOf(g.group), shareText(g.total), g.x1 - g.x0, g.y1 - g.y0, size);
-    if (label.mode !== "none") groupLabels.push({ group: g, fill: contrastText(hueOf(g.group)), label });
+    const members = tiles.filter((t) => t.datum.group === g.group);
+    if (g.strip || members.some((t) => t.label.mode !== "none")) continue;
+    const label = fitTileLabel(labelOf(g.group), numberOf(g.total), g.x1 - g.x0, g.y1 - g.y0, size);
+    if (label.mode === "none") continue;
+    const [ax, ay] = [g.x0 + TM_GEOM.pad, g.y0 + TM_GEOM.pad];
+    const under = members.find((t) => t.x0 <= ax && ax <= t.x1 && t.y0 <= ay && ay <= t.y1)
+      ?? members.reduce((a, b) => (b.datum.value > a.datum.value ? b : a));
+    groupLabels.push({ group: g, fill: contrastText(under.fill), label });
   }
   return { width, areaH, size, stripH, layout, tiles, strips, groupLabels, groupNames, colors };
 }
