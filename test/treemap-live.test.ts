@@ -304,6 +304,17 @@ describe("treemap live mount: hover", () => {
     expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Defense · Discretionary");
   });
 
+  it("tooltip_group: false has no effect on data with no groups: the card is identical", () => {
+    const card = (spec: ChartSpec): string => {
+      document.body.replaceChildren();
+      enter(tileNamed(svgOf(mountAt(900, spec)), "Housing").parentElement!);
+      return tip()!.innerHTML;
+    };
+    const off = card({ ...FLAT_SPEC, treemap: { tooltip_group: false } } as ChartSpec);
+    expect(tip()!.querySelector(".tbl-tooltip-head")!.textContent).toBe("Housing");
+    expect(off).toBe(card(FLAT_SPEC));
+  });
+
   it("the tile's screen-reader label keeps the group first, whatever the header shows", () => {
     for (const tooltip_group of [true, false]) {
       document.body.replaceChildren();

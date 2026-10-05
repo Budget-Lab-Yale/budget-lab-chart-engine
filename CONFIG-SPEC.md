@@ -1044,15 +1044,15 @@ a right-hand legend column taller than it); the PNG can therefore label differen
 narrower screen does.
 
 **Hover.** Hovering a tile outlines it (2px, navy), dims the other tiles slightly, and shows the
-hover card: a header of the tile's name, followed with groups by its group's name as `series_labels`
-gives it (`Medicare · Mandatory`; `treemap.tooltip_group: false` leaves the name alone), then
-**Value** (`value_format`, at `tooltip_decimals`) and **Share** — the rows `treemap.tooltip_values`
-selects, labelled by `treemap.value_label` and `treemap.share_label` — then the `treemap.tooltip`
-rows and, last, below a divider, the `treemap.tooltip_note` cell where it is not blank.
-`chrome.tooltip: false` removes the card; the outline and dimming stay. Like every tooltip, the
-hover is screen-only and absent from the PNG. A treemap's hover does not call `hooks.tooltip` and
-fires no `onHover` / `tbl-hover` (see [Customisation](#customisation)), and it is pointer-only:
-tiles are not keyboard-focusable.
+hover card. Its header is the tile's name, then, when the data has groups, the group's name as
+`series_labels` gives it (`Medicare · Mandatory`); `treemap.tooltip_group: false` shows the tile's
+name alone. Below the header come **Value** (`value_format`, at `tooltip_decimals`) and **Share** —
+the rows `treemap.tooltip_values` selects, labelled by `treemap.value_label` and
+`treemap.share_label` — then the `treemap.tooltip` rows and, last, below a divider, the
+`treemap.tooltip_note` cell where it is not blank. `chrome.tooltip: false` removes the card; the
+outline and dimming stay. Like every tooltip, the hover is screen-only and absent from the PNG. A
+treemap's hover does not call `hooks.tooltip` and fires no `onHover` / `tbl-hover` (see
+[Customisation](#customisation)), and it is pointer-only: tiles are not keyboard-focusable.
 
 **Accessibility.** The chart's SVG is a `role="group"` labelled with the title. Each tile is a
 `role="img"` whose `aria-label` reads `[Group · ]Name, <share> of total, <value>` — `Housing, 33.4% of

@@ -20,11 +20,13 @@ function rowHtml(label: string, value: string): string {
   return `<div class="tbl-tooltip-row"><span><span class="tbl-tooltip-label">${escapeHtml(label)}:</span>${LABEL_VALUE_GAP}<span class="tbl-tooltip-value">${escapeHtml(value)}</span></span></div>`;
 }
 
-/** The card's HTML for one tile: header `Name[ · Group]` (the group unless flat or
- *  `tooltip_group: false`), then the built-in Value and Share rows that
- *  `treemap.tooltip_values` selects (labelled by `value_label` / `share_label`), and each configured
- *  `treemap.tooltip` row whose cell is not blank. A row with a `format` formats a numeric cell with
- *  it; every other cell (any cell of a row without `format`, e.g. a Year) prints verbatim. */
+/** The card's HTML for one tile, in order:
+ *  - the header `Name · Group`, or `Name` alone on flat data or with `tooltip_group: false`;
+ *  - the built-in Value and Share rows `treemap.tooltip_values` selects, labelled by `value_label`
+ *    and `share_label`;
+ *  - each configured `treemap.tooltip` row whose cell is not blank (a row with a `format` formats a
+ *    numeric cell with it; every other cell, e.g. a Year, prints verbatim);
+ *  - the `treemap.tooltip_note` cell below a divider, unless blank. */
 function cardHtml(t: TreemapTileInfo, spec: ChartSpec): string {
   const cfg = resolveTreemapConfig(spec);
   const valueFmt = spec.tooltip_decimals != null ? { ...spec.value_format, decimals: spec.tooltip_decimals } : spec.value_format;
