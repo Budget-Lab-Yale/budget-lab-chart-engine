@@ -48,7 +48,8 @@ describe("treemap export", () => {
     expect(t.getAttribute("x")).toBe(String(MARGIN));
     expect(t.getAttribute("width")).toBe(String(INNER_W));
     expect(MARGIN * 2 + INNER_W).toBe(1000);
-    expect(svg.querySelector("[class*=legend]")).toBeNull();
+    // No legend: the export is identical to the same spec with the legend switched off.
+    expect(svg.outerHTML).toBe(buildExportSvg({ ...SPEC, legend: false } as ChartSpec, BIG).outerHTML);
   });
 
   it("sizes the frame to the treemap area alone, whatever is unlabelled, at a whole-pixel height", () => {

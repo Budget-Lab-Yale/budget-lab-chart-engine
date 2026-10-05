@@ -10,27 +10,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tile
   area is proportional to value at one scale across the chart, less the gutters; tiles shaded by
-  size rank within a band around their colour (each group's, or blue with no groups): the four
-  tonal tiers nearest it plus the CIELAB midpoint of each adjacent pair, seven shades in all (blue:
-  500, 450, … 200); a one-tile group is drawn in its colour as resolved, the legend chip's. The
-  midpoints are computed, not palette tokens, and have no name a figure could set (a raw hex equal
-  to one is accepted, and fills its group flat). Labels top-left at one size per chart (14px, 12px
-  below 600px wide), placed largest first within each group and stopping at
-  the first that does not fit, so a group never labels a tile while leaving a larger one bare. The
-  tiles of flat data are drawn squarified, as rows, as columns or as a balanced split, whichever
-  labels the most tiles; grouped data's blocks are squarified at 600px and wider and compete the
-  same way below; below 400px wide 11px text competes too. A group whose largest tile cannot hold
-  its label is re-laid out inside its own block (rows, columns or a balanced split) where that lets
-  it fit. Groups are named by the standard legend (top, or `legendPosition: right`, which reserves
-  no column when there are no legend rows; `legend` and `series_legend` work as on other charts),
-  whose rows highlight their group's tiles. A tile left
-  unlabelled is named by its hover card and screen-reader label. New `treemap:` block
-  (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap, `value_format`
-  groups thousands, and `series_order` sets hue order and breaks ties between equal group totals,
-  without filtering. Hover card on screen; the PNG export re-renders at 920px (744px beside a
-  right-hand legend). `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly
-  unlabelled tiles at the export width, or more than seven groups without `series_colors`. The
-  `treemap:` block is rejected on every other chart type, so no existing spec changes. See
+  size rank within a band around their colour (each group's, or blue with no groups): the four tonal
+  tiers nearest it plus the CIELAB midpoint of each adjacent pair, seven shades in all (blue: 500,
+  450, … 200); a one-tile group is drawn in its colour as resolved, the legend chip's. The midpoints
+  are computed, not palette tokens, and have no name a figure could set (a raw hex equal to one is
+  accepted, and fills its group flat). Labels top-left at one size per chart (14px, 12px below 600px
+  wide), placed largest first within each group and stopping at the first that does not fit, so a
+  group never labels a tile while leaving a larger one bare. The tiles of flat data are drawn
+  squarified, as rows, as columns or as a balanced split, whichever labels the most tiles; grouped
+  data's blocks are squarified at 600px and wider and compete the same way below; below 400px wide
+  11px text competes too. A group whose largest tile cannot hold its label is re-laid out inside its
+  own block (rows, columns or a balanced split) where that lets it fit. Groups are named by the
+  standard legend (top, or `legendPosition: right`, which reserves no column when there are no
+  legend rows; `legend` and `series_legend` work as on other charts), whose rows highlight their
+  group's tiles. A tile left unlabelled is named by its hover card and screen-reader label. New
+  `treemap:` block (`label_value`, `shading`, `share_decimals`, `tooltip` rows). On a treemap,
+  `value_format` groups thousands, and `series_order` sets hue order and breaks ties between equal
+  group totals, without filtering. Hover card on screen; the PNG export re-renders at 920px (744px
+  beside a right-hand legend). `tbl-chart validate` warns on zero-value rows, more than 30 tiles,
+  mostly unlabelled tiles at the export width, or more than seven groups without `series_colors`.
+  The `treemap:` block is rejected on every other chart type, so no existing spec changes. See
   CONFIG-SPEC "Treemap options".
 
 ### Docs
@@ -40,6 +39,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - CONFIG-SPEC `series_order`: an empty `series_order: []` filters nothing.
 
 ### Fixed
+- A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
+  validation as a palette name and could make the chart throw at render; it is now rejected at load
+  like any unknown name, on every chart type. No published figure uses one.
 - A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
   `series_order`, matching every other chart type.
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,

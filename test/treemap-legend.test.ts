@@ -193,6 +193,8 @@ describe("treemap legend, live", () => {
     mountChart(b, { spec: line, rows: lRows, width: INNER_W });
     expect(b.querySelector(".tbl-legend")).toBeNull();
     expect(Number(b.querySelector("svg.tblchart")!.getAttribute("width"))).toBe(RIGHT_W);
+    // ... while its PNG, with no legend rows to put in a column, draws at the full inner width.
+    expect(Number(buildExportSvg(line, lRows).querySelector("svg.tblchart")!.getAttribute("width"))).toBe(INNER_W);
   });
 
   it("a repeated series_order entry counts once: one legend row and one hue per group (Ruling 43)", () => {
@@ -269,10 +271,17 @@ describe("treemap legend, live", () => {
     const svg = svgOf(host);
     const g = q(svg, 'g[data-series="Discretionary"]')[0]!;
     // jsdom has no layout: answer the hit test the click handler makes with the tile under the pointer.
+    const had = Object.hasOwn(document, "elementsFromPoint");
+    const prev = (document as { elementsFromPoint?: unknown }).elementsFromPoint;
     (document as { elementsFromPoint?: unknown }).elementsFromPoint = () => [g.querySelector("rect")!, g, svg];
-    svg.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 50, clientY: 50 }));
-    expect(row(host, "Discretionary").getAttribute("aria-pressed")).toBe("true");
-    expect(dimmed(host).sort()).toEqual(["Mandatory", "Net interest", "Other spending"]);
+    try {
+      svg.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 50, clientY: 50 }));
+      expect(row(host, "Discretionary").getAttribute("aria-pressed")).toBe("true");
+      expect(dimmed(host).sort()).toEqual(["Mandatory", "Net interest", "Other spending"]);
+    } finally {
+      if (had) (document as { elementsFromPoint?: unknown }).elementsFromPoint = prev;
+      else delete (document as { elementsFromPoint?: unknown }).elementsFromPoint;
+    }
   });
 });
 

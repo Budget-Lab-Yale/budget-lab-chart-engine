@@ -3,7 +3,7 @@
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
-// is a union so each new type is additive; it now carries ten — see below, and CONFIG-SPEC.md.
+// is a union so each new type is additive; it now carries eleven — see below, and CONFIG-SPEC.md.
 
 export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell" | "timeline" | "treemap";
 
@@ -837,7 +837,10 @@ export interface ChartSpec {
    * is the authority): `legend: false` resolves "top" before the field is read; a card narrower than
    * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top", at mount and on resize; a `small_multiples`
    * figure has only a top legend slot; a vertical timeline's PNG export puts the legend on top; and a
-   * treemap with no legend rows takes no column, live as in the PNG.
+   * treemap with no legend rows takes no column, live as in the PNG. Otherwise the PNG follows this
+   * field for a legend with rows to show; a legend with NO rows gets no column in the PNG (full-width
+   * plot), while live every chart type but a treemap still draws the plot at the narrower width — a
+   * known, unfixed divergence.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */
   legendPosition?: "top" | "right";

@@ -152,8 +152,8 @@ describe("series_labels on a treemap", () => {
 });
 
 describe("tile label sizes", () => {
-  // Many tiles of very different sizes and name lengths, so the old per-tile ladder would have
-  // drawn several sizes.
+  // Many tiles of very different sizes and name lengths, so a size chosen per tile would differ
+  // between them.
   const MANY = flatRows([
     ["Housing", 28452], ["Transportation", 13174], ["Food", 10990], ["Personal insurance and pensions", 9556],
     ["Healthcare", 6159], ["Entertainment", 3635], ["Cash contributions", 2531], ["Apparel and services", 2041],

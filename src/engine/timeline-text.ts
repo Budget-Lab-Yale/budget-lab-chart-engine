@@ -15,7 +15,7 @@
 //     (Cyrillic, Greek) can still measure short, so a line of them may run past its column.
 // So a line wrapped to a column renders inside it, to within that fraction of a pixel, only for the
 // table's characters and the two wide classes (Rulings 48, 49).
-// Shared by the timeline and the treemap (treemap-labels.ts fits tile, strip and key text with it),
+// Shared by the timeline and the treemap (treemap-labels.ts fits tile label text with it),
 // so a change to the table or its fallbacks moves both; every other chart keeps estimateLabelWidth,
 // byte-identical.
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "./timeline-metrics";
