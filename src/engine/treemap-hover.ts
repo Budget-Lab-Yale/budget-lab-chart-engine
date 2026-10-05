@@ -91,7 +91,7 @@ export function attachTreemapHover(
     const show = (evt: PointerEvent): void => {
       clear();
       targets.forEach((g, j) => { if (j !== i) g.setAttribute("opacity", DIM_OPACITY); });
-      // A separate element appended last, so the stroke is not covered by later tiles or strips;
+      // A separate element appended last, so the stroke is not covered by later tiles;
       // inset 1px so the whole 2px stroke shows on a tile at the svg edge too.
       const o = doc.createElementNS(SVG_NS, "rect");
       const at = (a: string): number => Number(rect.getAttribute(a) ?? 0);

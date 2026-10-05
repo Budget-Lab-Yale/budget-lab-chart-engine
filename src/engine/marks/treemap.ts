@@ -178,9 +178,9 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
   return { width, areaH, tiles, groupNames, colors, keyRows };
 }
 
-/** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone (there is no key),
- *  so it depends on the width only. Takes the spec and rows so callers need not know that. */
-export function treemapHeight(_spec: ChartSpec, _rows: TidyRow[], width: number): number {
+/** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone, which depends on
+ *  the width only. */
+export function treemapHeight(width: number): number {
   return treemapAreaHeight(width);
 }
 

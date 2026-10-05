@@ -338,7 +338,7 @@ describe("afterRender on a horizontal timeline or a treemap at 920px gets the sa
     const seen = sizes(TMAP, rows, 920);
     expect(seen.map((s) => s.phase)).toEqual(["live", "export"]);
     expect(seen[0]!.w).toBe("920");
-    expect(seen[0]!.h).toBe(String(treemapHeight(TMAP, rows, 920)));
+    expect(seen[0]!.h).toBe(String(treemapHeight(920)));
     expect(seen[1]).toEqual({ ...seen[0], phase: "export" });
   });
 });

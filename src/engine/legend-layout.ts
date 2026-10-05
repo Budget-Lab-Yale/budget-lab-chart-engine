@@ -88,8 +88,9 @@ export function resolveLegendPosition(
 /**
  * Order legend items for a right-hand column so the rows read top→bottom as the stack does.
  *
- *   - When the engine supplies `legendVisualOrder` (stacked charts), series rows follow that order
- *     ([positives reversed] ++ [negatives in declaration order]).
+ *   - When the engine supplies `legendVisualOrder`, series rows follow that order: a stacked chart's
+ *     is [positives reversed] ++ [negatives in declaration order]; a treemap's is its groups in hue
+ *     order, the same order as its top legend.
  *   - Otherwise fall back to REVERSED declaration order (top-of-stack first).
  *   - Extra rows (the interactive Total pseudo-series, the neutral shape legend) are appended at
  *     the END in their original relative order.

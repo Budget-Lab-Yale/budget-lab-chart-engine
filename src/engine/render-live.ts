@@ -230,7 +230,7 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   // computes it again at the real width, so this is only the pre-draw estimate.
   if (spec.chartType === "timeline") return timelineHeight(spec, rows, 720);
   // Treemap: the same pre-draw estimate; its height follows its width (spec §6).
-  if (spec.chartType === "treemap") return treemapHeight(spec, rows, 720);
+  if (spec.chartType === "treemap") return treemapHeight(720);
   // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
   // same as a single-series horizontal bar, section spacers included).

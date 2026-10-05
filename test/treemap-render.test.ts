@@ -385,7 +385,7 @@ describe("treemap render", () => {
   it.each([375, 720, 920])("treemapHeight equals the svg height at %ipx", (w) => {
     for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
       const { svg } = render(spec, rows, w);
-      expect(treemapHeight(spec, rows, w)).toBe(num(svg, "height"));
+      expect(treemapHeight(w)).toBe(num(svg, "height"));
     }
   });
 });

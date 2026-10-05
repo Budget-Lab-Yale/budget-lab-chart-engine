@@ -15,7 +15,7 @@ const rowsOf = (pairs: Array<[string, number]>): TidyRow[] =>
   pairs.map(([category, amount]) => ({ category, amount: String(amount) }) as TidyRow);
 const BIG = rowsOf([["Alpha", 500], ["Beta", 300], ["Gamma", 150], ["Delta", 50]]);
 // Many tiny tiles, unlabelled at the export width.
-const TINY =rowsOf([["Big", 1_000_000], ...Array.from({ length: 12 }, (_, i): [string, number] => [`Tiny category ${i}`, 1])]);
+const TINY = rowsOf([["Big", 1_000_000], ...Array.from({ length: 12 }, (_, i): [string, number] => [`Tiny category ${i}`, 1])]);
 const inner = (svg: SVGSVGElement) => svg.querySelector<SVGSVGElement>(`svg.${TREEMAP_CLASS}`)!;
 const frameH = (svg: SVGSVGElement) => Number(svg.getAttribute("height"));
 
@@ -54,7 +54,7 @@ describe("treemap export", () => {
   it("sizes the frame to the treemap area alone, whatever is unlabelled, at a whole-pixel height", () => {
     const small = buildExportSvg(SPEC, BIG);
     const tiny = buildExportSvg(SPEC, TINY);
-    for (const rows of [BIG, TINY]) expect(treemapHeight(SPEC, rows, INNER_W)).toBe(treemapAreaHeight(INNER_W));
+    expect(treemapHeight(INNER_W)).toBe(treemapAreaHeight(INNER_W));
     expect(frameH(tiny)).toBe(frameH(small));
     // The frame holds the whole chart: nothing is cropped at the bottom.
     for (const svg of [small, tiny]) {

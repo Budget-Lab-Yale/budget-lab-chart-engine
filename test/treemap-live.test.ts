@@ -109,13 +109,13 @@ afterEach(() => {
 
 describe("treemap live mount: sizing", () => {
   it("pre-draw height estimate is the treemap's own height at 720, not the fixed 400", () => {
-    expect(computeChartHeight(FLAT_SPEC, BLS)).toBe(treemapHeight(FLAT_SPEC, BLS, 720));
+    expect(computeChartHeight(FLAT_SPEC, BLS)).toBe(treemapHeight(720));
   });
 
   it("renders at the card width with the treemap's height (the area alone)", () => {
     const svg = svgOf(mountAt(900));
     expect(num(svg, "width")).toBe(900);
-    expect(num(svg, "height")).toBe(treemapHeight(FLAT_SPEC, BLS, 900));
+    expect(num(svg, "height")).toBe(treemapHeight(900));
     expect(num(svg, "height")).toBe(treemapAreaHeight(900));
     // The area is width / 2 at this width (aspect 2.0, under the 460 cap); the tiles fill it.
     const bottom = Math.max(...tileRects(svg).map((r) => num(r, "y") + num(r, "height")));
@@ -126,7 +126,7 @@ describe("treemap live mount: sizing", () => {
   it("floors the live width at 280px: a 200px card renders a 280px chart", () => {
     const svg = svgOf(mountAt(200));
     expect(num(svg, "width")).toBe(280);
-    expect(num(svg, "height")).toBe(treemapHeight(FLAT_SPEC, BLS, 280));
+    expect(num(svg, "height")).toBe(treemapHeight(280));
   });
 
   it("draws no sticky y-axis overlay, and no legend for flat data (grouped legends: treemap-legend.test.ts)", () => {
@@ -149,7 +149,7 @@ describe("treemap live mount: sizing", () => {
     await resizeTo(host, 340);
     const narrow = svgOf(host);
     expect(num(narrow, "width")).toBe(340);
-    expect(num(narrow, "height")).toBe(treemapHeight(FLAT_SPEC, BLS, 340));
+    expect(num(narrow, "height")).toBe(treemapHeight(340));
     // Portrait-ish: the area is taller than it is wide at 340.
     const bottom = Math.max(...tileRects(narrow).map((r) => num(r, "y") + num(r, "height")));
     expect(bottom).toBeGreaterThan(340);

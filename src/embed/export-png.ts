@@ -467,7 +467,7 @@ export function buildExportSvg(
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
         : isTreemap
           // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
-          ? Math.ceil(treemapHeight(spec, rows, chartW))
+          ? Math.ceil(treemapHeight(chartW))
           : Math.max(160, H - chartTop - bottomH);
     // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
