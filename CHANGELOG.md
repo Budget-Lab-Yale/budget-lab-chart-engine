@@ -155,6 +155,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Small multiples of a horizontal dumbbell in `per-pane` mode stacked one pane per row on screen
   but drew each at the width of a side-by-side column (352px at a 720px mount); each pane now takes
   the full row, as in `shared` mode and the PNG.
+- A standalone horizontal dumbbell's PNG kept the fixed 750px frame while the live chart grows with
+  its rows, so the download stretched a short chart's rows apart and squeezed a long one's together.
+  The export now sizes it with the live chart's height rule, as it already did for horizontal bars,
+  so each row sits at the page's spacing and the frame grows or shrinks to fit.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -239,6 +243,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   per-pane horizontal dumbbell panes take the full row width on screen. **No published figure is
   affected**: the archive has no dumbbell, and the one on the unpublished `pr67-spec-fixes` branch
   sets `orientation: horizontal` and has no facets. No golden moves.
+- **A standalone horizontal dumbbell's PNG is sized to its rows**, as the live chart is. The live
+  chart does not change. **No published figure is affected**: the archive has no dumbbell. The one
+  on the unpublished `pr67-spec-fixes` branch, `effective-tax-rates-top-groups` (7 rows in 2
+  sections), now downloads 599px tall instead of 750px at 1x, with its rows 38px apart as on the
+  page rather than 55px. No golden moves.
 
 ## [1.15.0] - 2026-10-01
 
