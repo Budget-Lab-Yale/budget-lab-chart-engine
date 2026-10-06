@@ -897,11 +897,7 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   today: 21.6 at `red-50`, 32.5 at `sky`). The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
   own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
-  The texture reaches the marks, the legend key, the export, and the hover tooltip on the chart types
-  that draw one — which among the filled types is standalone `area`, standalone `histogram` and a
-  stacked chart with a net dot; `bar` and `waterfall` hover with value pills and have no tooltip key,
-  and neither does a coordinated small-multiples pane (corrected in 1.12.0; the original wording
-  over-claimed). A key draws ONE centred
+  The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
   instance of the texture as a glyph rather than a patch of the tiling — at 14px a tiling shows an
   edge with no direction in it — so `"/"` reads as three bands, `"+"` as a plus, `"x"` as an x. A
   rasterising test measures all six from their pixels. An unrecognised
@@ -1774,8 +1770,7 @@ backward-compatible — existing chart specs render unchanged.
   `shape_order`, `shape_labels`, with separate `color_legend_title` / `shape_legend_title`),
   category dodge, per-point hover tooltips, and a coordinated cursor.
 - **Area** (`chartType: "area"`). Stacked areas, with a single series filling to the zero
-  baseline. The hover tooltip adds a cumulative **Total** row (standalone only — a coordinated
-  small-multiples pane has no card; clarified in 1.12.0). **Click-to-restack**: selecting
+  baseline. The hover tooltip adds a cumulative **Total** row. **Click-to-restack**: selecting
   series animates them to the bottom of the stack (in click order) so they can be read against
   zero; deselecting restores the default order.
 

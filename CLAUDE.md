@@ -9,6 +9,8 @@ The chart engine: the tool that renders Budget Lab figures. Content (chart specs
 - **Releasing**: bump `version` in `package.json`, commit, tag `vX.Y.Z`, push the tag. A repin
   re-renders every figure in the archive, so a change to a default or a renamed field lands across
   all published figures at once, not just in new ones. Note it in `CHANGELOG.md`.
+  A released entry records what shipped and is never edited afterwards; a correction goes in the
+  release that makes it (or `[Unreleased]`), as a line pointing back at the entry it fixes.
 - **No design docs or plans in this repo.** There is no `docs/` folder, and adding one back for a
   spec or an implementation plan is wrong — nine such files accumulated here describing features
   that had already shipped (histogram, dumbbell, value affixes, shading, reversed axis, annotation
