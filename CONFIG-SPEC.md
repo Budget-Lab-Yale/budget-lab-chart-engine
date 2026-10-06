@@ -772,6 +772,8 @@ reuses `category_order` (or `x_order`); faceting reuses `columns.facet` + `small
 
 The value axis **fits the data** and does **not** force a zero baseline (a 2%–35% rate view keeps
 its useful range); zero is included only when the dots cross it, and a zero rule is drawn there.
+`yAxisPolicy.includeZero: true` extends the fitted axis to 0 instead; a pinned `yAxisPolicy.min`
+or `max` still sets its own end.
 Faceted dumbbells share a common value scale by default (`small_multiples.mode: per-pane` gives
 each pane its own).
 

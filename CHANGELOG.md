@@ -131,6 +131,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the value axis: a dumbbell fitted to its data (8–31, say), or a bar axis truncated with
   `yAxisPolicy.min`. The rule was drawn at x = 0 outside the plot, across the category labels. A
   vertical chart already drew it only when 0 is in range. Live and in the PNG.
+- A dumbbell (connected dot plot) ignored `yAxisPolicy.includeZero: true`; it now extends the
+  fitted value axis to 0, standalone and in small multiples. A pinned `min` or `max` still sets its
+  own end. Omitted, the axis stays fitted to the dots as before.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -197,6 +200,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   0. Nor are the three horizontal figures on the unpublished `pr67-spec-fixes` branch:
   `effective-tax-rates-top-groups` (a dumbbell with `yAxisPolicy.min: 0`) and the two
   `revenue-by-tax` stacks include 0. All five draw one zero rule before and after. No golden moves.
+- **A dumbbell with `yAxisPolicy.includeZero: true` now starts (or ends) its value axis at 0.**
+  **No published figure is affected**: the archive has no dumbbell, and the one on the unpublished
+  `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, does not set `includeZero` (it pins
+  `min: 0`). No golden moves.
 
 ## [1.15.0] - 2026-10-01
 

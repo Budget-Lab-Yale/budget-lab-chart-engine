@@ -788,13 +788,16 @@ function assemblePaneResult(
     });
   } else if (chartType === "dumbbell") {
     // Dumbbell: dots are POSITIONS, so the value axis fits the padded data extent and does NOT
-    // force zero (see computeDumbbellValueExtent). Orientation is handled by the mark (horizontal
-    // puts the value on x via yScaleOpts).
-    includeZero = false;
+    // force zero (see computeDumbbellValueExtent) unless the author sets yAxisPolicy.includeZero.
+    // That has to widen the auto extent itself: this branch always resolves a hard domain, and
+    // computeYAxis never applies its own includeZero to one. A pinned min/max still wins on its side.
+    // Orientation is handled by the mark (horizontal puts the value on x via yScaleOpts).
+    includeZero = policy.includeZero === true;
+    const fitted = computeDumbbellValueExtent(dataInScope.map((d) => d._y));
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      auto: computeDumbbellValueExtent(dataInScope.map((d) => d._y)),
+      auto: includeZero ? { min: Math.min(0, fitted.min), max: Math.max(0, fitted.max) } : fitted,
       fold: valueAxisMarkers(),
     });
   } else if (chartType === "histogram") {
