@@ -182,21 +182,6 @@ describe("treemap legend, live", () => {
     }
   });
 
-  it("the no-rows fallback is treemap-only: a non-treemap chart's right legend is unchanged", () => {
-    // A single-series line (no legend rows) with legendPosition: right still reserves the column's
-    // width live, exactly as before this fix: pre-existing behaviour on non-treemap chart types,
-    // pinned here so the treemap fallback provably does not reach them.
-    const line = { chartType: "line", title: "L", xAxisType: "categorical", data: "inline", legendPosition: "right" } as ChartSpec;
-    const lRows = [{ time: "X", series: "A", value: "3" }, { time: "Y", series: "A", value: "2" }] as TidyRow[];
-    const b = document.createElement("div");
-    document.body.append(b);
-    mountChart(b, { spec: line, rows: lRows, width: INNER_W });
-    expect(b.querySelector(".tbl-legend")).toBeNull();
-    expect(Number(b.querySelector("svg.tblchart")!.getAttribute("width"))).toBe(RIGHT_W);
-    // ... while its PNG, with no legend rows to put in a column, draws at the full inner width.
-    expect(Number(buildExportSvg(line, lRows).querySelector("svg.tblchart")!.getAttribute("width"))).toBe(INNER_W);
-  });
-
   it("a repeated series_order entry counts once: one legend row and one hue per group (Ruling 43)", () => {
     const two = [{ group: "A", category: "a1", amount: "300" }, { group: "A", category: "a2", amount: "100" },
       { group: "B", category: "b1", amount: "200" }] as TidyRow[];

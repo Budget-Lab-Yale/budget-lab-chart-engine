@@ -54,6 +54,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   again, the redraw threw `NotFoundError` and stopped partway. The column is now taken down when the
   legend moves to the top and rebuilt when it moves back, as timelines already did. Live only: the
   first draw and the PNG export are unchanged, and no published figure resolves to a right legend.
+- `legendPosition: right` (explicit or defaulted) with no legend rows to show now takes the full
+  width on screen, as the PNG export already did, on every chart type; no published figure changes.
 
 ## [1.15.0] - 2026-10-01
 

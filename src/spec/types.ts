@@ -850,10 +850,9 @@ export interface ChartSpec {
    * is the authority): `legend: false` resolves "top" before the field is read; a card narrower than
    * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top", at mount and on resize; a `small_multiples`
    * figure has only a top legend slot; a vertical timeline's PNG export puts the legend on top; and a
-   * treemap with no legend rows takes no column, live as in the PNG. Otherwise the PNG follows this
-   * field for a legend with rows to show; a legend with NO rows gets no column in the PNG (full-width
-   * plot), while live every chart type but a treemap still draws the plot at the narrower width — a
-   * known, unfixed divergence.
+   * legend with no rows to show takes no column on any chart type (full-width plot), live as in the
+   * PNG — live, a timeline's rows are judged in the orientation it would draw beside the column.
+   * Otherwise the PNG follows this field.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */
   legendPosition?: "top" | "right";

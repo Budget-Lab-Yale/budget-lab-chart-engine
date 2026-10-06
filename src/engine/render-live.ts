@@ -14,7 +14,6 @@ import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
   legendInRightColumn,
-  legendSeriesCount,
   orderForRightLegend,
   resolveLegendPosition,
 } from "./legend-layout.js";
@@ -29,7 +28,7 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
-import { resolveTimelineOrientation, timelineHeight } from "./marks/timeline.js";
+import { resolveTimelineOrientation, timelineHeight, timelineLegendRowCount } from "./marks/timeline.js";
 import { TL_GEOM } from "./timeline-layout.js";
 import { treemapHeight } from "./marks/treemap.js";
 import { TM_GEOM } from "./treemap-layout.js";
@@ -686,7 +685,8 @@ function buildDownloadActions(
  *       div.figure-canvas          ← the re-rendered SVG goes here
  *     div.figure-meta              note + source + Data/Image download buttons
  *
- * Card structure (right-legend variant — stacked ≥5 series or explicit legendPosition:"right"):
+ * Card structure (right-legend variant — stacked ≥5 series or explicit legendPosition:"right",
+ * with legend rows to show):
  *   div.figure-card
  *     div.figure-header
  *     div.figure-body--legend-right  (flex row: canvas-side left, legend-column right)
@@ -917,11 +917,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let currentSeriesNames: string[] = [];
 
 
-  const draw = (
-    outerWidth: number,
-    legendPos: "top" | "right",
-    renderPhase?: "mount" | "resize" | "reselect" | "restack",
-  ): void => {
+  /** The width the chart is drawn at on a card `outerWidth` wide with the legend at `legendPos`. */
+  const chartTarget = (outerWidth: number, legendPos: "top" | "right"): number => {
     // For right-legend, the chart width is computed from the OUTER card width (stable),
     // not from canvasScroll (which would shrink as the legend takes space → feedback loop).
     const chartAvail = legendPos === "right"
@@ -932,7 +929,15 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const minW = spec.chartType === "timeline" ? TL_GEOM.minLiveWidth
       : spec.chartType === "treemap" ? TM_GEOM.minLiveWidth
       : MIN_CHART_WIDTH;
-    const target = Math.max(minW, Math.round(chartAvail));
+    return Math.max(minW, Math.round(chartAvail));
+  };
+
+  const draw = (
+    outerWidth: number,
+    legendPos: "top" | "right",
+    renderPhase?: "mount" | "resize" | "reselect" | "restack",
+  ): void => {
+    const target = chartTarget(outerWidth, legendPos);
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
     hideTreemapHover?.();
@@ -1125,8 +1130,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
-        // A timeline can reach here already "right" with no wrapper built: an earlier draw
-        // (horizontal with lanes) had no legend items, so it recorded the position without one.
+        // `!rightLegendSlot` is defensive: a right draw with no legend rows to show takes the top
+        // position instead (specPos below), so none records "right" without building the column.
         if (currentLegendPos !== "right" || !rightLegendSlot) {
           // Move canvasScroll into the body wrapper.
           const bodyWrapper = doc.createElement("div");
@@ -1560,28 +1565,38 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // else a real mount would fire a mutating, possibly side-effecting hook twice: once uselessly
   // on this throwaway probe, once more on the real draw() below. Every other hook is a pure
   // formatter, unaffected by running against output nobody sees.
-  let prelimSeriesCount = 1;
   let prelimLegendItems: NonNullable<ReturnType<typeof renderChart>["legendItems"]> = [];
+  let prelimShapeRows = 0;
   try {
     const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
     const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: prelimHooks });
-    prelimSeriesCount = legendSeriesCount(prelim.legendItems ?? []);
     prelimLegendItems = prelim.legendItems ?? [];
+    prelimShapeRows = prelim.shapeLegendItems?.length ?? 0;
   } catch {
     // Ignore — draw() will surface the error.
   }
-  // The spec's legend position. A TREEMAP takes the export's rule (legendInRightColumn): with no
-  // legend rows — flat data, one group, `series_legend: false` — there is no column to reserve, so
-  // it draws at the card's full width, as its PNG does. Treemap-only by design: every other chart
-  // type keeps its existing resolution (a right column's width is reserved even with no rows).
-  const specPos = (): "top" | "right" =>
-    spec.chartType === "treemap"
-      ? (legendInRightColumn(spec, prelimLegendItems, 0, rows) ? "right" : "top")
-      : resolveLegendPosition(spec, prelimSeriesCount, rows);
+  // The spec's legend position on a card `cardW` wide, by the export's rule (legendInRightColumn):
+  // "right" only for a legend with rows to show. A legend with none — a single series,
+  // `series_legend: false` with no other rows, a treemap's flat data — reserves no column, so the
+  // plot takes the card's full width, as in the PNG. Legend rows do not depend on the chart's width,
+  // so the probe's rows hold at every width — except a timeline's: a resize can switch its
+  // orientation, and with it whether drawn lanes replace the rows, so it is asked at the width the
+  // column would leave.
+  const specPos = (cardW: number): "top" | "right" => {
+    if (spec.chartType !== "timeline") {
+      return legendInRightColumn(spec, prelimLegendItems, prelimShapeRows, rows) ? "right" : "top";
+    }
+    // A timeline's position never depends on its row count (only a stacked chart's does), so this
+    // check is cheap and skips the orientation layout for every timeline that is not "right".
+    if (resolveLegendPosition(spec, 0, rows) !== "right") return "top";
+    const orientation = resolveTimelineOrientation(spec, rows, chartTarget(cardW, "right"));
+    return timelineLegendRowCount(spec, rows, orientation) > 0 ? "right" : "top";
+  };
   // Fall back to top if the card is too narrow for the right-legend column.
   const resolvedPos = (): "top" | "right" => {
-    const pos = specPos();
-    if (pos === "right" && (card.clientWidth || initialWidth || 720) < LEGEND_RIGHT_MIN_CARD_WIDTH) {
+    const cardW = card.clientWidth || initialWidth || 720;
+    const pos = specPos(cardW);
+    if (pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH) {
       return "top";
     }
     return pos;
@@ -1621,7 +1636,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
         const cardW = card.clientWidth;
-        const pos = specPos();
+        const pos = specPos(cardW);
         const effectivePos: "top" | "right" =
           pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
         draw(cardW, effectivePos, "resize");
