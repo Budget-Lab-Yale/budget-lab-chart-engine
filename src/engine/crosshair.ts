@@ -1973,7 +1973,8 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
  * shades its span, and lays a per-series height pill above each bar (staggered on collision). When
  * `active`, the bin range is drawn as an axis pill (same `formatBinLabel` as the hover tooltip),
  * hiding the tick labels it covers (`hideAxisLabelsUnder`). `driver(null)` clears. No pointer
- * handlers (externally driven by the figure bus). Built on the SAME bin geometry as the primary hover (buildHistogramGeom). */
+ * handlers (externally driven by the figure bus). Built on the SAME bin geometry as the primary
+ * hover (buildHistogramGeom). */
 export function attachSecondaryHistogramCursor(
   svgEl: SVGSVGElement,
   opts: HistogramHoverOptions,

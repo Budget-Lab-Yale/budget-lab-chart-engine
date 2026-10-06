@@ -347,12 +347,13 @@ describe("histogram bin-range echo and its axis ticks", () => {
     }
     return rows;
   };
-  const histSpec = (faceted: boolean): ChartSpec =>
+  /** `smOverride` replaces the shared-mode `small_multiples` block (faceted only). */
+  const histSpec = (faceted: boolean, smOverride?: Record<string, unknown>): ChartSpec =>
     spec({
       chartType: "histogram", xAxisType: "numeric", data: "d.csv",
       histogram: { bins: 20, domain: [0, 20] },
       columns: { x: "amount", ...(faceted ? { facet: "pane" } : {}) },
-      ...(faceted ? sm : {}),
+      ...(faceted ? { small_multiples: { ...sm.small_multiples, ...smOverride } } : {}),
     });
   /** Every still-VISIBLE x-axis text the pill's box intersects — the collision itself. */
   const visibleUnderPill = (svg: SVGSVGElement, box: NonNullable<ReturnType<typeof pillBox>>) =>
@@ -416,6 +417,45 @@ describe("histogram bin-range echo and its axis ticks", () => {
     expect(xTicks(svg).length).toBeGreaterThan(0);
     expect(xTicks(svg).filter((t) => t.hidden)).toEqual([]);
   });
+
+  it("2-pane shared histogram: moving to the other pane restores the first pane's ticks", () => {
+    const m = mountHover(histSpec(true), histRows(["P1", "P2"]), true);
+    const [a, b] = [m.svgs[0]!, m.svgs[1]!];
+    hoverFirstMark(a, HIST_MARK);
+    expect(xTicks(a).some((t) => t.hidden)).toBe(true);
+    // No pointerleave in between: the bus calls pane A's driver with active=false, which must
+    // restore A's axis on its own.
+    hoverFirstMark(b, HIST_MARK);
+    expect(a.querySelector(".tbl-coord-axis-label")).toBeNull();
+    expect(xTicks(a).filter((t) => t.hidden)).toEqual([]);
+    expect(xTicks(b).some((t) => t.hidden)).toBe(true);
+    expect(visibleUnderPill(b, pillBox(b)!)).toEqual([]);
+  });
+
+  // The echo (and so the hidden ticks) needs the coordinated cursor: a faceted histogram with
+  // `small_multiples.mode` shared, `coordinated_cursor` not false, and more than one pane
+  // (render-live: `coordinated` in mountFigure, `histCoord` in wireFigureSvg). Every other faceted
+  // histogram hovers with a card, as a standalone one does. CONFIG-SPEC `histogram.bin_label`.
+  const cardCases: Array<[string, Record<string, unknown> | undefined, string[]]> = [
+    ["2-pane per-pane histogram", { mode: "per-pane" }, ["P1", "P2"]],
+    ["2-pane shared histogram with coordinated_cursor: false", { coordinated_cursor: false }, ["P1", "P2"]],
+    ["shared histogram whose facet resolves to one pane", undefined, ["P1"]],
+  ];
+  for (const [name, smOverride, panes] of cardCases) {
+    it(`${name}: hover is a card, no echo is drawn and no tick is hidden`, () => {
+      const m = mountHover(histSpec(true, smOverride), histRows(panes), true);
+      expect(m.svgs.length).toBe(panes.length);
+      const svg = m.svgs[0]!;
+      hoverFirstMark(svg, HIST_MARK);
+      expect(cardShown()).toBe(true);
+      expect(cardText()).toContain("0 – 1");
+      for (const s of m.svgs) {
+        expect(s.querySelector(".tbl-coord-axis-label")).toBeNull();
+        expect(xTicks(s).length).toBeGreaterThan(0);
+        expect(xTicks(s).filter((t) => t.hidden)).toEqual([]);
+      }
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

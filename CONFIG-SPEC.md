@@ -695,9 +695,16 @@ later.
 | `histogram.bin_label` | object | Friendly formatting of the hovered bin's range label. See below. |
 
 **Bin-range hover labels (`histogram.bin_label`).** The hovered bin is named by a friendly label
-rather than a mathematical interval. It reaches whichever surface the chart hovers with: the
-tooltip card's header on a standalone histogram, and the coordinated cursor's echoed bin label in a
-small-multiples pane, which is built from the same formatter with the same options so the two agree. That echo sits on the pane's x-axis tick row; the tick labels its pill covers are hidden while it shows and restored when the cursor leaves (`test/hover-claims-defaults.test.ts`). Numeric x renders an en-dash range (`47.9 – 50.7`).
+rather than a mathematical interval. It reaches whichever surface the chart hovers with. A faceted
+histogram hovers with the coordinated cursor only when all three hold: `small_multiples.mode` is
+`shared` (the default), `small_multiples.coordinated_cursor` is not `false`, and the facet resolves
+to two or more panes. There the label is drawn as an echo on the hovered pane's x-axis tick row,
+built from the same formatter with the same options as the card so the two agree; the tick labels
+the echo's pill covers are hidden while it shows and restored when the cursor leaves. Every other
+histogram hovers with the tooltip card, headed by the label and with no echo: a standalone one, a
+`per-pane` figure, a shared figure with `coordinated_cursor: false`, and a figure whose facet
+resolves to a single pane. `test/hover-claims-defaults.test.ts` gates each case. Numeric x renders
+an en-dash range (`47.9 – 50.7`).
 Temporal x whose `binWidth` is a calendar interval name collapses each bin to its period name
 (`month` → `July 2023`, `quarter` → `Q3 2023`, `year` → `2023`, `week` → `Week of July 2, 2023`,
 `day` → `July 5, 2023`); any other temporal binning (a bin count, or a day-count `binWidth`) renders
@@ -1284,7 +1291,7 @@ so a consumer stylesheet can target them without depending on presentation attri
 | `tbl-coord-region` | the shaded band/column `<rect>` | every coordinated-cursor chart type except line and area (any x-axis type), which draw `tbl-coord-guide` instead |
 | `tbl-coord-pill` | a value-pill's background `<rect>` | every coordinated-cursor chart type except dumbbell (its coordinated cursor is a pure band echo — no pills) — and on a **waterfall**, its *delta* steps only: a `total` or `skip` step gets the shaded region and the axis-label echo but no pill, because its number is the always-on running-total label rather than a delta. Also draws the legend-hover/pin value pills on bar, stacked-bar, waterfall and dot-plot. `test/hover-surface-matrix.test.ts` records both waterfall steps as separate rows |
 | `tbl-coord-pill-text` | a value-pill's `<text>` | same as `tbl-coord-pill` |
-| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | every coordinated-cursor chart type except dumbbell and horizontal bar/stacked/waterfall (which bold the existing axis label instead) — the actively-hovered pane only. On **line/area** it is additionally conditional on there being something to draw: absent `tooltip_x_format` the echo mirrors the pane's x-axis tick rows, so a pane spanning less than a month (a temporal axis ticks on whole months) draws no ticks and no echoed label either. Setting `tooltip_x_format` draws it regardless, anchored below the plot where there are no tick rows — and where there are, the tick labels the pill covers carry an inline `visibility: hidden` while it shows, removed when the cursor leaves the pane. A **histogram** pane's bin-range echo hides the tick labels it covers the same way, with no field to set |
+| `tbl-coord-axis-label` | the hovered category's echoed axis-label `<rect>` background | every coordinated-cursor chart type except dumbbell and horizontal bar/stacked/waterfall (which bold the existing axis label instead) — the actively-hovered pane only. On **line/area** it is additionally conditional on there being something to draw: absent `tooltip_x_format` the echo mirrors the pane's x-axis tick rows, so a pane spanning less than a month (a temporal axis ticks on whole months) draws no ticks and no echoed label either. Setting `tooltip_x_format` draws it regardless, anchored below the plot where there are no tick rows — and where there are, the tick labels the pill covers carry an inline `visibility: hidden` while it shows, removed when the cursor leaves the pane. A **histogram** pane's bin-range echo hides the tick labels it covers the same way, with no field to set; a histogram draws the echo only where the figure coordinates (see `histogram.bin_label`) |
 | `tbl-coord-axis-label-text` | that echoed axis label's `<text>` | same as `tbl-coord-axis-label` |
 | `tbl-coord-guide` | the vertical guide `<line>` | line charts (any x-axis type) and area charts |
 | `tbl-coord-dot` | the hovered point's highlight ring `<circle>` | line charts (any x-axis type), area charts, and dot-plot |
@@ -1512,7 +1519,7 @@ Notes:
   chart types that draw one**. That last clause is narrow: textures are restricted to the filled
   types (`bar`, `stacked`, `area`, `histogram`, `waterfall`), and of those only standalone `area`,
   standalone `histogram` and a stacked chart with a net dot hover with a card at default settings.
-  `bar` and `waterfall` never do, and a faceted `area` or `histogram` pane does not either — its
+  `bar` and `waterfall` never do, and a multi-pane faceted `area` or `histogram` does not either — its
   coordinated cursor replaces the card. There the texture reaches the marks and the legend, and the
   hover shows in-place value pills with no key to texture. (At default settings a net-dot stack keeps
   its card in a pane too — there the coordinated cursor is a band echo only — so the pane's card keys

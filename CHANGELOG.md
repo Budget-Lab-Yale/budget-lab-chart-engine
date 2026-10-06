@@ -60,14 +60,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   first draw and the PNG export are unchanged, and no published figure resolves to a right legend.
 - `legendPosition: right` (explicit or defaulted) with no legend rows to show now takes the full
   width on screen, as the PNG export already did, on every chart type; no published figure changes.
-- A faceted histogram's bin-range hover label (`10 – 20`) now hides the axis tick labels it covers
-  instead of leaving a neighbouring tick's fragment past its edge. Hover only.
+- A shared-mode (coordinated) faceted histogram's bin-range hover label (`10 – 20`) now hides the
+  axis tick labels it covers instead of leaving a neighbouring tick's fragment past its edge. Hover
+  only.
 
 ### Upgrading
 
 - **Hover: the bin-range label now hides the tick it covers.** Drawn only on the hovered pane of a
-  shared-mode small-multiples histogram; a standalone or `per-pane` histogram hovers with a card and
-  draws no such label. **No published figure is affected**: the archive's only histogram, the
+  shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not `false`;
+  every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet resolving to
+  one pane) hovers with a card and draws no such label. **No published figure is affected**: the archive's only histogram, the
   deficit-management scorecard's `deviation-distribution`, is standalone. Rendered SVG and the PNG
   export are unchanged.
 
