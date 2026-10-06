@@ -514,8 +514,9 @@ describe("histogram bin-range echo and its axis ticks", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stacked AREA's cumulative `Total` row — standalone only. `showTotal` is passed at both
-// `attachCrosshair` sites, but the Total row is built below `if (emitOnly) return;`.
+// Stacked AREA's cumulative `Total` row — wherever the card is drawn. `showTotal` is passed at both
+// `attachCrosshair` sites (mountChart's and wireFigureSvg's), and the Total row is built below
+// `if (emitOnly) return;`, so a coordinated pane has none; a lone pane or an uncoordinated one does.
 // ---------------------------------------------------------------------------
 
 describe("stacked-area Total row", () => {
@@ -562,6 +563,53 @@ describe("stacked-area Total row", () => {
     expect(cardShown()).toBe(false);
     expect(svg.textContent ?? "").not.toContain("Total");
     expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(2);
+  });
+
+  // CONFIG-SPEC: "a single-pane area chart, or `small_multiples.coordinated_cursor: false`, keeps
+  // the card and its Total." Both are FACETED figures that hover with a card, so the Total row has
+  // to come from wireFigureSvg's attachCrosshair, not only from mountChart's.
+  it("faceted, facet resolves to ONE pane: the card carries the Total row", () => {
+    const m = mountHover(
+      spec({ chartType: "area", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm }),
+      temporalRows(MONTHLY).filter((r) => (r as unknown as { pane: string }).pane === "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Total");
+    // P1's middle month: A = 4, B = 4.
+    expect(cardText()).toContain("8.00");
+  });
+
+  it("2-pane with coordinated_cursor: false: each pane's card carries the Total row", () => {
+    const m = mountHover(
+      spec({
+        chartType: "area", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols,
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      temporalRows(MONTHLY),
+      true,
+    );
+    expect(m.svgs.length).toBe(2);
+    hoverFirstMark(m.svgs[1]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Total");
+    // P2's middle month: A = 6, B = 6.
+    expect(cardText()).toContain("12.00");
+  });
+
+  it("faceted, one pane, ONE series: no Total row, as standalone", () => {
+    const rows = soloTemporalRows(MONTHLY).map((r) => ({ ...r, pane: "P1" })) as unknown as TidyRow[];
+    const m = mountHover(
+      spec({ chartType: "area", xAxisType: "temporal", data: "d.csv", columns: { x: "time", value: "value", facet: "pane" }, ...sm }),
+      rows,
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("4.00");
+    expect(cardText()).not.toContain("Total");
   });
 });
 

@@ -104,6 +104,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   unchanged, and it still paints no segment labels. A small-multiples figure counts the distinct
   series in the panes it draws, not a pane's, and a series named twice in `series_order` counts
   once. With no legend rows left, its defaulted right legend takes no column.
+- A faceted area chart whose pane hovers with a card (a facet resolving to one pane, or
+  `small_multiples.coordinated_cursor: false`) now shows the card's cumulative Total row, as
+  CONFIG-SPEC promised and a standalone area chart already did. Hover only.
 
 ### Upgrading
 
@@ -118,6 +121,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
   `revenue-by-income-type` and `revenue-by-instrument`, have four series in every pane and set
   `netDisplay: none`. No golden covers a single-series stack.
+- **Hover: a faceted area chart's card gains its Total row** where the pane hovers with a card (one
+  pane, or `coordinated_cursor: false`). **No published figure is affected**: the archive has no
+  area chart. Rendered SVG and the PNG export are unchanged.
 - **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
   under Changed). Specs that pass `tbl-chart validate` are unaffected.
 

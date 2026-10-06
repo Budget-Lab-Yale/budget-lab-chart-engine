@@ -2453,6 +2453,9 @@ function wireFigureSvg(
     ...(ctx.icons ? { icons: ctx.icons } : {}),
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
+    // As mountChart's standalone call. A coordinated pane (`emitOnly`) never builds the card, so
+    // this reaches only a pane that hovers with one: a lone pane, or `coordinated_cursor: false`.
+    showTotal: ctx.spec.chartType === "area",
     ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
     showTooltip: chromeTooltip,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),

@@ -597,7 +597,7 @@ stack order follows `series_order`. The hover tooltip adds a cumulative **Total*
 card shows more than one series row — the sum of one row is that row, so a single-series area chart
 gets no Total row, and neither does a hovered x where only one series has a value. Selecting series
 in the legend animates them to the bottom of the stack so they can be read against
-zero. The Total row is **standalone only**: a multi-pane area figure's coordinated cursor replaces
+zero. The Total row is **card only**: a multi-pane area figure's coordinated cursor replaces
 each pane's card with value pills that report each series' own value, so the cumulative stack height
 is not reported anywhere. Plan for that if the total is the number your reader needs — a single-pane
 area chart, or `small_multiples.coordinated_cursor: false`, keeps the card and its Total.
