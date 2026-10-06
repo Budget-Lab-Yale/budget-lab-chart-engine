@@ -156,7 +156,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the stack's top (-5, say), though areas fill from 0. Its ceiling is now 0, as on bars and stacks.
 - An `area` chart's value-axis floor was its lowest single value, though negatives stack down from
   0, so two negative series at one x (-20 and -11) got a floor of -20 and the stack's bottom (-31)
-  was clipped. The floor is now the stacked negative extent. Live and in the PNG.
+  was clipped. The floor is now the stacked negative extent. Its ceiling had the mirror defect: it
+  was the net total per x, so mixed signs (+12, -2, -1 at one x) got a ceiling of 10 under a band
+  reaching 12; it is now the stacked positive extent. Both are keyed by the parsed x, as Plot
+  stacks, so a numeric x spelled `1` in one row and `1.0` in another is one stack, not two. Live and
+  in the PNG.
 - Small multiples of a horizontal dumbbell now share one category-label column, sized to the
   longest label in any pane up to the 240px gutter cap (longer labels wrap), and every pane shows
   its own labels. In the default `shared` mode every
@@ -264,9 +268,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **An all-negative `area` chart's value axis now reaches 0.** **No published figure is affected**:
   there is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree.
   No golden moves.
-- **An `area` chart with two or more negative values at one x gets a lower floor**, at their stacked
-  sum. **No published figure is affected**: there is no `area` chart in the archive, on the
-  `pr67-spec-fixes` branch or in its working tree. No golden moves.
+- **An `area` chart's value axis can reach further, to its stacked extents.** The floor moves only
+  when some x's negatives sum below the lowest single value; the ceiling moves only when some x's
+  positives sum above every x's net total (and above 0), which takes negatives at that x; and either
+  moves where one x is spelled two ways (`1` and `1.0`). **No published figure is affected**: there
+  is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree. No
+  golden moves.
 - **Faceted horizontal dumbbells share one category-label column** (live and PNG). **No published
   figure is affected**: the archive has no dumbbell, and the one on the unpublished
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not

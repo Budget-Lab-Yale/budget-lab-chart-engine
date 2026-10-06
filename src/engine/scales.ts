@@ -365,8 +365,9 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
  */
 /** Cumulative stack tops/bottoms per x — positives stack up from zero, negatives down — with zero
  *  always included because the stack is drawn from it. Shared by stacked bars and areas, which
- *  differ only in how an x is keyed. */
-function stackedExtent(
+ *  differ only in how an x is keyed. An area's axis (renderPane) and its clip gate (below) both
+ *  read it, keyed by `areaStackKey`, so the two cannot disagree about one stack. */
+export function stackedExtent(
   data: PreparedRow[],
   keyOf: (r: PreparedRow) => string,
 ): { min: number; max: number } | null {
@@ -384,6 +385,15 @@ function stackedExtent(
     min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
     max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
   };
+}
+
+/** The x an area stacks a row at: its PARSED coordinate (one of `_xd`/`_xn`/`_xc`, whichever the
+ *  x-adapter set), which is what Plot's stack transform groups on. Keying by the raw cell split one
+ *  numeric x spelled "1" and "1.0" into two stacks, so the axis missed the drawn stack's extent. */
+export function areaStackKey(r: PreparedRow): string {
+  if (r._xd instanceof Date) return `d${r._xd.getTime()}`;
+  if (r._xn != null) return `n${r._xn}`;
+  return `c${r._xc ?? ""}`;
 }
 
 export function computeDrawnValueExtent(
@@ -427,9 +437,8 @@ export function computeDrawnValueExtent(
   }
 
   if (chartType === "area") {
-    // Same cumulative-top geometry as a stacked bar, but an area's x may be numeric or temporal, so
-    // key the stack the way renderPane's own area branch does.
-    return stackedExtent(data, (r) => r.time || String(r._xn ?? r._xc ?? ""));
+    // Same cumulative-top geometry as a stacked bar, keyed on the x Plot stacks an area on.
+    return stackedExtent(data, areaStackKey);
   }
 
   if (chartType === "dumbbell") {

@@ -23,6 +23,8 @@ import {
   computeDrawnValueExtent,
   resolveHardDomain,
   fittedExtent,
+  stackedExtent,
+  areaStackKey,
   domainBounds,
   makeTickFormatter,
 } from "./scales";
@@ -898,25 +900,17 @@ function assemblePaneResult(
       ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
       ...overlayColumnYs,
     ].filter(Number.isFinite);
-    // The floor is the stacked NEGATIVE extent: negatives stack down from 0 on their own, so two
-    // negatives at one x reach their sum, not the lower of the two (Ruling 72).
-    const totalByX = new Map<string, number>();
-    const negByX = new Map<string, number>();
-    for (const r of dataInScope) {
-      if (!Number.isFinite(r._y as number)) continue;
-      const k = r.time || String(r._xn ?? r._xc ?? "");
-      totalByX.set(k, (totalByX.get(k) ?? 0) + (r._y as number));
-      if ((r._y as number) < 0) negByX.set(k, (negByX.get(k) ?? 0) + (r._y as number));
-    }
-    const stackMax = totalByX.size ? Math.max(...totalByX.values()) : 0;
-    const stackMin = negByX.size ? Math.min(...negByX.values()) : 0;
+    // The floor and ceiling are the stacked NEGATIVE and POSITIVE extents: each sign stacks away
+    // from 0 on its own, so two negatives at one x reach their sum, not the lower of the two, and
+    // positives reach theirs whatever negatives share the x (Ruling 72). Keyed by the parsed x, as
+    // Plot stacks, and the same computation as the clip gate's (computeDrawnValueExtent).
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
       ...hardOpts,
       // Areas fill from 0, so the baseline is on the axis whatever the sign of the stack: an
       // all-negative area's ceiling is 0 (Ruling 70), as a bar's or a stack's is.
-      auto: { min: Math.min(0, stackMin), max: Math.max(0, stackMax) },
+      auto: stackedExtent(dataInScope, areaStackKey) ?? { min: 0, max: 0 },
       fold: markerYs,
     });
   } else {

@@ -71,3 +71,54 @@ describe("Ruling 72: an area's value-axis floor is its stacked negative extent",
     expect(chart!.querySelectorAll("clipPath").length).toBe(0);
   });
 });
+
+// Ruling 72 extended: the ceiling is the stacked POSITIVE extent, mirroring the floor. It was the net
+// total per x, which with mixed signs (+10 -5 -7, +12 -2 -1) gave [-15, 10] while the +12 band
+// reached 12 and was clipped.
+describe("Ruling 72: an area's value-axis ceiling is its stacked positive extent", () => {
+  it("with mixed signs the ceiling covers the positives' own stack, and nothing is clipped", () => {
+    expect(domainOf(MIXED)[1]).toBeGreaterThanOrEqual(12);
+    expect(renderChart(SPEC, MIXED, OPTS).svg.querySelectorAll("clipPath").length).toBe(0);
+  });
+
+  it("two positives with a negative at the same x: the ceiling is their sum, not the net", () => {
+    const rows = [r({ t: 2020, s: "A", v: 20 }), r({ t: 2020, s: "B", v: 11 }), r({ t: 2020, s: "C", v: -25 })];
+    expect(domainOf(rows)[1]).toBeGreaterThanOrEqual(31);
+  });
+});
+
+// The stack is keyed by the PARSED x, the coordinate Plot stacks on: numeric x spelled "1" and "1.0"
+// is one x, so A=-20 and B=-11 there reach -31. Keyed by the raw text they were two x's, the floor
+// stayed at -20 and the second band ran out of the frame (live y=576 in a 400px svg).
+describe("Ruling 72: an area's stacked extents key on the parsed x, not its spelling", () => {
+  const spelled = (a: number, b: number): TidyRow[] => [
+    r({ t: "1", s: "A", v: a }), r({ t: "1.0", s: "B", v: b }),
+    r({ t: "2", s: "A", v: a }), r({ t: "2.0", s: "B", v: b }),
+  ];
+  const noClip = (rows: TidyRow[]) => {
+    expect(renderChart(SPEC, rows, OPTS).svg.querySelectorAll("clipPath").length, "renderChart").toBe(0);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    mountChart(container, { spec: SPEC, rows, width: 720 });
+    expect(container.querySelector(".figure-canvas svg")!.querySelectorAll("clipPath").length, "live").toBe(0);
+    const chart = buildExportSvg(SPEC, rows).querySelector('svg g[aria-label="area"]')?.closest("svg");
+    expect(chart!.querySelectorAll("clipPath").length, "export").toBe(0);
+  };
+
+  it("floor: '1' and '1.0' stack together to -31", () => {
+    const rows = spelled(-20, -11);
+    expect(domainOf(rows)[0]).toBeLessThanOrEqual(-31);
+    noClip(rows);
+  });
+
+  it("ceiling: '1' and '1.0' stack together to 31", () => {
+    const rows = spelled(20, 11);
+    expect(domainOf(rows)[1]).toBeGreaterThanOrEqual(31);
+    noClip(rows);
+  });
+
+  it("the clip gate measures the same stack: a pinned max of 20 under the 31 clips", () => {
+    const pinned = { ...SPEC, yAxisPolicy: { max: 20 } } as ChartSpec;
+    expect(renderChart(pinned, spelled(20, 11), OPTS).svg.querySelectorAll("clipPath").length).toBe(1);
+  });
+});
