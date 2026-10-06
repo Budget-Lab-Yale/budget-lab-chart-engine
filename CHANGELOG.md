@@ -143,13 +143,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `min`, `max` and `includeZero` rows now say so.
 - A lone `yAxisPolicy.min` or `max` past all of the data reversed the axis (a line with data 8–31
   and `min: 50` drew 50 at the bottom and 30 at the top; bars under `max: -5` drew [0, -5]), though
-  CONFIG-SPEC reads a lone bound as ascending. The axis now ascends: the bound stays where it was
-  written and the open end is one tick step past it (`min: 50` there draws 50–60). It applies on
-  every value-axis chart type, and per pane in small multiples, where a bound inside the figure's
-  data can lie past one pane's. `tbl-chart validate` now warns, naming the bound, when it leaves a
-  chart or a pane showing no data. CONFIG-SPEC's `min` and `max` rows and its reversed-axis section
-  state the rule, and the `autoWiden.step` row now says it applies to `line`, `scatter` and `dotplot`
-  only.
+  CONFIG-SPEC reads a lone bound as ascending. The axis now ascends on every value-axis chart type:
+  the bound stays where it was written and the open end lies past it (`min: 50` there draws 50–60),
+  finite at any bound. In `per-pane` small multiples each pane decides this for itself; in `shared`
+  mode the figure decides it for its one axis, so a pane past the bound leaves an axis the other
+  panes set unchanged. `yAxisPolicy.min` and `max` beyond ±1e300 are now validation errors.
+  `tbl-chart validate` now warns, naming the bound, when a lone `min` is above every value in the
+  data or a lone `max` below every value (per pane on a small-multiples figure; bin heights on a
+  histogram). CONFIG-SPEC's `min` and `max` rows and its reversed-axis section state the rule, and
+  the `autoWiden.step` row now says it applies to `line`, `scatter` and `dotplot` only.
 - An `area` chart whose stack is negative at every x drew no 0 baseline: the value axis stopped at
   the stack's top (-5, say), though areas fill from 0. Its ceiling is now 0, as on bars and stacks.
 - An `area` chart's value-axis floor was its lowest single value, though negatives stack down from
@@ -256,7 +258,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **A lone `yAxisPolicy` bound past all of the data now gives an ascending axis** instead of a
   reversed one. **No published figure is affected**: the archive has no lone bound, and the one on
   the unpublished `pr67-spec-fixes` branch (`effective-tax-rates-top-groups`, `min: 0`) is below all
-  of its data (8.0–30.6), so its axis is unchanged. No golden moves.
+  of its data (8.0–30.6), so its axis is unchanged and validate does not warn. No golden moves.
+- **`yAxisPolicy.min` and `max` must lie within ±1e300.** **No published figure is affected**: every
+  bound on `main`, on the `pr67-spec-fixes` branch and in its working tree lies within ±4000.
 - **An all-negative `area` chart's value axis now reaches 0.** **No published figure is affected**:
   there is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree.
   No golden moves.

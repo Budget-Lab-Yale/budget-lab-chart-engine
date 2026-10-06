@@ -17,7 +17,7 @@ import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbe
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneDrawnValueExtent } from "./index";
+import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
@@ -411,26 +411,28 @@ function figurePaneValues(spec: ChartSpec, rows: TidyRow[], facetField: string):
 }
 
 /**
- * `tbl-chart validate` warnings for a LONE `yAxisPolicy.min` or `max` that hides every data point of
- * a pane (or of the chart, unfaceted): the pane's painted geometry (`paneDrawnValueExtent`, so a bar
- * counts from its 0 base and a stack by its totals) lies entirely at or past the bound. The axis still
- * ascends (see resolveHardDomain), but the pane draws an empty frame. Both bounds or neither: none.
+ * `tbl-chart validate` warnings for a LONE `yAxisPolicy.min` strictly above every value in the data,
+ * or a lone `max` strictly below every value (Ruling 74): per pane on a small-multiples figure,
+ * naming the pane. A statement about the DATA only (`paneValueExtent`), never about what the chart
+ * shows, which also answers to headroom, markers, nice rounding, autoWiden and shared domains. A
+ * value exactly on the bound is not past it. Both bounds or neither: none.
  */
 export function loneBoundWarnings(spec: ChartSpec, rows: TidyRow[]): string[] {
   const { min, max } = spec.yAxisPolicy ?? {};
   if ((min == null) === (max == null)) return [];
-  const hides = (ext: { min: number; max: number } | null): boolean =>
-    ext != null && (min != null ? ext.max <= min : ext.min >= (max as number));
-  const what = min != null ? `yAxisPolicy.min (${min}) is at or above` : `yAxisPolicy.max (${max}) is at or below`;
+  const past = (ext: { min: number; max: number } | null): boolean =>
+    ext != null && (min != null ? min > ext.max : (max as number) < ext.min);
+  const noun = spec.chartType === "histogram" ? "bin height" : "value";
+  const what = min != null ? `yAxisPolicy.min (${min}) is above every ${noun}` : `yAxisPolicy.max (${max}) is below every ${noun}`;
   const cols = resolveColumns(spec, rows);
   if (!spec.small_multiples || !cols.facet) {
-    return hides(paneDrawnValueExtent(spec, rows)) ? [`${what} every value the chart draws, so no data shows`] : [];
+    return past(paneValueExtent(spec, rows)) ? [`${what} in the data`] : [];
   }
   const facetField = cols.facet;
   const binThresholds = figureBinThresholds(spec, rows, cols, spec.small_multiples.mode ?? "shared");
   return figurePaneValues(spec, rows, facetField)
-    .filter((v) => hides(paneDrawnValueExtent(spec, rows.filter((r) => (r[facetField] as string) === v), binThresholds)))
-    .map((v) => `${what} every value pane "${v}" draws, so that pane shows no data`);
+    .filter((v) => past(paneValueExtent(spec, rows.filter((r) => (r[facetField] as string) === v), binThresholds)))
+    .map((v) => `${what} in pane "${v}"`);
 }
 
 /**
@@ -892,13 +894,16 @@ export function renderFigure(
   //    monotonic — yields exactly the combined-probe domain for line/single-series/grouped bars,
   //    so those stay unchanged. Each per-pane probe already applies the bar zero-baseline +
   //    value-label headroom, so the union endpoints carry it. Probe SVGs are discarded.
-  let yLo = Infinity;
-  let yHi = -Infinity;
-  for (const value of paneValues) {
-    const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-    const [lo, hi] = renderPane(
+  //    A lone yAxisPolicy bound's ascending fallback is decided on the FIGURE (Ruling 74): a pane
+  //    whose own axis needed it (nothing on the bound's open side) is left out of the union whenever
+  //    another pane ascends on its own, so it can never widen that axis. Before the fallback existed
+  //    such a pane probed reversed or [b, b] and its far end never won the union, so dropping it
+  //    leaves those figures as they were. Only when every pane needs it does the figure take it, as
+  //    the union of the panes' fallback domains.
+  const probes = paneValues.map((value) =>
+    renderPane(
       spec,
-      paneRows,
+      rows.filter((r) => (r[facetField] as string) === value),
       {
         ...opts,
         height: effHeight,
@@ -907,7 +912,13 @@ export function renderFigure(
         ...(binThresholds ? { binThresholds } : {}),
       },
       "probe",
-    ).yDomain;
+    ),
+  );
+  const ascendingProbes = probes.filter((p) => !p.yLoneFallback);
+  let yLo = Infinity;
+  let yHi = -Infinity;
+  for (const p of ascendingProbes.length ? ascendingProbes : probes) {
+    const [lo, hi] = p.yDomain;
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }

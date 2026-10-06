@@ -353,3 +353,136 @@ describe("lone-bound coverage: histogram clipping, non-line small multiples", ()
     }
   });
 });
+
+// Ruling 74: the lone-bound contract, simplified. CONFIG-SPEC promises only that a lone bound keeps
+// the axis ascending with the pinned end at the bound (then nice'd outward) and the open end past it,
+// otherwise fitted. The tests below check each of those words, the shared-figure rule, and the
+// numeric edges.
+describe("Ruling 74: shared small multiples decide the fallback on the figure's domain", () => {
+  const firstLast = (svg: SVGSVGElement): [number, number] => {
+    const t = ascendingTicks(svg);
+    return [t[0]!, t[t.length - 1]!];
+  };
+  const shared = (base: Case, policy: Record<string, unknown>, mode = "shared") =>
+    ({
+      ...base.spec,
+      columns: { ...(base.spec as unknown as { columns: Record<string, string> }).columns, facet: "f" },
+      yAxisPolicy: policy,
+      small_multiples: { columns: 2, mode },
+    }) as unknown as ChartSpec;
+
+  it("a pane past the bound does not widen an axis another pane already ascends (line, min 50)", () => {
+    const rows = [
+      r({ f: "A", t: 2020, v: 8 }), r({ f: "A", t: 2021, v: 31 }),
+      r({ f: "B", t: 2020, v: 45 }), r({ f: "B", t: 2021, v: 51 }),
+    ];
+    const fig = renderFigure(shared(CASES.line!, { min: 50 }), rows, OPTS);
+    // bc87c77 drew 50–51: pane A probed reversed and never won the union's ceiling.
+    expect(firstLast(fig.panes[0]!.svg!)).toEqual([50, 51]);
+    // ...which is pane B's own axis: pane A contributes nothing to the shared domain.
+    const bOnly = renderPane({ ...CASES.line!.spec, yAxisPolicy: { min: 50 } } as ChartSpec, rows.filter((x) => x.f === "B"), OPTS);
+    expect(domainBounds(bOnly.yDomain)).toEqual([50, 51]);
+  });
+
+  it("a [b, b] pane does not widen it either (positive bars under max 0 beside a negative pane)", () => {
+    const rows = [
+      r({ f: "A", c: "a", v: 8 }), r({ f: "A", c: "b", v: 31 }),
+      r({ f: "B", c: "a", v: -1 }), r({ f: "B", c: "b", v: -2 }),
+    ];
+    const fig = renderFigure(shared(CASES.bar!, { max: 0 }), rows, OPTS);
+    const bOnly = renderPane({ ...CASES.bar!.spec, yAxisPolicy: { max: 0 } } as ChartSpec, rows.filter((x) => x.f === "B"), OPTS);
+    const [lo, hi] = domainBounds(bOnly.yDomain);
+    expect(lo).toBeGreaterThan(-5); // pane A alone would fall back a whole step (5) below 0
+    expect(firstLast(fig.panes[0]!.svg!)).toEqual([lo, hi]);
+  });
+
+  it("per-pane mode keeps each pane's own fallback", () => {
+    const rows = [
+      r({ f: "A", t: 2020, v: 8 }), r({ f: "A", t: 2021, v: 31 }),
+      r({ f: "B", t: 2020, v: 45 }), r({ f: "B", t: 2021, v: 51 }),
+    ];
+    const [a, b] = renderFigure(shared(CASES.line!, { min: 50 }, "per-pane"), rows, OPTS).panes.map((p) => firstLast(p.svg!));
+    expect(a).toEqual([50, 60]);
+    expect(b).toEqual([50, 51]);
+  });
+});
+
+describe("Ruling 74: CONFIG-SPEC's lone-bound sentence, claim by claim", () => {
+  it("the open end lies past the bound and is otherwise fitted: bar label headroom sets it", () => {
+    // Bars 8–31 under min: 32 — nothing is above 32 but the 31 bar's value-label headroom (×1.05).
+    const [lo, hi] = domainOf(CASES.bar!, { min: 32 });
+    expect(lo).toBe(32);
+    expect(hi).toBeGreaterThanOrEqual(31 * 1.05);
+    expect(hi).toBeLessThan(33);
+  });
+
+  it("the open end lies past the bound and is otherwise fitted: a reference marker sets it", () => {
+    const spec = { ...CASES.line!.spec, annotations: { yAxis: [{ y: 52, label: "m" }] } } as unknown as ChartSpec;
+    const [lo, hi] = domainBounds(renderPane({ ...spec, yAxisPolicy: { min: 50 } } as ChartSpec, CASES.line!.rows, OPTS).yDomain);
+    expect(lo).toBe(50);
+    expect(hi).toBeGreaterThanOrEqual(52);
+    expect(hi).toBeLessThan(60); // not the bare fallback a marker-less chart gets
+  });
+
+  it("the validate warning describes the data, not the drawing: autoWiden can widen over it", () => {
+    // cli.test.ts: this spec warns "yAxisPolicy.max (2) is below every value in the data".
+    const [lo, hi] = domainOf(CASES.scatter!, { max: 2, autoWiden: { step: 25 } });
+    expect(lo).toBeLessThanOrEqual(8);
+    expect(hi).toBeGreaterThanOrEqual(31);
+  });
+
+  it("the pinned end is at the bound, then nice'd outward, on every type", () => {
+    // min: 51 on data below it: the floor is 51 before nice, and nice only ever moves it down.
+    for (const [type, c] of Object.entries(CASES)) {
+      const [lo, hi] = domainOf(c, { min: 51 });
+      expect(lo, type).toBeLessThanOrEqual(51);
+      expect(hi, type).toBeGreaterThan(51);
+    }
+  });
+});
+
+describe("Ruling 74: extreme bounds stay finite and ascending", () => {
+  const line = CASES.line!;
+  const rowsAt = (...vs: number[]): TidyRow[] => vs.map((v, i) => r({ t: 2020 + i, v }));
+  const check = (rows: TidyRow[], policy: Record<string, number>): [number, number] => {
+    const pane = renderPane({ ...line.spec, yAxisPolicy: policy } as ChartSpec, rows, OPTS);
+    const [lo, hi] = pane.yDomain;
+    expect(Number.isFinite(lo) && Number.isFinite(hi), `${lo}, ${hi}`).toBe(true);
+    expect(lo, "ascending").toBeLessThan(hi);
+    return [lo, hi];
+  };
+  // One unit in the last place of a normal double.
+  const ulp = (x: number) => 2 ** (Math.floor(Math.log2(Math.abs(x))) - 52);
+
+  it("1e20: a step of 1 rounds back to the bound, so the step is widened to move it", () => {
+    const [lo, hi] = check(rowsAt(1e20, 1e20), { min: 1e20 });
+    expect(lo).toBe(1e20);
+    expect(hi - lo).toBeGreaterThanOrEqual(4 * ulp(1e20));
+    const [lo2, hi2] = check(rowsAt(1e20, 1e20), { max: 1e20 });
+    expect(hi2).toBe(1e20);
+    expect(hi2 - lo2).toBeGreaterThanOrEqual(4 * ulp(1e20));
+  });
+
+  it("5e-324: a tick step of 0 at subnormal magnitude still moves the open end", () => {
+    const [lo, hi] = check(rowsAt(5e-324, 5e-324), { min: 1e-323 });
+    expect(lo).toBeLessThanOrEqual(1e-323);
+    expect(hi).toBeGreaterThan(1e-323);
+    check(rowsAt(1e-323, 1e-323), { max: 5e-324 });
+  });
+
+  it("an open end that would overflow is clamped to ±Number.MAX_VALUE", () => {
+    // The span from -MAX_VALUE up to 1e300 overflows, so the tick step is Infinity.
+    expect(check(rowsAt(-Number.MAX_VALUE, -1e308), { min: 1e300 })).toEqual([1e300, Number.MAX_VALUE]);
+    expect(check(rowsAt(Number.MAX_VALUE, 1e308), { max: -1e300 })).toEqual([-Number.MAX_VALUE, -1e300]);
+  });
+
+  it("1e308: the schema rejects a bound beyond ±1e300, with a message naming the range", () => {
+    for (const [key, v] of [["min", 1e308], ["max", -1e308], ["min", Number.MAX_VALUE], ["max", -Number.MAX_VALUE]] as const) {
+      const errors = validateSpec({ chartType: "line", title: "t", xAxisType: "numeric", data: "d.csv", yAxisPolicy: { [key]: v } }).errors;
+      expect(errors, `${key} ${v}`).toEqual([`/yAxisPolicy/${key}: must be between -1e300 and 1e300`]);
+    }
+    for (const v of [1e300, -1e300]) {
+      expect(validateSpec({ chartType: "line", title: "t", xAxisType: "numeric", data: "d.csv", yAxisPolicy: { min: v } }).errors).toEqual([]);
+    }
+  });
+});

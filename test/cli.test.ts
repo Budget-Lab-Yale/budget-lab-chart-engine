@@ -404,11 +404,14 @@ describe("runValidate — treemap warnings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// validate: a lone yAxisPolicy bound that hides a pane's data (Ruling 69)
+// validate: a lone yAxisPolicy bound past every value in the data (Ruling 74)
 // ---------------------------------------------------------------------------
 
-describe("runValidate — a lone yAxisPolicy bound past all of a pane's data", () => {
-  function chartSpec(chartType: string, rowsCsv: string, extraYaml: string[]): string {
+// The warning is a statement about the DATA, never about what the chart draws: the drawn axis also
+// answers to nice rounding, label headroom, reference markers, autoWiden and (in shared small
+// multiples) the other panes, so a claim about visibility was false in some case whatever it said.
+describe("runValidate — a lone yAxisPolicy bound past every value in the data", () => {
+  function chartSpec(chartType: string, rowsCsv: string, extraYaml: string[], xAxisType = "categorical"): string {
     const dir = mkdtempSync(join(tmpdir(), "cli-test-lone-bound-"));
     const specPath = join(dir, "chart.yaml");
     const csvPath = join(dir, "data.csv");
@@ -416,29 +419,45 @@ describe("runValidate — a lone yAxisPolicy bound past all of a pane's data", (
     writeFileSync(csvPath, rowsCsv, "utf8");
     writeFileSync(
       specPath,
-      [`chartType: ${chartType}`, "title: Test", "xAxisType: categorical", "data: data.csv", ...extraYaml].join("\n") + "\n",
+      [`chartType: ${chartType}`, "title: Test", `xAxisType: ${xAxisType}`, "data: data.csv", ...extraYaml].join("\n") + "\n",
       "utf8",
     );
     return specPath;
   }
   const flat = "c,v\na,8\nb,31\n";
   const faceted = "f,c,v\nA,a,8\nA,b,31\nB,a,60\nB,b,80\n";
+  const bar = (policy: string[]) => chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", ...policy]);
+  const warningsOf = (message: string) => message.split("\n").filter((l) => l.includes("warning:"));
 
-  it("warns, naming the bound, when a lone min is above everything a chart draws (exit 0)", async () => {
-    const result = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", "  min: 50"]));
+  it("warns, naming the bound, when a lone min is above every value (exit 0)", async () => {
+    const result = await runValidate(bar(["  min: 50"]));
     expect(result.exitCode).toBe(0);
-    expect(result.message).toMatch(/warning: yAxisPolicy\.min \(50\) is at or above every value the chart draws, so no data shows/);
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/: warning: yAxisPolicy\.min \(50\) is above every value in the data$/),
+    ]);
   });
 
-  it("warns for a lone max below everything a chart draws, counting a bar's 0 base", async () => {
-    const neg = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", "  max: -5"]));
-    expect(neg.message).toMatch(/warning: yAxisPolicy\.max \(-5\) is at or below every value the chart draws/);
-    // A lone max of 5 still shows each bar's 0–5 stretch, so nothing is hidden.
-    const partial = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", "  max: 5"]));
-    expect(partial.message).not.toMatch(/warning:/);
+  it("warns when a lone max is below every value, whatever the bars draw from their 0 base", async () => {
+    const neg = await runValidate(bar(["  max: -5"]));
+    expect(warningsOf(neg.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.max \(-5\) is below every value in the data$/),
+    ]);
+    // Each bar still draws its 0–5 stretch here; the warning says only what is true of the data.
+    const partial = await runValidate(bar(["  max: 5"]));
+    expect(warningsOf(partial.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.max \(5\) is below every value in the data$/),
+    ]);
   });
 
-  it("names only the hidden pane of a small-multiples figure, in either mode", async () => {
+  it("makes no claim about what the chart shows", async () => {
+    for (const policy of [["  min: 50"], ["  max: -5"]]) {
+      const lines = warningsOf((await runValidate(bar(policy))).message);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]!.split("warning:")[1]).not.toMatch(/show|draw|visible|hid/);
+    }
+  });
+
+  it("names only the pane whose values all lie past the bound, in either mode", async () => {
     for (const mode of ["shared", "per-pane"]) {
       const result = await runValidate(
         chartSpec("bar", faceted, [
@@ -447,23 +466,91 @@ describe("runValidate — a lone yAxisPolicy bound past all of a pane's data", (
         ]),
       );
       expect(result.exitCode).toBe(0);
-      expect(result.message).toMatch(/warning: yAxisPolicy\.min \(50\) is at or above every value pane "A" draws, so that pane shows no data/);
-      expect(result.message).not.toMatch(/pane "B"/);
+      expect(warningsOf(result.message), mode).toEqual([
+        expect.stringMatching(/warning: yAxisPolicy\.min \(50\) is above every value in pane "A"$/),
+      ]);
     }
   });
 
-  it("does not warn when the bound leaves data on its open side, or both bounds are pinned", async () => {
-    for (const policy of [["  min: 20"], ["  max: 50"], ["  min: 50", "  max: 100"]]) {
-      const result = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", ...policy]));
-      expect(result.message, policy.join(" ")).not.toMatch(/warning:/);
+  it("does not warn when some value lies on the open side, or both bounds are pinned", async () => {
+    for (const policy of [["  min: 20"], ["  max: 50"], ["  min: 50", "  max: 100"], ["  min: 100", "  max: 50"]]) {
+      expect(warningsOf((await runValidate(bar(policy))).message), policy.join(" ")).toEqual([]);
     }
   });
 
-  it("counts a stack by its totals: a min below the stacked top hides nothing", async () => {
+  it("is strict: a value exactly on the bound is not past it", async () => {
+    // A flat line at 7 under min: 7 is drawn along the frame's edge; 8–31 under min: 31 draws its 31.
+    const line = (csv: string, policy: string) =>
+      chartSpec("line", csv, ["columns:", "  x: t", "  value: v", "yAxisPolicy:", policy], "numeric");
+    expect(warningsOf((await runValidate(line("t,v\n1,7\n2,7\n", "  min: 7"))).message)).toEqual([]);
+    expect(warningsOf((await runValidate(line("t,v\n1,7\n2,7\n", "  max: 7"))).message)).toEqual([]);
+    expect(warningsOf((await runValidate(line("t,v\n1,8\n2,31\n", "  min: 31"))).message)).toEqual([]);
+    expect(warningsOf((await runValidate(bar(["  max: 8"]))).message)).toEqual([]);
+  });
+
+  it("reads each value cell, not a stack's totals: a min above both segments warns", async () => {
     const stacked = "c,s,v\na,A,8\na,B,15\n";
     const result = await runValidate(
       chartSpec("stacked", stacked, ["columns:", "  x: c", "  value: v", "  series: s", "yAxisPolicy:", "  min: 20"]),
     );
-    expect(result.message).not.toMatch(/warning:/);
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.min \(20\) is above every value in the data$/),
+    ]);
+  });
+
+  it("counts only the series the chart keeps (series_order filters)", async () => {
+    const csv = "t,s,v\n1,A,8\n2,A,31\n1,B,80\n";
+    const spec = (order: string[]) =>
+      chartSpec(
+        "line",
+        csv,
+        ["columns:", "  x: t", "  value: v", "  series: s", `series_order: [${order.join(", ")}]`, "yAxisPolicy:", "  min: 50"],
+        "numeric",
+      );
+    expect(warningsOf((await runValidate(spec(["A"]))).message)).toHaveLength(1);
+    expect(warningsOf((await runValidate(spec(["A", "B"]))).message)).toEqual([]);
+  });
+
+  it("counts a shape_order-filtered point as data, so the statement stays true", async () => {
+    // The 80 is not drawn (shape_order drops it), but it is a value in the data: 50 is not above it.
+    const csv = "t,v,k\n1,8,keep\n2,80,drop\n";
+    const result = await runValidate(
+      chartSpec(
+        "scatter",
+        csv,
+        ["columns:", "  x: t", "  value: v", "  shape: k", "shape_order: [keep]", "yAxisPolicy:", "  min: 50"],
+        "numeric",
+      ),
+    );
+    expect(result.exitCode).toBe(0);
+    expect(warningsOf(result.message)).toEqual([]);
+  });
+
+  it("states the bound as written, whatever autoWiden then does to the axis", async () => {
+    const result = await runValidate(
+      chartSpec(
+        "scatter",
+        "t,v\n1,8\n2,31\n",
+        ["columns:", "  x: t", "  value: v", "yAxisPolicy:", "  max: 2", "  autoWiden:", "    step: 25"],
+        "numeric",
+      ),
+    );
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.max \(2\) is below every value in the data$/),
+    ]);
+  });
+
+  it("a histogram's values are its bin heights", async () => {
+    const result = await runValidate(
+      chartSpec(
+        "histogram",
+        "lo,hi,n\n0,5,8\n5,10,31\n",
+        ["columns:", "  x0: lo", "  x1: hi", "  value: n", "yAxisPolicy:", "  min: 50"],
+        "numeric",
+      ),
+    );
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.min \(50\) is above every bin height in the data$/),
+    ]);
   });
 });

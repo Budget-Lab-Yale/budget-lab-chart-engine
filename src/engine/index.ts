@@ -316,6 +316,10 @@ export interface PaneResult {
    *  or the forced opts.yDomain). The shared-mode orchestrator probe-renders over all rows and
    *  reads this to obtain the one shared domain. */
   yDomain: [number, number];
+  /** True when a lone `yAxisPolicy` bound had nothing fitted on its open side in THIS pane's rows,
+   *  so its own domain took resolveHardDomain's ascending fallback. Shared-mode probes read it: the
+   *  figure leaves such panes out of its union whenever another pane ascends on its own. */
+  yLoneFallback: boolean;
   /** Formats a value the way this pane's value AXIS does (decimal places derived from its tick
    *  set, plus the chart's affixes). Carried so a `{value}` token in a keyed annotation's legend
    *  label reads exactly as the in-frame label would have. */
@@ -578,10 +582,12 @@ function histogramPaneRows(
   return binned;
 }
 
-/** The value-axis extent of the geometry `rows` paint as one pane (`computeDrawnValueExtent` over
- *  renderPane's own row prep, series scope and category order; a histogram binned at
- *  `binThresholds`). Pure, no DOM, so `tbl-chart validate` can ask it. Null when nothing is drawn. */
-export function paneDrawnValueExtent(
+/** The [min, max] of the value cells `rows` hold as one pane, after renderPane's own row prep and
+ *  series scope (`series_order` filters); a histogram's values are its bin heights, binned at
+ *  `binThresholds`. A statement about the DATA, not the drawing: `tbl-chart validate` reads it, and
+ *  what the axis then draws also answers to headroom, markers, nice rounding and shared domains.
+ *  Pure, no DOM. Null when no value is finite. */
+export function paneValueExtent(
   spec: ChartSpec,
   rows: TidyRow[],
   binThresholds?: number[],
@@ -594,10 +600,15 @@ export function paneDrawnValueExtent(
     spec.chartType === "histogram"
       ? histogramPaneRows(spec, rows, cols, xType, binThresholds)
       : prepareRows(spec, rows, cols, makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
-  const { dataInScope } = scopeToSeries(spec, data);
-  // A waterfall's cumulative path depends on the category order.
-  sortByCategoryOrder(spec, dataInScope);
-  return computeDrawnValueExtent(dataInScope, spec, spec.chartType);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const r of scopeToSeries(spec, data).dataInScope) {
+    const y = r._y as number;
+    if (!Number.isFinite(y)) continue;
+    if (y < min) min = y;
+    if (y > max) max = y;
+  }
+  return min <= max ? { min, max } : null;
 }
 
 /** Series order. When series_order is set it acts as both filter and order. Mirrored by
@@ -813,6 +824,9 @@ function assemblePaneResult(
 
   let hardDomain: [number, number] | null;
   let includeZero: boolean;
+  // Set when a lone bound took resolveHardDomain's ascending fallback (see PaneResult.yLoneFallback).
+  let yLoneFallback = false;
+  const hardOpts = { tickCount, onLoneFallback: () => void (yLoneFallback = true) };
 
   // Value-axis reference markers, for the branches that fold them in so a marker stays visible.
   // The value axis is x on a horizontal chart, so annotations.xAxis plays the yAxis role there
@@ -832,7 +846,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      tickCount,
+      ...hardOpts,
       auto: computeBarYExtent(dataInScope, spec, chartType),
       fold: valueAxisMarkers(),
     });
@@ -847,7 +861,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      tickCount,
+      ...hardOpts,
       auto: includeZero ? { min: Math.min(0, fitted.min), max: Math.max(0, fitted.max) } : fitted,
       fold: valueAxisMarkers(),
     });
@@ -856,7 +870,7 @@ function assemblePaneResult(
     // already carries. Zero baseline by default (bars grow from 0); a pinned min/max sets its own
     // end, and a lone one leaves the other auto-fitted from zero.
     includeZero = true;
-    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max, tickCount, ...fittedOpenEnd(true) });
+    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max, ...hardOpts, ...fittedOpenEnd(true) });
   } else if (chartType === "waterfall") {
     // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
     // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
@@ -865,7 +879,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      tickCount,
+      ...hardOpts,
       auto: computeWaterfallYExtent(dataInScope),
       fold: ann.yAxis.map((m) => m.y).filter(Number.isFinite),
     });
@@ -899,7 +913,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      tickCount,
+      ...hardOpts,
       // Areas fill from 0, so the baseline is on the axis whatever the sign of the stack: an
       // all-negative area's ceiling is 0 (Ruling 70), as a bar's or a stack's is.
       auto: { min: Math.min(0, stackMin), max: Math.max(0, stackMax) },
@@ -926,7 +940,7 @@ function assemblePaneResult(
         }
       }
     }
-    hardDomain = resolveHardDomain({ min: policy.min, max: yMax, tickCount, ...fittedOpenEnd(includeZero) });
+    hardDomain = resolveHardDomain({ min: policy.min, max: yMax, ...hardOpts, ...fittedOpenEnd(includeZero) });
   }
 
   // Shared-mode small multiples: opts.yDomain is the ONE domain the orchestrator computed over
@@ -1177,6 +1191,7 @@ function assemblePaneResult(
     colors,
     valueAffixes,
     yDomain,
+    yLoneFallback,
     // Wrapped with the SAME tickLabel hook + ctx assemblePlot used internally for the in-frame
     // annotation label (yTickFallbackFmt) — this is what buildLegendItems passes through as
     // pane.formatValue for a keyed annotation's LEGEND row token. Left un-wrapped, the two would

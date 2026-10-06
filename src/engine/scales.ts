@@ -50,6 +50,9 @@ export interface ResolveHardDomainOptions {
   /** `yAxisPolicy.tickCount` (default 5): sizes the step a lone bound's open end takes when the
    *  data leave nothing on the open side. */
   tickCount?: number;
+  /** Called when a lone bound took the ascending fallback below. renderFigure's shared mode reads
+   *  it (PaneResult.yLoneFallback) to decide the fallback on the figure's domain, not per pane. */
+  onLoneFallback?: () => void;
 }
 
 /**
@@ -66,13 +69,14 @@ export interface ResolveHardDomainOptions {
  * CEILING widens it, a pinned FLOOR is authoritative. It keeps ascending output byte-identical.
  *
  * A LONE bound (`min` or `max`, the other unset) is always read as ascending (CONFIG-SPEC: "`min`
- * alone, or `max` alone, is read as ascending"). When the fitted extent leaves nothing on the open
- * side of it (the data, and any 0 base the chart type folds into `auto`, all sit at or past the
- * bound), the open end is placed ONE TICK STEP from the bound: d3's tick step at `tickCount` across
- * the span from the fitted extent to the bound, or 1 if that span is empty. Without this the pin and
- * the data's far end were paired as they came and a bound past all of the data reversed the axis.
- * Only that case changes: a both-bound or no-bound domain, and a lone bound with data on its open
- * side, resolve exactly as before.
+ * alone, or `max` alone, is read as ascending"). When nothing fitted (the data, any 0 base or label
+ * headroom the chart type folds into `auto`, the fold values) lies on the open side of it, the open
+ * end is placed one step past the bound (`loneOpenEnd`): d3's tick step at `tickCount` across the
+ * span from the fitted extent to the bound, or 1 if that span is empty. Without this the pin and the
+ * data's far end were paired as they came and a bound past all of the data reversed the axis. Only
+ * that case changes: a both-bound or no-bound domain, and a lone bound with anything fitted on its
+ * open side, resolve exactly as before. CONFIG-SPEC promises only "ascending, pinned end at the
+ * bound, open end past it", so the step itself is free to change.
  */
 export function resolveHardDomain({
   min,
@@ -80,6 +84,7 @@ export function resolveHardDomain({
   auto,
   fold,
   tickCount = 5,
+  onLoneFallback,
 }: ResolveHardDomainOptions): [number, number] | null {
   const reversed = min != null && max != null && min > max;
   const pinnedLo = reversed ? max : min;
@@ -98,10 +103,23 @@ export function resolveHardDomain({
     const spanLo = Math.min(bound, auto.min, ...folds);
     const spanHi = Math.max(bound, auto.max, ...folds);
     const step = spanHi > spanLo ? d3.tickStep(spanLo, spanHi, tickCount) : 1;
-    return min != null ? [lo, lo + step] : [hi - step, hi];
+    onLoneFallback?.();
+    return min != null ? [lo, loneOpenEnd(lo, 1, step)] : [loneOpenEnd(hi, -1, step), hi];
   }
 
   return reversed ? [hi, lo] : [lo, hi];
+}
+
+/** The open end `step` past a lone `bound` (`dir` +1 above a min, -1 below a max), made to move and
+ *  to stay finite (Ruling 74). A step that does not move the end by four ulps of the bound (0 from
+ *  d3 at subnormal magnitudes, 1 lost to rounding at 1e20) becomes the larger of 1 and those four
+ *  ulps; an end past ±Number.MAX_VALUE (the span overflowed, so the step is Infinity) is clamped to
+ *  it. The schema keeps a bound within ±1e300, so the clamped end is always past it. */
+function loneOpenEnd(bound: number, dir: 1 | -1, step: number): number {
+  const minMove = 4 * Math.max(Number.MIN_VALUE, Math.abs(bound) * Number.EPSILON);
+  let open = bound + dir * step;
+  if (!(Math.abs(open - bound) >= minMove)) open = bound + dir * Math.max(1, minMove);
+  return Number.isFinite(open) ? open : dir * Number.MAX_VALUE;
 }
 
 /** The y extent `computeYAxis` fits when it is given no domain: the finite values' [min, max],

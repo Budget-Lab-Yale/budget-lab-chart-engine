@@ -56,6 +56,9 @@ function formatAjvError(e: ErrorObject, spec: unknown): string {
   if (e.keyword === "required") {
     return `${path}: missing required property "${e.params.missingProperty}"`;
   }
+  if ((e.keyword === "minimum" || e.keyword === "maximum") && /^\/yAxisPolicy\/(min|max)$/.test(path)) {
+    return `${path}: must be between -1e300 and 1e300`;
+  }
   return `${path}: ${e.message ?? "invalid"}`;
 }
 

@@ -134,12 +134,17 @@ const X_AXIS_POLICY = {
   },
 } as const;
 
+/** The largest |yAxisPolicy.min| / |max| accepted (Ruling 74). A lone bound's open end is placed past
+ *  it, clamped to ±Number.MAX_VALUE; this keeps that end strictly past the bound, so the axis ascends.
+ *  validate.ts formats the error. */
+export const Y_BOUND_LIMIT = 1e300;
+
 const Y_AXIS_POLICY = {
   type: "object",
   additionalProperties: false,
   properties: {
-    min: { type: "number" },
-    max: { type: "number" },
+    min: { type: "number", minimum: -Y_BOUND_LIMIT, maximum: Y_BOUND_LIMIT },
+    max: { type: "number", minimum: -Y_BOUND_LIMIT, maximum: Y_BOUND_LIMIT },
     includeZero: { type: "boolean" },
     tickCount: { type: "integer", minimum: 1 },
     autoWiden: {
