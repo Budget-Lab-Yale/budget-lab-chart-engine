@@ -599,6 +599,87 @@ describe("stacked-area Total row", () => {
     expect(cardText()).toContain("12.00");
   });
 
+  // The same promise on a CATEGORICAL x. An area chart has no bar rects, so the band crosshair
+  // (which resolves the category from them) found nothing and drew no card at all. The card and its
+  // Total come from the categorical-line crosshair, which resolves the category from the axis
+  // labels, as temporal area takes the line crosshair.
+  const catAreaRows = (pane?: string): TidyRow[] =>
+    ["x", "y", "z"].flatMap((t) =>
+      ([["A", 3], ["B", 5]] as const).map(([s, v]) => ({ ...(pane ? { pane } : {}), time: t, series: s, value: String(v) })),
+    ) as unknown as TidyRow[];
+  const catArea = (extra: Record<string, unknown> = {}): ChartSpec =>
+    spec({ chartType: "area", xAxisType: "categorical", series_order: ["A", "B"], ...extra });
+
+  it("categorical x, standalone: the card carries A, B and the Total", () => {
+    const m = mountHover(catArea(), catAreaRows());
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("3.00");
+    expect(cardText()).toContain("5.00");
+    expect(cardText()).toContain("Total");
+    expect(cardText()).toContain("8.00");
+  });
+
+  it("categorical x, faceted, facet resolves to ONE pane: the card carries the Total row", () => {
+    const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), catAreaRows("P1"), true);
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("3.00");
+    expect(cardText()).toContain("5.00");
+    expect(cardText()).toContain("Total");
+    expect(cardText()).toContain("8.00");
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  it("categorical x, 2-pane with coordinated_cursor: false: each pane's card carries the Total row", () => {
+    const m = mountHover(
+      catArea({ data: "d.csv", ...facetCols, small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false } }),
+      [...catAreaRows("P1"), ...catAreaRows("P2")],
+      true,
+    );
+    expect(m.svgs.length).toBe(2);
+    hoverFirstMark(m.svgs[1]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Total");
+    expect(cardText()).toContain("8.00");
+  });
+
+  it("categorical x, 2-pane coordinated (default): no card and no Total — pills, as temporal", () => {
+    const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), [...catAreaRows("P1"), ...catAreaRows("P2")], true);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    const svg = m.svgs[0]!;
+    expect(coordShown(svg)).toBe(true);
+    expect(cardShown()).toBe(false);
+    expect(svg.textContent ?? "").not.toContain("Total");
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(2);
+    expect(m.calls()).toBe(0);
+  });
+
+  // The card is the categorical-line family's, so it carries that family's two other promises:
+  // `x_labels` heads it, and `hooks.tooltip` fires on it.
+  it("categorical x, standalone: x_labels heads the card and hooks.tooltip fires", () => {
+    const m = mountHover(catArea({ x_labels: { x: "Verbose label for x" } }), catAreaRows());
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    // PLOT_MIDDLE resolves the middle category; hover the first one by its own axis label.
+    const first = Array.from(m.svgs[0]!.querySelectorAll<SVGTextElement>("text")).find((t) => t.textContent === "x")!;
+    m.svgs[0]!.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: first.getBoundingClientRect().left + 1, clientY: 100, bubbles: true }),
+    );
+    expect(cardText()).toContain("Verbose label for x");
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  it("categorical x, faceted, one pane, ONE series: no Total row", () => {
+    const rows = catAreaRows("P1").filter((r) => (r as unknown as { series: string }).series === "A");
+    const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), rows, true);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("3.00");
+    expect(cardText()).not.toContain("Total");
+  });
+
   it("faceted, one pane, ONE series: no Total row, as standalone", () => {
     const rows = soloTemporalRows(MONTHLY).map((r) => ({ ...r, pane: "P1" })) as unknown as TidyRow[];
     const m = mountHover(

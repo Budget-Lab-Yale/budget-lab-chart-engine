@@ -1256,9 +1256,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
       });
-    } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
-      // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
-      // guide + tooltip.
+    } else if (spec.xAxisType === "categorical" && (spec.chartType === "line" || spec.chartType === "area")) {
+      // Categorical-x LINE or AREA: resolve the category from the x-axis labels (no bars) and show
+      // a guide + tooltip. Area takes this path, not the band crosshair below, because the band
+      // crosshair resolves the category from bar rects an area chart does not draw.
       attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
@@ -1270,6 +1271,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         categoryLabels: spec.x_labels,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
+        // Stacked area: a Total row, as the temporal attachCrosshair call below.
+        ...(spec.chartType === "area" ? { showTotal: true } : {}),
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
@@ -2216,9 +2219,10 @@ function wireFigureSvg(
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
   // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
   // an interactive legend.
-  if (categorical && ctx.spec.chartType === "line") {
-    // Categorical-x LINE pane: resolve the category from the x-axis labels (no bars). Coordinated
-    // panes hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
+  if (categorical && (ctx.spec.chartType === "line" || ctx.spec.chartType === "area")) {
+    // Categorical-x LINE or AREA pane: resolve the category from the x-axis labels (no bars — the
+    // band branch below reads bar rects, so an area pane there drew no card). Coordinated panes
+    // hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
     attachCategoricalLineCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
@@ -2231,6 +2235,8 @@ function wireFigureSvg(
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
+      // As mountChart's call. Reaches only a pane that hovers with a card (emitOnly builds none).
+      ...(ctx.spec.chartType === "area" ? { showTotal: true } : {}),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {

@@ -92,6 +92,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A faceted area chart whose pane hovers with a card (a facet resolving to one pane, or
   `small_multiples.coordinated_cursor: false`) now shows the card's cumulative Total row, as
   CONFIG-SPEC promised and a standalone area chart already did. Hover only.
+- An area chart on a categorical x (`xAxisType: categorical`) now hovers at all: standalone, and in
+  a pane that hovers with a card, it shows the card with each series and the Total row; a
+  coordinated multi-pane figure shows the guide and value pills, as on a temporal x. Before, the
+  hover looked for bar rectangles an area chart does not draw, and showed nothing. The card is the
+  categorical-x line's, so `x_labels` heads it and `hooks.tooltip` reaches it. Hover only.
 - A small-multiples figure legend no longer keys a series whose rows sit only in panes
   `small_multiples.pane_order` leaves out, which is drawn nowhere; live and in the PNG. Colours are
   unchanged: the palette still counts that series, so every drawn series keeps its colour.
@@ -134,6 +139,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **Hover: a faceted area chart's card gains its Total row** where the pane hovers with a card (one
   pane, or `coordinated_cursor: false`). **No published figure is affected**: the archive has no
   area chart. Rendered SVG and the PNG export are unchanged.
+- **Hover: a categorical-x area chart gains its card (or, coordinated, its pills).** **No published
+  figure is affected**: the archive has no area chart. Rendered SVG and the PNG export are
+  unchanged.
 - **A figure legend drops a row for a series drawn in no pane** (live and PNG). **No published
   figure is affected**: all 17 archived small-multiples specs set `pane_order`, and none leaves out
   a facet value present in its data. No golden moves.

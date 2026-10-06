@@ -3348,6 +3348,11 @@ export interface CategoricalLineOptions {
   /** This pane facet value -- see BandCrosshairOptions.facet. undefined on the standalone
    *  mountChart path. */
   facet?: string;
+  /** Categorical-x stacked AREA: append the card's Total row, as `CrosshairOptions.showTotal` does
+   *  on a temporal axis. Built by `buildBandTooltipHtml`'s own Total row, so it carries that
+   *  builder's gate (more than one series with a value at the hovered category). Read by the
+   *  primary crosshair only; the coordinated cursor draws pills, not a card. */
+  showTotal?: boolean;
 }
 
 /**
@@ -3467,6 +3472,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       tooltipHook: opts.tooltipHook,
       facet: opts.facet,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
+      ...(opts.showTotal ? { isStacked: true, totalRow: "text" as const } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
