@@ -2764,6 +2764,9 @@ export interface SecondaryBandOptions {
   /** `chrome.valuePills: false` — suppress only the per-series value pills; the shaded band region
    *  and the accented category label still render. Default true. */
   showPills?: boolean;
+  /** Temporary `MountOptions.pillGranularity: "segment"` A/B gate: when set, a value pill is drawn
+   *  only for a (category, series) it returns true for. Absent → every segment (current behaviour). */
+  pillFilter?: (category: string, series: string) => boolean;
   /** Echo-only mode, for a pane that draws its OWN hover card + highlight (a stacked pane under
    *  `barStack.hover: "tooltip"`): shade the hovered category's band on the OTHER panes and draw
    *  nothing else — no pills, no category-name pill — and stay blank on the active (hovered) pane,
@@ -3052,6 +3055,7 @@ export function attachSecondaryBandCursor(
       // chrome.tooltip's "hit-testing and the band/point highlight are untouched" contract.
       if (opts.showPills !== false) {
         const valid = (rectsByCat.get(category) ?? [])
+          .filter((rect) => !opts.pillFilter || opts.pillFilter(category, rect.series))
           .map((rect) => ({ rect, v: vals.get(rect.series) }))
           .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
         for (const x of valid) {
@@ -3098,6 +3102,7 @@ export function attachSecondaryBandCursor(
       }
     }
     const valid = (rectsByCat.get(category) ?? [])
+      .filter((rect) => !opts.pillFilter || opts.pillFilter(category, rect.series))
       .map((rect) => ({ rect, v: vals?.get(rect.series) }))
       .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
     // Pill color: prefer the bar's ACTUAL rendered fill (category_colors/bar_color/mono/dim),
@@ -3644,6 +3649,9 @@ export interface HighlightPillsOptions {
    *  category's net dot (below the dot, flipping above when space is tight). Absent/false → the
    *  Total selection draws nothing (it has no rect to pin to). */
   hasNetDots?: boolean;
+  /** Temporary `MountOptions.pillGranularity: "segment"` A/B gate: when set, a value pill is drawn
+   *  only for a (category, series) it returns true for. Absent → every segment (current behaviour). */
+  pillFilter?: (category: string, series: string) => boolean;
 }
 
 export interface HighlightPillsHandle {
@@ -3784,6 +3792,7 @@ export function attachHighlightPills(
       const vals = valByCat.get(category);
       const valid = rects
         .filter((r) => active.has(r.series))
+        .filter((r) => !opts.pillFilter || opts.pillFilter(category, r.series))
         .map((rect) => ({ rect, v: vals?.get(rect.series) }))
         .filter((x) => x.v != null && !Number.isNaN(x.v)) as Array<{ rect: CatRect; v: number }>;
       if (!valid.length) continue;

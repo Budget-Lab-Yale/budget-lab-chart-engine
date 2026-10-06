@@ -154,6 +154,8 @@ export function stackedSegmentLabelsShown(
  *    The cost it adds is a band state nobody has published or reviewed.
  *  - it needs the SET of refused segments to reach the pill driver plus a second gate inside it —
  *    two more places for the paint and the pill to disagree, against this one boolean.
+ * That finer rule is being re-evaluated as the temporary `MountOptions.pillGranularity: "segment"`
+ * A/B mode (engine/render-live.ts); the default here is unchanged.
  * Where all the labels do fit, the coarse rule keeps afc61bf's behaviour exactly; where they do not,
  * it falls back to the pre-afc61bf behaviour (pills on), which is what the published archive shipped.
  */

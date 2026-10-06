@@ -281,6 +281,10 @@ export interface MarkLayers {
    *  the threshold lives in exactly one place and only the builder can see the frame geometry it
    *  needs. Absent ⇒ no segment labels were attempted (not a stacked chart, or they were gated off). */
   segmentLabelsDropped?: boolean;
+  /** Stacked bars: WHICH segments' labels the builder refused (the set behind
+   *  `segmentLabelsDropped`). Read only by the temporary `MountOptions.pillGranularity: "segment"`
+   *  A/B mode. Absent under the same conditions as `segmentLabelsDropped`. */
+  segmentLabelsRefused?: Array<{ category: string; series: string }>;
 }
 
 export type MarkBuilder = (data: PreparedRow[], spec: ChartSpec, ctx: MarkContext) => MarkLayers;
