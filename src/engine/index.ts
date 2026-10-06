@@ -884,22 +884,25 @@ function assemblePaneResult(
       ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
       ...overlayColumnYs,
     ].filter(Number.isFinite);
+    // The floor is the stacked NEGATIVE extent: negatives stack down from 0 on their own, so two
+    // negatives at one x reach their sum, not the lower of the two (Ruling 72).
     const totalByX = new Map<string, number>();
-    let minVal = 0;
+    const negByX = new Map<string, number>();
     for (const r of dataInScope) {
       if (!Number.isFinite(r._y as number)) continue;
       const k = r.time || String(r._xn ?? r._xc ?? "");
       totalByX.set(k, (totalByX.get(k) ?? 0) + (r._y as number));
-      if ((r._y as number) < minVal) minVal = r._y as number;
+      if ((r._y as number) < 0) negByX.set(k, (negByX.get(k) ?? 0) + (r._y as number));
     }
     const stackMax = totalByX.size ? Math.max(...totalByX.values()) : 0;
+    const stackMin = negByX.size ? Math.min(...negByX.values()) : 0;
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
       tickCount,
       // Areas fill from 0, so the baseline is on the axis whatever the sign of the stack: an
       // all-negative area's ceiling is 0 (Ruling 70), as a bar's or a stack's is.
-      auto: { min: Math.min(0, minVal), max: Math.max(0, stackMax) },
+      auto: { min: Math.min(0, stackMin), max: Math.max(0, stackMax) },
       fold: markerYs,
     });
   } else {

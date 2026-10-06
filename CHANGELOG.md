@@ -152,6 +152,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   only.
 - An `area` chart whose stack is negative at every x drew no 0 baseline: the value axis stopped at
   the stack's top (-5, say), though areas fill from 0. Its ceiling is now 0, as on bars and stacks.
+- An `area` chart's value-axis floor was its lowest single value, though negatives stack down from
+  0, so two negative series at one x (-20 and -11) got a floor of -20 and the stack's bottom (-31)
+  was clipped. The floor is now the stacked negative extent. Live and in the PNG.
 - Small multiples of a horizontal dumbbell now share one category-label column, sized to the
   longest label in any pane up to the 240px gutter cap (longer labels wrap), and every pane shows
   its own labels. In the default `shared` mode every
@@ -257,6 +260,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **An all-negative `area` chart's value axis now reaches 0.** **No published figure is affected**:
   there is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree.
   No golden moves.
+- **An `area` chart with two or more negative values at one x gets a lower floor**, at their stacked
+  sum. **No published figure is affected**: there is no `area` chart in the archive, on the
+  `pr67-spec-fixes` branch or in its working tree. No golden moves.
 - **Faceted horizontal dumbbells share one category-label column** (live and PNG). **No published
   figure is affected**: the archive has no dumbbell, and the one on the unpublished
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not
