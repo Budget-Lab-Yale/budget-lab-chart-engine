@@ -74,15 +74,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   name, on every chart type and in tables. No published figure uses such a name.
 - A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
   `series_order`, matching every other chart type.
-- Timeline and treemap text in scripts Figtree lacks no longer runs past its column or tile in the
-  fallback fonts measured (Arial, Segoe UI, Liberation Sans, DejaVu Sans, Noto Sans, FreeSans,
-  Source Sans 3, Roboto; Unifont for other scripts; macOS fonts not measured): a Cyrillic or Greek
-  letter measures at its widest advance among them, any other such script at an em or more a code
-  point. A line now breaks only between graphemes, the same way in every runtime, so a flag,
-  skin-toned, keycap or ZWJ emoji or an accented letter stays whole. Emoji joiners, variation
-  selectors, tag characters and keycap marks now measure nothing (a keycap 1.4em, was 1.7em; a
-  Scotland flag 1.4em, was 9.8em); flags and skin-toned emoji still measure 2.8em. ◽ ◾ measure as
-  emoji. Latin text measures as before; no published figure is a timeline or treemap.
+- Timeline and treemap text in scripts Figtree lacks measures wider, so it runs past its column or
+  tile far less often. A Cyrillic or Greek letter (Cyrillic Extended-B included) measures at its
+  widest advance among Arial, Segoe UI, Liberation Sans, DejaVu Sans, Noto Sans, FreeSans, Source
+  Sans 3 and Roboto; at weight 500 on Windows, Chromium draws Segoe UI's semibold face, up to 0.7%
+  wider for common letters and 9% for rare ones. Any other such script measures an em a code point
+  (Unifont's width; 1.08em at weight 700). That is not a bound: on Windows some single Tamil,
+  Malayalam and Myanmar letters draw at 2–2.7em, so a word dense in them can still run past. macOS
+  fonts were not measured. A line now breaks only between graphemes, the same way in every
+  runtime, so a flag, skin-toned, keycap or ZWJ emoji or an accented letter stays whole. Emoji
+  joiners, variation selectors, tag characters and keycap marks now measure nothing (a keycap
+  1.4em, was 1.7em; a Scotland flag 1.4em, was 9.8em); flags, skin-toned emoji and ZWJ sequences
+  measure 1.4em per part (a flag 2.8em, as before). ◽ ◾ measure as emoji. Latin text, Latin
+  Extended-E (U+AB30–AB6F) included, measures as in 1.15.0; no published figure is a timeline or
+  treemap.
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,
   the chart stayed squeezed beside the old right column with a second legend drawn on top; widened
   again, the redraw threw `NotFoundError` and stopped partway. The column is now taken down when the
