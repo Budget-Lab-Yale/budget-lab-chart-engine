@@ -106,9 +106,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   missing a series, or meeting its series in another order with no `series_order`, drew a series
   with another series' marker. The coordinated cursor's hover dot follows, and so does the hover
   card's key for a series the legend has no row for (`series_legend: false`, `legend: false`, or a
-  figure drawing one series). Live and in the PNG. With a duplicated `series_order` or `shape_order`
-  entry, a pane still draws each value with its first entry's marker, and the legend still keeps one
-  row per entry, numbered by position, as before.
+  figure drawing one series). Live and in the PNG.
 - A small-multiples `scatter` or `dotplot` whose `columns.shape` is its own column (not the series)
   now draws each shape with the marker the figure's shape legend keys it with, in every pane, and the
   shape legend lists every shape a pane draws. Each pane numbered symbols by its own shapes, even

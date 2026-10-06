@@ -34,7 +34,7 @@ import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolsForRows } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
 import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
@@ -1177,7 +1177,7 @@ export function buildSeriesKeyRows(
    *  silently fall back to the colour map, which is the bug. */
   paintedColors: Map<string, string>,
   /** Small multiples: the FIGURE's series list, which numbers the per-series markers as the panes'
-   *  marks and the figure legend do (theme.ts markerSymbolsForRows). A pane's key rows fill the
+   *  marks and the figure legend do (theme.ts markerSymbolForSeries). A pane's key rows fill the
    *  hover card for a series the figure legend has no row for, so indexing the pane's own list there
    *  keyed a different marker from the one drawn. Absent (a single chart) → the row's own index. */
   symbolOrder?: readonly string[],
@@ -1188,7 +1188,6 @@ export function buildSeriesKeyRows(
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
     paintedColors.get(name) ?? layers.seriesColors?.get(name) ?? colors.get(name);
-  const rowSymbols = markerSymbolsForRows(seriesNames, symbolOrder);
 
 
   let items: LegendItem[];
@@ -1211,7 +1210,7 @@ export function buildSeriesKeyRows(
         dashed: false,
       };
       if (layers.shapeIsSeries) {
-        return { ...base, markerShape: "point" as const, markerSymbol: rowSymbols[i]! };
+        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForSeries(name, i, symbolOrder) };
       }
       if (distinctShape) {
         return { ...base, markerShape: "chip" as const };
@@ -1253,7 +1252,7 @@ export function buildSeriesKeyRows(
       color: legendColorFor(name),
       dashed: ownValue(spec.series_styles, name)?.dashed === true,
       markerShape,
-      ...(withSymbols ? { markerSymbol: rowSymbols[i]! } : {}),
+      ...(withSymbols ? { markerSymbol: markerSymbolForSeries(name, i, symbolOrder) } : {}),
     }));
   }
 
@@ -1352,11 +1351,10 @@ export function buildShapeLegendItems(
 ): ShapeLegendItem[] | null {
   if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
-  const rowSymbols = markerSymbolsForRows(layers.shapeNames, symbolOrder);
   return layers.shapeNames.map((shape, i) => ({
     shape,
     label: ownValue(spec.shape_labels, shape) ?? shape,
-    markerSymbol: rowSymbols[i]!,
+    markerSymbol: markerSymbolForSeries(shape, i, symbolOrder),
   }));
 }
 

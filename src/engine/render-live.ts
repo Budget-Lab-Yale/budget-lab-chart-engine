@@ -62,7 +62,7 @@ import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
-import { TBL, markerSymbolsForRows } from "./theme.js";
+import { TBL, markerSymbolForSeries } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
 
 const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
@@ -2008,13 +2008,6 @@ export function buildFigureHeader(
   };
 }
 
-/** Series → its hover-dot marker in a figure pane: `seriesOrder` (the pane's list) numbered by the
- *  figure's (`symbolSeries`) row by row, so a later duplicate overwrites as it did pre-F12. */
-function seriesSymbolMap(seriesOrder: string[], symbolSeries: string[] | undefined): Map<string, string> {
-  const syms = markerSymbolsForRows(seriesOrder, symbolSeries);
-  return new Map(seriesOrder.map((s, i) => [s, syms[i]!] as const));
-}
-
 /** Wire the crosshair + two-way selection onto one figure SVG (shared combined SVG or a
  *  per-pane mini-SVG). Dispatches the crosshair by `spec.xAxisType`:
  *   - continuous (line): `attachCrosshair` + the fat line hit-paths (thin strokes are hard to
@@ -2148,16 +2141,14 @@ function wireFigureSvg(
   // from axis-label centers (points have no rects). The marker dots take each series' symbol.
   if (ctx.spec.chartType === "dotplot") {
     const dotUseCoord = ctx.onResolve != null;
-    // A separate shape column: each hover dot draws the marker of the point it sits on, that point's
-    // own shape as Plot's symbol scale draws it (the k-th DISTINCT domain value takes range[k]). A
-    // series-keyed map was wrong there, since a shape can change between categories within one
-    // series. Shape = series: the series' marker, numbered as the line chart's hover dots and the key
-    // rows are. No shape channel: every point is a circle, and so is every dot.
-    const symbols = ctx.symbolScale && ctx.shapeIsSeries ? seriesSymbolMap(ctx.seriesOrder, ctx.symbolSeries) : undefined;
+    // Each hover dot draws the marker of the point it sits on: that point's own shape through this
+    // pane's symbol scale. A series-keyed map was wrong whenever shape is its own column (and a
+    // shape can change between categories within one series). No shape channel: every point is a
+    // circle, and so is every dot.
     let pointSymbols: Map<string, Map<string, string>> | undefined;
-    if (ctx.symbolScale && !ctx.shapeIsSeries) {
+    if (ctx.symbolScale) {
       const scale = ctx.symbolScale;
-      const symbolOf = new Map([...new Set(scale.domain)].map((d, k) => [d, scale.range[k]!] as const));
+      const symbolOf = new Map(scale.domain.map((d, i) => [d, scale.range[i]!] as const));
       pointSymbols = new Map();
       for (const r of ctx.pointOrder ?? []) {
         const sym = symbolOf.get(r._shape ?? "");
@@ -2204,7 +2195,6 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        ...(symbols ? { symbols } : {}),
         ...(pointSymbols ? { pointSymbols } : {}),
         bandHighlight: true,
         centersFromMarks: true,
@@ -2239,10 +2229,10 @@ function wireFigureSvg(
   const horizontal = ctx.spec.orientation === "horizontal";
   const useCoord = ctx.onResolve != null;
   // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
-  // match the static marker. Numbered by the figure's list, as the pane's key rows and the figure
-  // legend are (theme.ts markerSymbolsForRows).
+  // match the static marker. Keyed by the series' position in the figure's list, as the pane's
+  // symbol scale (marks/line.ts) and the figure legend are.
   const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
-    ? seriesSymbolMap(ctx.seriesOrder, ctx.symbolSeries)
+    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForSeries(s, i, ctx.symbolSeries)] as const))
     : undefined;
   // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the

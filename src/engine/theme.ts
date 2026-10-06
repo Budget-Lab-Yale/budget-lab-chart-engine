@@ -86,44 +86,13 @@ export function markerSymbolForIndex(i: number): string {
   return MARKER_SYMBOLS[((i % MARKER_SYMBOLS.length) + MARKER_SYMBOLS.length) % MARKER_SYMBOLS.length]!;
 }
 
-/** The marker symbol of each row of `names`, a list built row by row (a legend, the key rows, a
- *  hover map). Small multiples pass the FIGURE's list as `order` (RenderOptions.paletteSeries /
- *  paletteShapes), the one the figure legend keys markers by: the n-th row naming a value takes the
- *  position of the n-th entry naming it in `order`. A pane lacking a value, or meeting its values in
- *  another order, so numbers them as the legend does; a pane holding the whole list numbers each row
- *  as it numbered its own before, a duplicated `series_order`/`shape_order` entry included (Ruling
- *  65). A value `order` does not name keeps its row index; absent `order` (a single chart), every
- *  row does. */
-export function markerSymbolsForRows(names: readonly string[], order?: readonly string[]): string[] {
-  if (!order) return names.map((_, i) => markerSymbolForIndex(i));
-  const positions = new Map<string, number[]>();
-  order.forEach((v, j) => (positions.get(v) ?? positions.set(v, []).get(v)!).push(j));
-  const seen = new Map<string, number>();
-  return names.map((name, i) => {
-    const nth = seen.get(name) ?? 0;
-    seen.set(name, nth + 1);
-    const at = positions.get(name);
-    return markerSymbolForIndex(at ? (at[nth] ?? at[0]!) : i);
-  });
-}
-
-/** The range of Plot's ordinal symbol scale over `domain`, the pane's own list. Plot keeps a value's
- *  FIRST occurrence and pairs the k-th DISTINCT value with `range[k]`, so the first entries are what
- *  is drawn: each distinct value takes its position among the distinct values of `order`, which is
- *  the same in every pane. The entries past them are read only by the hover maps built from domain
- *  and range row by row (a later duplicate overwrites), so they keep `markerSymbolsForRows`'
- *  numbering. A pane holding the figure's whole list gets the range it built before F12, duplicates
- *  included; absent `order` (a single chart), the range is numbered by row as it always was. */
-export function markerSymbolRange(domain: readonly string[], order?: readonly string[]): string[] {
-  const byRow = markerSymbolsForRows(domain, order);
-  if (!order) return byRow;
-  const distinct = [...new Set(domain)];
-  const distinctOrder = [...new Set(order)];
-  return byRow.map((sym, k) => {
-    if (k >= distinct.length) return sym;
-    const at = distinctOrder.indexOf(distinct[k]!);
-    return markerSymbolForIndex(at >= 0 ? at : k);
-  });
+/** The marker symbol for `series`, at its position in `order` when `order` names it, else at `i`.
+ *  Small multiples pass the FIGURE's series list (RenderOptions.paletteSeries), which is the list the
+ *  figure legend keys markers by; a pane's own list would key a pane that lacks a series, or meets
+ *  its series in another order, differently from the legend. Absent (a single chart) → `i`. */
+export function markerSymbolForSeries(series: string, i: number, order?: readonly string[]): string {
+  const at = order ? order.indexOf(series) : -1;
+  return markerSymbolForIndex(at >= 0 ? at : i);
 }
 
 // Callout number labels — the single shared style for per-bar VALUE labels (grouped/single
