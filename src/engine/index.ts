@@ -765,6 +765,21 @@ function assemblePaneResult(
   const tickCount = policy.tickCount ?? 5;
   const chartType = spec.chartType;
 
+  // A LONE pinned bound (`min` or `max`, the other unset) pins only its own end. The branches that
+  // have no extent of their own fill the open end with what computeYAxis fits from `yForAxis` when
+  // given no domain: the extent, widened to 0 under includeZero. Without it resolveHardDomain
+  // returned null and the lone bound was silently dropped. Undefined when the values hold nothing
+  // finite, which keeps the axis on computeYAxis' own fallback.
+  const loneBound = (policy.min == null) !== (policy.max == null);
+  const fittedOpenEnd = (zero: boolean): { auto?: { min: number; max: number } } => {
+    if (!loneBound) return {};
+    const nums = yForAxis.map((v) => +(v as number)).filter(Number.isFinite);
+    if (!nums.length) return {};
+    const lo = Math.min(...nums);
+    const hi = Math.max(...nums);
+    return { auto: zero ? { min: Math.min(0, lo), max: Math.max(0, hi) } : { min: lo, max: hi } };
+  };
+
   let hardDomain: [number, number] | null;
   let includeZero: boolean;
 
@@ -805,10 +820,10 @@ function assemblePaneResult(
     });
   } else if (chartType === "histogram") {
     // Histogram: the value axis is the (possibly normalized) bin height `_y`, which yForAxis
-    // already carries. Zero baseline is mandatory (bars grow from 0); an explicit min+max opts
-    // into a fixed domain, otherwise auto-fit-from-zero.
+    // already carries. Zero baseline by default (bars grow from 0); a pinned min/max sets its own
+    // end, and a lone one leaves the other auto-fitted from zero.
     includeZero = true;
-    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max });
+    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max, ...fittedOpenEnd(true) });
   } else if (chartType === "waterfall") {
     // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
     // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
@@ -871,7 +886,7 @@ function assemblePaneResult(
         }
       }
     }
-    hardDomain = resolveHardDomain({ min: policy.min, max: yMax });
+    hardDomain = resolveHardDomain({ min: policy.min, max: yMax, ...fittedOpenEnd(includeZero) });
   }
 
   // Shared-mode small multiples: opts.yDomain is the ONE domain the orchestrator computed over

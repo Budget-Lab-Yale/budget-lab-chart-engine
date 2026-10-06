@@ -134,6 +134,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A dumbbell (connected dot plot) ignored `yAxisPolicy.includeZero: true`; it now extends the
   fitted value axis to 0, standalone and in small multiples. A pinned `min` or `max` still sets its
   own end. Omitted, the axis stays fitted to the dots as before.
+- A lone `yAxisPolicy.min` or `max` (the other unset) was ignored on `line`, `scatter`, `dotplot`
+  and `histogram` charts, which auto-fitted the whole axis; CONFIG-SPEC calls them a hard floor and
+  ceiling. It now pins its own end and the other end stays fitted, as bars, stacks, areas,
+  waterfalls and dumbbells already did. `autoWiden` now acts on a lone `max` there too, and
+  `includeZero` extends only an unpinned end. Standalone, small multiples and the PNG. CONFIG-SPEC's
+  `min`, `max` and `includeZero` rows now say so.
 - Small multiples of a horizontal dumbbell now share one category-label column, sized to the
   longest label in any pane up to the 240px gutter cap (longer labels wrap), and every pane shows
   its own labels. In the default `shared` mode every
@@ -219,6 +225,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   **No published figure is affected**: the archive has no dumbbell, and the one on the unpublished
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, does not set `includeZero` (it pins
   `min: 0`). No golden moves.
+- **A lone `yAxisPolicy.min` or `max` on a line, scatter, dot plot or histogram now pins its end.**
+  **No published figure is affected**: every `yAxisPolicy` among the 47 archived specs sets both
+  `min` and `max` or neither, and the one lone bound on the unpublished `pr67-spec-fixes` branch
+  (`effective-tax-rates-top-groups`, `min: 0`) is a dumbbell, which already honoured it. No golden
+  moves.
 - **Faceted horizontal dumbbells share one category-label column** (live and PNG). **No published
   figure is affected**: the archive has no dumbbell, and the one on the unpublished
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not
