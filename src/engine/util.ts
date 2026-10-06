@@ -1,5 +1,21 @@
-import type { ValueAffixes } from "../spec/types";
+import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
+
+/** `spec` with each repeated `series_order` / `shape_order` entry dropped, the first kept. A repeat is
+ *  an author error that validation rejects (Ruling 66), but renderChart does not validate, so every
+ *  public entry point (renderChart, renderFigure, mountChart, buildExportSvg) runs this first: the
+ *  legend, marks, key rows, hover maps, palette, marker index and a horizontal bar's height all read
+ *  one list. A spec with no repeat is returned as is, the same object. */
+export function withoutRepeatedOrderEntries(spec: ChartSpec): ChartSpec {
+  let out: ChartSpec | undefined;
+  for (const field of ["series_order", "shape_order"] as const) {
+    const list = spec[field];
+    if (!list) continue;
+    const unique = [...new Set(list)];
+    if (unique.length !== list.length) (out ??= { ...spec })[field] = unique;
+  }
+  return out ?? spec;
+}
 
 /** HTML-escape a value for safe interpolation into innerHTML (tooltip/legend). */
 export function escapeHtml(s: unknown): string {

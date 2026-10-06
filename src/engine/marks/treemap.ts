@@ -143,9 +143,7 @@ function treemapGroups(spec: ChartSpec, data: TreemapDatum[]): {
   // Hue order: series_order's present groups first, then the rest by first appearance.
   const appearance: string[] = [];
   for (const d of data) if (d.group !== null && !appearance.includes(d.group)) appearance.push(d.group);
-  // Deduplicated, first occurrence winning (Ruling 43): a repeated entry would otherwise take a hue
-  // and a legend row of its own.
-  const listed = [...new Set(spec.series_order ?? [])].filter((g) => appearance.includes(g));
+  const listed = (spec.series_order ?? []).filter((g) => appearance.includes(g));
   const groupNames = grouped ? [...listed, ...appearance.filter((g) => !listed.includes(g))] : [];
   const colors = buildColorMap(groupNames, spec.series_colors);
   const keyRows: LegendItem[] = groupNames.map((g) => ({

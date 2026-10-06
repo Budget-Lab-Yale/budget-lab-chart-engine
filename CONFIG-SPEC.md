@@ -208,7 +208,7 @@ The series **column** is set via `columns.series`. These options reference the s
 
 | field | type | notes |
 |---|---|---|
-| `series_order` | array | Render order. **Also an inclusion filter** — when it lists at least one series, only listed series render (an empty `series_order: []` filters nothing). For stacked charts (bar/area) it is also the bottom→top stack order. **A treemap is the exception:** there it neither filters nor orders the layout — every group draws, largest first — and only sets the groups' hue order and breaks ties between equal group totals (see [Treemap options](#treemap-options)). |
+| `series_order` | array | Render order. **Also an inclusion filter** — when it lists at least one series, only listed series render (an empty `series_order: []` filters nothing). For stacked charts (bar/area) it is also the bottom→top stack order. **A treemap is the exception:** there it neither filters nor orders the layout — every group draws, largest first — and only sets the groups' hue order and breaks ties between equal group totals (see [Treemap options](#treemap-options)). Entries must be unique: a series listed twice is a validation error naming it. |
 | `series_colors` | object | `{ <seriesKey>: color }`. Overrides palette assignment. `color` is a named color or raw `"#hex"` (see [Colors](#colors)). On a treemap the key is a group, and the colour picks that group's hue family or, off the hue ramps, fills its tiles as written (see [Treemap options](#treemap-options)). |
 | `series_patterns` | object | `{ <seriesKey>: hatch }` — a **texture** for the series' fill, alongside its color. Filled chart types only (`bar`, `stacked`, `area`, `histogram`, `waterfall`); rejected elsewhere. See [Series textures](#series-textures). |
 | `series_styles` | object | `{ <seriesKey>: { dashed: true } }`. `dashed` is currently the only flag. |
@@ -609,7 +609,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 
 | field | type | notes |
 |---|---|---|
-| `shape_order` | array | Shape render order; also an inclusion filter. |
+| `shape_order` | array | Shape render order; also an inclusion filter. Entries must be unique: a shape listed twice is a validation error naming it. |
 | `shape_labels` | object | `{ <shapeKey>: "Display label" }` for the shape legend. |
 | `color_legend_title` | string | Heading above the color (series) legend group. |
 | `shape_legend_title` | string | Heading above the shape legend group. |

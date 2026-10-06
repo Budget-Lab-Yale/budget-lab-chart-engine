@@ -70,7 +70,7 @@ describe("a single-series diverging stack: no net dot, no Total row", () => {
     ["horizontal", { ...STACKED, orientation: "horizontal" } as ChartSpec, ONE],
     // series_order is an inclusion filter: listing one of two series leaves a one-series chart.
     ["series_order filtering two series to one", { ...STACKED, series_order: ["A"] } as ChartSpec, TWO],
-    // A duplicated entry is accepted and renders one series; the count is of DISTINCT series.
+    // A repeated entry fails validation; renderChart (which does not validate) drops it.
     ["series_order naming the one series twice", { ...STACKED, series_order: ["A", "A"] } as ChartSpec, ONE],
     // Ruling 49: an explicit dot on ALL-POSITIVE single-series data is not drawn either.
     ["explicit netDisplay: dot on all-positive data", { ...STACKED, barStack: { netDisplay: "dot" } } as ChartSpec,
@@ -82,7 +82,7 @@ describe("a single-series diverging stack: no net dot, no Total row", () => {
       // Precondition: the bars are drawn, so "no dot" is not "nothing rendered".
       expect(r.svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(2);
       expect(r.svg.querySelectorAll(NET_DOTS)).toHaveLength(0);
-      // No Total row. (A duplicated series_order entry keeps its accepted duplicate series row.)
+      // No Total row.
       expect((r.legendItems ?? []).map((i) => i.series)).not.toContain(TOTAL_SERIES_KEY);
 
       const host = mount(spec, rows);

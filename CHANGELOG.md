@@ -45,6 +45,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   quarterly axis (`annotations` markers, bands and callouts, the legacy `xAxisPolicy` ones,
   `shading` bounds) against the grammar. Every published figure was scanned and re-rendered before
   and after: none is rejected and none changes.
+- A `series_order` or `shape_order` that lists a value twice is now a validation error naming the
+  field and the value (`/series_order: "M" appears more than once`), on every chart type.
+  `renderChart`, which does not validate, drops the repeat and keeps the first entry, so such a spec
+  renders as the list without it, live and in the PNG. Before, the marks took the first entry while
+  the legend, key rows, hover markers, colours and a horizontal bar's height counted the repeat, so
+  they disagreed.
 
 ### Fixed
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
@@ -87,8 +93,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `netDisplay` resolves to a dot (by default, any negative value; an explicit `dot` included): with
   one series each bar's net is its own end. Its hover card, which already omitted the Total row, is
   unchanged, and it still paints no segment labels. A small-multiples figure counts the distinct
-  series in the panes it draws, not a pane's, and a series named twice in `series_order` counts
-  once. With no legend rows left, its defaulted right legend takes no column.
+  series in the panes it draws, not a pane's. With no legend rows left, its defaulted right legend
+  takes no column.
 - A faceted area chart whose pane hovers with a card (a facet resolving to one pane, or
   `small_multiples.coordinated_cursor: false`) now shows the card's cumulative Total row, as
   CONFIG-SPEC promised and a standalone area chart already did. Hover only.
@@ -175,6 +181,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   channel, the dot plot's hover dot): no archived faceted spec has a separate shape channel (the two
   that do, ai-fiscal's `revenue-vs-factor-income` and `revenue-vs-pretax-income`, are standalone),
   and `inequality-gini`'s hover dots are unchanged.
+- **A spec that lists a value twice in `series_order` or `shape_order` now fails `tbl-chart
+  validate`**; remove the repeat. Embedders calling `renderChart` directly get the list without the
+  repeat instead. **No published figure is affected**: none of the 47 archived specs repeats an
+  entry. No golden moves.
 - **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
   under Changed). Specs that pass `tbl-chart validate` are unaffected.
 

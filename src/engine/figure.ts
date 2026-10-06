@@ -18,7 +18,7 @@ import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
-import { resolveValueAffixes } from "./util";
+import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
@@ -367,6 +367,7 @@ export function renderFigure(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): FigureRenderResult {
+  spec = withoutRepeatedOrderEntries(spec);
   const sm = spec.small_multiples;
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
@@ -533,7 +534,7 @@ export function renderFigure(
 
   // How many DISTINCT series the figure draws: rows in a drawn pane, through series_order's filter.
   // The stacked net dot needs two (spec/bar-stack.ts drawsNetDots). Not `figureSeries.length`, which
-  // also counts series found only in panes pane_order leaves out, and a duplicated series_order entry.
+  // also counts series found only in panes pane_order leaves out.
   const drawnPanes = new Set(paneValues);
   const drawnSeries = new Set<string>();
   for (const r of rows) {

@@ -37,8 +37,14 @@ export interface ValidationResult {
 const ajv = new Ajv({ allErrors: true });
 const validateStructural = ajv.compile(CHART_SPEC_SCHEMA);
 
-function formatAjvError(e: ErrorObject): string {
+function formatAjvError(e: ErrorObject, spec: unknown): string {
   const path = e.instancePath || "(root)";
+  if (e.keyword === "uniqueItems") {
+    // Name the value, not ajv's item indexes: `/series_order: "M" appears more than once`.
+    const list = e.instancePath.split("/").slice(1).reduce<unknown>((node, key) => (node as Record<string, unknown> | undefined)?.[key], spec);
+    const repeated = Array.isArray(list) ? list[e.params.i as number] : undefined;
+    return `${path}: ${JSON.stringify(repeated)} appears more than once`;
+  }
   if (e.keyword === "additionalProperties") {
     return `${path}: unknown property "${e.params.additionalProperty}" (check for a typo)`;
   }
@@ -870,7 +876,7 @@ function treemapSpecErrors(spec: Record<string, unknown>): string[] {
 export function validateSpec(spec: unknown): ValidationResult {
   const ok = validateStructural(spec);
   if (!ok) {
-    const errors = (validateStructural.errors ?? []).map(formatAjvError);
+    const errors = (validateStructural.errors ?? []).map((e) => formatAjvError(e, spec));
     return { valid: false, errors };
   }
   // First, so a timeline's rejected fields report as such instead of tripping a chart-type rule

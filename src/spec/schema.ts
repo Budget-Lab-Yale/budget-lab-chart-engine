@@ -417,7 +417,8 @@ export const CHART_SPEC_SCHEMA = {
     annotations: ANNOTATIONS,
 
     // Series (the series COLUMN is mapped via `columns.series`)
-    series_order: { type: "array", items: { type: "string" } },
+    // A repeated entry is an author error (validate.ts formats the message naming the value).
+    series_order: { type: "array", items: { type: "string" }, uniqueItems: true },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
     // A closed enum, so an unrecognised hatch (including a matplotlib density repeat like "//")
     // fails at load rather than silently rendering a flat fill.
@@ -445,7 +446,7 @@ export const CHART_SPEC_SCHEMA = {
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 
     // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
-    shape_order: { type: "array", items: { type: "string" } },
+    shape_order: { type: "array", items: { type: "string" }, uniqueItems: true },
     shape_labels: { type: "object", additionalProperties: { type: "string" } },
     color_legend_title: { type: "string" },
     shape_legend_title: { type: "string" },

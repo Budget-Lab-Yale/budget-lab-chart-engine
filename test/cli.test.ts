@@ -122,6 +122,25 @@ describe("runValidate — series_order names missing series", () => {
   });
 });
 
+describe("runValidate — series_order lists a series twice", () => {
+  it("returns exitCode 1 and names the field and the repeated series", async () => {
+    const dir = join(tmpdir(), `cli-test-series-dup-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, "time,series,value\n2021-01-01,a,1.0\n2021-01-01,b,2.0\n", "utf8");
+    writeFileSync(
+      specPath,
+      ["chartType: line", "title: Test", "xAxisType: temporal", "data: data.csv", "series_order: [a, b, a]"].join("\n") + "\n",
+      "utf8",
+    );
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toBe(`${specPath}: /series_order: "a" appears more than once`);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // validate: timeline warnings
 // ---------------------------------------------------------------------------

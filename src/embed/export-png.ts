@@ -6,6 +6,7 @@ import type { RenderHooks } from "../spec/hooks.js";
 import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
+import { withoutRepeatedOrderEntries } from "../engine/util.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
@@ -341,6 +342,7 @@ export function buildExportSvg(
   rows: TidyRow[],
   opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): SVGSVGElement {
+  spec = withoutRepeatedOrderEntries(spec);
   const isFigure = spec.small_multiples != null;
   const isSingleHorizontalBar =
     !isFigure && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";

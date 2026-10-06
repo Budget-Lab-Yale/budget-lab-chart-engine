@@ -161,10 +161,9 @@ export function buildStackedMarks(
       : {};
 
   const netMode = resolveNetMode(spec, hasNegatives);
-  // The dot and its legend row need a second series to net; see drawsNetDots. DISTINCT series (a
-  // duplicated series_order entry lists one twice), counted over the whole chart (a figure's panes
-  // can each hold fewer), so every pane and the figure legend agree.
-  const netDots = drawsNetDots(netMode, ctx.chartSeriesCount ?? new Set(seriesNames).size);
+  // The dot and its legend row need a second series to net; see drawsNetDots. Counted over the whole
+  // chart (a figure's panes can each hold fewer), so every pane and the figure legend agree.
+  const netDots = drawsNetDots(netMode, ctx.chartSeriesCount ?? seriesNames.length);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data

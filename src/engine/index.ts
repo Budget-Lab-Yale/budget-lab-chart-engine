@@ -35,7 +35,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
-import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
+import { resolveValueAffixes, isTruthyFlag, formatNumericX, withoutRepeatedOrderEntries } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
@@ -1363,6 +1363,7 @@ export function renderChart(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): RenderResult {
+  spec = withoutRepeatedOrderEntries(spec);
   // Timeline draws its own SVG (no Plot frame, no value axis): branch before renderPane so no
   // existing chart type's path runs any timeline code.
   if (spec.chartType === "timeline") return renderTimeline(spec, rows, opts);

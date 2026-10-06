@@ -34,7 +34,7 @@ import { treemapHeight } from "./marks/treemap.js";
 import { TM_GEOM } from "./treemap-layout.js";
 import { attachTreemapHover } from "./treemap-hover.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { applyValueAffixes, formatNumericX } from "./util.js";
+import { applyValueAffixes, formatNumericX, withoutRepeatedOrderEntries } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
@@ -808,6 +808,8 @@ function sectionOrderedCategories(spec: ChartSpec, rows: PreparedRow[], cats: st
 }
 
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
+  const unique = withoutRepeatedOrderEntries(opts.spec);
+  if (unique !== opts.spec) opts = { ...opts, spec: unique };
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
   if (opts.spec.small_multiples) return mountFigure(container, opts);
