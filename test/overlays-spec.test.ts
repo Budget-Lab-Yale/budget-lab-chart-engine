@@ -114,10 +114,15 @@ describe("overlays — field applicability", () => {
 
   it("bounds ci to (0, 0.999], naming the field", () => {
     const m = { method: "lm" };
-    for (const ci of [0.9991, 0.99999, 1, 1.5, 0, -0.1]) {
+    for (const ci of [0.9991, 0.99999, 1, 1.5]) {
       const r = check([{ ...m, ci }]);
       expect(r.valid, `ci ${ci}`).toBe(false);
-      expect(err(r), `ci ${ci}`).toMatch(/ci/);
+      expect(err(r), `ci ${ci}`).toBe("/overlays/0/ci: must be <= 0.999");
+    }
+    for (const ci of [0, -0.1]) {
+      const r = check([{ ...m, ci }]);
+      expect(r.valid, `ci ${ci}`).toBe(false);
+      expect(err(r), `ci ${ci}`).toBe("/overlays/0/ci: must be > 0");
     }
     for (const ci of [0.001, 0.95, 0.999]) expect(check([{ ...m, ci }]).valid, `ci ${ci}`).toBe(true);
   });

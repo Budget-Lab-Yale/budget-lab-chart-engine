@@ -6,19 +6,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
-### Changed
-- `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error naming `ci`.
-  Near 1 the t-quantile is numerically meaningless. No published figure uses one.
-- One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
-  `renderChart` with a malformed date now get an error** naming the value, instead of a silently
-  wrong x: `2024Q5` rolled into 2025Q1, `2024-13-01` into January 2025, `March 1, 2024` (or any
-  other spelling) was read by JavaScript's `Date`, and a malformed timeline `end` cell drew its event
-  as a point. Validation also tightens: it now rejects a day
-  the month does not have (`2024-02-30`, which it passed before), and checks every spec-side x
-  coordinate on a temporal or quarterly axis (`annotations` markers, bands and callouts, the legacy
-  `xAxisPolicy` ones, `shading` bounds) against the grammar. Every published figure was scanned and
-  re-rendered before and after: none is rejected and none changes.
-
 ### Added
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tile
@@ -46,40 +33,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   export width, or more than seven groups without `series_colors`. The `treemap:` block is rejected
   on every other chart type, so no existing spec changes. See CONFIG-SPEC "Treemap options".
 
-### Docs
-- CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
-  small-multiples pane) never used it; the pill takes the running-total labels' precision
-  (`valueLabels.decimals`, else what the data needs). A waterfall pane with a card does use it.
-- CONFIG-SPEC `series_order`: an empty `series_order: []` filters nothing.
-- CONFIG-SPEC: statements of when a small-multiples pane hovers with a card instead of the
-  coordinated cursor were wider than the code. `small_multiples.coordinated_cursor` now names the
-  cases that never coordinate (a scatter, a `per-pane` histogram, a single pane of any type but bar
-  or stacked); the `hooks.tooltip` table and `x_labels` no longer say bar and waterfall have no card
-  "in any configuration" (an uncoordinated pane has one, and so does a dot plot or categorical line
-  resolving to one pane); the texture notes count a single-pane faceted area, histogram or
-  waterfall as hovering with a card.
-- CONFIG-SPEC `barStack.netDisplay` said it "chooses the marker and nothing else" and no longer
-  decides the hover. Resolving to a dot also sets the default hover (the card, unless
-  `barStack.hover` is set) and refuses segment labels; the row now says so.
-- CONFIG-SPEC `x_labels`: its list of cards that carry the label now includes an uncoordinated
-  `bar` or `waterfall` pane, and its test note no longer calls the `coordinated_cursor: false` case
-  a default-settings one.
+### Changed
+- `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error
+  naming `ci`. Near 1 the t-quantile is numerically meaningless. No published figure uses one.
+- One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
+  `renderChart` with a malformed date now get an error** naming the value, instead of a silently
+  wrong x: `2024Q5` rolled into 2025Q1, `2024-13-01` into January 2025, `March 1, 2024` (or any
+  other spelling) was read by JavaScript's `Date`, and a malformed timeline `end` cell drew its
+  event as a point. Validation also tightens: it now rejects a day the month does not have
+  (`2024-02-30`, which it passed before), and checks every spec-side x coordinate on a temporal or
+  quarterly axis (`annotations` markers, bands and callouts, the legacy `xAxisPolicy` ones,
+  `shading` bounds) against the grammar. Every published figure was scanned and re-rendered before
+  and after: none is rejected and none changes.
 
 ### Fixed
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
   validation as a palette name and could make the chart throw at render; it is now rejected at load
   like any unknown name, on every chart type. No published figure uses one.
 - A series, category, group, facet, section or shape named like an `Object.prototype` key
-  (`constructor`, `toString`, `__proto__`, …) drew a function as its colour and printed its source as
-  its label; every author map is now read by own key, so it takes its default colour and its own
-  name, on every chart type and in tables. No published figure uses such a name.
+  (`constructor`, `toString`, `__proto__`, …) drew a function as its colour and printed its source
+  as its label; under `category_colors` its bar was not drawn at all (bar and waterfall), a dumbbell
+  with `series_marker` set threw at render, and in a table's rich text `\constructor` was read as a
+  Greek letter instead of reported as an unsupported macro. Every author map is now read by own key,
+  so it takes its default colour and its own name, on every chart type and in tables. No published
+  figure uses such a name.
 - A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
   `series_order`, matching every other chart type.
 - Timeline and treemap text in scripts Figtree lacks measures wider, so it runs past its column or
   tile far less often. A Cyrillic or Greek letter (Cyrillic Extended-B included) measures at its
   widest advance among Arial, Segoe UI, Liberation Sans, DejaVu Sans, Noto Sans, FreeSans, Source
   Sans 3 and Roboto, at weight 500 including Segoe UI's semibold face, which Chromium on Windows
-  draws there. Any other such script measures an em a code point (Unifont's width; 1.08em at weight
+  draws there (of Roboto only the 400 and 700 faces were measured; Roboto Medium, where installed,
+  was not). Any other such script measures an em a code point (Unifont's width; 1.08em at weight
   700). That is not a bound: on Windows some single Tamil, Malayalam and Myanmar letters draw at
   2–2.7em, so a word dense in them can still run past. macOS fonts were not measured. A line now
   breaks only between graphemes, the same way in every runtime, so a flag, skin-toned, keycap or ZWJ
@@ -99,8 +84,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   axis tick labels it covers instead of leaving a neighbouring tick's fragment past its edge. Hover
   only.
 - A stacked chart with a single series no longer draws a net dot or a legend "Total" row where
-  `netDisplay` resolves to a dot (by default, any negative value; an explicit `dot` included): with one
-  series each bar's net is its own end. Its hover card, which already omitted the Total row, is
+  `netDisplay` resolves to a dot (by default, any negative value; an explicit `dot` included): with
+  one series each bar's net is its own end. Its hover card, which already omitted the Total row, is
   unchanged, and it still paints no segment labels. A small-multiples figure counts the distinct
   series in the panes it draws, not a pane's, and a series named twice in `series_order` counts
   once. With no legend rows left, its defaulted right legend takes no column.
@@ -111,17 +96,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `small_multiples.pane_order` leaves out, which is drawn nowhere; live and in the PNG. Colours are
   unchanged: the palette still counts that series, so every drawn series keeps its colour.
 
+### Docs
+- CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
+  small-multiples pane) never used it; the pill takes the running-total labels' precision
+  (`valueLabels.decimals`, else what the data needs). A waterfall pane with a card does use it.
+- CONFIG-SPEC `overlays[].ci`: the reason for the 0.999 cap is now stated as the t quantile growing
+  without bound near 1, not as an interval "too wide to mean anything".
+- CONFIG-SPEC `series_order`: an empty `series_order: []` filters nothing.
+- CONFIG-SPEC: statements of when a small-multiples pane hovers with a card instead of the
+  coordinated cursor were wider than the code. `small_multiples.coordinated_cursor` now names the
+  cases that never coordinate (a scatter, a `per-pane` histogram, a single pane of any type but bar
+  or stacked); the `hooks.tooltip` table and `x_labels` no longer say bar and waterfall have no card
+  "in any configuration" (an uncoordinated pane has one, and so does a dot plot or categorical line
+  resolving to one pane); the texture notes count a single-pane faceted area, histogram or waterfall
+  as hovering with a card.
+- CONFIG-SPEC `barStack.netDisplay` said it "chooses the marker and nothing else" and no longer
+  decides the hover. Resolving to a dot also sets the default hover (the card, unless
+  `barStack.hover` is set) and refuses segment labels; the row now says so, and that `text` prints
+  nothing in a `small_multiples` pane.
+- CONFIG-SPEC `x_labels`: its list of cards that carry the label now includes an uncoordinated `bar`
+  or `waterfall` pane, and its test note no longer calls the `coordinated_cursor: false` case a
+  default-settings one.
+
 ### Upgrading
 
 - **Hover: the bin-range label now hides the tick it covers.** Drawn only on the hovered pane of a
-  shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not
-  `false`; every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet
-  resolving to one pane) hovers with a card and draws no such label. **No published figure is
-  affected**: the archive's only histogram, the deficit-management scorecard's
-  `deviation-distribution`, is standalone. Rendered SVG and the PNG export are unchanged.
-- **A single-series diverging stack loses its net dot and its legend "Total" row**, on screen and in
-  the PNG; with that row gone a defaulted right legend has no rows, so the plot takes the full width.
-  **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
+  shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not `false`;
+  every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet resolving
+  to one pane) hovers with a card and draws no such label. **No published figure is affected**: the
+  archive's only histogram, the deficit-management scorecard's `deviation-distribution`, is
+  standalone. Rendered SVG and the PNG export are unchanged.
+- **A single-series stack, of any sign, loses its net dot and its legend "Total" row**, on screen
+  and in the PNG; with that row gone a defaulted right legend has no rows, so the plot takes the
+  full width. **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
   `revenue-by-income-type` and `revenue-by-instrument`, have four series in every pane and set
   `netDisplay: none`. No golden covers a single-series stack.
 - **Hover: a faceted area chart's card gains its Total row** where the pane hovers with a card (one

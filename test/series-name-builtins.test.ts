@@ -12,7 +12,7 @@ import { renderChart, buildColorMap } from "../src/engine/index";
 import { renderFigure } from "../src/engine/figure";
 import { mountChart } from "../src/engine/render-live";
 import { buildBandTooltipHtml, overlayTooltipRows } from "../src/engine/crosshair";
-import { tblColorScale } from "../src/engine/palette";
+import { tblColorScale, resolveColor } from "../src/engine/palette";
 import { resolveActiveOptionColor } from "../src/spec/title";
 import { buildTableModel } from "../src/table/model";
 import { splitPanes, resolveStubHeader } from "../src/table/panes";
@@ -293,5 +293,78 @@ describe("tables: author maps keyed by data", () => {
     const runs = parseRich("\\(\\constructor\\)", (c) => unsupported.push(c));
     expect(unsupported).toEqual(["constructor"]);
     expect(JSON.stringify(runs)).not.toContain("native code");
+  });
+});
+
+// The converted lookups must still resolve an ORDINARY name: reading by own key may not have turned
+// every author map into a no-op.
+describe("an ordinary name still resolves through every converted lookup", () => {
+  const RED = resolveColor("red")!;
+  const SIZE = { width: 720, height: 400 };
+
+  it("series_colors, series_labels and series_styles key a series named \"A\"", () => {
+    const spec = {
+      ...SPECS.line,
+      series_colors: { A: "red" }, series_labels: { A: "Alpha" }, series_styles: { A: { dashed: true } },
+    } as ChartSpec;
+    const r = renderChart(spec, rows(["A", "B"]), SIZE);
+    const a = (r.legendItems ?? []).find((it) => it.series === "A")!;
+    const b = (r.legendItems ?? []).find((it) => it.series === "B")!;
+    expect(buildColorMap(["A", "B"], { A: "red" }).get("A")).toBe(RED);
+    expect(a.color).toBe(RED);
+    expect(a.label).toBe("Alpha");
+    expect(a.dashed).toBe(true);
+    expect(b.color).not.toBe(RED);
+    expect(b.label).toBe("B");
+    expect(b.dashed).toBe(false);
+  });
+
+  it("category_colors paints the bar of a category named \"A\" (bar and waterfall)", () => {
+    const rws = rowsOf([{ x: "A", y: "5" }, { x: "B", y: "6" }]);
+    for (const chartType of ["bar", "waterfall"]) {
+      const spec = { chartType, xAxisType: "categorical", columns: { x: "x", value: "y" }, category_colors: { A: "red" } } as unknown as ChartSpec;
+      const fills = Array.from(renderChart(spec, rws, SIZE).svg.querySelectorAll('g[aria-label="bar"] rect'))
+        .map((e) => (e.getAttribute("fill") ?? "").toLowerCase());
+      expect(fills, chartType).toContain(RED.toLowerCase());
+      expect(fills.some((f) => f !== RED.toLowerCase()), chartType).toBe(true);
+    }
+  });
+
+  it("section_labels heads a section named \"A\"; shape_labels and pane_titles name \"A\"", () => {
+    const sec = {
+      chartType: "bar", xAxisType: "categorical", orientation: "horizontal", columns: { x: "x", value: "y", section: "sec" },
+      section_labels: { A: "Section A" },
+    } as unknown as ChartSpec;
+    const texts = Array.from(renderChart(sec, rowsOf([{ x: "a", y: "1", sec: "A" }, { x: "b", y: "2", sec: "B" }]), { width: 520, height: 500 })
+      .svg.querySelectorAll("text")).map((x) => x.textContent ?? "");
+    expect(texts).toContain("Section A");
+    expect(texts).toContain("B");
+
+    const shp = {
+      chartType: "scatter", xAxisType: "numeric", columns: { x: "x", value: "y", series: "g", shape: "sh" },
+      shape_labels: { A: "Shape A" },
+    } as unknown as ChartSpec;
+    const sr = renderChart(shp, rowsOf([{ x: "1", y: "1", g: "s", sh: "A" }, { x: "2", y: "2", g: "s", sh: "B" }]), SIZE);
+    expect((sr.shapeLegendItems ?? []).map((s) => s.label)).toEqual(["Shape A", "B"]);
+
+    const pane = {
+      chartType: "line", xAxisType: "numeric", columns: { x: "x", value: "y", facet: "f" },
+      small_multiples: { columns: 2, pane_titles: { A: "Pane A" } },
+    } as unknown as ChartSpec;
+    const fig = renderFigure(pane, rowsOf(["A", "B"].flatMap((f) => [{ x: "1", y: "1", f }, { x: "2", y: "2", f }])), { ...SIZE, document });
+    expect(fig.panes.map((p) => p.title)).toEqual(["Pane A", "B"]);
+  });
+
+  it("hover cards and the title selector read an entry keyed \"A\"", () => {
+    const html = buildBandTooltipHtml("c", [{ _xc: "c", series: "A", _y: 2 }, { _xc: "c", series: "B", _y: 3 }], {
+      isStacked: true, totalRow: "text", seriesLabels: { A: "Alpha" }, categoryLabels: { c: "Cat" },
+    });
+    expect(html).toContain('<div class="tbl-tooltip-head">Cat</div>');
+    expect(html).toContain("Alpha");
+    expect(html).toContain("B");
+    const line = { label: "Trend", color: "#333", dashed: false, series: "A", points: [{ x: 0, y: 1 }, { x: 2, y: 3 }] };
+    expect(overlayTooltipRows([line, { ...line, series: "B" }], 1, String, { A: "Alpha" })).toContain("Trend (Alpha)");
+    const sel = { k: { options: [{ id: "A" }] } } as never;
+    expect(resolveActiveOptionColor(sel, { k: "A" }, { A: "red" })).toBeDefined();
   });
 });

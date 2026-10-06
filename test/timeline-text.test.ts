@@ -210,11 +210,12 @@ describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (
 });
 
 // Ruling 51: Cyrillic and Greek letters measure from a per-letter table of the widest advance among
-// common fallback fonts (src/engine/script-metrics.ts), and every other script Figtree lacks at a
-// conservative constant. The floors here are read independently from the fonts' own hmtx tables
-// (fontTools): per letter the widest of Arial, Liberation Sans, DejaVu Sans, FreeSans and Segoe UI,
-// regular at 500 (where those fonts have no 500 face) and bold at 700.
-describe("per-letter Cyrillic and Greek, a conservative constant for other scripts (Ruling 51)", () => {
+// common fallback fonts (src/engine/script-metrics.ts), and every other script Figtree lacks at
+// SCRIPT_EM (Unifont's em), which is not claimed as a bound. The floors here are read independently
+// from the fonts' own hmtx tables (fontTools): per letter the widest of Arial, Liberation Sans,
+// DejaVu Sans, FreeSans and Segoe UI, regular at 500 (where those fonts have no 500 face) and bold
+// at 700.
+describe("per-letter Cyrillic and Greek, SCRIPT_EM for other scripts (Ruling 51)", () => {
   const FLOOR: Record<string, [number, number]> = {
     "ω": [837.4, 869.1], "Щ": [1093.8, 1325.7], "Ж": [1077.1, 1224.1], "ш": [915, 1062], "Ю": [1079.6, 1173.8], "Ω": [764.2, 850.1],
     // Cyrillic Extended-B, Segoe UI regular and bold (F5 fix round 2).

@@ -34,7 +34,8 @@ export const TIMELINE_CLASS = "tbl-timeline";
 type Orientation = "horizontal" | "vertical";
 
 /** Rows → layout events, filtered and ordered by `series_order` (inclusion filter and render
- *  order, as on every chart type). `id` is the 0-based CSV row index (the layout's tie-break). */
+ *  order, as on every chart type but treemap, where it orders without filtering). `id` is the
+ *  0-based CSV row index (the layout's tie-break). */
 export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: LayoutEvent[]; seriesNames: string[] } {
   const cfg = resolveTimelineConfig(spec);
   const cols = timelineColumns(spec, rows);

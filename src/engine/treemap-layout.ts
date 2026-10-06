@@ -157,7 +157,8 @@ export function layoutTreemap(data: TreemapDatum[], width: number, height: numbe
   type LNode = { data: Node; parent: { children: unknown[] }; x0: number; y0: number; x1: number; y1: number };
   const tileRect = (n: LNode): TileRect => ({ datum: n.data.datum!, ...rect(n, width, height), rank: n.parent.children.indexOf(n) });
 
-  // Rescue: re-tile a group whose largest tile cannot hold its label (the blocks are final).
+  // Rescue: re-tile a group whose first tile in layout order cannot hold its label (the blocks are
+  // final).
   const tilings = new Map<string, TreemapTiling>();
   if (opts.labelFits) {
     type Kid = LNode & { value: number };

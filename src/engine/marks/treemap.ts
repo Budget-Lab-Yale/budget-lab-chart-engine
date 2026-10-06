@@ -170,7 +170,8 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
   const size = cand.size;
   const numberOf = (v: number): string | null =>
     cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
-  // A group whose largest tile cannot hold its label is re-tiled inside its block where that helps.
+  // A group whose first tile in layout order cannot hold its label is re-tiled inside its block where
+  // that helps.
   const layout = layoutTreemap(data, width, areaH, {
     groupOrder: groupNames,
     tiling: cand.tiling,

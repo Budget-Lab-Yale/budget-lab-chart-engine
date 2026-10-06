@@ -1078,7 +1078,9 @@ export function resolveCategorySeriesValues(
   // drops the series, which then read back as Object.prototype. Defined, it is an own key.
   const values: Record<string, number> = {};
   for (const s of series) {
-    Object.defineProperty(values, s, { value: valBySeries.get(s)!, enumerable: true, writable: true, configurable: true });
+    Object.defineProperty(values, s, {
+      value: valBySeries.get(s)!, enumerable: true, writable: true, configurable: true,
+    });
   }
   return { series, values };
 }

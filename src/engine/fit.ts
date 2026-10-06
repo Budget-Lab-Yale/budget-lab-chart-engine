@@ -259,7 +259,8 @@ const QUANTILE_MAX_DOUBLINGS = 200;
  *  excluded by the "no band below n ≤ degree + 1" rule) with `ci: 0.99999` the quantile is ≈ 63,662,
  *  and a bound of 10,000 returned 10,000 — so the ribbon came out NARROWER than the interval it
  *  claimed. An understated confidence interval in published research is a substantive error, not a
- *  cosmetic one, and `ci` was documented as any level in (0, 1) then (the schema now caps it at 0.999; this guard stays).
+ *  cosmetic one, and `ci` was documented as any level in (0, 1) then (the schema now caps it at
+ *  0.999; this guard stays).
  *
  *  TERMINATION is by the CDF, not by the counter: as |t| grows the tail underflows and `studentTCdf`
  *  returns exactly 1 (or 0), which brackets ANY p the guard admits — p < 1 and p > 0 — after at most
