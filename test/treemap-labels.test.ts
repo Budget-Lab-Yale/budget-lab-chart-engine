@@ -253,6 +253,12 @@ describe("fitTileLabel (one size)", () => {
   it("labels nothing in a tile with no inner box", () => {
     expect(fitTileLabel("X", "1%", 10, 10, 12)).toEqual({ mode: "none" });
   });
+  it("does not stack a Cyrillic Extended-B word wider than the tile in Segoe UI", () => {
+    // Segoe UI Bold draws U+A698 at 1.278em (hmtx), so ten of them at 12px are 153.4px, past the
+    // 132px inner width; at the old script constant (1.08em) they measured 129.6px and stacked.
+    expect((10 * 1278.3 * 12) / 1000).toBeGreaterThan(144 - 2 * pad);
+    expect(fitTileLabel("Ꚙ".repeat(10), null, 144, 100, 12)).toEqual({ mode: "none" });
+  });
 });
 
 describe("treemapLabelSize", () => {

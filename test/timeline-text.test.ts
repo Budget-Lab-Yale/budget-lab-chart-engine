@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { timelineTextWidth, graphemes, WIDE_EM, EMOJI_EM } from "../src/engine/timeline-text";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "../src/engine/timeline-metrics";
+import { SCRIPT_CHARS } from "../src/engine/script-metrics";
 import { layoutTimeline, LINE_STYLE, type LayoutEvent } from "../src/engine/timeline-layout";
 
 const adv = (ch: string, w: 500 | 700): number => FIGTREE_ADVANCE[w][[...FIGTREE_CHARS].indexOf(ch)]!;
@@ -147,6 +148,17 @@ describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (
     for (const s of corpus) expect(graphemes(s), s).toEqual(Array.from(seg.segment(s), (x) => x.segment));
   });
 
+  it("joins an emoji across one ZWJ only (GB11), as Intl.Segmenter does", () => {
+    const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
+    const Z = "‍";
+    const corpus = [
+      `😀${Z}${Z}😀`, `😀${Z}😀`, `😀${Z}😀${Z}😀`, `😀́${Z}😀`, `😀${Z}́${Z}😀`, `😀${Z}́😀`,
+      `©️${Z}${Z}🔥`, `❤️${Z}🔥${Z}${Z}❤️`, `a${Z}${Z}😀`,
+    ];
+    for (const s of corpus) expect(graphemes(s), s).toEqual(Array.from(seg.segment(s), (x) => x.segment));
+    expect(graphemes(`😀${Z}${Z}😀`)).toEqual([`😀${Z}${Z}`, "😀"]);
+  });
+
   it("measures a flag, a skin-toned emoji and a ZWJ sequence one emoji glyph per emoji part", () => {
     // A platform whose emoji font lacks the combined glyph draws the parts side by side: Chromium on
     // Windows 10 draws 🧑‍💻 at 2.68em and ❤️‍🔥 at 2.47em, and on Linux an unsupported flag is its two
@@ -155,6 +167,8 @@ describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (
       for (const [e, parts] of [
         ["🇺🇸", 2], ["🇦🇦", 2], ["👍🏽", 2], ["☝🏿", 2], ["👨‍👩‍👧", 3], ["👨‍👩‍👧‍👦", 4], ["🧑‍💻", 2], ["❤️‍🔥", 2],
         ["🧔🏻‍♂️", 3], ["👩🏾‍🚀", 3], ["🏳️‍🌈", 2],
+        // A BMP pictographic base outside the emoji blocks is a part too: © ️ ZWJ 🔥 draws as two.
+        ["©️‍🔥", 2], ["‼️‍🔥", 2],
       ] as const) {
         expect(timelineTextWidth(e, 1000, w), e).toBeCloseTo(parts * EMOJI_EM, 9);
       }
@@ -203,6 +217,8 @@ describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (
 describe("per-letter Cyrillic and Greek, a conservative constant for other scripts (Ruling 51)", () => {
   const FLOOR: Record<string, [number, number]> = {
     "ω": [837.4, 869.1], "Щ": [1093.8, 1325.7], "Ж": [1077.1, 1224.1], "ш": [915, 1062], "Ю": [1079.6, 1173.8], "Ω": [764.2, 850.1],
+    // Cyrillic Extended-B, Segoe UI regular and bold (F5 fix round 2).
+    "Ꚙ": [1330.5, 1278.3], "Ꙍ": [1128.9, 1152.3],
   };
   it.each(Object.entries(FLOOR))("%s measures no narrower than its widest font", (ch, [f500, f700]) => {
     expect(timelineTextWidth(ch, 1000, 500)).toBeGreaterThanOrEqual(f500);
@@ -225,13 +241,27 @@ describe("per-letter Cyrillic and Greek, a conservative constant for other scrip
   });
 
   it("measures every other script Figtree lacks at no less than an em a code point, Unifont's width", () => {
-    // Unifont, the Playwright Linux image's last-resort font, draws these an em wide; Windows draws a
-    // Sinhala code point up to 1.08em at 700 (කොළඹ).
+    // Unifont, the Playwright Linux image's last-resort font, draws these an em wide; Windows draws the
+    // Sinhala word කොළඹ at 1.08em a code point at 700. Not a bound on every font (Ruling 52).
     for (const ch of ["Ա", "א", "ب", "क", "ক", "த", "മ", "ක", "ก", "ሀ", "ა", "ܐ", "ᠮ", "က", "ក", "ཀ", "Ꭰ", "ᐃ"]) {
       expect(timelineTextWidth(ch, 1000, 500), ch).toBeGreaterThanOrEqual(1000);
       expect(timelineTextWidth(ch, 1000, 700), ch).toBeGreaterThanOrEqual(1000);
     }
     expect(timelineTextWidth("කොළඹ", 1000, 700)).toBeGreaterThanOrEqual(4314);
+  });
+
+  it("measures every Cyrillic Extended-B and -C letter from the per-letter table", () => {
+    // Extended-A (U+2DE0-2DFF) is all combining marks, which the table leaves out.
+    const table = new Set(SCRIPT_CHARS);
+    const letters: string[] = [];
+    for (const [a, b] of [[0xa640, 0xa69f], [0x1c80, 0x1c88]] as const) {
+      for (let cp = a; cp <= b; cp++) {
+        const ch = String.fromCodePoint(cp);
+        if (!/\p{M}/u.test(ch)) letters.push(ch);
+      }
+    }
+    expect(letters.length).toBeGreaterThan(80);
+    for (const ch of letters) expect(table.has(ch), ch).toBe(true);
   });
 
   it("leaves Latin Extended-E at the Latin letter mean", () => {

@@ -13,15 +13,19 @@
 //   - EMOJI_EM (1.4em): astral (emoji, supplementary CJK) and the BMP emoji/symbol blocks in
 //     EMOJI_RANGES — at least what Chromium's fallback fonts draw (😀 1.37em, ✅ ⭐ ☀ ~1.3em);
 //   - WIDE_EM (1em): BMP East Asian Wide/Fullwidth (WIDE_RANGES) — Chromium draws those an em wide;
-//   - a Cyrillic or Greek letter: the widest advance among Arial, Segoe UI, Liberation Sans, DejaVu
-//     Sans, Noto Sans, FreeSans, Source Sans 3 and Roboto (script-metrics.ts; Ruling 51);
-//   - SCRIPT_EM: any other character of a script Figtree lacks (SCRIPT_RANGES), at least the widest
-//     a measured fallback font draws a code point of them (Unifont; Windows' Sinhala);
+//   - a Cyrillic or Greek letter (Cyrillic Extended-B included): the widest advance among Arial,
+//     Segoe UI, Liberation Sans, DejaVu Sans, Noto Sans, FreeSans, Source Sans 3 and Roboto
+//     (script-metrics.ts; Ruling 51);
+//   - SCRIPT_EM: any other character of a script Figtree lacks (SCRIPT_RANGES) — Unifont's em, not
+//     the widest any font draws (Ruling 52);
 //   - FIGTREE_FALLBACK (the Latin letter mean): everything else (Latin Extended, symbols).
 // So a line wrapped to a column renders inside it, to within that fraction of a pixel, for the
-// table's characters and the two wide classes (Rulings 48, 49); and for those scripts in the fonts
-// measured (Windows' own and those of the CI Playwright image; macOS fonts were not measured),
-// short only where kerning tightens a pair.
+// table's characters and the two wide classes (Rulings 48, 49); and Cyrillic and Greek, in the fonts
+// measured (macOS fonts were not), short only where kerning tightens a pair, except at 500 on
+// Windows, where Chromium draws Segoe UI's semibold face: up to 0.7% wider than the table for common
+// letters (М) and 9% for rare ones (ꙇ). Text in another script runs past its column where the
+// reader's font draws it wider than SCRIPT_EM, as Windows does a word dense in some Tamil, Malayalam
+// or Myanmar letters (see SCRIPT_EM).
 // Shared by the timeline and the treemap (treemap-labels.ts fits tile label text with it),
 // so a change to the table or its fallbacks moves both; every other chart keeps estimateLabelWidth,
 // byte-identical.
@@ -83,10 +87,12 @@ const SCRIPT_RANGES: Ranges = [
 ];
 
 /** Advance, per 1000 em, for a code point of SCRIPT_RANGES with no entry in the per-letter table
- *  (every script but Cyrillic and Greek, and their rarer characters): at least the widest any
- *  fallback font measured draws a code point of them. Unifont, the last-resort font of the CI
- *  Playwright image, draws them an em wide; Windows draws a Sinhala code point up to 1.08em at 700
- *  (කොළඹ). So this runs wide of most scripts — Arabic draws 0.39–0.56em. */
+ *  (every script but Cyrillic and Greek, and their rarer characters). 1000 is Unifont's width: the
+ *  last-resort font of the CI Playwright image draws every BMP code point an em wide or less. 1080
+ *  at 700 is Windows' Sinhala word කොළඹ averaged per code point. Not a per-letter bound (Ruling
+ *  52): Windows' Nirmala UI draws some single Tamil and Malayalam letters at 2–2.7em (ஔ ഐ) and
+ *  Myanmar Text draws ဪ at 2.3em, so a word dense in them runs past this (ഔഷധം 15–18% short).
+ *  It runs wide of most scripts — Arabic draws 0.39–0.56em. */
 export const SCRIPT_EM: Record<TimelineWeight, number> = { 500: 1000, 700: 1080 };
 
 const inRanges = (cp: number, ranges: Ranges): boolean => ranges.some(([a, b]) => cp >= a && cp <= b);
@@ -153,8 +159,9 @@ export function graphemes(text: string): string[] {
       pictographic = false;
     }
     zwjAfterPictographic = cp === ZWJ && pictographic;
+    // A ZWJ ends the run too: GB11 joins across exactly one, so 😀 ZWJ ZWJ 😀 is two graphemes.
     if (inPairs(cp, EXTENDED_PICTOGRAPHIC)) pictographic = true;
-    else if (cp !== ZWJ && !inPairs(cp, GRAPHEME_EXTEND)) pictographic = false;
+    else if (cp === ZWJ || !inPairs(cp, GRAPHEME_EXTEND)) pictographic = false;
     ri = isRegionalIndicator(cp) ? ri + 1 : 0;
     cur += ch;
     prev = cp;
@@ -190,9 +197,11 @@ export function timelineTextWidth(text: string, sizePx: number, weight: Timeline
   return (em * sizePx) / 1000;
 }
 
-/** An emoji part of an emoji grapheme: an emoji-class code point other than a tag character or a
- *  variation selector (U+E0000–E01EF, which draw nothing). */
-const isEmojiPart = (cp: number): boolean => isEmoji(cp) && !(cp >= 0xe0000 && cp <= 0xe01ef);
+/** An emoji part of an emoji grapheme: an Extended_Pictographic or emoji-class code point other than
+ *  a tag character or a variation selector (U+E0000–E01EF, which draw nothing). Extended_Pictographic
+ *  takes in BMP bases outside EMOJI_RANGES (© ‼ ↔ ▶), so ©️ ZWJ 🔥 counts two. */
+const isEmojiPart = (cp: number): boolean =>
+  (isEmoji(cp) || inPairs(cp, EXTENDED_PICTOGRAPHIC)) && !(cp >= 0xe0000 && cp <= 0xe01ef);
 
 /** `text`'s advance, per 1000 em, a grapheme at a time. A multi-code-point grapheme led by an emoji
  *  or carrying VS16 (U+FE0F) or a keycap mark (U+20E3) is emoji: one EMOJI_EM per emoji part (at

@@ -24,8 +24,9 @@ import { chromium } from "playwright";
 
 const OUT_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/engine/script-metrics.ts");
 const WEIGHTS = [500, 700];
-/** Greek and Coptic, Cyrillic, Cyrillic Supplement, Cyrillic Extended-C, Greek Extended. */
-const BLOCKS = [[0x0370, 0x03ff], [0x0400, 0x052f], [0x1c80, 0x1c8f], [0x1f00, 0x1fff]];
+/** Greek and Coptic, Cyrillic, Cyrillic Supplement, Cyrillic Extended-C, Greek Extended, Cyrillic
+ *  Extended-B. (Cyrillic Extended-A, U+2DE0–2DFF, is all combining marks, which the table leaves out.) */
+const BLOCKS = [[0x0370, 0x03ff], [0x0400, 0x052f], [0x1c80, 0x1c8f], [0x1f00, 0x1fff], [0xa640, 0xa69f]];
 
 /** The code points a TrueType/OpenType font maps (cmap format 4 or 12, Unicode subtables). */
 function cmapCodePoints(buf) {
