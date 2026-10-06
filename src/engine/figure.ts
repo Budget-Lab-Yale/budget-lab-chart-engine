@@ -448,6 +448,13 @@ export function renderFigure(
   const hGutter = isHorizontalBar
     ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
     : TBL_MARGIN_LEFT;
+  // Horizontal dumbbells stack one pane per row and every pane shows its own labels, so each pane
+  // gets ONE category-label column sized over every pane's categories (measured like hGutter).
+  // Without it a pane sized the column to its own labels: per-pane mode misaligned the panes, and
+  // shared mode's TBL_MARGIN_LEFT override pushed long labels off the pane's left edge.
+  const dotGutter = isHorizontalDumbbell
+    ? horizontalLeftGutter(orderedCategories(rows, cols.x, spec), { fontSize: FACETED_CAT_LABEL_PX })
+    : undefined;
   // Auto-height: grow the panes with the row count when the caller doesn't force a height. The
   // per-facet inputs (nSpacers/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
   // are hoisted to this outer scope (not just computed inline) because perPaneHeights, below —
@@ -739,7 +746,9 @@ export function renderFigure(
                 categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
                 hideCategoryLabels: col > 0,
               }
-            : {}),
+            : dotGutter != null
+              ? { categoryGutter: dotGutter }
+              : {}),
         },
         `p${i}`,
       );
@@ -912,10 +921,14 @@ export function renderFigure(
               categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
               hideCategoryLabels: col > 0,
             }
-          : {
-              hideYAxisLabels: col > 0,
-              marginLeft: colMarginLeft[col],
-            }),
+          : dotGutter != null
+            ? // One pane per row: no label-less column, and the mark's gutter owns the left margin
+              // (an explicit marginLeft would override it — the clipped-label defect).
+              { categoryGutter: dotGutter }
+            : {
+                hideYAxisLabels: col > 0,
+                marginLeft: colMarginLeft[col],
+              }),
       },
       `p${i}`,
     );

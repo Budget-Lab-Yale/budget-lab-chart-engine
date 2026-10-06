@@ -134,6 +134,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A dumbbell (connected dot plot) ignored `yAxisPolicy.includeZero: true`; it now extends the
   fitted value axis to 0, standalone and in small multiples. A pinned `min` or `max` still sets its
   own end. Omitted, the axis stays fitted to the dots as before.
+- Small multiples of a horizontal dumbbell now share one category-label column, sized to the
+  longest label in any pane, and every pane shows its own labels. In the default `shared` mode every
+  pane kept the narrow default margin while pushing its labels left by its own label width, so long
+  labels started off the pane's left edge and were clipped ("op 1%"); in `per-pane` mode each pane
+  sized its own column, so the panes' value axes started at different x. Live and in the PNG.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -204,6 +209,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   **No published figure is affected**: the archive has no dumbbell, and the one on the unpublished
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, does not set `includeZero` (it pins
   `min: 0`). No golden moves.
+- **Faceted horizontal dumbbells share one category-label column** (live and PNG). **No published
+  figure is affected**: the archive has no dumbbell, and the one on the unpublished
+  `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not
+  `columns.facet`, so it renders as a single chart. Horizontal bar and stacked figures are untouched.
+  No golden moves.
 
 ## [1.15.0] - 2026-10-01
 
