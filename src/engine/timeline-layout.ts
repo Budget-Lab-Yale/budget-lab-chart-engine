@@ -239,8 +239,9 @@ const dateUnits = (text: string): string[] => dateParts(text).flatMap(dateWordUn
 /** `hardBreak` for one date line, which is only ever over-wide as a single unit (see wrapUnits). A
  *  trailing dash — glued " –" or an unspaced "–" — stays on the last chunk of its word, so no chunk
  *  is a bare dash or starts or ends with a space. If the last chunk plus the dash is still too wide,
- *  its final grapheme (so a flag or ZWJ emoji stays whole) moves down with the dash. */
-function hardBreakDate(line: string, framePx: number, measure: (s: string) => number): string[] {
+ *  its final grapheme (so a flag or ZWJ emoji stays whole) moves down with the dash. Exported for
+ *  its tests. */
+export function hardBreakDate(line: string, framePx: number, measure: (s: string) => number): string[] {
   if (measure(line) <= framePx) return [line];
   const suffix = / ?–$/.exec(line)?.[0] ?? "";
   const body = line.slice(0, line.length - suffix.length);

@@ -128,34 +128,46 @@ describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (
   });
 
   it("keeps a multi-code-point emoji, and a letter with its combining mark, one grapheme", () => {
-    expect(graphemes("a🇺🇸👍🏽1️⃣🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}👨‍👩‍👧e\u0301ж")).toEqual([
-      "a", "🇺🇸", "👍🏽", "1️⃣", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}", "👨‍👩‍👧", "e\u0301", "ж",
+    expect(graphemes("a🇺🇸👍🏽1️⃣🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}👨‍👩‍👧éж")).toEqual([
+      "a", "🇺🇸", "👍🏽", "1️⃣", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}", "👨‍👩‍👧", "é", "ж",
     ]);
     expect(graphemes("")).toEqual([]);
   });
 
-  it("measures a flag, a skin-toned emoji, a keycap, a tag flag and a VS16 emoji as one emoji glyph", () => {
-    // Chromium: 🇺🇸 0.96em and 🇬🇧 1.01em (Windows draws the letter pair), 👍🏽 1.23em, 1️⃣ #️⃣ ❤️ ▶️
-    // 1.37em, 🏴 Scotland 1.30em — each one glyph, inside EMOJI_EM.
+  it("splits graphemes as Intl.Segmenter does, from built-in tables, whatever the runtime has", () => {
+    // UAX #29 less the Indic conjunct rule (GB9c) and Prepend (GB9b): those words may break inside a
+    // conjunct, the same way in every runtime.
+    const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
+    const corpus = [
+      "Tax Cuts and Jobs Act – 2017", "a\r\nb\u0007c", "🇺🇸🇬🇧🇺", "🇺🇸👍🏽".repeat(4), "👨‍👩‍👧‍👦 🧑‍💻 ❤️‍🔥 🏳️‍🌈 🧔🏻‍♂️ 👩🏾‍🚀",
+      "1️⃣#️⃣*️⃣ ▶️ ↔️ ©️ ☝🏿 ✊🏽", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}x", "é̂ö",
+      "Закон о налогах ёлка й", "Κρατικός προϋπολογισμός ᾄ", "שָׁלוֹם", "مِيزَانِيَّة", "การปฏิรูปภาษีนำ",
+      "한국어 각가", "‍́a", "a‍👍", "👍‍a",
+    ];
+    for (const s of corpus) expect(graphemes(s), s).toEqual(Array.from(seg.segment(s), (x) => x.segment));
+  });
+
+  it("measures a flag, a skin-toned emoji and a ZWJ sequence one emoji glyph per emoji part", () => {
+    // A platform whose emoji font lacks the combined glyph draws the parts side by side: Chromium on
+    // Windows 10 draws 🧑‍💻 at 2.68em and ❤️‍🔥 at 2.47em, and on Linux an unsupported flag is its two
+    // letter tiles. Even a sequence the font has can run past one glyph (👨‍👩‍👧‍👦 1.94em).
     for (const w of [500, 700] as const) {
-      for (const e of ["🇺🇸", "🇬🇧", "👍🏽", "☝🏿", "1️⃣", "#️⃣", "❤️", "▶️", "↔️", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}"]) {
-        expect(timelineTextWidth(e, 1000, w), e).toBeCloseTo(EMOJI_EM, 9);
+      for (const [e, parts] of [
+        ["🇺🇸", 2], ["🇦🇦", 2], ["👍🏽", 2], ["☝🏿", 2], ["👨‍👩‍👧", 3], ["👨‍👩‍👧‍👦", 4], ["🧑‍💻", 2], ["❤️‍🔥", 2],
+        ["🧔🏻‍♂️", 3], ["👩🏾‍🚀", 3], ["🏳️‍🌈", 2],
+      ] as const) {
+        expect(timelineTextWidth(e, 1000, w), e).toBeCloseTo(parts * EMOJI_EM, 9);
       }
-      expect(timelineTextWidth("🇺🇸🇬🇧 2026", 12, w)).toBeCloseTo((2 * EMOJI_EM * 12) / 1000 + timelineTextWidth(" 2026", 12, w), 9);
+      expect(timelineTextWidth("🇺🇸🇬🇧 2026", 12, w)).toBeCloseTo((4 * EMOJI_EM * 12) / 1000 + timelineTextWidth(" 2026", 12, w), 9);
     }
   });
 
-  it("measures a ZWJ sequence one emoji glyph per joined part", () => {
-    // A platform whose emoji font lacks a sequence draws its parts side by side: Chromium on Windows
-    // 10 draws 🧑‍💻 at 2.68em and ❤️‍🔥 at 2.47em; even a sequence it has can run past one glyph
-    // (👨‍👩‍👧‍👦 1.94em).
+  it("measures a keycap, a tag flag and a VS16 emoji as one emoji glyph", () => {
+    // Chromium: 1️⃣ #️⃣ ❤️ ▶️ 1.37em, 🏴 Scotland 1.30em — the joiners, selectors and tags draw nothing.
     for (const w of [500, 700] as const) {
-      expect(timelineTextWidth("👨‍👩‍👧", 1000, w)).toBeCloseTo(3 * EMOJI_EM, 9);
-      expect(timelineTextWidth("👨‍👩‍👧‍👦", 1000, w)).toBeCloseTo(4 * EMOJI_EM, 9);
-      expect(timelineTextWidth("🧑‍💻", 1000, w)).toBeGreaterThanOrEqual(2676);
-      expect(timelineTextWidth("❤️‍🔥", 1000, w)).toBeGreaterThanOrEqual(2465);
-      expect(timelineTextWidth("🧔🏻‍♂️", 1000, w)).toBeGreaterThanOrEqual(2466);
-      expect(timelineTextWidth("🏳️‍🌈", 1000, w)).toBeCloseTo(2 * EMOJI_EM, 9);
+      for (const e of ["1️⃣", "#️⃣", "❤️", "▶️", "↔️", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}"]) {
+        expect(timelineTextWidth(e, 1000, w), e).toBeCloseTo(EMOJI_EM, 9);
+      }
     }
   });
 

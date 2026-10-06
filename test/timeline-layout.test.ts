@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { layoutTimeline, plainFirstFitFits, verticalNoSwapLayout, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
+import { layoutTimeline, hardBreakDate, plainFirstFitFits, verticalNoSwapLayout, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
-import { timelineTextWidth } from "../src/engine/timeline-text";
+import { graphemes, timelineTextWidth } from "../src/engine/timeline-text";
 import { TBL } from "../src/engine/theme";
 
 let nextId = 0;
@@ -2351,5 +2351,36 @@ describe("hard breaks never split a grapheme (F5)", () => {
       }
     }
     expect(splits).toBeGreaterThan(0); // the runs really were split
+  });
+  it("moves a whole final grapheme down with a date's dash", () => {
+    // hardBreakDate's second branch: the last chunk plus " –" overflows, so its final grapheme moves
+    // down with the dash. Measured at 10px a grapheme, a 30px frame takes three per chunk.
+    const tenPerGrapheme = (s: string): number => 10 * graphemes(s).length;
+    expect(hardBreakDate("🇺🇸👍🏽🇺🇸👍🏽🇺🇸👍🏽 –", 30, tenPerGrapheme)).toEqual(["🇺🇸👍🏽🇺🇸", "👍🏽🇺🇸", "👍🏽 –"]);
+    expect(hardBreakDate("🇺🇸👍🏽🇺🇸👍🏽🇺🇸👍🏽–", 30, tenPerGrapheme)).toEqual(["🇺🇸👍🏽🇺🇸", "👍🏽🇺🇸", "👍🏽–"]);
+  });
+
+  it("splits a long emoji title identically with and without Intl.Segmenter", async () => {
+    const title = "🇺🇸👍🏽".repeat(20);
+    const lines = (layout: typeof layoutTimeline): string[] => {
+      const e = ev("2020", title);
+      const l = layout(base([e, ev("2040", "z")], { width: 280, orientation: "vertical" }));
+      return labelOf(l, e.id).lines.filter((ln) => ln.role === "title").map((ln) => ln.text);
+    };
+    const withSegmenter = lines(layoutTimeline);
+    const segmenter = Object.getOwnPropertyDescriptor(Intl, "Segmenter")!;
+    let without: string[];
+    try {
+      delete (Intl as { Segmenter?: unknown }).Segmenter;
+      vi.resetModules();
+      const fresh = await import("../src/engine/timeline-layout");
+      without = lines(fresh.layoutTimeline);
+    } finally {
+      Object.defineProperty(Intl, "Segmenter", segmenter);
+      vi.resetModules();
+    }
+    expect(withSegmenter.length).toBeGreaterThan(1);
+    expect(without).toEqual(withSegmenter);
+    expectWholeGraphemes(withSegmenter, title);
   });
 });

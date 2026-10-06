@@ -7,9 +7,9 @@
 // Chromium's rendering (getComputedTextLength, the embedded Figtree), 95,108 drawn lines of vertical
 // timelines at 280–440px ran from 1.5% narrower than it (kerned pairs tighten) to 0.23% wider, never
 // more than 0.05px wider (round-3 final fix probe). Text with a character outside the table
-// (Latin-1 plus common punctuation) is measured by grapheme (`graphemes`), so a multi-code-point
-// emoji is one unit: a flag, skin-toned emoji, keycap or tag sequence is one EMOJI_EM, and a ZWJ
-// sequence one EMOJI_EM per joined part. Any other grapheme sums its code points, each by class:
+// (Latin-1 plus common punctuation) is measured by grapheme (`graphemes`): a multi-code-point
+// emoji is one unit, one EMOJI_EM per emoji part (graphemesEm). Any other grapheme sums its code
+// points, each by class:
 //   - EMOJI_EM (1.4em): astral (emoji, supplementary CJK) and the BMP emoji/symbol blocks in
 //     EMOJI_RANGES — at least what Chromium's fallback fonts draw (😀 1.37em, ✅ ⭐ ☀ ~1.3em);
 //   - WIDE_EM (1em): BMP East Asian Wide/Fullwidth (WIDE_RANGES) — Chromium draws those an em wide;
@@ -21,6 +21,7 @@
 // Shared by the timeline and the treemap (treemap-labels.ts fits tile label text with it),
 // so a change to the table or its fallbacks moves both; every other chart keeps estimateLabelWidth,
 // byte-identical.
+import { EXTENDED_PICTOGRAPHIC, GRAPHEME_EXTEND } from "./grapheme-data";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "./timeline-metrics";
 
 /** The two weights a timeline draws: 500 (titles, descriptions, ticks), 700 (dates, lane names). The
@@ -98,15 +99,77 @@ function fallbackEm(ch: string, weight: TimelineWeight): number {
   return script.capsEm && ch !== ch.toLowerCase() ? script.capsEm[weight] : script.em[weight];
 }
 
-const SEGMENTER: Intl.Segmenter | null =
-  typeof Intl !== "undefined" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter("en", { granularity: "grapheme" }) : null;
+/** Whether `cp` is in a flattened, ascending list of inclusive [start, end] pairs (grapheme-data). */
+function inPairs(cp: number, pairs: readonly number[]): boolean {
+  let lo = 0;
+  let hi = pairs.length / 2 - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cp < pairs[2 * mid]!) hi = mid - 1;
+    else if (cp > pairs[2 * mid + 1]!) lo = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+const ZWJ = 0x200d;
+const isRegionalIndicator = (cp: number): boolean => cp >= 0x1f1e6 && cp <= 0x1f1ff;
+const isControl = (cp: number): boolean => cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || cp === 0x2028 || cp === 0x2029;
+
+/** A code point's Hangul syllable type (UAX #29 L, V, T, LV, LVT), or null. */
+function hangul(cp: number): "L" | "V" | "T" | "LV" | "LVT" | null {
+  if ((cp >= 0x1100 && cp <= 0x115f) || (cp >= 0xa960 && cp <= 0xa97c)) return "L";
+  if ((cp >= 0x1160 && cp <= 0x11a7) || (cp >= 0xd7b0 && cp <= 0xd7c6)) return "V";
+  if ((cp >= 0x11a8 && cp <= 0x11ff) || (cp >= 0xd7cb && cp <= 0xd7fb)) return "T";
+  if (cp >= 0xac00 && cp <= 0xd7a3) return (cp - 0xac00) % 28 === 0 ? "LV" : "LVT";
+  return null;
+}
 
 /** `text` split into graphemes (user-perceived characters: a flag, a skin-toned or ZWJ emoji, a
- *  keycap, a letter with its combining marks), so a line break never cuts inside one. Intl.Segmenter
- *  is in Node (full ICU, the default build) and every current browser (Chrome and Edge 87, Safari
- *  14.1, Firefox 125); a runtime without it falls back to code points. */
+ *  keycap, a tag sequence, a letter with its combining marks, a Hangul syllable), so a line break
+ *  never cuts inside one. UAX #29's extended grapheme clusters, from tables frozen in grapheme-data.ts
+ *  (scripts/gen-grapheme-data.mjs) rather than Intl.Segmenter, so every runtime — Node under the
+ *  goldens, any browser — splits a line at the same points. Two rules are left out: Prepend (GB9b)
+ *  and the Indic conjunct rule (GB9c), so an over-wide word in Devanagari, Bengali and the like may
+ *  be hard-broken between the consonants of a conjunct (widths are unaffected). */
 export function graphemes(text: string): string[] {
-  return SEGMENTER ? Array.from(SEGMENTER.segment(text), (s) => s.segment) : Array.from(text);
+  const out: string[] = [];
+  let cur = "";
+  let prev = -1;
+  let ri = 0; // regional indicators at the end of `cur`
+  let pictographic = false; // `cur` ends in Extended_Pictographic Extend*
+  let zwjAfterPictographic = false; // ...and then a ZWJ (GB11)
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (cur && !continues(prev, cp, ri, zwjAfterPictographic)) {
+      out.push(cur);
+      cur = "";
+      ri = 0;
+      pictographic = false;
+    }
+    zwjAfterPictographic = cp === ZWJ && pictographic;
+    if (inPairs(cp, EXTENDED_PICTOGRAPHIC)) pictographic = true;
+    else if (cp !== ZWJ && !inPairs(cp, GRAPHEME_EXTEND)) pictographic = false;
+    ri = isRegionalIndicator(cp) ? ri + 1 : 0;
+    cur += ch;
+    prev = cp;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** Whether `cp` continues the grapheme ending in `prev` (UAX #29 GB3–GB13, less GB9b and GB9c). */
+function continues(prev: number, cp: number, ri: number, zwjAfterPictographic: boolean): boolean {
+  if (prev === 0x0d && cp === 0x0a) return true; // GB3
+  if (isControl(prev) || isControl(cp)) return false; // GB4, GB5
+  const h0 = hangul(prev);
+  const h1 = hangul(cp);
+  if (h0 === "L" && h1 !== null && h1 !== "T") return true; // GB6
+  if ((h0 === "LV" || h0 === "V") && (h1 === "V" || h1 === "T")) return true; // GB7
+  if ((h0 === "LVT" || h0 === "T") && h1 === "T") return true; // GB8
+  if (cp === ZWJ || inPairs(cp, GRAPHEME_EXTEND)) return true; // GB9, GB9a
+  if (zwjAfterPictographic && inPairs(cp, EXTENDED_PICTOGRAPHIC)) return true; // GB11
+  return isRegionalIndicator(cp) && ri % 2 === 1; // GB12, GB13
 }
 
 /** Width in px of `text` set in Figtree at `sizePx` and `weight`. Text the table covers sums one
@@ -122,22 +185,27 @@ export function timelineTextWidth(text: string, sizePx: number, weight: Timeline
   return (em * sizePx) / 1000;
 }
 
+/** An emoji part of an emoji grapheme: an emoji-class code point other than a tag character or a
+ *  variation selector (U+E0000–E01EF, which draw nothing). */
+const isEmojiPart = (cp: number): boolean => isEmoji(cp) && !(cp >= 0xe0000 && cp <= 0xe01ef);
+
 /** `text`'s advance, per 1000 em, a grapheme at a time. A multi-code-point grapheme led by an emoji
- *  or carrying VS16 (U+FE0F) or a keycap mark (U+20E3) is emoji: one EMOJI_EM for a flag, skin-toned
- *  emoji, keycap or tag sequence, and one per part of a ZWJ (U+200D) sequence — a platform whose
- *  emoji font lacks the sequence draws its parts side by side (Chromium on Windows 10: 🧑‍💻 2.68em),
- *  and even one it has can run past an em and a half (👨‍👩‍👧‍👦 1.94em). Any other grapheme sums its code
- *  points. */
+ *  or carrying VS16 (U+FE0F) or a keycap mark (U+20E3) is emoji: one EMOJI_EM per emoji part (at
+ *  least one), so a keycap, a tag flag or a VS16 emoji is one, while a flag (two regional
+ *  indicators), a skin-toned emoji (base and modifier) and a ZWJ sequence count each part. A
+ *  platform whose emoji font lacks the combined glyph draws the parts side by side — Chromium on
+ *  Windows 10 draws 🧑‍💻 at 2.68em, Linux an unknown flag as its two letter tiles — and even one it
+ *  has can run past an em and a half (👨‍👩‍👧‍👦 1.94em). Any other grapheme sums its code points. */
 function graphemesEm(text: string, weight: TimelineWeight): number {
   const table = ADVANCE[weight];
   let em = 0;
   for (const g of graphemes(text)) {
-    const cps = Array.from(g);
-    if (cps.length > 1 && (isEmoji(g.codePointAt(0)!) || g.includes("\uFE0F") || g.includes("\u20E3"))) {
-      em += EMOJI_EM * (1 + cps.filter((ch) => ch === "\u200D").length);
+    const cps = Array.from(g, (ch) => ch.codePointAt(0)!);
+    if (cps.length > 1 && (isEmoji(cps[0]!) || cps.includes(0xfe0f) || cps.includes(0x20e3))) {
+      em += EMOJI_EM * Math.max(1, cps.filter(isEmojiPart).length);
       continue;
     }
-    for (const ch of cps) em += table.get(ch) ?? fallbackEm(ch, weight);
+    for (const ch of g) em += table.get(ch) ?? fallbackEm(ch, weight);
   }
   return em;
 }
