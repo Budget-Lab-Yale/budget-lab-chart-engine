@@ -3,7 +3,7 @@
 // markers) is added by assemblePlot. Split out of the tracker's monolithic
 // buildLineChart so other chart types can register their own builder (marks/index.ts).
 import { Plot } from "../vendor";
-import { TBL, markerSymbolForSeries, MARK_LINE_POINT_R, MARK_LINE_POINT_PANE_R } from "../theme";
+import { TBL, markerSymbolRange, MARK_LINE_POINT_R, MARK_LINE_POINT_PANE_R } from "../theme";
 import { resolveColorOr } from "../palette";
 import { buildShadeRuns } from "../shade";
 import { labelMovedToLegend, annotationKey } from "../annotation-legend";
@@ -304,7 +304,7 @@ export function buildLineMarks(
     const symbolSeries = ctx.seriesNames ?? seriesOrder;
     symbolScaleOpts = {
       domain: symbolSeries,
-      range: symbolSeries.map((s, i) => markerSymbolForSeries(s, i, ctx.paletteSeries)),
+      range: markerSymbolRange(symbolSeries, ctx.paletteSeries),
     };
     // Symbol markers render as <path>; tag each (DOM order == pointData order) with its series
     // so the dots dim with the legend exactly like the lines.
