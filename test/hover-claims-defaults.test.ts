@@ -27,7 +27,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   mountHover, cardShown, cardText, coordShown, coordTexts, hoverFirstMark,
-  BAR_MARK, DOT_MARK, PLOT_MIDDLE,
+  BAR_MARK, DOT_MARK, HIST_MARK, PLOT_MIDDLE,
 } from "./helpers/hover-harness";
 import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
@@ -65,6 +65,25 @@ const temporalRows = (times: string[]): TidyRow[] =>
  *  card's rows single-row at defaults. */
 const soloTemporalRows = (times: string[]): TidyRow[] =>
   times.map((t, i) => ({ time: t, value: String(3 + i) })) as unknown as TidyRow[];
+
+/** The pane's x-axis tick labels (below the plot), each with whether it is hidden. Shared by the
+ *  `tooltip_x_format` and histogram bin-range echo collision tests. */
+const xTicks = (svg: SVGSVGElement): Array<{ text: string; hidden: boolean }> => {
+  const vb = svg.viewBox.baseVal;
+  const plotBottom = vb.height - (+(svg.dataset.marginBottom ?? "") || 28);
+  return Array.from(svg.querySelectorAll<SVGTextElement>("text"))
+    .filter((t) => !t.closest(".tbl-coord") && !t.closest(".tbl-y-tick-label"))
+    .filter((t) => t.getBoundingClientRect().width > 0)
+    .filter((t) => t.getBoundingClientRect().top >= plotBottom - 2)
+    .map((t) => ({ text: t.textContent ?? "", hidden: t.style.visibility === "hidden" }));
+};
+/** The echo pill's box, from the rect the engine actually drew. */
+const pillBox = (svg: SVGSVGElement) => {
+  const r = svg.querySelector<SVGRectElement>("rect.tbl-coord-axis-label");
+  if (!r) return null;
+  const x = +r.getAttribute("x")!, y = +r.getAttribute("y")!;
+  return { left: x, right: x + +r.getAttribute("width")!, top: y, bot: y + +r.getAttribute("height")! };
+};
 
 const MONTHLY = ["2026-06-01", "2026-07-01", "2026-08-01"];
 const DAILY = ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"];
@@ -194,23 +213,6 @@ describe("tooltip_x_format", () => {
   // it shows, then restored. The GEOMETRY here is the harness's mock (a text is `len * 5` wide), not
   // real font metrics, so these prove the mechanism fires and targets the right elements — the
   // absence of a visible collision at real widths is a browser screenshot, not this.
-  const xTicks = (svg: SVGSVGElement): Array<{ text: string; hidden: boolean }> => {
-    const vb = svg.viewBox.baseVal;
-    const plotBottom = vb.height - (+(svg.dataset.marginBottom ?? "") || 28);
-    return Array.from(svg.querySelectorAll<SVGTextElement>("text"))
-      .filter((t) => !t.closest(".tbl-coord") && !t.closest(".tbl-y-tick-label"))
-      .filter((t) => t.getBoundingClientRect().width > 0)
-      .filter((t) => t.getBoundingClientRect().top >= plotBottom - 2)
-      .map((t) => ({ text: t.textContent ?? "", hidden: t.style.visibility === "hidden" }));
-  };
-  /** The echo pill's box, from the rect the engine actually drew. */
-  const pillBox = (svg: SVGSVGElement) => {
-    const r = svg.querySelector<SVGRectElement>("rect.tbl-coord-axis-label");
-    if (!r) return null;
-    const x = +r.getAttribute("x")!, y = +r.getAttribute("y")!;
-    return { left: x, right: x + +r.getAttribute("width")!, top: y, bot: y + +r.getAttribute("height")! };
-  };
-
   it("2-pane MONTHLY temporal line: the echo hides the tick labels it covers, and only those", () => {
     // A year of months puts the ticks close enough together that a long format's pill lands on one.
     const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}-01`);
@@ -318,6 +320,101 @@ describe("tbl-coord-axis-label", () => {
     expect(m.svgs[0]!.querySelectorAll(".tbl-coord-axis-label").length).toBeGreaterThan(0);
     expect(coordShown(m.svgs[1]!)).toBe(true);
     expect(m.svgs[1]!.querySelectorAll(".tbl-coord-axis-label").length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A HISTOGRAM PANE'S BIN-RANGE ECHO ON ITS TICK ROW. The same collision as the `tooltip_x_format`
+// echo above, through the same `addCoordAxisLabel`: the pill is centred on the bin and sized from
+// `"0 – 1"`, not from the tick it lands on, so on narrow bins it covers the bin's edge ticks and
+// leaves a neighbour's fragment past its edge. Unlike that echo it is not gated on a dial — every
+// bin label is a range, wider than either edge's tick. Mocked geometry (a text is `len * 5` wide),
+// so these prove the mechanism fires on the right elements, not the absence of overlap at real
+// font metrics.
+//
+// A STANDALONE histogram draws no echo at all — its hover is a card — so there is no collision to
+// reproduce there; the last test pins that the fix does not reach it.
+// ---------------------------------------------------------------------------
+
+describe("histogram bin-range echo and its axis ticks", () => {
+  /** One value per unit bin on [0, 20) — narrow bins (about 18px in an 838px 2-column figure). */
+  const histRows = (panes: string[] | null): TidyRow[] => {
+    const rows: TidyRow[] = [];
+    for (const pane of panes ?? [null]) {
+      for (let v = 0; v < 20; v++) {
+        rows.push({ ...(pane ? { pane } : {}), amount: String(v + 0.5) } as unknown as TidyRow);
+      }
+    }
+    return rows;
+  };
+  const histSpec = (faceted: boolean): ChartSpec =>
+    spec({
+      chartType: "histogram", xAxisType: "numeric", data: "d.csv",
+      histogram: { bins: 20, domain: [0, 20] },
+      columns: { x: "amount", ...(faceted ? { facet: "pane" } : {}) },
+      ...(faceted ? sm : {}),
+    });
+  /** Every still-VISIBLE x-axis text the pill's box intersects — the collision itself. */
+  const visibleUnderPill = (svg: SVGSVGElement, box: NonNullable<ReturnType<typeof pillBox>>) =>
+    Array.from(svg.querySelectorAll<SVGTextElement>("text"))
+      .filter((t) => !t.closest(".tbl-coord") && t.style.visibility !== "hidden")
+      .map((t) => ({ text: t.textContent ?? "", r: t.getBoundingClientRect() }))
+      .filter(({ r }) => r.width > 0 && r.top >= box.top - 1)
+      .filter(({ r }) => Math.min(box.right, r.right) - Math.max(box.left, r.left) > 0.5)
+      .filter(({ r }) => Math.min(box.bot, r.bottom) - Math.max(box.top, r.top) > 0.5)
+      .map(({ text }) => text);
+
+  it("2-pane shared histogram: the echo hides the tick labels it covers, and only those", () => {
+    const m = mountHover(histSpec(true), histRows(["P1", "P2"]), true);
+    const svg = m.svgs[0]!;
+    hoverFirstMark(svg, HIST_MARK);
+    expect(cardShown()).toBe(false);
+    const box = pillBox(svg)!;
+    expect(box, "the hovered pane draws a bin-range echo").toBeTruthy();
+    expect(coordTexts(svg)).toContain("0 – 1");
+    // The collision, in mocked geometry: no visible tick label is left under the pill.
+    expect(visibleUnderPill(svg, box)).toEqual([]);
+    // Only the covered ones: the axis keeps the ticks the pill does not reach.
+    const ticks = xTicks(svg);
+    expect(ticks.some((t) => t.hidden), ticks.map((t) => `${t.text}:${t.hidden}`).join("|")).toBe(true);
+    expect(ticks.some((t) => !t.hidden)).toBe(true);
+    // The sibling pane echoes the bin (shaded region) but draws no axis echo, so hides nothing.
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    expect(xTicks(m.svgs[1]!).filter((t) => t.hidden)).toEqual([]);
+    // Leaving the pane clears the echo and restores every tick.
+    svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+    expect(xTicks(svg).filter((t) => t.hidden)).toEqual([]);
+  });
+
+  it("2-pane shared histogram: moving to another bin restores the ticks the last echo hid", () => {
+    const m = mountHover(histSpec(true), histRows(["P1", "P2"]), true);
+    const svg = m.svgs[0]!;
+    const rects = Array.from(svg.querySelectorAll<SVGRectElement>(HIST_MARK));
+    const centre = (r: SVGRectElement) => +r.getAttribute("x")! + +r.getAttribute("width")! / 2;
+    const move = (clientX: number) =>
+      svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+        new PointerEvent("pointermove", { clientX, clientY: svg.viewBox.baseVal.height / 2, bubbles: true }),
+      );
+    move(centre(rects[0]!));
+    const firstHidden = xTicks(svg).filter((t) => t.hidden).map((t) => t.text);
+    expect(firstHidden.length).toBeGreaterThan(0);
+    move(centre(rects[rects.length - 1]!));
+    const box = pillBox(svg)!;
+    expect(visibleUnderPill(svg, box)).toEqual([]);
+    // Hidden now is exactly what the NEW pill covers: nothing from the first bin's edge stays hidden.
+    const nowHidden = xTicks(svg).filter((t) => t.hidden).map((t) => t.text);
+    expect(nowHidden.some((t) => firstHidden.includes(t))).toBe(false);
+  });
+
+  it("standalone histogram: hover is a card, no echo is drawn and no tick is hidden", () => {
+    const m = mountHover(histSpec(false), histRows(null));
+    const svg = m.svgs[0]!;
+    hoverFirstMark(svg, HIST_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("0 – 1");
+    expect(svg.querySelector(".tbl-coord-axis-label")).toBeNull();
+    expect(xTicks(svg).length).toBeGreaterThan(0);
+    expect(xTicks(svg).filter((t) => t.hidden)).toEqual([]);
   });
 });
 
