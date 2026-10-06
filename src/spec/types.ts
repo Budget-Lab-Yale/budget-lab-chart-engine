@@ -851,7 +851,9 @@ export interface ChartSpec {
    * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top", at mount and on resize; a `small_multiples`
    * figure has only a top legend slot; a vertical timeline's PNG export puts the legend on top; and a
    * legend with no rows to show takes no column on any chart type (full-width plot), live as in the
-   * PNG — live, a timeline's rows are judged in the orientation it would draw beside the column.
+   * PNG — live, a timeline's rows are judged in the orientation it would draw beside the column. A
+   * stacked chart's Total row counts: it is drawn exactly when `barStack.netDisplay` resolves to a
+   * dot (explicit `dot` always; `auto` on diverging data; never `text`, `none` or `normalize`).
    * Otherwise the PNG follows this field.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */

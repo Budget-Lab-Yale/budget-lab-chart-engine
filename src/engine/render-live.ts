@@ -1578,8 +1578,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // The spec's legend position on a card `cardW` wide, by the export's rule (legendInRightColumn):
   // "right" only for a legend with rows to show. A legend with none — a single series,
   // `series_legend: false` with no other rows, a treemap's flat data — reserves no column, so the
-  // plot takes the card's full width, as in the PNG. Legend rows do not depend on the chart's width,
-  // so the probe's rows hold at every width — except a timeline's: a resize can switch its
+  // plot takes the card's full width, as in the PNG. Legend rows do not depend on the chart's width
+  // (pinned per row source in test/right-legend-no-rows.test.ts), so the probe's rows hold at
+  // every width — except a timeline's: a resize can switch its
   // orientation, and with it whether drawn lanes replace the rows, so it is asked at the width the
   // column would leave.
   const specPos = (cardW: number): "top" | "right" => {
