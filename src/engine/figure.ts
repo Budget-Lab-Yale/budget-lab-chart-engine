@@ -541,6 +541,11 @@ export function renderFigure(
   }
   const listedSeries = spec.series_order?.length ? new Set(spec.series_order) : null;
   const chartSeriesCount = [...drawnSeries].filter((s) => !listedSeries || listedSeries.has(s)).length;
+  // The figure legend keys only the series a pane draws: one found only in a pane pane_order leaves
+  // out is drawn nowhere. Its rows are still built over `figureSeries` and then filtered, so every
+  // drawn series keeps the row it had — colour and marker both index the full list.
+  const legendSeries = figureSeries.filter((s) => drawnSeries.has(s));
+  const drawnKeyRows = (rows: LegendItem[]): LegendItem[] => rows.filter((r) => drawnSeries.has(r.series));
 
   // Per-pane heights: every facet sized by the SAME shared per-slot height (effSlotPx/chromeExtra,
   // computed above from the BUSIEST facet with the floor applied only there), scaled by ITS OWN
@@ -756,10 +761,10 @@ export function renderFigure(
     const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
     const legendItems = buildLegendItems(
       spec,
-      figureSeries,
+      legendSeries,
       figureColors,
       figureLayers,
-      buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills)),
+      drawnKeyRows(buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills))),
       firstFormatValue,
     );
 
@@ -933,10 +938,10 @@ export function renderFigure(
   const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
   const legendItems = buildLegendItems(
     spec,
-    figureSeries,
+    legendSeries,
     figureColors,
     figureLayers,
-    buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills)),
+    drawnKeyRows(buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills))),
     firstFormatValue,
   );
 
