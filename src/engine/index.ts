@@ -374,6 +374,7 @@ export function renderPane(
   classNameSuffix?: string,
   facetInfo?: FacetInfo,
 ): PaneResult {
+  spec = withoutRepeatedOrderEntries(spec);
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
   const cols = resolveColumns(spec, rows);
@@ -608,6 +609,7 @@ function resolveShapeNames(spec: ChartSpec, dataInScope: readonly PreparedRow[])
  *  of the figure's own (dropping a listed blank value, reading rows before x_order sorts them,
  *  counting rows no pane draws) returned another list and moved those figures' markers. */
 export function shapeDomainOver(spec: ChartSpec, rows: TidyRow[]): string[] {
+  spec = withoutRepeatedOrderEntries(spec);
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
   const cols = resolveColumns(spec, rows);

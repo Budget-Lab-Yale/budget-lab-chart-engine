@@ -10,6 +10,7 @@
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
 import { buildColorMap } from "../index";
+import { withoutRepeatedOrderEntries } from "../util";
 import { ownValue } from "../../spec/own-key";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
 import { legendInRightColumn, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
@@ -305,6 +306,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
 }
 
 export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
+  spec = withoutRepeatedOrderEntries(spec);
   const b = build(spec, rows, opts.width ?? 720);
   const svg = draw(opts.document ?? document, spec, b);
   const treemapTiles: TreemapTileInfo[] = b.tiles.map((t) => ({

@@ -3,9 +3,10 @@ import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
 
 /** `spec` with each repeated `series_order` / `shape_order` entry dropped, the first kept. A repeat is
  *  an author error that validation rejects (Ruling 66), but renderChart does not validate, so every
- *  public entry point (renderChart, renderFigure, mountChart, buildExportSvg) runs this first: the
- *  legend, marks, key rows, hover maps, palette, marker index and a horizontal bar's height all read
- *  one list. A spec with no repeat is returned as is, the same object. */
+ *  exported entry that takes a spec and reads either list runs this first: renderChart, renderFigure,
+ *  mountChart, buildExportSvg, and the renderers they dispatch to that are exported in their own
+ *  right (renderPane, shapeDomainOver, renderTreemap, renderTimeline). The legend, marks, key rows,
+ *  hover maps, palette, marker index and a horizontal bar's height then all read one list. A spec with no repeat is returned as is, the same object. */
 export function withoutRepeatedOrderEntries(spec: ChartSpec): ChartSpec {
   let out: ChartSpec | undefined;
   for (const field of ["series_order", "shape_order"] as const) {

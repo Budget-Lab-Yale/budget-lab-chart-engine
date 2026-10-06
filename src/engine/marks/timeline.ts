@@ -9,7 +9,7 @@
 import { d3 } from "../vendor";
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
-import { isTruthyFlag } from "../util";
+import { isTruthyFlag, withoutRepeatedOrderEntries } from "../util";
 import { LABEL_HALO } from "../assemble-plot";
 import { buildColorMap } from "../index";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
@@ -415,6 +415,7 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
 }
 
 export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
+  spec = withoutRepeatedOrderEntries(spec);
   const width = opts.width ?? 720;
   const orientation = opts.timelineOrientation ?? spec.orientation ?? "horizontal";
   const { layout, events, seriesNames, lanesOn } = build(spec, rows, width, orientation, opts.timelineBudgetWidth);

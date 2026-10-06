@@ -9,7 +9,9 @@
 // occurrence while every list the engine built row by row (the legend, the key rows, the hover maps,
 // a horizontal bar's height) counted the repeat, so the legend and the marks disagreed.
 import { describe, it, expect, afterEach } from "vitest";
-import { renderChart } from "../src/engine/index";
+import { renderChart, renderPane, shapeDomainOver } from "../src/engine/index";
+import { renderTreemap } from "../src/engine/marks/treemap";
+import { renderTimeline } from "../src/engine/marks/timeline";
 import { renderFigure } from "../src/engine/figure";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
@@ -477,3 +479,81 @@ for (const f of RAGGED_FIGS) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Every exported renderer entry drops the repeat itself, not only the wrappers above: a direct call
+// with a repeat equals the same call with the repeat removed.
+
+/** A render result, serialised whole: SVG elements as markup (clip ids made stable), Maps and Sets
+ *  as their entries, functions by name only. */
+function serialised(v: unknown): string {
+  return stable(JSON.stringify(v, (_k, x: unknown) => {
+    if (x instanceof Element) return x.outerHTML;
+    if (x instanceof Map) return { map: [...x.entries()] };
+    if (x instanceof Set) return { set: [...x] };
+    if (typeof x === "function") return "fn";
+    return x;
+  }));
+}
+
+describe("a direct renderer call with a repeat equals the call without it", () => {
+  it("renderPane · stacked · series_order A, A (two net dots before)", () => {
+    const base = {
+      chartType: "stacked", title: "t", xAxisType: "categorical", data: "d.csv",
+      columns: { x: "x", value: "value", series: "series" },
+    };
+    const rows = [{ x: "X", series: "A", value: "-3" }, { x: "Y", series: "A", value: "2" }] as unknown as TidyRow[];
+    const got = renderPane({ ...base, series_order: ["A", "A"] } as unknown as ChartSpec, rows, { width: 720 });
+    const want = renderPane({ ...base, series_order: ["A"] } as unknown as ChartSpec, rows, { width: 720 });
+    expect(got.seriesNames).toEqual(["A"]);
+    expect(serialised(got)).toBe(serialised(want));
+  });
+
+  it("renderPane · scatter, shape column · shape_order M, M, N", () => {
+    const spec = (shape_order: string[]): ChartSpec => specOf(
+      { chartType: "scatter", xAxisType: "numeric" }, SHAPE_COLS, { shape_order }, "standalone");
+    const rows = shapeRows(["1", "2"], ["P"]);
+    const got = renderPane(spec(["M", "M", "N"]), rows, { width: 720 });
+    const want = renderPane(spec(["M", "N"]), rows, { width: 720 });
+    expect(got.layers.shapeNames).toEqual(["M", "N"]);
+    expect(serialised(got)).toBe(serialised(want));
+  });
+
+  it("shapeDomainOver · shape_order N, M, N", () => {
+    const spec = (shape_order: string[]): ChartSpec => specOf(
+      { chartType: "scatter", xAxisType: "numeric" }, SHAPE_COLS, { shape_order }, "standalone");
+    const rows = shapeRows(["1", "2"], ["P"]);
+    expect(shapeDomainOver(spec(["N", "M", "N"]), rows)).toEqual(shapeDomainOver(spec(["N", "M"]), rows));
+    expect(shapeDomainOver(spec(["N", "M", "N"]), rows)).toEqual(["N", "M"]);
+  });
+
+  it("renderTreemap · series_order A, A, B (three legend rows before)", () => {
+    const base = {
+      chartType: "treemap", title: "t", xAxisType: "categorical", data: "d.csv",
+      columns: { x: "name", value: "amount", series: "group" },
+    };
+    const rows = [
+      { name: "a1", amount: "300", group: "A" }, { name: "a2", amount: "100", group: "A" },
+      { name: "b1", amount: "200", group: "B" },
+    ] as unknown as TidyRow[];
+    const got = renderTreemap({ ...base, series_order: ["A", "A", "B"] } as unknown as ChartSpec, rows, { width: 720 });
+    const want = renderTreemap({ ...base, series_order: ["A", "B"] } as unknown as ChartSpec, rows, { width: 720 });
+    expect(got.seriesKeyRows!.map((r) => r.series)).toEqual(["A", "B"]);
+    expect(serialised(got)).toBe(serialised(want));
+  });
+
+  it("renderTimeline · series_order policy, cohort, policy", () => {
+    const base = {
+      chartType: "timeline", title: "t", xAxisType: "temporal", data: "d.csv",
+      columns: { x: "date", label: "title", series: "kind" }, timeline: { lanes: true },
+    };
+    const rows = [
+      { date: "2026", title: "Policy begins", kind: "policy" },
+      { date: "2030", title: "First cohort", kind: "cohort" },
+      { date: "2034", title: "Second step", kind: "policy" },
+    ] as unknown as TidyRow[];
+    const got = renderTimeline({ ...base, series_order: ["policy", "cohort", "policy"] } as unknown as ChartSpec, rows, { width: 720 });
+    const want = renderTimeline({ ...base, series_order: ["policy", "cohort"] } as unknown as ChartSpec, rows, { width: 720 });
+    expect(serialised(got)).toBe(serialised(want));
+  });
+});
