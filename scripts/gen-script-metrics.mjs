@@ -13,8 +13,8 @@
  * The set used for the committed table is listed in its header. Each face is loaded into headless
  * Chromium as a FontFace and every letter it maps (read from its cmap) is measured with canvas
  * measureText at 1000px, so the table is in thousandths of an em; at each weight a family is
- * measured with the face CSS font matching picks for it (500 takes a 400 face where there is no
- * 500). Run by hand (needs playwright's Chromium); it is not part of the build or the tests.
+ * measured with every face font matching could pick for it (`candidateFaces`), and the widest kept.
+ * Run by hand (needs playwright's Chromium); it is not part of the build or the tests.
  */
 
 import { readFile, writeFile } from "node:fs/promises";
@@ -84,6 +84,20 @@ function matchFace(faces, weight) {
   return weight <= 500 ? (below[0] ?? above[0]) : (above[0] ?? below[0]);
 }
 
+/** Every face of a family that font matching could pick for `weight` (Ruling 57): the face CSS
+ *  matching picks, plus, where the family has no face at `weight`, the nearest heavier face within
+ *  100. Chromium on Windows draws Segoe UI at 500 with its Semibold (600) face, where CSS Fonts 4
+ *  picks Regular, so measuring only Regular left 45 letters short (ꙇ by 9%). Taking the widest of
+ *  both means a letter never measures short of either, and adds a face only, so no value goes down. */
+function candidateFaces(faces, weight) {
+  const picks = [matchFace(faces, weight)];
+  if (!faces.some((f) => f.lo <= weight && weight <= f.hi)) {
+    const heavier = faces.filter((f) => f.lo > weight && f.lo <= weight + 100).sort((a, b) => a.lo - b.lo)[0];
+    if (heavier && !picks.includes(heavier)) picks.push(heavier);
+  }
+  return picks;
+}
+
 const args = process.argv.slice(2);
 if (!args.length) throw new Error("usage: gen-script-metrics.mjs Family:weight=path ...");
 const families = new Map();
@@ -105,12 +119,11 @@ for (const [a, b] of BLOCKS) {
   }
 }
 
-// Per weight and letter, the faces that would draw it: each family's matched face, if it maps it.
+// Per weight and letter, the faces that could draw it: each family's candidate faces that map it.
 const allFaces = [...families.values()].flat();
-const jobs = WEIGHTS.flatMap((w) => [...families.values()].map((faces) => {
-  const face = matchFace(faces, w);
-  return { w, idx: allFaces.indexOf(face), chars: letters.filter((ch) => face.cps.has(ch.codePointAt(0))) };
-}));
+const jobs = WEIGHTS.flatMap((w) => [...families.values()].flatMap((faces) => candidateFaces(faces, w).map((face) => (
+  { w, idx: allFaces.indexOf(face), chars: letters.filter((ch) => face.cps.has(ch.codePointAt(0))) }
+))));
 
 const browser = await chromium.launch();
 try {

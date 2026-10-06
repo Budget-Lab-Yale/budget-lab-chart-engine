@@ -21,11 +21,10 @@
 //   - FIGTREE_FALLBACK (the Latin letter mean): everything else (Latin Extended, symbols).
 // So a line wrapped to a column renders inside it, to within that fraction of a pixel, for the
 // table's characters and the two wide classes (Rulings 48, 49); and Cyrillic and Greek, in the fonts
-// measured (macOS fonts were not), short only where kerning tightens a pair, except at 500 on
-// Windows, where Chromium draws Segoe UI's semibold face: up to 0.7% wider than the table for common
-// letters (М) and 9% for rare ones (ꙇ). Text in another script runs past its column where the
-// reader's font draws it wider than SCRIPT_EM, as Windows does a word dense in some Tamil, Malayalam
-// or Myanmar letters (see SCRIPT_EM).
+// measured (macOS fonts were not), short only where kerning tightens a pair; at 500 the table also
+// covers Segoe UI's semibold face, which Chromium on Windows draws there (Ruling 57). Text in another
+// script runs past its column where the reader's font draws it wider than SCRIPT_EM, as Windows does
+// a word dense in some Tamil, Malayalam or Myanmar letters (see SCRIPT_EM).
 // Shared by the timeline and the treemap (treemap-labels.ts fits tile label text with it),
 // so a change to the table or its fallbacks moves both; every other chart keeps estimateLabelWidth,
 // byte-identical.
@@ -142,7 +141,10 @@ function hangul(cp: number): "L" | "V" | "T" | "LV" | "LVT" | null {
  *  (scripts/gen-grapheme-data.mjs) rather than Intl.Segmenter, so every runtime — Node under the
  *  goldens, any browser — splits a line at the same points. Two rules are left out: Prepend (GB9b)
  *  and the Indic conjunct rule (GB9c), so an over-wide word in Devanagari, Bengali and the like may
- *  be hard-broken between the consonants of a conjunct (widths are unaffected). */
+ *  be hard-broken between the consonants of a conjunct (widths are unaffected). Two classes are
+ *  approximated, both toward merging: SpacingMark is every Mc, without UAX #29's exceptions (so
+ *  Myanmar U+102B, U+102C, U+1038 join the letter before), and Control is Cc, U+2028 and U+2029
+ *  only, so a Cf format control (U+200B, U+00AD) joins a mark after it. */
 export function graphemes(text: string): string[] {
   const out: string[] = [];
   let cur = "";

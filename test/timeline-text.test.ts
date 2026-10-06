@@ -225,6 +225,16 @@ describe("per-letter Cyrillic and Greek, a conservative constant for other scrip
     expect(timelineTextWidth(ch, 1000, 700)).toBeGreaterThanOrEqual(f700);
   });
 
+  // Ruling 57: at weight 500 on Windows, Chromium draws Segoe UI Semibold (600; there is no 500
+  // face), so a 500 entry is never narrower than Semibold's advance. hmtx of seguisb.ttf (fontTools),
+  // rounded down to 0.1: the generator used to measure Regular there, and these three were short.
+  it.each([["И", 767.5], ["ю", 844.7], ["ꙇ", 395.5]] as const)(
+    "%s at 500 measures no narrower than Segoe UI Semibold (%s)",
+    (ch, semibold) => {
+      expect(timelineTextWidth(ch, 1000, 500)).toBeGreaterThanOrEqual(semibold);
+    },
+  );
+
   it.each(["ω", "Щ"])("a title of 30 %s wraps inside a 280px frame at its widest font's advance", (ch) => {
     const title = ch.repeat(30);
     const e: LayoutEvent = { id: 0, start: new Date("2020-01-01"), end: null, ongoing: false, category: "a", dateText: "2020", title, description: null, projected: false };
