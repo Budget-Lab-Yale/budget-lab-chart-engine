@@ -1972,8 +1972,8 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
  * thresholds, so the bin sets match; keying on x0 also degrades gracefully if edges ever drift),
  * shades its span, and lays a per-series height pill above each bar (staggered on collision). When
  * `active`, the bin range is drawn as an axis pill (same `formatBinLabel` as the hover tooltip),
- * hiding the tick labels it covers (`hideAxisLabelsUnder`). `driver(null)` clears. No pointer handlers (externally driven by the figure bus). Built on the
- * SAME bin geometry as the primary hover (buildHistogramGeom). */
+ * hiding the tick labels it covers (`hideAxisLabelsUnder`). `driver(null)` clears. No pointer
+ * handlers (externally driven by the figure bus). Built on the SAME bin geometry as the primary hover (buildHistogramGeom). */
 export function attachSecondaryHistogramCursor(
   svgEl: SVGSVGElement,
   opts: HistogramHoverOptions,
@@ -2063,10 +2063,10 @@ export function attachSecondaryHistogramCursor(
         const cx = (spans[idx]!.min + spans[idx]!.max) / 2;
         const text = formatBinLabel(bin.x0, bin.x1, opts.label ?? { xType: "numeric", interval: null });
         const box = addCoordAxisLabel(g, doc, cx, [{ text, cy: rowYs[0]! }]);
-        // A bin range ("10 – 20") is wider than the edge ticks it is centred between, so on narrow
-        // bins the pill covers them and leaves a neighbour's fragment past its edge. Hide what it
-        // covers, as the line cursor does for a wide `tooltip_x_format` echo. Ungated: unlike that
-        // echo there is no default form that fits its tick.
+        // A numeric bin range ("10 – 20") is wider than the edge ticks it is centred between, so on
+        // narrow bins the pill covers them and leaves a neighbour's fragment past its edge. Hide
+        // what it covers, as the line cursor does for a wide `tooltip_x_format` echo. Ungated:
+        // the default label is already a range; where it covers nothing, nothing is hidden.
         if (box) hiddenTicks = hideAxisLabelsUnder(svgEl, mt + plotH, box);
       }
     }
@@ -2399,8 +2399,8 @@ type HiddenTick = { el: SVGTextElement; prev: string };
  * axis whose ticks are `Jun`, so the pill reaches across its neighbour and leaves a fragment of it
  * sticking out past the pill's edge (`Apr` read as `pr`). Hiding just the ticks the pill actually
  * covers keeps the echo where the reader expects it — on the axis row — while the ticks it does
- * NOT reach stay put, so the axis keeps its context. A histogram pane's bin-range echo has the
- * same problem unconditionally (`"10 – 20"` is wider than either edge tick) and uses this too.
+ * NOT reach stay put, so the axis keeps its context. A histogram pane's bin-range echo hits the
+ * same collision at defaults (a numeric `"10 – 20"` is wider than either edge tick) and uses this.
  * Restored on the next cursor move and on clear; the export path re-renders from the spec and
  * never sees this.
  */
