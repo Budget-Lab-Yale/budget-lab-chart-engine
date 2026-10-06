@@ -34,7 +34,7 @@ import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex, markerSymbolForSeries } from "./theme";
 import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
@@ -1131,6 +1131,11 @@ export function buildSeriesKeyRows(
    *  REQUIRED, like `paintedHatches` and for the same reason: a default would let a new call site
    *  silently fall back to the colour map, which is the bug. */
   paintedColors: Map<string, string>,
+  /** Small multiples: the FIGURE's series list, which numbers the per-series markers as the panes'
+   *  marks and the figure legend do (theme.ts markerSymbolForSeries). A pane's key rows fill the
+   *  hover card for a series the figure legend has no row for, so indexing the pane's own list there
+   *  keyed a different marker from the one drawn. Absent (a single chart) → the row's own index. */
+  symbolOrder?: readonly string[],
 ): LegendItem[] {
   const chartType = spec.chartType;
   const labelFor = (name: string): string => ownValue(spec.series_labels, name) ?? name;
@@ -1160,7 +1165,7 @@ export function buildSeriesKeyRows(
         dashed: false,
       };
       if (layers.shapeIsSeries) {
-        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForIndex(i) };
+        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForSeries(name, i, symbolOrder) };
       }
       if (distinctShape) {
         return { ...base, markerShape: "chip" as const };
@@ -1202,7 +1207,7 @@ export function buildSeriesKeyRows(
       color: legendColorFor(name),
       dashed: ownValue(spec.series_styles, name)?.dashed === true,
       markerShape,
-      ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
+      ...(withSymbols ? { markerSymbol: markerSymbolForSeries(name, i, symbolOrder) } : {}),
     }));
   }
 

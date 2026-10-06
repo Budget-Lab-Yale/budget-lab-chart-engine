@@ -104,7 +104,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   (`line` with `points: true`, and a `scatter` or `dotplot` whose `columns.shape` is the series
   column), as colours already did. A pane used to number markers by its own series, so a pane
   missing a series, or meeting its series in another order with no `series_order`, drew a series
-  with another series' marker. The coordinated cursor's hover dot follows. Live and in the PNG.
+  with another series' marker. The coordinated cursor's hover dot follows, and so does the hover
+  card's key for a series the legend has no row for (`series_legend: false`, `legend: false`, or a
+  figure drawing one series). Live and in the PNG.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated

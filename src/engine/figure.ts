@@ -749,7 +749,7 @@ export function renderFigure(
         overlayTooltips: p.overlayTooltips,
         netMode: p.layers.netMode,
         legendVisualOrder: p.layers.legendVisualOrder,
-        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
+        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted, figureSeries),
       };
     });
 
@@ -926,7 +926,7 @@ export function renderFigure(
       overlayTooltips: p.overlayTooltips,
       netMode: p.layers.netMode,
       legendVisualOrder: p.layers.legendVisualOrder,
-      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
+      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted, figureSeries),
     };
   });
 

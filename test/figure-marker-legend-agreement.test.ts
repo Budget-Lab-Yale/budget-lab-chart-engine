@@ -159,3 +159,55 @@ for (const k of [KINDS[0], KINDS[1]]) {
     });
   });
 }
+
+// A series the figure legend has NO row for — `series_legend: false`, `legend: false`, or a figure
+// that draws one series — takes its hover-card key from the PANE's key rows instead
+// (icon.ts resolveTooltipIcons). Those rows numbered markers by the pane's own list after the marks
+// had moved to the figure's, so pane P of RAGGED drew A as a square under a card keying it a circle.
+/** series → the marker symbol its row in the shown card is keyed with. */
+function cardSymbols(): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of Array.from(document.body.querySelectorAll(".tbl-tooltip .tbl-tooltip-row"))) {
+    const label = (r.querySelector(".tbl-tooltip-label")?.textContent ?? "").replace(/:$/, "");
+    const mark = r.querySelector(".tbl-tooltip-swatch path, .tbl-tooltip-swatch circle");
+    if (label && mark) out.set(label, symbolOf(mark));
+  }
+  return out;
+}
+
+// C sits only in pane R, which pane_order leaves out: the figure draws one series, A, as the
+// figure's second marker (square), in a single pane.
+const ONE_DRAWN = { name: "one drawn series", order: [["R", "C"], ["P", "A"]], pane_order: ["P"] } as const;
+const NO_KEY = [
+  { why: "series_legend: false", f: RAGGED, extra: { series_legend: false } },
+  { why: "legend: false", f: RAGGED, extra: { legend: false } },
+  { why: "one drawn series (no series rows)", f: ONE_DRAWN, extra: {} },
+] as const;
+
+for (const k of [KINDS[0], KINDS[1]]) {
+  for (const c of NO_KEY) {
+    describe(`${k.kind} · ${c.why} · hover card`, () => {
+      it("keys each series with the marker its pane draws", () => {
+        const s = {
+          ...specFor(k, "shared", c.f.pane_order),
+          ...c.extra,
+          small_multiples: { columns: 2, mode: "shared", pane_order: [...c.f.pane_order], coordinated_cursor: false },
+        } as unknown as ChartSpec;
+        const rows = rowsFor(c.f, [...k.xs]);
+        const host = document.createElement("div");
+        document.body.append(host);
+        mountChart(host, { spec: s, rows, width: 838, height: 420 });
+        const pane = host.querySelector<SVGSVGElement>(".figure-pane svg")!;
+        mockRect1to1(pane);
+        mockPathMarks(pane);
+        hoverFirstMark(pane, PLOT_MIDDLE);
+        const card = cardSymbols();
+        const drawn = drawnSymbols(pane);
+        expect(card.size, "no card rows, so this measures nothing").toBe(drawn.size);
+        for (const [series, syms] of drawn) expect(card.get(series), `card key for ${series}`).toBe([...syms][0]);
+        // The figure's list is [C, A, B]: A is its second marker wherever it is drawn.
+        expect([...drawn.get("A")!]).toEqual(["square"]);
+      });
+    });
+  }
+}
