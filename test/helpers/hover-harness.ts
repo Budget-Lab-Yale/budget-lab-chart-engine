@@ -97,18 +97,28 @@ export function coordTexts(svg: SVGSVGElement): string[] {
 }
 
 /** Hover the horizontal centre of the first mark matching `markSel`, on whichever hit rect the
- *  chart attached. Falls back to the middle of the pane when there is no such mark. */
+ *  chart attached. Falls back to the middle of the pane when there is no such mark. A dot is hovered
+ *  at its own height too: a horizontal dumbbell (the default orientation) resolves its category
+ *  from the pointer's y, so the pane's middle row would name another category. */
 export function hoverFirstMark(svg: SVGSVGElement, markSel: string): void {
   const vb = svg.viewBox.baseVal;
   const mark = svg.querySelector<SVGGraphicsElement>(markSel);
   let cx = vb.width / 2;
+  let cy = vb.height / 2;
   if (mark) {
     const x = mark.getAttribute("x");
     if (x != null) cx = parseFloat(x) + parseFloat(mark.getAttribute("width") ?? "0") / 2;
     else if (mark.getAttribute("cx") != null) cx = parseFloat(mark.getAttribute("cx")!);
+    if (mark.getAttribute("cy") != null) {
+      cy = parseFloat(mark.getAttribute("cy")!);
+      for (let g: Element | null = mark.parentElement; g && g !== svg; g = g.parentElement) {
+        const m = /translate\(\s*[-\d.]+[ ,]+([-\d.]+)/.exec(g.getAttribute("transform") ?? "");
+        if (m) cy += +m[1]!;
+      }
+    }
   }
   svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
-    new PointerEvent("pointermove", { clientX: cx, clientY: vb.height / 2, bubbles: true }),
+    new PointerEvent("pointermove", { clientX: cx, clientY: cy, bubbles: true }),
   );
 }
 

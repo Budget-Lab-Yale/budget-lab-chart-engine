@@ -135,10 +135,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   fitted value axis to 0, standalone and in small multiples. A pinned `min` or `max` still sets its
   own end. Omitted, the axis stays fitted to the dots as before.
 - Small multiples of a horizontal dumbbell now share one category-label column, sized to the
-  longest label in any pane, and every pane shows its own labels. In the default `shared` mode every
+  longest label in any pane up to the 240px gutter cap (longer labels wrap), and every pane shows
+  its own labels. In the default `shared` mode every
   pane kept the narrow default margin while pushing its labels left by its own label width, so long
   labels started off the pane's left edge and were clipped ("op 1%"); in `per-pane` mode each pane
   sized its own column, so the panes' value axes started at different x. Live and in the PNG.
+- A dumbbell with `orientation` omitted is horizontal, as CONFIG-SPEC documents and the dots were
+  already drawn, but everything around the mark treated it as vertical: a standalone chart kept a
+  fixed height and hovered by column on screen, its `annotations.xAxis` markers were not folded into
+  the value axis, `columns.section` was rejected, and small multiples sat side by side at a fixed
+  320px pane height, clipping long labels. It now renders exactly as `orientation: horizontal`,
+  live and in the PNG.
+- Small multiples of a horizontal dumbbell in `per-pane` mode stacked one pane per row on screen
+  but drew each at the width of a side-by-side column (352px at a 720px mount); each pane now takes
+  the full row, as in `shared` mode and the PNG.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -214,6 +224,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not
   `columns.facet`, so it renders as a single chart. Horizontal bar and stacked figures are untouched.
   No golden moves.
+- **A dumbbell with `orientation` omitted now renders as `orientation: horizontal`** throughout, and
+  per-pane horizontal dumbbell panes take the full row width on screen. **No published figure is
+  affected**: the archive has no dumbbell, and the one on the unpublished `pr67-spec-fixes` branch
+  sets `orientation: horizontal` and has no facets. No golden moves.
 
 ## [1.15.0] - 2026-10-01
 

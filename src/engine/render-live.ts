@@ -10,6 +10,7 @@ import type { NetMode } from "../spec/bar-stack.js";
 import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
 import { ownValue } from "../spec/own-key.js";
+import { isHorizontalDumbbell } from "../spec/dumbbell-orientation.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
@@ -255,8 +256,8 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
   // same as a single-series horizontal bar, section spacers included).
   const growsWithRows =
-    spec.orientation === "horizontal" &&
-    (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell");
+    (spec.orientation === "horizontal" && (spec.chartType === "bar" || spec.chartType === "stacked")) ||
+    isHorizontalDumbbell(spec);
   if (!growsWithRows) {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
@@ -1253,7 +1254,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         categoryLabels: spec.x_labels,
         bandHighlight: true,
         centersFromMarks: true,
-        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+        orientation: isHorizontalDumbbell(spec) ? "horizontal" : "vertical",
         renderedFills: dbFills,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
@@ -2103,7 +2104,7 @@ function wireFigureSvg(
   // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
   if (ctx.spec.chartType === "dumbbell") {
     const dbUseCoord = ctx.onResolve != null;
-    const orientation = ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical";
+    const orientation = isHorizontalDumbbell(ctx.spec) ? "horizontal" : "vertical";
     const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
     const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ownValue(ctx.spec.series_marker, s) ?? "filled"] as const));
     const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
@@ -2654,6 +2655,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // bar/stacked panes grow with row count (undefined). Single source of truth shared with the
   // PNG export (export-png.ts) so the two paths can't drift.
   const figHeight = figurePaneHeight(spec);
+  const stacksOnePerRow = isHorizontalDumbbell(spec);
 
   const drawGrid = (outerWidth: number, renderPhase?: "mount" | "resize" | "reselect"): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
@@ -2662,9 +2664,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // NO-STACK figures (horizontal bars / variable widths) never reduce columns for width — they
     // keep the configured columns (else a single row) and scroll horizontally instead.
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
-    const cols = noStack
-      ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
-      : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
+    // Horizontal dumbbells always stack one pane per row (renderFigure forces it), so each pane is
+    // rendered at the full row width; a reflow column count here would size a side-by-side pane.
+    const cols = stacksOnePerRow
+      ? 1
+      : noStack
+        ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
+        : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     // No-stack: keep panes at a readable minimum and let the row overflow into the scroll wrapper.
     // (Horizontal panes reserve the left category gutter on top of the data, so allow extra.)
     const minPerPane = isHorizontalBarFig ? HBAR_PANE_MIN_WIDTH : paneMinWidth;

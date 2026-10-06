@@ -11,6 +11,7 @@ import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
 import { ownValue } from "../../spec/own-key";
+import { isHorizontalDumbbell } from "../../spec/dumbbell-orientation";
 import {
   tblBandYAxis,
   tblFacetGroupYAxis,
@@ -49,7 +50,7 @@ export function buildDumbbellMarks(
   const seriesNames = ctx.seriesNames ?? [];
   // Orientation defaults to horizontal (categories on screen-y) — long income-group labels read
   // best down the left gutter.
-  const horizontal = spec.orientation !== "vertical";
+  const horizontal = isHorizontalDumbbell(spec);
   const catFont = horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
   const r = spec.dot_radius ?? DEFAULT_DOT_R;
   // Shared-mode small multiples: bind fx/fy so marks face into the grid (Plot allows a category

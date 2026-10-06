@@ -12,6 +12,7 @@ import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import { ownValue } from "../spec/own-key";
+import { isHorizontalDumbbell } from "../spec/dumbbell-orientation";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import {
@@ -773,7 +774,7 @@ function assemblePaneResult(
   const valueAxisMarkers = (): number[] =>
     [
       ...ann.yAxis.map((m) => m.y),
-      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
+      ...(spec.orientation === "horizontal" || isHorizontalDumbbell(spec) ? ann.xAxis.map((m) => Number(m.x)) : []),
     ].filter(Number.isFinite);
 
   if (chartType === "bar" || chartType === "stacked") {

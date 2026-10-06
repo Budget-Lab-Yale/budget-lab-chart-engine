@@ -14,6 +14,7 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 // Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
+import { isHorizontalDumbbell } from "./dumbbell-orientation";
 import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
@@ -272,8 +273,10 @@ function sectionColumnError(spec: {
   columns?: { section?: unknown };
 }): string | null {
   if (spec.columns?.section == null) return null;
-  const sectionable = spec.chartType === "bar" || spec.chartType === "dumbbell";
-  if (!sectionable || spec.orientation !== "horizontal") {
+  // A dumbbell is horizontal unless it says vertical; a bar must say horizontal.
+  const sectionable =
+    (spec.chartType === "bar" && spec.orientation === "horizontal") || isHorizontalDumbbell(spec);
+  if (!sectionable) {
     return (
       `columns.section requires a horizontal "bar" or "dumbbell" chart ` +
       `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`

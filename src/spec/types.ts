@@ -737,7 +737,8 @@ export interface ChartSpec {
   projected_style?: { dashed?: boolean; fillOpacity?: number };
 
   // Bar / stacked bar
-  /** Chart orientation; defaults to "vertical" (value axis is Y). */
+  /** Chart orientation; defaults to "vertical" (value axis is Y), except a dumbbell, which defaults
+   *  to "horizontal" (see dumbbell-orientation.ts). */
   orientation?: "vertical" | "horizontal";
   /** In-bar value labels. `decimals` fixes the label precision; omitted ⇒ the minimum precision
    *  the data needs, capped at 2 (so raw floats don't print 15 digits). */

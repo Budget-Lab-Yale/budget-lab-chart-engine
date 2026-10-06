@@ -13,6 +13,7 @@ import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "../spec/parse-time";
 import { ownValue } from "../spec/own-key";
+import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -139,11 +140,11 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
 /** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of
  *  truth shared by the live figure mount (render-live) and the PNG export (export-png), so the
  *  two can't drift (the export previously omitted waterfall's taller pane, squashing it to 240).
- *  Returns undefined for horizontal bar/stacked figures, whose height GROWS with row count:
+ *  Returns undefined for horizontal bar/stacked/dumbbell figures, whose height GROWS with row count:
  *  renderFigure computes it from horizontalBarHeight when opts.height is undefined. */
 export function figurePaneHeight(spec: ChartSpec): number | undefined {
-  const horizontal = spec.orientation === "horizontal";
-  if (horizontal && (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell")) return undefined;
+  const horizontalBar = spec.orientation === "horizontal" && (spec.chartType === "bar" || spec.chartType === "stacked");
+  if (horizontalBar || isHorizontalDumbbellSpec(spec)) return undefined;
   if (spec.chartType === "waterfall") return 420;
   if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell") return 320;
   return 240;
@@ -442,8 +443,9 @@ export function renderFigure(
   // Horizontal dumbbells are wide (a value axis spanning the frame); their facets STACK vertically
   // (one pane per row, full width) rather than sitting side by side, and each pane's height grows
   // with its own category-row count — like a horizontal bar. (Vertical dumbbells facet in a grid.)
-  const isHorizontalDumbbell = spec.chartType === "dumbbell" && spec.orientation === "horizontal";
-  const sharedCategories = isHorizontalBar ? orderedCategories(rows, cols.x, spec) : [];
+  const isHorizontalDumbbell = isHorizontalDumbbellSpec(spec);
+  // Every pane's categories, in render order: the input both left-gutter measurements below read.
+  const sharedCategories = isHorizontalBar || isHorizontalDumbbell ? orderedCategories(rows, cols.x, spec) : [];
   // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
   const hGutter = isHorizontalBar
     ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
@@ -453,7 +455,7 @@ export function renderFigure(
   // Without it a pane sized the column to its own labels: per-pane mode misaligned the panes, and
   // shared mode's TBL_MARGIN_LEFT override pushed long labels off the pane's left edge.
   const dotGutter = isHorizontalDumbbell
-    ? horizontalLeftGutter(orderedCategories(rows, cols.x, spec), { fontSize: FACETED_CAT_LABEL_PX })
+    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
     : undefined;
   // Auto-height: grow the panes with the row count when the caller doesn't force a height. The
   // per-facet inputs (nSpacers/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
