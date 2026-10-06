@@ -147,6 +147,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   const plotH = H - mt - mb;
 
   if (!xParse) {
+    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
+    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
       xParse = (v) => +new Date(String(v));
@@ -682,6 +684,8 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
 
   // x-parse/format inference (mirrors attachCrosshair) when the adapter didn't thread them.
   if (!xParse) {
+    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
+    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
     const sample = panes.find((p) => p.rows.length)?.rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
       xParse = (v) => +new Date(String(v));
@@ -2631,6 +2635,8 @@ export function attachSecondaryLineCursor(
   // single "Jun 2026" on every published multi-pane temporal figure, including the ones that set
   // nothing. Only an author-set `tooltip_x_format` may change what a pane echoes.
   if (!xParse) {
+    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
+    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
     else if (/Q\d/.test(String(sample)))

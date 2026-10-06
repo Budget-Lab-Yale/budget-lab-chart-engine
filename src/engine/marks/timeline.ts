@@ -15,7 +15,7 @@ import { buildColorMap } from "../index";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
 import type { ChartSpec } from "../../spec/types";
 import type { TidyRow } from "../../data/index";
-import { parseDate } from "../../spec/parse-time";
+import { parseDate, temporalValueError } from "../../spec/parse-time";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
 import { ownValue } from "../../spec/own-key";
 import {
@@ -53,6 +53,9 @@ export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: Lay
   const parsed = kept.map((e) => {
     const start = parseDate(cell(e.r, cols.x).trim());
     const endCell = parseEndCell(cell(e.r, cols.end));
+    // A malformed end cell throws, as the start cell does (CONFIG-SPEC "Dates"); it used to become
+    // "no end" and draw the row as a point event.
+    if (endCell.kind === "invalid") throw new Error(`timeline end value: ${temporalValueError(endCell.raw)}`);
     const end = endCell.kind === "date" ? parseDate(endCell.value) : null;
     return { ...e, start, end, ongoing: endCell.kind === "ongoing" };
   });

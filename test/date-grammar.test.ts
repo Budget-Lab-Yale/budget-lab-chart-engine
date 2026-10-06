@@ -11,6 +11,7 @@ import { validateChartData, validateSpec } from "../src/spec/validate";
 import { parseEndCell, timelineDataErrors } from "../src/spec/timeline";
 import { rugBoundPosition } from "../src/spec/rug";
 import { renderChart } from "../src/engine/index";
+import { buildExportSvg } from "../src/embed/export-png";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -173,8 +174,45 @@ describe("renderChart rejects a malformed date instead of drawing a wrong x", ()
     );
   });
 
-  it("well-formed dates render as before", () => {
+  it("well-formed dates do not throw", () => {
     expect(() => renderChart(temporal, rowsAt("2024", "2024-02-29", "2024-12-31"), OPTS)).not.toThrow();
     expect(() => renderChart(quarterly, rowsAt("2024Q1", "2024Q4"), OPTS)).not.toThrow();
+  });
+});
+
+describe("a timeline's start and end cells: renderChart and the PNG export throw on a malformed date", () => {
+  // A malformed end cell used to become "no end" and draw the row as a point event, silently.
+  const OPTS = { width: 720, document };
+  const TL = {
+    chartType: "timeline", title: "t", xAxisType: "temporal", data: "d.csv",
+    columns: { x: "date", label: "label", end: "end" },
+  } as unknown as ChartSpec;
+  const rowsWith = (start: string, end: string): TidyRow[] =>
+    [{ date: "2020-01-01", label: "a", end: "" }, { date: start, label: "b", end }] as TidyRow[];
+  const both = (rows: TidyRow[]) => [() => renderChart(TL, rows, OPTS), () => buildExportSvg(TL, rows)];
+
+  it.each([
+    ["2024-02-30", 'timeline end value: invalid date "2024-02-30"'],
+    ["March 1, 2024", 'timeline end value: expected YYYY-MM-DD or YYYY, got "March 1, 2024"'],
+    ["2024-13-01", 'timeline end value: invalid date "2024-13-01"'],
+  ])("an end cell %j", (bad, message) => {
+    for (const f of both(rowsWith("2024-01-01", bad))) expect(f).toThrow(message);
+  });
+
+  it.each([
+    ["2024-02-30", 'temporal x value: invalid date "2024-02-30"'],
+    ["March 1, 2024", 'temporal x value: expected YYYY-MM-DD or YYYY, got "March 1, 2024"'],
+  ])("a start cell %j", (bad, message) => {
+    for (const f of both(rowsWith(bad, ""))) expect(f).toThrow(message);
+  });
+
+  it("a blank end cell is still a point event, and \"ongoing\" still an open span", () => {
+    const noEnd = { ...TL, columns: { x: "date", label: "label" } } as unknown as ChartSpec;
+    const html = (spec: ChartSpec, rows: TidyRow[]) => renderChart(spec, rows, OPTS).svg.outerHTML;
+    const blank = rowsWith("2024-01-01", "");
+    expect(html(TL, blank)).toBe(html(noEnd, blank));
+    expect(buildExportSvg(TL, blank).outerHTML).toBe(buildExportSvg(noEnd, blank).outerHTML);
+    for (const f of both(rowsWith("2024-01-01", "ongoing"))) expect(f).not.toThrow();
+    expect(html(TL, rowsWith("2024-01-01", "ongoing"))).not.toBe(html(TL, blank));
   });
 });

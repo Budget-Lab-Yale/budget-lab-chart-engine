@@ -11,8 +11,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   Near 1 the t-quantile is numerically meaningless. No published figure uses one.
 - One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
   `renderChart` with a malformed date now get an error** naming the value, instead of a silently
-  wrong x: `2024Q5` rolled into 2025Q1, `2024-13-01` into January 2025, and `March 1, 2024` (or any
-  other spelling) was read by JavaScript's `Date`. Validation also tightens: it now rejects a day
+  wrong x: `2024Q5` rolled into 2025Q1, `2024-13-01` into January 2025, `March 1, 2024` (or any
+  other spelling) was read by JavaScript's `Date`, and a malformed timeline `end` cell drew its event
+  as a point. Validation also tightens: it now rejects a day
   the month does not have (`2024-02-30`, which it passed before), and checks every spec-side x
   coordinate on a temporal or quarterly axis (`annotations` markers, bands and callouts, the legacy
   `xAxisPolicy` ones, `shading` bounds) against the grammar. Every published figure was scanned and
@@ -118,6 +119,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
   `revenue-by-income-type` and `revenue-by-instrument`, have four series in every pane and set
   `netDisplay: none`. No golden covers a single-series stack.
+- **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
+  under Changed). Specs that pass `tbl-chart validate` are unaffected.
 
 ## [1.15.0] - 2026-10-01
 

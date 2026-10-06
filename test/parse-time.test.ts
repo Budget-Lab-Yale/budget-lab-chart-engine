@@ -51,12 +51,12 @@ describe("parse-time", () => {
     expect([full.getFullYear(), full.getMonth(), full.getDate()]).toEqual([50, 5, 15]);
     expect(parseDate("0050").getTime()).toBe(parseDate("0050-01-01").getTime());
     // parseQuarter shares the constructor for the same reason.
-    expect((parseQuarter("0050Q3") as Date).getFullYear()).toBe(50);
-    expect((parseQuarter("0050Q3") as Date).getMonth()).toBe(6);
+    expect(parseQuarter("0050Q3").getFullYear()).toBe(50);
+    expect(parseQuarter("0050Q3").getMonth()).toBe(6);
     // Unchanged for every ordinary year.
     const ord = parseDate("2021-01-02");
     expect([ord.getFullYear(), ord.getMonth(), ord.getDate()]).toEqual([2021, 0, 2]);
-    expect((parseQuarter("2022Q3") as Date).getMonth()).toBe(6);
+    expect(parseQuarter("2022Q3").getMonth()).toBe(6);
   });
 
   it("throws on a non-year, non-ISO string rather than falling back to Date()", () => {
@@ -66,7 +66,7 @@ describe("parse-time", () => {
   });
 
   it("parses YYYYQ# to the first day of the quarter", () => {
-    const d = parseQuarter("2022Q3") as Date;
+    const d = parseQuarter("2022Q3");
     expect(d.getFullYear()).toBe(2022);
     expect(d.getMonth()).toBe(6); // July
     expect(d.getDate()).toBe(1);
@@ -77,7 +77,7 @@ describe("parse-time", () => {
   });
 
   it("round-trips a quarter through formatQuarter", () => {
-    expect(formatQuarter(parseQuarter("2024Q2") as Date)).toBe("2024Q2");
+    expect(formatQuarter(parseQuarter("2024Q2"))).toBe("2024Q2");
   });
 });
 
