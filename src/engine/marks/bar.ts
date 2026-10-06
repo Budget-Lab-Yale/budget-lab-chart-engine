@@ -17,6 +17,7 @@
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
+import { ownValue } from "../../spec/own-key";
 import {
   tblBandXAxis,
   tblBandYAxis,
@@ -126,18 +127,18 @@ export function buildBarMarks(
       spec.section_order && spec.section_order.length
         ? spec.section_order.filter((s) => seenSec.has(s))
         : encountered;
-    const labels = spec.section_labels ?? {};
+    const labelOf = (s: string): string => ownValue(spec.section_labels, s) ?? s;
     const domain: string[] = [];
     let firstRendered = false;
     for (const s of order) {
       const catsInSection = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
       if (!catsInSection.length) continue;
       if (!firstRendered) {
-        topSectionHeader = { category: catsInSection[0] as string, label: labels[s] ?? s };
+        topSectionHeader = { category: catsInSection[0] as string, label: labelOf(s) };
         firstRendered = true;
       } else {
         for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
-        sectionHeaders.push({ category: catsInSection[0] as string, label: labels[s] ?? s });
+        sectionHeaders.push({ category: catsInSection[0] as string, label: labelOf(s) });
       }
       for (const cat of catsInSection) domain.push(cat);
     }
@@ -279,7 +280,7 @@ export function buildBarMarks(
     const fill = categoryColorMap
       ? (d: PreparedRow) => {
           const cat = (d as unknown as Record<string, unknown>)[catField] as string | undefined;
-          const override = cat != null ? categoryColorMap[cat] : undefined;
+          const override = cat != null ? ownValue(categoryColorMap, cat) : undefined;
           if (override != null) return override;
           return typeof baseFill === "function" ? baseFill(d) : baseFill;
         }

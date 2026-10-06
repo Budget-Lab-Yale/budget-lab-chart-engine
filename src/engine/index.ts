@@ -11,6 +11,7 @@ import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
+import { ownValue } from "../spec/own-key";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import {
@@ -284,7 +285,7 @@ export function buildColorMap(
   const palette = tblColorScale(Math.max(seriesNames.length, order.length));
   const m = new Map<string, string>();
   seriesNames.forEach((s, i) => {
-    const override = resolveColor(seriesColorsCfg?.[s]);
+    const override = resolveColor(ownValue(seriesColorsCfg, s));
     const at = order.indexOf(s);
     m.set(s, override || (palette[at >= 0 ? at : i] as string));
   });
@@ -861,16 +862,14 @@ function assemblePaneResult(
   // `{series}` reads the `series_labels` name, which may name the implicit single series too
   // (SINGLE_SERIES_KEY = ""); unmapped, that nameless series and a blank point_label cell are
   // `undefined`, which leaves the token literal rather than printing nothing.
-  // Own-property lookups: a data key like "toString" must fall through to the raw key, not to
-  // Object.prototype (the publish boundary rebuilds these maps as ordinary objects).
-  const own = (m: Record<string, string> | undefined, k: string): string | undefined =>
-    m && Object.prototype.hasOwnProperty.call(m, k) ? m[k] : undefined;
+  // Own-property lookups (ownValue): a data key like "toString" must fall through to the raw key,
+  // not to Object.prototype (the publish boundary rebuilds these maps as ordinary objects).
   const seriesLabelFor = (key: string | undefined): string | undefined =>
-    key == null ? undefined : (own(spec.series_labels, key) ?? (key || undefined));
+    key == null ? undefined : (ownValue(spec.series_labels, key) ?? (key || undefined));
   const xTokenFor = (x: string | undefined): string | undefined => {
     if (x == null) return undefined;
     const mx = xOpts.markerToX({ x });
-    if (typeof mx === "string") return own(spec.x_labels, mx) ?? x;
+    if (typeof mx === "string") return ownValue(spec.x_labels, mx) ?? x;
     if (typeof mx === "number") return Number.isFinite(mx) ? formatNumericX(mx) : x;
     const n = mx instanceof Date ? mx.getTime() : NaN;
     return Number.isFinite(n) && xOpts.tooltipXFormat ? xOpts.tooltipXFormat(n) : x;
@@ -1126,8 +1125,7 @@ export function buildSeriesKeyRows(
   paintedColors: Map<string, string>,
 ): LegendItem[] {
   const chartType = spec.chartType;
-  const seriesLabels = spec.series_labels ?? {};
-  const labelFor = (name: string): string => seriesLabels[name] ?? name;
+  const labelFor = (name: string): string => ownValue(spec.series_labels, name) ?? name;
   // When the mark layer is the source of truth for series colors (stacked: mono tiers or
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
@@ -1171,7 +1169,7 @@ export function buildSeriesKeyRows(
       dashed: false,
       markerShape: "point" as const,
       markerSymbol: "circle",
-      ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
+      ...((ownValue(spec.series_marker, name) ?? "filled") === "hollow" ? { hollow: true } : {}),
     }));
   } else {
     // Every chart type whose marks are FILLED keys with a chip; only stroked marks get a line
@@ -1194,7 +1192,7 @@ export function buildSeriesKeyRows(
       series: name,
       label: labelFor(name),
       color: legendColorFor(name),
-      dashed: spec.series_styles?.[name]?.dashed === true,
+      dashed: ownValue(spec.series_styles, name)?.dashed === true,
       markerShape,
       ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
     }));
@@ -1292,10 +1290,9 @@ export function buildShapeLegendItems(
 ): ShapeLegendItem[] | null {
   if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
-  const shapeLabels = spec.shape_labels ?? {};
   return layers.shapeNames.map((shape, i) => ({
     shape,
-    label: shapeLabels[shape] ?? shape,
+    label: ownValue(spec.shape_labels, shape) ?? shape,
     markerSymbol: markerSymbolForIndex(i),
   }));
 }

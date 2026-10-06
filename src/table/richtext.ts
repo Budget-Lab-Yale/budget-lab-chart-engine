@@ -232,14 +232,14 @@ function parseMath(s: string, out: RichRun[], onUnsupported?: (cmd: string) => v
       while (j < s.length && /[a-zA-Z]/.test(s[j]!)) j++;
       const name = s.slice(i + 1, j);
       i = j;
-      if (name in GREEK) {
+      if (Object.hasOwn(GREEK, name)) {
         // Lowercase Greek is italic in math mode (like Latin variables); uppercase Greek upright.
         pushText(out, GREEK[name]!, /^[a-z]/.test(name));
         i = applyScripts(s, i, out, onUnsupported, flatten);
         continue;
       }
-      if (name in SYMBOLS) { pushText(out, SYMBOLS[name]!, false); i = applyScripts(s, i, out, onUnsupported, flatten); continue; }
-      if (name in STYLE_MACROS) {
+      if (Object.hasOwn(SYMBOLS, name)) { pushText(out, SYMBOLS[name]!, false); i = applyScripts(s, i, out, onUnsupported, flatten); continue; }
+      if (Object.hasOwn(STYLE_MACROS, name)) {
         // Consume the braced argument and emit its text in the macro's style.
         while (i < s.length && /\s/.test(s[i]!)) i++;
         let content = "";

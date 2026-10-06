@@ -9,6 +9,7 @@ import type { RenderHooks } from "../spec/hooks.js";
 import type { NetMode } from "../spec/bar-stack.js";
 import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
+import { ownValue } from "../spec/own-key.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
@@ -1232,7 +1233,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
       // lists each series' value with a DOT swatch that matches the legend/chart marker — hollow
       // ring / ink / filled). Reuses the categorical crosshair with orientation.
-      const dbMarkers = new Map(seriesOrder.map((s) => [s, spec.series_marker?.[s] ?? "filled"] as const));
+      const dbMarkers = new Map(seriesOrder.map((s) => [s, ownValue(spec.series_marker, s) ?? "filled"] as const));
       const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
       attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
@@ -1905,7 +1906,7 @@ function buildSelectorTitle(
       label: opt.label ?? opt.id,
       // Explicit option color wins; else the figure's series color for the option's label (the
       // shared per-series map) — mirrors spec/title.ts#resolveActiveOptionColor.
-      color: opt.color ?? seriesColors?.[opt.label ?? opt.id],
+      color: opt.color ?? ownValue(seriesColors, opt.label ?? opt.id),
     }));
     // The mounts always pass a resolveSelections() map (every key populated), so the fallback is
     // defensive only — buildFigureHeader is exported, and an external caller could hand-roll an
@@ -2080,7 +2081,7 @@ function wireFigureSvg(
     const dbUseCoord = ctx.onResolve != null;
     const orientation = ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical";
     const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
-    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ctx.spec.series_marker?.[s] ?? "filled"] as const));
+    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ownValue(ctx.spec.series_marker, s) ?? "filled"] as const));
     const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
     const dbOpts = {
       rows: dbRows,

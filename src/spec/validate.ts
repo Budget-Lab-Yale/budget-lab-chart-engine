@@ -18,6 +18,7 @@ import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
+import { ownValue } from "./own-key";
 import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
@@ -914,7 +915,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   // a hard throw at render. Checked against the AUTHORED colour — a palette default is always a hex.
   const groundErrors: string[] = [];
   for (const series of Object.keys((spec as { series_patterns?: Record<string, unknown> }).series_patterns ?? {})) {
-    const declared = (spec as { series_colors?: Record<string, unknown> }).series_colors?.[series];
+    const declared = ownValue((spec as { series_colors?: Record<string, unknown> }).series_colors, series);
     const authored = declared ?? (series === "" ? (spec as { bar_color?: unknown }).bar_color : undefined);
     const err = hatchGroundError(
       declared !== undefined ? `series_colors[${JSON.stringify(series)}]` : "bar_color",

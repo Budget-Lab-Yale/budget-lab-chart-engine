@@ -17,6 +17,7 @@ import type { ChartSpec } from "../../spec/types";
 import type { TidyRow } from "../../data/index";
 import { parseDate } from "../../spec/parse-time";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
+import { ownValue } from "../../spec/own-key";
 import {
   resolveTimelineConfig, timelineColumns, parseEndCell, deriveDateFormat, TIMELINE_EVENT_WARN_COUNT,
 } from "../../spec/timeline";
@@ -102,10 +103,9 @@ function layoutInput(
   const cfg = resolveTimelineConfig(spec);
   const { events, seriesNames } = prepareTimeline(spec, rows);
   const lanesOn = lanesDrawn(spec, seriesNames.length, orientation);
-  const labels = spec.series_labels ?? {};
   const input: TimelineLayoutInput = {
     events, width, orientation, spacing: cfg.spacing,
-    lanes: lanesOn ? seriesNames.map((k) => ({ key: k, label: labels[k] ?? k })) : null,
+    lanes: lanesOn ? seriesNames.map((k) => ({ key: k, label: ownValue(spec.series_labels, k) ?? k })) : null,
     axis: cfg.axis, labelWidth: cfg.labelWidth, maxRows: cfg.maxRows,
     ...(budgetWidth !== undefined ? { budgetWidth } : {}),
   };
@@ -407,7 +407,7 @@ export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOpt
 
   const seriesLabels = spec.series_labels ?? {};
   const seriesKeyRows: LegendItem[] = seriesNames.map((name) => ({
-    series: name, label: seriesLabels[name] ?? name, color: colors.get(name), dashed: false,
+    series: name, label: ownValue(seriesLabels, name) ?? name, color: colors.get(name), dashed: false,
     markerShape: "point", markerSymbol: "circle",
   }));
   // Drawn lanes name their categories (the horizontal gutter, or the vertical lane columns'

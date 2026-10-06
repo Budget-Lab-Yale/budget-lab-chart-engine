@@ -8,6 +8,7 @@ import { INDENT_STEP } from "./layout";
 // renderer's PAD_X — so the corner, group headers, and row labels share one left edge.
 const STUB_BASE_PAD = 8;
 import type { TableSpec } from "../spec/table-types";
+import { ownValue } from "../spec/own-key";
 import { appendRichHtml } from "./richtext";
 
 /**
@@ -42,7 +43,7 @@ export function renderTableHtml(
   // wraps only the named ones. Keyed by leaf VALUE (mirrors column_width / layout's colWrapEnabled).
   const columnWrap = spec?.column_wrap;
   const colWrapEnabled = (leafValue: string): boolean =>
-    columnWrap === true || (typeof columnWrap === "object" && columnWrap[leafValue] === true);
+    columnWrap === true || (typeof columnWrap === "object" && ownValue(columnWrap, leafValue) === true);
 
   const table = doc.createElement("table");
   table.className = "tbl-table";

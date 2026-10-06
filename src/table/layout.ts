@@ -8,6 +8,7 @@
 // otherwise mismatch the reserved height and overlap neighboring rows).
 import type { TableModel, HeaderCell, BodyRow, RowGroup } from "./model";
 import type { TableSpec } from "../spec/table-types";
+import { ownValue } from "../spec/own-key";
 import { TBL } from "../engine/theme";
 import { richWidth, hasBreak, splitBreaks } from "./richtext";
 
@@ -160,7 +161,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     const cw = opts.columnWidth;
     if (cw == null) return undefined;
     if (typeof cw === "number") return cw;
-    return cw[leafValue];
+    return ownValue(cw, leafValue);
   };
 
   // Resolve whether a leaf's body cells wrap (opts.columnWrap: true for all, or a per-leaf-value
@@ -169,7 +170,7 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
     const cw = opts.columnWrap;
     if (cw == null) return false;
     if (typeof cw === "boolean") return cw;
-    return cw[leafValue] === true;
+    return ownValue(cw, leafValue) === true;
   };
 
   // ---- Per-leaf natural width = max(label, sublabel, every body cell text) + padding. ----

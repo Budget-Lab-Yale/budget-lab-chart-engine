@@ -43,6 +43,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
   validation as a palette name and could make the chart throw at render; it is now rejected at load
   like any unknown name, on every chart type. No published figure uses one.
+- A series, category, group, facet, section or shape named like an `Object.prototype` key
+  (`constructor`, `toString`, `__proto__`, …) drew a function as its colour and printed its source as
+  its label; every author map is now read by own key, so it takes its default colour and its own
+  name, on every chart type and in tables. No published figure uses such a name.
 - A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
   `series_order`, matching every other chart type.
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,

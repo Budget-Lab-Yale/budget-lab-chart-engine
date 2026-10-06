@@ -25,6 +25,7 @@ import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
 import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
+import { ownValue } from "../spec/own-key";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
@@ -1316,7 +1317,7 @@ export function assemblePlot({
       const series = seriesOrder[i] as string | undefined;
       // Read once, before any texture is written over it: the walk is the expensive part, and after
       // `style.fill` becomes a `url(#…)` the flat colour underneath is no longer what it returns.
-      const char = fill && series !== undefined ? hatchChars[series] : undefined;
+      const char = fill && series !== undefined ? ownValue(hatchChars, series) : undefined;
       // Walked only when the answer is wanted: a hatch needs the ground of THIS element (a
       // `category_colors` bar grounds per category), while `seriesPainted` only needs the first, so
       // an untextured chart walks once per series rather than once per bar.

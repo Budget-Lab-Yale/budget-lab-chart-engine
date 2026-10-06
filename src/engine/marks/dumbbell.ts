@@ -10,6 +10,7 @@
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
+import { ownValue } from "../../spec/own-key";
 import {
   tblBandYAxis,
   tblFacetGroupYAxis,
@@ -90,16 +91,16 @@ export function buildDumbbellMarks(
       if (!seenSec.has(s)) { seenSec.add(s); encountered.push(s); }
     }
     const order = spec.section_order?.length ? spec.section_order.filter((s) => seenSec.has(s)) : encountered;
-    const labels = spec.section_labels ?? {};
+    const labelOf = (s: string): string => ownValue(spec.section_labels, s) ?? s;
     const domain: string[] = [];
     for (const s of order) {
       const cats = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
       if (!cats.length) continue;
       if (domain.length === 0) {
-        topSectionHeader = { category: cats[0] as string, label: labels[s] ?? s };
+        topSectionHeader = { category: cats[0] as string, label: labelOf(s) };
       } else {
         for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
-        sectionHeaders.push({ category: cats[0] as string, label: labels[s] ?? s });
+        sectionHeaders.push({ category: cats[0] as string, label: labelOf(s) });
       }
       for (const cat of cats) domain.push(cat);
     }
@@ -110,7 +111,7 @@ export function buildDumbbellMarks(
   // icons read too, so a key cannot describe a different middle from the dot it names — a hollow end
   // is a HOLE (the stem shows through) and only the shared description says so. The WIDTH stays here:
   // it belongs to this chart's geometry, not to the ink.
-  const markerOf = (s: string): MarkerStyle => spec.series_marker?.[s] ?? "filled";
+  const markerOf = (s: string): MarkerStyle => ownValue(spec.series_marker, s) ?? "filled";
   const seriesColor = (s: string): string => colors.get(s) || TBL.color.blue;
   const inkFor = (s: string): MarkerInk => markerInk(markerOf(s), seriesColor(s));
   const fillFor = (s: string): string => inkFor(s).fill;

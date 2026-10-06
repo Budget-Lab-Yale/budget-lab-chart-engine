@@ -12,6 +12,7 @@ import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "../spec/parse-time";
+import { ownValue } from "../spec/own-key";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -570,8 +571,7 @@ export function renderFigure(
   const columns = Math.max(1, Math.min(requestedColumns, paneValues.length));
   const gridRows = Math.ceil(paneValues.length / columns);
 
-  const titles = sm.pane_titles ?? {};
-  const titleFor = (value: string): string => titles[value] ?? value;
+  const titleFor = (value: string): string => ownValue(sm.pane_titles, value) ?? value;
   const seriesLabels = spec.series_labels ?? {};
 
   // Variable pane widths (`pane_widths`) — used by BOTH modes. Resolve the per-column weight

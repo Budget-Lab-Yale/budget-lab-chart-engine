@@ -12,6 +12,7 @@ import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
 import { SINGLE_SERIES_KEY } from "../spec/columns";
+import { ownValue } from "../spec/own-key";
 import { paintedFill } from "./painted-fill";
 import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
@@ -518,7 +519,7 @@ export function overlayTooltipRows(
   drawn.forEach(({ o, v }, i) => {
     const name =
       o.series != null && (perLabel.get(o.label) ?? 0) > 1
-        ? `${o.label} (${seriesLabels?.[o.series] ?? o.series})`
+        ? `${o.label} (${ownValue(seriesLabels, o.series) ?? o.series})`
         : o.label;
     const swatch = seriesSwatchHtml({
       shape: "line",
@@ -582,7 +583,7 @@ function tooltipSeriesRowHtml(
   valueText: string,
   opts: { seriesLabels?: Record<string, string>; icons?: Map<string, IconSpec> },
 ): string {
-  const display = (opts.seriesLabels && opts.seriesLabels[series]) || series;
+  const display = ownValue(opts.seriesLabels, series) || series;
   const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
   const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span>${LABEL_VALUE_GAP}`;
   return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
@@ -1069,8 +1070,12 @@ export function resolveCategorySeriesValues(
   const series = seriesOrder && seriesOrder.length
     ? seriesOrder.filter((s) => valBySeries.has(s))
     : [...valBySeries.keys()];
+  // defineProperty, not `values[s] =`: assigning to "__proto__" hits the inherited setter and
+  // drops the series, which then read back as Object.prototype. Defined, it is an own key.
   const values: Record<string, number> = {};
-  for (const s of series) values[s] = valBySeries.get(s)!;
+  for (const s of series) {
+    Object.defineProperty(values, s, { value: valBySeries.get(s)!, enumerable: true, writable: true, configurable: true });
+  }
   return { series, values };
 }
 
@@ -1119,11 +1124,11 @@ export function buildBandTooltipHtml(
     category, rows, seriesOrder,
   );
 
-  let html = `<div class="tbl-tooltip-head">${escapeHtml(categoryLabels?.[category] ?? category)}</div>`;
+  let html = `<div class="tbl-tooltip-head">${escapeHtml(ownValue(categoryLabels, category) ?? category)}</div>`;
   let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
-    const v = valuesBySeries[series];
+    const v = ownValue(valuesBySeries, series);
     if (v == null) continue;
     total += v;
     seriesRows += tooltipSeriesRowHtml(series, fmt(v), {
@@ -3964,7 +3969,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
     const show = (evt: PointerEvent): void => {
       if (!tip) return;
       const color = opts.colors?.get(p.series) || TBL.color.navy;
-      const sLabel = opts.seriesLabels?.[p.series] ?? p.series;
+      const sLabel = ownValue(opts.seriesLabels, p.series) ?? p.series;
       // Header: the point's actual marker (its symbol, filled in the series color) followed by
       // "series · shape" on one line (e.g. a navy triangle + "Slow · Compressive").
       const symbolName = (p.shape && opts.symbols?.get(p.shape)) || "circle";
@@ -3988,7 +3993,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       // single-series chart resolves to SINGLE_SERIES_KEY (""), and joining that produced a header
       // opening with a dangling "· ".
       const tokens = opts.showSeriesName === false ? [] : [sLabel];
-      if (opts.showShape && p.shape) tokens.push(opts.shapeLabels?.[p.shape] ?? p.shape);
+      if (opts.showShape && p.shape) tokens.push(ownValue(opts.shapeLabels, p.shape) ?? p.shape);
       if (p.pointLabel) tokens.push(p.pointLabel);
       const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
       let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;

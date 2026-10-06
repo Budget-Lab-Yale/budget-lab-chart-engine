@@ -10,6 +10,7 @@
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
 import { buildColorMap } from "../index";
+import { ownValue } from "../../spec/own-key";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
 import { legendInRightColumn, LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../legend-layout";
 import { INNER_W } from "../../embed/figure-chrome";
@@ -137,11 +138,7 @@ function treemapGroups(spec: ChartSpec, data: TreemapDatum[]): {
   groupNames: string[]; colors: Map<string, string>; keyRows: LegendItem[]; labelOf: (g: string) => string;
 } {
   const grouped = data.some((d) => d.group !== null);
-  // Own-property lookups only: a group named "constructor", "toString" or "__proto__" must not
-  // find the inherited Object.prototype member (author maps are ordinary objects).
-  const own = (m: Record<string, string> | undefined, g: string): string | undefined =>
-    m && Object.hasOwn(m, g) ? m[g] : undefined;
-  const labelOf = (g: string): string => own(spec.series_labels, g) ?? g;
+  const labelOf = (g: string): string => ownValue(spec.series_labels, g) ?? g;
 
   // Hue order: series_order's present groups first, then the rest by first appearance.
   const appearance: string[] = [];
@@ -150,13 +147,7 @@ function treemapGroups(spec: ChartSpec, data: TreemapDatum[]): {
   // and a legend row of its own.
   const listed = [...new Set(spec.series_order ?? [])].filter((g) => appearance.includes(g));
   const groupNames = grouped ? [...listed, ...appearance.filter((g) => !listed.includes(g))] : [];
-  // buildColorMap indexes its map directly, so hand it a prototype-free copy of the own entries.
-  const colorCfg: Record<string, string> = Object.create(null);
-  for (const g of groupNames) {
-    const c = own(spec.series_colors, g);
-    if (c !== undefined) colorCfg[g] = c;
-  }
-  const colors = buildColorMap(groupNames, spec.series_colors ? colorCfg : undefined);
+  const colors = buildColorMap(groupNames, spec.series_colors);
   const keyRows: LegendItem[] = groupNames.map((g) => ({
     series: g, label: labelOf(g), color: colors.get(g), dashed: false, markerShape: "rect",
   }));
