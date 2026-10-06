@@ -59,9 +59,10 @@ describe("parse-time", () => {
     expect((parseQuarter("2022Q3") as Date).getMonth()).toBe(6);
   });
 
-  it("leaves a non-year, non-ISO string on the Date() fallback", () => {
-    // Four digits is the whole gate: five must not be read as a year.
-    expect(parseDate("12345").getTime()).toBe(new Date("12345").getTime());
+  it("throws on a non-year, non-ISO string rather than falling back to Date()", () => {
+    // Four digits is the whole gate: five must not be read as a year. The full rejected set is
+    // pinned in test/date-grammar.test.ts.
+    expect(() => parseDate("12345")).toThrow('temporal x value: expected YYYY-MM-DD or YYYY, got "12345"');
   });
 
   it("parses YYYYQ# to the first day of the quarter", () => {
@@ -71,8 +72,8 @@ describe("parse-time", () => {
     expect(d.getDate()).toBe(1);
   });
 
-  it("returns null for a non-quarter string", () => {
-    expect(parseQuarter("2022-01-01")).toBeNull();
+  it("throws on a non-quarter string", () => {
+    expect(() => parseQuarter("2022-01-01")).toThrow('quarterly x value: expected YYYYQ#, got "2022-01-01"');
   });
 
   it("round-trips a quarter through formatQuarter", () => {
@@ -103,16 +104,20 @@ describe("parseXValue — the ONE x parse the renderer positions rows by", () =>
   const CASES: Array<[XAxisType, string[]]> = [
     ["numeric", ["1", "1.0", "1e0", "+.50", "0.5", "-3", "", "oops"]],
     ["temporal", ["2020-01-01", "2020-02-01", "not-a-date"]],
-    ["quarterly", ["2020Q1", "2020Q2", "2020-01-01"]],
+    ["quarterly", ["2020Q1", "2020Q2", "2020-01-01", "2020Q5"]],
     ["categorical", ["Alaska", "", "1"]],
   ];
 
   it("is what engine/x-adapter.ts's parseX returns, for every axis type", () => {
     for (const [type, raws] of CASES) {
       const { parseX } = makeXAdapter(type);
+      // A malformed date throws from both, with the same message.
+      const outcome = (f: () => unknown): unknown => {
+        try { return f(); } catch (e) { return `threw: ${(e as Error).message}`; }
+      };
       for (const raw of raws) {
-        const viaAdapter = parseX(raw);
-        const direct = parseXValue(type, raw);
+        const viaAdapter = outcome(() => parseX(raw));
+        const direct = outcome(() => parseXValue(type, raw));
         // Dates compare by instant; NaN (a bad numeric cell) compares by NaN-ness.
         const norm = (v: unknown): unknown =>
           v instanceof Date ? (Number.isNaN(+v) ? "Invalid Date" : +v) : typeof v === "number" && Number.isNaN(v) ? "NaN" : v;

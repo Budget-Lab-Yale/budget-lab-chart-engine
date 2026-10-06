@@ -19,7 +19,8 @@ import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
 import { ownValue } from "./own-key";
-import { resolveRugTracks, fullyHiddenRugTracks } from "./rug";
+import { resolveRugTracks, fullyHiddenRugTracks, rugBoundPosition } from "./rug";
+import { temporalValueError, quarterValueError } from "./parse-time";
 import type { ResolvedColumns } from "./columns";
 import type { TidyRow } from "../data/index";
 import { parseExpression, exprVariables, EXPR_CONSTANTS } from "./expr";
@@ -563,6 +564,40 @@ function overlaySpecErrors(spec: {
   return errors;
 }
 
+/** Every spec-side x coordinate on a temporal or quarterly axis, against the same grammar as a data
+ *  cell. The engine parses each through the x adapter, which throws on a malformed date; the publish
+ *  CLI validates and then ships HTML that renders in the browser, so a coordinate passed here and
+ *  rejected there would publish a figure that throws on load. `rug.tracks` intervals are checked
+ *  with the rest of the rug, in `legendAndRugErrors`. Paths name the block the author wrote — the
+ *  unified `annotations` block or the legacy `xAxisPolicy` one, as `resolveAnnotations` picks. */
+function dateCoordinateErrors(spec: ChartSpec): string[] {
+  const { xAxisType } = spec;
+  if (xAxisType !== "temporal" && xAxisType !== "quarterly") return [];
+  const ann = spec.annotations;
+  const resolved = resolveAnnotations(spec);
+  const markersAt = ann?.xAxis ? "annotations.xAxis" : "xAxisPolicy.markers";
+  const bandsAt = ann?.bands ? "annotations.bands" : "xAxisPolicy.bands";
+  const coords: Array<[string, string | undefined]> = [
+    ...resolved.xAxis.map((m, i): [string, string] => [`${markersAt}[${i}].x`, m.x]),
+    ...resolved.bands.flatMap((b, i): Array<[string, string]> => [
+      [`${bandsAt}[${i}].start`, b.start],
+      [`${bandsAt}[${i}].end`, b.end],
+    ]),
+    ...resolved.points.map((p, i): [string, string | undefined] => [`annotations.points[${i}].x`, p.x]),
+    ...(spec.shading ?? []).flatMap((s, i): Array<[string, string | undefined]> => [
+      [`shading[${i}].from`, s.from],
+      [`shading[${i}].to`, s.to],
+    ]),
+  ];
+  const errors: string[] = [];
+  for (const [where, value] of coords) {
+    if (value === undefined) continue;
+    const err = timeParseError(xAxisType, value);
+    if (err) errors.push(`${where}: ${err}`);
+  }
+  return errors;
+}
+
 /** A band / shading / marker entry as the legend + rug flags see it. */
 interface LegendFlagged {
   label?: string;
@@ -694,7 +729,7 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
       const toErr = timeParseError(xAxisType, iv.to);
       if (fromErr) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
       if (toErr) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
-      if (!fromErr && !toErr && rugBoundOrder(xAxisType, iv.from) > rugBoundOrder(xAxisType, iv.to)) {
+      if (!fromErr && !toErr && rugBoundPosition(xAxisType, iv.from) > rugBoundPosition(xAxisType, iv.to)) {
         errors.push(`${iv.where}: rug interval runs backwards (${iv.from} → ${iv.to})`);
       }
     }
@@ -719,13 +754,6 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
     );
   }
   return errors;
-}
-
-/** Sortable position of a rug bound. Only meaningful for bounds that already parsed. */
-function rugBoundOrder(xAxisType: XAxisType, value: string): number {
-  if (xAxisType === "numeric") return Number(value);
-  if (xAxisType === "temporal") return +new Date(value);
-  return Number(value.slice(0, 4)) * 4 + Number(value[5]); // quarterly: YYYYQ#
 }
 
 /** Top-level fields a timeline honours. Every CHART_SPEC_SCHEMA property is in exactly one of
@@ -930,35 +958,26 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (patErr) return { valid: false, errors: [patErr] };
   const colErrors = colorErrors(spec as ChartSpec);
   if (colErrors.length) return { valid: false, errors: colErrors };
+  // Before the rug checks, which would otherwise report a malformed rug-flagged band bound twice.
+  const coordErrors = dateCoordinateErrors(spec as ChartSpec);
+  if (coordErrors.length) return { valid: false, errors: coordErrors };
   const rugErrors = legendAndRugErrors(spec as ChartSpec);
   if (rugErrors.length) return { valid: false, errors: rugErrors };
   return { valid: true, errors: [] };
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-/** A bare year is a valid temporal cell: it is the natural spelling for an annual series, and
- *  `parseDate` reads it as local 1 January. Without this, moving an annual chart from
- *  `xAxisType: numeric` to `temporal` — which is what the engine now recommends, since a numeric
- *  axis groups thousands and would print `1,950` — failed validation on every row. */
-const YEAR_RE = /^\d{4}$/;
-const QUARTER_RE = /^\d{4}Q[1-4]$/;
-
-/** Returns an error string if `value` doesn't parse under `xAxisType`, else null. */
+/** Returns an error string if `value` doesn't parse under `xAxisType`, else null. A date axis reads
+ *  the ONE grammar the parsers throw on (spec/parse-time.ts), so a cell validation passes always
+ *  parses and one it rejects never does. A bare year is a valid temporal cell: it is the natural
+ *  spelling for an annual series, and `parseDate` reads it as local 1 January. */
 function timeParseError(xAxisType: XAxisType, value: string): string | null {
   if (xAxisType === "numeric") {
     return value.trim() !== "" && Number.isFinite(Number(value))
       ? null
       : `expected a number, got ${JSON.stringify(value)}`;
   }
-  if (xAxisType === "temporal") {
-    if (!DATE_RE.test(value) && !YEAR_RE.test(value)) {
-      return `expected YYYY-MM-DD or YYYY, got ${JSON.stringify(value)}`;
-    }
-    return Number.isNaN(+new Date(value)) ? `invalid date ${JSON.stringify(value)}` : null;
-  }
-  if (xAxisType === "quarterly") {
-    return QUARTER_RE.test(value) ? null : `expected YYYYQ#, got ${JSON.stringify(value)}`;
-  }
+  if (xAxisType === "temporal") return temporalValueError(value);
+  if (xAxisType === "quarterly") return quarterValueError(value);
   if (xAxisType === "categorical") {
     // Any non-empty string is a valid category label.
     return value.trim() !== "" ? null : `expected a non-empty category label, got ${JSON.stringify(value)}`;

@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Changed
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error naming `ci`.
   Near 1 the t-quantile is numerically meaningless. No published figure uses one.
+- One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
+  `renderChart` with a malformed date now get an error** naming the value, instead of a silently
+  wrong x: `2024Q5` rolled into 2025Q1, `2024-13-01` into January 2025, and `March 1, 2024` (or any
+  other spelling) was read by JavaScript's `Date`. Validation also tightens: it now rejects a day
+  the month does not have (`2024-02-30`, which it passed before), and checks every spec-side x
+  coordinate on a temporal or quarterly axis (`annotations` markers, bands and callouts, the legacy
+  `xAxisPolicy` ones, `shading` bounds) against the grammar. Every published figure was scanned and
+  re-rendered before and after: none is rejected and none changes.
 
 ### Added
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile

@@ -69,7 +69,7 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 | `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
 | `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
 | `columns.x0` / `columns.x1` | string | Histograms only: columns holding each row's bin **lower**/**upper** edge, for **pre-binned** input. Map both to switch the histogram to pre-binned mode; mapping only one is a validation error. See [Histogram](#histogram-options). |
-| `columns.end` | string | **Timeline only** — like the three rows below, a validation error on every other chart type. The span's end date, `YYYY` or `YYYY-MM-DD`. A blank cell makes the row a point event, and `ongoing` (any case) an open-ended span. Any other text, an impossible calendar date (`2026-13-01`), or an end before its start is a validation error naming the row. See [Timeline options](#timeline-options). |
+| `columns.end` | string | **Timeline only** — like the three rows below, a validation error on every other chart type. The span's end date, in the [date grammar](#dates). A blank cell makes the row a point event, and `ongoing` (any case) an open-ended span. Any other text, an impossible calendar date (`2026-13-01`), or an end before its start is a validation error naming the row. See [Timeline options](#timeline-options). |
 | `columns.label` | string | **Timeline only.** The event's headline. Default `"label"`. A blank cell is a validation error. |
 | `columns.description` | string | **Timeline only.** Optional supporting text for the event. |
 | `columns.date_label` | string | **Timeline only.** Text that replaces the formatted date for that row (`FY2030`, `Spring 2027`). |
@@ -804,7 +804,7 @@ gap_annotation: { series_a: static, series_b: collected }
 and **open-ended** spans as bars that run to the end of the rule and fade out. One CSV row per event,
 mapped with `columns.x` (the start date), `columns.end`, `columns.label`, `columns.description` and
 `columns.date_label` (see [Column mapping](#column-mapping)). It requires `xAxisType: temporal`
-(start dates are `YYYY` or `YYYY-MM-DD`; an impossible calendar date is a validation error) and has
+(start dates follow the [date grammar](#dates); an impossible calendar date is a validation error) and has
 no value axis. There is no hover and no tooltip — every label is always drawn — but the legend still
 pins and dims categories. The `timeline:` block and the four timeline-only column roles are
 validation errors on every other chart type.
@@ -1640,7 +1640,7 @@ see [Treemap options](#treemap-options).
 
 | role | content |
 |---|---|
-| x (`time`) | x-value. Must parse per `xAxisType`: a number for `numeric`; `YYYY-MM-DD` **or a bare `YYYY`** for `temporal` (a bare year is read as that year's 1 January, and is the right spelling for an annual series — see the note under `annotations.points` row tokens on why an annual series belongs on a temporal axis rather than a numeric one); `YYYYQ#` for `quarterly`; any **non-empty** string for `categorical` (a blank or whitespace-only cell is a validation error, not an unnamed category). |
+| x (`time`) | x-value. Must parse per `xAxisType`: a number for `numeric`; a date in the [date grammar](#dates) for `temporal` and `quarterly` (a bare `YYYY` is the right spelling for an annual series — see the note under `annotations.points` row tokens on why an annual series belongs on a temporal axis rather than a numeric one); any **non-empty** string for `categorical` (a blank or whitespace-only cell is a validation error, not an unnamed category). |
 | series | Series identifier; each distinct value is a separate line/segment/band. Omit the column for a single-series chart. |
 | value | Numeric y-value. May be empty for missing observations — except on a treemap, where a blank value is a validation error. |
 
@@ -1654,6 +1654,22 @@ numbers, blanks, or text strings.
 
 Validation parses every row and fails on malformed x-values, missing required columns, or
 referenced keys that don't appear in the data.
+
+### Dates
+
+One grammar applies wherever a date is read: a data x cell, a timeline `end` cell, and every x
+coordinate in the spec — `annotations.xAxis[].x`, `annotations.bands[].start`/`end`,
+`annotations.points[].x`, `shading[].from`/`to`, `rug.tracks[].intervals[].from`/`to`, and the
+legacy `xAxisPolicy.markers`/`bands`.
+
+- **`temporal`:** `YYYY-MM-DD` naming a real calendar day, or a bare `YYYY` (read as that year's
+  1 January). `2024-02-29` is accepted; `2023-02-29`, `2024-02-30` and `2024-13-01` are not, and
+  neither is any other spelling — `2024-1-1`, `2024/01/01`, `March 1, 2024`, a timestamp.
+- **`quarterly`:** `YYYYQ1` to `YYYYQ4`. `2024Q5` and `2024q1` are rejected.
+
+`tbl-chart validate` reports a value outside the grammar and names where it is. `renderChart` does
+not validate, but it does not guess either: a malformed date makes it throw an `Error` whose message
+names the value, e.g. `temporal x value: expected YYYY-MM-DD or YYYY, got "March 1, 2024"`.
 
 ---
 

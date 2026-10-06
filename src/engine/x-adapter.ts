@@ -189,7 +189,7 @@ export function makeXAdapter(
           marginBottom: temporalMarginBottom(xDomain) + bottomGutter,
           axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter),
           markerToX: (m) => parseQuarter(m.x),
-          tooltipXParse: (v) => +(parseQuarter(v) as Date),
+          tooltipXParse: (v) => +parseQuarter(v),
           tooltipXFormat: tooltipXFormatPattern
             ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
             : (v) => formatQuarter(new Date(v)),
