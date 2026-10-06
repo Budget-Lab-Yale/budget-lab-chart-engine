@@ -171,6 +171,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   its rows, so the download stretched a short chart's rows apart and squeezed a long one's together.
   The export now sizes it with the live chart's height rule, as it already did for horizontal bars,
   so each row sits at the page's spacing and the frame grows or shrinks to fit.
+- A right-hand legend column taller than the plot stretched the plot in the PNG: the export drew
+  the chart at the legend's height, so its rows moved away from where the page draws them (a
+  horizontal stacked bar with 30 series: 732px in the PNG, 400px on the page). The plot now keeps
+  its own height, top-aligned, and the frame grows to hold the legend. Live is unchanged.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -267,6 +271,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   on the unpublished `pr67-spec-fixes` branch, `effective-tax-rates-top-groups` (7 rows in 2
   sections), now downloads 599px tall instead of 750px at 1x, with its rows 38px apart as on the
   page rather than 55px. No golden moves.
+- **A PNG whose right-hand legend is taller than its plot keeps the plot at its own height** (PNG
+  only). **No published figure is affected**: no spec on `main`, on the `pr67-spec-fixes` branch
+  or in its working tree resolves to a right legend, and every one exports byte-identical before
+  and after. No golden moves.
 
 ## [1.15.0] - 2026-10-01
 

@@ -473,12 +473,17 @@ export function buildExportSvg(
           // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
           ? Math.ceil(treemapHeight(chartW))
           : Math.max(160, H - chartTop - bottomH);
+    // The plot's own height. A right-hand legend never changes it: the live card keeps
+    // computeChartHeight's height beside a taller legend column, so stretching the plot here moved
+    // every row of the download away from the page (Ruling 71).
+    const plotHeight = contentHeight;
     // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
     // title, note and source, and then off the frame. Measure it first (same routine that draws
-    // it, so the two cannot drift) and let the chart region be at least that tall; `H_eff` below
-    // grows the frame to match. Nothing published takes this path today, so the arithmetic is here
-    // to keep a future many-series chart honest rather than to fix a current figure.
+    // it, so the two cannot drift) and let the chart REGION be at least that tall, with the plot
+    // top-aligned in it; `H_eff` below grows the frame to match. Nothing published takes this path
+    // today, so the arithmetic is here to keep a future many-series chart honest rather than to
+    // fix a current figure.
     const colItems = rightLegend
       ? orderForRightLegend(legendItems, (meta as { legendVisualOrder?: string[] }).legendVisualOrder)
       : [];
@@ -512,7 +517,7 @@ export function buildExportSvg(
     }
     const rendered = renderChart(spec, rows, {
       width: chartW,
-      height: contentHeight,
+      height: plotHeight,
       hooks: opts.hooks,
       phase: "export",
       ...(accentColor ? { accentColor } : {}),
@@ -522,10 +527,9 @@ export function buildExportSvg(
     chartSvg.setAttribute("x", String(MARGIN));
     chartSvg.setAttribute("y", String(chartTop));
     chartSvg.setAttribute("width", String(chartW));
-    // A timeline keeps its own layout height: a right legend taller than it grows `contentHeight`,
-    // and stretching the SVG to that would centre the timeline (xMidYMid meet) beside the legend.
-    // A treemap too: its own height is the layout height, and the frame is sized to its ceiling.
-    if (!isTimeline && !isTreemap) chartSvg.setAttribute("height", String(contentHeight));
+    // A timeline keeps its own layout height (its `plotHeight` is only the pre-draw estimate). A
+    // treemap too: its own height is the layout height, and the frame is sized to its ceiling.
+    if (!isTimeline && !isTreemap) chartSvg.setAttribute("height", String(plotHeight));
     // A timeline's x-axis title follows the ticks of THIS render, at `chartW`: the metadata pass ran
     // at INNER_W, and a vertical timeline can drop its ticks at the narrower right-legend width.
     if (isTimeline) {
