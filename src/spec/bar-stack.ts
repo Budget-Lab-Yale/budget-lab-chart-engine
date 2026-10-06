@@ -25,7 +25,8 @@
 // decision computed from the spec plus those two reports, at the site that acts on it.
 import type { ChartSpec } from "./types";
 
-/** The net (sum) callout actually painted on a stacked chart. */
+/** The net (sum) callout a stacked chart resolved to (resolveNetMode). What it painted, except that a
+ *  single-series stack resolving to "dot" paints no dot (drawsNetDots). */
 export type NetMode = "dot" | "text" | "none";
 /** The hover tooltip's Total row style. */
 export type TotalRow = "dot" | "text" | "none";
@@ -51,8 +52,9 @@ export function resolveNetMode(spec: ChartSpec, hasNegatives: boolean): NetMode 
  *
  * Only where the net resolves to a dot AND the chart has two or more series. With one series each
  * bar's net is that bar's own end, so a dot there marks nothing the bar does not, and an explicit
- * `netDisplay: dot` does not override that: there is nothing to net. `seriesCount` is the CHART's
- * count — a figure's, not a pane's — so the panes and the figure legend agree.
+ * `netDisplay: dot` does not override that, on all-positive data either: there is nothing to net.
+ * `seriesCount` is the CHART's count of DISTINCT series — a figure's, over the panes it draws, not a
+ * pane's — so the panes and the figure legend agree.
  *
  * Only the marker and its legend row go. Everything else `netMode === "dot"` decides stays, so a
  * single-series diverging stack keeps the card hover (whose Total row is already omitted for one

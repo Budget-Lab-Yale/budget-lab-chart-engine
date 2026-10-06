@@ -531,6 +531,17 @@ export function renderFigure(
 
   if (!paneValues.length) throw new Error("No panes: facet_field produced no values in scope.");
 
+  // How many DISTINCT series the figure draws: rows in a drawn pane, through series_order's filter.
+  // The stacked net dot needs two (spec/bar-stack.ts drawsNetDots). Not `figureSeries.length`, which
+  // also counts series found only in panes pane_order leaves out, and a duplicated series_order entry.
+  const drawnPanes = new Set(paneValues);
+  const drawnSeries = new Set<string>();
+  for (const r of rows) {
+    if (drawnPanes.has(r[facetField] as string)) drawnSeries.add(cols.series ? (r[cols.series] ?? "") : SINGLE_SERIES_KEY);
+  }
+  const listedSeries = spec.series_order?.length ? new Set(spec.series_order) : null;
+  const chartSeriesCount = [...drawnSeries].filter((s) => !listedSeries || listedSeries.has(s)).length;
+
   // Per-pane heights: every facet sized by the SAME shared per-slot height (effSlotPx/chromeExtra,
   // computed above from the BUSIEST facet with the floor applied only there), scaled by ITS OWN
   // slot count — so bar thickness is uniform across ragged facets (the horizontal analog of
@@ -686,6 +697,7 @@ export function renderFigure(
           pane: true,
           paneFacetValue: value,
           paletteSeries: figureSeries,
+          chartSeriesCount,
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
@@ -859,6 +871,7 @@ export function renderFigure(
         pane: true,
         paneFacetValue: value,
         paletteSeries: figureSeries,
+        chartSeriesCount,
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
         width: colWidths[col],

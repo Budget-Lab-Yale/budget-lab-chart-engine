@@ -129,6 +129,10 @@ export interface RenderOptions {
    *  painted the second one blue while the legend said amber). Absent (single chart) → the pane's
    *  own list, unchanged. */
   paletteSeries?: string[];
+  /** Small multiples: how many DISTINCT series the figure draws (rows in its drawn panes, through
+   *  series_order). A pane's own list can undercount it. Read by the stacked builder's net dot
+   *  (spec/bar-stack.ts drawsNetDots). Absent (single chart) → the pane's own distinct count. */
+  chartSeriesCount?: number;
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -953,8 +957,8 @@ function assemblePaneResult(
     ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     // Pane stroke flag: thins line marks for figure panes (both modes). renderFigure sets it.
     ...(opts.pane ? { pane: true } : {}),
-    // A figure's series list (set only by renderFigure): the chart-level count a pane can undercount.
-    ...(opts.paletteSeries ? { chartSeriesCount: opts.paletteSeries.length } : {}),
+    // The figure's distinct drawn series (set only by renderFigure): a count a pane can undercount.
+    ...(opts.chartSeriesCount != null ? { chartSeriesCount: opts.chartSeriesCount } : {}),
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),

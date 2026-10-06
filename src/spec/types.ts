@@ -749,9 +749,11 @@ export interface ChartSpec {
      * - "text": text above the top of each cumulative stack.
      * - "dot": white-stroked black dot at the true net value.
      * - "none": suppress all net markers and the "Total" legend entry.
-     * A single-series stack draws no net dot and no "Total" legend row whatever this resolves to,
-     * explicit "dot" included (one series has nothing to net; a figure counts its own series, not a
-     * pane's). It keeps the rest of the dot treatment: the hover card, and no segment labels. */
+     * Resolving to "dot" also sets the default hover (the card; `hover` decouples it) and refuses
+     * segment labels. A single-series stack draws no net dot and no "Total" legend row whatever this
+     * resolves to, explicit "dot" on all-positive data included (one series has nothing to net; a
+     * figure counts the distinct series in its drawn panes, not a pane's). It keeps the other two
+     * effects: the hover card, and no segment labels. */
     netDisplay?: "auto" | "text" | "dot" | "none";
     /** Monochrome override: render all segments using shades of one base color. */
     mono?: { base: ColorRef };
@@ -856,8 +858,8 @@ export interface ChartSpec {
    * legend with no rows to show takes no column on any chart type (full-width plot), live as in the
    * PNG — live, a timeline's rows are judged in the orientation it would draw beside the column. A
    * stacked chart's Total row counts: it is drawn exactly when `barStack.netDisplay` resolves to a
-   * dot and the chart has two or more series (explicit `dot` always; `auto` on diverging data; never
-   * `text`, `none`, `normalize`, or a single series).
+   * dot and the chart has two or more series (explicit `dot` on 2+ series; `auto` on diverging data;
+   * never `text`, `none`, `normalize`, or a single series, explicit `dot` included).
    * Otherwise the PNG follows this field.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */

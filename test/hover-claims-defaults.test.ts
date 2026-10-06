@@ -202,6 +202,32 @@ describe("x_labels", () => {
       expect(cardText(), `faceted=${faceted}`).toContain("Verbose label for A");
     }
   });
+
+  it("renders on a SINGLE-SERIES negative stack, standalone AND 2-pane — a card with no net dot drawn", () => {
+    for (const faceted of [false, true]) {
+      document.body.innerHTML = "";
+      const m = mountHover(
+        spec({
+          chartType: "stacked", xAxisType: "categorical", ...LABELS,
+          ...(faceted ? { data: "d.csv", ...facetCols, ...sm } : {}),
+        }),
+        faceted ? twoPane([["Only", -6, 4]]) : catRows([["Only", -6, 4]]),
+        faceted,
+      );
+      expect(m.container.querySelectorAll("g.tbl-net-marker circle"), `faceted=${faceted}`).toHaveLength(0);
+      hoverFirstMark(m.svgs[0]!, BAR_MARK);
+      expect(cardText(), `faceted=${faceted}`).toContain("Verbose label for A");
+    }
+  });
+
+  it("renders on an all-positive stack under the barStack.hover: tooltip dial", () => {
+    const m = mountHover(
+      spec({ chartType: "stacked", xAxisType: "categorical", series_order: ["Up", "Down"], barStack: { hover: "tooltip" }, ...LABELS }),
+      catRows([["Up", 6, 5], ["Down", 4, 2]]),
+    );
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardText()).toContain("Verbose label for A");
+  });
 });
 
 // ---------------------------------------------------------------------------

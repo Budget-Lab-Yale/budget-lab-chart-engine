@@ -92,8 +92,9 @@ export interface MarkContext {
    *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
    *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
   pane?: boolean;
-  /** How many series the whole CHART has: on a small-multiples figure, the figure's, which a pane's
-   *  own `seriesNames` can undercount. Absent ⇒ `seriesNames.length` (a standalone chart). Read by
+  /** How many DISTINCT series the whole CHART draws: on a small-multiples figure, the figure's
+   *  (RenderOptions.chartSeriesCount), which a pane's own `seriesNames` can undercount. Absent ⇒ the
+   *  distinct entries of `seriesNames` (a standalone chart). Read by
    *  the stacked builder, whose net dot needs a second series to net (spec/bar-stack.ts drawsNetDots). */
   chartSeriesCount?: number;
   /** Categorical x-axis label layout ("wrap" → two lines, "rotate" → 45°), decided in renderChart

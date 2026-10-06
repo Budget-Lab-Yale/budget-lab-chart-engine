@@ -49,6 +49,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   "in any configuration" (an uncoordinated pane has one, and so does a dot plot or categorical line
   resolving to one pane); the texture notes count a single-pane faceted area, histogram or
   waterfall as hovering with a card.
+- CONFIG-SPEC `barStack.netDisplay` said it "chooses the marker and nothing else" and no longer
+  decides the hover. Resolving to a dot also sets the default hover (the card, unless
+  `barStack.hover` is set) and refuses segment labels; the row now says so.
+- CONFIG-SPEC `x_labels`: its list of cards that carry the label now includes an uncoordinated
+  `bar` or `waterfall` pane, and its test note no longer calls the `coordinated_cursor: false` case
+  a default-settings one.
 
 ### Fixed
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
@@ -73,8 +79,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A stacked chart with a single series no longer draws a net dot or a legend "Total" row where
   `netDisplay` resolves to a dot (by default, any negative value; an explicit `dot` included): with one
   series each bar's net is its own end. Its hover card, which already omitted the Total row, is
-  unchanged, and it still paints no segment labels. A small-multiples figure counts its own series,
-  not a pane's. With no legend rows left, its defaulted right legend takes no column.
+  unchanged, and it still paints no segment labels. A small-multiples figure counts the distinct
+  series in the panes it draws, not a pane's, and a series named twice in `series_order` counts
+  once. With no legend rows left, its defaulted right legend takes no column.
 
 ### Upgrading
 
