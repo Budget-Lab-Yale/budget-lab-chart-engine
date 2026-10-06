@@ -297,6 +297,38 @@ describe("categorical-x line — card standalone, none in a default multi-pane f
   });
 });
 
+// The reach table's categorical-x row names `area` beside `line`: the same crosshair, so the same
+// three cases.
+describe("categorical-x area — card standalone, none in a default multi-pane figure", () => {
+  const rows = catRows([["A", 10, 20], ["B", 12, 22]]);
+  const area = (extra: Record<string, unknown> = {}) =>
+    spec({ chartType: "area", xAxisType: "categorical", series_order: ["A", "B"], ...extra });
+
+  it("standalone: card at defaults, hooks.tooltip fires", () => {
+    const m = mount(area(), rows);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  it("2-pane: NO card at defaults, hooks.tooltip never fires", () => {
+    const m = mount(area({ data: "d.csv", ...facetCols(), ...sm }), twoPane([["A", 10, 20], ["B", 12, 22]]), true);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(coordShown(m.svgs[0]!)).toBe(true);
+    expect(cardShown()).toBe(false);
+    expect(m.calls()).toBe(0);
+  });
+
+  it("faceted but resolving to one pane: card at defaults, hooks.tooltip fires", () => {
+    const m = mount(area({ data: "d.csv", ...facetCols(), ...sm }), catRows([["A", 10, 20], ["B", 12, 22]], "P1"), true);
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+});
+
 describe("dot plot — card standalone, none in a default multi-pane figure", () => {
   it("standalone: card at defaults, hooks.tooltip fires", () => {
     const m = mount(

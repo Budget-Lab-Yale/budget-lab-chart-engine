@@ -1181,8 +1181,9 @@ export function buildBandTooltipHtml(
   // hooks.tooltip (#30, Task 5): screen-only content replacement — the engine still does the
   // hit-testing/positioning/highlight around this card (see the two call sites below). `total`
   // reuses `hasTotalRow` above so it is only handed to the hook when a Total row would actually
-  // show — callers that never pass isStacked/totalRow (e.g. attachCategoricalLineCrosshair) have
-  // no stack "total" concept, and the raw series sum would mislabel one for them.
+  // show — callers that never pass isStacked/totalRow (attachCategoricalLineCrosshair, except for a
+  // categorical-x area's `showTotal`) have no "total" concept, and the raw series sum would
+  // mislabel one for them.
   if (opts.tooltipHook) {
     const hooked = opts.tooltipHook({
       category,

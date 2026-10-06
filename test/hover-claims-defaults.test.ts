@@ -671,6 +671,27 @@ describe("stacked-area Total row", () => {
     expect(m.calls()).toBeGreaterThan(0);
   });
 
+  // CONFIG-SPEC x_labels: categorical-x area carries it "faceted wherever the card survives
+  // coordination" — a facet resolving to one pane, and every pane under coordinated_cursor: false.
+  it("categorical x, faceted: x_labels heads a pane's card (one pane, and coordinated_cursor: false)", () => {
+    const labels = { x_labels: { y: "Verbose label for y" } };
+    const one = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm, ...labels }), catAreaRows("P1"), true);
+    expect(one.svgs.length).toBe(1);
+    hoverFirstMark(one.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Verbose label for y");
+    document.body.innerHTML = "";
+    const two = mountHover(
+      catArea({ data: "d.csv", ...facetCols, small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false }, ...labels }),
+      [...catAreaRows("P1"), ...catAreaRows("P2")],
+      true,
+    );
+    expect(two.svgs.length).toBe(2);
+    hoverFirstMark(two.svgs[1]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Verbose label for y");
+  });
+
   it("categorical x, faceted, one pane, ONE series: no Total row", () => {
     const rows = catAreaRows("P1").filter((r) => (r as unknown as { series: string }).series === "A");
     const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), rows, true);

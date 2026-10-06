@@ -28,7 +28,8 @@ import type { ValueAffixes } from "./types";
 
 /** Screen-only (see module note above) — a static PNG has no hover state to be identical to.
  *  The hovered category's per-series values, plus the engine's own rendered card markup so a
- *  hook can wrap rather than replace it. `total` is present for stacked charts' Total row. */
+ *  hook can wrap rather than replace it. `total` is present wherever the card draws a Total
+ *  row: a stacked chart's, and a categorical-x area chart's. */
 export interface TooltipHookCtx {
   category: string;
   series: string[];
