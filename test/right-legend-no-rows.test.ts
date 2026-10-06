@@ -79,7 +79,8 @@ describe("legendPosition: right with no legend rows", () => {
 
 // CONFIG-SPEC `legendPosition`: a stacked chart's legend has a Total row exactly when
 // `barStack.netDisplay` RESOLVES to a dot — an explicit `dot` always, the default `auto` on a
-// diverging chart — and never with `text`, `none` or `normalize` (normalize wins even over `dot`).
+// diverging chart — and never with `text`, `none` or `normalize` (normalize wins even over `dot`),
+// or on a single-series stack (test/stacked-single-series-net.test.ts).
 // With `series_legend: false` that row is the legend's only row, so it alone decides the column.
 describe("a stacked chart's Total row decides the column when series_legend: false", () => {
   const S = { ...STACKED, series_legend: false } as ChartSpec;

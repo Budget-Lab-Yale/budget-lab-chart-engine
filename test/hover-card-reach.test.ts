@@ -166,7 +166,7 @@ describe("no floating card exists in any configuration (hoverMode is always \"pi
 // Stacked bar: the card is DATA-dependent (the net dot), not dial-dependent.
 // ---------------------------------------------------------------------------
 
-describe("stacked bar — a card only where the net dot is drawn", () => {
+describe("stacked bar — a card only where the net resolves to a dot", () => {
   it("all-positive, standalone: no card at defaults, hooks.tooltip never fires", () => {
     const m = mount(
       spec({ chartType: "stacked", xAxisType: "categorical", series_order: ["Up", "Down"] }),

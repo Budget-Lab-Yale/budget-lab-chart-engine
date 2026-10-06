@@ -27,7 +27,7 @@ import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import type { ChartSpec } from "../../spec/types";
-import { resolveNetMode, stackedSegmentLabelsShown } from "../../spec/bar-stack";
+import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
 
@@ -161,6 +161,9 @@ export function buildStackedMarks(
       : {};
 
   const netMode = resolveNetMode(spec, hasNegatives);
+  // The dot and its legend row need a second series to net; see drawsNetDots. Counted over the
+  // whole chart (a figure's panes can each hold fewer), so every pane and the figure legend agree.
+  const netDots = drawsNetDots(netMode, ctx.chartSeriesCount ?? seriesNames.length);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data
@@ -308,7 +311,7 @@ export function buildStackedMarks(
             dy: reversed ? TBL_VALUE_LABEL.gapBelow : -TBL_VALUE_LABEL.gap,
           }),
     );
-  } else if (netMode === "dot") {
+  } else if (netDots) {
     // Black-stroked WHITE dot at the true net y (KEPT in panes). The white is this marker's own ink,
     // not an assumption about the ground: the dot sits ON its stack and has to occlude it. It comes
     // from marker-ink.ts so the legend's Total key is painted from the same description — keying it as
@@ -378,11 +381,11 @@ export function buildStackedMarks(
     )
     .map((r) => r.series);
 
-  // --- Legend extras: diverging stacks add a "Total" dot row (A8 renders it) ---
+  // --- Legend extras: a stack that draws net dots adds a "Total" dot row (A8 renders it) ---
   // The row carries TOTAL_SERIES_KEY, shared with the net dot's data-series below, so the
   // legend row + net dots pin/hover/dim as one pseudo-series.
   const legendExtras =
-    netMode === "dot"
+    netDots
       ? [{ series: TOTAL_SERIES_KEY, label: "Total", markerShape: "dot" as const }]
       : undefined;
 
@@ -391,7 +394,7 @@ export function buildStackedMarks(
   // tag every one with TOTAL_SERIES_KEY so the existing pin/dim system treats them as the Total
   // pseudo-series.
   const netTagging =
-    netMode === "dot"
+    netDots
       ? [
           {
             selector: `g.${NET_DOT_CLASS} circle`,

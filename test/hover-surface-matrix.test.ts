@@ -57,7 +57,8 @@
 //      every waterfall, in any configuration. Those never reach a card, standalone or not, and
 //      `barStack.hover` cannot talk them into one.
 // A stacked bar's card is therefore DATA-dependent, not dial-dependent: it appears only where the
-// net dot is drawn, i.e. where the stack has a genuine negative. Both stacked variants are below.
+// net resolves to a dot, i.e. where the stack has a genuine negative (a single-series stack draws no
+// dot but still cards). Both stacked variants are below.
 //
 // WHAT JSDOM CAN AND CANNOT MEASURE HERE (read before trusting a cell)
 // -------------------------------------------------------------------

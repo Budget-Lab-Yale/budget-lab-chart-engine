@@ -953,6 +953,8 @@ function assemblePaneResult(
     ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     // Pane stroke flag: thins line marks for figure panes (both modes). renderFigure sets it.
     ...(opts.pane ? { pane: true } : {}),
+    // A figure's series list (set only by renderFigure): the chart-level count a pane can undercount.
+    ...(opts.paletteSeries ? { chartSeriesCount: opts.paletteSeries.length } : {}),
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),

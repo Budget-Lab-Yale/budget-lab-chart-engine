@@ -63,6 +63,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A shared-mode (coordinated) faceted histogram's bin-range hover label (`10 – 20`) now hides the
   axis tick labels it covers instead of leaving a neighbouring tick's fragment past its edge. Hover
   only.
+- A stacked chart with a single series no longer draws a net dot or a legend "Total" row where
+  `netDisplay` resolves to a dot (by default, any negative value; an explicit `dot` included): with one
+  series each bar's net is its own end. Its hover card, which already omitted the Total row, is
+  unchanged, and it still paints no segment labels. A small-multiples figure counts its own series,
+  not a pane's. With no legend rows left, its defaulted right legend takes no column.
 
 ### Upgrading
 
@@ -72,6 +77,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   one pane) hovers with a card and draws no such label. **No published figure is affected**: the archive's only histogram, the
   deficit-management scorecard's `deviation-distribution`, is standalone. Rendered SVG and the PNG
   export are unchanged.
+- **A single-series diverging stack loses its net dot and its legend "Total" row**, on screen and in
+  the PNG; with that row gone a defaulted right legend has no rows, so the plot takes the full width.
+  **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
+  `revenue-by-income-type` and `revenue-by-instrument`, have four series in every pane and set
+  `netDisplay: none`. No golden covers a single-series stack.
 
 ## [1.15.0] - 2026-10-01
 

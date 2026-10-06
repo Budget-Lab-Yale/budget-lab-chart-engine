@@ -92,6 +92,10 @@ export interface MarkContext {
    *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
    *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
   pane?: boolean;
+  /** How many series the whole CHART has: on a small-multiples figure, the figure's, which a pane's
+   *  own `seriesNames` can undercount. Absent ⇒ `seriesNames.length` (a standalone chart). Read by
+   *  the stacked builder, whose net dot needs a second series to net (spec/bar-stack.ts drawsNetDots). */
+  chartSeriesCount?: number;
   /** Categorical x-axis label layout ("wrap" → two lines, "rotate" → 45°), decided in renderChart
    *  from width + labels to avoid collision. Grouped bars use it for their `fx` group labels. */
   xLabelMode?: BandLabelMode;
@@ -268,7 +272,8 @@ export interface MarkLayers {
    *  made on the segment's share of the data (see the threshold note in applySegmentGap). Set in
    *  the same literal as `segmentGap`. */
   segmentLabelSelector?: string;
-  /** Stacked bars: the net (sum) callout actually painted — see spec/bar-stack.ts. The single field
+  /** Stacked bars: the net (sum) callout the stack resolved to — what it painted, except that a
+   *  single-series stack reports "dot" with no dot drawn (see spec/bar-stack.ts). The single field
    *  the hover path needs; the tooltip's Total row, the hover treatment and the pills' net-dot flag
    *  are all DERIVED from this plus the spec, at the sites that read them, rather than forwarded
    *  alongside it. Absent ⇒ not a stacked chart. */

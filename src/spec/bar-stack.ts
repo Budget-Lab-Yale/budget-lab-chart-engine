@@ -11,9 +11,11 @@
 // So the rule is not "one field crosses the chain" — it is that a value crosses it ONLY when the
 // read site cannot compute the value itself, which makes every field that crosses a REPORT of what
 // the mark builder observed rather than a DECISION about what to do. Two qualify:
-//   - `netMode` — which net callout the stack actually painted. `undefined` additionally carries
-//     "not a stacked chart" (marks/stacked.ts is its only writer), which resolveHoverMode below
-//     depends on, so it is passed un-defaulted.
+//   - `netMode` — which net callout the stack resolved to (resolveNetMode). It is what was painted,
+//     with one exception: a single-series stack resolving to "dot" paints no dot (drawsNetDots), yet
+//     keeps the rest of the dot treatment, so it still reports "dot". `undefined` additionally
+//     carries "not a stacked chart" (marks/stacked.ts is its only writer), which resolveHoverMode
+//     below depends on, so it is passed un-defaulted.
 //   - `segmentLabelsDropped` — whether the label builder refused any segment's in-bar value label
 //     for being thinner than the fit threshold. That is a function of the data AND the frame
 //     geometry the builder was handed, and the pill read site has neither; re-deriving it there
@@ -45,8 +47,24 @@ export function resolveNetMode(spec: ChartSpec, hasNegatives: boolean): NetMode 
 }
 
 /**
+ * Does the stack DRAW its net dots, and the legend "Total" row that keys them?
+ *
+ * Only where the net resolves to a dot AND the chart has two or more series. With one series each
+ * bar's net is that bar's own end, so a dot there marks nothing the bar does not, and an explicit
+ * `netDisplay: dot` does not override that: there is nothing to net. `seriesCount` is the CHART's
+ * count — a figure's, not a pane's — so the panes and the figure legend agree.
+ *
+ * Only the marker and its legend row go. Everything else `netMode === "dot"` decides stays, so a
+ * single-series diverging stack keeps the card hover (whose Total row is already omitted for one
+ * series) and still paints no segment labels.
+ */
+export function drawsNetDots(netMode: NetMode | undefined, seriesCount: number): boolean {
+  return netMode === "dot" && seriesCount > 1;
+}
+
+/**
  * Which hover treatment to attach. Absent `barStack.hover`, this reproduces the historical coupling
- * exactly — tooltip iff the net dot is drawn — so a spec that does not set it renders as before.
+ * exactly — tooltip iff the net resolves to a dot — so a spec that does not set it renders as before.
  *
  * `netMode: undefined` means NOT A STACKED CHART (only marks/stacked.ts sets it), and the caller
  * passes `layers.netMode` un-defaulted so that signal survives. The read site in render-live serves
@@ -89,6 +107,10 @@ export function resolveTotalRow(
  * a net-value pill at each net dot instead (crosshair.ts, `readNetDotMarkers`). This tracks the
  * MARKER, which is why it is not the same question as `resolveTotalRow` — `netDisplay: none` with
  * `hover: tooltip` yields a "text" Total row and no dots whatsoever.
+ *
+ * It over-reports on a single-series stack, which keeps `netMode: "dot"` but draws no dots
+ * (drawsNetDots). Harmless: that stack has no Total legend row, so the Total pseudo-series cannot
+ * be selected, and the pill driver draws only at the markers it finds.
  */
 export function hasNetDots(netMode: NetMode | undefined): boolean {
   return netMode === "dot";
@@ -107,7 +129,8 @@ export function hasNetDots(netMode: NetMode | undefined): boolean {
  *    A **waterfall** lands here, and that is correct rather than incidental: it does paint labels
  *    under `valueLabels.show`, but they are the running LEVEL after each step while its hover pill is
  *    the signed DELTA. Those are different numbers, so nothing is duplicated and the pill must stay.
- *  - `netMode === "dot"` — a diverging stack suppresses segment labels entirely.
+ *  - `netMode === "dot"` — a diverging stack suppresses segment labels entirely, a single-series one
+ *    included, though it draws no net dot (drawsNetDots).
  *  - `pane` — small-multiples panes paint none either (there is no room).
  */
 export function stackedSegmentLabelsShown(
