@@ -661,14 +661,20 @@ export function assemblePlot({
     }
     // 3h. Category labels (single-stack: y band; grouped: fy group facets) — layer-supplied.
     marks.push(...(layers.xAxisMarks ?? []));
-    // 4h. Vertical zero baseline.
-    marks.push(
-      Plot.ruleX([0], {
-        stroke: TBL.color.axisStroke,
-        strokeWidth: 1,
-        ...(fyFaceted ? { className: ZERO_BASELINE_CLASS } : {}),
-      }),
-    );
+    // 4h. Vertical zero baseline — ONLY when 0 is within the value domain, as in the vertical
+    //     branch (4, below). A fitted dot plot (e.g. 8–31) otherwise painted the rule at x(0),
+    //     outside the plot, through the category-label gutter. The fy collapse pass skips the
+    //     class when no copy exists.
+    const [hZeroLo, hZeroHi] = domainBounds(yDomain);
+    if (hZeroLo <= 0 && hZeroHi >= 0) {
+      marks.push(
+        Plot.ruleX([0], {
+          stroke: TBL.color.axisStroke,
+          strokeWidth: 1,
+          ...(fyFaceted ? { className: ZERO_BASELINE_CLASS } : {}),
+        }),
+      );
+    }
   } else {
     // 2. Gridlines + y-tick labels. 3. X-axis. (extend across both label columns so the
     //    chart edges sit flush with the canvas.)

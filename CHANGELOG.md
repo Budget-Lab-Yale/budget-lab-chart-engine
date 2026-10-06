@@ -127,6 +127,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   It took a marker per series, so with a separate `columns.shape` it could draw a circle over a
   square, and with no shape column it drew series symbols over circles. A point `shape_order`
   leaves out gets no hover dot. Hover only.
+- A horizontal chart (bar, stacked bar, dumbbell) no longer draws its zero rule when 0 is outside
+  the value axis: a dumbbell fitted to its data (8–31, say), or a bar axis truncated with
+  `yAxisPolicy.min`. The rule was drawn at x = 0 outside the plot, across the category labels. A
+  vertical chart already drew it only when 0 is in range. Live and in the PNG.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -187,6 +191,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   entry. No golden moves.
 - **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
   under Changed). Specs that pass `tbl-chart validate` are unaffected.
+- **A horizontal chart whose value axis excludes 0 loses its zero rule** (live and PNG). **No
+  published figure is affected**: the only horizontal specs among the 47 archived ones,
+  tariff-model-update-july2026's `eta-effect` and `etas` (sectioned bars, no `yAxisPolicy`), include
+  0. Nor are the three horizontal figures on the unpublished `pr67-spec-fixes` branch:
+  `effective-tax-rates-top-groups` (a dumbbell with `yAxisPolicy.min: 0`) and the two
+  `revenue-by-tax` stacks include 0. All five draw one zero rule before and after. No golden moves.
 
 ## [1.15.0] - 2026-10-01
 
