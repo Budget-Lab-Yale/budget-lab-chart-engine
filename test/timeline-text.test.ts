@@ -194,3 +194,47 @@ describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (
     }
   });
 });
+
+// Ruling 51: Cyrillic and Greek letters measure from a per-letter table of the widest advance among
+// common fallback fonts (src/engine/script-metrics.ts), and every other script Figtree lacks at a
+// conservative constant. The floors here are read independently from the fonts' own hmtx tables
+// (fontTools): per letter the widest of Arial, Liberation Sans, DejaVu Sans, FreeSans and Segoe UI,
+// regular at 500 (where those fonts have no 500 face) and bold at 700.
+describe("per-letter Cyrillic and Greek, a conservative constant for other scripts (Ruling 51)", () => {
+  const FLOOR: Record<string, [number, number]> = {
+    "ω": [837.4, 869.1], "Щ": [1093.8, 1325.7], "Ж": [1077.1, 1224.1], "ш": [915, 1062], "Ю": [1079.6, 1173.8], "Ω": [764.2, 850.1],
+  };
+  it.each(Object.entries(FLOOR))("%s measures no narrower than its widest font", (ch, [f500, f700]) => {
+    expect(timelineTextWidth(ch, 1000, 500)).toBeGreaterThanOrEqual(f500);
+    expect(timelineTextWidth(ch, 1000, 700)).toBeGreaterThanOrEqual(f700);
+  });
+
+  it.each(["ω", "Щ"])("a title of 30 %s wraps inside a 280px frame at its widest font's advance", (ch) => {
+    const title = ch.repeat(30);
+    const e: LayoutEvent = { id: 0, start: new Date("2020-01-01"), end: null, ongoing: false, category: "a", dateText: "2020", title, description: null, projected: false };
+    const l = layoutTimeline({ events: [e], width: 280, orientation: "vertical", spacing: "proportional", lanes: null, axis: false, labelWidth: 150, maxRows: 3 });
+    const lab = l.labels[0]!;
+    const lines = lab.lines.filter((ln) => ln.role === "title");
+    expect(lines.map((ln) => ln.text).join("")).toBe(title);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lab.box.x0).toBeGreaterThanOrEqual(0);
+    expect(lab.box.x1).toBeLessThanOrEqual(280 + 1e-6);
+    const st = LINE_STYLE.title;
+    const floor = FLOOR[ch]![st.bold ? 1 : 0];
+    for (const ln of lines) expect(([...ln.text].length * floor * st.size) / 1000, ln.text).toBeLessThanOrEqual(lab.box.x1 - lab.box.x0 + 1e-6);
+  });
+
+  it("measures every other script Figtree lacks at no less than an em a code point, Unifont's width", () => {
+    // Unifont, the Playwright Linux image's last-resort font, draws these an em wide; Windows draws a
+    // Sinhala code point up to 1.08em at 700 (කොළඹ).
+    for (const ch of ["Ա", "א", "ب", "क", "ক", "த", "മ", "ක", "ก", "ሀ", "ა", "ܐ", "ᠮ", "က", "ក", "ཀ", "Ꭰ", "ᐃ"]) {
+      expect(timelineTextWidth(ch, 1000, 500), ch).toBeGreaterThanOrEqual(1000);
+      expect(timelineTextWidth(ch, 1000, 700), ch).toBeGreaterThanOrEqual(1000);
+    }
+    expect(timelineTextWidth("කොළඹ", 1000, 700)).toBeGreaterThanOrEqual(4314);
+  });
+
+  it("leaves Latin Extended-E at the Latin letter mean", () => {
+    for (const w of [500, 700] as const) expect(timelineTextWidth("ꬰ", 1000, w)).toBeCloseTo(FIGTREE_FALLBACK[w], 9);
+  });
+});

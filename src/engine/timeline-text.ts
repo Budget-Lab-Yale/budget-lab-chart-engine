@@ -13,15 +13,20 @@
 //   - EMOJI_EM (1.4em): astral (emoji, supplementary CJK) and the BMP emoji/symbol blocks in
 //     EMOJI_RANGES — at least what Chromium's fallback fonts draw (😀 1.37em, ✅ ⭐ ☀ ~1.3em);
 //   - WIDE_EM (1em): BMP East Asian Wide/Fullwidth (WIDE_RANGES) — Chromium draws those an em wide;
-//   - SCRIPT_EM: a script Figtree lacks (Cyrillic, Greek, and the scripts of OTHER_SCRIPT_RANGES),
-//     at the widest Chromium draws it with any of six common fallback fonts, less 2% (F5);
+//   - a Cyrillic or Greek letter: the widest advance among Arial, Segoe UI, Liberation Sans, DejaVu
+//     Sans, Noto Sans, FreeSans, Source Sans 3 and Roboto (script-metrics.ts; Ruling 51);
+//   - SCRIPT_EM: any other character of a script Figtree lacks (SCRIPT_RANGES), at least the widest
+//     a measured fallback font draws a code point of them (Unifont; Windows' Sinhala);
 //   - FIGTREE_FALLBACK (the Latin letter mean): everything else (Latin Extended, symbols).
 // So a line wrapped to a column renders inside it, to within that fraction of a pixel, for the
-// table's characters and the two wide classes (Rulings 48, 49), and to within 2% for those scripts.
+// table's characters and the two wide classes (Rulings 48, 49); and for those scripts in the fonts
+// measured (Windows' own and those of the CI Playwright image; macOS fonts were not measured),
+// short only where kerning tightens a pair.
 // Shared by the timeline and the treemap (treemap-labels.ts fits tile label text with it),
 // so a change to the table or its fallbacks moves both; every other chart keeps estimateLabelWidth,
 // byte-identical.
 import { EXTENDED_PICTOGRAPHIC, GRAPHEME_EXTEND } from "./grapheme-data";
+import { SCRIPT_ADVANCE, SCRIPT_CHARS } from "./script-metrics";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "./timeline-metrics";
 
 /** The two weights a timeline draws: 500 (titles, descriptions, ticks), 700 (dates, lane names). The
@@ -59,44 +64,43 @@ const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
 
 type Ranges = ReadonlyArray<readonly [number, number]>;
 
-/** BMP script blocks Figtree draws none of: Armenian to Ol Chiki (Hebrew, Arabic, the Indic
- *  scripts, Thai, Georgian, Myanmar, Ethiopic, Khmer...), Georgian Mtavruli to Vedic, Coptic to
- *  Ethiopic Extended, Lisu to Vai, Bamum, Syloti Nagri to Meetei Mayek, and the Hebrew and Arabic
- *  presentation forms — less the Hangul jamo blocks, which compose into one wide syllable. */
-const OTHER_SCRIPT_RANGES: Ranges = [
-  [0x0530, 0x10ff], [0x1200, 0x1c7f], [0x1c90, 0x1cff], [0x2c80, 0x2ddf], [0xa4d0, 0xa63f],
-  [0xa6a0, 0xa6ff], [0xa800, 0xa95f], [0xa980, 0xabff], [0xfb1d, 0xfdff], [0xfe70, 0xfefe],
+/** Cyrillic and Greek letters: the widest advance among the common fallback fonts that draw them
+ *  (script-metrics.ts, scripts/gen-script-metrics.mjs; Ruling 51). */
+const SCRIPT_ADVANCE_BY_CHAR: Record<TimelineWeight, Map<string, number>> = {
+  500: new Map([...SCRIPT_CHARS].map((ch, i) => [ch, SCRIPT_ADVANCE[500][i]!])),
+  700: new Map([...SCRIPT_CHARS].map((ch, i) => [ch, SCRIPT_ADVANCE[700][i]!])),
+};
+
+/** BMP script blocks Figtree draws none of: Greek and Coptic, Cyrillic and its Supplement,
+ *  Armenian to Ol Chiki (Hebrew, Arabic, the Indic scripts, Thai, Georgian, Myanmar, Ethiopic,
+ *  Khmer...), Cyrillic Extended-C to Vedic, Greek Extended, Coptic to Cyrillic Extended-A, Lisu to
+ *  Bamum (with Cyrillic Extended-B), Syloti Nagri to Meetei Mayek, and the Hebrew and Arabic
+ *  presentation forms. Left out: the Hangul jamo blocks (they compose into one wide syllable) and
+ *  Latin Extended-E (U+AB30–AB6F, Latin, so the Latin letter mean). */
+const SCRIPT_RANGES: Ranges = [
+  [0x0370, 0x10ff], [0x1200, 0x1cff], [0x1f00, 0x1fff], [0x2c80, 0x2dff], [0xa4d0, 0xa6ff],
+  [0xa800, 0xa95f], [0xa980, 0xab2f], [0xab70, 0xabff], [0xfb1d, 0xfdff], [0xfe70, 0xfefe],
 ];
 
-/** Scripts Figtree lacks: the advance per code point, per 1000 em, and the capitals' where those
- *  run wider. Each is the least that keeps every string of a probe corpus (sentences, place names,
- *  acronyms, all-caps headings, short words of wide letters such as "щи" and "мышь") within 2% of
- *  the widest Chromium draws it with the embedded Figtree first in the engine's stack and Segoe UI,
- *  Source Sans 3, Arial, Roboto, Noto Sans or DejaVu Sans drawing the script (F5, 2026-10-06; for
- *  the scripts none of those covers, Windows' own fallback). DejaVu Sans is the widest, so a
- *  narrower font draws short of the estimate: a Cyrillic sentence in Segoe UI by 30–45%. First
- *  match wins: Tamil and Sinhala, inside OTHER_SCRIPT_RANGES, draw wider a code point than any other
- *  script measured (சென்னை 0.88em, කොළඹ 1.06em); the rest is held to the widest of the others
- *  (Armenian 0.74em, Malayalam 0.78em at 700), so it runs wide of most — Arabic draws 0.39–0.56em. */
-const SCRIPT_EM: ReadonlyArray<{ ranges: Ranges; em: Record<TimelineWeight, number>; capsEm?: Record<TimelineWeight, number> }> = [
-  { ranges: [[0x0400, 0x052f], [0x1c80, 0x1c8f], [0xa640, 0xa69f]], em: { 500: 780, 700: 890 }, capsEm: { 500: 810, 700: 920 } }, // Cyrillic
-  { ranges: [[0x0370, 0x03ff], [0x1f00, 0x1fff]], em: { 500: 640, 700: 695 }, capsEm: { 500: 740, 700: 805 } }, // Greek
-  { ranges: [[0x0b80, 0x0bff], [0x0d80, 0x0dff]], em: { 500: 930, 700: 1060 } }, // Tamil, Sinhala
-  { ranges: OTHER_SCRIPT_RANGES, em: { 500: 750, 700: 780 } },
-];
+/** Advance, per 1000 em, for a code point of SCRIPT_RANGES with no entry in the per-letter table
+ *  (every script but Cyrillic and Greek, and their rarer characters): at least the widest any
+ *  fallback font measured draws a code point of them. Unifont, the last-resort font of the CI
+ *  Playwright image, draws them an em wide; Windows draws a Sinhala code point up to 1.08em at 700
+ *  (කොළඹ). So this runs wide of most scripts — Arabic draws 0.39–0.56em. */
+export const SCRIPT_EM: Record<TimelineWeight, number> = { 500: 1000, 700: 1080 };
 
 const inRanges = (cp: number, ranges: Ranges): boolean => ranges.some(([a, b]) => cp >= a && cp <= b);
 
 const isEmoji = (cp: number): boolean => cp > 0xffff || inRanges(cp, EMOJI_RANGES);
 
-/** Advance, per 1000 em, for a character outside the table. */
+/** Advance, per 1000 em, for a character outside the Figtree table. */
 function fallbackEm(ch: string, weight: TimelineWeight): number {
   const cp = ch.codePointAt(0)!;
   if (isEmoji(cp)) return EMOJI_EM;
   if (inRanges(cp, WIDE_RANGES)) return WIDE_EM;
-  const script = SCRIPT_EM.find((s) => inRanges(cp, s.ranges));
-  if (!script) return FIGTREE_FALLBACK[weight];
-  return script.capsEm && ch !== ch.toLowerCase() ? script.capsEm[weight] : script.em[weight];
+  const letter = SCRIPT_ADVANCE_BY_CHAR[weight].get(ch);
+  if (letter !== undefined) return letter;
+  return inRanges(cp, SCRIPT_RANGES) ? SCRIPT_EM[weight] : FIGTREE_FALLBACK[weight];
 }
 
 /** Whether `cp` is in a flattened, ascending list of inclusive [start, end] pairs (grapheme-data). */
@@ -114,7 +118,8 @@ function inPairs(cp: number, pairs: readonly number[]): boolean {
 
 const ZWJ = 0x200d;
 const isRegionalIndicator = (cp: number): boolean => cp >= 0x1f1e6 && cp <= 0x1f1ff;
-const isControl = (cp: number): boolean => cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || cp === 0x2028 || cp === 0x2029;
+const isControl = (cp: number): boolean =>
+  cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || cp === 0x2028 || cp === 0x2029;
 
 /** A code point's Hangul syllable type (UAX #29 L, V, T, LV, LVT), or null. */
 function hangul(cp: number): "L" | "V" | "T" | "LV" | "LVT" | null {
