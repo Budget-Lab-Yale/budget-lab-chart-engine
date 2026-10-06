@@ -402,3 +402,68 @@ describe("runValidate — treemap warnings", () => {
     expect(result.message).not.toMatch(/warning:/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// validate: a lone yAxisPolicy bound that hides a pane's data (Ruling 69)
+// ---------------------------------------------------------------------------
+
+describe("runValidate — a lone yAxisPolicy bound past all of a pane's data", () => {
+  function chartSpec(chartType: string, rowsCsv: string, extraYaml: string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), "cli-test-lone-bound-"));
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, rowsCsv, "utf8");
+    writeFileSync(
+      specPath,
+      [`chartType: ${chartType}`, "title: Test", "xAxisType: categorical", "data: data.csv", ...extraYaml].join("\n") + "\n",
+      "utf8",
+    );
+    return specPath;
+  }
+  const flat = "c,v\na,8\nb,31\n";
+  const faceted = "f,c,v\nA,a,8\nA,b,31\nB,a,60\nB,b,80\n";
+
+  it("warns, naming the bound, when a lone min is above everything a chart draws (exit 0)", async () => {
+    const result = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", "  min: 50"]));
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/warning: yAxisPolicy\.min \(50\) is at or above every value the chart draws, so no data shows/);
+  });
+
+  it("warns for a lone max below everything a chart draws, counting a bar's 0 base", async () => {
+    const neg = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", "  max: -5"]));
+    expect(neg.message).toMatch(/warning: yAxisPolicy\.max \(-5\) is at or below every value the chart draws/);
+    // A lone max of 5 still shows each bar's 0–5 stretch, so nothing is hidden.
+    const partial = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", "  max: 5"]));
+    expect(partial.message).not.toMatch(/warning:/);
+  });
+
+  it("names only the hidden pane of a small-multiples figure, in either mode", async () => {
+    for (const mode of ["shared", "per-pane"]) {
+      const result = await runValidate(
+        chartSpec("bar", faceted, [
+          "columns:", "  x: c", "  value: v", "  facet: f", "small_multiples:", "  columns: 2", `  mode: ${mode}`,
+          "yAxisPolicy:", "  min: 50",
+        ]),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.message).toMatch(/warning: yAxisPolicy\.min \(50\) is at or above every value pane "A" draws, so that pane shows no data/);
+      expect(result.message).not.toMatch(/pane "B"/);
+    }
+  });
+
+  it("does not warn when the bound leaves data on its open side, or both bounds are pinned", async () => {
+    for (const policy of [["  min: 20"], ["  max: 50"], ["  min: 50", "  max: 100"]]) {
+      const result = await runValidate(chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", ...policy]));
+      expect(result.message, policy.join(" ")).not.toMatch(/warning:/);
+    }
+  });
+
+  it("counts a stack by its totals: a min below the stacked top hides nothing", async () => {
+    const stacked = "c,s,v\na,A,8\na,B,15\n";
+    const result = await runValidate(
+      chartSpec("stacked", stacked, ["columns:", "  x: c", "  value: v", "  series: s", "yAxisPolicy:", "  min: 20"]),
+    );
+    expect(result.message).not.toMatch(/warning:/);
+  });
+});

@@ -47,6 +47,9 @@ export interface ResolveHardDomainOptions {
   auto?: { min: number; max: number };
   /** Values that must stay inside the frame — reference-marker levels, callout `y`s. */
   fold?: number[];
+  /** `yAxisPolicy.tickCount` (default 5): sizes the step a lone bound's open end takes when the
+   *  data leave nothing on the open side. */
+  tickCount?: number;
 }
 
 /**
@@ -61,12 +64,22 @@ export interface ResolveHardDomainOptions {
  *
  * The floor/ceiling asymmetry below is pre-existing behavior, kept exactly: a fold beyond the pinned
  * CEILING widens it, a pinned FLOOR is authoritative. It keeps ascending output byte-identical.
+ *
+ * A LONE bound (`min` or `max`, the other unset) is always read as ascending (CONFIG-SPEC: "`min`
+ * alone, or `max` alone, is read as ascending"). When the fitted extent leaves nothing on the open
+ * side of it (the data, and any 0 base the chart type folds into `auto`, all sit at or past the
+ * bound), the open end is placed ONE TICK STEP from the bound: d3's tick step at `tickCount` across
+ * the span from the fitted extent to the bound, or 1 if that span is empty. Without this the pin and
+ * the data's far end were paired as they came and a bound past all of the data reversed the axis.
+ * Only that case changes: a both-bound or no-bound domain, and a lone bound with data on its open
+ * side, resolve exactly as before.
  */
 export function resolveHardDomain({
   min,
   max,
   auto,
   fold,
+  tickCount = 5,
 }: ResolveHardDomainOptions): [number, number] | null {
   const reversed = min != null && max != null && min > max;
   const pinnedLo = reversed ? max : min;
@@ -78,7 +91,34 @@ export function resolveHardDomain({
   if (lo == null || hiBase == null) return null;
   const hi = Math.max(hiBase, ...folds);
 
+  const lone = (min == null) !== (max == null);
+  if (lone && auto && !(lo < hi)) {
+    // The bound and the fitted extent it would have replaced, as one span.
+    const bound = min ?? hi;
+    const spanLo = Math.min(bound, auto.min, ...folds);
+    const spanHi = Math.max(bound, auto.max, ...folds);
+    const step = spanHi > spanLo ? d3.tickStep(spanLo, spanHi, tickCount) : 1;
+    return min != null ? [lo, lo + step] : [hi - step, hi];
+  }
+
   return reversed ? [hi, lo] : [lo, hi];
+}
+
+/** The y extent `computeYAxis` fits when it is given no domain: the finite values' [min, max],
+ *  widened to 0 under `includeZero`. Null when nothing is finite. Shared with the lone-bound path in
+ *  renderPane, whose open end must be fitted exactly as an unpinned axis is. */
+export function fittedExtent(
+  yValues: Array<number | null | undefined>,
+  includeZero: boolean,
+): { min: number; max: number } | null {
+  const nums = yValues.map((v) => +(v as number)).filter(Number.isFinite);
+  if (!nums.length) return null;
+  let [lo, hi] = d3.extent(nums) as [number, number];
+  if (includeZero) {
+    lo = Math.min(0, lo);
+    hi = Math.max(0, hi);
+  }
+  return { min: lo, max: hi };
 }
 
 /** Compute a "nice" y-domain + tick array up front so gridlines and labels can be
@@ -91,14 +131,9 @@ export function computeYAxis(
     const scale = d3.scaleLinear().domain(domain).nice(tickCount);
     return { domain: scale.domain(), ticks: scale.ticks(tickCount) };
   }
-  const nums = yValues.map((v) => +(v as number)).filter(Number.isFinite);
-  if (!nums.length) return { domain: [0, 1], ticks: [0, 1] };
-  let [lo, hi] = d3.extent(nums) as [number, number];
-  if (includeZero) {
-    lo = Math.min(0, lo);
-    hi = Math.max(0, hi);
-  }
-  const scale = d3.scaleLinear().domain([lo, hi]).nice(tickCount);
+  const fitted = fittedExtent(yValues, includeZero);
+  if (!fitted) return { domain: [0, 1], ticks: [0, 1] };
+  const scale = d3.scaleLinear().domain([fitted.min, fitted.max]).nice(tickCount);
   return { domain: scale.domain(), ticks: scale.ticks(tickCount) };
 }
 

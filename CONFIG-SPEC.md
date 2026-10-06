@@ -154,11 +154,11 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. **Default `false`** (the axis fits its data range — anchoring at zero squishes a year axis to the right). |
 | `x_order` | array | Categorical x-axis only: render order for the x-axis categories. Listed categories come first in this order; any unlisted ones follow in data-encounter order. **Order-only** — unlike `series_order`, it does *not* filter. Ignored off a categorical x-axis. |
 | `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). **It heads every hover CARD, and only a card** — so check which surface your chart hovers with. Cards that carry it: `dumbbell`, `dotplot`, and categorical-x `line` and `area` (standalone, and faceted wherever the card survives coordination — a dumbbell always does); the *band* card of a **stacked** bar, drawn at default settings where `barStack.netDisplay` resolves to a dot (by default, a stack with a negative value, a single-series one included though it draws no dot) and under an explicit `barStack.hover: "tooltip"`; and the band card of a plain/grouped `bar` or `waterfall` pane that is not coordinated — under `coordinated_cursor: false`, or a waterfall figure that resolves to a single pane. Where a chart draws no card there is no header to put it in: plain/grouped `bar` and `waterfall` hover with value pills standalone and in a coordinated pane, and a coordinated small-multiples pane replaces its card with the in-place cursor — except the two panes whose card IS the hover treatment: a `dumbbell`, and a **stacked** pane in tooltip mode, which keep their cards and coordinate a band echo only. That cursor's own category echo stays the **raw** category by design — it overlays the rendered axis tick, taking that tick's box, wrapping and rotation, and this field exists to read more verbosely than the tick. `test/hover-claims-defaults.test.ts` gates every case above, each at default settings apart from the one dial it names (`coordinated_cursor: false`, `barStack.hover: "tooltip"`). |
-| `yAxisPolicy.min` | number | Hard floor for the y-axis. Set alone, it pins only the floor; the ceiling is still fitted to the data. |
-| `yAxisPolicy.max` | number | Hard ceiling for the y-axis. Set alone, it pins only the ceiling; the floor is still fitted to the data (from 0 on bars, stacks, areas, waterfalls and histograms). |
+| `yAxisPolicy.min` | number | Hard floor for the y-axis. Set alone, it pins only the floor; the ceiling is still fitted to the data (up to 0 on bars, stacks, areas and waterfalls when 0 is above the floor, so all-negative bars under `min: -40` get [-40, 0]). A floor above everything the chart draws still gives an ascending axis (see **Reversing the axis** below). |
+| `yAxisPolicy.max` | number | Hard ceiling for the y-axis. Set alone, it pins only the ceiling; the floor is still fitted to the data (from 0 on bars, stacks, areas, waterfalls and histograms when 0 is below the ceiling). A ceiling below everything the chart draws still gives an ascending axis (see **Reversing the axis** below). |
 | `yAxisPolicy.includeZero` | boolean | When `true`, extend the fitted y-domain to 0. A pinned `min` or `max` still sets its own end, so only an end left unpinned extends; with both pinned it has no effect. |
 | `yAxisPolicy.tickCount` | integer | Approximate target number of y-ticks. Default 5. |
-| `yAxisPolicy.autoWiden.step` | number | When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
+| `yAxisPolicy.autoWiden.step` | number | `line`, `scatter` and `dotplot` only; every other chart type ignores it. When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
 
 **Truncating the axis below the data.** When `min`/`max` cut into the data, **every chart type**
 with a value axis (all but `timeline` and `treemap`, which reject `yAxisPolicy`) clips its marks to the plot frame: the geometry runs to its true crossing with the axis edge and
@@ -185,7 +185,14 @@ NEAR edge — the bottom on a vertical chart, the left on a horizontal one — a
 so reversing moves the numerically lower value to the top (vertical) or the right (horizontal). On
 horizontal bars that means negative data grows left-to-right from a zero line at the left, the mirror
 of its ascending layout. Both bounds must be pinned: `min` alone, or `max` alone, is read as
-ascending.
+ascending. That holds even when the lone bound is past all of the data (a `min` at or above every
+value, or a `max` at or below every value, counting the 0 base of bars, stacks, areas, waterfalls and
+histograms):
+the pinned end stays at the bound and the open end is set one tick step past it. The step is d3's
+tick step at `tickCount` across the span from the data's fitted extent to the bound, or 1 when every
+value sits exactly on the bound; nice rounding then applies as usual. So `min: 50` on a line whose
+data run 8–31 draws 50–60. `tbl-chart validate` warns when a lone bound leaves a chart, or a
+small-multiples pane it names, showing no data.
 
 A reversed axis is a scale flip and nothing more, so the rest of the engine follows it:
 

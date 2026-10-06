@@ -17,7 +17,7 @@ import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbe
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver } from "./index";
+import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneDrawnValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
@@ -356,6 +356,71 @@ export interface FigureRenderResult {
   netMode?: NetMode;
 }
 
+/** Histogram shared mode: the ONE set of bin thresholds every pane bins to, computed over all rows.
+ *  Undefined in per-pane mode (each pane bins its own rows), for pre-binned data (the edges are in
+ *  the data), and off histograms. */
+function figureBinThresholds(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ReturnType<typeof resolveColumns>,
+  mode: "shared" | "per-pane",
+): number[] | undefined {
+  if (spec.chartType !== "histogram" || mode === "per-pane" || isPreBinned(cols)) return undefined;
+  const isTemporal = spec.xAxisType === "temporal";
+  const values = rows
+    .map((r) => (isTemporal ? parseDate(r[cols.x] ?? "").getTime() : +(r[cols.x] ?? "")))
+    .filter((v) => Number.isFinite(v));
+  const bw = spec.histogram?.binWidth;
+  return isTemporal
+    ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
+    : computeThresholds(values, {
+        bins: spec.histogram?.bins,
+        binWidth: typeof bw === "number" ? bw : undefined,
+        domain: spec.histogram?.domain,
+      });
+}
+
+/** The figure's panes, in order: distinct facet values in data-encounter order, then reordered and
+ *  filtered by `small_multiples.pane_order` when set (it names the included panes, in order). A
+ *  blank facet cell is not a pane. Both drops are mirrored by validateChartData's keyed-callout
+ *  "drawn nowhere" rules (src/spec/validate.ts) — change both. */
+function figurePaneValues(spec: ChartSpec, rows: TidyRow[], facetField: string): string[] {
+  const encounterOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const v = r[facetField] as string;
+    if (v != null && v !== "" && !seen.has(v)) {
+      seen.add(v);
+      encounterOrder.push(v);
+    }
+  }
+  const order = spec.small_multiples?.pane_order;
+  return order && order.length ? order.filter((v) => seen.has(v)) : encounterOrder;
+}
+
+/**
+ * `tbl-chart validate` warnings for a LONE `yAxisPolicy.min` or `max` that hides every data point of
+ * a pane (or of the chart, unfaceted): the pane's painted geometry (`paneDrawnValueExtent`, so a bar
+ * counts from its 0 base and a stack by its totals) lies entirely at or past the bound. The axis still
+ * ascends (see resolveHardDomain), but the pane draws an empty frame. Both bounds or neither: none.
+ */
+export function loneBoundWarnings(spec: ChartSpec, rows: TidyRow[]): string[] {
+  const { min, max } = spec.yAxisPolicy ?? {};
+  if ((min == null) === (max == null)) return [];
+  const hides = (ext: { min: number; max: number } | null): boolean =>
+    ext != null && (min != null ? ext.max <= min : ext.min >= (max as number));
+  const what = min != null ? `yAxisPolicy.min (${min}) is at or above` : `yAxisPolicy.max (${max}) is at or below`;
+  const cols = resolveColumns(spec, rows);
+  if (!spec.small_multiples || !cols.facet) {
+    return hides(paneDrawnValueExtent(spec, rows)) ? [`${what} every value the chart draws, so no data shows`] : [];
+  }
+  const facetField = cols.facet;
+  const binThresholds = figureBinThresholds(spec, rows, cols, spec.small_multiples.mode ?? "shared");
+  return figurePaneValues(spec, rows, facetField)
+    .filter((v) => hides(paneDrawnValueExtent(spec, rows.filter((r) => (r[facetField] as string) === v), binThresholds)))
+    .map((v) => `${what} every value pane "${v}" draws, so that pane shows no data`);
+}
+
 /**
  * Render a small-multiples figure. Requires `spec.small_multiples`.
  *
@@ -411,24 +476,9 @@ export function renderFigure(
   }
 
   // Histogram shared mode (default): bin every pane to ONE set of thresholds computed over ALL
-  // in-scope rows, so panes share a common continuous x-domain and their bars line up. Per-pane
-  // mode omits these (each pane bins its own rows). Pre-binned histograms carry their edges in the
-  // data, so there is nothing to compute. Threaded into every pane's renderPane via opts.binThresholds.
-  let binThresholds: number[] | undefined;
-  if (spec.chartType === "histogram" && mode !== "per-pane" && !isPreBinned(cols)) {
-    const isTemporal = spec.xAxisType === "temporal";
-    const values = rows
-      .map((r) => (isTemporal ? parseDate(r[cols.x] ?? "").getTime() : +(r[cols.x] ?? "")))
-      .filter((v) => Number.isFinite(v));
-    const bw = spec.histogram?.binWidth;
-    binThresholds = isTemporal
-      ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
-      : computeThresholds(values, {
-          bins: spec.histogram?.bins,
-          binWidth: typeof bw === "number" ? bw : undefined,
-          domain: spec.histogram?.domain,
-        });
-  }
+  // in-scope rows, so panes share a common continuous x-domain and their bars line up. Threaded into
+  // every pane's renderPane via opts.binThresholds.
+  const binThresholds = figureBinThresholds(spec, rows, cols, mode);
 
   // Horizontal bars: the category axis runs down the left gutter (shared across panes). Compute the
   // shared category set, gutter, section-spacer count and tallest wrapped label ONCE here, so the
@@ -521,23 +571,8 @@ export function renderFigure(
   }
   const effHeight = opts.height ?? autoHeight;
 
-  // 1. Partition + order panes. Distinct facet values in data-encounter order, then reorder +
-  //    filter by pane_order when set (pane_order names the included panes, in order). A blank facet
-  //    cell is not a pane. Both drops are mirrored by validateChartData's keyed-callout "drawn
-  //    nowhere" rules (src/spec/validate.ts) — change both.
-  const encounterOrder: string[] = [];
-  const seen = new Set<string>();
-  for (const r of rows) {
-    const v = r[facetField] as string;
-    if (v != null && v !== "" && !seen.has(v)) {
-      seen.add(v);
-      encounterOrder.push(v);
-    }
-  }
-  const paneValues =
-    sm.pane_order && sm.pane_order.length
-      ? sm.pane_order.filter((v) => seen.has(v))
-      : encounterOrder;
+  // 1. Partition + order panes (see figurePaneValues).
+  const paneValues = figurePaneValues(spec, rows, facetField);
 
   if (!paneValues.length) throw new Error("No panes: facet_field produced no values in scope.");
 

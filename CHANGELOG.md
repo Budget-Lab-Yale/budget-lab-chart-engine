@@ -137,9 +137,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A lone `yAxisPolicy.min` or `max` (the other unset) was ignored on `line`, `scatter`, `dotplot`
   and `histogram` charts, which auto-fitted the whole axis; CONFIG-SPEC calls them a hard floor and
   ceiling. It now pins its own end and the other end stays fitted, as bars, stacks, areas,
-  waterfalls and dumbbells already did. `autoWiden` now acts on a lone `max` there too, and
+  waterfalls and dumbbells already did. `autoWiden` now acts on a lone `max` on `line`, `scatter`
+  and `dotplot` too (it has no effect on any other chart type, histograms included), and
   `includeZero` extends only an unpinned end. Standalone, small multiples and the PNG. CONFIG-SPEC's
   `min`, `max` and `includeZero` rows now say so.
+- A lone `yAxisPolicy.min` or `max` past all of the data reversed the axis (a line with data 8–31
+  and `min: 50` drew 50 at the bottom and 30 at the top; bars under `max: -5` drew [0, -5]), though
+  CONFIG-SPEC reads a lone bound as ascending. The axis now ascends: the bound stays where it was
+  written and the open end is one tick step past it (`min: 50` there draws 50–60). It applies on
+  every value-axis chart type, and per pane in small multiples, where a bound inside the figure's
+  data can lie past one pane's. `tbl-chart validate` now warns, naming the bound, when it leaves a
+  chart or a pane showing no data. CONFIG-SPEC's `min` and `max` rows and its reversed-axis section
+  state the rule, and the `autoWiden.step` row now says it applies to `line`, `scatter` and `dotplot`
+  only.
+- An `area` chart whose stack is negative at every x drew no 0 baseline: the value axis stopped at
+  the stack's top (-5, say), though areas fill from 0. Its ceiling is now 0, as on bars and stacks.
 - Small multiples of a horizontal dumbbell now share one category-label column, sized to the
   longest label in any pane up to the 240px gutter cap (longer labels wrap), and every pane shows
   its own labels. In the default `shared` mode every
@@ -234,6 +246,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `min` and `max` or neither, and the one lone bound on the unpublished `pr67-spec-fixes` branch
   (`effective-tax-rates-top-groups`, `min: 0`) is a dumbbell, which already honoured it. No golden
   moves.
+- **A lone `yAxisPolicy` bound past all of the data now gives an ascending axis** instead of a
+  reversed one. **No published figure is affected**: the archive has no lone bound, and the one on
+  the unpublished `pr67-spec-fixes` branch (`effective-tax-rates-top-groups`, `min: 0`) is below all
+  of its data (8.0–30.6), so its axis is unchanged. No golden moves.
+- **An all-negative `area` chart's value axis now reaches 0.** **No published figure is affected**:
+  there is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree.
+  No golden moves.
 - **Faceted horizontal dumbbells share one category-label column** (live and PNG). **No published
   figure is affected**: the archive has no dumbbell, and the one on the unpublished
   `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not

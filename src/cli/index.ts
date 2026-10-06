@@ -29,6 +29,7 @@ import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 import { timelineWarnings, timelineExportChartWidth } from "../engine/marks/timeline";
 import { treemapWarnings, treemapExportChartWidth } from "../engine/marks/treemap";
+import { loneBoundWarnings } from "../engine/figure";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -198,7 +199,8 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
         // Includes the data warnings (>30 tiles, zero-value rows; negatives are validation errors),
         // at the width the export draws the treemap at.
         ? treemapWarnings(typedSpec, rows, treemapExportChartWidth(typedSpec, rows))
-        : [];
+        // A lone yAxisPolicy bound past all of a pane's data: the axis ascends, the frame is empty.
+        : loneBoundWarnings(typedSpec, rows);
   return {
     exitCode: 0,
     message: [

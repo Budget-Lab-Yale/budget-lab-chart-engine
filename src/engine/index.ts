@@ -22,6 +22,7 @@ import {
   computeDumbbellValueExtent,
   computeDrawnValueExtent,
   resolveHardDomain,
+  fittedExtent,
   domainBounds,
   makeTickFormatter,
 } from "./scales";
@@ -503,6 +504,22 @@ function renderHistogramPane(
   cols: ResolvedColumns,
   xType: NonNullable<ChartSpec["xAxisType"]>,
 ): PaneResult {
+  const binned = histogramPaneRows(spec, rows, cols, xType, opts.binThresholds);
+  if (!binned.length) throw new Error("No data.");
+
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned), spec.tooltip_x_format);
+  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
+}
+
+/** A histogram pane's binned `_x0/_x1/_y` rows: pre-binned rows read directly, raw rows binned at
+ *  `binThresholds` (the figure's shared thresholds) or their own. */
+function histogramPaneRows(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  xType: NonNullable<ChartSpec["xAxisType"]>,
+  binThresholds: number[] | undefined,
+): PreparedRow[] {
   const isTemporal = xType === "temporal";
   let binned: PreparedRow[];
 
@@ -545,7 +562,7 @@ function renderHistogramPane(
     const values = inputs.map((r) => r.x);
     const bw = spec.histogram?.binWidth;
     const thresholds =
-      opts.binThresholds ??
+      binThresholds ??
       (isTemporal
         ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
         : computeThresholds(values, {
@@ -558,11 +575,29 @@ function renderHistogramPane(
       normalize: spec.histogram?.normalize,
     }) as PreparedRow[];
   }
+  return binned;
+}
 
-  if (!binned.length) throw new Error("No data.");
-
-  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned), spec.tooltip_x_format);
-  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
+/** The value-axis extent of the geometry `rows` paint as one pane (`computeDrawnValueExtent` over
+ *  renderPane's own row prep, series scope and category order; a histogram binned at
+ *  `binThresholds`). Pure, no DOM, so `tbl-chart validate` can ask it. Null when nothing is drawn. */
+export function paneDrawnValueExtent(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  binThresholds?: number[],
+): { min: number; max: number } | null {
+  spec = withoutRepeatedOrderEntries(spec);
+  const xType = spec.xAxisType;
+  if (!xType) return null;
+  const cols = resolveColumns(spec, rows);
+  const data =
+    spec.chartType === "histogram"
+      ? histogramPaneRows(spec, rows, cols, xType, binThresholds)
+      : prepareRows(spec, rows, cols, makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
+  const { dataInScope } = scopeToSeries(spec, data);
+  // A waterfall's cumulative path depends on the category order.
+  sortByCategoryOrder(spec, dataInScope);
+  return computeDrawnValueExtent(dataInScope, spec, spec.chartType);
 }
 
 /** Series order. When series_order is set it acts as both filter and order. Mirrored by
@@ -767,17 +802,13 @@ function assemblePaneResult(
 
   // A LONE pinned bound (`min` or `max`, the other unset) pins only its own end. The branches that
   // have no extent of their own fill the open end with what computeYAxis fits from `yForAxis` when
-  // given no domain: the extent, widened to 0 under includeZero. Without it resolveHardDomain
-  // returned null and the lone bound was silently dropped. Undefined when the values hold nothing
-  // finite, which keeps the axis on computeYAxis' own fallback.
+  // given no domain (the same `fittedExtent`). Without it resolveHardDomain returned null and the
+  // lone bound was silently dropped. Undefined when the values hold nothing finite, which keeps the
+  // axis on computeYAxis' own fallback.
   const loneBound = (policy.min == null) !== (policy.max == null);
   const fittedOpenEnd = (zero: boolean): { auto?: { min: number; max: number } } => {
-    if (!loneBound) return {};
-    const nums = yForAxis.map((v) => +(v as number)).filter(Number.isFinite);
-    if (!nums.length) return {};
-    const lo = Math.min(...nums);
-    const hi = Math.max(...nums);
-    return { auto: zero ? { min: Math.min(0, lo), max: Math.max(0, hi) } : { min: lo, max: hi } };
+    const auto = loneBound ? fittedExtent(yForAxis, zero) : null;
+    return auto ? { auto } : {};
   };
 
   let hardDomain: [number, number] | null;
@@ -801,6 +832,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
+      tickCount,
       auto: computeBarYExtent(dataInScope, spec, chartType),
       fold: valueAxisMarkers(),
     });
@@ -815,6 +847,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
+      tickCount,
       auto: includeZero ? { min: Math.min(0, fitted.min), max: Math.max(0, fitted.max) } : fitted,
       fold: valueAxisMarkers(),
     });
@@ -823,7 +856,7 @@ function assemblePaneResult(
     // already carries. Zero baseline by default (bars grow from 0); a pinned min/max sets its own
     // end, and a lone one leaves the other auto-fitted from zero.
     includeZero = true;
-    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max, ...fittedOpenEnd(true) });
+    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max, tickCount, ...fittedOpenEnd(true) });
   } else if (chartType === "waterfall") {
     // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
     // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
@@ -832,6 +865,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
+      tickCount,
       auto: computeWaterfallYExtent(dataInScope),
       fold: ann.yAxis.map((m) => m.y).filter(Number.isFinite),
     });
@@ -862,7 +896,10 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      auto: { min: Math.min(0, minVal), max: stackMax },
+      tickCount,
+      // Areas fill from 0, so the baseline is on the axis whatever the sign of the stack: an
+      // all-negative area's ceiling is 0 (Ruling 70), as a bar's or a stack's is.
+      auto: { min: Math.min(0, minVal), max: Math.max(0, stackMax) },
       fold: markerYs,
     });
   } else {
@@ -886,7 +923,7 @@ function assemblePaneResult(
         }
       }
     }
-    hardDomain = resolveHardDomain({ min: policy.min, max: yMax, ...fittedOpenEnd(includeZero) });
+    hardDomain = resolveHardDomain({ min: policy.min, max: yMax, tickCount, ...fittedOpenEnd(includeZero) });
   }
 
   // Shared-mode small multiples: opts.yDomain is the ONE domain the orchestrator computed over
