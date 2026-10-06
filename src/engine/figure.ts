@@ -16,7 +16,7 @@ import { ownValue } from "../spec/own-key";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems } from "./index";
+import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
@@ -547,24 +547,17 @@ export function renderFigure(
   const legendSeries = figureSeries.filter((s) => drawnSeries.has(s));
   const drawnKeyRows = (rows: LegendItem[]): LegendItem[] => rows.filter((r) => drawnSeries.has(r.series));
 
-  // A point chart's SEPARATE shape channel (columns.shape not the series) gets the treatment
-  // `figureSeries` gives colours: ONE shape list, resolved over every pane's rows by renderPane's
-  // rule (shape_order is filter + order, else encounter order), which every pane's symbols and the
-  // shape legend index. A pane numbering its own shapes drew a shape another pane also has with a
-  // different marker, and the legend (pane 0's) had no row for a shape pane 0 lacks. Rows of a
-  // series series_order leaves out are drawn in no pane, so they do not count; rows of a pane
-  // pane_order leaves out do, so every drawn shape keeps its position (as a colour does).
-  const figureShapes = ((): string[] | undefined => {
-    if (!cols.shape || cols.shape === cols.series) return undefined;
-    const seen = new Set<string>();
-    for (const r of rows) {
-      const series = cols.series ? (r[cols.series] ?? "") : SINGLE_SERIES_KEY;
-      if (listedSeries && !listedSeries.has(series)) continue;
-      const shape = r[cols.shape] ?? "";
-      if (shape !== "") seen.add(shape);
-    }
-    return spec.shape_order?.length ? spec.shape_order.filter((s) => seen.has(s)) : [...seen];
-  })();
+  // A point chart's SEPARATE shape channel (columns.shape not the series): ONE shape list, which
+  // every pane's symbols and the shape legend index. A pane numbering its own shapes drew a shape
+  // another pane also has with a different marker, and the legend (pane 0's) had no row for a shape
+  // pane 0 lacks. The list is renderPane's own shape rule run over the rows of every DRAWN pane
+  // (index.ts shapeDomainOver), so a figure whose panes already agreed resolves the list each pane
+  // did and renders unchanged. Unlike a series' colour position, a shape found only in a pane
+  // pane_order leaves out takes no position: the panes never counted it, and neither did the legend.
+  const figureShapes =
+    cols.shape && cols.shape !== cols.series && (spec.chartType === "scatter" || spec.chartType === "dotplot")
+      ? shapeDomainOver(spec, rows.filter((r) => drawnPanes.has(r[facetField] as string)))
+      : undefined;
   // The figure's shape legend: every shape some pane draws (a pane's `shapeNames` is its symbol
   // domain, which is also its draw filter), in the figure's order and with the figure's symbols.
   const figureShapeLegend = (firstLayers: MarkLayers | undefined, paneShapes: Array<string[] | undefined>) => {

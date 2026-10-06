@@ -385,7 +385,22 @@ export function renderPane(
   }
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
+  const data = prepareRows(spec, rows, cols, adapter, facetInfo);
 
+  if (!data.length) throw new Error("No data.");
+
+  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, data);
+}
+
+/** renderPane's row prep: parse + validate rows into the engine's in-memory shape. Shared with
+ *  `shapeDomainOver`, which must read the rows exactly as a pane does. */
+function prepareRows(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  adapter: XAdapter,
+  facetInfo: FacetInfo | undefined,
+): PreparedRow[] {
   // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
   // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
   // byte-identical rows.
@@ -396,7 +411,7 @@ export function renderPane(
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
   // series column ⇒ a single implicit series.
-  const data: PreparedRow[] = rows
+  return rows
     .map((r) => {
       const xRaw = r[cols.x] ?? "";
       const valRaw = r[cols.value];
@@ -458,10 +473,6 @@ export function renderPane(
     .filter((r) => adapter.validate(r as unknown as Record<string, unknown>))
     // Drop rows outside the in-scope pane set (consistent with pane_order filtering).
     .filter((r) => !facetInfo || r._facet != null);
-
-  if (!data.length) throw new Error("No data.");
-
-  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, data);
 }
 
 /** [min(_x0), max(_x1)] over binned rows — the continuous bin-edge span the histogram x-scale
@@ -552,6 +563,60 @@ function renderHistogramPane(
   return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
 }
 
+/** Series order. When series_order is set it acts as both filter and order. Mirrored by
+ *  validateChartData's keyed-callout "drawn nowhere" rules (src/spec/validate.ts) — change both. */
+function scopeToSeries(spec: ChartSpec, data: PreparedRow[]): { seriesNames: string[]; dataInScope: PreparedRow[] } {
+  const seriesNames =
+    spec.series_order && spec.series_order.length
+      ? spec.series_order.filter((s) => data.some((r) => r.series === s))
+      : uniqueSeries(data);
+  const seriesSet = new Set(seriesNames);
+  return { seriesNames, dataInScope: data.filter((r) => seriesSet.has(r.series)) };
+}
+
+/** Categorical x render order, IN PLACE. Every downstream consumer (the band scale via
+ *  adapter.buildXOpts, the mark builders, the x-label collision check) reads the category order from
+ *  dataInScope's row order, so a single stable sort fixes the order everywhere. Listed categories
+ *  first in x_order; unlisted ones keep their encounter order after (order-only — unlike
+ *  series_order, x_order does NOT filter). Stable sort preserves within-category row order. No-op
+ *  off the categorical axis. */
+function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[]): void {
+  const catOrder = categoryOrderFor(spec);
+  if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
+    const rank = new Map(catOrder.map((c, i) => [c, i] as const));
+    const last = catOrder.length;
+    dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
+  }
+}
+
+/** Point charts: the shape domain. Distinct shape values in spec.shape_order (filter + order; a
+ *  listed blank value counts) else data-encounter order over the (category-sorted) rows, blanks
+ *  left out. This domain is an inclusion filter, mirrored by validateChartData's keyed-callout
+ *  "drawn nowhere" rules (src/spec/validate.ts) — change both. */
+function resolveShapeNames(spec: ChartSpec, dataInScope: readonly PreparedRow[]): string[] {
+  return spec.shape_order && spec.shape_order.length
+    ? spec.shape_order.filter((s) => dataInScope.some((r) => r._shape === s))
+    : Array.from(new Set(dataInScope.map((r) => r._shape).filter((s): s is string => s != null && s !== "")));
+}
+
+/** The shape domain a pane resolves when it draws `rows`: renderPane's own row prep, series scope,
+ *  category order and shape rule, run over these rows. Small multiples call it over every DRAWN
+ *  pane's rows for the figure's one shape list (RenderOptions.paletteShapes). Being the pane rule
+ *  itself is what leaves an already-consistent figure unchanged: each pane's rows, in the order the
+ *  pane reads them, are a subsequence of these, so where every pane's list is a prefix of the
+ *  longest (the panes agreed with each other and with that list as legend) this returns it. A rule
+ *  of the figure's own (dropping a listed blank value, reading rows before x_order sorts them,
+ *  counting rows no pane draws) returned another list and moved those figures' markers. */
+export function shapeDomainOver(spec: ChartSpec, rows: TidyRow[]): string[] {
+  const xType = spec.xAxisType;
+  if (!xType) throw new Error("No xAxisType.");
+  const cols = resolveColumns(spec, rows);
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
+  const { dataInScope } = scopeToSeries(spec, prepareRows(spec, rows, cols, adapter, undefined));
+  sortByCategoryOrder(spec, dataInScope);
+  return resolveShapeNames(spec, dataInScope);
+}
+
 /** Shared pane-assembly tail: series order/colors → annotations → y-axis → x-opts → markBuilder →
  *  assemblePlot → PaneResult. Consumed by BOTH the standard parse path (line/bar/…, which passes a
  *  data-fitted adapter) and the histogram path (which passes binned `_x0/_x1/_y` rows + a
@@ -565,14 +630,7 @@ function assemblePaneResult(
   cols: ResolvedColumns,
   data: PreparedRow[],
 ): PaneResult {
-  // Series order + colors. When series_order is set it acts as both filter and order. Mirrored by
-  // validateChartData's keyed-callout "drawn nowhere" rules (src/spec/validate.ts) — change both.
-  const seriesNames =
-    spec.series_order && spec.series_order.length
-      ? spec.series_order.filter((s) => data.some((r) => r.series === s))
-      : uniqueSeries(data);
-  const seriesSet = new Set(seriesNames);
-  const dataInScope = data.filter((r) => seriesSet.has(r.series));
+  const { seriesNames, dataInScope } = scopeToSeries(spec, data);
   const colors = buildColorMap(seriesNames, spec.series_colors, opts.paletteSeries);
   // Single-series charts driven by a colored inline title selector (e.g. a by-industry picker)
   // adopt the selector's color, so the line matches the selector's tinted label. Multi-series
@@ -581,18 +639,7 @@ function assemblePaneResult(
     colors.set(seriesNames[0]!, opts.accentColor);
   }
 
-  // Categorical x render order. Every downstream consumer (the band scale via adapter.buildXOpts,
-  // the mark builders, the x-label collision check) reads the category order from dataInScope's
-  // row order, so a single stable sort here fixes the order everywhere. Listed categories first in
-  // x_order; unlisted ones keep their encounter order after (order-only — unlike series_order,
-  // x_order does NOT filter). Stable sort preserves within-category row order. No-op off the
-  // categorical axis.
-  const catOrder = categoryOrderFor(spec);
-  if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
-    const rank = new Map(catOrder.map((c, i) => [c, i] as const));
-    const last = catOrder.length;
-    dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
-  }
+  sortByCategoryOrder(spec, dataInScope);
 
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
@@ -914,19 +961,11 @@ function assemblePaneResult(
   const plotWidth = effWidth - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT;
   const plotHeight = effHeight - TBL_MARGIN_TOP - xOpts.marginBottom;
 
-  // Point charts: the shape-encoding channel. Distinct shape values in spec.shape_order (filter +
-  // order) else data-encounter order; `shapeIsSeries` flags the redundant case (shape column ==
-  // series column) so the symbol scale + legend collapse to a single combined group. This domain is
-  // an inclusion filter, mirrored by validateChartData's keyed-callout "drawn nowhere" rules
-  // (src/spec/validate.ts) — change both.
+  // Point charts: the shape-encoding channel (resolveShapeNames); `shapeIsSeries` flags the
+  // redundant case (shape column == series column) so the symbol scale + legend collapse to a
+  // single combined group.
   const hasShape = cols.shape != null;
-  const shapeNames = hasShape
-    ? spec.shape_order && spec.shape_order.length
-      ? spec.shape_order.filter((s) => dataInScope.some((r) => r._shape === s))
-      : Array.from(
-          new Set(dataInScope.map((r) => r._shape).filter((s): s is string => s != null && s !== "")),
-        )
-    : undefined;
+  const shapeNames = hasShape ? resolveShapeNames(spec, dataInScope) : undefined;
   const shapeIsSeries = hasShape && cols.shape === cols.series;
 
   // Truncated value axis (a hard yAxisPolicy.min/max, or a shared-mode figure domain, narrower than

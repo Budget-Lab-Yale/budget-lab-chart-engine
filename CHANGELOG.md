@@ -112,8 +112,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   shape legend lists every shape a pane draws. Each pane numbered symbols by its own shapes, even
   with `shape_order`, so a pane missing a shape drew the next one with another shape's marker, and
   the legend (the first pane's) had no row for a shape the first pane lacked. The figure now
-  resolves one shape list (`shape_order`, else first appearance across the panes); a shape found
-  only in a pane `pane_order` leaves out keeps its position. Live and in the PNG.
+  resolves one shape list by the rule each pane applies to its own rows (`shape_order`, a listed
+  blank value included, else first appearance with categories read in `x_order`), run over the
+  rows of every drawn pane; a shape found only in a pane `pane_order` leaves out takes no position.
+  A figure whose panes already agreed with each other and with the shape legend renders unchanged.
+  Live and in the PNG.
 - A small-multiples dot plot's coordinated hover dot now draws the marker of the point it sits on.
   It took a marker per series, so with a separate `columns.shape` it could draw a circle over a
   square, and with no shape column it drew series symbols over circles. A point `shape_order`
