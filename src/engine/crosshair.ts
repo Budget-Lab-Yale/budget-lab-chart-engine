@@ -3301,6 +3301,11 @@ export interface CategoricalLineOptions {
   onResolve?: (category: string | null) => void;
   /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
   symbols?: Map<string, string>;
+  /** Dot plots: category → series → the symbol that series' point at that category is DRAWN with.
+   *  When set it replaces `symbols` (a point's shape can change between categories within one
+   *  series), and a series with no entry at the category, a point the chart never drew, gets no
+   *  dot. */
+  pointSymbols?: Map<string, Map<string, string>>;
   /** Dot plots: shade the hovered category's full band (like a bar-chart hover) instead of
    *  drawing a dashed vertical guide line. The band extents are derived from the x-axis label
    *  centers (midpoints to neighbors). */
@@ -3535,6 +3540,10 @@ export function attachSecondaryCategoricalLineCursor(
       : [...vals.keys()];
   };
 
+  // The hover dot's symbol for `series` at `cat`; null = that point was never drawn, so no dot.
+  const dotSymbol = (cat: string, series: string): string | undefined | null =>
+    opts.pointSymbols ? (opts.pointSymbols.get(cat)?.get(series) ?? null) : opts.symbols?.get(series);
+
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
@@ -3584,7 +3593,10 @@ export function attachSecondaryCategoricalLineCursor(
         const weight = active ? 700 : 600;
         const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
         const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
-        if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
+        if (!opts.markerless) for (const p of pts) {
+          const sym = dotSymbol(category, p.s);
+          if (sym !== null) addCoordDot(g, doc, p.x, cy, colorFor(p.s), sym);
+        }
         // showPills: false (chrome.valuePills) suppresses only these value pills — the row echo
         // above and the per-series dots just above are untouched, matching
         // SecondaryBandOptions'/HistogramHoverOptions' identical split.
@@ -3617,7 +3629,10 @@ export function attachSecondaryCategoricalLineCursor(
       const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, y: toPy(vals.get(s)!), dx: opts.dodge?.get(s) ?? 0 }));
       // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
       // Skipped for the dumbbell (markerless): its own dots are visible; a white ring would recolor them.
-      if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
+      if (!opts.markerless) for (const p of pts) {
+        const sym = dotSymbol(category, p.s);
+        if (sym !== null) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), sym);
+      }
       // showPills: false (chrome.valuePills) suppresses only the value pills in BOTH layouts
       // below — the guide/band echo, the per-series dots just above, and the active pane's
       // category highlight are untouched, matching SecondaryBandOptions'/

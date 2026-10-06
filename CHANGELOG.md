@@ -107,6 +107,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   with another series' marker. The coordinated cursor's hover dot follows, and so does the hover
   card's key for a series the legend has no row for (`series_legend: false`, `legend: false`, or a
   figure drawing one series). Live and in the PNG.
+- A small-multiples `scatter` or `dotplot` whose `columns.shape` is its own column (not the series)
+  now draws each shape with the marker the figure's shape legend keys it with, in every pane, and the
+  shape legend lists every shape a pane draws. Each pane numbered symbols by its own shapes, even
+  with `shape_order`, so a pane missing a shape drew the next one with another shape's marker, and
+  the legend (the first pane's) had no row for a shape the first pane lacked. The figure now
+  resolves one shape list (`shape_order`, else first appearance across the panes); a shape found
+  only in a pane `pane_order` leaves out keeps its position. Live and in the PNG.
+- A small-multiples dot plot's coordinated hover dot now draws the marker of the point it sits on.
+  It took a marker per series, so with a separate `columns.shape` it could draw a circle over a
+  square, and with no shape column it drew series symbols over circles. A point `shape_order`
+  leaves out gets no hover dot. Hover only.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -157,7 +168,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   small-multiples specs, the 11 that draw per-series markers (10 `line` with `points: true`, one
   `dotplot` with shape = series) give every series the same position in every pane as in the
   figure; all 47 archived specs render byte-identical panes, legends and PNG export before and
-  after. No golden moves.
+  after. No golden moves. The same holds for the follow-up fixes (hover-card keys, a separate shape
+  channel, the dot plot's hover dot): no archived faceted spec has a separate shape channel (the two
+  that do, ai-fiscal's `revenue-vs-factor-income` and `revenue-vs-pretax-income`, are standalone),
+  and `inequality-gini`'s hover dots are unchanged.
 - **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
   under Changed). Specs that pass `tbl-chart validate` are unaffected.
 

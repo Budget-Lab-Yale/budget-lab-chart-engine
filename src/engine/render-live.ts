@@ -2141,7 +2141,22 @@ function wireFigureSvg(
   // from axis-label centers (points have no rects). The marker dots take each series' symbol.
   if (ctx.spec.chartType === "dotplot") {
     const dotUseCoord = ctx.onResolve != null;
-    const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForSeries(s, i, ctx.symbolSeries)] as const));
+    // Each hover dot draws the marker of the point it sits on: that point's own shape through this
+    // pane's symbol scale. A series-keyed map was wrong whenever shape is its own column (and a
+    // shape can change between categories within one series). No shape channel: every point is a
+    // circle, and so is every dot.
+    let pointSymbols: Map<string, Map<string, string>> | undefined;
+    if (ctx.symbolScale) {
+      const scale = ctx.symbolScale;
+      const symbolOf = new Map(scale.domain.map((d, i) => [d, scale.range[i]!] as const));
+      pointSymbols = new Map();
+      for (const r of ctx.pointOrder ?? []) {
+        const sym = symbolOf.get(r._shape ?? "");
+        if (sym == null || !r._xc) continue;
+        if (!pointSymbols.has(r._xc)) pointSymbols.set(r._xc, new Map());
+        pointSymbols.get(r._xc)!.set(r.series, sym);
+      }
+    }
     // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
     // offsets so they land over the actual points (panes dodge at the pane gap).
     const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
@@ -2180,7 +2195,7 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        symbols,
+        ...(pointSymbols ? { pointSymbols } : {}),
         bandHighlight: true,
         centersFromMarks: true,
         dodge,

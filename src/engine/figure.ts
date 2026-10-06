@@ -547,6 +547,34 @@ export function renderFigure(
   const legendSeries = figureSeries.filter((s) => drawnSeries.has(s));
   const drawnKeyRows = (rows: LegendItem[]): LegendItem[] => rows.filter((r) => drawnSeries.has(r.series));
 
+  // A point chart's SEPARATE shape channel (columns.shape not the series) gets the treatment
+  // `figureSeries` gives colours: ONE shape list, resolved over every pane's rows by renderPane's
+  // rule (shape_order is filter + order, else encounter order), which every pane's symbols and the
+  // shape legend index. A pane numbering its own shapes drew a shape another pane also has with a
+  // different marker, and the legend (pane 0's) had no row for a shape pane 0 lacks. Rows of a
+  // series series_order leaves out are drawn in no pane, so they do not count; rows of a pane
+  // pane_order leaves out do, so every drawn shape keeps its position (as a colour does).
+  const figureShapes = ((): string[] | undefined => {
+    if (!cols.shape || cols.shape === cols.series) return undefined;
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const series = cols.series ? (r[cols.series] ?? "") : SINGLE_SERIES_KEY;
+      if (listedSeries && !listedSeries.has(series)) continue;
+      const shape = r[cols.shape] ?? "";
+      if (shape !== "") seen.add(shape);
+    }
+    return spec.shape_order?.length ? spec.shape_order.filter((s) => seen.has(s)) : [...seen];
+  })();
+  // The figure's shape legend: every shape some pane draws (a pane's `shapeNames` is its symbol
+  // domain, which is also its draw filter), in the figure's order and with the figure's symbols.
+  const figureShapeLegend = (firstLayers: MarkLayers | undefined, paneShapes: Array<string[] | undefined>) => {
+    const layers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
+    if (!figureShapes || !layers.shapeNames || layers.shapeIsSeries) return buildShapeLegendItems(spec, layers);
+    const drawn = new Set(paneShapes.flatMap((s) => s ?? []));
+    return buildShapeLegendItems(spec, { ...layers, shapeNames: figureShapes.filter((s) => drawn.has(s)) }, figureShapes);
+  };
+  const paneShapes: Array<string[] | undefined> = [];
+
   // Per-pane heights: every facet sized by the SAME shared per-slot height (effSlotPx/chromeExtra,
   // computed above from the BUSIEST facet with the floor applied only there), scaled by ITS OWN
   // slot count — so bar thickness is uniform across ragged facets (the horizontal analog of
@@ -702,6 +730,7 @@ export function renderFigure(
           pane: true,
           paneFacetValue: value,
           paletteSeries: figureSeries,
+          ...(figureShapes ? { paletteShapes: figureShapes } : {}),
           chartSeriesCount,
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
@@ -726,6 +755,7 @@ export function renderFigure(
       }
       panePainted.push(p.seriesHatches);
       paneFills.push(p.seriesPainted);
+      paneShapes.push(p.layers.shapeNames);
       // Escape hatch, per pane: a figure has no single SVG (each pane is its own), so this fires
       // once per pane, LAST — after renderPane's own assembly — with ctx.facet set to the SAME
       // FigurePane.value the tooltip hook (Task 5) already uses, not a second derivation of it.
@@ -777,7 +807,7 @@ export function renderFigure(
       ...(perPaneWidths ? { columnWidths: perPaneWidths } : {}),
       ...(perPaneHeights ? { paneHeights: perPaneHeights } : {}),
       legendItems,
-      shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
+      shapeLegendItems: figureShapeLegend(firstLayers, paneShapes),
       colorLegendTitle: spec.color_legend_title,
       shapeLegendTitle: spec.shape_legend_title,
       seriesLabels,
@@ -876,6 +906,7 @@ export function renderFigure(
         pane: true,
         paneFacetValue: value,
         paletteSeries: figureSeries,
+        ...(figureShapes ? { paletteShapes: figureShapes } : {}),
         chartSeriesCount,
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
@@ -899,6 +930,7 @@ export function renderFigure(
       firstFormatValue = p.formatValue;
     }
     panePainted.push(p.seriesHatches);
+    paneShapes.push(p.layers.shapeNames);
     // Pushed in BOTH pane loops or the figure legend lies. `paneFills` was declared here and pushed
     // only in the per-pane branch, so shared mode — the DEFAULT — handed firstPainted() an empty map
     // and the legend fell through to the palette: panes painted a `highlightSeries`-dimmed series
@@ -954,7 +986,7 @@ export function renderFigure(
     columnWidths: colWidths,
     ...(perPaneHeights ? { paneHeights: perPaneHeights } : {}),
     legendItems,
-    shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
+    shapeLegendItems: figureShapeLegend(firstLayers, paneShapes),
     colorLegendTitle: spec.color_legend_title,
     shapeLegendTitle: spec.shape_legend_title,
     seriesLabels,

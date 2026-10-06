@@ -34,7 +34,7 @@ import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex, markerSymbolForSeries } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
 import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
@@ -129,6 +129,11 @@ export interface RenderOptions {
    *  painted the second one blue while the legend said amber). Absent (single chart) → the pane's
    *  own list, unchanged. */
   paletteSeries?: string[];
+  /** Small multiples, point charts with a SEPARATE shape channel: the FIGURE's shape list, resolved
+   *  once over all panes' rows. A shape takes its marker symbol from its index here, as a series
+   *  takes its colour from `paletteSeries`; the pane's own shape list still decides what it draws.
+   *  Absent (single chart) → the pane's own list, unchanged. */
+  paletteShapes?: string[];
   /** Small multiples: how many DISTINCT series the figure draws (rows in its drawn panes, through
    *  series_order). A pane's own list can undercount it. Read by the stacked builder's net dot
    *  (spec/bar-stack.ts drawsNetDots). Absent (single chart) → the pane's own distinct count. */
@@ -961,6 +966,7 @@ function assemblePaneResult(
     ...(opts.chartSeriesCount != null ? { chartSeriesCount: opts.chartSeriesCount } : {}),
     // The figure's series list (set only by renderFigure): per-series marker symbols index it.
     ...(opts.paletteSeries ? { paletteSeries: opts.paletteSeries } : {}),
+    ...(opts.paletteShapes ? { paletteShapes: opts.paletteShapes } : {}),
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),
@@ -1300,13 +1306,16 @@ export function buildLegendItems(
 export function buildShapeLegendItems(
   spec: ChartSpec,
   layers: MarkLayers,
+  /** Small multiples: the figure's shape list the panes' symbols index (RenderOptions.paletteShapes).
+   *  Absent (a single chart) → the row's own index. */
+  symbolOrder?: readonly string[],
 ): ShapeLegendItem[] | null {
   if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
   return layers.shapeNames.map((shape, i) => ({
     shape,
     label: ownValue(spec.shape_labels, shape) ?? shape,
-    markerSymbol: markerSymbolForIndex(i),
+    markerSymbol: markerSymbolForSeries(shape, i, symbolOrder),
   }));
 }
 

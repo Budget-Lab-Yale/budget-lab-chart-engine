@@ -80,6 +80,10 @@ export interface MarkContext {
    *  symbols index it, as colours do, so every pane keys a series as the figure legend does. Absent
    *  (single chart) → markers index `seriesNames`. */
   paletteSeries?: string[];
+  /** Small multiples: the FIGURE's shape list (RenderOptions.paletteShapes). A separate shape
+   *  channel's symbols index it, so every pane keys a shape as the figure's shape legend does.
+   *  Absent (single chart) → symbols index `shapeNames`. */
+  paletteShapes?: string[];
   /** Inner plot width in px (outer width minus left+right margins). Approximate — bar
    *  builders use this for px-based label-suppression logic. */
   plotWidth?: number;
