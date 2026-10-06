@@ -331,7 +331,7 @@ export interface Overlay {
   /** `method` and `column`: one line per colour series (`series`, default) or one over every in-scope
    *  point (`none`). Rejected on `fun` and `slope`+`intercept`, which do not read the data. */
   by?: "series" | "none";
-  /** `method` only. Confidence level for a pointwise ribbon around the fit, e.g. 0.95. Omitted ⇒ no
+  /** `method` only. Confidence level for a pointwise ribbon around the fit, in (0, 0.999], e.g. 0.95. Omitted ⇒ no
    *  ribbon. Needs residual degrees of freedom (n > degree + 1); a fit without them draws the line
    *  and no band. */
   ci?: number;

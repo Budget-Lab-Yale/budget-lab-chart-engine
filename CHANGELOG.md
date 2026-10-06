@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
+### Changed
+- `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error naming `ci`.
+  Near 1 the t-quantile is numerically meaningless. No published figure uses one.
+
 ### Added
 - `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
   (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tile

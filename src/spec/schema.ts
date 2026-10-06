@@ -179,7 +179,8 @@ const OVERLAY = {
     intercept: { type: "number" },
     column: { type: "string", minLength: 1 },
     by: { type: "string", enum: ["series", "none"] },
-    ci: { type: "number", exclusiveMinimum: 0, exclusiveMaximum: 1 },
+    // Capped at 0.999: within an ulp of 1 the t-quantile is finite but meaningless (~1e16).
+    ci: { type: "number", exclusiveMinimum: 0, maximum: 0.999 },
     domain: {
       anyOf: [
         { type: "string", enum: ["axis"] },
