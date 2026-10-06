@@ -16,8 +16,9 @@
 //      : getSharedTooltip(...)`, then `if (emitOnly) return;`). The secondary cursor draws the
 //      in-place guide/dot/pill instead. Deliberate.
 //   2. `resolveHoverMode` returns "pills" whenever `netMode == null`, i.e. for every plain/grouped
-//      BAR and every WATERFALL, in any configuration — so those two never reach a card at all, even
-//      standalone, and `barStack.hover` cannot talk them into one.
+//      BAR and every WATERFALL — so standalone and in a coordinated pane those two never reach a
+//      card, and `barStack.hover` cannot talk them into one. A pane that is NOT coordinated
+//      (`coordinated_cursor: false`, or a lone waterfall pane) does hover with the band card.
 //
 // `hooks.tooltip` is wired at the two `buildBandTooltipHtml` call sites (attachBandCrosshair,
 // attachCategoricalLineCrosshair) and fires unconditionally whenever either builds a card — so the
@@ -95,10 +96,10 @@ function hoverPoint(svg: SVGSVGElement): void {
 }
 
 // ---------------------------------------------------------------------------
-// No card in ANY configuration: plain/grouped bar and waterfall.
+// No card standalone or in a coordinated pane: plain/grouped bar and waterfall.
 // ---------------------------------------------------------------------------
 
-describe("no floating card exists in any configuration (hoverMode is always \"pills\")", () => {
+describe("bar and waterfall: no card standalone or in a coordinated pane (hoverMode is \"pills\")", () => {
   it("plain bar, standalone: no card, hooks.tooltip never fires", () => {
     const m = mount(spec({ chartType: "bar", xAxisType: "categorical" }), catRows([["S", 6, 4]]));
     hoverFirstMark(m.svgs[0]!, BAR);
@@ -140,6 +141,51 @@ describe("no floating card exists in any configuration (hoverMode is always \"pi
     expect(coordShown(m.svgs[0]!)).toBe(true);
     expect(cardShown()).toBe(false);
     expect(m.calls()).toBe(0);
+  });
+
+  // The pills rule above holds standalone and in a COORDINATED pane. A pane that is not coordinated
+  // hovers with the band card instead, and the hook fires there: a bar pane under the
+  // `coordinated_cursor: false` dial, and a waterfall whose facet resolves to one pane at defaults
+  // (render-live keeps only a lone bar/stacked pane coordinated).
+  it("plain bar, 2-pane, DIAL coordinated_cursor: false: a card, and hooks.tooltip fires", () => {
+    const m = mount(
+      spec({
+        chartType: "bar", xAxisType: "categorical", data: "d.csv", ...facetCols(),
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      twoPane([["S", 10, 20]]),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, BAR);
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  it("waterfall, 2-pane, DIAL coordinated_cursor: false: a card, and hooks.tooltip fires", () => {
+    const m = mount(
+      spec({
+        chartType: "waterfall", xAxisType: "categorical", data: "d.csv", ...facetCols(),
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      twoPane([["S", 10, 5]]),
+      true,
+    );
+    expect(m.svgs.length).toBe(2);
+    hoverFirstMark(m.svgs[0]!, BAR);
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  it("waterfall, faceted but resolving to one pane: a card at defaults, and hooks.tooltip fires", () => {
+    const m = mount(
+      spec({ chartType: "waterfall", xAxisType: "categorical", data: "d.csv", ...facetCols(), ...sm }),
+      catRows([["S", 10, 5]], "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, BAR);
+    expect(cardShown()).toBe(true);
+    expect(m.calls()).toBeGreaterThan(0);
   });
 
   it("bar: even an explicit barStack.hover \"tooltip\" does NOT produce one (netMode == null)", () => {
@@ -216,7 +262,7 @@ describe("stacked bar — a card only where the net resolves to a dot", () => {
 // Categorical-x line and dot plot: a card standalone, none in a coordinated pane.
 // ---------------------------------------------------------------------------
 
-describe("categorical-x line — card standalone, none in a default pane", () => {
+describe("categorical-x line — card standalone, none in a default multi-pane figure", () => {
   const rows = catRows([["A", 10, 20], ["B", 12, 22]]);
 
   it("standalone: card at defaults, hooks.tooltip fires", () => {
@@ -237,9 +283,21 @@ describe("categorical-x line — card standalone, none in a default pane", () =>
     expect(cardShown()).toBe(false);
     expect(m.calls()).toBe(0);
   });
+  it("faceted but resolving to one pane: card at defaults, hooks.tooltip fires", () => {
+    const m = mount(
+      spec({ chartType: "line", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
+      catRows([["A", 10, 20], ["B", 12, 22]], "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+    expect(m.calls()).toBeGreaterThan(0);
+  });
 });
 
-describe("dot plot — card standalone, none in a default pane", () => {
+describe("dot plot — card standalone, none in a default multi-pane figure", () => {
   it("standalone: card at defaults, hooks.tooltip fires", () => {
     const m = mount(
       spec({ chartType: "dotplot", xAxisType: "categorical", series_order: ["A", "B"] }),
@@ -260,6 +318,20 @@ describe("dot plot — card standalone, none in a default pane", () => {
     expect(coordShown(m.svgs[0]!)).toBe(true);
     expect(cardShown()).toBe(false);
     expect(m.calls()).toBe(0);
+  });
+  // A faceted figure resolving to ONE pane has nothing to coordinate (render-live `coordinated`
+  // needs 2+ panes unless bar/stacked), so it keeps the standalone card and its hook.
+  it("faceted but resolving to one pane: card at defaults, hooks.tooltip fires", () => {
+    const m = mount(
+      spec({ chartType: "dotplot", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
+      catRows([["A", 10, 20], ["B", 12, 22]], "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, DOT_MARK);
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+    expect(m.calls()).toBeGreaterThan(0);
   });
 });
 
@@ -288,6 +360,17 @@ describe("dumbbell — card standalone AND in a default pane", () => {
     hoverFirstMark(m.svgs[0]!, DOT_MARK);
     expect(cardShown()).toBe(true);
     expect(m.calls()).toBeGreaterThan(0);
+  });
+  it("faceted but resolving to one pane: card at defaults, no coordinated cursor", () => {
+    const m = mount(
+      spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
+      catRows([["A", 3, 4], ["B", 7, 9]], "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, DOT_MARK);
+    expect(cardShown()).toBe(true);
+    expect(m.svgs[0]!.querySelector("g.tbl-coord")).toBeNull();
   });
 });
 
@@ -547,6 +630,20 @@ describe("card builders outside hooks.tooltip's two call sites", () => {
     expect(m.calls()).toBe(0);
   });
 
+  // CONFIG-SPEC `small_multiples.coordinated_cursor` and the texture note: a faceted area whose
+  // facet resolves to ONE pane has nothing to coordinate, so it keeps the standalone card.
+  it("area, faceted but resolving to one pane: card at defaults, no coordinated cursor", () => {
+    const m = mount(
+      spec({ chartType: "area", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
+      TEMPORAL_ROWS.filter((r) => (r as unknown as { pane: string }).pane === "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown()).toBe(true);
+    expect(coordShown(m.svgs[0]!)).toBe(false);
+  });
+
   it("histogram, standalone: card at defaults but hooks.tooltip never fires", () => {
     const rows: TidyRow[] = [];
     for (let v = 0; v < 16; v++) rows.push({ amount: String(v) } as unknown as TidyRow);
@@ -575,6 +672,15 @@ describe("card builders outside hooks.tooltip's two call sites", () => {
     hoverPoint(m.svgs[0]!);
     expect(cardShown()).toBe(true);
     expect(m.calls()).toBe(0);
+  });
+
+  // CONFIG-SPEC `small_multiples.coordinated_cursor`: a scatter figure never coordinates — hovering
+  // one pane echoes nothing on any pane.
+  it("scatter, 2-pane: no coordinated cursor on either pane", () => {
+    const m = mount(scatterSpec(true), SCATTER_ROWS, true);
+    hoverPoint(m.svgs[0]!);
+    expect(cardShown()).toBe(true);
+    for (const s of m.svgs) expect(s.querySelector("g.tbl-coord")).toBeNull();
   });
 
   // A treemap has no small-multiples form (validation rejects `small_multiples`), so standalone only.

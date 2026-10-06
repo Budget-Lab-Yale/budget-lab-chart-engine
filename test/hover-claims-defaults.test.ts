@@ -158,6 +158,35 @@ describe("x_labels", () => {
     expect(document.body.textContent ?? "").not.toContain("Verbose label for A");
   });
 
+  // A bar or waterfall pane that is NOT coordinated hovers with the band card, and the label heads
+  // it: a plain bar under the `coordinated_cursor: false` dial, and a waterfall whose facet resolves
+  // to one pane at defaults (only bar/stacked stay coordinated alone).
+  it("plain bar, 2-pane with coordinated_cursor: false: the card carries the display label", () => {
+    const m = mountHover(
+      spec({
+        chartType: "bar", xAxisType: "categorical", data: "d.csv", ...facetCols, ...LABELS,
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      twoPane([["S", 10, 20]]),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("Verbose label for A");
+  });
+
+  it("waterfall, faceted but resolving to one pane: the card carries the display label", () => {
+    const m = mountHover(
+      spec({ chartType: "waterfall", xAxisType: "categorical", data: "d.csv", ...facetCols, ...sm, ...LABELS }),
+      catRows([["S", 10, 5]], "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("Verbose label for A");
+  });
+
   it("renders on a diverging stack, standalone AND 2-pane — the one band card drawn at defaults", () => {
     for (const faceted of [false, true]) {
       document.body.innerHTML = "";

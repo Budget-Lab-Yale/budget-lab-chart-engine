@@ -153,7 +153,7 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 |---|---|---|
 | `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. **Default `false`** (the axis fits its data range — anchoring at zero squishes a year axis to the right). |
 | `x_order` | array | Categorical x-axis only: render order for the x-axis categories. Listed categories come first in this order; any unlisted ones follow in data-encounter order. **Order-only** — unlike `series_order`, it does *not* filter. Ignored off a categorical x-axis. |
-| `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). **It heads every hover CARD, and only a card** — so check which surface your chart hovers with. Cards that carry it: `dumbbell`, `dotplot` and categorical-x `line` (standalone, and faceted wherever the card survives coordination — a dumbbell always does), and the *band* card, drawn at default settings on a **stacked** bar with a net dot (a stack with a negative value) or under an explicit `barStack.hover: "tooltip"`. Where a chart draws no card there is no header to put it in: plain/grouped `bar` and `waterfall` hover with value pills in every configuration, and a coordinated small-multiples pane replaces its card with the in-place cursor — except the two panes whose card IS the hover treatment: a `dumbbell`, and a **stacked** pane in tooltip mode, which keep their cards and coordinate a band echo only. That cursor's own category echo stays the **raw** category by design — it overlays the rendered axis tick, taking that tick's box, wrapping and rotation, and this field exists to read more verbosely than the tick. `test/hover-claims-defaults.test.ts` gates every case above at default settings. |
+| `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). **It heads every hover CARD, and only a card** — so check which surface your chart hovers with. Cards that carry it: `dumbbell`, `dotplot` and categorical-x `line` (standalone, and faceted wherever the card survives coordination — a dumbbell always does), and the *band* card, drawn at default settings on a **stacked** bar with a net dot (a stack with a negative value) or under an explicit `barStack.hover: "tooltip"`. Where a chart draws no card there is no header to put it in: plain/grouped `bar` and `waterfall` hover with value pills standalone and in a coordinated pane (a pane that is not coordinated — `coordinated_cursor: false`, or a waterfall figure that resolves to a single pane — hovers with the band card, which it heads), and a coordinated small-multiples pane replaces its card with the in-place cursor — except the two panes whose card IS the hover treatment: a `dumbbell`, and a **stacked** pane in tooltip mode, which keep their cards and coordinate a band echo only. That cursor's own category echo stays the **raw** category by design — it overlays the rendered axis tick, taking that tick's box, wrapping and rotation, and this field exists to read more verbosely than the tick. `test/hover-claims-defaults.test.ts` gates every case above at default settings. |
 | `yAxisPolicy.min` | number | Hard floor for the y-axis. |
 | `yAxisPolicy.max` | number | Hard ceiling for the y-axis. |
 | `yAxisPolicy.includeZero` | boolean | When `true` (and no hard min/max), always extend the y-domain to 0. |
@@ -1101,7 +1101,7 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.mode` | enum | `shared` (one y-scale, y-labels in the left column only — default) \| `per-pane` (each pane its own y-scale/units). |
 | `small_multiples.pane_order` | array | Pane render order + inclusion filter. |
 | `small_multiples.pane_titles` | object | `{ <facetValue>: "Display title" }`. Falls back to the raw facet value. |
-| `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. A figure that resolves to a single **line/area/point** pane has nothing to coordinate and behaves as if this were `false` — but a single **bar or stacked** pane stays coordinated on purpose (the bar-end value pill is that chart type's hover treatment whether or not there are sibling panes), so there `false` is *not* equivalent to the default: it brings back the floating card. On a **line/area** pane the coordinated cursor *replaces* that pane's floating tooltip card with the in-place cursor — guide, per-series dot, value pill — so a reader gets the values from the pills rather than a card, and `overlays[].tooltip` has no card to report into. |
+| `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. Three cases coordinate nothing with this field at its default, and each pane hovers with its own card instead: a **scatter** figure; a **histogram** with `small_multiples.mode: per-pane` (its panes bin independently, so there is no shared bin to echo); and a figure that resolves to a single pane of a type other than bar or stacked (**line, area, dotplot, dumbbell, histogram, waterfall**), which has nothing to coordinate and behaves as if this were `false` — but a single **bar or stacked** pane stays coordinated on purpose (the bar-end value pill is that chart type's hover treatment whether or not there are sibling panes), so there `false` is *not* equivalent to the default: it brings back the floating card. On a **line/area** pane the coordinated cursor *replaces* that pane's floating tooltip card with the in-place cursor — guide, per-series dot, value pill — so a reader gets the values from the pills rather than a card, and `overlays[].tooltip` has no card to report into. `test/hover-card-reach.test.ts` and `test/hover-claims-defaults.test.ts` gate each case. |
 | `small_multiples.pane_widths` | enum \| array | How a row's width splits among its columns (vertical bar facets; applied to every row). `equal` (default) — same data width per column. `equal-bar` — each column sized to its bar count so bars render at the same width (exact for a single row; multi-row uses the max bar count per column). An array like `[2, 1]` sets explicit per-column proportions (length must equal the column count). When set and `columns` is unset, the panes lay out in a single row. |
 
 **Faceted horizontal bars/stacks.** `orientation: horizontal` combines with `small_multiples` to
@@ -1219,19 +1219,20 @@ content has no card to replace. Where the hook fires, at defaults:
 | chart type | hook fires? | why not |
 |---|---|---|
 | `dumbbell` | **yes**, standalone and faceted | — |
-| `dotplot`, categorical-x `line` | **standalone only** | a multi-pane figure's coordinated cursor replaces each pane's card |
+| `dotplot`, categorical-x `line` | **standalone**, or a faceted figure that resolves to a single pane | a multi-pane figure's coordinated cursor replaces each pane's card |
 | `stacked` | **only where `barStack.netDisplay` resolves to a dot** — by default, a stack with a negative value, a single-series one included though it draws no dot — **or with an explicit `barStack.hover: "tooltip"`**; standalone and faceted alike | an all-positive stack hovers with per-segment value pills, not a card |
-| `bar` (plain or grouped), `waterfall` | **never, in any configuration** | `resolveHoverMode` returns `"pills"` whenever the chart is not a stack, ahead of reading `barStack.hover` at all — these two have no card to hook |
+| `bar` (plain or grouped), `waterfall` | **never at defaults**, except a faceted `waterfall` that resolves to a single pane, which is not coordinated and hovers with the band card; with `coordinated_cursor: false` every pane of either type does too | standalone and in a coordinated pane, `resolveHoverMode` returns `"pills"` whenever the chart is not a stack, ahead of reading `barStack.hover` at all — there these two have no card to hook |
 | temporal/numeric-x `line`, `area`, `histogram`, `scatter` | **never** | their cards are built by `attachCrosshair` / `attachHistogramHover` / `attachPointHover`, which do not call this hook |
 | `treemap` | **never** | its card is built by `attachTreemapHover`, which does not call this hook (a treemap has no small-multiples form, so it is gated standalone only) |
 
 `test/hover-card-reach.test.ts` gates every row of that table by mounting each chart type at
-default settings, standalone and two-pane, and asserting both whether a card appears and whether
-the hook fires. If you need to intercept hover content on a chart type marked "never", the hook is
-the wrong tool — there is no card there to intercept, and `hooks.tooltip` will not create one. On
-the categorical bar/stacked types, the `onHover` **event** does report the resolved category and
-values whether or not a card is drawn (it fires ahead of the same gate that suppresses the card);
-see the events table below for the chart types it covers.
+default settings, standalone and two-pane (plus the single-pane and `coordinated_cursor: false`
+cases a row names), and asserting both whether a card appears and whether the hook fires. If you
+need to intercept hover content on a chart type marked "never", the hook is the wrong tool — there
+is no card there to intercept, and `hooks.tooltip` will not create one. On the categorical
+bar/stacked types, the `onHover` **event** does report the resolved category and values whether or
+not a card is drawn (it fires ahead of the same gate that suppresses the card); see the events
+table below for the chart types it covers.
 
 **`legendKey`'s `ctx.medium` is `"html"` on the live legend and `"svg"` in the export — a returned
 string must be written in THAT vocabulary, not just `ctx.rendered` echoed back unconditionally.**
@@ -1517,10 +1518,13 @@ Notes:
 - The texture reaches the chart, the legend key, the **PNG export** — the export re-renders from the
   spec, so a texture applied by a consumer's stylesheet would not — and the hover tooltip **on the
   chart types that draw one**. That last clause is narrow: textures are restricted to the filled
-  types (`bar`, `stacked`, `area`, `histogram`, `waterfall`), and of those only standalone `area`,
-  standalone `histogram` and a stacked chart whose `netDisplay` resolves to a dot hover with a card at default settings.
-  `bar` and `waterfall` never do, and a multi-pane faceted `area` or `histogram` does not either — its
-  coordinated cursor replaces the card. There the texture reaches the marks and the legend, and the
+  types (`bar`, `stacked`, `area`, `histogram`, `waterfall`), and of those only these hover with a
+  card at default settings: a standalone `area` or `histogram`; a faceted `area`, `histogram` or
+  `waterfall` whose facet resolves to a single pane; and a stacked chart whose `netDisplay` resolves
+  to a dot. (A `per-pane` histogram and `coordinated_cursor: false` add more; see
+  `small_multiples.coordinated_cursor`.) `bar` never does, and neither does a standalone `waterfall`
+  or a multi-pane faceted `area`, `histogram` or `waterfall` — its coordinated cursor replaces the
+  card. There the texture reaches the marks and the legend, and the
   hover shows in-place value pills with no key to texture. (At default settings such a stack keeps
   its card in a pane too — there the coordinated cursor is a band echo only — so the pane's card keys
   the texture just as the standalone one does.)
@@ -1572,9 +1576,9 @@ Notes:
   actually painted (the first pane that paints the series, so a series the first pane lacks is still
   keyed) rather than re-deriving one. A series is assigned its color once for the whole figure, so
   every pane paints it the same ground and there is only one ground to take. Where a pane draws a
-  **tooltip** of its own, it keys from that pane — which among the texturable types means a stacked
-  pane whose `netDisplay` resolves to a dot; every other filled type's pane hovers with the coordinated cursor and has no
-  key to texture.
+  **tooltip** of its own, it keys from that pane — which among the texturable types, in a multi-pane
+  figure at default settings, means a stacked pane whose `netDisplay` resolves to a dot; there every
+  other filled type's pane hovers with the coordinated cursor and has no key to texture.
 - **The color under a texture must be one the engine can read** — a palette name or a `"#hex"`.
   Since the band is derived from the ground's own lightness, a string whose lightness cannot be read
   would leave the band equal to the ground, i.e. a flat block where a texture was asked for. Neither

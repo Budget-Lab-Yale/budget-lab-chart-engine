@@ -42,6 +42,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   small-multiples pane) never used it; the pill takes the running-total labels' precision
   (`valueLabels.decimals`, else what the data needs). A waterfall pane with a card does use it.
 - CONFIG-SPEC `series_order`: an empty `series_order: []` filters nothing.
+- CONFIG-SPEC: statements of when a small-multiples pane hovers with a card instead of the
+  coordinated cursor were wider than the code. `small_multiples.coordinated_cursor` now names the
+  cases that never coordinate (a scatter, a `per-pane` histogram, a single pane of any type but bar
+  or stacked); the `hooks.tooltip` table and `x_labels` no longer say bar and waterfall have no card
+  "in any configuration" (an uncoordinated pane has one, and so does a dot plot or categorical line
+  resolving to one pane); the texture notes count a single-pane faceted area, histogram or
+  waterfall as hovering with a card.
 
 ### Fixed
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
@@ -72,11 +79,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Upgrading
 
 - **Hover: the bin-range label now hides the tick it covers.** Drawn only on the hovered pane of a
-  shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not `false`;
-  every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet resolving to
-  one pane) hovers with a card and draws no such label. **No published figure is affected**: the archive's only histogram, the
-  deficit-management scorecard's `deviation-distribution`, is standalone. Rendered SVG and the PNG
-  export are unchanged.
+  shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not
+  `false`; every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet
+  resolving to one pane) hovers with a card and draws no such label. **No published figure is
+  affected**: the archive's only histogram, the deficit-management scorecard's
+  `deviation-distribution`, is standalone. Rendered SVG and the PNG export are unchanged.
 - **A single-series diverging stack loses its net dot and its legend "Total" row**, on screen and in
   the PNG; with that row gone a defaulted right legend has no rows, so the plot takes the full width.
   **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
