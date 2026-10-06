@@ -36,7 +36,7 @@ import { TM_GEOM } from "./treemap-layout.js";
 import { attachTreemapHover } from "./treemap-hover.js";
 import { waterfallValueDecimals } from "./scales.js";
 import { applyValueAffixes, formatNumericX, withoutRepeatedOrderEntries } from "./util.js";
-import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
+import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
@@ -255,10 +255,7 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
   // same as a single-series horizontal bar, section spacers included).
-  const growsWithRows =
-    (spec.orientation === "horizontal" && (spec.chartType === "bar" || spec.chartType === "stacked")) ||
-    isHorizontalDumbbell(spec);
-  if (!growsWithRows) {
+  if (!growsWithRows(spec)) {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }
@@ -2642,9 +2639,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // reflow floor (fewer, roomier columns) than a plain bar pane.
   const isWaterfallFig = spec.chartType === "waterfall";
   const paneMinWidth = isPointFigure ? 160 : isWaterfallFig ? 320 : PANE_MIN_WIDTH;
-  // Horizontal bar AND horizontal stacked figures grow their height with the row count — let
-  // renderFigure compute it (passing undefined) rather than forcing the fixed pane height. Also
-  // drives the pane-title offset (both share the left-gutter fy topology — see figure.ts).
+  // Horizontal bar AND horizontal stacked figures share the left-gutter fy topology (see figure.ts):
+  // this drives their pane width floor, grid width and pane-title offset. Their pane HEIGHT comes
+  // from figurePaneHeight below (growsWithRows), which a horizontal dumbbell shares and this does not.
   const isHorizontalBarFig =
     (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
@@ -2652,7 +2649,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
   // Dot-plot AND bar/stacked (vertical) panes render ~33% taller (320); waterfall panes taller
   // still (420) to clear rotated step labels; line/scatter keep the default (240); horizontal
-  // bar/stacked panes grow with row count (undefined). Single source of truth shared with the
+  // bar/stacked/dumbbell panes grow with row count (undefined — growsWithRows). Single source of truth shared with the
   // PNG export (export-png.ts) so the two paths can't drift.
   const figHeight = figurePaneHeight(spec);
   const stacksOnePerRow = isHorizontalDumbbell(spec);

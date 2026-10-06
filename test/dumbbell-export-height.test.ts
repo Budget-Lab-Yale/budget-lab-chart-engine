@@ -94,6 +94,9 @@ describe("standalone horizontal dumbbell — the PNG export lays out like the li
     ["30 rows", BASE, MANY],
     ["pr67 shape: 7 rows in 2 sections", SECTIONED, PR67],
     ["30 rows in 2 sections", SECTIONED, MANY_SECTIONED],
+    // Orientation omitted is horizontal for a dumbbell (isHorizontalDumbbell) on both paths.
+    ["30 rows, orientation omitted", { ...BASE, orientation: undefined }, MANY],
+    ["pr67 shape, orientation omitted", { ...SECTIONED, orientation: undefined }, PR67],
   ];
 
   for (const [name, spec, rows] of cases) {

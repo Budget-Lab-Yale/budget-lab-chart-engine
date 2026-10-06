@@ -8,8 +8,7 @@ import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import { withoutRepeatedOrderEntries } from "../engine/util.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
-import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
-import { isHorizontalDumbbell } from "../spec/dumbbell-orientation.js";
+import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
 import { treemapHeight } from "../engine/marks/treemap.js";
 import { resolveColor } from "../engine/palette.js";
@@ -346,12 +345,9 @@ export function buildExportSvg(
   spec = withoutRepeatedOrderEntries(spec);
   const isFigure = spec.small_multiples != null;
   // A single chart whose height grows with its category rows: horizontal bar/stacked, and a
-  // horizontal dumbbell — the same set computeChartHeight (render-live) sizes from
-  // horizontalBarChartHeight, so the download's row pitch matches the page's.
-  const growsWithRows =
-    !isFigure &&
-    (((spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal") ||
-      isHorizontalDumbbell(spec));
+  // horizontal dumbbell — the same predicate computeChartHeight (render-live) asks before sizing
+  // from horizontalBarChartHeight, so the download's row pitch matches the page's.
+  const rowSized = !isFigure && growsWithRows(spec);
   const isTimeline = !isFigure && spec.chartType === "timeline";
   // A treemap has no portrait frame: frame height = content. Its legend (grouped data) takes the
   // ordinary top/right paths below; treemapExportChartWidth mirrors the width they leave it.
@@ -469,7 +465,7 @@ export function buildExportSvg(
   if (!isFigure) {
     // Single chart: horizontal bar/stacked/dumbbell charts size from the shared intrinsic-height
     // helper (growing the export frame with row count); everything else fills the fixed 750 frame.
-    contentHeight = growsWithRows
+    contentHeight = rowSized
       ? horizontalBarChartHeight(spec, rows)
       : isTimeline
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
@@ -562,9 +558,9 @@ export function buildExportSvg(
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
-    // Horizontal bar/stacked figures grow with their row count — figurePaneHeight returns
-    // undefined for them, so renderFigure computes the height and we read it back from the
-    // rendered SVG for the layout math below.
+    // Horizontal bar/stacked/dumbbell figures grow with their row count (growsWithRows) —
+    // figurePaneHeight returns undefined for them, so renderFigure computes the height and we read
+    // it back from the rendered SVG for the layout math below.
     const paneChartH = figurePaneHeight(spec);
     const isHorizontalBarFig =
       (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
@@ -662,7 +658,7 @@ export function buildExportSvg(
     : [xAxisTitle];
   if (portrait) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
   const H_eff =
-    isFigure || growsWithRows || isTimeline || isTreemap || chartTop + contentHeight + bottomH > H
+    isFigure || rowSized || isTimeline || isTreemap || chartTop + contentHeight + bottomH > H
       ? Math.round(chartTop + contentHeight + bottomH)
       : H;
   if (H_eff !== H) {

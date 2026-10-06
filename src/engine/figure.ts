@@ -104,10 +104,23 @@ export function horizontalBarHeight(opts: {
   return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx));
 }
 
-/** Intrinsic px height of a SINGLE horizontal bar/stacked chart. Single source of truth shared by
- *  the live mount (computeChartHeight) and the PNG export (buildExportSvg), so per-row height,
- *  section-spacer reservation and the export frame all agree. Caller must confirm the chart is a
- *  horizontal bar/stacked before calling. */
+/** Whether a chart's height grows with its category rows: horizontal bar/stacked, and a horizontal
+ *  dumbbell (orientation omitted included). The one predicate the live mount (computeChartHeight),
+ *  the small-multiples pane height (figurePaneHeight) and the PNG export (buildExportSvg) all ask,
+ *  so the three cannot drift apart again. Not the left-gutter/title topology (export-png's
+ *  `isHorizontalBarFig`, which excludes dumbbell) nor validate's sections rule (bar only). */
+export function growsWithRows(spec: ChartSpec): boolean {
+  return (
+    ((spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal") ||
+    isHorizontalDumbbellSpec(spec)
+  );
+}
+
+/** Intrinsic px height of a SINGLE chart whose height grows with its rows (`growsWithRows`:
+ *  horizontal bar/stacked or horizontal dumbbell — a dumbbell is never grouped, so it sizes like a
+ *  single-series bar). Single source of truth shared by the live mount (computeChartHeight) and the
+ *  PNG export (buildExportSvg), so per-row height, section-spacer reservation and the export frame
+ *  all agree. Caller must confirm `growsWithRows(spec)` before calling. */
 export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   const cols = resolveColumns(spec, rows);
   const categories = orderedCategories(rows, cols.x, spec);
@@ -143,8 +156,7 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
  *  Returns undefined for horizontal bar/stacked/dumbbell figures, whose height GROWS with row count:
  *  renderFigure computes it from horizontalBarHeight when opts.height is undefined. */
 export function figurePaneHeight(spec: ChartSpec): number | undefined {
-  const horizontalBar = spec.orientation === "horizontal" && (spec.chartType === "bar" || spec.chartType === "stacked");
-  if (horizontalBar || isHorizontalDumbbellSpec(spec)) return undefined;
+  if (growsWithRows(spec)) return undefined;
   if (spec.chartType === "waterfall") return 420;
   if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell") return 320;
   return 240;
