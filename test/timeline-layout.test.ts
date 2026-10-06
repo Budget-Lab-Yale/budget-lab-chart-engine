@@ -2316,3 +2316,40 @@ describe("vertical: every column hugs its placed content and the block is centre
     expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("ce344858b9d58fe6");
   });
 });
+
+describe("hard breaks never split a grapheme (F5)", () => {
+  // A word wider than the frame is split into chunks (hardBreak, hardBreakDate, a lane name's
+  // hardBreak). Cutting by code point could strand a regional-indicator half of a flag, a skin-tone
+  // modifier, a ZWJ part, a keycap's combining mark or a combining accent at the start of a line.
+  const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
+  const RUN = "🇺🇸👍🏽👨‍👩‍👧1️⃣🇬🇧é🧔🏻‍♂️".repeat(5);
+  /** Lines that rejoin to `text` and each start on one of its grapheme boundaries. */
+  const expectWholeGraphemes = (lines: string[], text: string): void => {
+    expect(lines.join("")).toBe(text);
+    const bounds = new Set([...seg.segment(text)].map((s) => s.index));
+    let at = 0;
+    for (const ln of lines) {
+      expect(bounds.has(at), `line "${ln}" starts mid-grapheme`).toBe(true);
+      at += ln.length;
+    }
+  };
+  it("splits titles, dates and lane names only between graphemes", () => {
+    let splits = 0;
+    for (const orientation of ["horizontal", "vertical"] as const) {
+      for (let width = 280; width <= 440; width += 8) {
+        const lanes = [{ key: "a", label: RUN }, { key: "b", label: "Second" }];
+        const e = ev("2020", RUN, { category: "a", dateText: `${RUN} –`, ongoing: true });
+        const l = layoutTimeline(base([e, ev("2040", "z", { category: "b" })], { width, orientation, lanes }));
+        const lab = labelOf(l, e.id);
+        const title = lab.lines.filter((ln) => ln.role === "title").map((ln) => ln.text);
+        expectWholeGraphemes(title, RUN);
+        const date = lab.lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+        expectWholeGraphemes(date, `${RUN} –`);
+        const lane = l.laneLabels.find((n) => n.text === RUN)!;
+        expectWholeGraphemes(lane.lines, RUN);
+        splits += title.length + date.length + lane.lines.length - 3;
+      }
+    }
+    expect(splits).toBeGreaterThan(0); // the runs really were split
+  });
+});

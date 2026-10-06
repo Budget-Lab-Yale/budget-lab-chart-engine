@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timelineTextWidth, WIDE_EM, EMOJI_EM } from "../src/engine/timeline-text";
+import { timelineTextWidth, graphemes, WIDE_EM, EMOJI_EM } from "../src/engine/timeline-text";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "../src/engine/timeline-metrics";
 import { layoutTimeline, LINE_STYLE, type LayoutEvent } from "../src/engine/timeline-layout";
 
@@ -25,7 +25,6 @@ describe("timelineTextWidth (Ruling 45)", () => {
   });
 
   it("measures a character outside the table at the fallback advance, an em if it is wide, 1.4em if emoji", () => {
-    expect(timelineTextWidth("ק", 1000, 500)).toBeCloseTo(FIGTREE_FALLBACK[500], 9);
     expect(timelineTextWidth("ｱ", 1000, 500)).toBeCloseTo(FIGTREE_FALLBACK[500], 9); // halfwidth katakana
     // BMP East Asian Wide/Fullwidth: an em in Chromium's fallback fonts (中 한 Ａ 1em), far past the
     // 0.58em letter mean.
@@ -86,5 +85,100 @@ describe("timeline layout measures with timelineTextWidth", () => {
     // 150px holds "illicit little lilies illicit" in Figtree (~118px) though 0.55em puts it at 191px.
     const l = layoutTimeline({ ...base, orientation: "horizontal", width: 600, events: [ev(0, "2020-01-01", "2020", "illicit little lilies illicit")] });
     expect(l.labels[0]!.lines.filter((ln) => ln.role === "title").map((ln) => ln.text)).toEqual(["illicit little lilies illicit"]);
+  });
+});
+
+// F5: text the calibrated Figtree table does not cover. Chromium-rendered widths in px at 1000px
+// (canvas measureText, the embedded Figtree first in the engine's stack), at 500 and 700, recorded
+// 2026-10-06: for each string the WIDEST of its renderings with Segoe UI, Source Sans 3, Arial,
+// Roboto, Noto Sans and DejaVu Sans as the fallback that draws the script (Cyrillic and Greek; the
+// other scripts only where those fonts cover them, else Windows' own fallback). The estimate may run
+// wide of a narrower font but is never more than 2% short of the widest.
+describe("scripts Figtree lacks, emoji clusters and emoji-presentation symbols (F5)", () => {
+  it.each([
+    ["Федеральный бюджет на 2026 год", 18011.9, 19658.9],
+    ["Министерство финансов", 12952.5, 14046.2],
+    ["Бюджет", 4317.9, 4795],
+    ["Москва", 3830.6, 4261.3],
+    ["США", 2451.7, 2743.2],
+    ["ЖКХ", 2472.2, 2812.5],
+    ["МВФ", 2414, 2749.1],
+    ["НАЛОГОВАЯ РЕФОРМА", 11713.8, 13082.8],
+    ["Рост ВВП в США", 8244.3, 9043.6],
+    ["щи", 1591.8, 1806.2],
+    ["мышь", 3048.4, 3416.1],
+    ["Κρατικός προϋπολογισμός για το 2026", 19041.1, 21149.1],
+    ["Αθήνα", 3147.5, 3541.1],
+    ["ΦΠΑ", 2254, 2461],
+    ["ΗΠΑ", 2188, 2447.8],
+    ["ΦΟΡΟΛΟΓΙΚΗ ΜΕΤΑΡΡΥΘΜΙΣΗ", 14874.4, 16827.9],
+    ["ψωμί", 2583, 2788.6],
+    ["Երևան", 3785.2, 3764.7],
+    ["თბილისი", 5029.8, 5299.4],
+    ["תקציב המדינה", 6352, 6647.7],
+    ["صندوق النقد الدولي", 8253.2, 9672.3],
+    ["नई दिल्ली", 3721.1, 4027.6],
+    ["சென்னை", 5366.7, 5667],
+    ["කොළඹ", 3779.8, 4314],
+    ["തിരുവനന്തപുരം", 9162.6, 10331.1],
+    ["กรุงเทพมหานคร", 6682.7, 7423.9],
+  ] as const)("%s measures within 2%% of its widest rendering, or wider", (text, px500, px700) => {
+    expect(timelineTextWidth(text, 1000, 500)).toBeGreaterThanOrEqual(0.98 * px500);
+    expect(timelineTextWidth(text, 1000, 700)).toBeGreaterThanOrEqual(0.98 * px700);
+  });
+
+  it("keeps a multi-code-point emoji, and a letter with its combining mark, one grapheme", () => {
+    expect(graphemes("a🇺🇸👍🏽1️⃣🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}👨‍👩‍👧e\u0301ж")).toEqual([
+      "a", "🇺🇸", "👍🏽", "1️⃣", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}", "👨‍👩‍👧", "e\u0301", "ж",
+    ]);
+    expect(graphemes("")).toEqual([]);
+  });
+
+  it("measures a flag, a skin-toned emoji, a keycap, a tag flag and a VS16 emoji as one emoji glyph", () => {
+    // Chromium: 🇺🇸 0.96em and 🇬🇧 1.01em (Windows draws the letter pair), 👍🏽 1.23em, 1️⃣ #️⃣ ❤️ ▶️
+    // 1.37em, 🏴 Scotland 1.30em — each one glyph, inside EMOJI_EM.
+    for (const w of [500, 700] as const) {
+      for (const e of ["🇺🇸", "🇬🇧", "👍🏽", "☝🏿", "1️⃣", "#️⃣", "❤️", "▶️", "↔️", "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}"]) {
+        expect(timelineTextWidth(e, 1000, w), e).toBeCloseTo(EMOJI_EM, 9);
+      }
+      expect(timelineTextWidth("🇺🇸🇬🇧 2026", 12, w)).toBeCloseTo((2 * EMOJI_EM * 12) / 1000 + timelineTextWidth(" 2026", 12, w), 9);
+    }
+  });
+
+  it("measures a ZWJ sequence one emoji glyph per joined part", () => {
+    // A platform whose emoji font lacks a sequence draws its parts side by side: Chromium on Windows
+    // 10 draws 🧑‍💻 at 2.68em and ❤️‍🔥 at 2.47em; even a sequence it has can run past one glyph
+    // (👨‍👩‍👧‍👦 1.94em).
+    for (const w of [500, 700] as const) {
+      expect(timelineTextWidth("👨‍👩‍👧", 1000, w)).toBeCloseTo(3 * EMOJI_EM, 9);
+      expect(timelineTextWidth("👨‍👩‍👧‍👦", 1000, w)).toBeCloseTo(4 * EMOJI_EM, 9);
+      expect(timelineTextWidth("🧑‍💻", 1000, w)).toBeGreaterThanOrEqual(2676);
+      expect(timelineTextWidth("❤️‍🔥", 1000, w)).toBeGreaterThanOrEqual(2465);
+      expect(timelineTextWidth("🧔🏻‍♂️", 1000, w)).toBeGreaterThanOrEqual(2466);
+      expect(timelineTextWidth("🏳️‍🌈", 1000, w)).toBeCloseTo(2 * EMOJI_EM, 9);
+    }
+  });
+
+  it("measures ◽ ◾ and every other BMP emoji-presentation symbol as emoji", () => {
+    // Chromium draws ◽ ◾ 0.60em in Windows' symbol font but 0.73em in DejaVu Sans, and from the
+    // colour emoji font (~1.37em) where that has them as emoji-presentation characters.
+    const table = new Set(FIGTREE_CHARS);
+    let n = 0;
+    for (let cp = 0x80; cp <= 0xffff; cp++) {
+      const ch = String.fromCodePoint(cp);
+      if (!/\p{Emoji_Presentation}/u.test(ch) || table.has(ch)) continue;
+      n++;
+      for (const w of [500, 700] as const) expect(timelineTextWidth(ch, 1000, w), ch).toBeCloseTo(EMOJI_EM, 9);
+    }
+    expect(n).toBeGreaterThan(50); // 60 in Unicode 15
+    for (const ch of ["◽", "◾"]) expect(timelineTextWidth(ch, 1000, 500), ch).toBeCloseTo(EMOJI_EM, 9);
+  });
+
+  it("leaves text the table covers measured per character, as before", () => {
+    // Latin text never reaches the grapheme path: a string of table characters sums their advances.
+    const s = "Tax Cuts and Jobs Act – 2017";
+    for (const w of [500, 700] as const) {
+      expect(timelineTextWidth(s, 1000, w)).toBeCloseTo([...s].reduce((a, ch) => a + adv(ch, w), 0), 9);
+    }
   });
 });

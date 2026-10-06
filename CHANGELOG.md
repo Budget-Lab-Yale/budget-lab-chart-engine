@@ -66,6 +66,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   name, on every chart type and in tables. No published figure uses such a name.
 - A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
   `series_order`, matching every other chart type.
+- Timeline (and treemap) text in Cyrillic, Greek and other scripts Figtree lacks now measures at no less than 98% of its widest rendering, so it no longer runs past its column or tile; a flag, skin-toned, keycap or ZWJ emoji is never split across lines, and ◽ ◾ measure as emoji. Latin text measures as before; no published figure is a timeline.
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,
   the chart stayed squeezed beside the old right column with a second legend drawn on top; widened
   again, the redraw threw `NotFoundError` and stopped partway. The column is now taken down when the
