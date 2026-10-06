@@ -4,7 +4,7 @@
 // — point both at the same column for redundant color+shape encoding (the dot-plot default).
 // The generic chrome (gridlines, axes, zero baseline) is added by assemblePlot.
 import { Plot } from "../vendor";
-import { markerSymbolForIndex, MARK_POINT_R, MARK_POINT_PANE_R } from "../theme";
+import { markerSymbolForIndex, markerSymbolForSeries, MARK_POINT_R, MARK_POINT_PANE_R } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -39,7 +39,9 @@ export function buildPointMarks(
     const domain = (shapeIsSeries ? ctx.seriesNames : shapeNames) ?? shapeNames ?? [];
     symbolScaleOpts = {
       domain,
-      range: domain.map((_, i) => markerSymbolForIndex(i)),
+      // Shape is the series: a pane takes each series' position in the FIGURE's list, the one the
+      // figure legend keys (as line markers do).
+      range: domain.map((d, i) => (shapeIsSeries ? markerSymbolForSeries(d, i, ctx.paletteSeries) : markerSymbolForIndex(i))),
     };
   }
 

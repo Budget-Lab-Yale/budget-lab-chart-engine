@@ -97,3 +97,72 @@ for (const mode of ["shared", "per-pane"] as const) {
     });
   });
 }
+
+// A blank facet cell is not a pane either, so a series whose rows all have one is drawn nowhere.
+describe("a series whose every row has a blank facet cell", () => {
+  const rows: TidyRow[] = [...ROWS, ...pts("", "E", 8)];
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`(${mode}) is not keyed by the figure legend, live or in the PNG`, () => {
+      const s = spec(mode);
+      (s.small_multiples as { pane_order?: string[] }).pane_order = undefined;
+      (s as { series_labels: Record<string, string> }).series_labels = { ...LABELS, E: "Echo series" };
+      const fig = renderFigure(s, rows, { width: INNER_W });
+      expect(fig.panes.map((p) => p.value)).toEqual(["P", "R", "Q"]);
+      expect((fig.legendItems ?? []).map((i) => i.series)).toEqual(["A", "B", "C", "D"]);
+      const host = mount(s, rows);
+      expect(host.textContent ?? "", "legend not found, so this measures nothing").toContain("Delta series");
+      expect(host.textContent ?? "").not.toContain("Echo series");
+      const png = buildExportSvg(s, rows);
+      expect(png.textContent ?? "", "legend not found, so this measures nothing").toContain("Delta series");
+      expect(png.textContent ?? "").not.toContain("Echo series");
+    });
+  }
+});
+
+// A drawn A and a C drawn nowhere: once C's row is dropped the figure keys one series, and a
+// one-series legend has no series rows.
+const ONE_DRAWN: TidyRow[] = [...pts("R", "C", 3), ...pts("P", "A", 1), ...pts("Q", "A", 5)];
+
+describe("a figure that draws one series", () => {
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`(${mode}) has no series rows in its legend, live or in the PNG`, () => {
+      const fig = renderFigure(spec(mode), ONE_DRAWN, { width: INNER_W });
+      expect((fig.legendItems ?? []).filter((i) => i.series === "A" || i.series === "C")).toEqual([]);
+      const host = mount(spec(mode), ONE_DRAWN);
+      expect(host.querySelector(".figure-pane svg"), "figure not mounted, so this measures nothing").not.toBeNull();
+      expect(host.querySelector(".tbl-legend-item[data-series]")).toBeNull();
+      expect(buildExportSvg(spec(mode), ONE_DRAWN).textContent ?? "").not.toContain("Alpha series");
+    });
+
+    it(`(${mode}) control: with C drawn too, both are keyed`, () => {
+      const s = spec(mode);
+      (s.small_multiples as { pane_order?: string[] }).pane_order = undefined;
+      expect((renderFigure(s, ONE_DRAWN, { width: INNER_W }).legendItems ?? []).map((i) => i.series)).toEqual(["C", "A"]);
+    });
+  }
+});
+
+// An `overlays[]` row with `legend: true` fitted per series takes the colour its lines resolve to:
+// one colour when they resolve to one, the neutral when they resolve to several. Its lines are the
+// DRAWN series' lines, so an undrawn series must not count toward "several".
+describe("an overlays[] legend row fitted per series", () => {
+  const FIT = { overlays: [{ method: "lm", label: "Fit", legend: true }] };
+  const fitRow = (s: ChartSpec) =>
+    (renderFigure(s, ONE_DRAWN, { width: INNER_W }).legendItems ?? []).find((i) => i.label === "Fit");
+
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`(${mode}) takes the one drawn series' colour, not the neutral`, () => {
+      const a = buildColorMap(["C", "A"]).get("A")!;
+      expect(fitRow(spec(mode, FIT))?.color).toBe(a);
+    });
+
+    it(`(${mode}) control: with C drawn too, the row is neutral`, () => {
+      const s = spec(mode, FIT);
+      (s.small_multiples as { pane_order?: string[] }).pane_order = undefined;
+      const row = fitRow(s);
+      expect(row, "no Fit row, so this measures nothing").toBeDefined();
+      expect(row!.color).not.toBe(buildColorMap(["C", "A"]).get("A"));
+      expect(row!.color).not.toBe(buildColorMap(["C", "A"]).get("C"));
+    });
+  }
+});

@@ -100,6 +100,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A small-multiples figure legend no longer keys a series whose rows sit only in panes
   `small_multiples.pane_order` leaves out, which is drawn nowhere; live and in the PNG. Colours are
   unchanged: the palette still counts that series, so every drawn series keeps its colour.
+- A small-multiples pane now draws each series with the point marker the figure legend keys it with
+  (`line` with `points: true`, and a `scatter` or `dotplot` whose `columns.shape` is the series
+  column), as colours already did. A pane used to number markers by its own series, so a pane
+  missing a series, or meeting its series in another order with no `series_order`, drew a series
+  with another series' marker. The coordinated cursor's hover dot follows. Live and in the PNG.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -145,6 +150,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **A figure legend drops a row for a series drawn in no pane** (live and PNG). **No published
   figure is affected**: all 17 archived small-multiples specs set `pane_order`, and none leaves out
   a facet value present in its data. No golden moves.
+- **A pane's point markers follow the figure legend** where the pane's own series list numbered
+  them differently (live and PNG). **No published figure is affected**: of the 17 archived
+  small-multiples specs, the 11 that draw per-series markers (10 `line` with `points: true`, one
+  `dotplot` with shape = series) give every series the same position in every pane as in the
+  figure; all 47 archived specs render byte-identical panes, legends and PNG export before and
+  after. No golden moves.
 - **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
   under Changed). Specs that pass `tbl-chart validate` are unaffected.
 

@@ -959,6 +959,8 @@ function assemblePaneResult(
     ...(opts.pane ? { pane: true } : {}),
     // The figure's distinct drawn series (set only by renderFigure): a count a pane can undercount.
     ...(opts.chartSeriesCount != null ? { chartSeriesCount: opts.chartSeriesCount } : {}),
+    // The figure's series list (set only by renderFigure): per-series marker symbols index it.
+    ...(opts.paletteSeries ? { paletteSeries: opts.paletteSeries } : {}),
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),

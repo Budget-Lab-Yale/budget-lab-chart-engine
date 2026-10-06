@@ -76,6 +76,10 @@ export interface MarkContext {
   colors: Map<string, string>;
   /** Resolved, ordered series names (for bar builders that need positional info). */
   seriesNames?: string[];
+  /** Small multiples: the FIGURE's series list (RenderOptions.paletteSeries). Per-series marker
+   *  symbols index it, as colours do, so every pane keys a series as the figure legend does. Absent
+   *  (single chart) → markers index `seriesNames`. */
+  paletteSeries?: string[];
   /** Inner plot width in px (outer width minus left+right margins). Approximate — bar
    *  builders use this for px-based label-suppression logic. */
   plotWidth?: number;

@@ -62,7 +62,7 @@ import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
-import { TBL, markerSymbolForIndex } from "./theme.js";
+import { TBL, markerSymbolForSeries } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
 
 const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
@@ -2042,6 +2042,9 @@ function wireFigureSvg(
     shapeIsSeries?: boolean;
     pointOrder?: PreparedRow[];
     netMode?: NetMode;
+    /** The FIGURE's series list (FigureRenderResult.seriesOrder): the coordinated cursor's
+     *  per-series hover-dot symbols index it, as the panes' marks and the figure legend do. */
+    symbolSeries?: string[];
     /** Series → its resolved icon, from the figure's legend rows. */
     icons?: Map<string, IconSpec>;
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
@@ -2138,7 +2141,7 @@ function wireFigureSvg(
   // from axis-label centers (points have no rects). The marker dots take each series' symbol.
   if (ctx.spec.chartType === "dotplot") {
     const dotUseCoord = ctx.onResolve != null;
-    const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const));
+    const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForSeries(s, i, ctx.symbolSeries)] as const));
     // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
     // offsets so they land over the actual points (panes dodge at the pane gap).
     const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
@@ -2211,9 +2214,10 @@ function wireFigureSvg(
   const horizontal = ctx.spec.orientation === "horizontal";
   const useCoord = ctx.onResolve != null;
   // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
-  // match the static marker. Keyed by series index, matching the chart's symbol scale.
+  // match the static marker. Keyed by the series' position in the figure's list, as the pane's
+  // symbol scale (marks/line.ts) and the figure legend are.
   const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
-    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const))
+    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForSeries(s, i, ctx.symbolSeries)] as const))
     : undefined;
   // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
@@ -2784,6 +2788,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         shapeIsSeries: pane.shapeIsSeries,
         pointOrder: pane.pointOrder,
         netMode: pane.netMode,
+        symbolSeries: fig.seriesOrder,
         // One shared key for the whole figure, so every pane's tooltip agrees with it. The
         // fallback is per-PANE: per-pane mode resolves each pane's colours independently, and a
         // single-series figure has no legend rows to read at all.

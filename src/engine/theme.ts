@@ -86,6 +86,15 @@ export function markerSymbolForIndex(i: number): string {
   return MARKER_SYMBOLS[((i % MARKER_SYMBOLS.length) + MARKER_SYMBOLS.length) % MARKER_SYMBOLS.length]!;
 }
 
+/** The marker symbol for `series`, at its position in `order` when `order` names it, else at `i`.
+ *  Small multiples pass the FIGURE's series list (RenderOptions.paletteSeries), which is the list the
+ *  figure legend keys markers by; a pane's own list would key a pane that lacks a series, or meets
+ *  its series in another order, differently from the legend. Absent (a single chart) → `i`. */
+export function markerSymbolForSeries(series: string, i: number, order?: readonly string[]): string {
+  const at = order ? order.indexOf(series) : -1;
+  return markerSymbolForIndex(at >= 0 ? at : i);
+}
+
 // Callout number labels — the single shared style for per-bar VALUE labels (grouped/single
 // bars) and stacked NET-TOTAL text, so they read consistently. `gap` is the px offset
 // between the bar's end/top and the number (perpendicular to the value axis); the
