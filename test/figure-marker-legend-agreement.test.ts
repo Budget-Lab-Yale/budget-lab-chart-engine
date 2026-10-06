@@ -186,28 +186,30 @@ const NO_KEY = [
 
 for (const k of [KINDS[0], KINDS[1]]) {
   for (const c of NO_KEY) {
-    describe(`${k.kind} · ${c.why} · hover card`, () => {
-      it("keys each series with the marker its pane draws", () => {
-        const s = {
-          ...specFor(k, "shared", c.f.pane_order),
-          ...c.extra,
-          small_multiples: { columns: 2, mode: "shared", pane_order: [...c.f.pane_order], coordinated_cursor: false },
-        } as unknown as ChartSpec;
-        const rows = rowsFor(c.f, [...k.xs]);
-        const host = document.createElement("div");
-        document.body.append(host);
-        mountChart(host, { spec: s, rows, width: 838, height: 420 });
-        const pane = host.querySelector<SVGSVGElement>(".figure-pane svg")!;
-        mockRect1to1(pane);
-        mockPathMarks(pane);
-        hoverFirstMark(pane, PLOT_MIDDLE);
-        const card = cardSymbols();
-        const drawn = drawnSymbols(pane);
-        expect(card.size, "no card rows, so this measures nothing").toBe(drawn.size);
-        for (const [series, syms] of drawn) expect(card.get(series), `card key for ${series}`).toBe([...syms][0]);
-        // The figure's list is [C, A, B]: A is its second marker wherever it is drawn.
-        expect([...drawn.get("A")!]).toEqual(["square"]);
+    for (const mode of ["shared", "per-pane"] as const) {
+      describe(`${k.kind} · ${c.why} · ${mode} · hover card`, () => {
+        it("keys each series with the marker its pane draws", () => {
+          const s = {
+            ...specFor(k, mode, c.f.pane_order),
+            ...c.extra,
+            small_multiples: { columns: 2, mode, pane_order: [...c.f.pane_order], coordinated_cursor: false },
+          } as unknown as ChartSpec;
+          const rows = rowsFor(c.f, [...k.xs]);
+          const host = document.createElement("div");
+          document.body.append(host);
+          mountChart(host, { spec: s, rows, width: 838, height: 420 });
+          const pane = host.querySelector<SVGSVGElement>(".figure-pane svg")!;
+          mockRect1to1(pane);
+          mockPathMarks(pane);
+          hoverFirstMark(pane, PLOT_MIDDLE);
+          const card = cardSymbols();
+          const drawn = drawnSymbols(pane);
+          expect(card.size, "no card rows, so this measures nothing").toBe(drawn.size);
+          for (const [series, syms] of drawn) expect(card.get(series), `card key for ${series}`).toBe([...syms][0]);
+          // The figure's list is [C, A, B]: A is its second marker wherever it is drawn.
+          expect([...drawn.get("A")!]).toEqual(["square"]);
+        });
       });
-    });
+    }
   }
 }
