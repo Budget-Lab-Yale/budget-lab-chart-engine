@@ -185,17 +185,24 @@ describe.skipIf(!HAS_BROWSER)("a tall right-hand legend: the PNG centres the plo
       // Live centres the canvas in the region (offset 0 when the canvas is the taller); the PNG
       // applies the same rule to its own region.
       if (tall) expect(live.plotOffset, why).toBeGreaterThan(50);
-      expect(live.plotOffset, why).toBeCloseTo((live.regionHeight - live.canvasHeight) / 2, 3);
+      // Live to one CSS layout unit (1/64px), the precision Chromium lays the flex row out in.
+      expect(Math.abs(live.plotOffset - (live.regionHeight - live.canvasHeight) / 2), why).toBeLessThanOrEqual(1 / 64);
       expect(png.plotOffset, why).toBeCloseTo((png.regionHeight - png.canvasHeight) / 2, 3);
       // The PNG draws its own column (rows on a 16+8px pitch, wrapped by the same canvas text
       // measurement), so its region can differ from live's; the offsets differ by half that, no more.
       const slack = Math.abs(png.regionHeight - png.canvasHeight - (live.regionHeight - live.canvasHeight)) / 2;
       expect(Math.abs(png.plotOffset - live.plotOffset), why).toBeLessThanOrEqual(slack + 0.01);
       if (tall) expect(slack, why).toBeLessThanOrEqual(20);
-      // The x-axis title stays directly under the plot, not below the legend: 14px below it, as the
-      // PNG draws it on every chart (live's CSS puts it 5px nearer, tall legend or not).
+      // The x-axis title stays directly under the plot, not below the legend. The PNG puts its first
+      // baseline 14px below the plot on every chart (export-png.ts arithmetic, not a browser
+      // measurement, so exact). Live's CSS puts it about 5px nearer: one ascent of the 12px title
+      // below its -3px margin, which Chromium lays out at 9px on Windows and 8px in the CI Linux
+      // image (each rounds the font's line metrics to whole pixels its own way). So live is held to
+      // a band around those, and to the canvas box: the title inside it, under the plot.
       expect(png.titleBelowPlot, why).toBe(14);
-      expect(live.titleBelowPlot, why).toBe(9);
+      expect(live.titleBelowPlot, why).toBeGreaterThanOrEqual(7);
+      expect(live.titleBelowPlot, why).toBeLessThanOrEqual(10);
+      expect(live.plotHeight + live.titleBelowPlot, why).toBeLessThanOrEqual(live.canvasHeight);
     });
   }
 });
