@@ -1,7 +1,7 @@
 // The horizontal category band shared by the one-bar-per-row builders: bar.ts (single-series and
 // grouped) and stacked.ts. `columns.section` groups the rows into sections; every section after the
-// first is preceded by SECTION_SPACER_SLOTS empty band slots that hold its bold header, and the first
-// section's header sits in the top margin. Sectioned charts put the band on `fy` row facets (a mark
+// first is set off by a fixed section gap (axes.ts sectionGapPx) that holds its bold header, and the
+// first section's header sits in the top margin. Sectioned charts put the band on `fy` row facets (a mark
 // with fy-bound header marks but a plain `y` band makes Plot facet the whole plot from the headers
 // alone — the fig09/fig10 phantom-facet defect), so both builders compose the band here and cannot
 // drift apart.
@@ -10,10 +10,8 @@ import type { ChartSpec } from "../../spec/types";
 import {
   tblFacetGroupYAxis,
   tblSectionTopHeader,
-  sectionSpacerSlot,
-  SECTION_SPACER_SLOTS,
-  SECTION_HEADER_GAP,
-  isSectionSpacer,
+  sectionGapPx,
+  sectionHeaderLift,
   horizontalValueAxisMargins,
 } from "../axes";
 import type { MarkLayers, PreparedRow } from "./index";
@@ -29,10 +27,10 @@ export interface CategoryBand {
   sectioned: boolean;
   /** The categories in data-encounter order. */
   categories: string[];
-  /** The band domain: the categories, section-grouped with spacer slots when sectioned. */
+  /** The band domain: the categories, section-grouped when sectioned. */
   bandDomain: string[];
-  /** The categories in drawn order (bandDomain without the spacers). With fy faceting Plot emits
-   *  marks facet by facet in this order, so DOM-order tagging must follow it, not encounter order. */
+  /** The categories in drawn order (== bandDomain). With fy faceting Plot emits marks facet by facet
+   *  in this order, so DOM-order tagging must follow it, not encounter order. */
   drawnOrder: string[];
   sectionHeaders: Header[];
   topSectionHeader: Header | null;
@@ -80,7 +78,6 @@ export function categoryBand(
     if (!topSectionHeader) {
       topSectionHeader = { category: catsInSection[0] as string, label: labelOf(s) };
     } else {
-      for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
       sectionHeaders.push({ category: catsInSection[0] as string, label: labelOf(s) });
     }
     for (const cat of catsInSection) domain.push(cat);
@@ -89,27 +86,21 @@ export function categoryBand(
     sectioned,
     categories,
     bandDomain: domain,
-    drawnOrder: domain.filter((c) => !isSectionSpacer(c)),
+    drawnOrder: domain,
     sectionHeaders,
     topSectionHeader,
   };
 }
 
-/** The first section header is faceted on its first category (facet top = first bar, align:0) and
- *  lifted so its baseline lands the same ~15px above the bar as the spacer-based headers: the
- *  top-anchored baseline sits ~one font-size below the facet top, and the bottom-anchored spacers
- *  sit ~5px higher. */
-export const topHeaderLift = (catFont: number): number => SECTION_HEADER_GAP + catFont + 5;
-
 /** The fy layer pieces for a category band on `fy` row facets: the band scale, the left-gutter
- *  category labels + section headers, and the margins. For an unsectioned band the header marks
- *  contribute nothing. */
+ *  category labels + section headers, the section gaps, and the margins. For an unsectioned band the
+ *  header marks and gaps contribute nothing. */
 export function fyCategoryBandLayer(
   band: CategoryBand,
   opts: { gutter: number; catFont: number; hideLabels: boolean; xAxisTicks: ChartSpec["x_axis_ticks"] },
-): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom"> {
+): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom" | "sectionGaps"> {
   const { gutter, catFont, hideLabels } = opts;
-  const lift = topHeaderLift(catFont);
+  const lift = sectionHeaderLift(catFont);
   return {
     // Declaration order; never auto-sort (Style-Guide §9). No axis: labelled by the marks below.
     fyScaleOpts: { domain: band.bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
@@ -121,6 +112,9 @@ export function fyCategoryBandLayer(
           ...(band.topSectionHeader ? tblSectionTopHeader(band.topSectionHeader, gutter, lift, catFont) : []),
         ],
     marginLeft: gutter,
+    ...(band.sectionHeaders.length
+      ? { sectionGaps: { before: band.sectionHeaders.map((h) => h.category), px: sectionGapPx(catFont) } }
+      : {}),
     ...horizontalValueAxisMargins(opts.xAxisTicks, {
       sectioned: band.sectioned,
       ...(band.topSectionHeader ? { topHeaderLift: lift } : {}),

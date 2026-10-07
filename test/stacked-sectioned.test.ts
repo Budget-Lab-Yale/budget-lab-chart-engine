@@ -165,7 +165,8 @@ describe("sectioned horizontal stack: layout", () => {
     expect(boldTexts(svg).filter((t) => t === "Second").length).toBe(1);
     const ys = labelYs(svg);
     const pitch = ys.get("Alpha two")! - ys.get("Alpha one")!;
-    expect(ys.get("Beta one")! - ys.get("Alpha two")!).toBeGreaterThan(2 * pitch);
+    // One row pitch plus the fixed 33px section gap (header line + 10px clear above and below).
+    expect(ys.get("Beta one")! - ys.get("Alpha two")!).toBe(pitch + 33);
   });
 
   it("stacks within each row: contiguous segments from 0, lengths proportional to the values", () => {
@@ -277,9 +278,9 @@ describe("sectioned horizontal stack: layout", () => {
     );
   });
 
-  // Top: the first section header's floor (38), or a value-tick row above the headers (40).
+  // Top: the first section header's floor (33), or a value-tick row above the headers (40).
   // Bottom: 26 with the value ticks at the bottom, 8 without.
-  for (const [ticks, top, bottom] of [["bottom", 38, 26], ["top", 40, 8], ["both", 40, 26]] as const) {
+  for (const [ticks, top, bottom] of [["bottom", 33, 26], ["top", 40, 8], ["both", 40, 26]] as const) {
     it(`x_axis_ticks: ${ticks} — margins ${top}/${bottom}, as on a sectioned horizontal bar`, () => {
       const stacked = render({ ...SPEC, x_axis_ticks: ticks }, POS);
       const bar = render({ ...SPEC, chartType: "bar", x_axis_ticks: ticks }, POS);

@@ -21,7 +21,7 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent, sectionRowOrderOver } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 import type { SeriesHatch } from "./hatch";
@@ -84,24 +84,25 @@ const HORIZONTAL_HEIGHT_FLOOR = 400;
 
 /** Intrinsic height (px) of a horizontal bar chart / faceted figure. Each category band slot is
  *  tall enough for its bars (grouped → nSeries bars) OR its wrapped label, whichever is taller;
- *  section spacer slots add one slot each. Floored at the vertical default. */
+ *  each section break adds the fixed section gap. Floored at the vertical default. */
 export function horizontalBarHeight(opts: {
   nCategories: number;
   nSeries: number;
   grouped: boolean;
-  nSpacers: number;
+  /** Section breaks (sections − 1): each adds `sectionGapPx()`, not a band slot. */
+  nSectionBreaks: number;
   maxLabelLines: number;
   /** Extra top-margin px (sectioned charts reserve room for the first section header). */
   extraTopPx?: number;
 }): number {
-  const { nCategories, nSeries, grouped, nSpacers, maxLabelLines, extraTopPx = 0 } = opts;
+  const { nCategories, nSeries, grouped, nSectionBreaks, maxLabelLines, extraTopPx = 0 } = opts;
   const barsPerCat = grouped ? Math.max(1, nSeries) : 1;
   const catBarPx = barsPerCat * HORIZONTAL_PX_PER_BAR;
   const labelPx = Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6;
-  // Uniform band → every slot (category or spacer) is the same height; size it to the taller of
-  // the bar budget and the wrapped-label budget so neither is clipped.
+  // Uniform band → every category slot is the same height; size it to the taller of the bar budget
+  // and the wrapped-label budget so neither is clipped.
   const slotPx = Math.max(catBarPx, labelPx);
-  const inner = (nCategories + Math.max(0, nSpacers)) * slotPx;
+  const inner = nCategories * slotPx + Math.max(0, nSectionBreaks) * sectionGapPx();
   return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx));
 }
 
@@ -121,7 +122,7 @@ export function growsWithRows(spec: ChartSpec): boolean {
 /** Intrinsic px height of a SINGLE chart whose height grows with its rows (`growsWithRows`:
  *  horizontal bar/stacked or horizontal dumbbell — a dumbbell is never grouped, so it sizes like a
  *  single-series bar). Single source of truth shared by the live mount (computeChartHeight) and the
- *  PNG export (buildExportSvg), so per-row height, section-spacer reservation and the export frame
+ *  PNG export (buildExportSvg), so per-row height, section-gap reservation and the export frame
  *  all agree. Caller must confirm `growsWithRows(spec)` before calling. */
 export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   const cols = resolveColumns(spec, rows);
@@ -138,7 +139,6 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
     spec.series_order && spec.series_order.length ? spec.series_order.length : Math.max(1, series.size);
   const grouped = spec.chartType === "bar" && nSeries > 1;
   const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, categories) : 0;
-  const nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
   const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX });
   const maxLabelLines = categories.reduce(
     (m, c) => Math.max(m, labelLineCount(categoryText(c), gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
@@ -148,7 +148,7 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
     nCategories: nCats,
     nSeries,
     grouped,
-    nSpacers,
+    nSectionBreaks: Math.max(0, nSections - 1),
     maxLabelLines,
     extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
   });
@@ -182,7 +182,7 @@ function inSectionOrder(spec: ChartSpec, cols: { section?: string | null }, rows
 }
 
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
- *  — i.e. the number of section spacer slots a sectioned horizontal axis inserts. */
+ *  — one more than the number of fixed section gaps a sectioned horizontal axis opens. */
 function countSections(
   rows: TidyRow[],
   keyOf: (r: TidyRow) => string,
@@ -525,7 +525,7 @@ export function renderFigure(
   const binThresholds = figureBinThresholds(spec, rows, cols, mode);
 
   // Horizontal bars: the category axis runs down the left gutter (shared across panes). Compute the
-  // shared category set, gutter, section-spacer count and tallest wrapped label ONCE here, so the
+  // shared category set, gutter, section count and tallest wrapped label ONCE here, so the
   // gutter sizing, category-label suppression and the auto-grown figure HEIGHT all agree across
   // panes. (Vertical / non-bar figures keep the default chrome + caller height.)
   // Horizontal bar AND horizontal stacked share the left-gutter / category-label / auto-height
@@ -557,7 +557,7 @@ export function renderFigure(
     ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
     : undefined;
   // Auto-height: grow the panes with the row count when the caller doesn't force a height. The
-  // per-facet inputs (nSpacers/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
+  // per-facet inputs (sectionGapTotal/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
   // are hoisted to this outer scope (not just computed inline) because perPaneHeights, below —
   // computed AFTER paneValues exists — reuses them.
   //
@@ -570,7 +570,7 @@ export function renderFigure(
   // there), then size every facet by that SAME per-slot height × its own slot count, so bar
   // thickness stays uniform whether or not the busiest facet itself needed the floor.
   let autoHeight: number | undefined;
-  let nSpacers = 0;
+  let sectionGapTotal = 0;
   let catsByFacet: Map<string, Set<string>> | undefined;
   let effSlotPx = 0;
   let chromeExtra = 0;
@@ -579,10 +579,10 @@ export function renderFigure(
       spec.series_order && spec.series_order.length
         ? spec.series_order.length
         : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
-    // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1,
-    // each reserving a SECTION_SPACER_SLOTS-slot block.
+    // First section has no gap (its header sits in the top margin), so gaps = sections − 1, each a
+    // fixed sectionGapPx() — the same px assemblePlot opens between the sections.
     const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, sharedCategories) : 0;
-    nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
+    sectionGapTotal = Math.max(0, nSections - 1) * sectionGapPx();
     const maxPx = hGutter - GUTTER_TEXT_PAD;
     const maxLabelLines = sharedCategories.reduce(
       (m, c) => Math.max(m, labelLineCount(categoryText(c), maxPx, FACETED_CAT_LABEL_PX)),
@@ -609,13 +609,12 @@ export function renderFigure(
       Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6,
     );
     chromeExtra = HORIZONTAL_CHROME_PX + (nSections > 0 ? SECTION_HEADER_TOP_PX : 0);
-    const busiestSlots = maxPaneCats + nSpacers;
-    const naturalBusiest = busiestSlots * slotPxNatural + chromeExtra;
+    const naturalBusiest = maxPaneCats * slotPxNatural + sectionGapTotal + chromeExtra;
     const hBusy = Math.max(HORIZONTAL_HEIGHT_FLOOR, naturalBusiest);
     // Back-solve the per-slot px the busiest facet ACTUALLY got (== slotPxNatural when the floor
     // didn't fire; inflated when it did) so every other facet is scaled by the SAME ratio —
     // otherwise a sub-floor busiest facet would silently give sparser facets thinner bars.
-    effSlotPx = (hBusy - chromeExtra) / busiestSlots;
+    effSlotPx = (hBusy - chromeExtra - sectionGapTotal) / maxPaneCats;
     autoHeight = Math.round(hBusy);
   }
   const effHeight = opts.height ?? autoHeight;
@@ -677,8 +676,8 @@ export function renderFigure(
   const perPaneHeights: number[] | undefined =
     isHorizontalBar && opts.height == null
       ? paneValues.map((v) => {
-          const slots = Math.max(1, catsByFacet?.get(v)?.size ?? 1) + nSpacers;
-          return Math.round(slots * effSlotPx + chromeExtra);
+          const slots = Math.max(1, catsByFacet?.get(v)?.size ?? 1);
+          return Math.round(slots * effSlotPx + sectionGapTotal + chromeExtra);
         })
       : isHorizontalDumbbell && opts.height == null
         ? // Each stacked pane grows with its OWN category count (facets can be ragged — e.g. a

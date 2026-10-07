@@ -352,18 +352,20 @@ describe("dumbbell mark — structure", () => {
       { group: "Top 1%", band: "Top decile", measure: "collected", rate: "35.1" },
     ] as TidyRow[];
     const { svg } = renderChart(spec, rows, { ...opts, document });
-    // 3 categories × 2 series = 6 dots (spacer slots carry no dots).
+    // 3 categories × 2 series = 6 dots.
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(6);
     // Sections render on the bar fy-topology; headers are Plot text (tblSectionTopHeader).
     const topHeader = textByContent(svg, "Top decile");
     expect(textByContent(svg, "Quintiles")).toBeTruthy();
     expect(topHeader).toBeTruthy();
     // Regression guard: the "Top decile" header sits JUST ABOVE its section's first row (Top 1%),
-    // not stranded a full empty slot above it — above the row and within ~2 row-heights of it.
+    // not stranded a slot above it — its em-box top is the shared header lift (13px category font +
+    // 10px clear) above the top of that row's band (the row is 0.8 of the pitch, centred on the dot).
     const firstRowY = absPos(dot(svg, "Top 1%", "static")).y;
+    const pitch = absPos(dot(svg, "Q5", "static")).y - absPos(dot(svg, "Q1", "static")).y;
     const headerY = absPos(topHeader ?? null).y;
     expect(headerY).toBeLessThan(firstRowY);
-    expect(firstRowY - headerY).toBeLessThan(60);
+    expect(Math.abs(firstRowY - 0.4 * pitch - headerY - 23)).toBeLessThanOrEqual(1);
   });
 
   it("horizontal sections: the value gridlines/baseline BREAK across the section gap (no line crosses it)", () => {

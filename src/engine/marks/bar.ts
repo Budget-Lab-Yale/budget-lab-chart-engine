@@ -84,8 +84,8 @@ export function buildBarMarks(
     }
   }
 
-  // Sectioned horizontal category axis (columns.section): categories grouped by section, with
-  // spacer slots for the headers (see category-band.ts). Vertical / unsectioned: the plain band.
+  // Sectioned horizontal category axis (columns.section): categories grouped by section, with a
+  // fixed gap for each header (see category-band.ts). Vertical / unsectioned: the plain band.
   const band = categoryBand(data, catField, categories, spec, horizontal);
   const { sectioned, bandDomain } = band;
 
@@ -93,7 +93,7 @@ export function buildBarMarks(
   // for the fy topology (sectioned and/or multi-series horizontal), Plot iterates the fy facet
   // DOMAIN — bandDomain, section-grouped — when placing this mark's <text> children in the DOM,
   // NOT the (encounter-order) `categories` array passed to Plot.text; the tagging pass reads DOM
-  // order, so it must match. Equals `categories` when unsectioned (bandDomain has no spacers then).
+  // order, so it must match. Equals `categories` when unsectioned.
   const catLabelOrder = band.drawnOrder;
   // Tagging entry for the hover-accent hook: stamps data-category on each rendered category label
   // (in render order, see catLabelOrder above) so the live layer can find + accent the hovered
@@ -196,13 +196,12 @@ export function buildBarMarks(
       : baseFill;
 
     // Sectioned horizontal (any series count): route onto the SAME fy topology the multi-series
-    // sectioned path uses (below, ~L310): fy = category band (incl. spacer slots), inner y = a
+    // sectioned path uses (below, ~L310): fy = category band, inner y = a
     // single-value series band, x = value. An UNfaceted single-series mark that still carries
     // fy-bound header marks (tblSectionTopHeader, pushed below) makes Plot
     // auto-facet the WHOLE plot from those header marks alone — a spurious fy domain derived from
-    // the spacer sentinels + first category (2-3 phantom facets), which starves every real bar's
-    // height and prints the raw " section:" sentinel as Plot's default fy-axis text (the
-    // fig09/fig10 defect, D1). Keeping every sectioned horizontal chart on fy, regardless of
+    // the header categories (phantom facets), which starves every real bar's height and prints raw
+    // domain values as Plot's default fy-axis text (the fig09/fig10 defect, D1). Keeping every sectioned horizontal chart on fy, regardless of
     // series count, means the header marks are always correct for the topology Plot actually uses.
     overlay.push(
       horizontal && sectioned
@@ -230,7 +229,7 @@ export function buildBarMarks(
         : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
 
       if (sectioned) {
-        // fy = the section-grouped category band (incl. spacer slots) via the SHARED
+        // fy = the section-grouped category band via the SHARED
         // fyCategoryBandLayer — the same composition the multi-series path uses below; inner
         // y = a single-value series band (padding 0, so the bar fills the whole facet —
         // geometrically equivalent to the old plain-y band's paddingInner:0.2, which now

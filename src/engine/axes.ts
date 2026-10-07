@@ -490,7 +490,7 @@ export function horizontalLeftGutter(
 }
 
 const HVALUE_TICK_PX = 18; // one value-tick row (top)
-/** Gap between a section header and its section's first bar (spacer-header lift). */
+/** Clear space between a section header's line and the rows around it (sectionGapPx/sectionHeaderLift). */
 export const SECTION_HEADER_GAP = 10;
 const HMARGIN_BOTTOM_TICKS = 26;
 const HMARGIN_BOTTOM_BARE = 8;
@@ -589,31 +589,25 @@ export function tblFacetGroupYAxis(
 
 // --- Sectioned horizontal category axis ---------------------------------------------------
 // A sectioned category axis (columns.section) groups categories into contiguous sections along the
-// `fy`/`y` band. A block of SECTION_SPACER_SLOTS empty spacer band slots is inserted before each
-// non-first section — it carries no data rows (so no bars render in it) and gives the section's
-// bold header symmetric whitespace above and below once lifted off its first bar. The sentinel
-// prefix uses a leading space so it never collides with a real category value (which the engine
-// trims/ignores). Every section header (first section included) is drawn via the single
-// `tblSectionTopHeader` mark below, lifted by a fixed px from its section's first bar.
+// `fy` band. The band itself holds only the categories; each non-first section is then moved down by
+// a FIXED `sectionGapPx` after Plot renders (facet-chrome.ts spreadSections), so the gap holds the
+// section's bold header and does not grow with the row pitch, as a run of empty band slots did. Every
+// section header (first section included) is drawn via the single `tblSectionTopHeader` mark below,
+// lifted `sectionHeaderLift` px above its section's first row.
 
-/** Sentinel prefix marking a section's empty spacer band slot. */
-export const SECTION_SPACER_PREFIX = " section:";
-/** Number of empty band slots reserved above each non-first section. Two slots (~2×row) give the
- *  header symmetric whitespace above and below at the dense row heights that exposed the defect;
- *  the header is lifted a fixed px from its section's first bar, so both gaps read as deliberate. */
-export const SECTION_SPACER_SLOTS = 2;
-/** The i-th spacer band value for a section (unique per slot so the band domain has no dup keys). */
-export function sectionSpacerSlot(section: string, i: number): string {
-  return `${SECTION_SPACER_PREFIX}${i}:${section}`;
+/** Px a section break adds between the last row slot of one section and the first row slot of the
+ *  next: one header line at the category font with SECTION_HEADER_GAP clear above and below it. */
+export function sectionGapPx(catFont: number = FACETED_CAT_LABEL_PX): number {
+  return 2 * SECTION_HEADER_GAP + catFont;
 }
-/** Whether a band value is a section spacer sentinel (not a real category). */
-export function isSectionSpacer(v: string): boolean {
-  return v.startsWith(SECTION_SPACER_PREFIX);
+/** How far a section header's em-box top sits above its section's first row: the header line plus
+ *  SECTION_HEADER_GAP clear below it. */
+export function sectionHeaderLift(catFont: number): number {
+  return SECTION_HEADER_GAP + catFont;
 }
 
-// The FIRST section has no leading spacer slot (so the figure doesn't open with a big empty gap);
-// its header is faceted on that section's FIRST CATEGORY and lifted up into the (enlarged) top
-// margin via a negative dy, so it sits just above the section's first bar at the very top.
+// A section header is faceted on its section's FIRST CATEGORY and lifted above that row via a
+// negative dy: into the section gap, or for the first section into the (enlarged) top margin.
 export function tblSectionTopHeader(
   header: { category: string; label: string },
   marginLeft: number = TBL_MARGIN_LEFT,

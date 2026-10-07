@@ -148,7 +148,7 @@ export function buildStackedMarks(
   }
 
   // Sections (horizontal only): one bar per category, so a sectioned stack takes the single-series
-  // sectioned bar's layout — the section-grouped category band (with header spacer slots) on `fy`,
+  // sectioned bar's layout — the section-grouped category band (with its section gaps) on `fy`,
   // one inner `y` slot — and every mark placed on a category row binds to that fy row. Plot stacks
   // within each facet, so each row is still one stack. See category-band.ts.
   const band = categoryBand(data, catField, categories, spec, horizontal);

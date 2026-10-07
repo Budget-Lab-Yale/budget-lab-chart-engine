@@ -223,8 +223,8 @@ const MIN_CHART_WIDTH = 390;
 const FIXED_CHART_HEIGHT = 400;
 
 /** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
- *  band slots (grouped → nSeries bars per category; stacked/single → one), plus section spacer
- *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
+ *  band slots (grouped → nSeries bars per category; stacked/single → one), plus the fixed section
+ *  gaps and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; the helper floors short horizontals at it too. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
@@ -235,7 +235,7 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   if (spec.chartType === "treemap") return treemapHeight(720);
   // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
-  // same as a single-series horizontal bar, section spacers included).
+  // same as a single-series horizontal bar, section gaps included).
   if (!growsWithRows(spec)) {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;

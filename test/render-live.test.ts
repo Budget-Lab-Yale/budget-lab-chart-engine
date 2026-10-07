@@ -254,7 +254,7 @@ describe("computeChartHeight", () => {
     expect(computeChartHeight(spec, catRows(cats, ["X", "Y", "Z"]))).toBe(24 * 22 + 80);
   });
 
-  it("adds height for section spacer rows (first section has no spacer)", () => {
+  it("adds a fixed gap per section break (first section has none)", () => {
     const base: ChartSpec = {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
       series_order: ["X", "Y"], data: "x",
@@ -269,9 +269,9 @@ describe("computeChartHeight", () => {
       { ...base, columns: { x: "time", series: "series", section: "sec" } },
       rows,
     );
-    // 2 sections → SECTION_SPACER_SLOTS (2) spacer slots (2 × 44px) + 16px top header → sectioned
-    // is taller.
-    expect(sectioned).toBe(unsectioned + 2 * 44 + 16);
+    // 2 sections → one fixed 33px section gap (not band slots, so not 44px row-sized) + 16px top
+    // header → sectioned is taller.
+    expect(sectioned).toBe(unsectioned + 33 + 16);
   });
 });
 

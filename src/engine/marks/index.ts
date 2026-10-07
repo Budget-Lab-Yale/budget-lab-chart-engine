@@ -232,6 +232,11 @@ export interface MarkLayers {
    *  this signals assemblePlot to run the fy-oriented facet-chrome collapse (continuous
    *  full-height vertical gridlines + one value-axis label row at the bottom). */
   fyScaleOpts?: Record<string, unknown>;
+  /** Sectioned `fy` band: the first category of every non-first section (`before`) and the fixed px
+   *  each of those sections moves down by after Plot renders (facet-chrome.ts spreadSections), so a
+   *  section gap does not scale with the row pitch. assemblePlot carves the gaps out of the
+   *  requested height, so the chart still renders exactly that tall. */
+  sectionGaps?: { before: string[]; px: number };
   /** Optional: a mark layer that owns the y-scale (horizontal bars put the category band
    *  on `y`) supplies y-scale options here; merged over assemblePlot's value-axis y. When
    *  present, assemblePlot treats the chart as horizontal: it skips the vertical value

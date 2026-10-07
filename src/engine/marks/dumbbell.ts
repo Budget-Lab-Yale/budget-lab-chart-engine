@@ -19,8 +19,9 @@ import {
   horizontalLeftGutter,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
-  sectionSpacerSlot,
-  SECTION_SPACER_SLOTS,
+  sectionGapPx,
+  sectionHeaderLift,
+  horizontalValueAxisMargins,
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { markerInk, type MarkerInk, type MarkerStyle } from "../marker-ink";
@@ -100,7 +101,6 @@ export function buildDumbbellMarks(
       if (domain.length === 0) {
         topSectionHeader = { category: cats[0] as string, label: labelOf(s) };
       } else {
-        for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
         sectionHeaders.push({ category: cats[0] as string, label: labelOf(s) });
       }
       for (const cat of cats) domain.push(cat);
@@ -139,8 +139,8 @@ export function buildDumbbellMarks(
   const connWidth = connCfg.width ?? 1.5;
   const connDash =
     connCfg.style === "dashed" ? "5 3" : connCfg.style === "dotted" ? "1 3" : undefined;
-  // Category-axis binding. Sectioned horizontal puts each category (and spacer) on an `fy` facet
-  // row with a single inner-y slot — the bar section topology — so header/spacing is Plot-managed.
+  // Category-axis binding. Sectioned horizontal puts each category on an `fy` facet row with a
+  // single inner-y slot — the bar section topology, section gaps included.
   // Otherwise the category is the plain band (y for horizontal, x for vertical). Sections and
   // small-multiples panes both want `fy`, so they are mutually exclusive (sectioned → no panes).
   const SINGLE_SLOT = "_v";
@@ -263,20 +263,22 @@ export function buildDumbbellMarks(
       : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
 
     if (sectioned) {
-      // fy-facet topology (identical to horizontal bars): category band on `fy` (incl. spacer
-      // slots), a single inner-y slot for the dots, value on `x`. Headers + labels come from the
-      // shared fy-bound helpers (tblFacetGroupYAxis + tblSectionTopHeader) so spacing is Plot-managed.
-      const SECTION_HEADER_GAP = 10;
-      const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
-      const hMarginTop = Math.max(SECTION_HEADER_GAP + 12, topSectionHeader ? topHeaderLift + SECTION_HEADER_GAP : 0);
+      // fy-facet topology (identical to horizontal bars): category band on `fy`, a single inner-y
+      // slot for the dots, value on `x`. Headers + labels, the header lift, the section gap and the
+      // top margin come from the same shared helpers the bar builders use (category-band.ts).
+      const topHeaderLift = sectionHeaderLift(catFont);
+      const hMarginTop = horizontalValueAxisMargins(undefined, {
+        sectioned: true,
+        ...(topSectionHeader ? { topHeaderLift } : {}),
+      }).marginTop;
       // With fy faceting Plot emits dots facet-by-facet (category order), series within — so tag in
       // that order, not the series-major draw order used for the flat band.
       const tagOrder = categories.flatMap((cat) =>
         dotData.filter((d) => (d as unknown as Record<string, string>)[catField] === cat),
       );
       // The section gap is cleared by BREAKING the continuous value gridlines/baseline across it
-      // (assemble-plot's collapseFacetChromeY reads the fy spacer slots) — so no mask is needed and
-      // the header sits in genuinely empty space.
+      // (assemble-plot's collapseFacetChromeY, from the gaps spreadSections opens) — so no mask is
+      // needed and the header sits in genuinely empty space.
       return {
         underlay,
         overlay,
@@ -289,6 +291,9 @@ export function buildDumbbellMarks(
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
         fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: 0.02, align: 0, axis: null },
+        ...(sectionHeaders.length
+          ? { sectionGaps: { before: sectionHeaders.map((h) => h.category), px: sectionGapPx(catFont) } }
+          : {}),
         xAxisMarks: ctx.hideCategoryLabels
           ? []
           : [

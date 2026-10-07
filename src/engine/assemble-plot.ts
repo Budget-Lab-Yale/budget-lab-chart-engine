@@ -10,6 +10,7 @@ import type { PaneTitleCell } from "./axes";
 import {
   collapseFacetChrome,
   collapseFacetChromeY,
+  spreadSections,
   collapseFacetGridChrome,
   GRIDLINE_CLASS,
   ZERO_BASELINE_CLASS,
@@ -1138,12 +1139,16 @@ export function assemblePlot({
   //    reference line, so no later stroke paints over them.
   marks.push(...labelMarks);
 
+  const sectionGaps = layers.fyScaleOpts && layers.sectionGaps?.before.length ? layers.sectionGaps : undefined;
+  const sectionGapTotal = sectionGaps ? sectionGaps.before.length * sectionGaps.px : 0;
   const plotOpts: Record<string, unknown> = {
     ...tblPlotDefaults({
       // Horizontal bars override marginBottom (the value-tick row is short; the inherited
       // categorical-label bottom margin would leave a big empty band under the axis).
       marginBottom: layers.marginBottom ?? xOpts.marginBottom,
-      ...(height != null ? { height } : {}),
+      // A sectioned fy band renders its section gaps after Plot (spreadSections), so Plot gets the
+      // height without them and the finished chart is exactly `height` tall.
+      ...(height != null ? { height: height - sectionGapTotal } : {}),
       ...(marginRight != null ? { marginRight } : {}),
       // Horizontal bars supply a responsive left gutter sized to their longest category
       // label (axes.horizontalLeftGutter); vertical charts leave it undefined → default. The
@@ -1239,6 +1244,8 @@ export function assemblePlot({
     );
   }
 
+  const sectionGapRanges = sectionGaps ? spreadSections(svg, { before: sectionGaps.before, gapPx: sectionGaps.px }) : [];
+
   svg.dataset.marginLeft = String((plotOpts.marginLeft as number) ?? 0);
   svg.dataset.marginRight = String((plotOpts.marginRight as number) ?? 8);
   svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
@@ -1257,15 +1264,12 @@ export function assemblePlot({
     // Horizontal grouped: collapse the per-row-facet value chrome to continuous full-height
     // vertical gridlines + one value-axis tick-label row at the bottom.
     const svgHeight =
-      Number(svg.getAttribute("height")) || (plotOpts.height as number) || 400;
+      Number(svg.getAttribute("height")) || (plotOpts.height as number) + sectionGapTotal || 400;
     collapseFacetChromeY(svg, {
       height: svgHeight,
       marginTop: (plotOpts.marginTop as number) ?? 18,
       marginBottom: (plotOpts.marginBottom as number) ?? 24,
-      // The fy band domain (categories + section spacers) drives the section-gap gridline break.
-      ...(Array.isArray(layers.fyScaleOpts?.domain)
-        ? { fyDomain: layers.fyScaleOpts!.domain as string[] }
-        : {}),
+      ...(sectionGapRanges.length ? { sectionGaps: sectionGapRanges } : {}),
     });
   } else if (gridFaceted) {
     // Shared-mode small-multiples grid: Plot repeated the y-tick labels in every column and

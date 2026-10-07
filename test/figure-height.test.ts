@@ -216,7 +216,7 @@ describe("renderFigure — per-facet pane heights (ragged horizontal facets, Tas
       nCategories: 5,
       nSeries: 2,
       grouped: false,
-      nSpacers: 0,
+      nSectionBreaks: 0,
       maxLabelLines: 1,
       extraTopPx: 0,
     });

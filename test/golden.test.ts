@@ -24,7 +24,8 @@ import {
   TBL_MARGIN_LEFT,
   TBL_MARGIN_RIGHT,
 } from "../src/engine/theme";
-import { paneTitleMark, temporalXTicks, isSectionSpacer } from "../src/engine/axes";
+import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
+
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { resolveColor } from "../src/engine/palette";
 import { computeYAxis } from "../src/engine/scales";
@@ -66,6 +67,9 @@ function absX(el: Element | null): number {
 // Mirror of absX: absolute y of an SVG element, accumulating every ancestor
 // `transform="translate(x,y)"` up to the root <svg>. Used to assert a section header's
 // vertical position lands within the reserved top margin (not clipped above y=0).
+/** The retired section-spacer band sentinel (sections used to be padded with " section:" slots). */
+const isSectionSpacer = (t: string): boolean => t.startsWith(" section:");
+
 function absY(el: Element | null): number {
   let y = 0;
   let n: Element | null = el;
@@ -987,7 +991,7 @@ describe("bar builder — sectioned horizontal category axis", () => {
     expect(headers).toEqual(["Durable goods", "Nondurable goods", "Services"]);
   });
 
-  it("non-first section header has a comfortable, comparable whitespace budget above and below (dense chart)", () => {
+  it("non-first section header has SECTION_HEADER_GAP clear above and below (dense chart)", () => {
     const rows = parseCsv("./fixtures/sectioned-dense.csv");
     const spec: ChartSpec = {
       chartType: "bar",
@@ -1012,14 +1016,17 @@ describe("bar builder — sectioned horizontal category axis", () => {
     const lastAbove = rectY("Hotel");
     const firstBelow = rectY("P01");
 
-    const gapAbove = headerY - lastAbove; // header sits below the last Group A row
-    const gapBelow = firstBelow - headerY; // and above the first Group B row
-    // 36 sits strictly between the measured pre-fix (~29px, one spacer slot) and post-fix (~45px,
-    // two-slot block + shared topHeaderLift) values at this figure height, so this is RED on the
-    // one-slot spacer and GREEN on the two-slot block.
-    expect(gapAbove).toBeGreaterThan(36);
-    // Comparable, not identical — within ~1.5x of each other (post-fix measures ~1.15).
-    expect(Math.max(gapAbove, gapBelow) / Math.min(gapAbove, gapBelow)).toBeLessThan(1.5);
+    // Row pitch: the smallest step between category labels. Each bar is 0.8 of it, centred on its
+    // label, so the clear space is measured from the bar edges to the header's 13px line.
+    const ys = Array.from(svg.querySelectorAll("g.tbl-cat-label text")).map((t) => absY(t)).sort((x, y) => x - y);
+    const pitch = Math.min(...ys.slice(1).map((y, i) => y - ys[i]!));
+    const gapAbove = headerY - (lastAbove + 0.4 * pitch); // last Group A bar → header line
+    const gapBelow = firstBelow - 0.4 * pitch - (headerY + 13); // header line → first Group B bar
+    // SECTION_HEADER_GAP (10px) clear on both sides; above also holds the row's inner padding.
+    expect(gapBelow).toBeGreaterThanOrEqual(9);
+    expect(gapBelow).toBeLessThanOrEqual(11);
+    expect(gapAbove).toBeGreaterThanOrEqual(9);
+    expect(gapAbove).toBeLessThanOrEqual(11 + 0.2 * pitch);
   });
 });
 
