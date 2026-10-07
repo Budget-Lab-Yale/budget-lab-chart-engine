@@ -116,6 +116,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   labels the horizontal chart never draws there.
 
 ### Fixed
+- A short category label of wide letters could reach the plot on a horizontal bar, stack or dumbbell
+  ("Gamma" touched a dumbbell's zero rule): the left gutter is sized from an average letter width,
+  which runs short on such labels. The gutter now also clears each one-line label's width, measured
+  from the font's letter widths, by 8px. Live, in the PNG export, the height models and small-multiple
+  panes. A label that already had the room leaves the gutter as it was, so no published figure moves.
 - `barStack.netDisplay: text` printed a negative net as its magnitude ("15" for -15), so a stack
   netting below zero read as a gain. It now prints it with a leading minus, outside any prefix, the
   sign style of the hover card and the waterfall labels (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.

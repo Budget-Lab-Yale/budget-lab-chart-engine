@@ -430,6 +430,31 @@ export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axi
   return text.length * fontSize * AVG_CHAR_EM;
 }
 
+/** Figtree's advance width (1/1000 em) at the category-label weight (500) for each printable ASCII
+ *  character, U+0020 to U+007E, measured in Chromium with the embedded font. */
+const FIGTREE_500_ADVANCE = [
+  244, 302, 345, 629, 561, 793, 645, 212, 360, 360, 483, 626, 235, 414, 219, 401,
+  643, 416, 564, 547, 624, 576, 569, 542, 614, 569, 266, 271, 626, 626, 626, 506,
+  990, 687, 611, 722, 691, 591, 546, 756, 751, 276, 525, 625, 524, 849, 774, 779,
+  586, 782, 631, 612, 561, 706, 701, 967, 632, 616, 638, 329, 401, 329, 559, 437,
+  233, 516, 589, 542, 588, 548, 376, 591, 561, 240, 275, 500, 227, 857, 561, 580,
+  594, 581, 349, 466, 384, 561, 530, 798, 492, 540, 488, 388, 257, 388, 595,
+];
+/** A category label's rendered width (px): Figtree's advances summed, kerning ignored; a character
+ *  outside printable ASCII counts AVG_CHAR_EM. The widest line of a label with hard breaks. */
+export function measuredLabelWidth(text: string, fontSize: number = TBL.size.axis): number {
+  let widest = 0;
+  for (const line of text.split("\n")) {
+    let em = 0;
+    for (const ch of line) {
+      const code = ch.codePointAt(0) as number;
+      em += code >= 32 && code < 127 ? (FIGTREE_500_ADVANCE[code - 32] as number) / 1000 : AVG_CHAR_EM;
+    }
+    widest = Math.max(widest, em * fontSize);
+  }
+  return widest;
+}
+
 /** Greedily word-wrap a label into as many lines as needed so each line's estimated width is
  *  ≤ `maxPx` (a single over-long word still gets its own line). Returns the lines joined by "\n"
  *  (Plot renders that as multi-line text). A label that already fits returns unchanged (no "\n"),
@@ -493,7 +518,16 @@ export function horizontalLeftGutter(
   }: { pad?: number; min?: number; max?: number; fontSize?: number; indent?: number } = {},
 ): number {
   const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(categoryText(c), fontSize)), 0);
-  return Math.round(Math.max(min, Math.min(max, longest + pad)) + indent);
+  const estimated = Math.max(min, Math.min(max, longest + pad));
+  // The estimate runs short on a short label of wide glyphs ("Gamma" is 45.5px at 13px, estimated
+  // 35.75), so the label reached the plot. Floor the gutter at each one-line label's glyph-measured
+  // width plus GUTTER_TEXT_PAD. A label that already had that room leaves the gutter unchanged; a
+  // label the estimate wraps (it reaches `max`) is left to the wrap.
+  const measured = categories.reduce((w, c) => {
+    const text = categoryText(c);
+    return estimateLabelWidth(text, fontSize) + pad > max ? w : Math.max(w, measuredLabelWidth(text, fontSize));
+  }, 0);
+  return Math.round(Math.max(estimated, Math.min(max, measured + GUTTER_TEXT_PAD)) + indent);
 }
 
 const HVALUE_TICK_PX = 18; // one value-tick row (top)
