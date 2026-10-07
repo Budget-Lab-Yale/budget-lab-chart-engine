@@ -153,21 +153,20 @@ function tooltipSeriesNameChartTypeError(spec: {
   return `tooltip_series_name is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the series name labels a tooltip ROW, not the header`;
 }
 
-/** `tooltip_section` puts the section in the hover CARD's header, so it needs sections and a card:
- *  rejected without `columns.section` (no section to name) and on a bar (a sectioned bar hovers
- *  with value pills, never a card). PRESENCE, not value, as the sibling gates. `columns.section`
- *  itself is limited to horizontal bar / stacked / dumbbell by sectionColumnError. */
+/** `tooltip_section` puts the section in the hover CARD's header, so it needs sections: rejected
+ *  without `columns.section` (no section to name). PRESENCE, not value, as the sibling gates.
+ *  Accepted on every chart type `columns.section` allows (horizontal bar / stacked / dumbbell, by
+ *  sectionColumnError): where the chart hovers with value pills rather than a card (a bar standalone
+ *  or in a coordinated pane, a stack in pills mode) it is a no-op, but a bar or stack pane under
+ *  `small_multiples.coordinated_cursor: false` hovers with the card, and the hover mode can depend
+ *  on the data (`barStack.netDisplay: auto`). */
 function tooltipSectionError(spec: {
-  chartType?: unknown;
   tooltip_section?: unknown;
   columns?: { section?: unknown };
 }): string | null {
   if (spec.tooltip_section === undefined) return null;
   if (spec.columns?.section == null) {
     return `tooltip_section needs columns.section — it names the hovered row's section in the hover card's header`;
-  }
-  if (spec.chartType === "bar") {
-    return `tooltip_section is not supported on chartType "bar" — a bar hovers with value pills, not a card with a header`;
   }
   return null;
 }
@@ -938,9 +937,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (pcErrors.length) return { valid: false, errors: pcErrors };
   const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
   if (tsnErr) return { valid: false, errors: [tsnErr] };
-  const tsecErr = tooltipSectionError(
-    spec as { chartType?: unknown; tooltip_section?: unknown; columns?: { section?: unknown } },
-  );
+  const tsecErr = tooltipSectionError(spec as { tooltip_section?: unknown; columns?: { section?: unknown } });
   if (tsecErr) return { valid: false, errors: [tsecErr] };
   const talErr = tooltipAxisLabelChartTypeError(
     spec as { chartType?: unknown; tooltip_x_label?: unknown; tooltip_y_label?: unknown },

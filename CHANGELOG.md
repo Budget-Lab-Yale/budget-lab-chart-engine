@@ -50,9 +50,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `tooltip_section: true` (opt-in, default false) on a sectioned chart puts the hovered row's
   section in the hover card's header, before the category: `+ Corporate · Before response`, through
   `section_labels` and `x_labels`. Horizontal dumbbells and card-hover horizontal stacks, standalone
-  and in small-multiples panes; card header only (pills and the coordinated echo are unchanged).
-  Validation rejects it without `columns.section` and on a `bar`, which has no card. See CONFIG-SPEC
-  `tooltip_section`.
+  and in small-multiples panes, and bar and pills-mode stack panes of a small-multiples figure with
+  `coordinated_cursor: false`; card header only (pills and the coordinated echo are unchanged, so it
+  does nothing where the chart hovers with pills). Validation rejects it without `columns.section`.
+  See CONFIG-SPEC `tooltip_section`.
 - The `onHover` payload (and the `tbl-hover` event's `detail`) carries `section` on a chart with
   `columns.section`: the hovered row's raw section value, so a host can tell apart two rows that
   share a category across sections. Absent on a chart without sections.

@@ -878,10 +878,11 @@ export interface ChartSpec {
    *  `point_label` tokens. Other chart types use the series name as a ROW label against a value, so
    *  suppressing it there would leave unlabelled numbers — validation rejects it. Default true. */
   tooltip_series_name?: boolean;
-  /** Sectioned charts (`columns.section`) whose hover shows a card — a horizontal stack hovering
-   *  with its card, a horizontal dumbbell: the card's header reads "<section> · <category>", each
-   *  through `section_labels` / `x_labels`. Validation rejects it without `columns.section` and on
-   *  a bar, which hovers with value pills. Default false. */
+  /** Sectioned charts (`columns.section`) whose hover shows a card — a horizontal dumbbell, a
+   *  horizontal stack hovering with its card, and a bar or stack pane of a small-multiples figure
+   *  with `coordinated_cursor: false`: the card's header reads "<section> · <category>", each
+   *  through `section_labels` / `x_labels`. A no-op where the chart hovers with value pills.
+   *  Validation rejects it without `columns.section`. Default false. */
   tooltip_section?: boolean;
   /** Scatter only: override the x-value row's label in the hover card. Falls back to `x_axis_title`,
    *  and to the literal "x" when that too is absent. An axis title is written to span the plot; a

@@ -126,7 +126,8 @@ function scatterPointHoverOptions(a: {
 }
 
 /** `tooltip_section: true` → the card-header options every sectioned hover card takes (stack card,
- *  dumbbell; standalone and panes). Card only: the pills and the coordinated echo never get them. */
+ *  dumbbell; standalone and panes; a bar or stack pane under `coordinated_cursor: false`). Card
+ *  only: the pills and the coordinated echo never get them. */
 function tooltipSectionOpts(spec: ChartSpec): { tooltipSection?: boolean; sectionLabels?: Record<string, string> } {
   if (spec.tooltip_section !== true) return {};
   return { tooltipSection: true, ...(spec.section_labels ? { sectionLabels: spec.section_labels } : {}) };
