@@ -13,6 +13,7 @@
 // here; the type-only import of `LegendItem` from ./index.js carries no runtime edge, and
 // engine/index.ts does not import this file, so nothing new is circular.
 import { resolveColumns } from "../spec/columns.js";
+import { rowsInSectionOrder } from "../spec/section-key.js";
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
@@ -76,8 +77,12 @@ export function resolveLegendPosition(
   }
   if (spec.chartType === "stacked") {
     if (seriesCount >= 5) return "right";
-    const valueCol = resolveColumns(spec, rows).value;
-    const isDiverging = rows.some((r) => {
+    const cols = resolveColumns(spec, rows);
+    const valueCol = cols.value;
+    // A section that section_order leaves out is not drawn, so its negatives make nothing diverge.
+    const sectionField = cols.section;
+    const drawn = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null);
+    const isDiverging = drawn.some((r) => {
       const v = typeof r._y === "number" ? r._y : Number(r[valueCol]);
       return Number.isFinite(v) && v < 0;
     });

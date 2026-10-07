@@ -12,7 +12,7 @@ import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import { ownValue } from "../spec/own-key";
-import { sectionKeyer, categoryText } from "../spec/section-key";
+import { sectionKeyer, categoryText, rowsInSectionOrder } from "../spec/section-key";
 import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
@@ -431,6 +431,7 @@ function prepareRows(
   // label repeated across sections stays two rows. Bare category when nothing repeats (in the
   // figure, when a small-multiples figure has decided for all its panes).
   const sectionField = cols.section;
+  rows = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] : null);
   const keyOf =
     sectionField && adapter.xField === "_xc"
       ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "", sectionKeyed)

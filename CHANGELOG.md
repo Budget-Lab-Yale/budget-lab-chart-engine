@@ -68,6 +68,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   they disagreed.
 
 ### Fixed
+- `section_order` left a section out of the drawing but not out of the chart: its rows still fed the
+  value axis, the height, a stack's net marker (a hidden negative gave a visible all-positive stack a
+  net dot) and a stack's legend placement. They are now dropped before anything reads them, live,
+  in small multiples and in the PNG export, on horizontal bars, stacks and dumbbells.
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
   validation as a palette name and could make the chart throw at render; it is now rejected at load
   like any unknown name, on every chart type. No published figure uses one.
@@ -254,6 +258,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 
+- **`section_order` drops the rows of a section it leaves out** before the axis, height, net marker
+  and legend placement read them. **No published figure is affected**: the archive's two
+  `section_order` specs (the tariff model update's `eta-effect` and `etas`) list every section their
+  data carries.
 - **Sections: a label repeated across sections draws one row per section**, and two rows for the
   same section + category + series are a validation error. **No published figure is affected**: the
   archive's sectioned specs — the tariff model update's `eta-effect` and `etas` (horizontal bar),

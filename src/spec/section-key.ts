@@ -72,3 +72,16 @@ export function sectionKeyer<R>(
     return c === "" ? c : sectionCategoryKey(sectionOf(r) ?? "", c);
   };
 }
+
+/** `section_order` is an inclusion filter: the rows of a section it leaves out are dropped here,
+ *  before anything reads them (net mode, the value domain, the height, hover), as series_order's
+ *  are. Identity when there is no section column or no `section_order`. */
+export function rowsInSectionOrder<R>(
+  rows: R[],
+  sectionOrder: readonly string[] | undefined,
+  sectionOf: ((r: R) => string | null | undefined) | null,
+): R[] {
+  if (!sectionOf || !sectionOrder || !sectionOrder.length) return rows;
+  const listed = new Set(sectionOrder);
+  return rows.filter((r) => listed.has(sectionOf(r) ?? ""));
+}

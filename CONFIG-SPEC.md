@@ -1166,7 +1166,7 @@ headers show on the leftmost pane).
 | field | type | notes |
 |---|---|---|
 | `columns.section` | string | Column whose distinct values define the sections. |
-| `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`). |
+| `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`): a section it leaves out is not drawn, and its rows do not count toward the value axis, the chart height, a stack's net marker or the legend placement. |
 | `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
 **Repeated labels.** A row is identified by its section and category together; what it displays is

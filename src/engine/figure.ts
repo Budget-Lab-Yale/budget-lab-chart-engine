@@ -13,7 +13,7 @@ import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "../spec/parse-time";
 import { ownValue } from "../spec/own-key";
-import { sectionKeyer, categoryText, labelsRepeatAcrossSections } from "../spec/section-key";
+import { sectionKeyer, categoryText, labelsRepeatAcrossSections, rowsInSectionOrder } from "../spec/section-key";
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
@@ -125,6 +125,7 @@ export function growsWithRows(spec: ChartSpec): boolean {
  *  all agree. Caller must confirm `growsWithRows(spec)` before calling. */
 export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   const cols = resolveColumns(spec, rows);
+  rows = inSectionOrder(spec, cols, rows);
   const keyOf = rowCategoryKey(rows, cols);
   const categories = orderedCategories(rows, keyOf, spec);
   const nCats = Math.max(1, categories.length);
@@ -172,6 +173,12 @@ function rowCategoryKey(rows: TidyRow[], cols: { x: string; section?: string | n
   const sectionField = cols.section;
   if (!sectionField) return (r) => (r[cols.x] as string) ?? "";
   return sectionKeyer(rows, (r) => r[cols.x] as string, (r) => r[sectionField] as string);
+}
+
+/** `rows` without those of a section `section_order` leaves out, as a pane's row prep drops them. */
+function inSectionOrder(spec: ChartSpec, cols: { section?: string | null }, rows: TidyRow[]): TidyRow[] {
+  const sectionField = cols.section;
+  return rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null);
 }
 
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
@@ -470,6 +477,7 @@ export function renderFigure(
   if (!facetField) {
     throw new Error("small_multiples requires a facet column (set columns.facet).");
   }
+  rows = inSectionOrder(spec, cols, rows);
 
   // The figure's series, resolved ONCE over ALL panes' rows — by the same rule renderPane applies to
   // a pane's own rows (series_order is filter + order, else encounter order).
