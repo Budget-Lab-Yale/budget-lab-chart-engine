@@ -20,6 +20,7 @@ import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
 import { ownValue } from "./own-key";
+import { sectionCategoryKey, sectionOfKey, categoryText } from "./section-key";
 import { resolveRugTracks, fullyHiddenRugTracks, rugBoundPosition } from "./rug";
 import { temporalValueError, quarterValueError } from "./parse-time";
 import type { ResolvedColumns } from "./columns";
@@ -1427,6 +1428,31 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
+  // A sectioned row is identified by section + category (spec/section-key.ts), so the same label may
+  // repeat across sections — but one section + category carries one value per series (per pane).
+  // A second row would be drawn on top of the first, or merged into it by the hover, unseen.
+  if (cols.section && columns.has(cols.section) && spec.xAxisType === "categorical") {
+    const secField = cols.section;
+    const seen = new Set<string>();
+    const reported = new Set<string>();
+    for (const r of rows) {
+      const cat = r[cols.x] as string;
+      if (cat == null || cat === "") continue;
+      const sec = (r[secField] as string) ?? "";
+      const series = cols.series ? ((r[cols.series] as string) ?? "") : null;
+      const facet = cols.facet ? ((r[cols.facet] as string) ?? "") : null;
+      const id = JSON.stringify([facet, sec, cat, series]);
+      if (!seen.has(id)) { seen.add(id); continue; }
+      if (reported.has(id)) continue;
+      reported.add(id);
+      const what = series != null ? `more than one ${JSON.stringify(series)} value` : "more than one value";
+      const where = facet != null ? ` in facet ${JSON.stringify(facet)}` : "";
+      errors.push(
+        `category ${JSON.stringify(cat)} in section ${JSON.stringify(sec)}${where} has ${what} — rows are identified by section + category, so each section's row carries one value per series`,
+      );
+    }
+  }
+
   // Cross-reference: every category named by x_order must appear in the categorical x column.
   // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
   // typo. Only checked on a categorical x-axis (it is a no-op for numeric/temporal x).
@@ -1510,33 +1536,27 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     const oneFacetPerRow = spec.small_multiples.columns === 1;
     if (!oneFacetPerRow && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal" && spec.xAxisType === "categorical" && cols.x) {
       const xField = cols.x;
+      const secField = cols.section;
+      // Panes are compared row by row, and a sectioned row is its section + category: "Top 1%"
+      // under two sections is two rows a facet must both carry (spec/section-key.ts).
+      const rowId = (r: TidyRow): string =>
+        secField ? sectionCategoryKey((r[secField] as string) ?? "", r[xField] as string) : (r[xField] as string);
       const catsByFacet = new Map<string, Set<string>>();
       const allCats = new Set<string>();
       for (const r of rows) {
         const facet = r[facetField] as string;
         const cat = r[xField] as string;
         if (!facet || !cat) continue;
-        allCats.add(cat);
+        const id = rowId(r);
+        allCats.add(id);
         if (!catsByFacet.has(facet)) catsByFacet.set(facet, new Set());
-        (catsByFacet.get(facet) as Set<string>).add(cat);
+        (catsByFacet.get(facet) as Set<string>).add(id);
       }
-      const sectionOf = cols.section
-        ? (() => {
-            const secField = cols.section as string;
-            const m = new Map<string, string>();
-            for (const r of rows) {
-              const cat = r[xField] as string;
-              const sec = r[secField] as string;
-              if (cat && sec != null && sec !== "" && !m.has(cat)) m.set(cat, sec);
-            }
-            return m;
-          })()
-        : null;
       for (const [facet, cats] of catsByFacet) {
         const missing = [...allCats].filter((c) => !cats.has(c));
         if (missing.length) {
-          const named = sectionOf
-            ? missing.map((c) => `${JSON.stringify(c)} (section ${JSON.stringify(sectionOf.get(c) ?? "?")})`)
+          const named = secField
+            ? missing.map((id) => `${JSON.stringify(categoryText(id))} (section ${JSON.stringify(sectionOfKey(id) || "?")})`)
             : missing.map((c) => JSON.stringify(c));
           errors.push(
             `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars/stacks share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,

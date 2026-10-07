@@ -18,6 +18,7 @@ import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
 import { ownValue } from "../../spec/own-key";
+import { categoryText } from "../../spec/section-key";
 import {
   tblBandXAxis,
   tblBandYAxis,
@@ -189,7 +190,8 @@ export function buildBarMarks(
     const fill = categoryColorMap
       ? (d: PreparedRow) => {
           const cat = (d as unknown as Record<string, unknown>)[catField] as string | undefined;
-          const override = cat != null ? ownValue(categoryColorMap, cat) : undefined;
+          // A bare name colours that category in every section (spec/section-key.ts).
+          const override = cat != null ? ownValue(categoryColorMap, categoryText(cat)) : undefined;
           if (override != null) return override;
           return typeof baseFill === "function" ? baseFill(d) : baseFill;
         }

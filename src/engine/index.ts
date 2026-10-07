@@ -12,6 +12,7 @@ import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import { ownValue } from "../spec/own-key";
+import { sectionKeyer, categoryText } from "../spec/section-key";
 import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
@@ -420,6 +421,13 @@ function prepareRows(
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
   // series column ⇒ a single implicit series.
+  // Sectioned axis: a row's category is its section + category key (spec/section-key.ts), so a
+  // label repeated across sections stays two rows. Bare category when nothing repeats.
+  const sectionField = cols.section;
+  const keyOf =
+    sectionField && adapter.xField === "_xc"
+      ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "")
+      : null;
   return rows
     .map((r) => {
       const xRaw = r[cols.x] ?? "";
@@ -443,7 +451,7 @@ function prepareRows(
       if (spec.projected_field) {
         row._projected = isTruthyFlag(r[spec.projected_field]);
       }
-      (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
+      (row as unknown as Record<string, unknown>)[adapter.xField] = keyOf ? keyOf(r) : adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {
           const lo = r[band.lower];
@@ -635,7 +643,9 @@ function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[]): void 
   if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
     const rank = new Map(catOrder.map((c, i) => [c, i] as const));
     const last = catOrder.length;
-    dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
+    // A bare name ranks every section's row of that name (spec/section-key.ts).
+    const rankOf = (r: PreparedRow): number => rank.get(categoryText(r._xc ?? "")) ?? last;
+    dataInScope.sort((a, b) => rankOf(a) - rankOf(b));
   }
 }
 

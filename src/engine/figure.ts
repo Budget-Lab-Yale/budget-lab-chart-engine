@@ -13,6 +13,7 @@ import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "../spec/parse-time";
 import { ownValue } from "../spec/own-key";
+import { sectionKeyer, categoryText } from "../spec/section-key";
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
@@ -124,7 +125,8 @@ export function growsWithRows(spec: ChartSpec): boolean {
  *  all agree. Caller must confirm `growsWithRows(spec)` before calling. */
 export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   const cols = resolveColumns(spec, rows);
-  const categories = orderedCategories(rows, cols.x, spec);
+  const keyOf = rowCategoryKey(rows, cols);
+  const categories = orderedCategories(rows, keyOf, spec);
   const nCats = Math.max(1, categories.length);
   const series = new Set<string>();
   for (const r of rows) {
@@ -134,11 +136,11 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
   const nSeries =
     spec.series_order && spec.series_order.length ? spec.series_order.length : Math.max(1, series.size);
   const grouped = spec.chartType === "bar" && nSeries > 1;
-  const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, categories) : 0;
+  const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, categories) : 0;
   const nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
   const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX });
   const maxLabelLines = categories.reduce(
-    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
+    (m, c) => Math.max(m, labelLineCount(categoryText(c), gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
     1,
   );
   return horizontalBarHeight({
@@ -163,18 +165,27 @@ export function figurePaneHeight(spec: ChartSpec): number | undefined {
   return 240;
 }
 
+/** Each raw row's category key, as renderPane's row prep assigns it (spec/section-key.ts): section +
+ *  category when a label repeats across sections, else the category. Height and gutter sizing
+ *  count rows by this key, so a repeated label is counted once per section, as it is drawn. */
+function rowCategoryKey(rows: TidyRow[], cols: { x: string; section?: string | null }): (r: TidyRow) => string {
+  const sectionField = cols.section;
+  if (!sectionField) return (r) => (r[cols.x] as string) ?? "";
+  return sectionKeyer(rows, (r) => r[cols.x] as string, (r) => r[sectionField] as string);
+}
+
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
  *  — i.e. the number of section spacer slots a sectioned horizontal axis inserts. */
 function countSections(
   rows: TidyRow[],
-  xField: string,
+  keyOf: (r: TidyRow) => string,
   sectionField: string,
   spec: ChartSpec,
   categories: string[],
 ): number {
   const sectionOf = new Map<string, string>();
   for (const r of rows) {
-    const cat = r[xField] as string;
+    const cat = keyOf(r);
     const sec = r[sectionField] as string;
     if (cat && sec != null && !sectionOf.has(cat)) sectionOf.set(cat, sec);
   }
@@ -189,11 +200,11 @@ function countSections(
 /** The category (band) values in render order, SHARED across every pane (so each pane's category
  *  band — and the left-gutter sizing — match): x_order first when set, then data-encounter order.
  *  Used by faceted horizontal bars to size the one shared category gutter. */
-function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): string[] {
+function orderedCategories(rows: TidyRow[], keyOf: (r: TidyRow) => string, spec: ChartSpec): string[] {
   const seen: string[] = [];
   const set = new Set<string>();
   for (const r of rows) {
-    const v = r[xField] as string;
+    const v = keyOf(r);
     if (v != null && v !== "" && !set.has(v)) {
       set.add(v);
       seen.push(v);
@@ -202,7 +213,8 @@ function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): st
   const order = categoryOrderFor(spec);
   if (order && order.length) {
     const rank = new Map(order.map((c, i) => [c, i] as const));
-    seen.sort((a, b) => (rank.get(a) ?? order.length) - (rank.get(b) ?? order.length));
+    const rankOf = (c: string): number => rank.get(categoryText(c)) ?? order.length;
+    seen.sort((a, b) => rankOf(a) - rankOf(b));
   }
   return seen;
 }
@@ -510,7 +522,8 @@ export function renderFigure(
   // with its own category-row count — like a horizontal bar. (Vertical dumbbells facet in a grid.)
   const isHorizontalDumbbell = isHorizontalDumbbellSpec(spec);
   // Every pane's categories, in render order: the input both left-gutter measurements below read.
-  const sharedCategories = isHorizontalBar || isHorizontalDumbbell ? orderedCategories(rows, cols.x, spec) : [];
+  const keyOf = rowCategoryKey(rows, cols);
+  const sharedCategories = isHorizontalBar || isHorizontalDumbbell ? orderedCategories(rows, keyOf, spec) : [];
   // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
   const hGutter = isHorizontalBar
     ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
@@ -547,11 +560,11 @@ export function renderFigure(
         : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
     // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1,
     // each reserving a SECTION_SPACER_SLOTS-slot block.
-    const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
+    const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, sharedCategories) : 0;
     nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
     const maxPx = hGutter - GUTTER_TEXT_PAD;
     const maxLabelLines = sharedCategories.reduce(
-      (m, c) => Math.max(m, labelLineCount(c, maxPx, FACETED_CAT_LABEL_PX)),
+      (m, c) => Math.max(m, labelLineCount(categoryText(c), maxPx, FACETED_CAT_LABEL_PX)),
       1,
     );
     // Height sizes to the BUSIEST pane's category count, not the union: with one-facet-per-row
@@ -560,7 +573,7 @@ export function renderFigure(
     catsByFacet = new Map<string, Set<string>>();
     for (const r of rows) {
       const f = facetField ? (r[facetField] as string) : "";
-      const c = r[cols.x] as string;
+      const c = keyOf(r);
       if (!c) continue;
       if (!catsByFacet.has(f)) catsByFacet.set(f, new Set());
       catsByFacet.get(f)!.add(c);
@@ -688,7 +701,7 @@ export function renderFigure(
         const catSet = new Set<string>();
         const serSet = new Set<string>();
         for (const r of pr) {
-          const c = r[cols.x] as string;
+          const c = keyOf(r);
           if (c) catSet.add(c);
           const s = cols.series ? (r[cols.series] as string) : "";
           if (s) serSet.add(s);

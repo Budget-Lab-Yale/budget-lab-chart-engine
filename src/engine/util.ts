@@ -1,5 +1,6 @@
 import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
+import { categoryText } from "../spec/section-key";
 
 /** `spec` with each repeated `series_order` / `shape_order` entry dropped, the first kept. A repeat is
  *  an author error that validation rejects (Ruling 66), but renderChart does not validate, so every
@@ -108,7 +109,8 @@ export function applyValueLabelHook(
 ): string {
   const hook = hooks?.valueLabel;
   if (!hook) return rendered;
-  return hook({ ...ctx, rendered }) ?? rendered;
+  // The hook names a category by its display text, never a section key (spec/section-key.ts).
+  return hook({ ...ctx, category: categoryText(ctx.category), rendered }) ?? rendered;
 }
 
 /** Parses a `projected_field` (or similar boolean-flag CSV column) value: `1`/`true`/`yes`

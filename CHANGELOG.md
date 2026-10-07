@@ -38,6 +38,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `x_axis_ticks`, small multiples (`shared` and `per-pane`) and the PNG export follow the sectioned
   rows. Validation still rejects `columns.section` on a vertical stack. See CONFIG-SPEC "Section
   axis".
+- A label may repeat across sections (`columns.section`, horizontal bar and dumbbell). A row is
+  identified by section + category and still displays the category, so "Top 1%" under two sections
+  draws two rows, each hovering its own values; before, the second merged silently into the first.
+  `x_order` / `category_order`, `x_labels` and `category_colors` name a bare label and apply to every
+  section containing it (`x_order` orders within each section). The same section + category with two
+  rows for one series is now a validation error, and the faceted ragged-pane check compares section
+  + category. A sectioned chart without a repeated label renders byte-identically.
 
 ### Changed
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error
@@ -245,6 +252,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 
+- **Sections: a label repeated across sections draws one row per section**, and two rows for the
+  same section + category + series are a validation error. **No published figure is affected**: the
+  archive's sectioned specs — the tariff model update's `eta-effect` and `etas` (horizontal bar),
+  and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (dumbbell) — repeat no label
+  across sections and carry no duplicate row, and none is faceted. Their rendered SVG and PNG export
+  are unchanged.
 - **Hover: the bin-range label now hides the tick it covers.** Drawn only on the hovered pane of a
   shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not `false`;
   every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet resolving

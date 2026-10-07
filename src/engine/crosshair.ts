@@ -8,6 +8,7 @@ import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { readLinearScale } from "./plot-scale";
 import { escapeHtml } from "./util";
+import { categoryText } from "../spec/section-key";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
@@ -1130,7 +1131,9 @@ export function buildBandTooltipHtml(
     category, rows, seriesOrder,
   );
 
-  let html = `<div class="tbl-tooltip-head">${escapeHtml(ownValue(categoryLabels, category) ?? category)}</div>`;
+  // `category` may be a section key; the card, the hook and x_labels see the display text.
+  const shown = categoryText(category);
+  let html = `<div class="tbl-tooltip-head">${escapeHtml(ownValue(categoryLabels, shown) ?? shown)}</div>`;
   let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
@@ -1186,7 +1189,7 @@ export function buildBandTooltipHtml(
   // mislabel one for them.
   if (opts.tooltipHook) {
     const hooked = opts.tooltipHook({
-      category,
+      category: shown,
       series: orderedSeries,
       values: valuesBySeries,
       ...(hasTotalRow ? { total } : {}),
@@ -1586,7 +1589,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     // false` still report what the engine resolved even though neither draws its own card.
     if (opts.onHover) {
       const { series, values } = resolveCategorySeriesValues(category, opts.rows, opts.seriesOrder);
-      opts.onHover({ category, series, values, ...(opts.facet != null ? { facet: opts.facet } : {}) });
+      opts.onHover({ category: categoryText(category), series, values, ...(opts.facet != null ? { facet: opts.facet } : {}) });
     }
     if (emitOnly) return;
 
@@ -2516,10 +2519,12 @@ function addCoordCategoryHighlight(
   svgEl: SVGSVGElement,
   plotBottom: number,
   cx: number,
-  category: string,
+  key: string,
   mode: "single" | "wrap" | "rotate",
   axisRows: number[],
 ): void {
+  // The echo reads, and finds its axis label by, the display text (spec/section-key.ts).
+  const category = categoryText(key);
   const box = findAxisLabelBox(svgEl, plotBottom, category);
   const anchorX = box?.cx ?? cx;
   const anchorY = box?.cy ?? axisRows[0];

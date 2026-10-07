@@ -3,6 +3,7 @@
 // two-line temporal x-axis). Marks are returned as opaque Plot mark objects.
 import { Plot, d3 } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
+import { categoryText } from "../spec/section-key";
 
 type Mark = unknown;
 
@@ -484,7 +485,7 @@ export function horizontalLeftGutter(
     fontSize = TBL.size.axis,
   }: { pad?: number; min?: number; max?: number; fontSize?: number } = {},
 ): number {
-  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c, fontSize)), 0);
+  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(categoryText(c), fontSize)), 0);
   return Math.round(Math.max(min, Math.min(max, longest + pad)));
 }
 
@@ -568,11 +569,12 @@ export function tblFacetGroupYAxis(
 ): Mark[] {
   const rows = categories.map((c) => ({ c }));
   const maxPx = marginLeft - GUTTER_TEXT_PAD;
-  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx, fontSize).includes("\n"));
+  // `fy` is the row's key; the label is its display text (spec/section-key.ts).
+  const anyMultiline = categories.some((c) => wrapToWidth(categoryText(c), maxPx, fontSize).includes("\n"));
   return [
     Plot.text(rows, {
       fy: (d: { c: string }) => d.c,
-      text: (d: { c: string }) => wrapToWidth(d.c, maxPx, fontSize),
+      text: (d: { c: string }) => wrapToWidth(categoryText(d.c), maxPx, fontSize),
       frameAnchor: "left",
       dx: -marginLeft,
       textAnchor: "start",

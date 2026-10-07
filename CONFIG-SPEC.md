@@ -67,7 +67,7 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
 | `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
-| `columns.section` | string | Horizontal `bar`, `stacked` and `dumbbell` charts only (validation rejects it on any other chart type and on a vertical chart): column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-charts). |
+| `columns.section` | string | Horizontal `bar`, `stacked` and `dumbbell` charts only (validation rejects it on any other chart type and on a vertical chart): column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). A row is identified by section + category, so the same label may appear in more than one section. See [Section axis](#section-axis-horizontal-charts). |
 | `columns.x0` / `columns.x1` | string | Histograms only: columns holding each row's bin **lower**/**upper** edge, for **pre-binned** input. Map both to switch the histogram to pre-binned mode; mapping only one is a validation error. See [Histogram](#histogram-options). |
 | `columns.end` | string | **Timeline only** — like the three rows below, a validation error on every other chart type. The span's end date, in the [date grammar](#dates). A blank cell makes the row a point event, and `ongoing` (any case) an open-ended span. Any other text, an impossible calendar date (`2026-13-01`), or an end before its start is a validation error naming the row. See [Timeline options](#timeline-options). |
 | `columns.label` | string | **Timeline only.** The event's headline. Default `"label"`. A blank cell is a validation error. |
@@ -814,7 +814,8 @@ pane (unless `coordinated_cursor: false`).
 
 **Sections (horizontal).** `columns.section` groups the categories into labeled blocks with bold
 headers in the left gutter, exactly like horizontal bars (`section_order` / `section_labels`
-control order and header text). Horizontal orientation only.
+control order and header text), and a label may repeat across sections (see
+[Section axis](#section-axis-horizontal-bars)). Horizontal orientation only.
 
 ```yaml
 chartType: dumbbell
@@ -1168,10 +1169,20 @@ headers show on the leftmost pane).
 | `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`). |
 | `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
+**Repeated labels.** A row is identified by its section and category together; what it displays is
+the category. So the same label may appear in more than one section: "Top 1%" under both "Ranked by
+income" and "Ranked by net worth" draws two rows, each reading "Top 1%", and hovering either reports
+that row's own values. A field that names a category by its label applies to every section
+containing it: `x_order` / `category_order` sets the order within each section, an `x_labels` entry
+renames the hover card's header for each such row, and a `category_colors` entry colours each such
+bar. The same section + category may carry only one value per series (per facet, when faceted); a
+second row for it is a validation error. Applies wherever sections do (horizontal bars and
+dumbbells).
+
 `columns.section` and `columns.facet` are supported together on faceted horizontal bars and stacks
 (both `shared` and `per-pane` `small_multiples.mode`). When panes share a row (`columns > 1`), faceted
 horizontal bars/stacks share one category axis across those panes, so every facet must carry the
-same categories (and sections) — a facet missing a category or a whole section (a **ragged facet**)
+same categories (and sections), compared as section + category — a facet missing a category or a whole section (a **ragged facet**)
 fails validation with an error naming the facet and the missing categories/sections, rather than
 silently misaligning rows across panes. This does not apply with `columns: 1` (each facet is on its
 own row with its own category axis, so different categories per facet are allowed).
