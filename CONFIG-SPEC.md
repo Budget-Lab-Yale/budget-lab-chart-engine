@@ -815,7 +815,7 @@ pane (unless `coordinated_cursor: false`).
 **Sections (horizontal).** `columns.section` groups the categories into labeled blocks with bold
 headers in the left gutter, exactly like horizontal bars (`section_order` / `section_labels`
 control order and header text), and a label may repeat across sections (see
-[Section axis](#section-axis-horizontal-bars)). Horizontal orientation only.
+[Section axis](#section-axis-horizontal-charts)). Horizontal orientation only.
 
 ```yaml
 chartType: dumbbell
@@ -1172,11 +1172,12 @@ headers show on the leftmost pane).
 **Repeated labels.** A row is identified by its section and category together; what it displays is
 the category. So the same label may appear in more than one section: "Top 1%" under both "Ranked by
 income" and "Ranked by net worth" draws two rows, each reading "Top 1%", and hovering either reports
-that row's own values. A field that names a category by its label applies to every section
+that row's own values. On a stack each such row is its own stack, with its own net marker and
+segment labels. A field that names a category by its label applies to every section
 containing it: `x_order` / `category_order` sets the order within each section, an `x_labels` entry
 renames the hover card's header for each such row, and a `category_colors` entry colours each such
 bar. The same section + category may carry only one value per series (per facet, when faceted); a
-second row for it is a validation error. Applies wherever sections do (horizontal bars and
+second row for it is a validation error. Applies wherever sections do (horizontal bars, stacks and
 dumbbells).
 
 `columns.section` and `columns.facet` are supported together on faceted horizontal bars and stacks

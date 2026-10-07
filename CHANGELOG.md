@@ -38,7 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `x_axis_ticks`, small multiples (`shared` and `per-pane`) and the PNG export follow the sectioned
   rows. Validation still rejects `columns.section` on a vertical stack. See CONFIG-SPEC "Section
   axis".
-- A label may repeat across sections (`columns.section`, horizontal bar and dumbbell). A row is
+- A label may repeat across sections (`columns.section`, horizontal bar, stacked and dumbbell). A row is
   identified by section + category and still displays the category, so "Top 1%" under two sections
   draws two rows, each hovering its own values; before, the second merged silently into the first.
   `x_order` / `category_order`, `x_labels` and `category_colors` name a bare label and apply to every
