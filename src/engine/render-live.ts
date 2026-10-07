@@ -9,6 +9,7 @@ import type { RenderHooks } from "../spec/hooks.js";
 import type { NetMode } from "../spec/bar-stack.js";
 import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
+import { rowsInSectionOrder } from "../spec/section-key.js";
 import { ownValue } from "../spec/own-key.js";
 import { isHorizontalDumbbell } from "../spec/dumbbell-orientation.js";
 import {
@@ -2588,10 +2589,15 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
   // width even when there are fewer panes than the reflow/config would allow.
-  const facetCol = resolveColumns(spec, rows).facet;
+  // Counted over the rows renderFigure draws: a pane holding only rows of a section section_order
+  // leaves out is never rendered, so it must not take a grid column.
+  const figCols = resolveColumns(spec, rows);
+  const facetCol = figCols.facet;
+  const sectionCol = figCols.section;
+  const drawnRows = rowsInSectionOrder(rows, spec.section_order, sectionCol ? (r) => r[sectionCol] as string : null);
   const paneCount = (): number => {
     const distinct = new Set<string>();
-    for (const r of rows) {
+    for (const r of drawnRows) {
       const v = facetCol ? r[facetCol] : undefined;
       if (typeof v === "string" && v !== "") distinct.add(v);
     }

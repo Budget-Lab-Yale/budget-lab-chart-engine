@@ -140,3 +140,101 @@ describe("faceted ragged check: panes are compared by section + category", () =>
     });
   }
 });
+
+describe("section_order: validation reads only the sections it keeps", () => {
+  const fig = (chartType: "stacked" | "bar") =>
+    ({
+      ...base,
+      section_order: ["Keep"],
+      chartType,
+      columns: { x: "bar", value: "v", section: "sec", facet: "pane" },
+      small_multiples: { columns: 2 },
+    }) as ChartSpec;
+  for (const chartType of ["stacked", "bar"] as const) {
+    it(`${chartType}: a category only one pane carries, in an excluded section, is not a ragged pane`, () => {
+      const rows = [
+        { pane: "P", sec: "Keep", bar: "A", v: "10" },
+        { pane: "P", sec: "Drop", bar: "B", v: "20" },
+        { pane: "Q", sec: "Keep", bar: "A", v: "10" },
+      ] as TidyRow[];
+      expect(validateChartData(fig(chartType), rows).errors).toEqual([]);
+      // Control: with the section drawn, the same rows are ragged.
+      const drawn = { ...fig(chartType), section_order: ["Keep", "Drop"] } as ChartSpec;
+      expect(validateChartData(drawn, rows).errors.join("\n")).toMatch(/facet "Q" is missing category "B" \(section "Drop"\)/);
+    });
+  }
+
+  it("a duplicate section + category + series in an excluded section is not an error", () => {
+    const spec = { ...STACKED, section_order: ["Keep"], series_order: undefined } as ChartSpec;
+    const rows = [
+      { sec: "Keep", bar: "A", tax: "Income", v: "1" },
+      { sec: "Drop", bar: "B", tax: "Income", v: "2" },
+      { sec: "Drop", bar: "B", tax: "Income", v: "3" },
+    ] as TidyRow[];
+    expect(validateChartData(spec, rows).errors).toEqual([]);
+    const drawn = { ...spec, section_order: ["Keep", "Drop"] } as ChartSpec;
+    expect(validateChartData(drawn, rows).errors.join("\n")).toMatch(/category "B" in section "Drop" has more than one "Income" value/);
+  });
+});
+
+describe("section_order: a pane holding only excluded rows does not widen the live grid", () => {
+  it("the mounted figure equals the figure without that pane", () => {
+    const spec = {
+      ...BAR_SINGLE,
+      section_order: ["Keep"],
+      columns: { x: "bar", value: "v", section: "sec", facet: "pane" },
+      small_multiples: { columns: 2 },
+    } as ChartSpec;
+    const keep = [{ pane: "P", sec: "Keep", bar: "A", v: "10" }] as TidyRow[];
+    const withDropPane = [...keep, { pane: "Q", sec: "Drop", bar: "B", v: "20" }] as TidyRow[];
+    const mounted = (rows: TidyRow[]): string => {
+      document.body.innerHTML = "";
+      const c = document.createElement("div");
+      document.body.appendChild(c);
+      mountChart(c, { spec, rows, width: 320 });
+      return Array.from(c.querySelectorAll("svg")).map((s) => s.getAttribute("width")).join(",");
+    };
+    expect(mounted(withDropPane)).toBe(mounted(keep));
+  });
+});
+
+describe("section_order: a series found only in an excluded section shifts no other series' colour", () => {
+  // X sits only in the excluded section and is reached first, so it holds palette slot 0.
+  const rows = [
+    { sec: "Drop", bar: "B", tax: "X", v: "5" },
+    { sec: "Keep", bar: "A", tax: "Y", v: "10" },
+    { sec: "Keep", bar: "A", tax: "Z", v: "20" },
+  ] as TidyRow[];
+  const fills = (svg: Element): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const r of Array.from(svg.querySelectorAll("rect[data-series]"))) m.set(r.getAttribute("data-series")!, r.getAttribute("fill")!);
+    return m;
+  };
+  for (const chartType of ["bar", "stacked"] as const) {
+    const all = { ...base, chartType, columns: { x: "bar", series: "tax", value: "v", section: "sec" }, section_order: ["Drop", "Keep"] } as ChartSpec;
+    const kept = { ...all, section_order: ["Keep"] } as ChartSpec;
+    it(`${chartType}: Y and Z keep the colours they have with X drawn (live, legend and PNG export)`, () => {
+      const full = renderChart(all, rows, { width: 720, height: 400, document });
+      const want = fills(full.svg);
+      expect(want.size).toBe(3);
+      const live = renderChart(kept, rows, { width: 720, height: 400, document });
+      expect(fills(live.svg)).toEqual(new Map([["Y", want.get("Y")], ["Z", want.get("Z")]]));
+      expect(live.legendItems?.map((l) => [l.series, l.color])).toEqual([["Y", want.get("Y")], ["Z", want.get("Z")]]);
+      expect(fills(buildExportSvg(kept, rows))).toEqual(new Map([["Y", want.get("Y")], ["Z", want.get("Z")]]));
+    });
+
+    it(`${chartType}, small multiples: the same in every pane and the figure legend`, () => {
+      const figSpec = (s: ChartSpec) =>
+        ({ ...s, columns: { ...s.columns, facet: "pane" }, small_multiples: { columns: 2 } }) as ChartSpec;
+      const figRows = ["P", "Q"].flatMap((pane) => rows.map((r) => ({ ...r, pane }))) as TidyRow[];
+      const want = fills(renderChart(all, rows, { width: 720, height: 400, document }).svg);
+      const expected = new Map([["Y", want.get("Y")], ["Z", want.get("Z")]]);
+      const f = renderFigure(figSpec(kept), figRows, { width: 900, document });
+      for (const p of f.panes) expect(fills(p.svg as SVGSVGElement)).toEqual(expected);
+      expect(f.legendItems?.map((l) => [l.series, l.color])).toEqual([["Y", want.get("Y")], ["Z", want.get("Z")]]);
+      const exported = Array.from(buildExportSvg(figSpec(kept), figRows).querySelectorAll("svg")).filter((s) => s.querySelector("rect[data-series]"));
+      expect(exported.length).toBe(2);
+      for (const s of exported) expect(fills(s)).toEqual(expected);
+    });
+  }
+});

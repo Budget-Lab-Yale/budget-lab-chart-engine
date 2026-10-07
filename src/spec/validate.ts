@@ -18,6 +18,7 @@ import { isHorizontalDumbbell, valueAxisIsX } from "./dumbbell-orientation";
 import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
+import { rowsInSectionOrder } from "./section-key";
 import { resolveAnnotations } from "./annotations";
 import { ownValue } from "./own-key";
 import { resolveRugTracks, fullyHiddenRugTracks, rugBoundPosition } from "./rug";
@@ -1430,11 +1431,12 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // A sectioned row is identified by section + category (spec/section-key.ts), so the same label may
   // repeat across sections — but one section + category carries one value per series (per pane).
   // A second row would be drawn on top of the first, or merged into it by the hover, unseen.
+  // Only the sections section_order keeps: an excluded section's rows are never drawn.
   if (cols.section && columns.has(cols.section) && spec.xAxisType === "categorical") {
     const secField = cols.section;
     const seen = new Set<string>();
     const reported = new Set<string>();
-    for (const r of rows) {
+    for (const r of rowsInSectionOrder(rows, spec.section_order, (r) => r[secField] as string)) {
       const cat = r[cols.x] as string;
       if (cat == null || cat === "") continue;
       const sec = (r[secField] as string) ?? "";
@@ -1542,7 +1544,9 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         secField ? JSON.stringify([(r[secField] as string) ?? "", r[xField] as string]) : (r[xField] as string);
       const catsByFacet = new Map<string, Set<string>>();
       const allCats = new Set<string>();
-      for (const r of rows) {
+      // An excluded section's rows are never drawn, so they cannot misalign a pane.
+      const drawn = rowsInSectionOrder(rows, spec.section_order, secField ? (r) => r[secField] as string : null);
+      for (const r of drawn) {
         const facet = r[facetField] as string;
         const cat = r[xField] as string;
         if (!facet || !cat) continue;

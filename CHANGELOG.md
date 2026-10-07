@@ -87,6 +87,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   value axis, the height, a stack's net marker (a hidden negative gave a visible all-positive stack a
   net dot) and a stack's legend placement. They are now dropped before anything reads them, live,
   in small multiples and in the PNG export, on horizontal bars, stacks and dumbbells.
+- `section_order` scoping reached three more readers. Validation's ragged-pane and duplicate-row
+  checks counted rows of a left-out section, so a valid spec was rejected. The live small-multiples
+  grid counted a pane holding only such rows, which widened every drawn pane (440px to 696px at a
+  320px mount) though that pane is never drawn. And a series found only in a left-out section moved
+  every later series one palette colour; colours now index the series list with every section drawn,
+  as small multiples' panes index the figure's list (live, figure legend and PNG export).
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
   validation as a palette name and could make the chart throw at render; it is now rejected at load
   like any unknown name, on every chart type. No published figure uses one.
@@ -280,7 +286,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **`section_order` drops the rows of a section it leaves out** before the axis, height, net marker
   and legend placement read them. **No published figure is affected**: the archive's two
   `section_order` specs (the tariff model update's `eta-effect` and `etas`) list every section their
-  data carries.
+  data carries. The same holds for its validation, grid-column and series-colour readers.
 - **Sections: `x_order` / `category_order` no longer move a section, and faceted panes share one row
   order.** Rows are re-sorted only when the order they would draw in differs, so a chart already
   drawn in this order keeps its output byte for byte. **No published figure is affected**: the

@@ -409,7 +409,27 @@ export function renderPane(
 
   if (!data.length) throw new Error("No data.");
 
-  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, data);
+  const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, rows, cols, adapter, facetInfo, data);
+  const paneOpts = paletteSeries ? { ...opts, paletteSeries } : opts;
+  return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data);
+}
+
+/** The series list a chart resolves with every section drawn, when `section_order` leaving a section
+ *  out drops a series from it; else undefined. Colours and markers index this list (as a figure's
+ *  panes index RenderOptions.paletteSeries), so a series found only in an excluded section takes no
+ *  legend row but keeps its palette position, and no drawn series changes colour. */
+function seriesBeforeSectionScope(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  adapter: XAdapter,
+  facetInfo: FacetInfo | undefined,
+  data: PreparedRow[],
+): string[] | undefined {
+  if (!cols.section || !spec.section_order?.length) return undefined;
+  const all = scopeToSeries(spec, prepareRows({ ...spec, section_order: undefined }, rows, cols, adapter, facetInfo)).seriesNames;
+  const drawn = scopeToSeries(spec, data).seriesNames;
+  return all.length === drawn.length && all.every((s, i) => s === drawn[i]) ? undefined : all;
 }
 
 /** renderPane's row prep: parse + validate rows into the engine's in-memory shape. Shared with

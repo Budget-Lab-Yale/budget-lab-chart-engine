@@ -477,7 +477,6 @@ export function renderFigure(
   if (!facetField) {
     throw new Error("small_multiples requires a facet column (set columns.facet).");
   }
-  rows = inSectionOrder(spec, cols, rows);
 
   // The figure's series, resolved ONCE over ALL panes' rows — by the same rule renderPane applies to
   // a pane's own rows (series_order is filter + order, else encounter order).
@@ -488,6 +487,10 @@ export function renderFigure(
   // (#0072B2) while the legend, and the other pane, said amber (#E69F00). Panes index into this list
   // instead (RenderOptions.paletteSeries), and the figure-level legend is built from it rather than
   // from pane 0, so a series the FIRST pane happens to lack still gets a key.
+  //
+  // Resolved before section_order scoping, for the same reason: a series found only in an excluded
+  // section takes no legend row (drawnSeries, below) but keeps its slot, so no drawn series changes
+  // colour.
   //
   // First-encounter order over a subset preserves the parent's relative order, so a figure whose
   // panes all carry every series resolves exactly what pane 0 resolved — nothing moves.
@@ -503,6 +506,7 @@ export function renderFigure(
   const figureSeries = spec.series_order?.length
     ? spec.series_order.filter((s) => seenSeries.has(s))
     : seriesEncountered;
+  rows = inSectionOrder(spec, cols, rows);
   const figureColors = buildColorMap(figureSeries, spec.series_colors);
   // Mirrors assemblePaneResult: a figure that resolves to ONE series adopts the title selector's
   // colour, so the figure-level legend matches the panes.
