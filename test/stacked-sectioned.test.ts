@@ -51,7 +51,7 @@ const rowsOf = (vals: Record<string, number[]>, pane?: string): TidyRow[] =>
 
 const POS = rowsOf({ Income: [10, 20, 30, 40], Gains: [5, 15, 25, 35], Corporate: [8, 6, 4, 2] });
 const NEG = rowsOf({ Income: [10, 20, 30, 40], Gains: [5, 15, 25, 35], Corporate: [-30, -6, -40, -2] });
-/** Negative segments but positive nets, as in pr67's two stacks (net text is unsigned). */
+/** Negative segments but positive nets, as in pr67's two stacks. */
 const NEG_POS_NET = rowsOf({ Income: [10, 20, 30, 40], Gains: [5, 15, 25, 35], Corporate: [-3, -6, -4, -2] });
 const netOf = (rows: TidyRow[], cat: string): number =>
   rows.filter((r) => r.bar === cat).reduce((a, r) => a + Number(r.v), 0);

@@ -72,8 +72,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Fixed
 - `barStack.netDisplay: text` printed a negative net as its magnitude ("15" for -15), so a stack
-  netting below zero read as a gain. It now keeps the minus as the hover card and the waterfall labels
-  write it (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.
+  netting below zero read as a gain. It now prints it with a leading minus, outside any prefix, the
+  sign style of the hover card and the waterfall labels (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.
   Positive nets and the (unsigned) segment labels are unchanged.
 - On a sectioned category axis (`columns.section`), `x_order` / `category_order` could move a whole
   section: listing a category of a later section drew that section first. They now order categories
@@ -243,6 +243,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `x_axis_ticks` is `top` or `both`. Live and in the PNG.
 
 ### Docs
+- CONFIG-SPEC's `x_axis_ticks` row said "Horizontal bars only"; validation also accepts it on a
+  horizontal stack, which draws the top tick row. It now says bars and stacks, and that
+  every other chart type, a horizontal dumbbell included, is rejected.
 - CONFIG-SPEC `annotations.xAxis`: the vertical rule on the value axis is drawn on horizontal
   stacked bars and dumbbells (`orientation` omitted included) as well as horizontal bars.
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated

@@ -152,6 +152,30 @@ describe("validateSpec (structural)", () => {
       expect(r.valid).toBe(true);
     });
 
+    it("accepts x_axis_ticks: top on a horizontal stacked chart (CONFIG-SPEC: bars and stacks)", () => {
+      const r = validateSpec({
+        chartType: "stacked",
+        title: "Demo",
+        xAxisType: "categorical",
+        orientation: "horizontal",
+        data: "data.csv",
+        x_axis_ticks: "top",
+      });
+      expect(r.valid).toBe(true);
+    });
+
+    it("rejects x_axis_ticks on a dumbbell, horizontal by default (CONFIG-SPEC: bars and stacks only)", () => {
+      const r = validateSpec({
+        chartType: "dumbbell",
+        title: "Demo",
+        xAxisType: "categorical",
+        data: "data.csv",
+        x_axis_ticks: "both",
+      });
+      expect(r.valid).toBe(false);
+      expect(r.errors.join("\n")).toMatch(/x_axis_ticks requires a horizontal bar\/stacked chart/);
+    });
+
     it("accepts a horizontal bar chart with no x_axis_ticks (default 'bottom', unaffected)", () => {
       const r = validateSpec({
         chartType: "bar",
