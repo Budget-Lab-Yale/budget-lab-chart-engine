@@ -21,7 +21,7 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent, sectionRowOrderOver } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx } from "./axes";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 import type { SeriesHatch } from "./hatch";
@@ -139,9 +139,11 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
     spec.series_order && spec.series_order.length ? spec.series_order.length : Math.max(1, series.size);
   const grouped = spec.chartType === "bar" && nSeries > 1;
   const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, categories) : 0;
-  const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX });
+  // Sectioned labels are indented; the gutter grows by the indent, so the text width is unchanged.
+  const indent = cols.section ? SECTION_LABEL_INDENT : 0;
+  const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX, indent });
   const maxLabelLines = categories.reduce(
-    (m, c) => Math.max(m, labelLineCount(categoryText(c), gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
+    (m, c) => Math.max(m, labelLineCount(categoryText(c), gutter - GUTTER_TEXT_PAD - indent, FACETED_CAT_LABEL_PX)),
     1,
   );
   return horizontalBarHeight({
@@ -545,16 +547,18 @@ export function renderFigure(
     ? labelsRepeatAcrossSections(rows, (r) => r[cols.x] as string, (r) => r[cols.section as string] as string)
     : undefined;
   const sharedCategories = isHorizontalBar || isHorizontalDumbbell ? orderedCategories(rows, keyOf, spec) : [];
-  // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
+  // Size the gutter at the (larger) faceted category-label font so wrapped labels fit, plus the
+  // section indent on a sectioned figure (the builders indent the labels by it).
+  const labelIndent = cols.section ? SECTION_LABEL_INDENT : 0;
   const hGutter = isHorizontalBar
-    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
+    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX, indent: labelIndent })
     : TBL_MARGIN_LEFT;
   // Horizontal dumbbells stack one pane per row and every pane shows its own labels, so each pane
   // gets ONE category-label column sized over every pane's categories (measured like hGutter).
   // Without it a pane sized the column to its own labels: per-pane mode misaligned the panes, and
   // shared mode's TBL_MARGIN_LEFT override pushed long labels off the pane's left edge.
   const dotGutter = isHorizontalDumbbell
-    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
+    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX, indent: labelIndent })
     : undefined;
   // Auto-height: grow the panes with the row count when the caller doesn't force a height. The
   // per-facet inputs (sectionGapTotal/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
@@ -583,7 +587,7 @@ export function renderFigure(
     // fixed sectionGapPx() — the same px assemblePlot opens between the sections.
     const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, sharedCategories) : 0;
     sectionGapTotal = Math.max(0, nSections - 1) * sectionGapPx();
-    const maxPx = hGutter - GUTTER_TEXT_PAD;
+    const maxPx = hGutter - GUTTER_TEXT_PAD - labelIndent;
     const maxLabelLines = sharedCategories.reduce(
       (m, c) => Math.max(m, labelLineCount(categoryText(c), maxPx, FACETED_CAT_LABEL_PX)),
       1,

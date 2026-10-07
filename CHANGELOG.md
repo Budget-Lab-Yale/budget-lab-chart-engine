@@ -61,6 +61,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart above
   the 400px height floor is 11px shorter per gap with its rows unchanged; one at the floor keeps its
   height and its rows grow into the space. Charts without sections render byte-identically.
+- **Sections: category labels are indented 14px under their section header**, as a table indents
+  the rows of a row group, so the bold header reads as a title over its rows. The header stays flush
+  left. The left gutter grows by the 14px, so the labels wrap as before. Horizontal bars, stacks and
+  dumbbells, standalone and in small multiples, live and in the PNG export. Charts without sections
+  render byte-identically.
 - **Hover on horizontal charts: the shaded strip covers only the hovered row.** A stack that hovers
   with its card (a net dot, or `barStack.hover: "tooltip"`) spread a section's first row's strip
   over the gap and the header above it; it is now one row high, as the bar's already was. That
@@ -299,17 +304,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 
-- **Sectioned charts get a fixed 33px section gap.** Published figures
+- **Sectioned charts get a fixed 33px section gap and indented category labels.** Published figures
   affected: the tariff model update's `etas` and `eta-effect` (sectioned horizontal bars, on
   `main`), and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (sectioned horizontal
   dumbbell). Their sections close up from two row heights to 33px and the headers move 5px closer
   to their first rows, on screen and in the PNG. `etas` and `eta-effect` come out 11px shorter (one
   break each); the PR #67 dumbbell sits at the 400px floor, so it keeps its height and its rows
-  grow. Found by reading every `chart.yaml` on `main` and on the PR #67 branch for
+  grow. In all three the category labels move 14px right under their headers and the plot area
+  narrows by 14px to make room. Found by reading every `chart.yaml` on `main` and on the PR #67 branch for
   `columns.section`; no other spec sets it. Sectioned goldens were re-recorded for this change
   (approved): `bar-sectioned-single`, `figure7-tariff-sectioned`, `figure10-shape-sectioned-single`,
   `dumbbell-sectioned`, `stacked-sectioned`, `stacked-sectioned-net-dot`,
-  `stacked-sectioned-net-text`, `figure-hstacked-sectioned`.
+  `stacked-sectioned-net-text`, `figure-hstacked-sectioned`; the same eight again for the
+  label indent (approved).
 - **Hover: horizontal card-hover stacks and horizontal dumbbells shade under the label and bold it.**
   Live only. Of the archive, only the PR #67 dumbbell above hovers differently; the stacks on `main`
   (ai-fiscal `revenue-by-income-type`, `revenue-by-instrument`) are vertical.

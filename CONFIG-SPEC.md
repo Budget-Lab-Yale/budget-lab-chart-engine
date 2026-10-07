@@ -1158,7 +1158,10 @@ requirement — see below — applies only when panes share a row).
 Set `columns.section` to group the category axis into labeled sections, on a horizontal `bar`,
 `stacked` or `dumbbell` chart (a dumbbell is horizontal unless it sets `orientation: vertical`).
 Validation rejects it on any other chart type and on a vertical chart. Categories are ordered so each
-section is contiguous, with a bold section header in the left gutter. Two sections are separated
+section is contiguous, with a bold section header in the left gutter. The header sits flush left and
+its section's category labels are indented 14px under it, as a table indents the rows of a row
+group; the left gutter is 14px wider than it would be without sections, so the labels wrap the
+same. Two sections are separated
 by the usual space between rows plus a fixed 33px that holds the later section's header: the
 header's line sits 10px above that section's first bar, with at least 10px between it and the bar
 above. The gap does not grow with the row height. A

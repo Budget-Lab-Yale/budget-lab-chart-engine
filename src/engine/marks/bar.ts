@@ -22,12 +22,11 @@ import { categoryText } from "../../spec/section-key";
 import {
   tblBandXAxis,
   tblBandYAxis,
-  horizontalLeftGutter,
   horizontalValueAxisMargins,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { categoryBand, fyCategoryBandLayer, HBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_OUTER } from "./category-band";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -226,7 +225,7 @@ export function buildBarMarks(
       // (the band domain is shared, so rows still line up).
       const gutter = ctx.hideCategoryLabels
         ? SHARED_LABELLESS_MARGIN_LEFT
-        : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+        : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
 
       if (sectioned) {
         // fy = the section-grouped category band via the SHARED
@@ -304,7 +303,7 @@ export function buildBarMarks(
     // and suppress category labels on non-leftmost panes.
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
-      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+      : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
     return {
       underlay: [],
       overlay,

@@ -25,7 +25,6 @@ import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
 import {
   tblBandYAxis,
-  horizontalLeftGutter,
   horizontalValueAxisMargins,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
@@ -38,7 +37,7 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
-import { categoryBand, fyCategoryBandLayer } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter } from "./category-band";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
@@ -440,7 +439,7 @@ export function buildStackedMarks(
     // hideCategoryLabels suppresses labels on non-leftmost panes (band domain is shared).
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
-      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+      : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
     const bandLayer = sectioned
       ? {
           // One inner slot per fy row, padding 0: the bar fills its row (the inter-row padding lives

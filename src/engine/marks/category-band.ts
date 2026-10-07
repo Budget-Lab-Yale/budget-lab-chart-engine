@@ -13,6 +13,8 @@ import {
   sectionGapPx,
   sectionHeaderLift,
   horizontalValueAxisMargins,
+  horizontalLeftGutter,
+  SECTION_LABEL_INDENT,
 } from "../axes";
 import type { MarkLayers, PreparedRow } from "./index";
 
@@ -92,6 +94,12 @@ export function categoryBand(
   };
 }
 
+/** The left gutter for a horizontal category band, unless the caller (a small-multiples figure)
+ *  passes its shared one: wide enough for the longest label, plus the section indent when sectioned. */
+export function bandGutter(categories: string[], catFont: number, sectioned: boolean, shared?: number): number {
+  return shared ?? horizontalLeftGutter(categories, { fontSize: catFont, indent: sectioned ? SECTION_LABEL_INDENT : 0 });
+}
+
 /** The fy layer pieces for a category band on `fy` row facets: the band scale, the left-gutter
  *  category labels + section headers, the section gaps, and the margins. For an unsectioned band the
  *  header marks and gaps contribute nothing. */
@@ -107,7 +115,7 @@ export function fyCategoryBandLayer(
     xAxisMarks: hideLabels
       ? []
       : [
-          ...tblFacetGroupYAxis(band.categories, gutter, catFont),
+          ...tblFacetGroupYAxis(band.categories, gutter, catFont, band.sectioned ? SECTION_LABEL_INDENT : 0),
           ...band.sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, lift, catFont)),
           ...(band.topSectionHeader ? tblSectionTopHeader(band.topSectionHeader, gutter, lift, catFont) : []),
         ],

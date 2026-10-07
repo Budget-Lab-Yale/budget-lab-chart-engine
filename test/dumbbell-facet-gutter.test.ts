@@ -11,7 +11,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { renderFigure } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
-import { FACETED_CAT_LABEL_PX, horizontalLeftGutter } from "../src/engine/axes";
+import { FACETED_CAT_LABEL_PX, SECTION_LABEL_INDENT, horizontalLeftGutter } from "../src/engine/axes";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -148,7 +148,8 @@ describe("panelled horizontal dumbbell with sections — one label column, heade
     ...row("Long", "Income", "Top 1% by net worth", 0),
     ...row("Long", "Wealth", "Net worth of $1 billion or more", 1),
   ] as unknown as TidyRow[];
-  const SEC_GUTTER = horizontalLeftGutter(["Q1", "Q5", "W1", ...LONG], { fontSize: FACETED_CAT_LABEL_PX });
+  // Sectioned: the column also holds the labels' indent under their section headers.
+  const SEC_GUTTER = horizontalLeftGutter(["Q1", "Q5", "W1", ...LONG], { fontSize: FACETED_CAT_LABEL_PX, indent: SECTION_LABEL_INDENT });
 
   function expectAligned(panes: SVGSVGElement[]): void {
     expect(panes).toHaveLength(2);
@@ -160,9 +161,13 @@ describe("panelled horizontal dumbbell with sections — one label column, heade
         .map((t) => absX(t, Number(t.getAttribute("x") ?? 0)));
       expect(labels.length).toBeGreaterThan(0);
       expect(headers).toHaveLength(2);
-      for (const x of [...labels, ...headers]) {
+      for (const x of headers) {
         expect(x).toBeGreaterThanOrEqual(0);
         expect(x).toBeLessThanOrEqual(1);
+      }
+      for (const x of labels) {
+        expect(x).toBeGreaterThanOrEqual(SECTION_LABEL_INDENT);
+        expect(x).toBeLessThanOrEqual(SECTION_LABEL_INDENT + 1);
       }
     }
   }

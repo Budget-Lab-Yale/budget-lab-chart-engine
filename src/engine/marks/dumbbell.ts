@@ -16,7 +16,7 @@ import {
   tblBandYAxis,
   tblFacetGroupYAxis,
   tblSectionTopHeader,
-  horizontalLeftGutter,
+  SECTION_LABEL_INDENT,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
   sectionGapPx,
@@ -25,6 +25,7 @@ import {
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { markerInk, type MarkerInk, type MarkerStyle } from "../marker-ink";
+import { bandGutter } from "./category-band";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -260,7 +261,7 @@ export function buildDumbbellMarks(
   if (horizontal) {
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
-      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+      : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
 
     if (sectioned) {
       // fy-facet topology (identical to horizontal bars): category band on `fy`, a single inner-y
@@ -297,7 +298,7 @@ export function buildDumbbellMarks(
         xAxisMarks: ctx.hideCategoryLabels
           ? []
           : [
-              ...tblFacetGroupYAxis(categories, gutter, catFont),
+              ...tblFacetGroupYAxis(categories, gutter, catFont, SECTION_LABEL_INDENT),
               ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
               ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
             ],

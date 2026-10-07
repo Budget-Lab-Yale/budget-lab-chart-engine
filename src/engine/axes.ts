@@ -4,6 +4,7 @@
 import { Plot, d3 } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
 import { categoryText } from "../spec/section-key";
+import { INDENT_STEP } from "../table/layout";
 
 type Mark = unknown;
 
@@ -471,6 +472,11 @@ export function labelLineCount(label: string, maxPx: number, fontSize: number = 
 /** Padding (px) reserved between the wrapped category label and the bars in the left gutter. */
 export const GUTTER_TEXT_PAD = 8;
 
+/** Indent (px) of a sectioned chart's category labels under their flush-left section header: the
+ *  table's member-row indent, so a sectioned chart reads like a table's row groups. The gutter grows
+ *  by it (horizontalLeftGutter `indent`), so the label text keeps its unsectioned width and wrapping. */
+export const SECTION_LABEL_INDENT = INDENT_STEP;
+
 // Responsive LEFT GUTTER for horizontal bars: the y-axis category labels live in the left
 // margin (left-justified at svg x=0), so the margin must be wide enough for the LONGEST
 // label or it clips into the plot. Derived from the longest category at the axis font size
@@ -483,10 +489,11 @@ export function horizontalLeftGutter(
     min = TBL_MARGIN_LEFT,
     max = 240,
     fontSize = TBL.size.axis,
-  }: { pad?: number; min?: number; max?: number; fontSize?: number } = {},
+    indent = 0,
+  }: { pad?: number; min?: number; max?: number; fontSize?: number; indent?: number } = {},
 ): number {
   const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(categoryText(c), fontSize)), 0);
-  return Math.round(Math.max(min, Math.min(max, longest + pad)));
+  return Math.round(Math.max(min, Math.min(max, longest + pad)) + indent);
 }
 
 const HVALUE_TICK_PX = 18; // one value-tick row (top)
@@ -566,9 +573,11 @@ export function tblFacetGroupYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
   fontSize: number = TBL.size.axis,
+  /** SECTION_LABEL_INDENT on a sectioned chart (the gutter already includes it), else 0. */
+  indent = 0,
 ): Mark[] {
   const rows = categories.map((c) => ({ c }));
-  const maxPx = marginLeft - GUTTER_TEXT_PAD;
+  const maxPx = marginLeft - GUTTER_TEXT_PAD - indent;
   // `fy` is the row's key; the label is its display text (spec/section-key.ts).
   const anyMultiline = categories.some((c) => wrapToWidth(categoryText(c), maxPx, fontSize).includes("\n"));
   return [
@@ -576,7 +585,7 @@ export function tblFacetGroupYAxis(
       fy: (d: { c: string }) => d.c,
       text: (d: { c: string }) => wrapToWidth(categoryText(d.c), maxPx, fontSize),
       frameAnchor: "left",
-      dx: -marginLeft,
+      dx: -marginLeft + indent,
       textAnchor: "start",
       fill: TBL.color.axis,
       fontSize,
