@@ -61,13 +61,15 @@ const SEGMENT_LABEL_MIN_PX = 25;
 const SEGMENT_LABEL_CLASS = "tbl-segment-label";
 const WHITE = "#FFFFFF";
 
-/** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable).
- *  Mirrors bar.ts: minimum decimal precision across the rendered values; `signed`
- *  prepends an explicit + / U+2212. */
+/** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable): minimum
+ *  decimal precision across the rendered values. `keepMinus` writes a negative value's "-" as
+ *  formatValue (the hover card) and the waterfall labels do, outside any prefix ("-$15"); without
+ *  it every value prints as its magnitude, which suits a segment label, whose side of zero already
+ *  carries the sign. */
 function makeValueFormatter(
   values: number[],
   affixes: ValueAffixes,
-  signed: boolean,
+  keepMinus: boolean,
   decimals?: number,
 ): (d: number) => string {
   // Fixed precision when set; else the minimum the data needs, CAPPED at 2 so raw floats don't
@@ -86,11 +88,7 @@ function makeValueFormatter(
         );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
-    // `mag` is unsigned, so the affix helper's minus-handling is inert here and the explicit
-    // −/+ below lands outside the prefix: −$5, not $−5.
-    const body = applyValueAffixes(Math.abs(d).toFixed(maxFrac), affixes);
-    if (!signed) return body;
-    return d < 0 ? `−${body}` : `+${body}`;
+    return applyValueAffixes((keepMinus ? d : Math.abs(d)).toFixed(maxFrac), affixes);
   };
 }
 
@@ -191,8 +189,8 @@ export function buildStackedMarks(
   const allValues = data
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
-  // Net text above a cumulative stack is unsigned (always positive); diverging net is signed.
-  const netFmt = makeValueFormatter([...netByCat.values()], affixes, netMode === "dot", spec.valueLabels?.decimals);
+  // The net text keeps a negative net's minus (only text mode prints it; the dot carries no label).
+  const netFmt = makeValueFormatter([...netByCat.values()], affixes, true, spec.valueLabels?.decimals);
   const segFmt = makeValueFormatter(allValues, affixes, false, spec.valueLabels?.decimals);
 
   // --- Color: categorical (default) or monochromatic by stack position ---

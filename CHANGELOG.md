@@ -71,6 +71,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   they disagreed.
 
 ### Fixed
+- `barStack.netDisplay: text` printed a negative net as its magnitude ("15" for -15), so a stack
+  netting below zero read as a gain. It now keeps the minus as the hover card and the waterfall labels
+  write it (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.
+  Positive nets and the (unsigned) segment labels are unchanged.
 - `section_order` left a section out of the drawing but not out of the chart: its rows still fed the
   value axis, the height, a stack's net marker (a hidden negative gave a visible all-positive stack a
   net dot) and a stack's legend placement. They are now dropped before anything reads them, live,
@@ -261,6 +265,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 
+- **A negative net printed by `barStack.netDisplay: text` gains its minus sign.** **No published
+  figure is affected**: the archive's stacks on `main` (ai-fiscal `revenue-by-income-type`,
+  `revenue-by-instrument`) use `netDisplay: none`, and PR #67's two `text` stacks have only
+  positive nets.
 - **`section_order` drops the rows of a section it leaves out** before the axis, height, net marker
   and legend placement read them. **No published figure is affected**: the archive's two
   `section_order` specs (the tariff model update's `eta-effect` and `etas`) list every section their
