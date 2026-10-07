@@ -8,8 +8,9 @@
 //
 // Pins are chosen as multiples of the tick step the resulting span gets, so the outward nice
 // leaves them where they were written and the assertion can be exact.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { renderPane, renderChart, renderFigure } from "../src/engine/index";
+import { buildExportSvg } from "../src/embed/export-png";
 import { domainBounds } from "../src/engine/scales";
 import { validateSpec } from "../src/spec/validate";
 import { TBL } from "../src/engine/theme";
@@ -379,7 +380,7 @@ describe("Ruling 74: shared small multiples decide the fallback on the figure's 
     const fig = renderFigure(shared(CASES.line!, { min: 50 }), rows, OPTS);
     // bc87c77 drew 50–51: pane A probed reversed and never won the union's ceiling.
     expect(firstLast(fig.panes[0]!.svg!)).toEqual([50, 51]);
-    // ...which is pane B's own axis: pane A contributes nothing to the shared domain.
+    // ...which is pane B's own axis: pane A's pre-fallback domain (reversed, [50, 30]) never wins.
     const bOnly = renderPane({ ...CASES.line!.spec, yAxisPolicy: { min: 50 } } as ChartSpec, rows.filter((x) => x.f === "B"), OPTS);
     expect(domainBounds(bOnly.yDomain)).toEqual([50, 51]);
   });
@@ -396,6 +397,112 @@ describe("Ruling 74: shared small multiples decide the fallback on the figure's 
     expect(firstLast(fig.panes[0]!.svg!)).toEqual([lo, hi]);
   });
 
+  describe("a pane that needs the fallback still contributes its fitted extents (Codex, F13 fix 4)", () => {
+    // jsdom has no canvas: return null quietly; text measurement takes the same fallback either way.
+    const realGetContext = HTMLCanvasElement.prototype.getContext;
+    beforeAll(() => {
+      HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+    });
+    afterAll(() => {
+      HTMLCanvasElement.prototype.getContext = realGetContext;
+    });
+
+    // Pane A's bars (100, 101) all lie past `max: -10`, so its own axis would take the fallback, but
+    // its facet-scoped marker at -5 raises the pinned ceiling to -5 (a bar folds markers into its
+    // ceiling). bc87c77, before the fallback existed, drew [-12, -5]. Dropping pane A wholesale gave
+    // [-12, -10] and drew the marker 882px above the frame.
+    const spec = {
+      ...shared(CASES.bar!, { max: -10 }),
+      annotations: { yAxis: [{ y: -5, label: "marker", facet: "A" }] },
+    } as unknown as ChartSpec;
+    const rows = [
+      r({ f: "A", c: "a", v: 100 }), r({ f: "A", c: "b", v: 101 }),
+      r({ f: "B", c: "a", v: -11 }), r({ f: "B", c: "b", v: -12 }),
+    ];
+    /** Every marker rule's y, with the height of the pane SVG that draws it. */
+    const markerYs = (root: Element): Array<{ y1: number; y2: number; h: number }> =>
+      Array.from(root.querySelectorAll('g[class^="tbl-annotation-line"] line')).map((l) => ({
+        y1: parseFloat(l.getAttribute("y1") ?? "NaN"),
+        y2: parseFloat(l.getAttribute("y2") ?? "NaN"),
+        h: parseFloat(l.closest("svg")?.getAttribute("height") ?? "NaN"),
+      }));
+
+    it("live: the shared axis keeps the marker's ceiling, and the marker is inside its pane", () => {
+      const fig = renderFigure(spec, rows, OPTS);
+      // Only the leftmost pane labels its ticks; every pane shares the one domain.
+      expect(firstLast(fig.panes[0]!.svg!)).toEqual([-12, -5]);
+      const ys = fig.panes.flatMap((p) => markerYs(p.svg!));
+      expect(ys).toHaveLength(1);
+      for (const { y1, y2, h } of ys) {
+        for (const y of [y1, y2]) {
+          expect(y).toBeGreaterThanOrEqual(0);
+          expect(y).toBeLessThanOrEqual(h);
+        }
+      }
+    });
+
+    it("export: the PNG's pane draws the marker inside its frame too", () => {
+      const ys = markerYs(buildExportSvg(spec, rows));
+      expect(ys).toHaveLength(1);
+      for (const { y1, y2, h } of ys) {
+        for (const y of [y1, y2]) {
+          expect(y).toBeGreaterThanOrEqual(0);
+          expect(y).toBeLessThanOrEqual(h);
+        }
+      }
+    });
+
+    it("without the marker, pane A still adds nothing: the axis is pane B's own", () => {
+      const { annotations: _a, ...bare } = spec as unknown as Record<string, unknown>;
+      const fig = renderFigure(bare as unknown as ChartSpec, rows, OPTS);
+      const bOnly = renderPane({ ...CASES.bar!.spec, yAxisPolicy: { max: -10 } } as ChartSpec, rows.filter((x) => x.f === "B"), OPTS);
+      expect(firstLast(fig.panes[0]!.svg!)).toEqual(domainBounds(bOnly.yDomain));
+    });
+  });
+
+  it("CONFIG-SPEC: a pane whose data all lie past the bound moves the axis through what it holds on the open side", () => {
+    // Line min: 50. Pane B's data (8–31) are all below the floor, but a marker or callout scoped to
+    // B at 70 is on the open side, so it raises the shared ceiling from pane A's 51 to 70.
+    const rows = [
+      r({ f: "A", t: 2020, v: 45 }), r({ f: "A", t: 2021, v: 51 }),
+      r({ f: "B", t: 2020, v: 8 }), r({ f: "B", t: 2021, v: 31 }),
+    ];
+    const base = shared(CASES.line!, { min: 50 });
+    expect(firstLast(renderFigure(base, rows, OPTS).panes[0]!.svg!)).toEqual([50, 51]);
+    for (const annotations of [
+      { yAxis: [{ y: 70, label: "m", facet: "B" }] },
+      { points: [{ x: 2021, y: 70, label: "c", facet: "B" }] },
+    ]) {
+      const fig = renderFigure({ ...base, annotations } as unknown as ChartSpec, rows, OPTS);
+      expect(firstLast(fig.panes[0]!.svg!), JSON.stringify(annotations)).toEqual([50, 70]);
+    }
+  });
+
+  it("CONFIG-SPEC: ...and through its data, where another pane's marker raised the figure's pinned end above them", () => {
+    // Vertical dumbbell, max: -10. Pane A's dots (100, 101) are above the bound, so its own axis
+    // falls back; pane B's marker at 500 raises the figure's ceiling, which puts A's dots on the open
+    // side of it. B alone fits 150–500; the figure reaches down to A's dots, as it did before the
+    // fallback existed.
+    const spec = {
+      ...shared(CASES.dumbbell!, { max: -10 }),
+      orientation: "vertical",
+      annotations: { yAxis: [{ y: 500, label: "m", facet: "B" }] },
+    } as unknown as ChartSpec;
+    const rows = [
+      r({ f: "A", c: "a", s: "A", v: 100 }), r({ f: "A", c: "a", s: "B", v: 101 }),
+      r({ f: "B", c: "a", s: "A", v: 200 }), r({ f: "B", c: "a", s: "B", v: 300 }),
+    ];
+    const bOnly = renderPane(
+      { ...spec, small_multiples: undefined, columns: CASES.dumbbell!.spec.columns } as unknown as ChartSpec,
+      rows.filter((x) => x.f === "B"),
+      OPTS,
+    );
+    expect(domainBounds(bOnly.yDomain)).toEqual([150, 500]);
+    const [lo, hi] = firstLast(renderFigure(spec, rows, OPTS).panes[0]!.svg!);
+    expect(lo).toBeLessThanOrEqual(100);
+    expect(hi).toBe(500);
+  });
+
   it("per-pane mode keeps each pane's own fallback", () => {
     const rows = [
       r({ f: "A", t: 2020, v: 8 }), r({ f: "A", t: 2021, v: 31 }),
@@ -404,6 +511,72 @@ describe("Ruling 74: shared small multiples decide the fallback on the figure's 
     const [a, b] = renderFigure(shared(CASES.line!, { min: 50 }, "per-pane"), rows, OPTS).panes.map((p) => firstLast(p.svg!));
     expect(a).toEqual([50, 60]);
     expect(b).toEqual([50, 51]);
+  });
+});
+
+// CONFIG-SPEC "Markers beyond a pinned bound": resolveHardDomain widens the numeric CEILING to its
+// fold values and never moves the floor. Only bar, stacked, waterfall, dumbbell and area pass folds.
+describe("CONFIG-SPEC: a reference marker beyond a pinned ceiling (F13 fix 4)", () => {
+  const FOLDING = ["bar", "stacked", "waterfall", "dumbbell", "area"];
+  const NOT_FOLDING = ["line", "scatter", "dotplot", "histogram"];
+  const domain = (c: Case, extra: Record<string, unknown>, rows = c.rows): [number, number] =>
+    renderPane({ ...c.spec, ...extra } as unknown as ChartSpec, rows, OPTS).yDomain;
+  const marker = (y: number) => ({ annotations: { yAxis: [{ y, label: "m" }] } });
+
+  it("the review's example: bars under max 20 with a marker at 40 get [0, 40], lone or with min 0", () => {
+    const rows = [r({ c: "a", v: 8 }), r({ c: "b", v: 15 })];
+    for (const yAxisPolicy of [{ max: 20 }, { min: 0, max: 20 }]) {
+      expect(domain(CASES.bar!, { yAxisPolicy, ...marker(40) }, rows)).toEqual([0, 40]);
+    }
+  });
+
+  it("on bar, stacked, waterfall, dumbbell and area a marker above max raises the ceiling to it", () => {
+    for (const type of FOLDING) {
+      for (const yAxisPolicy of [{ max: 40 }, { min: 0, max: 40 }]) {
+        expect(domainBounds(domain(CASES[type]!, { yAxisPolicy, ...marker(60) }))[1], type).toBe(60);
+      }
+    }
+  });
+
+  it("on a horizontal bar, stack or dumbbell an annotations.xAxis marker does too", () => {
+    const xMarker = { annotations: { xAxis: [{ x: 60, label: "m" }] } };
+    for (const type of ["bar", "stacked", "dumbbell"]) {
+      const horizontal = { orientation: "horizontal", yAxisPolicy: { max: 40 }, ...xMarker };
+      expect(domainBounds(domain(CASES[type]!, horizontal))[1], type).toBe(60);
+    }
+  });
+
+  it("on an area, a callout or a column overlay does too", () => {
+    const area = CASES.area!;
+    const callout = { annotations: { points: [{ x: 2021, y: 60, label: "c" }] } };
+    expect(domainBounds(domain(area, { yAxisPolicy: { max: 40 }, ...callout }))[1]).toBe(60);
+    const withU = area.rows.map((row) => ({ ...row, u: "60" }) as unknown as TidyRow);
+    const overlay = { yAxisPolicy: { max: 40 }, overlays: [{ column: "u", by: "none" }] };
+    expect(domainBounds(domain(area, overlay, withU))[1]).toBe(60);
+  });
+
+  it("the floor never moves: a marker below min leaves it at the bound on every type", () => {
+    for (const type of [...FOLDING, ...NOT_FOLDING]) {
+      expect(domainBounds(domain(CASES[type]!, { yAxisPolicy: { min: 5 }, ...marker(-10) }))[0], type).toBe(5);
+    }
+  });
+
+  it("line, scatter, dot plot and histogram keep a pinned max whatever marker lies above it", () => {
+    for (const type of NOT_FOLDING) {
+      for (const yAxisPolicy of [{ max: 40 }, { min: 0, max: 40 }]) {
+        expect(domainBounds(domain(CASES[type]!, { yAxisPolicy, ...marker(60) }))[1], type).toBe(40);
+      }
+    }
+  });
+
+  it("reversed: the marker raises the numeric ceiling, which is min, on a bar; a line keeps it", () => {
+    const reversed = { yAxisPolicy: { min: 40, max: 0 }, ...marker(60) };
+    expect(domain(CASES.bar!, reversed)).toEqual([60, 0]);
+    expect(domain(CASES.line!, reversed)).toEqual([40, 0]);
+    // ...and its numeric floor, max, does not move for a marker below it.
+    expect(domain(CASES.bar!, { yAxisPolicy: { min: 40, max: 0 }, ...marker(-10) })).toEqual([40, 0]);
+    const callout = { annotations: { points: [{ x: 2021, y: 60, label: "c" }] } };
+    expect(domain(CASES.area!, { yAxisPolicy: { min: 40, max: 0 }, ...callout })).toEqual([60, 0]);
   });
 });
 

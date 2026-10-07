@@ -154,8 +154,8 @@ tints; each series keeps its own distinct color from the palette/`series_colors`
 | `xAxisPolicy.anchorAtZero` | boolean | Numeric x-axis only: extend the visible domain to include 0. **Default `false`** (the axis fits its data range — anchoring at zero squishes a year axis to the right). |
 | `x_order` | array | Categorical x-axis only: render order for the x-axis categories. Listed categories come first in this order; any unlisted ones follow in data-encounter order. **Order-only** — unlike `series_order`, it does *not* filter. Ignored off a categorical x-axis. |
 | `x_labels` | object | Categorical x-axis: `{ <category>: "Display label" }` for the hover-tooltip header (lets the tooltip read more verbosely than the compact axis ticks). **It heads every hover CARD, and only a card** — so check which surface your chart hovers with. Cards that carry it: `dumbbell`, `dotplot`, and categorical-x `line` and `area` (standalone, and faceted wherever the card survives coordination — a dumbbell always does); the *band* card of a **stacked** bar, drawn at default settings where `barStack.netDisplay` resolves to a dot (by default, a stack with a negative value, a single-series one included though it draws no dot) and under an explicit `barStack.hover: "tooltip"`; and the band card of a plain/grouped `bar` or `waterfall` pane that is not coordinated — under `coordinated_cursor: false`, or a waterfall figure that resolves to a single pane. Where a chart draws no card there is no header to put it in: plain/grouped `bar` and `waterfall` hover with value pills standalone and in a coordinated pane, and a coordinated small-multiples pane replaces its card with the in-place cursor — except the two panes whose card IS the hover treatment: a `dumbbell`, and a **stacked** pane in tooltip mode, which keep their cards and coordinate a band echo only. That cursor's own category echo stays the **raw** category by design — it overlays the rendered axis tick, taking that tick's box, wrapping and rotation, and this field exists to read more verbosely than the tick. `test/hover-claims-defaults.test.ts` gates every case above, each at default settings apart from the one dial it names (`coordinated_cursor: false`, `barStack.hover: "tooltip"`). |
-| `yAxisPolicy.min` | number | Hard floor for the y-axis, between -1e300 and 1e300 (validation rejects anything beyond). Set alone, it pins only the floor; the ceiling is still fitted to the data (up to 0 on bars, stacks, areas and waterfalls when 0 is above the floor, so all-negative bars under `min: -40` get [-40, 0]). A floor above all of the data still gives an ascending axis (see **Reversing the axis** below). |
-| `yAxisPolicy.max` | number | Hard ceiling for the y-axis, between -1e300 and 1e300 (validation rejects anything beyond). Set alone, it pins only the ceiling; the floor is still fitted to the data (from 0 on bars, stacks, areas, waterfalls and histograms when 0 is below the ceiling). A ceiling below all of the data still gives an ascending axis (see **Reversing the axis** below). |
+| `yAxisPolicy.min` | number | Hard floor for the y-axis, between -1e300 and 1e300 (validation rejects anything beyond). Set alone, it pins only the floor; the ceiling is still fitted to the data (up to 0 on bars, stacks, areas and waterfalls when 0 is above the floor, so all-negative bars under `min: -40` get [-40, 0]). A floor above all of the data still gives an ascending axis (see **Reversing the axis** below). On a reversed axis `min` is the numeric ceiling, which a reference marker beyond it can raise on some chart types (see **Markers beyond a pinned bound** below). |
+| `yAxisPolicy.max` | number | Hard ceiling for the y-axis, between -1e300 and 1e300 (validation rejects anything beyond). Set alone, it pins only the ceiling; the floor is still fitted to the data (from 0 on bars, stacks, areas, waterfalls and histograms when 0 is below the ceiling). A ceiling below all of the data still gives an ascending axis (see **Reversing the axis** below). On `bar`, `stacked`, `waterfall`, `dumbbell` and `area` charts a reference marker above it raises it (see **Markers beyond a pinned bound** below). |
 | `yAxisPolicy.includeZero` | boolean | When `true`, extend the fitted y-domain to 0. A pinned `min` or `max` still sets its own end, so only an end left unpinned extends; with both pinned it has no effect. |
 | `yAxisPolicy.tickCount` | integer | Approximate target number of y-ticks. Default 5. |
 | `yAxisPolicy.autoWiden.step` | number | `line`, `scatter` and `dotplot` only; every other chart type ignores it. When data exceeds `max`, round the ceiling up to the next multiple of `step`. |
@@ -172,6 +172,15 @@ Note that `min`/`max` are **nice'd outward** to land on clean tick boundaries, s
 ceiling can sit above the number you wrote (`max: 15` with 5 ticks renders a 20 ceiling) — clipping
 only engages once the *nice'd* domain still cuts the data.
 
+**Markers beyond a pinned bound.** On `bar`, `stacked`, `waterfall`, `dumbbell` and `area` charts, a
+reference marker above the axis' numeric ceiling (`max`, or `min` on a reversed axis) raises the
+ceiling to it so the marker stays in the frame, whether one bound is pinned or both: bars under
+`max: 20` with a marker at 40 get [0, 40]. The markers that count are `annotations.yAxis` lines, plus
+`annotations.xAxis` lines on a horizontal bar, stack or dumbbell, whose value axis is x; on an `area`,
+`annotations.points` callouts and `column` overlays count too. A pinned numeric floor (`min`, or `max`
+on a reversed axis) never moves for a marker. On `line`, `scatter`, `dotplot` and `histogram` charts a
+marker beyond a pinned end does not move it.
+
 A line leaving the frame is honest but easy to misread as the end of the series, so pair a truncated
 axis with a note or an `annotations.yAxis` marker at the ceiling.
 
@@ -186,11 +195,17 @@ so reversing moves the numerically lower value to the top (vertical) or the righ
 horizontal bars that means negative data grows left-to-right from a zero line at the left, the mirror
 of its ascending layout. Both bounds must be pinned: `min` alone, or `max` alone, is read as
 ascending, on every chart type and even when the bound lies past all of the data. The pinned end
-stays at the bound (then nice'd outward, as above) and the open end lies past it. The open end is
+stays at the bound (then nice'd outward, as above; a marker above a lone `max` can raise it, see
+**Markers beyond a pinned bound**) and the open end lies past it. The open end is
 otherwise fitted as on any axis: data, a 0 base, value-label headroom and reference markers beyond
 the bound all reach it, and where none does the engine places it past the bound itself. On a
-small-multiples figure in the default `shared` mode that is decided for the figure's one axis, so a
-pane whose data all lie past the bound does not move an axis the other panes already set.
+small-multiples figure in the default `shared` mode that is decided for the figure's one axis, not
+per pane: the panes are fitted together, and the engine places the open end itself only when no pane
+has anything on the open side. A pane whose data all lie on the other side of the bound (below a lone
+`min`, above a lone `max`) moves the shared axis only through a marker that raises its pinned end, or
+through what it holds on the open side of the figure's pinned end: data, a 0 base, value-label
+headroom, or a reference marker, callout or `column` overlay scoped to it with `facet`. With none of
+these it leaves the axis the other panes set unchanged.
 `tbl-chart validate` warns when a lone `min` is above every value in the data, or a lone `max` below
 every value (on a histogram, every bin height; on a small-multiples figure, per pane, naming it). A
 value exactly on the bound does not count as past it. The warning describes the data, not the
@@ -203,7 +218,7 @@ A reversed axis is a scale flip and nothing more, so the rest of the engine foll
 | Ticks and gridlines | Run top-to-bottom in descending order. |
 | Zero baseline | Still drawn whenever the domain straddles zero. |
 | `shading` baselines | Close on their threshold, not on the frame edge. |
-| Reference markers, `annotations.points` | Fold in without moving either pinned bound. |
+| Reference markers, `annotations.points` | Where they fold in (see **Markers beyond a pinned bound**), one beyond the numeric ceiling — `min` here — raises it; the numeric floor, `max`, never moves for one. |
 | Clipping | Engages only on real overflow, in either direction. |
 | Value labels | Stay clear of the mark's end, on whichever pixel side that now is. |
 | `autoWiden` | Extends whichever end the data overflows — on a reversed axis that is `max`, the numeric floor. |

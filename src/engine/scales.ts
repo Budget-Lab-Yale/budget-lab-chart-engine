@@ -50,9 +50,10 @@ export interface ResolveHardDomainOptions {
   /** `yAxisPolicy.tickCount` (default 5): sizes the step a lone bound's open end takes when the
    *  data leave nothing on the open side. */
   tickCount?: number;
-  /** Called when a lone bound took the ascending fallback below. renderFigure's shared mode reads
-   *  it (PaneResult.yLoneFallback) to decide the fallback on the figure's domain, not per pane. */
-  onLoneFallback?: () => void;
+  /** Called when a lone bound took the ascending fallback below, with the domain it replaced (the
+   *  bound and fitted extent paired as they came: reversed or [b, b]). renderFigure's shared mode
+   *  reads it (PaneResult.yDomainWithoutFallback) to decide the fallback on the figure's domain. */
+  onLoneFallback?: (withoutFallback: [number, number]) => void;
 }
 
 /**
@@ -103,7 +104,7 @@ export function resolveHardDomain({
     const spanLo = Math.min(bound, auto.min, ...folds);
     const spanHi = Math.max(bound, auto.max, ...folds);
     const step = spanHi > spanLo ? d3.tickStep(spanLo, spanHi, tickCount) : 1;
-    onLoneFallback?.();
+    onLoneFallback?.([lo, hi]);
     return min != null ? [lo, loneOpenEnd(lo, 1, step)] : [loneOpenEnd(hi, -1, step), hi];
   }
 
@@ -137,6 +138,12 @@ export function fittedExtent(
     hi = Math.max(0, hi);
   }
   return { min: lo, max: hi };
+}
+
+/** `domain` nice'd outward at `tickCount` exactly as computeYAxis nices a supplied domain, without
+ *  computing ticks (d3 cannot tick some domains a lone bound's fallback replaces, e.g. subnormal). */
+export function niceDomain(domain: [number, number], tickCount: number): [number, number] {
+  return d3.scaleLinear().domain(domain).nice(tickCount).domain() as [number, number];
 }
 
 /** Compute a "nice" y-domain + tick array up front so gridlines and labels can be

@@ -17,6 +17,7 @@ import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import {
   computeYAxis,
+  niceDomain,
   computeBarYExtent,
   computeWaterfallYExtent,
   computeDumbbellValueExtent,
@@ -318,10 +319,11 @@ export interface PaneResult {
    *  or the forced opts.yDomain). The shared-mode orchestrator probe-renders over all rows and
    *  reads this to obtain the one shared domain. */
   yDomain: [number, number];
-  /** True when a lone `yAxisPolicy` bound had nothing fitted on its open side in THIS pane's rows,
-   *  so its own domain took resolveHardDomain's ascending fallback. Shared-mode probes read it: the
-   *  figure leaves such panes out of its union whenever another pane ascends on its own. */
-  yLoneFallback: boolean;
+  /** Set only when a lone `yAxisPolicy` bound had nothing fitted on its open side in THIS pane's
+   *  rows, so its own domain took resolveHardDomain's ascending fallback: the domain the pane would
+   *  have had without it, nice'd as `yDomain` is (reversed or [b, b]). Shared-mode probes read it:
+   *  whenever another pane ascends on its own, the figure unions this in place of `yDomain`. */
+  yDomainWithoutFallback?: [number, number];
   /** Formats a value the way this pane's value AXIS does (decimal places derived from its tick
    *  set, plus the chart's affixes). Carried so a `{value}` token in a keyed annotation's legend
    *  label reads exactly as the in-frame label would have. */
@@ -826,9 +828,13 @@ function assemblePaneResult(
 
   let hardDomain: [number, number] | null;
   let includeZero: boolean;
-  // Set when a lone bound took resolveHardDomain's ascending fallback (see PaneResult.yLoneFallback).
-  let yLoneFallback = false;
-  const hardOpts = { tickCount, onLoneFallback: () => void (yLoneFallback = true) };
+  // Set when a lone bound took resolveHardDomain's ascending fallback: the hard domain it replaced
+  // (see PaneResult.yDomainWithoutFallback).
+  let hardDomainWithoutFallback: [number, number] | undefined;
+  const hardOpts = {
+    tickCount,
+    onLoneFallback: (d: [number, number]) => void (hardDomainWithoutFallback = d),
+  };
 
   // Value-axis reference markers, for the branches that fold them in so a marker stays visible.
   // The value axis is x on a horizontal chart, so annotations.xAxis plays the yAxis role there
@@ -1185,7 +1191,9 @@ function assemblePaneResult(
     colors,
     valueAffixes,
     yDomain,
-    yLoneFallback,
+    ...(hardDomainWithoutFallback
+      ? { yDomainWithoutFallback: niceDomain(hardDomainWithoutFallback, tickCount) }
+      : {}),
     // Wrapped with the SAME tickLabel hook + ctx assemblePlot used internally for the in-frame
     // annotation label (yTickFallbackFmt) — this is what buildLegendItems passes through as
     // pane.formatValue for a keyed annotation's LEGEND row token. Left un-wrapped, the two would

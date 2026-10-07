@@ -146,9 +146,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   CONFIG-SPEC reads a lone bound as ascending. The axis now ascends on every value-axis chart type:
   the bound stays where it was written and the open end lies past it (`min: 50` there draws 50–60),
   finite at any bound. In `per-pane` small multiples each pane decides this for itself; in `shared`
-  mode the figure decides it for its one axis, so a pane past the bound leaves an axis the other
-  panes set unchanged. `yAxisPolicy.min` and `max` beyond ±1e300 are now validation errors.
-  `tbl-chart validate` now warns, naming the bound, when a lone `min` is above every value in the
+  mode the figure decides it for its one axis, so a pane whose data all lie on the other side of
+  the bound moves that axis only through what it holds on the open side or a marker that raises
+  its pinned end, as it did before. `yAxisPolicy.min` and `max` beyond ±1e300 are now validation
+  errors. `tbl-chart validate` now warns, naming the bound, when a lone `min` is above every value in the
   data or a lone `max` below every value (per pane on a small-multiples figure; bin heights on a
   histogram). CONFIG-SPEC's `min` and `max` rows and its reversed-axis section state the rule, and
   the `autoWiden.step` row now says it applies to `line`, `scatter` and `dotplot` only.
@@ -208,6 +209,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - CONFIG-SPEC `x_labels`: its list of cards that carry the label now includes an uncoordinated `bar`
   or `waterfall` pane, and its test note no longer calls the `coordinated_cursor: false` case a
   default-settings one.
+- CONFIG-SPEC `yAxisPolicy.min`/`max` called them a hard floor and ceiling, and its reversed-axis
+  table said reference markers fold in without moving either pinned bound. On `bar`, `stacked`,
+  `waterfall`, `dumbbell` and `area` a marker above the numeric ceiling (`max`, or `min` reversed)
+  raises it, with one bound pinned or both (bars under `max: 20` with a marker at 40 get [0, 40]).
+  A new note, **Markers beyond a pinned bound**, says which markers count on which types; the rows
+  and the table point to it.
 
 ### Upgrading
 

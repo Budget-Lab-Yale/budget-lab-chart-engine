@@ -894,12 +894,13 @@ export function renderFigure(
   //    monotonic — yields exactly the combined-probe domain for line/single-series/grouped bars,
   //    so those stay unchanged. Each per-pane probe already applies the bar zero-baseline +
   //    value-label headroom, so the union endpoints carry it. Probe SVGs are discarded.
-  //    A lone yAxisPolicy bound's ascending fallback is decided on the FIGURE (Ruling 74): a pane
-  //    whose own axis needed it (nothing on the bound's open side) is left out of the union whenever
-  //    another pane ascends on its own, so it can never widen that axis. Before the fallback existed
-  //    such a pane probed reversed or [b, b] and its far end never won the union, so dropping it
-  //    leaves those figures as they were. Only when every pane needs it does the figure take it, as
-  //    the union of the panes' fallback domains.
+  //    A lone yAxisPolicy bound's ascending fallback is decided on the FIGURE (Ruling 74): whenever
+  //    another pane ascends on its own, a pane whose own axis needed it (nothing on the bound's open
+  //    side) contributes the domain it had before the fallback existed (reversed or [b, b]), not its
+  //    fallback domain. That keeps its pinned end as its own markers extend it (a facet-scoped marker
+  //    beyond a bar's ceiling), and leaves those figures exactly as they were before the fallback.
+  //    Dropping the pane instead lost such a marker's extent and drew it off the frame. Only when
+  //    every pane needs the fallback does the figure take it, as the union of their fallback domains.
   const probes = paneValues.map((value) =>
     renderPane(
       spec,
@@ -914,11 +915,11 @@ export function renderFigure(
       "probe",
     ),
   );
-  const ascendingProbes = probes.filter((p) => !p.yLoneFallback);
+  const anyAscends = probes.some((p) => !p.yDomainWithoutFallback);
   let yLo = Infinity;
   let yHi = -Infinity;
-  for (const p of ascendingProbes.length ? ascendingProbes : probes) {
-    const [lo, hi] = p.yDomain;
+  for (const p of probes) {
+    const [lo, hi] = (anyAscends && p.yDomainWithoutFallback) || p.yDomain;
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }
