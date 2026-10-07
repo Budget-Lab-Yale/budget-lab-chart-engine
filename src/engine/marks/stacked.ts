@@ -61,6 +61,19 @@ const SEGMENT_LABEL_MIN_PX = 25;
 const SEGMENT_LABEL_CLASS = "tbl-segment-label";
 const WHITE = "#FFFFFF";
 
+/** `names` split by the sign of each series' SUMMED value over `rows` (negative below 0, else
+ *  positive), each half in `names` order. */
+function splitBySign(names: string[], rows: readonly PreparedRow[]): { negs: string[]; poss: string[] } {
+  const sumBySeries = new Map<string, number>();
+  for (const r of rows) {
+    const y = r._y;
+    if (!Number.isFinite(y as number) || y == null) continue;
+    sumBySeries.set(r.series, (sumBySeries.get(r.series) ?? 0) + (y as number));
+  }
+  const negative = (s: string): boolean => (sumBySeries.get(s) ?? 0) < 0;
+  return { negs: names.filter(negative), poss: names.filter((s) => !negative(s)) };
+}
+
 /** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable): minimum
  *  decimal precision across the rendered values. `keepMinus` writes a negative value's "-" as
  *  formatValue (the hover card) and the waterfall labels do, outside any prefix ("-$15"); without
@@ -202,16 +215,7 @@ export function buildStackedMarks(
   // if its total is < 0, positive otherwise. Edge case: a genuinely mixed-sign series is
   // classified by the sign of its sum, which can place it on the "wrong" visual side for
   // individual categories — acceptable, and the only well-defined single classification.
-  const sumBySeries = new Map<string, number>();
-  for (const r of data) {
-    const y = r._y;
-    if (!Number.isFinite(y as number) || y == null) continue;
-    sumBySeries.set(r.series, (sumBySeries.get(r.series) ?? 0) + (y as number));
-  }
-  const sign = new Map<string, number>();
-  for (const s of seriesNames) sign.set(s, (sumBySeries.get(s) ?? 0) < 0 ? -1 : 1);
-  const negs = seriesNames.filter((s) => sign.get(s) === -1);
-  const poss = seriesNames.filter((s) => sign.get(s) !== -1);
+  const { negs, poss } = splitBySign(seriesNames, data);
 
   // Visual stack order, top→bottom (bar-stacked.md §8.2): positives stack up from 0 in
   // declaration order (first-declared just above 0) so visual top→bottom = positives
@@ -223,11 +227,15 @@ export function buildStackedMarks(
   // series → mono tier hex (darkest at bottom of the visual stack), or null when categorical.
   let monoTierForSeries: Map<string, string> | null = null;
   let fillChannel: string | ((d: PreparedRow) => string);
+  // Ranked over every section's rows when section_order leaves some out (ctx.monoBasis), so a
+  // drawn series keeps its shade.
+  const monoSeries = ctx.monoBasis?.seriesNames ?? seriesNames;
+  const monoSplit = ctx.monoBasis ? splitBySign(monoSeries, ctx.monoBasis.dataInScope) : { negs, poss };
   if (monoBase) {
-    const tiers = monoScale(monoBase, seriesNames.length); // darkest-first
+    const tiers = monoScale(monoBase, monoSeries.length); // darkest-first
     // Bottom→top: bottommost negative first. Negatives stack downward in declaration
     // order, so the last-declared negative sits at the visual bottom → reverse them.
-    const bottomToTop = [...negs.slice().reverse(), ...poss];
+    const bottomToTop = [...monoSplit.negs.slice().reverse(), ...monoSplit.poss];
     const tierForSeries = new Map<string, string>();
     bottomToTop.forEach((s, i) => {
       tierForSeries.set(s, tiers[Math.min(i, tiers.length - 1)] as string);
@@ -362,7 +370,7 @@ export function buildStackedMarks(
     // last two hexes assigned.
     let lightSeries: Set<string> | null = null;
     if (monoTierForSeries) {
-      const lightHexes = new Set(monoScale(monoBase as string, seriesNames.length).slice(-2));
+      const lightHexes = new Set(monoScale(monoBase as string, monoSeries.length).slice(-2));
       lightSeries = new Set<string>();
       for (const [s, hex] of monoTierForSeries) if (lightHexes.has(hex)) lightSeries.add(s);
     }

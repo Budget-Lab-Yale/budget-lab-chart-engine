@@ -238,3 +238,81 @@ describe("section_order: a series found only in an excluded section shifts no ot
     });
   }
 });
+
+describe("section_order: a monochrome stack keeps every drawn series' shade when a section is left out", () => {
+  // Mono shades rank the series by stack position (sign, then order), over the rows with every
+  // section drawn: the shade a series has with the section drawn is the one it keeps.
+  const CASES: Record<string, TidyRow[]> = {
+    // Codex's repro: X only in Drop, reached first.
+    "X only in the left-out section": [
+      { sec: "Drop", bar: "B", tax: "X", v: "5" },
+      { sec: "Keep", bar: "A", tax: "Y", v: "10" },
+      { sec: "Keep", bar: "A", tax: "Z", v: "20" },
+    ],
+    // A negative X stacks below zero, so it takes the darkest shade.
+    "a negative X only in the left-out section": [
+      { sec: "Drop", bar: "B", tax: "X", v: "-5" },
+      { sec: "Keep", bar: "A", tax: "Y", v: "10" },
+      { sec: "Keep", bar: "A", tax: "Z", v: "20" },
+    ],
+    // Y nets negative only with Drop's row counted.
+    "Y's sign set by the left-out section": [
+      { sec: "Drop", bar: "B", tax: "X", v: "5" },
+      { sec: "Drop", bar: "B", tax: "Y", v: "-100" },
+      { sec: "Keep", bar: "A", tax: "X", v: "1" },
+      { sec: "Keep", bar: "A", tax: "Y", v: "10" },
+      { sec: "Keep", bar: "A", tax: "Z", v: "20" },
+    ],
+  } as Record<string, TidyRow[]>;
+  const fills = (svg: Element): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const r of Array.from(svg.querySelectorAll('g[aria-label="bar"] rect[data-series]'))) m.set(r.getAttribute("data-series")!, r.getAttribute("fill")!);
+    return m;
+  };
+  const all = {
+    ...base,
+    chartType: "stacked",
+    columns: { x: "bar", series: "tax", value: "v", section: "sec" },
+    section_order: ["Drop", "Keep"],
+    barStack: { mono: { base: "blue" } },
+  } as ChartSpec;
+  const kept = { ...all, section_order: ["Keep"] } as ChartSpec;
+  for (const [name, rows] of Object.entries(CASES)) {
+    const want = (): Map<string, string> => {
+      const m = fills(renderChart(all, rows, { width: 720, height: 400, document }).svg);
+      expect(new Set(m.values()).size).toBe(3);
+      return m;
+    };
+    it(`${name}: live, legend and PNG export`, () => {
+      const full = want();
+      const drawn = [...fills(renderChart(kept, rows, { width: 720, height: 400, document }).svg).keys()];
+      const expected = new Map(drawn.map((s) => [s, full.get(s)]));
+      const live = renderChart(kept, rows, { width: 720, height: 400, document });
+      expect(fills(live.svg)).toEqual(expected);
+      for (const l of live.legendItems ?? []) expect([l.series, l.color]).toEqual([l.series, full.get(l.series)]);
+      expect(live.legendItems?.length).toBe(drawn.length);
+      expect(fills(buildExportSvg(kept, rows))).toEqual(expected);
+    });
+
+    for (const mode of ["shared", "per-pane"] as const) {
+      it(`${name}, small multiples (${mode}): every pane, the figure legend and the PNG export`, () => {
+        const full = want();
+        const figSpec = { ...kept, columns: { ...kept.columns, facet: "pane" }, small_multiples: { columns: 2, mode } } as ChartSpec;
+        const figRows = ["P", "Q"].flatMap((pane) => rows.map((r) => ({ ...r, pane }))) as TidyRow[];
+        const f = renderFigure(figSpec, figRows, { width: 900, document });
+        const panes = f.panes.map((p) => p.svg as SVGSVGElement);
+        expect(panes.length).toBe(2);
+        for (const p of panes) {
+          const got = fills(p);
+          expect(got.size).toBeGreaterThan(0);
+          for (const [s, c] of got) expect([s, c]).toEqual([s, full.get(s)]);
+        }
+        expect(f.legendItems?.length).toBeGreaterThan(0);
+        for (const l of f.legendItems ?? []) expect([l.series, l.color]).toEqual([l.series, full.get(l.series)]);
+        const exported = Array.from(buildExportSvg(figSpec, figRows).querySelectorAll("svg")).filter((s) => s.querySelector('g[aria-label="bar"] rect[data-series]'));
+        expect(exported.length).toBeGreaterThan(0);
+        for (const s of exported) for (const [ser, c] of fills(s)) expect([ser, c]).toEqual([ser, full.get(ser)]);
+      });
+    }
+  }
+});

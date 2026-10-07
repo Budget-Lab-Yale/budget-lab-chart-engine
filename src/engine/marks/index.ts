@@ -84,6 +84,10 @@ export interface MarkContext {
    *  channel's symbols index it, so every pane keys a shape as the figure's shape legend does.
    *  Absent (single chart) → symbols index `shapeNames`. */
   paletteShapes?: string[];
+  /** Stacked `barStack.mono`: this pane's series list and series-scoped rows with every section
+   *  drawn, set only when `section_order` leaves rows out. The shades are ranked over these, so a
+   *  drawn series keeps the shade it has with that section drawn. Absent: ranked over the drawn rows. */
+  monoBasis?: { seriesNames: string[]; dataInScope: PreparedRow[] };
   /** Inner plot width in px (outer width minus left+right margins). Approximate — bar
    *  builders use this for px-based label-suppression logic. */
   plotWidth?: number;

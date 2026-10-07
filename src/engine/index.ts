@@ -38,7 +38,7 @@ import { parseDate } from "../spec/parse-time";
 import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
-import type { PreparedRow, MarkLayers } from "./marks/index";
+import type { PreparedRow, MarkLayers, MarkContext } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
 import { resolveValueAffixes, isTruthyFlag, formatNumericX, withoutRepeatedOrderEntries } from "./util";
@@ -154,6 +154,10 @@ export interface RenderOptions {
    *  headers the left pane draws, whichever order its own data reaches the sections in. Absent
    *  (single chart) → the pane's own order. */
   sectionRowOrder?: string[];
+  /** Small multiples, `barStack.mono` stack: this pane's rows before `section_order` scoping
+   *  (renderFigure scopes the figure's rows up front), over which the pane ranks its shades. Absent
+   *  (single chart) → the rows passed in. */
+  rowsBeforeSectionScope?: TidyRow[];
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -409,25 +413,37 @@ export function renderPane(
 
   if (!data.length) throw new Error("No data.");
 
-  const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, rows, cols, adapter, facetInfo, data);
+  const monoStack = spec.chartType === "stacked" && spec.barStack?.mono?.base != null;
+  const allSections = !opts.paletteSeries || monoStack ? rowsWithEverySection(spec, opts.rowsBeforeSectionScope ?? rows, cols, adapter, facetInfo, data) : undefined;
+  const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, allSections, data);
   const paneOpts = paletteSeries ? { ...opts, paletteSeries } : opts;
-  return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data);
+  const monoBasis = monoStack && allSections ? scopeToSeries(spec, allSections) : undefined;
+  return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
 }
 
-/** The series list a chart resolves with every section drawn, when `section_order` leaving a section
- *  out drops a series from it; else undefined. Colours and markers index this list (as a figure's
- *  panes index RenderOptions.paletteSeries), so a series found only in an excluded section takes no
- *  legend row but keeps its palette position, and no drawn series changes colour. */
-function seriesBeforeSectionScope(
+/** This pane's rows with every section drawn, when `section_order` leaves some of them out; else
+ *  undefined. Colours are resolved over these, so no drawn series changes colour (Ruling 79). */
+function rowsWithEverySection(
   spec: ChartSpec,
   rows: TidyRow[],
   cols: ResolvedColumns,
   adapter: XAdapter,
   facetInfo: FacetInfo | undefined,
   data: PreparedRow[],
-): string[] | undefined {
+): PreparedRow[] | undefined {
   if (!cols.section || !spec.section_order?.length) return undefined;
-  const all = scopeToSeries(spec, prepareRows({ ...spec, section_order: undefined }, rows, cols, adapter, facetInfo)).seriesNames;
+  const all = prepareRows({ ...spec, section_order: undefined }, rows, cols, adapter, facetInfo);
+  // section_order only removes rows, so an equal count means it removed none.
+  return all.length === data.length ? undefined : all;
+}
+
+/** The series list a chart resolves with every section drawn (`allSections`), when `section_order`
+ *  leaving a section out drops a series from it; else undefined. Colours and markers index this list
+ *  (as a figure's panes index RenderOptions.paletteSeries), so a series found only in an excluded
+ *  section takes no legend row but keeps its palette position, and no drawn series changes colour. */
+function seriesBeforeSectionScope(spec: ChartSpec, allSections: PreparedRow[] | undefined, data: PreparedRow[]): string[] | undefined {
+  if (!allSections) return undefined;
+  const all = scopeToSeries(spec, allSections).seriesNames;
   const drawn = scopeToSeries(spec, data).seriesNames;
   return all.length === drawn.length && all.every((s, i) => s === drawn[i]) ? undefined : all;
 }
@@ -786,6 +802,7 @@ function assemblePaneResult(
   adapter: XAdapter,
   cols: ResolvedColumns,
   data: PreparedRow[],
+  monoBasis?: MarkContext["monoBasis"],
 ): PaneResult {
   const { seriesNames, dataInScope } = scopeToSeries(spec, data);
   const colors = buildColorMap(seriesNames, spec.series_colors, opts.paletteSeries);
@@ -1192,6 +1209,7 @@ function assemblePaneResult(
     // The figure's series list (set only by renderFigure): per-series marker symbols index it.
     ...(opts.paletteSeries ? { paletteSeries: opts.paletteSeries } : {}),
     ...(opts.paletteShapes ? { paletteShapes: opts.paletteShapes } : {}),
+    ...(monoBasis ? { monoBasis } : {}),
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),

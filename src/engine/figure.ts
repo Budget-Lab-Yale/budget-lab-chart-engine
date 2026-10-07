@@ -506,6 +506,11 @@ export function renderFigure(
   const figureSeries = spec.series_order?.length
     ? spec.series_order.filter((s) => seenSeries.has(s))
     : seriesEncountered;
+  // A mono stack's panes rank their shades over their rows with every section drawn
+  // (RenderOptions.rowsBeforeSectionScope), as a single chart does.
+  const monoRows = spec.chartType === "stacked" && spec.barStack?.mono?.base != null && spec.section_order?.length ? rows : undefined;
+  const monoRowsOf = (value: string): { rowsBeforeSectionScope?: TidyRow[] } =>
+    monoRows ? { rowsBeforeSectionScope: monoRows.filter((r) => (r[facetField] as string) === value) } : {};
   rows = inSectionOrder(spec, cols, rows);
   const figureColors = buildColorMap(figureSeries, spec.series_colors);
   // Mirrors assemblePaneResult: a figure that resolves to ONE series adopts the title selector's
@@ -820,6 +825,7 @@ export function renderFigure(
           paletteSeries: figureSeries,
           ...(figureShapes ? { paletteShapes: figureShapes } : {}),
           chartSeriesCount,
+          ...monoRowsOf(value),
           ...(sectionKeyed != null ? { sectionKeyed } : {}),
           ...(sectionRowOrder ? { sectionRowOrder } : {}),
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
@@ -1012,6 +1018,7 @@ export function renderFigure(
         paletteSeries: figureSeries,
         ...(figureShapes ? { paletteShapes: figureShapes } : {}),
         chartSeriesCount,
+        ...monoRowsOf(value),
         ...(sectionKeyed != null ? { sectionKeyed } : {}),
         ...(sectionRowOrder ? { sectionRowOrder } : {}),
         yDomain: sharedYDomain,

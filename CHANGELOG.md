@@ -92,7 +92,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   grid counted a pane holding only such rows, which widened every drawn pane (440px to 696px at a
   320px mount) though that pane is never drawn. And a series found only in a left-out section moved
   every later series one palette colour; colours now index the series list with every section drawn,
-  as small multiples' panes index the figure's list (live, figure legend and PNG export).
+  as small multiples' panes index the figure's list (live, figure legend and PNG export). A
+  `barStack.mono` stack ranks its shades over the rows with every section drawn, so no drawn series
+  changes shade either.
 - A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
   validation as a palette name and could make the chart throw at render; it is now rejected at load
   like any unknown name, on every chart type. No published figure uses one.
