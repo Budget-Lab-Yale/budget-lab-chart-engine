@@ -64,7 +64,7 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 | `columns.category` | string | Dumbbell only: the categorical-axis column — a synonym for `columns.x` (wins when both are set). |
 | `columns.value` | string | Column holding the numeric y value. Default `"value"`. On a treemap, the tile's size: a number ≥ 0 in every row. |
 | `columns.series` | string | Column identifying series. **Omit for a single-series chart.** Default `"series"` if present. On a treemap, the tile's group (optional, one level). |
-| `columns.facet` | string | Column whose distinct values split small-multiples panes. |
+| `columns.facet` | string | Column whose distinct values split small-multiples panes. On a horizontal `bar`, `stacked` or `dumbbell` chart they are groups of one chart instead (see [Small multiples](#small-multiples)). |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
 | `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
 | `columns.section` | string | Horizontal `bar`, `stacked` and `dumbbell` charts only (validation rejects it on any other chart type and on a vertical chart): column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). A row is identified by section + category, so the same label may appear in more than one section. See [Section axis](#section-axis-horizontal-charts). |
@@ -85,7 +85,7 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 | `y_axis_title` | string | Short caption above the y-axis (left-aligned, horizontal). |
 | `tooltip_decimals` | integer | Decimal places for every hover **value**, independent of the axis ticks — the tooltip card where one is drawn, and the coordinated cursor's value pills where those replace it, so a multi-pane figure honours it too. Default 2. Two exceptions. A **waterfall** ignores it wherever its hover is the value pill — a standalone waterfall, and each pane of a coordinated small-multiples figure: the pill takes the precision of the running-total labels (`valueLabels.decimals`, else the fewest decimals the data needs, at most 2), so the two never disagree. A waterfall pane that hovers with a card instead (`small_multiples.coordinated_cursor: false`, or a figure that resolves to a single pane) formats the card with `tooltip_decimals` as usual. On a **treemap** it sets the hover card's Value row and defaults to `value_format.decimals`, else 0. |
 | `tooltip_series_name` | boolean | **`scatter` only** (validation rejects it elsewhere): set `false` to drop the **series token** from the hover card's header, leaving the shape and `columns.point_label` tokens — so `Observed · 2004` reads `2004`. Use it where the series exists to colour the marks and `point_label` already says which observation the reader is on. Rejected on other chart types because their cards use the series name as a ROW label against a value: suppressing it there would leave a list of unlabelled numbers, which is a different thing entirely. Pairs with `series_legend` but is independent of it — either surface can name the series without the other. Default true. |
-| `tooltip_section` | boolean | **Sectioned charts only** (`columns.section`; validation rejects it on a chart without sections): set `true` to put the hovered row's section in the hover card's header, before the category: `+ Corporate · Before response`, each half through `section_labels` / `x_labels`. Use it where a category label repeats across sections and the card alone would not say which one it is. Applies wherever the chart hovers with a card: a horizontal dumbbell, and a horizontal stack that hovers with its card (`barStack.hover: tooltip`, or a net dot), standalone and in every small-multiples pane; and a horizontal `bar`, or a stack in pills mode, only in the panes of a small-multiples figure with `small_multiples.coordinated_cursor: false`, which hover with the card. Where the chart hovers with value pills instead (a `bar` standalone or in a coordinated pane, and a stack in pills mode the same way) it is accepted and does nothing. Card header only: the pills, the coordinated cursor's echo and the `onHover` payload (which already carries `section`) are unchanged. Live only, like every hover. Default false. |
+| `tooltip_section` | boolean | **Sectioned charts only** (`columns.section`, or `columns.facet` on a horizontal chart, whose facets draw as sections; validation rejects it on a chart without sections): set `true` to put the hovered row's section in the hover card's header, before the category: `+ Corporate · Before response`, each half through `section_labels` / `x_labels`. Use it where a category label repeats across sections and the card alone would not say which one it is. Applies wherever the chart hovers with a card: a horizontal dumbbell, and a horizontal stack that hovers with its card (`barStack.hover: tooltip`, or a net dot). Where the chart hovers with value pills instead (a horizontal `bar`, and a stack in pills mode) it is accepted and does nothing. Card header only: the pills, the coordinated cursor's echo and the `onHover` payload (which already carries `section`) are unchanged. Live only, like every hover. Default false. |
 | `tooltip_x_label` / `tooltip_y_label` | string | **`scatter` only** (validation rejects them elsewhere): the row labels for the x and y value rows in the hover card, defaulting to `x_axis_title` / `y_axis_title` (and, absent those, the literal `"x"` / `"Value"`). Use them when the axis has room for a full title and the card does not — the card is read repeatedly in a narrow floating box, so a long axis title wraps onto two or three lines there and the card grows taller than the region it is describing. (Before 1.14.0 it did not wrap: the line ran out through the card's right border and the value was clipped, which is what these fields were introduced to work around.) The axis title itself is untouched. Hover-only, like every tooltip field, so absent from a PNG export. Rejected on other chart types because their cards label rows by SERIES, not by axis. |
 | `tooltip_x_format` | string | d3 `timeFormat` pattern for the tooltip's **x** value. `xAxisType: temporal` or `quarterly` only — rejected on `numeric`/`categorical`. Default (absent): `"%b %Y"` on temporal, `YYYYQ#` on quarterly, matching the axis ticks — except that an **annual** temporal series (every x cell on 1 January, the natural spelling being a bare `YYYY`) defaults to `"%Y"`, because the year alone identifies the point and the axis prints it bare for a year-cadence span. That test is on the DATA, not the tick cadence: a monthly series across eighty years also gets decade ticks, and there the month is the only thing telling adjacent points apart. Set it when the data is finer than the ticks: on a **daily** series every point in a month otherwise shares one tooltip label, so hovering cannot tell you which day you are on. `"%b %-d, %Y"` → `Jul 23, 2026`. **Faceted figures too:** a multi-pane figure's coordinated cursor replaces each pane's card, and its x echo is drawn with this pattern on one line, on the hovered pane. It is drawn there even where the pane has no x-axis tick to annotate — a temporal axis ticks on whole months, so a **daily** multi-pane line draws none, and the echo is anchored just below the plot instead. Where there ARE tick rows the echo sits on them, and since your format can be wider than the tick it lands on, the tick labels its pill covers are hidden for as long as it shows and restored when the cursor leaves — ticks the pill does not reach stay put, so the axis keeps its context. Absent the field that echo keeps its axis-matching form instead: `%b` over `%Y`, one line per tick row, and nothing at all on a sub-month span, since there is no tick row to mirror. `test/hover-claims-defaults.test.ts` gates all four cases at default settings. |
 
@@ -291,7 +291,9 @@ alongside them.
 
 **`facet` (small multiples only).** Scope an `xAxis`/`yAxis` marker to the pane whose facet value
 equals `facet`; omit to render in every pane (unchanged default). Ignored on a non-faceted chart.
-`points` take `facet` the same way. `bands` are not facet-scoped.
+`points` take `facet` the same way. `bands` are not facet-scoped. A horizontal `bar`, `stacked` or
+`dumbbell` chart draws its facets as groups of one chart, with no pane to scope to, so validation
+rejects `facet` there.
 
 ### Keying annotations in the legend (`legend: true`)
 
@@ -664,7 +666,7 @@ shape-encoding legend. When color and shape encode different fields, each legend
 | `barStack.stackOrder` | array | Visual bottom→top stack order, independent of `series_order` (which still drives legend + colors). |
 | `barStack.segmentGap` | number | px of whitespace **between** adjacent stacked segments. Default `0` (segments abut). Separates two slices from the same hue family without spending another color. Applied as subtractive geometry, not a stroke: each segment's trailing edge is pulled in, floored at 0.5px so a slice thinner than the gap survives as a hairline rather than being painted over. **No gap is added at the bar's outer ends** — the baseline and the total do not move, and the net marker stays at the true net. A genuine `0` value stays zero-height. With `valueLabels.show`, each label re-centres on its segment as gapped, but the gap never changes **whether** a label is drawn: the ~25px fit threshold is a judgement about a segment's share of the data, applied once to the un-gapped extent, and a rect that cleared it is at worst 13px after the maximum gap — still room for a 10px glyph. Honored in both orientations, on 100%-normalized stacks, in small-multiples panes, and in the PNG export. Max 12. |
 | `highlightSeries` | array | Series keys to emphasize (dims all others). |
-| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it — but with them suppressed the column needs another row to show. A stacked chart's legend has a Total row exactly when `barStack.netDisplay` resolves to a dot and the chart has two or more series: an explicit `dot` on any stack of two or more series (diverging or not), the default `auto` on a diverging one, and never with `text` or `none`, with `normalize` (which overrides even `dot`), or on a single-series stack, an explicit `dot` included (there is nothing to net); a legend left with no rows at all takes no column (see below). **Five routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top`, at mount and on every resize (a card narrowed below it moves the legend to the top, and one widened past it again moves the legend back to the right column); a `small_multiples` figure has only a top legend slot, in the export as on screen; a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)); and a legend with no rows to show reserves no column, so the plot takes the full width, on screen as in the PNG, on every chart type — for example a single-series line, a stacked chart with `series_legend: false` whose `netDisplay` does not resolve to a dot (so has no Total row), a single-series diverging stack (no series row, and no Total row), a horizontal `timeline` whose drawn lanes name its categories, or a `treemap` with no groups or a single group (see [Treemap options](#treemap-options)). On screen a `timeline`'s rows are judged in the orientation it would draw beside the column, so a resize that switches it to a single vertical track, whose legend does show the rows, gets the column. **Otherwise the PNG export follows this field for a legend with rows to show**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. |
+| `legendPosition` | enum | `top` \| `right`, **on a standalone live chart wide enough to hold a right column**. Default `top`, except a diverging stacked chart or one with ≥5 series defaults to `right`. **The count is of the SERIES rows the legend actually shows**, so `series_legend: false` removes them and a chart that qualified only on count falls back to `top` — a right-hand column holding just overlay rows would be a tall gutter for two lines of text. **A DIVERGING stacked chart still resolves `right`**: that test is on the data (any negative value), not on the legend, so suppressing the series rows does not reach it — but with them suppressed the column needs another row to show. A stacked chart's legend has a Total row exactly when `barStack.netDisplay` resolves to a dot and the chart has two or more series: an explicit `dot` on any stack of two or more series (diverging or not), the default `auto` on a diverging one, and never with `text` or `none`, with `normalize` (which overrides even `dot`), or on a single-series stack, an explicit `dot` included (there is nothing to net); a legend left with no rows at all takes no column (see below). **Five routes ignore this field entirely, an explicit value included** — `legend: false` resolves `top` before the field is read (unobservable, since no legend is drawn); a card narrower than the right-column minimum falls back to `top`, at mount and on every resize (a card narrowed below it moves the legend to the top, and one widened past it again moves the legend back to the right column); a `small_multiples` figure has only a top legend slot, in the export as on screen (a horizontal `bar`, `stacked` or `dumbbell` chart's facets draw as groups of one chart, which is not a figure); a vertical `timeline`'s PNG export always puts the legend above the chart, in its portrait image (see [Timeline options](#timeline-options)); and a legend with no rows to show reserves no column, so the plot takes the full width, on screen as in the PNG, on every chart type — for example a single-series line, a stacked chart with `series_legend: false` whose `netDisplay` does not resolve to a dot (so has no Total row), a single-series diverging stack (no series row, and no Total row), a horizontal `timeline` whose drawn lanes name its categories, or a `treemap` with no groups or a single group (see [Treemap options](#treemap-options)). On screen a `timeline`'s rows are judged in the orientation it would draw beside the column, so a resize that switches it to a single vertical track, whose legend does show the rows, gets the column. **Otherwise the PNG export follows this field for a legend with rows to show**, so a standalone chart with a right legend on screen downloads with the legend on the right: it reserves a 160px column plus a 16px gap, renders the plot into what is left, and stacks the rows in the same top-to-bottom order the live column uses. Where a right legend is possible, an explicit value wins over the defaults above. |
 | `series_legend` | boolean | Set `false` to drop the **series rows** from the legend while keeping the rows overlays and annotations opted into with `legend: true`. For a chart whose colour channel does not need naming because the points are identified some other way — a `columns.point_label`, or a single highlighted observation the note explains. Distinct from `legend: false` directly below, which removes the whole box (and, having nowhere to put them, pushes overlay labels back in-frame). Because the box survives, click-to-pin/dim still works for the rows that remain. One caveat, and it is per DIMENSION rather than per legend: colour/annotation rows and shape rows are selected independently, and each dims only on a strict subset of its own dimension. So selecting a row that is the only one left in **its** dimension dims nothing — which `series_legend: false` makes reachable on a dual-encoding point chart, where it strips the colour rows but **not** the shape rows (those follow the top-level `legend` only), leaving a lone overlay row in the colour/annotation dimension beside two live shape rows. The same is already true of a single-series scatter with one keyed overlay. Not chart-type specific. Default true. |
 | `legend` | boolean | Set `false` to hide the legend entirely (top/right/figure/PNG export alike) while keeping multi-series coloring, tooltips, and crosshair. Click-to-pin/dim is consequently unavailable, since it's driven through the legend. Default true. Not bar-specific — applies to any chart type with a legend, a grouped treemap included. |
 | `chrome.tooltip` | boolean | Turn the floating hover-tooltip card off, from the spec itself rather than a stylesheet — so the PNG export (which re-renders from the spec, never sees CSS) agrees. Hit-testing and the band/point highlight are untouched; only the card is suppressed — on a treemap, the hovered tile's outline and the dimming of the other tiles stay. Applies to any chart type that has a tooltip — which is a real restriction, not a formality: on a chart whose hover is the coordinated cursor or the value pills rather than a card (see `small_multiples.coordinated_cursor` and `barStack.hover`) there is no card to suppress and this switch is a no-op, pills included. Use `chrome.valuePills` for those. Default true. Not bar-specific. The card itself is capped at 320px wide and **wraps** a row label longer than that onto further lines rather than clipping it — including a label with no space or hyphen to break at, which is broken mid-word rather than run out through the border. A row's value is joined to its label by a non-breaking space, so a wrap does not separate them. A long series name, category name, overlay label or (on a `scatter`) axis title therefore makes the card taller, never wider, and never leaves its number outside the card. Wrapping is live-DOM CSS: a PNG export has no card, so nothing about it changes in a download. |
@@ -805,12 +807,13 @@ The value axis **fits the data** and does **not** force a zero baseline (a 2%–
 its useful range); zero is included only when the dots cross it, and a zero rule is drawn there.
 `yAxisPolicy.includeZero: true` extends the fitted axis to 0 instead; a pinned `yAxisPolicy.min`
 or `max` still sets its own end.
-Faceted dumbbells share a common value scale by default (`small_multiples.mode: per-pane` gives
-each pane its own).
+Faceted vertical dumbbells share a common value scale by default (`small_multiples.mode: per-pane`
+gives each pane its own). A horizontal dumbbell (orientation omitted included) draws its facets as
+groups of one chart, on one value axis (see [Small multiples](#small-multiples)).
 
 **Hover & coordinated cursor.** Hovering anywhere in a category's band (a row for horizontal, a
 column for vertical) highlights that band and shows a tooltip listing each series' value. In a
-faceted dumbbell the cursor is coordinated — hovering a category echoes the band highlight on every
+faceted vertical dumbbell the cursor is coordinated — hovering a category echoes the band highlight on every
 pane (unless `coordinated_cursor: false`).
 
 **Sections (horizontal).** `columns.section` groups the categories into labeled blocks with bold
@@ -1127,7 +1130,8 @@ data: data.csv
 
 ### Small multiples
 
-Set `columns.facet` to the pane-splitting column, then tune the grid here.
+Set `columns.facet` to the pane-splitting column, then tune the grid here. A horizontal `bar`,
+`stacked` or `dumbbell` chart makes no panes: see **Facets on horizontal charts** below.
 
 | field | type | notes |
 |---|---|---|
@@ -1138,21 +1142,20 @@ Set `columns.facet` to the pane-splitting column, then tune the grid here.
 | `small_multiples.coordinated_cursor` | boolean | Hovering one pane echoes a secondary cursor on every pane at the same x. Default true. Three cases coordinate nothing with this field at its default, and each pane hovers with its own card instead: a **scatter** figure; a **histogram** with `small_multiples.mode: per-pane` (its panes bin independently, so there is no shared bin to echo); and a figure that resolves to a single pane of a type other than bar or stacked (**line, area, dotplot, dumbbell, histogram, waterfall**), which has nothing to coordinate and behaves as if this were `false` — but a single **bar or stacked** pane stays coordinated on purpose (the bar-end value pill is that chart type's hover treatment whether or not there are sibling panes), so there `false` is *not* equivalent to the default: it brings back the floating card. On a **line/area** pane the coordinated cursor *replaces* that pane's floating tooltip card with the in-place cursor — guide, per-series dot, value pill — so a reader gets the values from the pills rather than a card, and `overlays[].tooltip` has no card to report into. `test/hover-card-reach.test.ts` and `test/hover-claims-defaults.test.ts` gate each case. |
 | `small_multiples.pane_widths` | enum \| array | How a row's width splits among its columns (vertical bar facets; applied to every row). `equal` (default) — same data width per column. `equal-bar` — each column sized to its bar count so bars render at the same width (exact for a single row; multi-row uses the max bar count per column). An array like `[2, 1]` sets explicit per-column proportions (length must equal the column count). When set and `columns` is unset, the panes lay out in a single row. |
 
-**Faceted horizontal bars/stacks.** `orientation: horizontal` combines with `small_multiples` to
-produce a faceted horizontal chart: each pane is one facet value, the panes share a single value (x)
-axis, and the category labels form a shared left gutter sized to the longest label — shown on the
-leftmost pane only, so the rows line up across panes. Works with single-series, grouped (multi-series),
-and **stacked** bars. Use `shared` mode (the default) so the value axis is comparable across panes.
-On a diverging stack with two or more series, `barStack.netDisplay: dot` keeps the net dot in each pane (at a reduced radius);
-the net text callout and per-segment value labels are suppressed in panes.
-`barStack.hover` applies per pane exactly as it does to a standalone chart, so a faceted stack can
-take the tooltip without the dot. Taking the tooltip costs none of the coordination: at default
-settings hovering a pane shows that pane's card and shades the same category on every other pane
-that has it, and draws no value pills on any pane (the card is the read-out). The two halves keep
-their own switches — `small_multiples.coordinated_cursor: false` drops the echo, and
-`chrome.tooltip: false` drops the card. With `columns: 1` each facet occupies its own row with its
-own full-width category axis, so facets may carry **different** categories (the shared-category
-requirement — see below — applies only when panes share a row).
+**Facets on horizontal charts.** On a horizontal `bar`, `stacked` or `dumbbell` chart (a dumbbell is
+horizontal unless it sets `orientation: vertical`), `columns.facet` draws each facet value as a group
+of one chart, exactly as `columns.section` draws a section (see
+[Section axis](#section-axis-horizontal-charts)): one plot on one value axis, a bold group title
+flush left, the group's category labels indented 14px under it, and the fixed gap between groups.
+`small_multiples.pane_order` orders the groups and leaves out any it does not list, and
+`small_multiples.pane_titles` titles them, as `section_order` and `section_labels` do for sections;
+`small_multiples` itself may be omitted. Groups may carry different categories, and a category in
+two groups is two rows. The hover, legend, PNG export and height are a sectioned chart's, and
+`onHover` reports the group as `section`. Validation rejects, on these charts: `columns.facet`
+together with `columns.section`; `small_multiples.columns` above 1; `small_multiples.mode: per-pane`;
+`small_multiples.pane_widths`; `small_multiples.coordinated_cursor`; `section_order` and
+`section_labels` (use `pane_order` / `pane_titles`); and `facet` on an `annotations`, `yAxisPolicy.markers`
+or `overlays` entry, which has no pane to scope to.
 
 ### Section axis (horizontal charts)
 
@@ -1166,20 +1169,18 @@ same. Two sections are separated
 by the usual space between rows plus a fixed 33px that holds the later section's header: the
 header's line sits 10px above that section's first bar, with at least 10px between it and the bar
 above. The gap does not grow with the row height. Wherever the engine picks the height (which
-grows with the rows) the gap is always the full 33px: a live chart or figure and the PNG export,
-in every pane of a small-multiples figure, including a pane with fewer rows than gaps. Only a host
-that renders at its own explicit height (`renderChart` / `renderFigure` `height`, or `mountChart`
-`height` on a single chart) too small for the rows and full gaps gets smaller gaps instead:
+grows with the rows) the gap is always the full 33px: a live chart and the PNG export. Only a host
+that renders at its own explicit height (`renderChart` or `mountChart` `height`) too small for the rows and full gaps gets smaller gaps instead:
 together they take at most half the plot, shared equally, so the rows keep the other half, and the
 headers may then crowd the rows above them. A
 stacked chart still draws one stack per category; its net callout (text or dot) and segment labels
-sit on that category's row. On horizontal bars and stacks it combines with `small_multiples` (the
-headers show on the leftmost pane).
+sit on that category's row. It cannot be combined with `columns.facet`, which on these charts draws
+its values as groups the same way (see [Small multiples](#small-multiples)).
 
 | field | type | notes |
 |---|---|---|
 | `columns.section` | string | Column whose distinct values define the sections. |
-| `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`): a section it leaves out is not drawn, and its rows do not count toward the value axis, the chart height, a stack's net marker, the legend placement or (small multiples) the panes and their grid columns. A series found only in a left-out section gets no legend row but keeps its colour position, so every drawn series keeps the colour it has with that section drawn. |
+| `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`): a section it leaves out is not drawn, and its rows do not count toward the value axis, the chart height, a stack's net marker or the legend placement. A series found only in a left-out section gets no legend row but keeps its colour position, so every drawn series keeps the colour it has with that section drawn. |
 | `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
 **Repeated labels.** A row is identified by its section and category together; what it displays is
@@ -1189,17 +1190,9 @@ that row's own values. On a stack each such row is its own stack, with its own n
 segment labels. A field that names a category by its label applies to every section
 containing it: `x_order` / `category_order` sets the order within each section, an `x_labels` entry
 renames the hover card's header for each such row, and a `category_colors` entry colours each such
-bar. The same section + category may carry only one value per series (per facet, when faceted); a
-second row for it is a validation error. Applies wherever sections do (horizontal bars, stacks and
+bar. The same section + category may carry only one value per series; a second row for it is a
+validation error. Applies wherever sections do (horizontal bars, stacks and
 dumbbells).
-
-`columns.section` and `columns.facet` are supported together on faceted horizontal bars and stacks
-(both `shared` and `per-pane` `small_multiples.mode`). When panes share a row (`columns > 1`), faceted
-horizontal bars/stacks share one category axis across those panes, so every facet must carry the
-same categories (and sections), compared as section + category — a facet missing a category or a whole section (a **ragged facet**)
-fails validation with an error naming the facet and the missing categories/sections, rather than
-silently misaligning rows across panes. This does not apply with `columns: 1` (each facet is on its
-own row with its own category axis, so different categories per facet are allowed).
 
 ### Data
 
@@ -1327,7 +1320,8 @@ no callback wired through JavaScript at mount time.
 | Legend select | `onLegendSelect` | Any chart with a legend. Reports the full active/dimmed series set. | Fires on a pin (click), **and also on hover, focus, blur, and the reset button** — issue #30's own gloss for this is "pin/**dim**", so hover-firing is intended, not a bug. A consumer that only cares about pins should debounce or de-duplicate. |
 
 **`onHover`'s payload** is `{ category, series, values }`, plus `facet` in a small-multiples pane
-and `section` on a chart with `columns.section`: the hovered row's section, which tells apart two
+and `section` on a chart with `columns.section` (or a horizontal chart's `columns.facet`, whose
+values draw as sections): the hovered row's section, which tells apart two
 rows that share a category across sections. `category` and `section` are the raw data values, not
 their `x_labels` / `section_labels` display names. A chart without sections has no `section` field.
 

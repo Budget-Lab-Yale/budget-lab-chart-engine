@@ -3,8 +3,8 @@
 // Dumbbell live-hover PLUMBING. The hover GEOMETRY (which category the pointer resolves to) is
 // browser-runtime — jsdom has no layout so getBoundingClientRect returns 0 and mark centers can't
 // be read — and is verified in the live demo. What we CAN prove here: the hover is wired (a hit
-// target is attached for both orientations, pointer events don't throw), a faceted figure mounts
-// with a coordinated grid, and the tooltip HTML the hover shows lists each series' value.
+// target is attached for both orientations, pointer events don't throw), a faceted horizontal
+// dumbbell mounts as one grouped chart, and the tooltip HTML the hover shows lists each series' value.
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { renderChart } from "../src/engine/index";
@@ -62,7 +62,7 @@ describe("dumbbell hover — plumbing", () => {
     }).not.toThrow();
   });
 
-  it("faceted dumbbell mounts a coordinated multi-pane grid", () => {
+  it("a faceted horizontal dumbbell mounts one grouped chart (Ruling 80), with one hover target", () => {
     const facetRows: TidyRow[] = [
       { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
       { pane: "Quintiles", group: "Q1", measure: "collected", rate: "2.0" },
@@ -73,14 +73,13 @@ describe("dumbbell hover — plumbing", () => {
       ...SPEC,
       series_order: ["static", "collected"],
       columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-      small_multiples: { columns: 2, mode: "shared" },
+      small_multiples: { mode: "shared" },
     };
     const container = document.createElement("div");
     document.body.appendChild(container);
     expect(() => mountChart(container, { spec, rows: facetRows, width: 838, height: 420 })).not.toThrow();
-    expect(container.querySelectorAll(".figure-pane svg").length).toBe(2);
-    // Each pane wired its own hover hit target (the coordinated cursor bus drives the rest live).
-    expect(container.querySelectorAll(".figure-pane .tbl-catline-hit").length).toBe(2);
+    expect(container.querySelectorAll(".figure-pane").length).toBe(0);
+    expect(container.querySelectorAll(".tbl-catline-hit").length).toBe(1);
   });
 
   it("tooltip swatches are the markers production resolves (ink / hollow ring / filled)", () => {

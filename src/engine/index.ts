@@ -41,7 +41,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers, MarkContext } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
-import { resolveValueAffixes, isTruthyFlag, formatNumericX, withoutRepeatedOrderEntries } from "./util";
+import { resolveValueAffixes, isTruthyFlag, formatNumericX, normalizeSpec } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
@@ -404,7 +404,7 @@ export function renderPane(
   classNameSuffix?: string,
   facetInfo?: FacetInfo,
 ): PaneResult {
-  spec = withoutRepeatedOrderEntries(spec);
+  spec = normalizeSpec(spec);
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
   const cols = resolveColumns(spec, rows);
@@ -661,7 +661,7 @@ export function paneValueExtent(
   rows: TidyRow[],
   binThresholds?: number[],
 ): { min: number; max: number } | null {
-  spec = withoutRepeatedOrderEntries(spec);
+  spec = normalizeSpec(spec);
   const xType = spec.xAxisType;
   if (!xType) return null;
   const cols = resolveColumns(spec, rows);
@@ -761,7 +761,7 @@ function sectionedRowOrder(spec: ChartSpec, rows: readonly PreparedRow[], withCa
  *  and series scope, so the keys match the panes' and a figure whose panes already agreed resolves
  *  the order each pane drew. Undefined when the axis is not sectioned. */
 export function sectionRowOrderOver(spec: ChartSpec, rows: TidyRow[], sectionKeyed?: boolean): string[] | undefined {
-  spec = withoutRepeatedOrderEntries(spec);
+  spec = normalizeSpec(spec);
   const xType = spec.xAxisType;
   if (!xType) return undefined;
   const cols = resolveColumns(spec, rows);
@@ -790,7 +790,7 @@ function resolveShapeNames(spec: ChartSpec, dataInScope: readonly PreparedRow[])
  *  of the figure's own (dropping a listed blank value, reading rows before x_order sorts them,
  *  counting rows no pane draws) returned another list and moved those figures' markers. */
 export function shapeDomainOver(spec: ChartSpec, rows: TidyRow[]): string[] {
-  spec = withoutRepeatedOrderEntries(spec);
+  spec = normalizeSpec(spec);
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
   const cols = resolveColumns(spec, rows);
@@ -1581,7 +1581,7 @@ export function renderChart(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): RenderResult {
-  spec = withoutRepeatedOrderEntries(spec);
+  spec = normalizeSpec(spec);
   // Timeline draws its own SVG (no Plot frame, no value axis): branch before renderPane so no
   // existing chart type's path runs any timeline code.
   if (spec.chartType === "timeline") return renderTimeline(spec, rows, opts);
@@ -1648,12 +1648,14 @@ import { renderTreemap } from "./marks/treemap";
 import type { TreemapTileInfo } from "./marks/treemap";
 
 /** Top-level dispatcher: a `small_multiples` spec renders a multi-panel figure (renderFigure),
- *  everything else renders a single chart (renderChart). render-live/export switch to this in
+ *  everything else renders a single chart (renderChart), a horizontal chart's facets included
+ *  (they draw as groups, normalizeSpec). render-live/export switch to this in
  *  B6/B7; for now both renderChart and renderFigure stay exported and callable directly. */
 export function render(
   spec: ChartSpec,
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): RenderResult | FigureRenderResult {
+  spec = normalizeSpec(spec);
   return spec.small_multiples ? renderFigure(spec, rows, opts) : renderChart(spec, rows, opts);
 }

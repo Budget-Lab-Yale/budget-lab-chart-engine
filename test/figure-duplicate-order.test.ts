@@ -22,6 +22,7 @@ import { symbolPathD } from "../src/engine/symbols";
 import { validateSpec } from "../src/spec/validate";
 import { CHART_SPEC_SCHEMA } from "../src/spec/schema";
 import { mockRect1to1 } from "./helpers/hover-harness";
+import { facetsDrawAsGroups } from "../src/spec/facet-groups";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -126,7 +127,8 @@ const stable = (s: string): string => s.replace(/plot-clip-\d+/g, "plot-clip-#")
 function surfaces(spec: ChartSpec, rows: TidyRow[]): Record<string, string> {
   const out: Record<string, string> = {};
   const keyed = (v: unknown): string => JSON.stringify(v ?? null);
-  if (spec.small_multiples) {
+  // A horizontal chart draws its facets as groups in one chart (spec/facet-groups.ts).
+  if (spec.small_multiples && !facetsDrawAsGroups(spec)) {
     const fig = renderFigure(spec, rows, { width: INNER_W });
     fig.panes.forEach((p, i) => {
       out[`pane ${i} svg`] = (p.svg as Element).outerHTML;

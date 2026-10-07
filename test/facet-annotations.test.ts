@@ -9,27 +9,12 @@
 //      categorical y-band adapter's markerToX always returns null). This is NEW capability: a
 //      vertical rule + label on the VALUE axis (which runs along x for horizontal bars).
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { renderChart, renderFigure } from "../src/engine/index";
 import { TBL } from "../src/engine/theme";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../src/spec/annotations";
 import { validateSpec } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
-
-// Minimal CSV → TidyRow[] (mirrors golden.test.ts's local helper) — fixtures are comma-free.
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
 
 // ---------------------------------------------------------------------------
 // filterAnnotationsByFacet — pure unit tests
@@ -307,105 +292,16 @@ describe("horizontal bars — xAxis value-axis markers (RED-proven new capabilit
   });
 });
 
-describe("horizontal faceted (shared mode) — xAxis markers scoped + folded per pane", () => {
-  const rows = parseCsv("./fixtures/figure7-tariff.csv");
-  const FIG7_FACETED_SPEC: ChartSpec = {
-    chartType: "bar",
-    title: "Consumer Price Effects by PCE Spending Category",
-    subtitle: "Percent change in consumer prices",
-    xAxisType: "categorical",
-    orientation: "horizontal",
-    series_order: ["Pre-Substitution", "Post-Substitution"],
-    columns: { x: "category", value: "value", series: "series", facet: "facet" },
-    small_multiples: {
-      columns: 2,
-      mode: "shared",
-      pane_order: ["Section 122 Expires", "Section 122 Extended"],
-    },
-    data: "figure7-tariff.csv",
-    annotations: {
-      xAxis: [
-        { x: "0.33", label: "EXPIRESMARK", facet: "Section 122 Expires" },
-        { x: "0.26", label: "EXTENDEDMARK", facet: "Section 122 Extended" },
-      ],
-    },
-  };
-
-  it("each pane shows only its own facet-scoped vertical value line + label", () => {
-    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
-    const [pane0, pane1] = fig.panes.map((p) => p.svg as SVGSVGElement);
-    expect(labelTexts(pane0!)).toContain("EXPIRESMARK");
-    expect(labelTexts(pane0!)).not.toContain("EXTENDEDMARK");
-    expect(labelTexts(pane1!)).toContain("EXTENDEDMARK");
-    expect(labelTexts(pane1!)).not.toContain("EXPIRESMARK");
-  });
-
-  it("grouped horizontal (fy row facets): the label renders exactly ONCE and the rule is one full-height copy", () => {
-    // Categories live on fy row facets here, so an unfaceted mark would repeat per band (20
-    // categories → 20 copies). The label binds to an end fy category and the rule is collapsed +
-    // stretched by the fy chrome pass (like the zero baseline), so each appears once.
-    const fig = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
-    const pane0 = fig.panes[0]!.svg as SVGSVGElement;
-    expect(labelTexts(pane0).filter((t) => t === "EXPIRESMARK").length).toBe(1);
-    // Exactly one collapsed marker-rule group; its line spans the full plot height (top margin →
-    // bottom plot edge), like the value gridlines/zero baseline after the fy collapse.
-    const ruleGroups = pane0.querySelectorAll('g[class*="tbl-annotation-vline-"]');
-    expect(ruleGroups.length).toBe(1);
-    const line = ruleGroups[0]!.querySelector("line")!;
-    const y1 = Number(line.getAttribute("y1"));
-    const y2 = Number(line.getAttribute("y2"));
-    const svgH = Number(pane0.getAttribute("height"));
-    expect(Math.abs(y2 - y1)).toBeGreaterThan(svgH * 0.7);
-  });
-
-  it("the shared value-axis extent folds in the markers (max tick reflects the widened domain)", () => {
-    const withoutMarkers = renderFigure(
-      { ...FIG7_FACETED_SPEC, annotations: undefined },
-      rows,
-      { width: 900, document },
-    );
-    const withMarkers = renderFigure(FIG7_FACETED_SPEC, rows, { width: 900, document });
-    const maxTick = (svg: SVGSVGElement): number =>
-      Math.max(
-        ...Array.from(svg.querySelectorAll("text"))
-          .map((t) => parseFloat((t.textContent ?? "").replace("%", "")))
-          .filter((v) => Number.isFinite(v)),
-      );
-    const before = maxTick(withoutMarkers.panes[0]!.svg as SVGSVGElement);
-    const after = maxTick(withMarkers.panes[0]!.svg as SVGSVGElement);
-    expect(after).toBeGreaterThanOrEqual(before);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Composition: ONE marker carrying BOTH `facet` and `value_format` + a `{value}` token, across
-// per-pane vertical yAxis, shared vertical, and per-pane horizontal xAxis. Each pane must render
+// per-pane and shared vertical yAxis. (A horizontal chart draws its facets as groups, so validation
+// rejects a facet-scoped marker there: spec/facet-groups.ts.) Each pane must render
 // ONLY its own facet-scoped marker, with its label formatted from ITS OWN coordinate value (not
 // a neighboring pane's) — proving the facet filter and the {value} substitution compose
 // correctly rather than one silently overriding or bypassing the other.
 // ---------------------------------------------------------------------------
 
-function horizontalFacetedSpec(mode: "shared" | "per-pane", markers: object[]): ChartSpec {
-  return {
-    chartType: "bar",
-    title: "t",
-    xAxisType: "categorical",
-    orientation: "horizontal",
-    columns: { x: "category", value: "value", facet: "facet" },
-    data: "x",
-    small_multiples: { mode, pane_order: ["pct", "dollars"], columns: 2 },
-    annotations: { xAxis: markers },
-  } as unknown as ChartSpec;
-}
-
-const H_FACET_ROWS: TidyRow[] = [
-  { facet: "pct", category: "A", value: "0.2" },
-  { facet: "pct", category: "B", value: "0.4" },
-  { facet: "dollars", category: "A", value: "100" },
-  { facet: "dollars", category: "B", value: "200" },
-] as unknown as TidyRow[];
-
-describe("composition — one marker with BOTH facet + value_format/{value}, across facet modes/orientations", () => {
+describe("composition — one marker with BOTH facet + value_format/{value}, across facet modes", () => {
   it("per-pane vertical yAxis: each pane renders only its own marker, formatted from its own value", () => {
     const spec = verticalFacetedSpec("per-pane", [
       { y: 1.5, label: "Val ({value})", value_format: { decimals: 2 }, facet: "pct" },
@@ -432,18 +328,6 @@ describe("composition — one marker with BOTH facet + value_format/{value}, acr
     expect(pane1).not.toContain("Val (1.50)");
   });
 
-  it("per-pane horizontal xAxis: each pane renders only its own value-axis marker, formatted from its own value", () => {
-    const spec = horizontalFacetedSpec("per-pane", [
-      { x: "0.33", label: "Rate ({value})", value_format: { decimals: 2, suffix: "%" }, facet: "pct" },
-      { x: "150", label: "Amt ({value})", value_format: { decimals: 0, prefix: "$" }, facet: "dollars" },
-    ]);
-    const fig = renderFigure(spec, H_FACET_ROWS, { width: 720, height: 320, document });
-    const [pane0, pane1] = fig.panes.map((p) => labelTexts(p.svg as SVGSVGElement));
-    expect(pane0).toContain("Rate (0.33%)");
-    expect(pane0).not.toContain("Amt ($150)");
-    expect(pane1).toContain("Amt ($150)");
-    expect(pane1).not.toContain("Rate (0.33%)");
-  });
 });
 
 // ---------------------------------------------------------------------------

@@ -164,7 +164,11 @@ function observe(svg: SVGSVGElement): Cell {
 //     sectioned stacks;
 //   - `orientation: horizontal` + `columns.section` on the two sectioned stacks. Layout, not hover
 //     dials: they decide where the rows are drawn (fy facets with header spacers), which is the
-//     thing those rows measure the hover against.
+//     thing those rows measure the hover against;
+//   - `orientation: vertical` on the second dumbbell fixture, also layout: a horizontal chart (the
+//     sectioned stacks, and a dumbbell, which is horizontal by default) draws its facets as groups in
+//     one chart (spec/facet-groups.ts), so it has no 2-pane cell, and the vertical dumbbell is the one
+//     that measures a dumbbell's panes.
 // Adding anything outside that inventory breaks the file's premise.
 //
 // Why `series_order` is there: it PINS the row order the `cardRows` column asserts instead of
@@ -303,7 +307,8 @@ const sectionedStack = (f: boolean, series: Array<[string, number, number, numbe
 
 type Mount = { spec: ChartSpec; rows: TidyRow[]; hover: (svg: SVGSVGElement) => void };
 
-const TYPES: Array<{ name: string; mount: (f: boolean) => Mount }> = [
+/** `panes: false`: a horizontal chart, which draws its facets as groups, so it has no 2-pane cell. */
+const TYPES: Array<{ name: string; mount: (f: boolean) => Mount; panes?: false }> = [
   {
     name: "bar (plain)",
     mount: (f) => ({
@@ -347,10 +352,12 @@ const TYPES: Array<{ name: string; mount: (f: boolean) => Mount }> = [
   {
     name: "stacked (horizontal, sectioned, all positive)",
     mount: (f) => sectionedStack(f, [["Up", 6, 5, 3], ["Down", 4, 2, 1]]),
+    panes: false,
   },
   {
     name: "stacked (horizontal, sectioned, with a negative)",
     mount: (f) => sectionedStack(f, [["Up", 6, 5, 3], ["Down", -4, -2, -1]]),
+    panes: false,
   },
   {
     name: "line (categorical x)",
@@ -372,6 +379,15 @@ const TYPES: Array<{ name: string; mount: (f: boolean) => Mount }> = [
     name: "dumbbell",
     mount: (f) => ({
       spec: spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], ...paned(f) }),
+      rows: cat(f, [["A", 3, 4], ["B", 7, 9]]),
+      hover: (svg) => hoverFirstMark(svg, DOT_MARK),
+    }),
+    panes: false,
+  },
+  {
+    name: "dumbbell (vertical)",
+    mount: (f) => ({
+      spec: spec({ chartType: "dumbbell", orientation: "vertical", xAxisType: "categorical", series_order: ["A", "B"], ...paned(f) }),
       rows: cat(f, [["A", 3, 4], ["B", 7, 9]]),
       hover: (svg) => hoverFirstMark(svg, DOT_MARK),
     }),
@@ -446,9 +462,7 @@ const EXPECTED: Record<string, Cell> = {
   // vertical stack except the axis-label echo — a horizontal bar-like chart bolds the hovered row's
   // label instead of echoing it. Measured equal to the same stacks without sections.
   "stacked (horizontal, sectioned, all positive) · standalone":    { card: false, cardRows: [], pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
-  "stacked (horizontal, sectioned, all positive) · 2-pane":        { card: false, cardRows: [], pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
   "stacked (horizontal, sectioned, with a negative) · standalone": { card: true,  cardRows: ["Up", "Down", "Total"], pills: false, guide: false, dot: false, region: false, axisLabel: false },
-  "stacked (horizontal, sectioned, with a negative) · 2-pane":     { card: true,  cardRows: ["Up", "Down", "Total"], pills: false, guide: false, dot: false, region: false, axisLabel: false },
   // Categorical-x line and dot plot: a card standalone, replaced by the in-place echo in a pane.
   // The two panes differ in their echo — the line pane draws a GUIDE, the dot pane shades the BAND.
   "line (categorical x) · standalone":    { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
@@ -462,7 +476,8 @@ const EXPECTED: Record<string, Cell> = {
   // no longer the only type that does; those two are the whole of the exception, and both of their
   // rows in the sibling-echo table below say so.
   "dumbbell · standalone":                { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
-  "dumbbell · 2-pane":                    { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
+  "dumbbell (vertical) · standalone":     { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
+  "dumbbell (vertical) · 2-pane":         { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
   // Temporal line / area / histogram: a card standalone, none in a default pane. (These card
   // builders do not call hooks.tooltip — that carve-out is pinned in hover-card-reach.test.ts.)
   "line (temporal) · standalone":         { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
@@ -488,7 +503,7 @@ const EXPECTED: Record<string, Cell> = {
 
 describe("the hover surface at defaults — every chart type, standalone and 2-pane", () => {
   for (const t of TYPES) {
-    for (const faceted of [false, true]) {
+    for (const faceted of t.panes === false ? [false] : [false, true]) {
       const key = `${t.name} · ${faceted ? "2-pane" : "standalone"}`;
       it(key, () => {
         const { spec: s, rows, hover } = t.mount(faceted);
@@ -502,7 +517,7 @@ describe("the hover surface at defaults — every chart type, standalone and 2-p
   }
 
   it("the matrix has no stale rows — every EXPECTED key is a cell that is actually mounted", () => {
-    const mounted = TYPES.flatMap((t) => [`${t.name} · standalone`, `${t.name} · 2-pane`]);
+    const mounted = TYPES.flatMap((t) => [`${t.name} · standalone`, ...(t.panes === false ? [] : [`${t.name} · 2-pane`])]);
     expect(Object.keys(EXPECTED).sort()).toEqual(mounted.sort());
   });
 
@@ -548,13 +563,11 @@ const SIBLING_ECHO: Record<string, PaneEcho> = {
   // pure band shade, no pills — the card is that pane's read-out, so a pill would double it up.
   // The same split as the dumbbell row below.
   "stacked (with a negative)": { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
-  "stacked (horizontal, sectioned, all positive)":   { pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
-  "stacked (horizontal, sectioned, with a negative)": { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
   "line (categorical x)":     { pills: true,  guide: true,  dot: true,  region: false, axisLabel: false },
   "dotplot":                  { pills: true,  guide: false, dot: true,  region: true,  axisLabel: false },
   // Dumbbell keeps its per-pane card AND coordinates: the sibling echo is a pure band shade, with
   // no pills and no dot. This is the row the hovered-pane table above cannot show.
-  "dumbbell":                 { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
+  "dumbbell (vertical)":      { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
   "line (temporal)":          { pills: true,  guide: true,  dot: true,  region: false, axisLabel: false },
   "area (temporal)":          { pills: true,  guide: true,  dot: true,  region: false, axisLabel: false },
   "histogram":                { pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
@@ -562,8 +575,10 @@ const SIBLING_ECHO: Record<string, PaneEcho> = {
   "scatter":                  { pills: false, guide: false, dot: false, region: false, axisLabel: false },
 };
 
+const PANED = TYPES.filter((t) => t.panes !== false);
+
 describe("what a 2-pane figure's OTHER pane echoes, at defaults", () => {
-  for (const t of TYPES) {
+  for (const t of PANED) {
     it(t.name, () => {
       const { spec: s, rows, hover } = t.mount(true);
       const m = mountHover(s, rows, true);
@@ -574,7 +589,7 @@ describe("what a 2-pane figure's OTHER pane echoes, at defaults", () => {
   }
 
   it("no stale rows — every SIBLING_ECHO key is a chart type that is actually mounted", () => {
-    expect(Object.keys(SIBLING_ECHO).sort()).toEqual(TYPES.map((t) => t.name).sort());
+    expect(Object.keys(SIBLING_ECHO).sort()).toEqual(PANED.map((t) => t.name).sort());
   });
 
   it("the axis-label echo is the ACTIVE pane's alone, on every type that draws one", () => {

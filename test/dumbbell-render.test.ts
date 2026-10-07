@@ -129,7 +129,7 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
     expect(lastIdx("static")).toBeLessThan(firstIdx("collected"));
   });
 
-  it("horizontal facets stack vertically (columns forced to 1)", () => {
+  it("horizontal facets draw as groups in one chart (Ruling 80)", () => {
     const rows: TidyRow[] = [
       { pane: "A", group: "Q1", measure: "static", rate: "2" },
       { pane: "A", group: "Q1", measure: "collected", rate: "3" },
@@ -141,9 +141,11 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
       columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
       small_multiples: { mode: "shared" },
     };
-    const fig = renderFigure(spec, rows, { width: 900, document });
-    expect(fig.columns).toBe(1); // horizontal → one full-width pane per row
-    expect(fig.panes.length).toBe(2);
+    const svg = renderChart(spec, rows, { width: 900, document }).svg as SVGSVGElement;
+    const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
+    expect(titles).toEqual(expect.arrayContaining(["A", "B"]));
+    // The repeated "Q1" is a row under each group.
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(4);
   });
 
   it("vertical facets sit side by side (grid columns > 1)", () => {
@@ -179,7 +181,7 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
   });
 });
 
-describe("dumbbell mark — faceting (both orientations)", () => {
+describe("dumbbell mark — faceting (vertical)", () => {
   // Two facet panes: main quintiles and the top-decile breakout, sharing series/colors/legend.
   const FACET_ROWS: TidyRow[] = [
     { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
@@ -201,8 +203,8 @@ describe("dumbbell mark — faceting (both orientations)", () => {
   });
 
   // Each pane must contain ONLY its own facet's categories (proof the facet split is real, not one
-  // pane drawing everything). Checked for both orientations.
-  for (const orientation of ["horizontal", "vertical"] as const) {
+  // pane drawing everything). A horizontal dumbbell draws its facets as groups instead (above).
+  for (const orientation of ["vertical"] as const) {
     it(`${orientation}: each pane draws only its facet's category dots`, () => {
       const result = renderFigure(facetSpec(orientation), FACET_ROWS, { width: 838, height: 440, document });
       expect(result.panes.length).toBe(2);
@@ -273,9 +275,9 @@ describe("dumbbell mark — structure", () => {
     expect(labels.length).toBe(1);
   });
 
-  it("composes with faceting (top-decile breakout as a separate pane)", () => {
-    // Main quintiles in one facet, the top-decile breakout in another — each pane a dumbbell that
-    // shares the series/colors/legend and (default) a common value scale.
+  it("composes with faceting (top-decile breakout as a separate group)", () => {
+    // Main quintiles in one facet, the top-decile breakout in another — on a horizontal dumbbell
+    // each facet is a group of one chart, sharing the series/colors/legend and the value scale.
     const facetRows: TidyRow[] = [
       { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
       { pane: "Quintiles", group: "Q1", measure: "collected", rate: "2.0" },
@@ -291,16 +293,12 @@ describe("dumbbell mark — structure", () => {
       series_order: ["static", "collected"],
       series_marker: { static: "hollow", collected: "filled" },
       columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-      small_multiples: { columns: 2, mode: "shared" },
+      small_multiples: { mode: "shared" },
     };
-    let result!: ReturnType<typeof renderFigure>;
-    expect(() => { result = renderFigure(spec, facetRows, { width: 838, height: 420, document }); }).not.toThrow();
-    expect(result.panes.length).toBe(2);
-    const totalCircles = result.panes.reduce(
-      (n, p) => n + (p.svg?.querySelectorAll('g[aria-label="dot"] circle').length ?? 0),
-      0,
-    );
-    expect(totalCircles).toBe(8);
+    const svg = renderChart(spec, facetRows, { width: 838, height: 420, document }).svg as SVGSVGElement;
+    const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
+    expect(titles).toEqual(expect.arrayContaining(["Quintiles", "Top decile"]));
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(8);
   });
 
   it("builds a per-series dot legend honoring series_marker (hollow ring for the hollow series)", () => {

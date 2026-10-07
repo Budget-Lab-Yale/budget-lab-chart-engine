@@ -4,7 +4,7 @@
 // pitch, centred on the row) — never the section gap or its header — and, like the standalone
 // horizontal bar's coordinated cursor, it runs left under the row's category label, whose text is
 // darkened and bolded while hovered. Checked on the stack's tooltip hover, the bar's pill hover and
-// the dumbbell's band hover, standalone and in small-multiple panes. Live only: nothing here renders
+// the dumbbell's band hover. Live only: nothing here renders
 // into the export.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
@@ -34,9 +34,9 @@ const CATS: Array<[string, string]> = [
   ["Beta one", "Second"],
   ["Beta two", "Second"],
 ];
-const stackRows = (vals: Record<string, number[]>, pane?: string): TidyRow[] =>
+const stackRows = (vals: Record<string, number[]>): TidyRow[] =>
   SERIES.flatMap((s) =>
-    CATS.map(([bar, sec], i) => ({ ...(pane ? { pane } : {}), bar, sec, tax: s, v: String(vals[s]![i]) })),
+    CATS.map(([bar, sec], i) => ({ bar, sec, tax: s, v: String(vals[s]![i]) })),
   ) as unknown as TidyRow[];
 /** Negative segments → a net dot → the stack hovers with its tooltip card and its own band. */
 const NEG = { Income: [10, 20, 30, 40], Gains: [5, 15, 25, 35], Corporate: [-30, -6, -40, -2] };
@@ -51,11 +51,6 @@ const STACK: ChartSpec = {
 };
 /** The step-up demo's shape: net as text, hover forced to the card. */
 const STACK_TEXT_TOOLTIP: ChartSpec = { ...STACK, barStack: { netDisplay: "text", hover: "tooltip" } };
-const STACK_FIG: ChartSpec = {
-  ...STACK,
-  columns: { ...STACK.columns, facet: "pane" },
-  small_multiples: { columns: 2, mode: "shared", pane_order: ["P1", "P2"] },
-};
 
 const BAR: ChartSpec = {
   chartType: "bar",
@@ -76,16 +71,11 @@ const DUMBBELL: ChartSpec = {
   series_order: ["Cash", "Accrual"],
   data: "d.csv",
 };
-const dbRows = (pane?: string): TidyRow[] =>
+const dbRows = (): TidyRow[] =>
   CATS.flatMap(([bar, sec], i) => [
-    { ...(pane ? { pane } : {}), bar, sec, m: "Cash", v: String(20 + i) },
-    { ...(pane ? { pane } : {}), bar, sec, m: "Accrual", v: String(8 + i) },
+    { bar, sec, m: "Cash", v: String(20 + i) },
+    { bar, sec, m: "Accrual", v: String(8 + i) },
   ]) as unknown as TidyRow[];
-const DUMBBELL_FIG: ChartSpec = {
-  ...DUMBBELL,
-  columns: { ...DUMBBELL.columns, facet: "pane" },
-  small_multiples: { pane_order: ["P1", "P2"] },
-};
 
 // --- geometry (jsdom has no layout: attributes + ancestor translates) ---
 function translateY(el: Element, svg: Element): number {
@@ -98,7 +88,7 @@ function translateY(el: Element, svg: Element): number {
 }
 const labels = (svg: SVGSVGElement): SVGTextElement[] => Array.from(svg.querySelectorAll<SVGTextElement>("g.tbl-cat-label text"));
 const labelOf = (svg: SVGSVGElement, cat: string): SVGTextElement => labels(svg).find((t) => t.textContent === cat)!;
-/** Each row's centre, from the (label-bearing) pane's labels. */
+/** Each row's centre, from its category label. */
 const centre = (svg: SVGSVGElement, cat: string): number => translateY(labelOf(svg, cat), svg);
 const widthOf = (svg: SVGSVGElement): number => svg.viewBox.baseVal.width;
 
@@ -125,15 +115,6 @@ function mountOne(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement {
   mockRect1to1(svg);
   return svg;
 }
-function mountPanes(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement[] {
-  const c = document.createElement("div");
-  document.body.appendChild(c);
-  mountChart(c, { spec, rows, width: 900 });
-  const panes = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
-  panes.forEach(mockRect1to1);
-  return panes;
-}
-
 /** The band is exactly the row's slot: one pitch, centred on the row, from the SVG's left edge. */
 function expectRowBand(band: Element | null, svg: SVGSVGElement, rowCentre: number, pitch: number, what: string): void {
   expect(band, what).not.toBeNull();
@@ -186,39 +167,6 @@ describe("sectioned horizontal stack, tooltip hover: the band is the hovered row
     });
   }
 
-  it("small multiples: each pane's own band is the row's slot, from the pane's left edge; the label pane accents", () => {
-    const panes = mountPanes(STACK_FIG, [...stackRows(NEG, "P1"), ...stackRows(NEG, "P2")]);
-    expect(panes).toHaveLength(2);
-    const [p0, p1] = panes as [SVGSVGElement, SVGSVGElement];
-    const pitch = centre(p0, "Alpha two") - centre(p0, "Alpha one");
-    for (const svg of [p0, p1]) {
-      const c = centre(p0, "Beta one");
-      hover(svg, c);
-      expectRowBand(shownHl(svg, ".tbl-band-crosshair-hl"), svg, c, pitch, "Beta one");
-      leave(svg);
-    }
-    hover(p0, centre(p0, "Beta one"));
-    expectAccent(p0, "Beta one");
-    leave(p0);
-    expectAccent(p0, null);
-  });
-
-  it("small multiples: hovering the label-less pane strips its row and accents the label pane's label", () => {
-    const panes = mountPanes(STACK_FIG, [...stackRows(NEG, "P1"), ...stackRows(NEG, "P2")]);
-    const [p0, p1] = panes as [SVGSVGElement, SVGSVGElement];
-    expect(labels(p1)).toHaveLength(0);
-    const pitch = centre(p0, "Alpha two") - centre(p0, "Alpha one");
-    for (const cat of GAP_ROWS) {
-      const c = centre(p0, cat);
-      hover(p1, c);
-      expectRowBand(shownHl(p1, ".tbl-band-crosshair-hl"), p1, c, pitch, `${cat} on the label-less pane`);
-      expectAccent(p0, cat);
-      // The label pane's echo strip is the same row, under the label.
-      expectRowBand(p0.querySelector(".tbl-coord-region"), p0, c, pitch, `${cat} echo on the label pane`);
-    }
-    leave(p1);
-    expectAccent(p0, null);
-  });
 });
 
 describe("sectioned horizontal bar, pill hover: the band is the hovered row only", () => {
@@ -252,16 +200,4 @@ describe("sectioned horizontal dumbbell: the band runs under the label, which ac
     expectAccent(svg, null);
   });
 
-  it("small multiples: the hovered pane's band and the other pane's echo both start at the left edge", () => {
-    const panes = mountPanes(DUMBBELL_FIG, [...dbRows("P1"), ...dbRows("P2")]);
-    expect(panes).toHaveLength(2);
-    const [p0, p1] = panes as [SVGSVGElement, SVGSVGElement];
-    const pitch = centre(p0, "Alpha two") - centre(p0, "Alpha one");
-    const c0 = centre(p0, "Beta one");
-    hover(p0, c0);
-    expectRowBand(shownHl(p0, ".tbl-catline-hl"), p0, c0, pitch, "hovered pane");
-    expectAccent(p0, "Beta one");
-    expectRowBand(p1.querySelector(".tbl-coord-region"), p1, centre(p1, "Beta one"), pitch, "echo pane");
-    expectAccent(p1, "Beta one");
-  });
 });

@@ -35,23 +35,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `columns.section` on a horizontal `stacked` chart: the categories are grouped into sections
   with bold headers in the left gutter, as on a horizontal bar. Each category is still one stack;
   its net text or net dot and its segment labels sit on its own row. Hover, legend pin/dim,
-  `x_axis_ticks`, small multiples (`shared` and `per-pane`) and the PNG export follow the sectioned
-  rows. Validation still rejects `columns.section` on a vertical stack. See CONFIG-SPEC "Section
+  `x_axis_ticks` and the PNG export follow the sectioned rows. Validation still rejects `columns.section` on a vertical stack. See CONFIG-SPEC "Section
   axis".
 - A label may repeat across sections (`columns.section`, horizontal bar, stacked and dumbbell). A row is
   identified by section + category and still displays the category, so "Top 1%" under two sections
   draws two rows, each hovering its own values; before, the second merged silently into the first.
   `x_order` / `category_order`, `x_labels` and `category_colors` name a bare label and apply to every
   section containing it (`x_order` orders within each section). The same section + category with two
-  rows for one series is now a validation error, and the faceted ragged-pane check compares section
-  + category. A sectioned chart without a repeated label renders byte-identically. A
-  small-multiples figure decides for all its panes at once, so every pane names a repeated label's
-  rows the same way and the coordinated cursor matches them across panes.
+  rows for one series is now a validation error. A sectioned chart without a repeated label renders
+  byte-identically.
 - `tooltip_section: true` (opt-in, default false) on a sectioned chart puts the hovered row's
   section in the hover card's header, before the category: `+ Corporate · Before response`, through
-  `section_labels` and `x_labels`. Horizontal dumbbells and card-hover horizontal stacks, standalone
-  and in small-multiples panes, and bar and pills-mode stack panes of a small-multiples figure with
-  `coordinated_cursor: false`; card header only (pills and the coordinated echo are unchanged, so it
+  `section_labels` and `x_labels`. Horizontal dumbbells and card-hover horizontal stacks; card header only (pills and the coordinated echo are unchanged, so it
   does nothing where the chart hovers with pills). Validation rejects it without `columns.section`.
   See CONFIG-SPEC `tooltip_section`.
 - The `onHover` payload (and the `tbl-hover` event's `detail`) carries `section` on a chart with
@@ -59,31 +54,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   share a category across sections. Absent on a chart without sections.
 
 ### Changed
+- **Horizontal charts draw `columns.facet` as groups, not small-multiple panes** (Ruling 80). On a
+  horizontal `bar`, `stacked` or `dumbbell` chart (orientation omitted included), each facet value is
+  a group of one chart, drawn exactly as a `columns.section` section: one plot on one value axis, a
+  bold group title flush left, its rows indented 14px under it, the fixed 33px gap between groups.
+  `small_multiples.pane_order` orders the groups and `pane_titles` titles them; `small_multiples`
+  may be omitted. Groups may carry different categories. Hover, legend, PNG export and height are a
+  sectioned chart's, and `onHover` reports the group as `section` (it was `facet`). Validation now
+  rejects on these charts `columns.facet` with `columns.section`, `small_multiples.columns` above 1,
+  `mode: per-pane`, `pane_widths`, `coordinated_cursor`, `section_order` / `section_labels` beside
+  `columns.facet`, and a `facet` key on an annotation, `yAxisPolicy.markers` or `overlays` entry;
+  `tooltip_section` is accepted with `columns.facet`. `renderFigure` throws on such a spec, pointing
+  at `renderChart` / `render`. The ragged-facet check is gone with the shared category axis it
+  protected. Vertical charts keep their panes, byte for byte. See CONFIG-SPEC "Small multiples".
 - **Sections: the gap between two sections is a fixed 33px** on top of the usual space between two
   rows (room for the 13px header line with 10px either side), on horizontal bars, stacks and
-  dumbbells, standalone and in small multiples, live and in the PNG export. It was two empty row
+  dumbbells, live and in the PNG export. It was two empty row
   slots, so it grew with the row height: 114-120px
   centre to centre at a 38-40px row pitch. The bottom of each section header's line sits 10px above
   its first row (was 15px), and the top margin of a sectioned chart shrinks to match (38 to 33px).
   The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart of
   400px or more is 11px shorter per gap with its rows unchanged; a shorter one is sized to its rows
   (see the 400px entry below). Charts without sections render byte-identically. The
-  chart's height (a figure's: its busiest pane's) gives the rows at least as much room as the gaps
-  (a chart of many one-row sections grows to fit). The gaps stay 33px at any height the engine
-  picks, every pane included; only a host's own explicit `renderChart` / `renderFigure` height, or
-  `mountChart` height on a single chart, too small for the rows shrinks them so they take at most
+  chart's height gives the rows at least as much room as the gaps (a chart of many one-row sections
+  grows to fit). The gaps stay 33px at any height the engine picks; only a host's own explicit
+  `renderChart` or `mountChart` height too small for the rows shrinks them so they take at most
   half the plot, rather than squeezing the rows to nothing.
 - **Sections: category labels are indented 14px under their section header**, as a table indents
   the rows of a row group, so the bold header reads as a title over its rows. The header stays flush
   left. The left gutter grows by the 14px, so the labels wrap as before. Horizontal bars, stacks and
-  dumbbells, standalone and in small multiples, live and in the PNG export. Charts without sections
+  dumbbells, live and in the PNG export. Charts without sections
   render byte-identically.
 - **Hover on horizontal charts: the shaded strip covers only the hovered row.** A stack that hovers
   with its card (a net dot, or `barStack.hover: "tooltip"`) spread a section's first row's strip
   over the gap and the header above it; it is now one row high, as the bar's already was. That
   stack's strip and a horizontal dumbbell's now also run left under the category label, which is
-  bolded and darkened while hovered, as on a horizontal bar (standalone and small-multiple panes,
-  the dumbbell's echoes included). Live only: the PNG export has no hover.
+  bolded and darkened while hovered, as on a horizontal bar. Live only: the PNG export has no hover.
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error
   naming `ci`. Near 1 the t-quantile is numerically meaningless. No published figure uses one.
 - One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
@@ -102,15 +108,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the legend, key rows, hover markers, colours and a horizontal bar's height counted the repeat, so
   they disagreed.
 - **Horizontal bars, stacks and dumbbells are no longer stretched to 400px.** A chart whose height
-  grows with its rows was floored at 400px, so a 3-row chart's rows sat over 100px apart, and in
-  small multiples every pane took the busiest pane's stretched pitch. Below 400px the height is now
+  grows with its rows was floored at 400px, so a 3-row chart's rows sat over 100px apart. Below 400px the height is now
   the chart's margins, its section gaps, and its rows one slot apart (22px per bar, or the wrapped
   label's height if taller): a 3-row horizontal bar chart is 107px tall, its rows 22px apart. A
-  chart whose height came to 400px or more keeps it, byte for byte. Small-multiples panes all take
-  the busiest pane's row pitch and are each as tall as their own rows need; before, a sparser pane
-  spread the height model's spare px over its own fewer rows, so its rows sat 2-3px further apart (25px
-  against 23px). Plot can leave the pitch of a pane of more than 30 rows fractional, and a shorter
-  pane then matches it to the nearest whole px. Live, the PNG export and small multiples agree. An
+  chart whose height came to 400px or more keeps it, byte for byte. Live and the PNG export agree. An
   unsectioned horizontal dumbbell's bottom margin is now one value-tick row (22px) at any label
   length; it was the vertical chart's category-label margin, which grew to 36px or 120px with long
   labels the horizontal chart never draws there.
@@ -129,18 +130,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   section: listing a category of a later section drew that section first. They now order categories
   within each section only; sections follow `section_order`, else the order the data first reaches
   them. Live and in the PNG export, on horizontal bars, stacks and dumbbells.
-- Faceted sectioned horizontal bars and stacks: a pane whose data reached the sections in another
-  order than the left pane drew its rows in its own order, so its values sat beside the wrong section
-  header (`shared` and `per-pane`, live and in the PNG export). Every pane now draws one figure-wide
-  row order.
 - `section_order` left a section out of the drawing but not out of the chart: its rows still fed the
   value axis, the height, a stack's net marker (a hidden negative gave a visible all-positive stack a
-  net dot) and a stack's legend placement. They are now dropped before anything reads them, live,
-  in small multiples and in the PNG export, on horizontal bars, stacks and dumbbells.
-- `section_order` scoping reached three more readers. Validation's ragged-pane and duplicate-row
-  checks counted rows of a left-out section, so a valid spec was rejected. The live small-multiples
-  grid counted a pane holding only such rows, which widened every drawn pane (440px to 696px at a
-  320px mount) though that pane is never drawn. And a series found only in a left-out section moved
+  net dot) and a stack's legend placement. They are now dropped before anything reads them, live
+  and in the PNG export, on horizontal bars, stacks and dumbbells.
+- `section_order` scoping reached two more readers. Validation's duplicate-row check counted rows
+  of a left-out section, so a valid spec was rejected. And a series found only in a left-out section moved
   every later series one palette colour; colours now index the series list with every section drawn,
   as small multiples' panes index the figure's list (live, figure legend and PNG export). A
   `barStack.mono` stack ranks its shades over the rows with every section drawn, summed in the row
@@ -255,21 +250,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   reaching 12; it is now the stacked positive extent. Both are keyed by the parsed x, as Plot
   stacks, so a numeric x spelled `1` in one row and `1.0` in another is one stack, not two. Live and
   in the PNG.
-- Small multiples of a horizontal dumbbell now share one category-label column, sized to the
-  longest label in any pane up to the 240px gutter cap (longer labels wrap), and every pane shows
-  its own labels. In the default `shared` mode every
-  pane kept the narrow default margin while pushing its labels left by its own label width, so long
-  labels started off the pane's left edge and were clipped ("op 1%"); in `per-pane` mode each pane
-  sized its own column, so the panes' value axes started at different x. Live and in the PNG.
 - A dumbbell with `orientation` omitted is horizontal, as CONFIG-SPEC documents and the dots were
   already drawn, but everything around the mark treated it as vertical: a standalone chart kept a
   fixed height and hovered by column on screen, its `annotations.xAxis` markers were not folded into
-  the value axis, `columns.section` was rejected, and small multiples sat side by side at a fixed
-  320px pane height, clipping long labels. It now renders exactly as `orientation: horizontal`,
+  the value axis, and `columns.section` was rejected. It now renders exactly as `orientation: horizontal`,
   live and in the PNG.
-- Small multiples of a horizontal dumbbell in `per-pane` mode stacked one pane per row on screen
-  but drew each at the width of a side-by-side column (352px at a 720px mount); each pane now takes
-  the full row, as in `shared` mode and the PNG.
 - A standalone horizontal dumbbell's PNG kept the fixed 750px frame while the live chart grows with
   its rows, so the download stretched a short chart's rows apart and squeezed a long one's together.
   The export now sizes it with the live chart's height rule, as it already did for horizontal bars,
@@ -335,6 +320,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 
+- **Horizontal facets draw as groups.** **No published figure is affected**: no `chart.yaml` on
+  `main` or on the PR #67 branch is a horizontal `bar` or `stacked` chart or a `dumbbell` with
+  `columns.facet` (the archive's 17 faceted specs are vertical line, bar, stacked, dotplot and
+  waterfall charts). Horizontal small-multiple goldens were replaced (approved):
+  `figure7-tariff` and `figure-hstacked-shared` by `figure7-tariff-grouped` and
+  `hstacked-grouped`, rendered as grouped single charts; `figure7-tariff-sectioned`,
+  `figure10-shape-sectioned-single` and `figure-hstacked-sectioned`, which set `columns.facet`
+  with `columns.section`, are removed, as validation now rejects that pairing.
 - **Sectioned charts get a fixed 33px section gap and indented category labels.** Published figures
   affected: the tariff model update's `etas` and `eta-effect` (sectioned horizontal bars, on
   `main`), and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (sectioned horizontal
@@ -354,8 +347,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   stretched. `etas` and `eta-effect` on `main`, and PR #67's `revenue-by-tax-step-up` (422px) and
   `revenue-by-tax-deemed-realization` (536px), are 400px or more and render byte-identically, live
   and in the PNG. Found by reading every `chart.yaml` on `main` and in the PR #67 working tree for a
-  horizontal `bar` or `stacked` chart or a `dumbbell`; no other spec is one, and none is faceted, so
-  the small-multiples pitch change reaches no published figure. The dumbbell bottom-margin change
+  horizontal `bar` or `stacked` chart or a `dumbbell`; no other spec is one. The dumbbell bottom-margin change
   reaches none either: the archive's only dumbbell is sectioned. Goldens re-recorded because they
   were floored at 400px (approved): `dumbbell-sectioned`, `figure-hstacked-shared`,
   `figure-hstacked-sectioned`.
@@ -446,13 +438,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   moves where one x is spelled two ways (`1` and `1.0`). **No published figure is affected**: there
   is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree. No
   golden moves.
-- **Faceted horizontal dumbbells share one category-label column** (live and PNG). **No published
-  figure is affected**: the archive has no dumbbell, and the one on the unpublished
-  `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, uses `columns.section`, not
-  `columns.facet`, so it renders as a single chart. Horizontal bar and stacked figures are untouched.
-  No golden moves.
-- **A dumbbell with `orientation` omitted now renders as `orientation: horizontal`** throughout, and
-  per-pane horizontal dumbbell panes take the full row width on screen. **No published figure is
+- **A dumbbell with `orientation` omitted now renders as `orientation: horizontal`** throughout.
+  **No published figure is
   affected**: the archive has no dumbbell, and the one on the unpublished `pr67-spec-fixes` branch
   sets `orientation: horizontal` and has no facets. No golden moves.
 - **A standalone horizontal dumbbell's PNG is sized to its rows**, as the live chart is. The live

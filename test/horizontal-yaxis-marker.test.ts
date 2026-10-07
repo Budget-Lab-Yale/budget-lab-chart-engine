@@ -7,7 +7,7 @@
 // nobody sees. Validation rejects it, pointing at annotations.xAxis; renderChart (unvalidated) no
 // longer folds it.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { renderPane, renderChart, renderFigure } from "../src/engine/index";
+import { renderPane, renderChart } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
 import { domainBounds } from "../src/engine/scales";
 import { validateSpec } from "../src/spec/validate";
@@ -112,21 +112,21 @@ describe("renderChart (unvalidated) does not fold an undrawn yAxis marker into t
     });
   }
 
-  it("small multiples, shared: a facet-scoped yAxis marker does not widen the figure's axis", () => {
-    const fig = (extra: Record<string, unknown>) =>
-      renderFigure(
+  it("facets drawn as groups: a facet-scoped yAxis marker does not widen the axis", () => {
+    const chart = (extra: Record<string, unknown>) =>
+      renderChart(
         specOf("bar", {
           columns: { x: "c", value: "v", facet: "f" },
           yAxisPolicy: { max: 20 },
-          small_multiples: { columns: 2, mode: "shared" },
+          small_multiples: { mode: "shared" },
           ...extra,
         }),
         [r({ f: "A", c: "a", v: 10 }), r({ f: "A", c: "b", v: 15 }), r({ f: "B", c: "a", v: 12 }), r({ f: "B", c: "b", v: 14 })],
         OPTS,
       );
-    const bare = fig({});
-    const marked = fig({ annotations: { yAxis: [{ y: 40, label: "m", facet: "B" }] } });
-    expect(marked.panes.map((p) => xTickEnds(p.svg!))).toEqual(bare.panes.map((p) => xTickEnds(p.svg!)));
+    const bare = chart({});
+    const marked = chart({ annotations: { yAxis: [{ y: 40, label: "m", facet: "B" }] } });
+    expect(xTickEnds(marked.svg)).toEqual(xTickEnds(bare.svg));
   });
 
   it("a horizontal chart's annotations.xAxis marker still raises the ceiling (bar, stacked, dumbbell)", () => {

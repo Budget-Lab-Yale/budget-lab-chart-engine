@@ -15,6 +15,7 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
 import { isHorizontalDumbbell, valueAxisIsX } from "./dumbbell-orientation";
+import { facetsDrawAsGroups, facetGroupErrors } from "./facet-groups";
 import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
@@ -154,18 +155,15 @@ function tooltipSeriesNameChartTypeError(spec: {
 }
 
 /** `tooltip_section` puts the section in the hover CARD's header, so it needs sections: rejected
- *  without `columns.section` (no section to name). PRESENCE, not value, as the sibling gates.
+ *  without `columns.section` (no section to name), or a horizontal chart's `columns.facet`, whose
+ *  values draw as sections (spec/facet-groups.ts). PRESENCE, not value, as the sibling gates.
  *  Accepted on every chart type `columns.section` allows (horizontal bar / stacked / dumbbell, by
- *  sectionColumnError): where the chart hovers with value pills rather than a card (a bar standalone
- *  or in a coordinated pane, a stack in pills mode) it is a no-op, but a bar or stack pane under
- *  `small_multiples.coordinated_cursor: false` hovers with the card, and the hover mode can depend
- *  on the data (`barStack.netDisplay: auto`). */
-function tooltipSectionError(spec: {
-  tooltip_section?: unknown;
-  columns?: { section?: unknown };
-}): string | null {
+ *  sectionColumnError): where the chart hovers with value pills rather than a card (a bar, a stack in
+ *  pills mode) it is a no-op, since a stack's hover mode can depend on the data
+ *  (`barStack.netDisplay: auto`). */
+function tooltipSectionError(spec: ChartSpec): string | null {
   if (spec.tooltip_section === undefined) return null;
-  if (spec.columns?.section == null) {
+  if (spec.columns?.section == null && !facetsDrawAsGroups(spec)) {
     return `tooltip_section needs columns.section — it names the hovered row's section in the hover card's header`;
   }
   return null;
@@ -937,7 +935,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (pcErrors.length) return { valid: false, errors: pcErrors };
   const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
   if (tsnErr) return { valid: false, errors: [tsnErr] };
-  const tsecErr = tooltipSectionError(spec as { tooltip_section?: unknown; columns?: { section?: unknown } });
+  const tsecErr = tooltipSectionError(spec as ChartSpec);
   if (tsecErr) return { valid: false, errors: [tsecErr] };
   const talErr = tooltipAxisLabelChartTypeError(
     spec as { chartType?: unknown; tooltip_x_label?: unknown; tooltip_y_label?: unknown },
@@ -951,6 +949,8 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
   );
   if (secErr) return { valid: false, errors: [secErr] };
+  const fgErrors = facetGroupErrors(spec as ChartSpec);
+  if (fgErrors.length) return { valid: false, errors: fgErrors };
   const hymErr = horizontalYAxisMarkerError(spec as ChartSpec);
   if (hymErr) return { valid: false, errors: [hymErr] };
   const ticksErr = xAxisTicksOrientationError(
@@ -1231,7 +1231,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   const rawPointLabel = spec.columns?.point_label;
   if (rawPointLabel) requiredRoles.push(["point_label", rawPointLabel]);
   if (spec.projected_field) requiredRoles.push(["projected_field", spec.projected_field]);
-  if (spec.small_multiples) {
+  if (spec.small_multiples || facetsDrawAsGroups(spec)) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);
     } else {
@@ -1449,30 +1449,33 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   }
 
   // A sectioned row is identified by section + category (spec/section-key.ts), so the same label may
-  // repeat across sections — but one section + category carries one value per series (per pane).
-  // A second row would be drawn on top of the first, or merged into it by the hover, unseen.
-  // Only the sections section_order keeps: an excluded section's rows are never drawn.
-  if (cols.section && columns.has(cols.section) && spec.xAxisType === "categorical") {
-    const secField = cols.section;
+  // repeat across sections — but one section + category carries one value per series. A second row
+  // would be drawn on top of the first, or merged into it by the hover, unseen. Only the sections
+  // section_order keeps: an excluded section's rows are never drawn. A horizontal chart's facets draw
+  // as sections (spec/facet-groups.ts), ordered by small_multiples.pane_order, and are named so here.
+  const groupsByFacet = facetsDrawAsGroups(spec);
+  const groupField = groupsByFacet ? cols.facet : cols.section;
+  const groupNoun = groupsByFacet ? "facet" : "section";
+  if (groupField && columns.has(groupField) && spec.xAxisType === "categorical") {
+    const groupOrder = groupsByFacet ? spec.small_multiples?.pane_order : spec.section_order;
     const seen = new Set<string>();
     const reported = new Set<string>();
-    for (const r of rowsInSectionOrder(rows, spec.section_order, (r) => r[secField] as string)) {
+    for (const r of rowsInSectionOrder(rows, groupOrder, (r) => r[groupField] as string)) {
       const cat = r[cols.x] as string;
       if (cat == null || cat === "") continue;
-      const sec = (r[secField] as string) ?? "";
+      const sec = (r[groupField] as string) ?? "";
       const series = cols.series ? ((r[cols.series] as string) ?? "") : null;
-      const facet = cols.facet ? ((r[cols.facet] as string) ?? "") : null;
-      const id = JSON.stringify([facet, sec, cat, series]);
+      const id = JSON.stringify([sec, cat, series]);
       if (!seen.has(id)) { seen.add(id); continue; }
       if (reported.has(id)) continue;
       reported.add(id);
       const what = series != null ? `more than one ${JSON.stringify(series)} value` : "more than one value";
-      const where = facet != null ? ` in facet ${JSON.stringify(facet)}` : "";
       errors.push(
-        `category ${JSON.stringify(cat)} in section ${JSON.stringify(sec)}${where} has ${what} — rows are identified by section + category, so each section's row carries one value per series`,
+        `category ${JSON.stringify(cat)} in ${groupNoun} ${JSON.stringify(sec)} has ${what} — rows are identified by ${groupNoun} + category, so each ${groupNoun}'s row carries one value per series`,
       );
     }
   }
+
 
   // Cross-reference: every category named by x_order must appear in the categorical x column.
   // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
@@ -1542,52 +1545,6 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         errors.push(
           `small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`,
         );
-      }
-    }
-
-    // Ragged-facet guard (both shared and per-pane mode): faceted HORIZONTAL bars lay every
-    // facet out as its own pane but assume ONE shared category axis (renderFigure suppresses the
-    // category labels/section headers on every pane but the first — see figure.ts). Each pane's
-    // band domain is otherwise computed independently from ITS OWN rows (buildBarMarks), so a
-    // facet missing a category (or a whole section) would silently shrink that pane's domain and
-    // misalign its rows against the others with no visual cue. Fail loudly instead — pointed at
-    // the facet + category (+ section, when sectioned) that's missing.
-    // Exception: columns:1 puts each pane on its OWN row with its own full-width gutter + labels,
-    // so panes never share a category axis and disjoint categories per facet are legitimate.
-    const oneFacetPerRow = spec.small_multiples.columns === 1;
-    if (!oneFacetPerRow && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal" && spec.xAxisType === "categorical" && cols.x) {
-      const xField = cols.x;
-      const secField = cols.section;
-      // Panes are compared row by row, and a sectioned row is its section + category: "Top 1%"
-      // under two sections is two rows a facet must both carry (spec/section-key.ts).
-      const rowId = (r: TidyRow): string =>
-        secField ? JSON.stringify([(r[secField] as string) ?? "", r[xField] as string]) : (r[xField] as string);
-      const catsByFacet = new Map<string, Set<string>>();
-      const allCats = new Set<string>();
-      // An excluded section's rows are never drawn, so they cannot misalign a pane.
-      const drawn = rowsInSectionOrder(rows, spec.section_order, secField ? (r) => r[secField] as string : null);
-      for (const r of drawn) {
-        const facet = r[facetField] as string;
-        const cat = r[xField] as string;
-        if (!facet || !cat) continue;
-        const id = rowId(r);
-        allCats.add(id);
-        if (!catsByFacet.has(facet)) catsByFacet.set(facet, new Set());
-        (catsByFacet.get(facet) as Set<string>).add(id);
-      }
-      for (const [facet, cats] of catsByFacet) {
-        const missing = [...allCats].filter((c) => !cats.has(c));
-        if (missing.length) {
-          const named = secField
-            ? missing.map((id) => {
-                const [sec, cat] = JSON.parse(id) as [string, string];
-                return `${JSON.stringify(cat)} (section ${JSON.stringify(sec || "?")})`;
-              })
-            : missing.map((c) => JSON.stringify(c));
-          errors.push(
-            `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars/stacks share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
-          );
-        }
       }
     }
   }

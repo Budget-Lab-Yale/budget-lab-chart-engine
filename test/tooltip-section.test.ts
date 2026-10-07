@@ -33,9 +33,9 @@ const CATS: Array<[string, string]> = [
   ["After response", "corp"],
 ];
 const NEG = { Income: [10, 20, 30, 40], Corporate: [-30, -6, -40, -2] };
-const stackRows = (pane?: string): TidyRow[] =>
+const stackRows = (): TidyRow[] =>
   SERIES.flatMap((s) =>
-    CATS.map(([bar, sec], i) => ({ ...(pane ? { pane } : {}), bar, sec, tax: s, v: String(NEG[s as keyof typeof NEG][i]) })),
+    CATS.map(([bar, sec], i) => ({ bar, sec, tax: s, v: String(NEG[s as keyof typeof NEG][i]) })),
   ) as unknown as TidyRow[];
 const LABELS = {
   section_labels: { cg: "Capital gains", corp: "+ Corporate" },
@@ -52,11 +52,6 @@ const STACK: ChartSpec = {
   ...LABELS,
   data: "d.csv",
 };
-const STACK_FIG: ChartSpec = {
-  ...STACK,
-  columns: { ...STACK.columns, facet: "pane" },
-  small_multiples: { columns: 2, mode: "shared", pane_order: ["P1", "P2"] },
-};
 const DUMBBELL: ChartSpec = {
   chartType: "dumbbell",
   orientation: "horizontal",
@@ -67,20 +62,21 @@ const DUMBBELL: ChartSpec = {
   ...LABELS,
   data: "d.csv",
 };
-const dbRows = (pane?: string): TidyRow[] =>
+const dbRows = (): TidyRow[] =>
   CATS.flatMap(([bar, sec], i) => [
-    { ...(pane ? { pane } : {}), bar, sec, m: "Cash", v: String(20 + i) },
-    { ...(pane ? { pane } : {}), bar, sec, m: "Accrual", v: String(8 + i) },
+    { bar, sec, m: "Cash", v: String(20 + i) },
+    { bar, sec, m: "Accrual", v: String(8 + i) },
   ]) as unknown as TidyRow[];
-const DUMBBELL_FIG: ChartSpec = {
-  ...DUMBBELL,
-  columns: { ...DUMBBELL.columns, facet: "pane" },
-  small_multiples: { pane_order: ["P1", "P2"] },
+// A horizontal chart's facets draw as sections (spec/facet-groups.ts), titled by pane_titles.
+const { section_labels: _sl, ...DUMBBELL_UNLABELLED } = DUMBBELL;
+const DUMBBELL_FACETS: ChartSpec = {
+  ...DUMBBELL_UNLABELLED,
+  columns: { category: "bar", series: "m", value: "v", facet: "sec" },
+  small_multiples: { pane_titles: LABELS.section_labels },
 };
-// A plain bar hovers with value pills, standalone and in a coordinated pane; a small-multiples pane
-// with `coordinated_cursor: false` hovers with the band card instead, so the header applies there.
-const barRows = (pane?: string): TidyRow[] =>
-  CATS.map(([bar, sec], i) => ({ ...(pane ? { pane } : {}), bar, sec, v: String(10 + i) })) as unknown as TidyRow[];
+// A plain bar hovers with value pills.
+const barRows = (): TidyRow[] =>
+  CATS.map(([bar, sec], i) => ({ bar, sec, v: String(10 + i) })) as unknown as TidyRow[];
 const BAR: ChartSpec = {
   chartType: "bar",
   orientation: "horizontal",
@@ -90,18 +86,6 @@ const BAR: ChartSpec = {
   ...LABELS,
   data: "d.csv",
 };
-const BAR_FIG_UNCOORD: ChartSpec = {
-  ...BAR,
-  columns: { ...BAR.columns, facet: "pane" },
-  small_multiples: { columns: 2, mode: "shared", pane_order: ["P1", "P2"], coordinated_cursor: false },
-};
-// A stack in pills mode hovers with pills when coordinated, and with its card when not.
-const STACK_PILLS_FIG_UNCOORD: ChartSpec = {
-  ...STACK_FIG,
-  barStack: { hover: "pills" },
-  small_multiples: { ...STACK_FIG.small_multiples, coordinated_cursor: false },
-};
-
 function translateY(el: Element, svg: Element): number {
   let y = 0;
   for (let n: Element | null = el; n && n !== svg; n = n.parentElement) {
@@ -110,7 +94,7 @@ function translateY(el: Element, svg: Element): number {
   }
   return y;
 }
-/** Row centres top to bottom, from the label pane's labels. */
+/** Row centres top to bottom, from the category labels. */
 const centres = (svg: SVGSVGElement): number[] =>
   Array.from(svg.querySelectorAll("g.tbl-cat-label text"))
     .map((t) => translateY(t, svg))
@@ -128,8 +112,9 @@ const head = (): string | null => {
 function mount(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement[] {
   const c = document.createElement("div");
   document.body.appendChild(c);
-  mountChart(c, { spec, rows, width: 900, ...(spec.small_multiples ? {} : { height: 500 }) });
-  const svgs = Array.from(c.querySelectorAll<SVGSVGElement>(spec.small_multiples ? ".figure-pane svg" : ".figure-canvas svg"));
+  mountChart(c, { spec, rows, width: 900, height: 500 });
+  const svgs = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-canvas svg"));
+  expect(svgs).toHaveLength(1);
   svgs.forEach(mockRect1to1);
   return svgs;
 }
@@ -137,18 +122,10 @@ function mount(spec: ChartSpec, rows: TidyRow[]): SVGSVGElement[] {
 const WITH = ["Capital gains · Before any response", "Capital gains · After response", "+ Corporate · Before any response", "+ Corporate · After response"];
 const WITHOUT = ["Before any response", "After response", "Before any response", "After response"];
 
-const CASES: Array<[string, ChartSpec, (pane?: string) => TidyRow[]]> = [
+const CASES: Array<[string, ChartSpec, () => TidyRow[]]> = [
   ["stacked (card)", STACK, stackRows],
   ["dumbbell", DUMBBELL, dbRows],
-  ["stacked small multiples", STACK_FIG, (_p) => [...stackRows("P1"), ...stackRows("P2")]],
-  ["dumbbell small multiples", DUMBBELL_FIG, (_p) => [...dbRows("P1"), ...dbRows("P2")]],
-  ["bar small multiples, coordinated_cursor: false", BAR_FIG_UNCOORD, (_p) => [...barRows("P1"), ...barRows("P2")]],
-  [
-    "bar per-pane small multiples, coordinated_cursor: false",
-    { ...BAR_FIG_UNCOORD, small_multiples: { ...BAR_FIG_UNCOORD.small_multiples, mode: "per-pane" } },
-    (_p) => [...barRows("P1"), ...barRows("P2")],
-  ],
-  ["pills-mode stack small multiples, coordinated_cursor: false",STACK_PILLS_FIG_UNCOORD, (_p) => [...stackRows("P1"), ...stackRows("P2")]],
+  ["dumbbell, facets as groups", DUMBBELL_FACETS, dbRows],
 ];
 
 describe("tooltip_section: the card header names the section first", () => {
@@ -157,7 +134,7 @@ describe("tooltip_section: the card header names the section first", () => {
       // Validation accepts every configuration whose card it changes.
       expect(validateSpec({ ...spec, tooltip_section: true }).errors).toEqual([]);
       const svgs = mount({ ...spec, tooltip_section: true }, rowsOf());
-      // Hover each pane (the label-less one included): every card names its row's section.
+      // Every card names its row's section.
       for (const svg of svgs) {
         const ys = centres(svgs[0]!);
         expect(ys).toHaveLength(4);
@@ -170,16 +147,14 @@ describe("tooltip_section: the card header names the section first", () => {
         const svgs = mount({ ...spec, ...(flag === false ? { tooltip_section: false } : {}) }, rowsOf());
         const ys = centres(svgs[0]!);
         expect(ys).toHaveLength(4);
-        // Every pane, the label-less one included.
         for (const svg of svgs) expect(ys.map((y) => (hover(svg, y), head()))).toEqual(WITHOUT);
         document.body.innerHTML = "";
       }
     });
   }
 
-  it("a no-op where a bar hovers with pills: standalone, and a coordinated pane", () => {
-    const coordFig = { ...BAR_FIG_UNCOORD, small_multiples: { columns: 2, mode: "shared", pane_order: ["P1", "P2"] } } as ChartSpec;
-    const cases: Array<[ChartSpec, TidyRow[]]> = [[BAR, barRows()], [coordFig, [...barRows("P1"), ...barRows("P2")]]];
+  it("a no-op where a bar hovers with pills", () => {
+    const cases: Array<[ChartSpec, TidyRow[]]> = [[BAR, barRows()]];
     for (const [spec, rows] of cases) {
       const svgs = mount({ ...spec, tooltip_section: true }, rows);
       const ys = centres(svgs[0]!);
@@ -206,7 +181,7 @@ describe("tooltip_section: the card header names the section first", () => {
 describe("tooltip_section: validation", () => {
   const ok = (spec: ChartSpec) => validateSpec(spec);
   it("accepted on a sectioned stack and dumbbell", () => {
-    for (const spec of [STACK, DUMBBELL, STACK_FIG]) {
+    for (const spec of [STACK, DUMBBELL, DUMBBELL_FACETS]) {
       for (const v of [true, false]) expect(ok({ ...spec, tooltip_section: v }).valid, spec.chartType).toBe(true);
     }
   });
@@ -220,8 +195,8 @@ describe("tooltip_section: validation", () => {
     }
   });
 
-  it("accepted on a sectioned bar, standalone and in small multiples", () => {
-    for (const spec of [BAR, BAR_FIG_UNCOORD, { ...BAR_FIG_UNCOORD, small_multiples: { pane_order: ["P1", "P2"] } }]) {
+  it("accepted on a sectioned bar", () => {
+    for (const spec of [BAR]) {
       for (const v of [true, false]) expect(ok({ ...spec, tooltip_section: v }).valid).toBe(true);
     }
   });

@@ -286,7 +286,9 @@ describe("mountFigure shared crosshair wiring", () => {
   });
 });
 
-describe("coordinated cursor — horizontal bars (row highlight + tip pills, no tooltip)", () => {
+// A horizontal chart draws its facets as groups in one chart (spec/facet-groups.ts), so it has no
+// panes to coordinate; the secondary band cursor still draws a horizontal bar's hover.
+describe("secondary band cursor — horizontal bars (row highlight + tip pills)", () => {
   const spec: ChartSpec = {
     chartType: "bar",
     title: "h",
@@ -294,8 +296,6 @@ describe("coordinated cursor — horizontal bars (row highlight + tip pills, no 
     xAxisType: "categorical",
     orientation: "horizontal",
     series_order: ["2019", "2022", "2025"],
-    columns: { facet: "facet" },
-    small_multiples: { columns: 2, mode: "shared" },
   } as ChartSpec;
 
   const rows: TidyRow[] = [];
@@ -306,34 +306,6 @@ describe("coordinated cursor — horizontal bars (row highlight + tip pills, no 
       }
     }
   }
-
-  it("faceted horizontal panes wire a band crosshair (coordinated), not a line tooltip", () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const teardown = mountChart(container, { spec, rows, width: 838, height: 600 });
-    const paneSvgs = container.querySelectorAll(".figure-pane svg");
-    expect(paneSvgs.length).toBe(2);
-    paneSvgs.forEach((svg) => {
-      // Band crosshair (categorical) hit overlay present; NOT the continuous-line crosshair.
-      expect(svg.querySelector(".tbl-band-crosshair-hit")).not.toBeNull();
-    });
-    teardown();
-    container.remove();
-  });
-
-  it("faceted horizontal bars never stack — one row inside a horizontal-scroll wrapper, even when narrow", () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    // A narrow width would normally reflow 2 panes to 1 column (2 rows); horizontal bars must not.
-    const teardown = mountChart(container, { spec, rows, width: 300, height: 600 });
-    expect(container.querySelector(".figure-grid-scroll")).not.toBeNull();
-    const grid = container.querySelector(".figure-grid") as HTMLElement;
-    // Both panes stay in a single row (2 explicit column widths, 2 panes).
-    expect(container.querySelectorAll(".figure-pane").length).toBe(2);
-    expect(grid.style.gridTemplateColumns.trim().split(/\s+/).length).toBe(2);
-    teardown();
-    container.remove();
-  });
 
   it("the horizontal secondary band cursor shades the category row and labels each bar tip", () => {
     const { svg } = renderChart(spec, rows.filter((r) => r.facet === "A"), {

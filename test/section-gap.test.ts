@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 //
-// The gap between two sections of a sectioned horizontal chart (bar, stacked, dumbbell; standalone
-// and small multiples) is a FIXED number of px — room for the bold section header with
-// SECTION_HEADER_GAP clear above and below it — not a run of empty band slots, which made the gap
-// grow with the row pitch (114-120px centre to centre at a 38-40px pitch). Measured here as the
+// The gap between two sections of a sectioned horizontal chart (bar, stacked, dumbbell) is a FIXED
+// number of px — room for the bold section header with SECTION_HEADER_GAP clear above and below
+// it — not a run of empty band slots, which made the gap grow with the row pitch (114-120px centre to centre at a 38-40px pitch). Measured here as the
 // slot gap: (first row of a section's centre − last row of the previous section's centre) − pitch.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { renderChart, renderFigure } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W } from "../src/embed/figure-chrome";
@@ -42,16 +41,6 @@ function translateY(el: Element, svg: Element): number {
 const rowCentres = (svg: SVGSVGElement): number[] =>
   Array.from(svg.querySelectorAll("g.tbl-cat-label text"))
     .map((t) => translateY(t, svg))
-    .sort((a, b) => a - b);
-
-/** Row centres from the drawn bars (panes without labels). */
-const barCentres = (svg: SVGSVGElement): number[] =>
-  Array.from(svg.querySelectorAll('g[aria-label="bar"] > g'))
-    .filter((g) => g.querySelector("rect"))
-    .map((g) => {
-      const r = g.querySelector("rect")!;
-      return translateY(g, svg) + Number(r.getAttribute("y")) + Number(r.getAttribute("height")) / 2;
-    })
     .sort((a, b) => a - b);
 
 /** Pitch (smallest centre step) and every section break's slot gap (step beyond the pitch). */
@@ -205,45 +194,6 @@ describe("section gap: live, export and height model agree", () => {
   }
 });
 
-describe("section gap: small multiples", () => {
-  const FIG: ChartSpec = {
-    ...STACK,
-    columns: { ...STACK.columns, facet: "pane" },
-    small_multiples: { columns: 2, mode: "shared", pane_order: ["P1", "P2"] },
-  };
-  const figRows = (n: number): TidyRow[] =>
-    ["P1", "P2"].flatMap((pane) => stackRows(n).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
-
-  it("every pane has the fixed gap, at two pitches, and the panes' rows line up", () => {
-    const pitches: number[] = [];
-    // 6 rows at a host's 400px (roomy rows, as the old 400px floor drew them), 36 at the model's.
-    for (const [n, height] of [[6, 400], [36, undefined]] as const) {
-      const fig = renderFigure(FIG, figRows(n), { width: 900, document, ...(height ? { height } : {}) });
-      const [p0, p1] = fig.panes.map((p) => p.svg as SVGSVGElement);
-      const g0 = gaps(barCentres(p0!));
-      pitches.push(g0.pitch);
-      expect(g0.breaks).toEqual([GAP, GAP]);
-      expect(gaps(rowCentres(p0!)).breaks).toEqual([GAP, GAP]);
-      expect(barCentres(p1!)).toEqual(barCentres(p0!));
-    }
-    expect(Math.abs(pitches[1]! - pitches[0]!)).toBeGreaterThan(2);
-  });
-
-  it("live pane heights match the export's", () => {
-    const rows = figRows(30);
-    const c = document.createElement("div");
-    document.body.appendChild(c);
-    mountChart(c, { spec: FIG, rows, width: INNER_W });
-    const heights = (root: ParentNode, sel: string) =>
-      Array.from(root.querySelectorAll(sel))
-        .filter((s) => s.querySelector('g[aria-label="bar"]'))
-        .map((s) => Number(s.getAttribute("height")));
-    const liveH = heights(c, ".figure-pane svg");
-    expect(liveH).toHaveLength(2);
-    expect(heights(buildExportSvg(FIG, rows), "svg")).toEqual(liveH);
-  });
-});
-
 describe("section gap: spreadSections needs Plot's fy scale", () => {
   it("throws, rather than silently drawing no gaps, when the svg exposes no fy scale", () => {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
@@ -331,53 +281,4 @@ describe("section gap: an explicit height too small for the full gaps", () => {
     });
   }
 
-  for (const mode of ["shared", "per-pane"] as const) {
-    it(`small multiples (${mode}) at an explicit height keep the rows in every pane`, () => {
-      const spec: ChartSpec = { ...STACK, columns: { ...STACK.columns, facet: "pane" }, small_multiples: { columns: 2, mode, pane_order: ["P1", "P2"] } };
-      const rows = ["P1", "P2"].flatMap((pane) => crampedStack().map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
-      const fig = renderFigure(spec, rows, { width: 900, height: 400, document });
-      const [p0, p1] = fig.panes.map((p) => p.svg as SVGSVGElement);
-      expectRowsKeepHalf(p0!, `${mode} p0`);
-      expect(barCentres(p1!)).toEqual(barCentres(p0!));
-      for (const h of barHeights(p1!)) expect(h).toBeGreaterThan(3);
-    });
-
-    it(`small multiples (${mode}), ragged, at auto height: every pane keeps the full gap`, () => {
-      // The review's probe: P1 has 21 rows in S1 and one in each of S2..S10; P2 has 2 rows in S1
-      // and one in each of S2..S10. The engine sizes P2 to its own rows at P1's row height, so P2's
-      // rows are shorter than its 9 gaps; that height is the engine's, so the gaps stay full.
-      const spec: ChartSpec = { ...BAR, columns: { ...BAR.columns, facet: "pane" }, small_multiples: { columns: 1, mode, pane_order: ["P1", "P2"] } };
-      const paneRows = (pane: string, firstSection: number): TidyRow[] => [
-        ...Array.from({ length: firstSection }, (_, i) => ({ pane, cat: `A${i + 1}`, sec: "S1", v: String(1 + (i % 5)) })),
-        ...Array.from({ length: 9 }, (_, i) => ({ pane, cat: `B${i + 2}`, sec: `S${i + 2}`, v: String(1 + (i % 5)) })),
-      ];
-      const rows = [...paneRows("P1", 21), ...paneRows("P2", 2)] as unknown as TidyRow[];
-      const fig = renderFigure(spec, rows, { width: 900, document });
-      const [p1, p2] = fig.panes.map((p) => p.svg as SVGSVGElement);
-      const g1 = gaps(rowCentres(p1!));
-      const g2 = gaps(rowCentres(p2!));
-      expect(rowCentres(p2!)).toHaveLength(11);
-      expect(g1.breaks).toEqual(Array(9).fill(GAP));
-      expect(g2.breaks).toEqual(Array(9).fill(GAP));
-      // Live and export draw the same panes at the same heights, with the same rows.
-      const c = document.createElement("div");
-      document.body.appendChild(c);
-      mountChart(c, { spec, rows, width: INNER_W });
-      const live = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-pane svg")).filter((s) => s.querySelector("g.tbl-cat-label"));
-      const exp = Array.from(buildExportSvg(spec, rows).querySelectorAll<SVGSVGElement>("svg")).filter((s) => s.querySelector("g.tbl-cat-label"));
-      expect(live).toHaveLength(2);
-      expect(exp.map((s) => s.getAttribute("height"))).toEqual(live.map((s) => s.getAttribute("height")));
-      for (const [i, svg] of live.entries()) {
-        expect(gaps(rowCentres(svg)).breaks, `live pane ${i}`).toEqual(Array(9).fill(GAP));
-        expect(rowCentres(exp[i]!), `export pane ${i}`).toEqual(rowCentres(svg));
-      }
-    });
-
-    it(`small multiples (${mode}) at auto height keep the full gap, one row per section`, () => {
-      const spec: ChartSpec = { ...STACK, columns: { ...STACK.columns, facet: "pane" }, small_multiples: { columns: 2, mode, pane_order: ["P1", "P2"] } };
-      const rows = ["P1", "P2"].flatMap((pane) => crampedStack(1).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
-      const fig = renderFigure(spec, rows, { width: 900, document });
-      expect(gaps(rowCentres(fig.panes[0]!.svg as SVGSVGElement)).breaks).toEqual(Array(12).fill(GAP));
-    });
-  }
 });

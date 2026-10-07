@@ -2,12 +2,11 @@
 //
 // A chart whose height grows with its rows (growsWithRows: horizontal bar/stacked, horizontal
 // dumbbell) keeps its row pitch however few rows it has: a 3-row chart is simply short. Until 1.16
-// the height was floored at 400px, so a 3-row chart's rows stretched to ~100px apart, and in small
-// multiples every pane inherited the stretched pitch from the busiest one. Below the old floor the
-// height is fitted to the rendered row band (figure.ts fitRowsHeight), so the rows sit at exactly
-// the slot pitch; a ragged figure's panes all take the busiest pane's pitch.
+// the height was floored at 400px, so a 3-row chart's rows stretched to ~100px apart. Below the old
+// floor the height is fitted to the rendered row band (figure.ts fitRowsHeight), so the rows sit at
+// exactly the slot pitch.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { renderChart, renderFigure } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W } from "../src/embed/figure-chrome";
@@ -192,90 +191,4 @@ describe("rowBandGeometry matches what each builder renders", () => {
       expect(Number(svg.dataset.marginBottom)).toBe(22);
     }
   });
-});
-
-describe("small-multiples panes all take the busiest pane's pitch", () => {
-  it("two-pane horizontal dumbbell (3 and 2 rows): short panes, rows one slot apart in both", () => {
-    const spec = {
-      ...DUMBBELL,
-      columns: { ...DUMBBELL.columns, facet: "pane" },
-      small_multiples: { pane_order: ["Short", "Long"] },
-    } as ChartSpec;
-    const rows = [
-      ...dumbbellRows(["Q1", "Q2", "Q5"], "Short"),
-      ...dumbbellRows(["Top 1% by net worth", "Net worth of $1 billion or more"], "Long"),
-    ];
-    const fig = renderFigure(spec, rows, { gridWidth: 920, gridGap: 20 });
-    const [short, long] = fig.panes.map((p) => p.svg as SVGSVGElement);
-    expect(Number(short!.getAttribute("height"))).toBeLessThan(200);
-    expect(Number(long!.getAttribute("height"))).toBeLessThan(Number(short!.getAttribute("height")));
-    expect(pitchOf(short!, 3)).toBe(HORIZONTAL_PX_PER_BAR);
-    expect(pitchOf(long!, 2)).toBe(HORIZONTAL_PX_PER_BAR);
-  });
-
-  it("the export lays the dumbbell panes out at the live pane heights", () => {
-    const spec = {
-      ...DUMBBELL,
-      columns: { ...DUMBBELL.columns, facet: "pane" },
-      small_multiples: { pane_order: ["Short", "Long"] },
-    } as ChartSpec;
-    const rows = [...dumbbellRows(["Q1", "Q2", "Q5"], "Short"), ...dumbbellRows(["Top 1%", "Top 0.1%"], "Long")];
-    const inner = Array.from(buildExportSvg(spec, rows).querySelectorAll("svg"));
-    expect(inner).toHaveLength(2);
-    expect(pitchOf(inner[0] as SVGSVGElement, 3)).toBe(HORIZONTAL_PX_PER_BAR);
-    expect(pitchOf(inner[1] as SVGSVGElement, 2)).toBe(HORIZONTAL_PX_PER_BAR);
-  });
-
-  const stackRows = (counts: [string, number][], section?: (i: number) => string): TidyRow[] => {
-    const rows: TidyRow[] = [];
-    for (const [pane, n] of counts) {
-      cats(n, pane[0]).forEach((c, i) => {
-        const sec = section ? { sec: section(i) } : {};
-        rows.push({ cat: c, pane, s: "A", v: "60", ...sec } as unknown as TidyRow);
-        rows.push({ cat: c, pane, s: "B", v: "40", ...sec } as unknown as TidyRow);
-      });
-    }
-    return rows;
-  };
-  const STACK = {
-    chartType: "stacked",
-    orientation: "horizontal",
-    title: "Stacks",
-    columns: { x: "cat", value: "v", series: "s", facet: "pane" },
-    xAxisType: "categorical",
-    barStack: { netDisplay: "none" },
-    data: "x",
-  } as unknown as ChartSpec;
-
-  it("faceted horizontal stack (5 and 3 rows): both panes short, rows one slot apart", () => {
-    const spec = { ...STACK, small_multiples: { columns: 1, pane_order: ["Five", "Three"] } } as ChartSpec;
-    const fig = renderFigure(spec, stackRows([["Five", 5], ["Three", 3]]), { gridWidth: 920, gridGap: 20, columns: 1 });
-    const [five, three] = fig.panes.map((p) => p.svg as SVGSVGElement);
-    expect(fig.paneHeights![0]).toBeLessThan(200);
-    expect(fig.paneHeights![1]).toBeLessThan(fig.paneHeights![0]!);
-    expect(pitchOf(five!, 5)).toBe(HORIZONTAL_PX_PER_BAR);
-    expect(pitchOf(three!, 3)).toBe(HORIZONTAL_PX_PER_BAR);
-  });
-
-  // The busiest pane is past the old floor, so its height (the chrome estimate) is unchanged and its
-  // pitch carries the estimate's spare px; the sparser pane matches it rather than spreading the
-  // spare px over its own fewer rows. Past 30 rows Plot may leave the busiest pane's step
-  // fractional, which a shorter pane (always rounded) can only match to the nearest whole px.
-  for (const sectioned of [false, true]) {
-    for (const [nMany, tol] of [[20, 0], [40, 0.5]] as const) {
-      it(`ragged ${sectioned ? "sectioned " : ""}stack past the floor (${nMany} and 9 rows): every pane at one pitch`, () => {
-        const spec = {
-          ...STACK,
-          columns: { ...STACK.columns, ...(sectioned ? { section: "sec" } : {}) },
-          small_multiples: { columns: 1, pane_order: ["Many", "Few"] },
-        } as ChartSpec;
-        const rows = stackRows([["Many", nMany], ["Few", 9]], sectioned ? (i) => (i % 2 ? "Odd" : "Even") : undefined);
-        const fig = renderFigure(spec, rows, { gridWidth: 920, gridGap: 20, columns: 1 });
-        expect(fig.paneHeights![0]).toBeGreaterThanOrEqual(400);
-        const [many, few] = fig.panes.map((p) => p.svg as SVGSVGElement);
-        const pMany = pitchOf(many!, nMany);
-        expect(Math.abs(pitchOf(few!, 9) - pMany)).toBeLessThanOrEqual(tol);
-      });
-    }
-  }
 });

@@ -5,7 +5,7 @@
 // includeZero = false and, because it always resolves a hard domain, never reached computeYAxis's
 // own includeZero step either — so the policy was ignored.
 import { describe, it, expect } from "vitest";
-import { renderChart, renderFigure } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -80,7 +80,7 @@ describe("dumbbell — yAxisPolicy.includeZero", () => {
     expect(Math.max(...t)).toBe(50);
   });
 
-  it("true on a shared small-multiples figure: every pane's range starts at 0", () => {
+  it("true on a faceted chart (its facets drawn as groups): the one range starts at 0", () => {
     const rows = [
       ...ROWS.map((r) => ({ ...r, pane: "A" })),
       ...ROWS.map((r) => ({ ...r, pane: "B", rate: String(Number((r as unknown as { rate: string }).rate) + 5) })),
@@ -92,8 +92,7 @@ describe("dumbbell — yAxisPolicy.includeZero", () => {
         small_multiples: { mode: "shared" },
       },
     );
-    const fig = renderFigure(spec, rows, { width: 720, document });
-    expect(fig.panes.length).toBe(2);
-    for (const p of fig.panes) expect(Math.min(...ticks(p.svg!))).toBe(0);
+    const svg = renderChart(spec, rows, { width: 720, document }).svg as SVGSVGElement;
+    expect(Math.min(...ticks(svg))).toBe(0);
   });
 });

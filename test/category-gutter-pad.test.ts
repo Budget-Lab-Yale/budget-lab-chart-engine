@@ -7,7 +7,7 @@
 // floored at each one-line label's glyph-measured width plus the pad. A label that already had the
 // room leaves the gutter unchanged.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { renderChart, renderFigure } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W } from "../src/embed/figure-chrome";
@@ -129,18 +129,5 @@ describe("the label clears the plot: dumbbell, bar and stack, standalone, live a
       );
     };
     expect(attrs(db)).toEqual(attrs(bar));
-  });
-});
-
-describe("the label clears the plot: dumbbell panes", () => {
-  it("every pane's gutter reserves the pad", () => {
-    const spec: ChartSpec = {
-      ...DUMBBELL,
-      columns: { ...DUMBBELL.columns, facet: "pane" },
-      small_multiples: { mode: "shared" },
-    };
-    const rows = ["P", "Q"].flatMap((pane) => dbRows().map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
-    const fig = renderFigure(spec, rows, { width: 720 });
-    for (const p of fig.panes) expect(marginLeft(p.svg as SVGSVGElement)).toBeGreaterThanOrEqual(GAMMA_13 + GUTTER_TEXT_PAD);
   });
 });

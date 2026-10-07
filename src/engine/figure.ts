@@ -15,12 +15,13 @@ import { parseDate } from "../spec/parse-time";
 import { ownValue } from "../spec/own-key";
 import { sectionKeyer, categoryText, labelsRepeatAcrossSections, rowsInSectionOrder } from "../spec/section-key";
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
+import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent, sectionRowOrderOver } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
-import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
+import { resolveValueAffixes, normalizeSpec } from "./util";
 import { rowBandGeometry } from "./marks/category-band";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
@@ -174,7 +175,7 @@ export function growsWithRows(spec: ChartSpec): boolean {
  *  all agree. No floor: a chart with few rows is short, its rows at the slot pitch (fitRowsHeight).
  *  Caller must confirm `growsWithRows(spec)` before calling. */
 export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
-  return rowSizedChart(spec, rows).height;
+  return rowSizedChart(normalizeSpec(spec), rows).height;
 }
 
 /** horizontalBarChartHeight's chrome estimate (horizontalBarHeight) for these rows: what a
@@ -508,6 +509,8 @@ function figurePaneValues(spec: ChartSpec, rows: TidyRow[], facetField: string):
  * value exactly on the bound is not past it. Both bounds or neither: none.
  */
 export function loneBoundWarnings(spec: ChartSpec, rows: TidyRow[]): string[] {
+  // A horizontal chart's facets are groups of one chart, on one axis (spec/facet-groups.ts).
+  spec = normalizeSpec(spec);
   const { min, max } = spec.yAxisPolicy ?? {};
   if ((min == null) === (max == null)) return [];
   const past = (ext: { min: number; max: number } | null): boolean =>
@@ -537,7 +540,12 @@ export function renderFigure(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): FigureRenderResult {
-  spec = withoutRepeatedOrderEntries(spec);
+  if (facetsDrawAsGroups(spec)) {
+    throw new Error(
+      "renderFigure: a horizontal bar, stacked or dumbbell chart draws columns.facet as groups in one chart, not as panes (Ruling 80) — render it with renderChart or render.",
+    );
+  }
+  spec = normalizeSpec(spec);
   const sm = spec.small_multiples;
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";

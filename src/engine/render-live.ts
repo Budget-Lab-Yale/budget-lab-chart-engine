@@ -36,7 +36,7 @@ import { treemapHeight } from "./marks/treemap.js";
 import { TM_GEOM } from "./treemap-layout.js";
 import { attachTreemapHover } from "./treemap-hover.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { applyValueAffixes, formatNumericX, withoutRepeatedOrderEntries } from "./util.js";
+import { applyValueAffixes, formatNumericX, normalizeSpec } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
@@ -236,6 +236,7 @@ const FIXED_CHART_HEIGHT = 400;
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
  *  fixed default; a horizontal chart with few rows is shorter than it. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+  spec = normalizeSpec(spec);
   // Timeline height is content-derived (label rows, or the stacked vertical column); renderChart
   // computes it again at the real width, so this is only the pre-draw estimate.
   if (spec.chartType === "timeline") return timelineHeight(spec, rows, 720);
@@ -796,7 +797,7 @@ function sectionOrderedCategories(spec: ChartSpec, rows: PreparedRow[], cats: st
 }
 
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
-  const unique = withoutRepeatedOrderEntries(opts.spec);
+  const unique = normalizeSpec(opts.spec);
   if (unique !== opts.spec) opts = { ...opts, spec: unique };
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.

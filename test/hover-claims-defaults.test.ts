@@ -126,9 +126,10 @@ describe("x_labels", () => {
     expect(cardText()).toContain("Verbose label for A");
   });
 
+  // Vertical: a horizontal dumbbell draws its facets as groups in one chart, not panes.
   it("dumbbell, 2-pane: the label reaches a FACETED card — a dumbbell keeps its card by design", () => {
     const m = mountHover(
-      spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...LABELS }),
+      spec({ chartType: "dumbbell", orientation: "vertical", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...LABELS }),
       twoPane([["A", 3, 4], ["B", 7, 9]]),
       true,
     );

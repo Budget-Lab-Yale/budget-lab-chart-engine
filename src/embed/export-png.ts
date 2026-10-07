@@ -6,7 +6,7 @@ import type { RenderHooks } from "../spec/hooks.js";
 import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
-import { withoutRepeatedOrderEntries } from "../engine/util.js";
+import { normalizeSpec } from "../engine/util.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
@@ -342,7 +342,7 @@ export function buildExportSvg(
   rows: TidyRow[],
   opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): SVGSVGElement {
-  spec = withoutRepeatedOrderEntries(spec);
+  spec = normalizeSpec(spec);
   const isFigure = spec.small_multiples != null;
   // A single chart whose height grows with its category rows: horizontal bar/stacked, and a
   // horizontal dumbbell — the same predicate computeChartHeight (render-live) asks before sizing

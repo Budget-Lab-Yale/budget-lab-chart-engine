@@ -7,7 +7,7 @@
 // the reference lays out pixel for pixel like the repeated chart, and every mark, tag and position
 // must match it. Only the category label text and the row identity (data-category) may differ.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { renderChart, renderFigure, TOTAL_SERIES_KEY } from "../src/engine/index";
+import { renderChart, TOTAL_SERIES_KEY } from "../src/engine/index";
 import { computeChartHeight, mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
@@ -46,12 +46,12 @@ const twin = (label: string): string => label.replace(/^Top/, "Pot");
 const TWIN_LABELS = RAW.map(([s, c]) => (s === WEALTH ? twin(c) : c));
 
 /** `sign` flips the second series, for the net-dot (diverging) case. */
-const rowsOf = (disambiguate: boolean, sign = 1, pane?: string): TidyRow[] =>
+const rowsOf = (disambiguate: boolean, sign = 1): TidyRow[] =>
   RAW.flatMap(([ranking, group, a, b]) => {
     const g = disambiguate && ranking === WEALTH ? twin(group) : group;
     return [
-      { ...(pane ? { pane } : {}), ranking, group: g, measure: "Cash", rate: String(a) },
-      { ...(pane ? { pane } : {}), ranking, group: g, measure: "Accrual", rate: String(sign * b) },
+      { ranking, group: g, measure: "Cash", rate: String(a) },
+      { ranking, group: g, measure: "Accrual", rate: String(sign * b) },
     ];
   }) as TidyRow[];
 
@@ -266,58 +266,6 @@ describe("sectioned stack: the internal row key never reaches a reader", () => {
       const csv = await blobs[0]!.text();
       expect(csv).toContain("Top 1%");
       expect(leaksKey(csv)).toBe(false);
-    });
-  }
-});
-
-describe("sectioned stack small multiples: repeated labels in every pane", () => {
-  const figSpec = (mode: "shared" | "per-pane"): ChartSpec =>
-    ({
-      ...SPEC,
-      columns: { ...SPEC.columns, facet: "pane" },
-      small_multiples: { columns: 2, mode, pane_order: ["P1", "P2"] },
-    }) as ChartSpec;
-  // Pane P2's values differ, so a pane reading the other's rows is caught.
-  const figRows = (disambiguate: boolean): TidyRow[] => [
-    ...rowsOf(disambiguate, 1, "P1"),
-    ...rowsOf(disambiguate, 1, "P2").map((r) => ({ ...r, rate: String(Number(r.rate) + 1) })),
-  ];
-
-  for (const mode of ["shared", "per-pane"] as const) {
-    it(`${mode}: each pane draws 7 stacks like the disambiguated figure; labels on the left pane`, () => {
-      const panes = (rows: TidyRow[]) => renderFigure(figSpec(mode), rows, { width: 900, document }).panes.map((p) => p.svg as SVGSVGElement);
-      const [p0, p1] = panes(figRows(false));
-      const [r0, r1] = panes(figRows(true));
-      expect(catLabels(p0!)).toEqual(ROW_LABELS);
-      expect(catLabels(p1!)).toEqual([]);
-      expect(rowCentres(p0!)).toHaveLength(7);
-      expect(marks(p0!)).toEqual(marks(r0!));
-      expect(marks(p1!)).toEqual(marks(r1!));
-    });
-
-    it(`${mode}: the PNG export draws the same panes as the disambiguated export`, () => {
-      const exp = buildExportSvg(figSpec(mode), figRows(false));
-      const ref = buildExportSvg(figSpec(mode), figRows(true));
-      expect(catLabels(exp)).toEqual(ROW_LABELS);
-      expect(marks(exp)).toEqual(marks(ref));
-    });
-
-    it(`${mode}: hovering pane P2's second 'Top 1%' reports P2's net-worth row and echoes P1's`, () => {
-      const seen: Array<BandHoverCtx | null> = [];
-      const c = document.createElement("div");
-      document.body.appendChild(c);
-      mountChart(c, { spec: figSpec(mode), rows: figRows(false), width: 900, onHover: (x) => seen.push(x) });
-      const [p1, p2] = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
-      mockRect1to1(p1!);
-      mockRect1to1(p2!);
-      hoverAt(p2!, rowCentres(p2!)[3]!);
-      const ctx = seen.filter((x): x is BandHoverCtx => x != null).at(-1)!;
-      expect(ctx.facet).toBe("P2");
-      expect(ctx.category).toBe("Top 1%");
-      expect(ctx.values).toEqual({ Cash: 28.3, Accrual: 14.2 });
-      // The sibling pane echoes its own second "Top 1%" row.
-      expect(p1!.querySelector("g.tbl-coord")?.getAttribute("opacity")).toBe("1");
-      expect(coordTexts(p1!).map(Number)).toEqual(expect.arrayContaining([27.3, 13.2]));
     });
   }
 });

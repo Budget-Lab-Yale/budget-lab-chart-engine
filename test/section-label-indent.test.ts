@@ -4,10 +4,10 @@
 // section header sits flush left and the category labels under it are indented by the table's
 // member-row indent (src/table/layout.ts INDENT_STEP). The left gutter grows by the indent, so the
 // label text keeps the width it has on an unsectioned chart (same wrapping), and the live render, the
-// PNG export, the height models and small-multiple panes all agree. Unsectioned charts are untouched
+// PNG export and the height models all agree. Unsectioned charts are untouched
 // (their goldens guard that).
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { renderChart, renderFigure } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W } from "../src/embed/figure-chrome";
@@ -187,47 +187,4 @@ describe("indent: live and export agree", () => {
       expect(lineCounts(e)).toEqual(lineCounts(l));
     });
   }
-});
-
-describe("indent: small multiples", () => {
-  const FIG: ChartSpec = {
-    ...STACK,
-    columns: { ...STACK.columns, facet: "pane" },
-    small_multiples: { columns: 2, mode: "shared", pane_order: ["P1", "P2"] },
-  };
-  const figRows = (n: number, long = false): TidyRow[] =>
-    ["P1", "P2"].flatMap((pane) => stackRows(n, long).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
-
-  for (const mode of ["shared", "per-pane"] as const) {
-    it(`${mode}: the label column is ${INDENT}px wider and its labels are indented; panes keep equal data widths`, () => {
-      const spec = { ...FIG, small_multiples: { ...FIG.small_multiples!, mode } };
-      const rows = figRows(6, true);
-      const fig = renderFigure(spec, rows, { width: 900, document });
-      const plain = renderFigure(unsectioned(spec), rows, { width: 900, document });
-      const [p0, p1] = fig.panes.map((p) => p.svg as SVGSVGElement);
-      const [q0] = plain.panes.map((p) => p.svg as SVGSVGElement);
-      expect(marginLeft(p0!) - marginLeft(q0!)).toBe(INDENT);
-      const hx = headerXs(p0!);
-      expect(hx.length).toBeGreaterThan(0);
-      for (const x of labelXs(p0!)) expect(x - hx[0]!).toBeCloseTo(INDENT, 6);
-      expect(lineCounts(p0!)).toEqual(lineCounts(q0!));
-      // The label-less pane holds no labels and the same data width as the label pane.
-      expect(labelXs(p1!)).toEqual([]);
-      const dataW = (s: SVGSVGElement) => Number(s.getAttribute("width")) - marginLeft(s);
-      expect(dataW(p1!)).toBeCloseTo(dataW(p0!), 0);
-    });
-  }
-
-  it("dumbbell panes (one per row) indent their labels too", () => {
-    const spec: ChartSpec = { ...DUMBBELL, columns: { ...DUMBBELL.columns, facet: "pane" }, small_multiples: { columns: 1 } };
-    const rows = ["P1", "P2"].flatMap((pane) => dbRows(4).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
-    const fig = renderFigure(spec, rows, { width: 900, document });
-    const plain = renderFigure(unsectioned(spec), rows, { width: 900, document });
-    for (const [i, p] of fig.panes.entries()) {
-      const svg = p.svg as SVGSVGElement;
-      expect(marginLeft(svg) - marginLeft(plain.panes[i]!.svg as SVGSVGElement)).toBe(INDENT);
-      const hx = headerXs(svg);
-      for (const x of labelXs(svg)) expect(x - hx[0]!).toBeCloseTo(INDENT, 6);
-    }
-  });
 });

@@ -312,42 +312,10 @@ describe("validation — rows are identified by section + category", () => {
     expect(errors.join("\n")).toMatch(/category "Top 1%" in section "Ranked by net worth" has more than one "Cash income" value/);
   });
 
-  it("faceted: the same section + category + series once per facet is valid, twice in one facet is not", () => {
-    const spec = {
-      ...BAR_SINGLE,
-      columns: { x: "group", value: "effective_rate", section: "ranking", facet: "pane" },
-      small_multiples: { columns: 2 },
-    } as ChartSpec;
-    const perPane = ["A", "B"].flatMap((pane) => CASH_ROWS.map((r) => ({ ...r, pane }))) as TidyRow[];
-    expect(validateChartData(spec, perPane).errors).toEqual([]);
-    const dup = [...perPane, { pane: "B", ranking: WEALTH, group: "Top 1%", income_measure: "Cash income", effective_rate: "1" }] as TidyRow[];
-    expect(validateChartData(spec, dup).errors.join("\n")).toMatch(
-      /category "Top 1%" in section "Ranked by net worth" in facet "B" has more than one value/,
-    );
-  });
-
-  it("faceted horizontal bars compare section + category across panes", () => {
-    // Pane B carries "Top 1%" only under the income section; pane A carries it under both.
-    const rows = [
-      { pane: "A", ranking: INCOME, group: "Top 1%", effective_rate: "1" },
-      { pane: "A", ranking: WEALTH, group: "Top 1%", effective_rate: "2" },
-      { pane: "B", ranking: INCOME, group: "Top 1%", effective_rate: "3" },
-      { pane: "B", ranking: WEALTH, group: "Top 0.1%", effective_rate: "4" },
-      { pane: "A", ranking: WEALTH, group: "Top 0.1%", effective_rate: "5" },
-    ] as TidyRow[];
-    const spec = {
-      ...BAR_SINGLE,
-      columns: { x: "group", value: "effective_rate", section: "ranking", facet: "pane" },
-      small_multiples: { columns: 2 },
-    } as ChartSpec;
-    const { errors } = validateChartData(spec, rows);
-    expect(errors.join("\n")).toMatch(/facet "B" is missing category "Top 1%" \(section "Ranked by net worth"\)/);
-  });
 });
 
 // ---------------------------------------------------------------------------
-// E6 fix: a label is only ever split if the engine minted it as a key, and the keying decision is
-// the FIGURE's, so every pane names a row the same way.
+// E6 fix: a label is only ever split if the engine minted it as a key.
 
 describe("an author label containing the separator character is never split", () => {
   // U+E000, the Private Use Area code point the key format uses. An author can type it.
@@ -391,49 +359,6 @@ describe("an author label containing the separator character is never split", ()
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
     expect(catLabels(svg)).toEqual(["Y", "Z", `${PUA}Y`, "Z"]);
   });
-});
-
-describe("keying is decided for the whole figure, so a coordinated hover crosses panes", () => {
-  // Pane P repeats "A" across both sections; pane Q has "A" in one section only. columns: 1 lets
-  // the panes carry different rows. Q must still answer when P's "A" (section S) is hovered.
-  const S = "Section S";
-  const T = "Section T";
-  const FIG_ROWS = [
-    { pane: "P", ranking: S, group: "A", effective_rate: "1" },
-    { pane: "P", ranking: T, group: "A", effective_rate: "2" },
-    { pane: "P", ranking: T, group: "B", effective_rate: "3" },
-    { pane: "Q", ranking: S, group: "A", effective_rate: "4" },
-    { pane: "Q", ranking: T, group: "B", effective_rate: "5" },
-  ] as TidyRow[];
-
-  for (const mode of ["shared", "per-pane"] as const) {
-    it(`${mode} mode: hovering P's first "A" echoes Q's "A" value, and back`, () => {
-      const spec = {
-        ...BAR_SINGLE,
-        columns: { x: "group", value: "effective_rate", section: "ranking", facet: "pane" },
-        small_multiples: { columns: 1, mode, pane_order: ["P", "Q"] },
-      } as ChartSpec;
-      expect(validateChartData(spec, FIG_ROWS).errors).toEqual([]);
-      const container = document.createElement("div");
-      document.body.appendChild(container);
-      mountChart(container, { spec, rows: FIG_ROWS, width: 720 } as never);
-      const [p, q] = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
-      expect(q).toBeTruthy();
-      mockRect1to1(p!);
-      mockRect1to1(q!);
-      const firstRowY = (svg: SVGSVGElement): number => {
-        const rects = Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
-        return Math.min(...rects.map((r) => absPos(r).y + Number(r.getAttribute("height")) / 2));
-      };
-      hoverAt(p!, 400, firstRowY(p!));
-      expect(coordTexts(p!).some((t) => t.includes("1"))).toBe(true);
-      expect(q!.querySelector("g.tbl-coord")?.getAttribute("opacity")).toBe("1");
-      expect(coordTexts(q!).some((t) => t.includes("4"))).toBe(true);
-      hoverAt(q!, 400, firstRowY(q!));
-      expect(p!.querySelector("g.tbl-coord")?.getAttribute("opacity")).toBe("1");
-      expect(coordTexts(p!).some((t) => t.includes("1"))).toBe(true);
-    });
-  }
 });
 
 describe("hooks.valueLabel names the display category (util.ts applyValueLabelHook)", () => {

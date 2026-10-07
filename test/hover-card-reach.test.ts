@@ -370,6 +370,7 @@ describe("dot plot — card standalone, none in a default multi-pane figure", ()
 // ---------------------------------------------------------------------------
 // Dumbbell: the one type that keeps its card in a coordinated pane, on purpose
 // (render-live.ts's "NOT emitOnly" comment).
+// Its panes are vertical: a horizontal dumbbell draws its facets as groups in one chart.
 // ---------------------------------------------------------------------------
 
 describe("dumbbell — card standalone AND in a default pane", () => {
@@ -385,7 +386,7 @@ describe("dumbbell — card standalone AND in a default pane", () => {
 
   it("2-pane: card at defaults, hooks.tooltip fires", () => {
     const m = mount(
-      spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
+      spec({ chartType: "dumbbell", orientation: "vertical", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
       twoPane([["A", 3, 4], ["B", 7, 9]]),
       true,
     );
@@ -395,7 +396,7 @@ describe("dumbbell — card standalone AND in a default pane", () => {
   });
   it("faceted but resolving to one pane: card at defaults, no coordinated cursor", () => {
     const m = mount(
-      spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
+      spec({ chartType: "dumbbell", orientation: "vertical", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols(), ...sm }),
       catRows([["A", 3, 4], ["B", 7, 9]], "P1"),
       true,
     );
@@ -478,21 +479,6 @@ describe("faceted stack with the hover card — card on the hovered pane, band e
   it("DIAL barStack.hover \"tooltip\" on an all-positive stack: same split", () => {
     const m = mount(
       stackSpec({ barStack: { hover: "tooltip", netDisplay: "none" } }),
-      twoPane([["Up", 6, 5], ["Down", 4, 2]]),
-      true,
-    );
-    hoverBandCentre(m.svgs[0]!);
-
-    expect(cardShown()).toBe(true);
-    expect(coordShown(m.svgs[1]!)).toBe(true);
-    expect(count(m.svgs[1]!, ".tbl-coord-region")).toBe(1);
-    expect(coordShown(m.svgs[0]!)).toBe(false);
-    for (const svg of m.svgs) expect(count(svg, ".tbl-coord-pill")).toBe(0);
-  });
-
-  it("DIAL, horizontal orientation: the echoed pane shades the category ROW", () => {
-    const m = mount(
-      stackSpec({ orientation: "horizontal", barStack: { hover: "tooltip", netDisplay: "none" } }),
       twoPane([["Up", 6, 5], ["Down", 4, 2]]),
       true,
     );

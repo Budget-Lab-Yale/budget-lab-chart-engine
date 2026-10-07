@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 //
 // A dumbbell with `orientation` omitted is HORIZONTAL (CONFIG-SPEC "Dumbbell options"; the mark,
-// marks/dumbbell.ts). Every other place that branches on a dumbbell's orientation — figure layout
-// (pane stacking, the shared label column, pane heights), the live mount (chart height, hover band,
-// grid columns) and the PNG export — must agree, so an omitted orientation renders exactly like an
-// explicit `orientation: horizontal`. Before, those places tested `=== "horizontal"`: a faceted
-// dumbbell with no orientation sat side by side at a fixed 320px height and clipped long labels.
+// marks/dumbbell.ts). Every other place that branches on a dumbbell's orientation — the facets drawn
+// as groups (spec/facet-groups.ts), the live mount (chart height, hover band) and the PNG export —
+// must agree, so an omitted orientation renders exactly like an explicit `orientation: horizontal`.
+// Before, those places tested `=== "horizontal"`: a faceted dumbbell with no orientation sat side by
+// side at a fixed 320px height and clipped long labels.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { renderFigure } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { validateSpec } from "../src/spec/validate";
@@ -63,24 +62,16 @@ function liveHtml(spec: ChartSpec): string {
 }
 
 describe("dumbbell with orientation omitted lays out as horizontal", () => {
-  for (const mode of ["shared", "per-pane"] as const) {
-    const spec: ChartSpec = { ...FACETED, small_multiples: { mode } };
+  {
+    const spec: ChartSpec = { ...FACETED, small_multiples: { mode: "shared" } };
 
-    it(`${mode}: renderFigure output is identical to orientation: horizontal`, () => {
-      const a = renderFigure(omitted(spec), ROWS, { gridWidth: 720, gridGap: 24, document });
-      const b = renderFigure(horizontal(spec), ROWS, { gridWidth: 720, gridGap: 24, document });
-      expect(a.columns).toBe(1);
-      expect(a.columns).toBe(b.columns);
-      expect(a.panes.map((p) => (p.svg as SVGSVGElement).outerHTML)).toEqual(
-        b.panes.map((p) => (p.svg as SVGSVGElement).outerHTML),
-      );
+    it("faceted, live mount: one grouped chart, identical to orientation: horizontal", () => {
+      const html = liveHtml(omitted(spec));
+      expect(html).not.toContain("figure-pane");
+      expect(html).toBe(liveHtml(horizontal(spec)));
     });
 
-    it(`${mode}, live mount: identical to orientation: horizontal`, () => {
-      expect(liveHtml(omitted(spec))).toBe(liveHtml(horizontal(spec)));
-    });
-
-    it(`${mode}, PNG export: identical to orientation: horizontal`, () => {
+    it("faceted, PNG export: identical to orientation: horizontal", () => {
       expect(buildExportSvg(omitted(spec), ROWS).outerHTML).toBe(buildExportSvg(horizontal(spec), ROWS).outerHTML);
     });
   }
@@ -103,47 +94,4 @@ describe("dumbbell with orientation omitted lays out as horizontal", () => {
     expect(validateSpec(omitted(sectioned)).valid).toBe(true);
     expect(validateSpec({ ...sectioned, orientation: "vertical" }).valid).toBe(false);
   });
-});
-
-describe("panelled horizontal dumbbell — stacked panes take the full row width", () => {
-  // The panes stack one per row (figure.ts), so each must be as wide as the row. Per-pane mode used
-  // to render each pane at the width of a side-by-side column (352px at a 720px mount) while the
-  // grid stacked them, leaving half of every row empty.
-  for (const orientation of ["horizontal", undefined] as const) {
-    const label = orientation ?? "omitted";
-    const spec: ChartSpec = orientation ? { ...FACETED, orientation } : FACETED;
-
-    it(`${label}, live mount: per-pane panes are as wide as shared-mode panes (the full row)`, () => {
-      const widths = (mode: "shared" | "per-pane"): number[] => {
-        const container = document.createElement("div");
-        document.body.appendChild(container);
-        const teardown = mountChart(container, { spec: { ...spec, small_multiples: { mode } }, rows: ROWS, width: 720 });
-        try {
-          const grid = container.querySelector(".figure-grid") as HTMLElement;
-          expect(grid.style.getPropertyValue("--figure-cols")).toBe("1");
-          return Array.from(container.querySelectorAll(".figure-pane svg")).map((s) => Number(s.getAttribute("width")));
-        } finally {
-          if (typeof teardown === "function") teardown();
-          container.remove();
-        }
-      };
-      const shared = widths("shared");
-      const perPane = widths("per-pane");
-      expect(shared).toHaveLength(2);
-      expect(shared[0]).toBe(shared[1]);
-      expect(shared[0]).toBeGreaterThan(600);
-      expect(perPane).toEqual(shared);
-    });
-
-    it(`${label}, PNG export: per-pane panes are as wide as shared-mode panes (the full row)`, () => {
-      const widths = (mode: "shared" | "per-pane"): number[] =>
-        Array.from(buildExportSvg({ ...spec, small_multiples: { mode } }, ROWS).querySelectorAll("svg svg"))
-          .filter((s) => s.querySelector("g.tbl-cat-label"))
-          .map((s) => Number(s.getAttribute("width")));
-      const shared = widths("shared");
-      expect(shared).toHaveLength(2);
-      expect(shared[0]).toBe(shared[1]);
-      expect(widths("per-pane")).toEqual(shared);
-    });
-  }
 });

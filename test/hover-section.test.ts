@@ -31,10 +31,10 @@ const RAW: Array<[string, string, number, number]> = [
   [WEALTH, "Top 1%", 27.3, 13.2],
   [WEALTH, "Billionaires", 30.6, 8.0],
 ];
-const rowsOf = (sign = 1, pane?: string): TidyRow[] =>
+const rowsOf = (sign = 1): TidyRow[] =>
   RAW.flatMap(([ranking, group, a, b]) => [
-    { ...(pane ? { pane } : {}), ranking, group, measure: "Cash", rate: String(a) },
-    { ...(pane ? { pane } : {}), ranking, group, measure: "Accrual", rate: String(sign * b) },
+    { ranking, group, measure: "Cash", rate: String(a) },
+    { ranking, group, measure: "Accrual", rate: String(sign * b) },
   ]) as TidyRow[];
 
 const base = {
@@ -74,7 +74,8 @@ function mount(spec: ChartSpec, rows: TidyRow[]) {
   document.body.appendChild(c);
   c.addEventListener("tbl-hover", (e) => events.push((e as CustomEvent).detail));
   mountChart(c, { spec, rows, width: 720, onHover: (x) => seen.push(x) });
-  const svgs = Array.from(c.querySelectorAll<SVGSVGElement>(spec.small_multiples ? ".figure-pane svg" : ".figure-canvas svg"));
+  const svgs = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-canvas svg"));
+  expect(svgs).toHaveLength(1);
   svgs.forEach(mockRect1to1);
   const hover = (svg: SVGSVGElement, y: number) =>
     svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(new PointerEvent("pointermove", { clientX: 400, clientY: y, bubbles: true }));
@@ -117,15 +118,18 @@ describe("onHover reports the hovered row's section", () => {
     expect(last().category).toBe("Top 1%");
   });
 
-  it("small multiples: a pane reports its row's section and its facet", () => {
+  it("a horizontal chart's facets are its sections: onHover reports the facet value as the section", () => {
     const spec = {
-      ...STACKED,
-      columns: { ...base.columns, facet: "pane" },
-      small_multiples: { columns: 2, pane_order: ["P1", "P2"] },
+      ...BAR,
+      columns: { x: "group", series: "measure", value: "rate", facet: "ranking" },
+      small_multiples: { pane_order: [WEALTH, INCOME] },
     } as ChartSpec;
-    const { svgs, hover, last } = mount(spec, [...rowsOf(1, "P1"), ...rowsOf(1, "P2")]);
-    hover(svgs[1]!, rowCentres(svgs[1]!)[2]!);
-    expect(last()).toMatchObject({ category: "Top 1%", section: WEALTH, facet: "P2" });
+    const { svgs, hover, last } = mount(spec, rowsOf());
+    const ys = rowCentres(svgs[0]!);
+    expect(ys).toHaveLength(4);
+    hover(svgs[0]!, ys[0]!);
+    expect(last()).toMatchObject({ category: "Top 1%", section: WEALTH });
+    expect("facet" in last()).toBe(false);
   });
 
   it("a chart without sections has no section field", () => {
