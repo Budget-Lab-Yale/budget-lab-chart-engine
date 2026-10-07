@@ -2081,12 +2081,12 @@ function wireFigureSvg(
   // and it is passed explicitly (rather than defaulted) so a future pane that DID paint labels would
   // have to come back and answer the question instead of silently inheriting "nothing was dropped".
   const chromePills = resolveValuePills(ctx.spec, ctx.netMode, true, false);
-  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
-  // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
-  // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
+  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that column and
+  // echoes it on every pane; the hovered pane shows the tooltip. Resolves the category from the dot
+  // marks (data-category). Only a vertical dumbbell reaches a figure: a horizontal one draws its
+  // facets as groups in one chart (facetsAsGroups).
   if (ctx.spec.chartType === "dumbbell") {
     const dbUseCoord = ctx.onResolve != null;
-    const orientation = isHorizontalDumbbell(ctx.spec) ? "horizontal" : "vertical";
     const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
     const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ownValue(ctx.spec.series_marker, s) ?? "filled"] as const));
     const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
@@ -2099,12 +2099,9 @@ function wireFigureSvg(
       categoryLabels: ctx.spec.x_labels,
       bandHighlight: true,
       centersFromMarks: true,
-      orientation: orientation as "vertical" | "horizontal",
+      orientation: "vertical" as const,
       renderedFills: dbFills,
       markerless: true,
-      // Horizontal: every pane carries its own labels, so each strip (the hovered pane's and the
-      // echoes) runs under the label and accents it — as on a horizontal bar figure.
-      ...(orientation === "horizontal" ? { regionFromLeftEdge: true, accentLabel: true } : {}),
     };
     // NOT emitOnly: every pane shows its own hover TOOLTIP (dot swatches matching the legend) — the
     // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
@@ -2211,11 +2208,9 @@ function wireFigureSvg(
   }
 
   const categorical = ctx.spec.xAxisType === "categorical";
-  // Coordinated cursor: the band crosshair resolves a CATEGORY (works for both orientations —
-  // categories on X for vertical, on Y for horizontal), so horizontal bars get the coordinated
-  // row-highlight + value pills too (not a per-pane tooltip). `useCoord` gates the no-tooltip
-  // emitOnly + coordinated-renderer path.
-  const horizontal = ctx.spec.orientation === "horizontal";
+  // Coordinated cursor: the band crosshair resolves a CATEGORY. Every figure pane is vertical: a
+  // horizontal bar or stack draws its facets as groups in one chart (facetsAsGroups). `useCoord`
+  // gates the no-tooltip emitOnly + coordinated-renderer path.
   const useCoord = ctx.onResolve != null;
   // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
   // match the static marker. Keyed by the series' position in the figure's list, as the pane's
@@ -2274,8 +2269,7 @@ function wireFigureSvg(
     // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
     const isStacked = ctx.spec.chartType === "stacked";
     // A grouped per-pane bar IS fx-faceted within its own frame (xScaleField === "fx" in
-    // bar.ts); a sectioned horizontal per-pane bar (any series count) is fy-faceted — see
-    // isBarCategoryFaceted above.
+    // bar.ts) — see isBarCategoryFaceted above.
     const isFaceted = isBarCategoryFaceted(ctx.spec, ctx.dataInScope, ctx.seriesOrder.length);
     const catsSeen = new Set<string>();
     const catsRaw: string[] = [];
@@ -2316,13 +2310,7 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
       ...tooltipSectionOpts(ctx.spec),
-      orientation: horizontal ? "horizontal" : "vertical",
-      // Horizontal card hover: the same row strip + label accent the coordinated cursor draws.
-      ...(horizontal
-        ? {
-            regionFromLeftEdge: true,
-          }
-        : {}),
+      orientation: "vertical",
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
@@ -2354,7 +2342,6 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        horizontal,
         hasNetDots: hasNetDots(ctx.netMode),
       });
       // The bus suppresses the hovered category in the legend-highlight pills so they don't double
@@ -2397,32 +2384,18 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, wfDecimals ?? ctx.spec.tooltip_decimals),
-        horizontal,
         showPills: chromePills,
-        ...(horizontal
-          ? {
-              regionFromLeftEdge: true,
-            }
-          : {}),
         ...(wfCursor ? { waterfall: wfCursor } : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     if (echoWithCard) {
       // Echo only: no colors/labels/formatter, because it draws no pills — just the band geometry
-      // inputs (`readCategoryBands`/`readCategoryBandsH` read rows + the category list) and, for
-      // horizontal, the same row-continuity options the pills path passes, so the echoed strip
-      // bridges the inter-pane gap exactly as it does in a pills figure.
+      // inputs (`readCategoryBands` reads rows + the category list).
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isFaceted,
         categories: cats,
-        horizontal,
         echoOnly: true,
-        ...(horizontal
-          ? {
-              regionFromLeftEdge: true,
-            }
-          : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
