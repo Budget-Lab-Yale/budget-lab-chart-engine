@@ -676,44 +676,6 @@ describe("golden SVG — bar category_colors / bar_color", () => {
   });
 });
 
-// --- Faceted-horizontal label/gutter signals (hideCategoryLabels + categoryGutter) ---
-
-describe("bar builder — faceted-horizontal label signals", () => {
-  const HBASE: ChartSpec = {
-    chartType: "bar",
-    title: "t",
-    subtitle: "Percentage points",
-    xAxisType: "categorical",
-    orientation: "horizontal",
-    series_order: ["2019", "2022", "2025"],
-    data: "bar-multi.csv",
-  };
-
-  it("hideCategoryLabels omits the y-band labels for grouped horizontal", () => {
-    const rows = parseCsv("./fixtures/bar-multi.csv");
-    const shown = renderChart(HBASE, rows, { width: 400, height: 400, document });
-    const hidden = renderChart(HBASE, rows, {
-      width: 400,
-      height: 400,
-      document,
-      hideCategoryLabels: true,
-    });
-    const labelCount = (svg: SVGSVGElement) =>
-      Array.from(svg.querySelectorAll("text")).filter((t) =>
-        /Northeast|Midwest|South/.test(t.textContent ?? ""),
-      ).length;
-    expect(labelCount(shown.svg)).toBeGreaterThan(0);
-    expect(labelCount(hidden.svg)).toBe(0);
-    expect(Number(hidden.svg.dataset.marginLeft)).toBe(SHARED_LABELLESS_MARGIN_LEFT);
-  });
-
-  it("categoryGutter overrides the computed gutter (plot margin follows it)", () => {
-    const rows = parseCsv("./fixtures/bar-multi.csv");
-    const r = renderChart(HBASE, rows, { width: 400, height: 400, document, categoryGutter: 180 });
-    expect(Number(r.svg.dataset.marginLeft)).toBe(180);
-  });
-});
-
 // --- D6: horizontal xAxis marker label placement (top margin, not on the flush-top first bar) ---
 //
 // The horizontal category band uses `align: 0` so the (small) outer pad goes to the BOTTOM only —

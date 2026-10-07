@@ -9,8 +9,6 @@
 //
 // A chart is keyed ONLY when some label actually repeats across sections. Without a repeat the key
 // is the bare category, so every chart without one — sectioned or not — renders byte-identically.
-// A small-multiples figure decides once for all its panes (`labelsRepeatAcrossSections` over the
-// figure's rows), so every pane names a row the same way and the coordinated cursor can match it.
 //
 // Decoding is by lookup, never by parsing: `categoryText` returns a category only for a string this
 // module minted as a key, so an author label that happens to contain the separator is never split.
@@ -57,16 +55,14 @@ export function labelsRepeatAcrossSections<R>(
 }
 
 /** Map each row to its category key: `sectionCategoryKey(section, category)` when the chart is
- *  keyed, else the bare category. `keyed` is the figure's decision when the caller has one (a
- *  small-multiples pane); absent, it is decided from `rows`. A blank category stays blank, so a
- *  row the engine drops for having no category is still dropped. */
+ *  keyed (some label in `rows` repeats across sections), else the bare category. A blank category
+ *  stays blank, so a row the engine drops for having no category is still dropped. */
 export function sectionKeyer<R>(
   rows: readonly R[],
   categoryOf: (r: R) => string | null | undefined,
   sectionOf: (r: R) => string | null | undefined,
-  keyed: boolean = labelsRepeatAcrossSections(rows, categoryOf, sectionOf),
 ): (r: R) => string {
-  if (!keyed) return (r) => categoryOf(r) ?? "";
+  if (!labelsRepeatAcrossSections(rows, categoryOf, sectionOf)) return (r) => categoryOf(r) ?? "";
   return (r) => {
     const c = categoryOf(r) ?? "";
     return c === "" ? c : sectionCategoryKey(sectionOf(r) ?? "", c);

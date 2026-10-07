@@ -61,10 +61,6 @@ describe("figurePaneHeight", () => {
     expect(figurePaneHeight({ ...base, chartType: "line" } as any)).toBe(240);
     expect(figurePaneHeight({ ...base, chartType: "scatter" } as any)).toBe(240);
   });
-  it("horizontal bar AND horizontal stacked figures grow (undefined ⇒ auto-height)", () => {
-    expect(figurePaneHeight({ ...base, chartType: "bar", orientation: "horizontal" } as any)).toBeUndefined();
-    expect(figurePaneHeight({ ...base, chartType: "stacked", orientation: "horizontal" } as any)).toBeUndefined();
-  });
 });
 
 describe("figurePaneHeight — export-integration", () => {

@@ -133,10 +133,10 @@ export function categoryBand(
   };
 }
 
-/** The left gutter for a horizontal category band, unless the caller (a small-multiples figure)
- *  passes its shared one: wide enough for the longest label, plus the section indent when sectioned. */
-export function bandGutter(categories: string[], catFont: number, sectioned: boolean, shared?: number): number {
-  return shared ?? horizontalLeftGutter(categories, { fontSize: catFont, indent: sectioned ? SECTION_LABEL_INDENT : 0 });
+/** The left gutter for a horizontal category band: wide enough for the longest label, plus the
+ *  section indent when sectioned. */
+export function bandGutter(categories: string[], catFont: number, sectioned: boolean): number {
+  return horizontalLeftGutter(categories, { fontSize: catFont, indent: sectioned ? SECTION_LABEL_INDENT : 0 });
 }
 
 /** The fy layer pieces for a category band on `fy` row facets: the band scale, the left-gutter
@@ -144,20 +144,18 @@ export function bandGutter(categories: string[], catFont: number, sectioned: boo
  *  header marks and gaps contribute nothing. */
 export function fyCategoryBandLayer(
   band: CategoryBand,
-  opts: { gutter: number; catFont: number; hideLabels: boolean; xAxisTicks: ChartSpec["x_axis_ticks"] },
+  opts: { gutter: number; catFont: number; xAxisTicks: ChartSpec["x_axis_ticks"] },
 ): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom" | "sectionGaps"> {
-  const { gutter, catFont, hideLabels } = opts;
+  const { gutter, catFont } = opts;
   const lift = sectionHeaderLift(catFont);
   return {
     // Declaration order; never auto-sort (Style-Guide §9). No axis: labelled by the marks below.
     fyScaleOpts: { domain: band.bandDomain, paddingInner: HBAND_PADDING_INNER, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
-    xAxisMarks: hideLabels
-      ? []
-      : [
-          ...tblFacetGroupYAxis(band.categories, gutter, catFont, band.sectioned ? SECTION_LABEL_INDENT : 0),
-          ...band.sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, lift, catFont)),
-          ...(band.topSectionHeader ? tblSectionTopHeader(band.topSectionHeader, gutter, lift, catFont) : []),
-        ],
+    xAxisMarks: [
+      ...tblFacetGroupYAxis(band.categories, gutter, catFont, band.sectioned ? SECTION_LABEL_INDENT : 0),
+      ...band.sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, lift, catFont)),
+      ...(band.topSectionHeader ? tblSectionTopHeader(band.topSectionHeader, gutter, lift, catFont) : []),
+    ],
     marginLeft: gutter,
     ...(band.sectionHeaders.length
       ? { sectionGaps: { before: band.sectionHeaders.map((h) => h.category), px: sectionGapPx(catFont) } }

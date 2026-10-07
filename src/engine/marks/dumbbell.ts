@@ -23,7 +23,6 @@ import {
   sectionHeaderLift,
   horizontalValueAxisMargins,
 } from "../axes";
-import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { markerInk, type MarkerInk, type MarkerStyle } from "../marker-ink";
 import { bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, HDUMBBELL_BAND_PADDING, HDUMBBELL_MARGIN_BOTTOM } from "./category-band";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
@@ -259,9 +258,7 @@ export function buildDumbbellMarks(
   };
 
   if (horizontal) {
-    const gutter = ctx.hideCategoryLabels
-      ? SHARED_LABELLESS_MARGIN_LEFT
-      : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
+    const gutter = bandGutter(categories, catFont, sectioned);
 
     if (sectioned) {
       // fy-facet topology (identical to horizontal bars): category band on `fy`, a single inner-y
@@ -285,9 +282,7 @@ export function buildDumbbellMarks(
         overlay,
         tagging: [
           { selector: 'g[aria-label="dot"] circle', seriesOrder: tagOrder.map((d) => d.series), categoryOrder: tagOrder.map((d) => (d as unknown as Record<string, string>)[catField] ?? "") },
-          ...(ctx.hideCategoryLabels
-            ? []
-            : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
+          { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories },
         ],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
@@ -295,13 +290,11 @@ export function buildDumbbellMarks(
         ...(sectionHeaders.length
           ? { sectionGaps: { before: sectionHeaders.map((h) => h.category), px: sectionGapPx(catFont) } }
           : {}),
-        xAxisMarks: ctx.hideCategoryLabels
-          ? []
-          : [
-              ...tblFacetGroupYAxis(categories, gutter, catFont, SECTION_LABEL_INDENT),
-              ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
-              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
-            ],
+        xAxisMarks: [
+          ...tblFacetGroupYAxis(categories, gutter, catFont, SECTION_LABEL_INDENT),
+          ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
+          ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
+        ],
         marginLeft: gutter,
         marginTop: hMarginTop,
         marginBottom: 26,
@@ -315,13 +308,11 @@ export function buildDumbbellMarks(
       overlay,
       tagging: [
         dotTagging,
-        ...(ctx.hideCategoryLabels
-          ? []
-          : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
+        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories },
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: bandDomain, padding: HDUMBBELL_BAND_PADDING, axis: null },
-      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
+      xAxisMarks: tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
       // One value-tick row. Left to the categorical x adapter, this was the VERTICAL category-label
       // margin, which grows to fit wrapped or rotated labels the horizontal chart never draws there.

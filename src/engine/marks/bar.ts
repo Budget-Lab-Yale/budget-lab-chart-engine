@@ -27,7 +27,6 @@ import {
   CAT_LABEL_CLASS,
 } from "../axes";
 import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER } from "./category-band";
-import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -96,11 +95,8 @@ export function buildBarMarks(
   const catLabelOrder = band.drawnOrder;
   // Tagging entry for the hover-accent hook: stamps data-category on each rendered category label
   // (in render order, see catLabelOrder above) so the live layer can find + accent the hovered
-  // one without matching on textContent. Empty when labels are suppressed (hideCategoryLabels —
-  // non-leftmost faceted panes): no label marks are emitted there, so nothing to tag.
-  const catLabelTagging = ctx.hideCategoryLabels
-    ? []
-    : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: catLabelOrder }];
+  // one without matching on textContent.
+  const catLabelTagging = [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: catLabelOrder }];
 
   // Horizontal value-axis margins for the unsectioned single-series path (the fy paths take theirs
   // from fyCategoryBandLayer, which adds the section-header floor).
@@ -142,7 +138,7 @@ export function buildBarMarks(
   // on one path while its sibling kept a hand-copied variant is exactly the shape that produced
   // the original phantom-facet defect (D1). `gutter` is the caller's resolved left-gutter width.
   const fyBandOpts = (gutter: number) =>
-    ({ gutter, catFont, hideLabels: ctx.hideCategoryLabels === true, xAxisTicks: spec.x_axis_ticks });
+    ({ gutter, catFont, xAxisTicks: spec.x_axis_ticks });
 
   const overlay: unknown[] = [];
 
@@ -220,12 +216,7 @@ export function buildBarMarks(
       // Categories on the band `y`; value on `x` (assemblePlot moves the value domain to
       // `x` when yScaleOpts is present). Supply the y band + its left-edge labels, and a
       // responsive left gutter wide enough for the longest category label (else it clips).
-      // Faceted horizontal small multiples: the figure passes the shared gutter (categoryGutter)
-      // so every pane aligns, and hideCategoryLabels suppresses the labels on non-leftmost panes
-      // (the band domain is shared, so rows still line up).
-      const gutter = ctx.hideCategoryLabels
-        ? SHARED_LABELLESS_MARGIN_LEFT
-        : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
+      const gutter = bandGutter(categories, catFont, sectioned);
 
       if (sectioned) {
         // fy = the section-grouped category band via the SHARED
@@ -251,7 +242,7 @@ export function buildBarMarks(
         yScaleOpts: { type: "band", domain: bandDomain, paddingInner: HBAND_PADDING_INNER, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
         // This is the NON-sectioned single-series horizontal path (sectioned routes to fy above),
         // so there are no section headers to place here — just the plain category labels.
-        xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
+        xAxisMarks: tblBandYAxis(categories, gutter, catFont),
         marginLeft: gutter,
         marginTop: hMarginTop,
         marginBottom: hMarginBottom,
@@ -299,11 +290,7 @@ export function buildBarMarks(
     // padding 0 so bars touch within the group.
     const innerYBandOpts = { type: "band", domain: seriesNames, padding: 0, axis: null };
 
-    // Faceted horizontal small multiples: use the shared gutter from the figure (so panes align)
-    // and suppress category labels on non-leftmost panes.
-    const gutter = ctx.hideCategoryLabels
-      ? SHARED_LABELLESS_MARGIN_LEFT
-      : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
+    const gutter = bandGutter(categories, catFont, sectioned);
     return {
       underlay: [],
       overlay,

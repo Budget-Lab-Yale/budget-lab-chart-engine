@@ -1664,15 +1664,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 // --- Small-multiples figure mount ----------------------------------------------------------
 // Below this pane width the grid reflows to fewer columns (3→2→1). Used by both modes.
 const PANE_MIN_WIDTH = 240;
-// Minimum DATA width per pane for faceted horizontal bars (the shared category gutter is
-// reserved separately — see HBAR_GUTTER_RESERVE). Matches the vertical PANE_MIN_WIDTH: a
-// horizontal pane reads fine at this width, and the earlier 300px premium forced a natural
-// figure width (2×300 + gutter) that overflowed a normal content column, so faceted horizontal
-// charts scrolled horizontally even at wide viewports.
-const HBAR_PANE_MIN_WIDTH = 240;
-// Width reserved (once) for the shared category-label gutter on the leftmost horizontal pane
-// when computing the no-stack natural width.
-const HBAR_GUTTER_RESERVE = 200;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
@@ -2054,12 +2045,6 @@ function wireFigureSvg(
      *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
      *  can suppress the hovered category's pills. */
     onPillDriver?: (handle: HighlightPillsHandle) => void;
-    /** Horizontal coordinated cursor: extend the shaded row this many px past the plot's right edge
-     *  to bridge the inter-pane gap (so the highlight reads as one continuous row). */
-    coordExtendRight?: number;
-    /** Horizontal coordinated cursor: this pane shows the category labels (leftmost), so accent the
-     *  hovered category's label on hover. */
-    coordAccentLabel?: boolean;
     /** Programmatic render hooks (mountFigure's `opts.hooks`) — only `tooltip` is read here,
      *  forwarded into each pane's attachBandCrosshair/attachCategoricalLineCrosshair call so a
      *  small-multiples figure's hook coverage matches a standalone chart's (see mountChart's
@@ -2336,8 +2321,6 @@ function wireFigureSvg(
       ...(horizontal
         ? {
             regionFromLeftEdge: true,
-            regionExtendRight: ctx.coordExtendRight ?? 0,
-            accentLabel: ctx.coordAccentLabel === true,
           }
         : {}),
       showTooltip: chromeTooltip,
@@ -2419,8 +2402,6 @@ function wireFigureSvg(
         ...(horizontal
           ? {
               regionFromLeftEdge: true,
-              regionExtendRight: ctx.coordExtendRight ?? 0,
-              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
             }
           : {}),
         ...(wfCursor ? { waterfall: wfCursor } : {}),
@@ -2440,8 +2421,6 @@ function wireFigureSvg(
         ...(horizontal
           ? {
               regionFromLeftEdge: true,
-              regionExtendRight: ctx.coordExtendRight ?? 0,
-              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
             }
           : {}),
       }) as (key: unknown, active?: boolean) => void;
@@ -2593,12 +2572,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Body: BOTH modes use the responsive `.figure-grid` of independent per-pane mini-SVGs.
   // (Shared mode is no longer a single faceted SVG — it is the same per-pane composition with
   // one shared y-domain + y-labels only on the left column, all handled inside renderFigure.)
-  // Horizontal-bar and variable-width figures never reflow to extra rows — they keep their columns
-  // and scroll horizontally when narrow, so their grid lives inside a horizontal-scroll wrapper.
+  // Variable-width figures never reflow to extra rows — they keep their columns and scroll
+  // horizontally when narrow, so their grid lives inside a horizontal-scroll wrapper.
   const smCfg = spec.small_multiples!;
   const variableWidths = smCfg.pane_widths != null && smCfg.pane_widths !== "equal";
-  const noStack =
-    (spec.chartType === "bar" && spec.orientation === "horizontal") || variableWidths;
+  const noStack = variableWidths;
   const grid = doc.createElement("div");
   grid.className = "figure-grid";
   if (noStack) {
@@ -2661,47 +2639,32 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // reflow floor (fewer, roomier columns) than a plain bar pane.
   const isWaterfallFig = spec.chartType === "waterfall";
   const paneMinWidth = isPointFigure ? 160 : isWaterfallFig ? 320 : PANE_MIN_WIDTH;
-  // Horizontal bar AND horizontal stacked figures share the left-gutter fy topology (see figure.ts):
-  // this drives their pane width floor, grid width and pane-title offset. Their pane HEIGHT comes
-  // from figurePaneHeight below (growsWithRows), which a horizontal dumbbell shares and this does not.
-  const isHorizontalBarFig =
-    (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
   // chart), not the floating tooltip. Used to give a lone pane that treatment (see `coordinated`).
   const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
-  // Dot-plot AND bar/stacked (vertical) panes render ~33% taller (320); waterfall panes taller
-  // still (420) to clear rotated step labels; line/scatter keep the default (240); horizontal
-  // bar/stacked/dumbbell panes grow with row count (undefined — growsWithRows). Single source of truth shared with the
-  // PNG export (export-png.ts) so the two paths can't drift.
+  // Dot-plot AND bar/stacked panes render ~33% taller (320); waterfall panes taller still (420) to
+  // clear rotated step labels; line/scatter keep the default (240). Single source of truth shared
+  // with the PNG export (export-png.ts) so the two paths can't drift. (A horizontal bar, stack or
+  // dumbbell is never a figure: its facets draw as groups, spec/facet-groups.ts.)
   const figHeight = figurePaneHeight(spec);
-  const stacksOnePerRow = isHorizontalDumbbell(spec);
 
   const drawGrid = (outerWidth: number, renderPhase?: "mount" | "resize" | "reselect"): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
-    // NO-STACK figures (horizontal bars / variable widths) never reduce columns for width — they
-    // keep the configured columns (else a single row) and scroll horizontally instead.
+    // NO-STACK figures (variable widths) never reduce columns for width — they keep the configured
+    // columns (else a single row) and scroll horizontally instead.
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
-    // Horizontal dumbbells always stack one pane per row (renderFigure forces it), so each pane is
-    // rendered at the full row width; a reflow column count here would size a side-by-side pane.
-    const cols = stacksOnePerRow
-      ? 1
-      : noStack
-        ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
-        : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
+    const cols = noStack
+      ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
+      : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     // No-stack: keep panes at a readable minimum and let the row overflow into the scroll wrapper.
-    // (Horizontal panes reserve the left category gutter on top of the data, so allow extra.)
-    const minPerPane = isHorizontalBarFig ? HBAR_PANE_MIN_WIDTH : paneMinWidth;
-    const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? HBAR_GUTTER_RESERVE : 0);
+    const naturalW = cols * paneMinWidth + (cols - 1) * GRID_GAP;
     const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
     // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
-    // — SHARED mode (unequal labeled/label-less columns), variable pane_widths in either mode, OR
-    // per-pane HORIZONTAL bars (the category gutter is asymmetric — pane 0 wide, others narrow —
-    // so renderFigure compensates the outer widths for one shared inner data width and needs the
-    // total row width, exactly like shared mode). Otherwise (equal per-pane) pass one shared pane
-    // width for 1fr columns.
-    const useGridWidth = isShared || variableWidths || isHorizontalBarFig;
+    // — SHARED mode (unequal labeled/label-less columns), or variable pane_widths in either mode.
+    // Otherwise (equal per-pane) pass one shared pane width for 1fr columns.
+    const useGridWidth = isShared || variableWidths;
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
@@ -2752,13 +2715,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       const title = doc.createElement("div");
       title.className = "figure-pane-title";
       title.textContent = pane.title;
-      // Faceted horizontal bars: the leftmost pane reserves a wide category gutter on its left, so
-      // align the pane title with the DATA area (offset by that pane's left margin) instead of
-      // letting it sit over the category labels. Other panes have a negligible margin (no shift).
-      if (isHorizontalBarFig && pane.svg) {
-        const ml = Number((pane.svg as SVGSVGElement).dataset.marginLeft) || 0;
-        if (ml > 0) title.style.paddingInlineStart = `${ml}px`;
-      }
       cell.appendChild(title);
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
@@ -2814,7 +2770,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
     fig.panes.forEach((pane, idx) => {
       if (!pane.svg) { drivers.push(() => {}); return; }
-      const col = idx % fig.columns;
       const driver = wireFigureSvg(pane.svg, handle, {
         spec,
         tooltipContainer,
@@ -2842,14 +2797,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         hooks: opts.hooks,
         facet: pane.value,
         onHover: hoverNotifier,
-        // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
-        // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
-        ...(isHorizontalBarFig
-          ? {
-              coordExtendRight: col < fig.columns - 1 ? GRID_GAP : 0,
-              coordAccentLabel: col === 0,
-            }
-          : {}),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));

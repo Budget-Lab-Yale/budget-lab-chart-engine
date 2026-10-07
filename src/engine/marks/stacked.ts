@@ -29,7 +29,6 @@ import {
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
@@ -434,27 +433,18 @@ export function buildStackedMarks(
 
   if (horizontal) {
     // Responsive left gutter so the longest category label is not clipped (see bar.ts); sized to
-    // the (now larger, faceted-matching) catFont so the wider glyphs still fit. Faceted small
-    // multiples: the figure passes the shared gutter (categoryGutter) so panes align, and
-    // hideCategoryLabels suppresses labels on non-leftmost panes (band domain is shared).
-    const gutter = ctx.hideCategoryLabels
-      ? SHARED_LABELLESS_MARGIN_LEFT
-      : bandGutter(categories, catFont, sectioned, ctx.categoryGutter);
+    // the (now larger, faceted-matching) catFont so the wider glyphs still fit.
+    const gutter = bandGutter(categories, catFont, sectioned);
     const bandLayer = sectioned
       ? {
           // One inner slot per fy row, padding 0: the bar fills its row (the inter-row padding lives
           // on fy), as on a sectioned single-series bar.
           yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
-          ...fyCategoryBandLayer(band, {
-            gutter,
-            catFont,
-            hideLabels: ctx.hideCategoryLabels === true,
-            xAxisTicks: spec.x_axis_ticks,
-          }),
+          ...fyCategoryBandLayer(band, { gutter, catFont, xAxisTicks: spec.x_axis_ticks }),
         }
       : {
           yScaleOpts: { type: "band", domain: categories, padding: HSTACK_BAND_PADDING, axis: null },
-          xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
+          xAxisMarks: tblBandYAxis(categories, gutter, catFont),
           marginLeft: gutter,
           // The value axis is at the bottom: a horizontal bar's margins, not the vertical category margin.
           ...horizontalValueAxisMargins(spec.x_axis_ticks),

@@ -942,11 +942,10 @@ export interface BandCrosshairOptions {
    *  own card). */
   onHover?: (ctx: BandHoverCtx | null) => void;
   /** Horizontal: the row strip's x-extent and label accent, as `SecondaryBandOptions`' fields of
-   *  the same names — start at the SVG's left edge (under the category label), run past the right
-   *  edge by `regionExtendRight` (bridging the inter-pane gap), and bold + darken the hovered row's
-   *  label. Unset keeps the strip within the plot and the label as drawn. */
+   *  the same names — start at the SVG's left edge (under the category label) and run to its right
+   *  edge, and bold + darken the hovered row's label. Unset keeps the strip within the plot and the
+   *  label as drawn. */
   regionFromLeftEdge?: boolean;
-  regionExtendRight?: number;
   accentLabel?: boolean;
 }
 
@@ -2211,16 +2210,11 @@ function rowStrip(
   return { min: Math.max(top, c - step / 2), max: Math.min(bottom, c + step / 2), centre: c };
 }
 
-/** A horizontal row strip's x-extent: from the plot's left edge, or the SVG's (under the label), to
- *  the SVG's right edge plus any inter-pane bridge. Unset options keep the plot-bounded strip. */
-function rowStripX(
-  W: number,
-  ml: number,
-  mr: number,
-  opts: { regionFromLeftEdge?: boolean; regionExtendRight?: number },
-): { x: number; w: number } {
+/** A horizontal row strip's x-extent: within the plot, or from the SVG's left edge (under the label)
+ *  to its right edge. */
+function rowStripX(W: number, ml: number, mr: number, opts: { regionFromLeftEdge?: boolean }): { x: number; w: number } {
   if (!opts.regionFromLeftEdge) return { x: ml, w: Math.max(0, W - ml - mr) };
-  return { x: 0, w: W + (opts.regionExtendRight ?? 0) };
+  return { x: 0, w: W };
 }
 /** Net-total pill text: true black, matching the net dot's black stroke (Style-Guide mark-black). */
 const TOTAL_PILL_COLOR = "#000000";
@@ -2882,13 +2876,9 @@ export interface SecondaryBandOptions {
    *  label gutter too, making the highlight read as one continuous row. Default false (starts at
    *  the plot's left margin). */
   regionFromLeftEdge?: boolean;
-  /** Horizontal: extend the shaded row this many px past the plot's right edge — used to bridge
-   *  the inter-pane grid gap so the row looks continuous across panes. Default 0. */
-  regionExtendRight?: number;
   /** Horizontal: when set, re-draw the hovered category's Y-axis label in bold/dark (accent) — by
    *  weight/color ONLY, no background pill. (Vertical's x-axis category name IS shown on a frosted
-   *  pill via addCoordCategoryHighlight; horizontal's row label is not.) Only the label-bearing
-   *  (leftmost) pane passes this; `font` is the label size. */
+   *  pill via addCoordCategoryHighlight; horizontal's row label is not.) `font` is the label size. */
   accentLabel?: { font: number };
   /** Gap (px) between a bar's tip and its value pill. Default 6. */
   pillGap?: number;
@@ -3084,12 +3074,10 @@ export function attachSecondaryBandCursor(
       if (idx < 0) return null;
       // EQUAL-height row for every category (rowStrip), the same strip the primary crosshair draws.
       const { min: yMin, max: yMax, centre: c } = rowStrip(bands, idx, mt, mt + plotH);
-      // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
-      // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
+      // Shade the whole category row, to the SVG's right edge (incl. the right margin). Optionally
+      // start at the SVG left edge, covering the label gutter, so it reads as one continuous row.
       const x0 = opts.regionFromLeftEdge ? 0 : ml;
-      // Cover the pane's full width (incl. the right margin) and, for non-last panes, bridge the
-      // inter-pane grid gap (SVG overflow is visible) so the row reads as one continuous strip.
-      const x1 = W + (opts.regionExtendRight ?? 0);
+      const x1 = W;
       return { x: x0, y: yMin, w: x1 - x0, h: yMax - yMin, centre: c };
     }
     // Vertical: the region spans the full band STEP (widened to the midpoints between clusters),
@@ -3440,11 +3428,10 @@ export interface CategoricalLineOptions {
    *  primary crosshair only; the coordinated cursor draws pills, not a card. */
   showTotal?: boolean;
   /** Horizontal: the row strip's x-extent and label accent, as `SecondaryBandOptions`' fields of
-   *  the same names — start at the SVG's left edge (under the category label), run past the right
-   *  edge by `regionExtendRight` (bridging the inter-pane gap), and bold + darken the hovered row's
-   *  label. Unset keeps the strip within the plot and the label as drawn. */
+   *  the same names — start at the SVG's left edge (under the category label) and run to its right
+   *  edge, and bold + darken the hovered row's label. Unset keeps the strip within the plot and the
+   *  label as drawn. */
   regionFromLeftEdge?: boolean;
-  regionExtendRight?: number;
   accentLabel?: boolean;
 }
 

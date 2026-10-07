@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 //
-// Three places decide whether a chart's height grows with its category rows: the live mount
-// (computeChartHeight), the small-multiples pane height (figurePaneHeight) and the PNG export
-// (buildExportSvg). They used to write the predicate out separately, and F14 was a drift between
-// two of those copies (the export left horizontal dumbbells out). All three now ask
-// `growsWithRows`; this pins that they agree for every chart type and orientation, omitted included.
+// Two places decide whether a chart's height grows with its category rows: the live mount
+// (computeChartHeight) and the PNG export (buildExportSvg). They used to write the predicate out
+// separately, and F14 was a drift between them (the export left horizontal dumbbells out). Both now
+// ask `growsWithRows`; this pins that they agree for every chart type and orientation, omitted
+// included. (A chart that grows with its rows is never a small-multiples figure: its facets draw as
+// groups, spec/facet-groups.ts.)
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { computeChartHeight } from "../src/engine/render-live";
-import { growsWithRows, figurePaneHeight, horizontalBarChartHeight } from "../src/engine/figure";
+import { growsWithRows, horizontalBarChartHeight } from "../src/engine/figure";
 import { buildExportSvg } from "../src/embed/export-png";
 import { H } from "../src/embed/figure-chrome";
 import type { ChartSpec } from "../src/spec/types";
@@ -80,7 +81,7 @@ const exportChartOf = (root: SVGSVGElement): SVGSVGElement =>
     Number(b.getAttribute("width") ?? 0) > Number(a.getAttribute("width") ?? 0) ? b : a,
   ) as SVGSVGElement;
 
-describe("growsWithRows: live, small-multiples and export agree on which charts grow with their rows", () => {
+describe("growsWithRows: live and export agree on which charts grow with their rows", () => {
   for (const [type, c] of Object.entries(CASES)) {
     for (const orientation of ORIENTATIONS) {
       const key = `${type}|${String(orientation)}`;
@@ -103,9 +104,6 @@ describe("growsWithRows: live, small-multiples and export agree on which charts 
         } else {
           expect(live).toBe(type === "waterfall" ? 460 : 400);
         }
-
-        // Small multiples: no fixed pane height exactly when the pane grows with its rows.
-        expect(figurePaneHeight(spec) === undefined).toBe(grows);
 
         // Export: a row-sized chart is drawn at the live height in a content-sized frame; every
         // other keeps the fixed 750 frame and fills it, at a height the live mount does not use.

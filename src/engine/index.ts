@@ -60,11 +60,9 @@ export interface RenderOptions {
   width?: number;
   height?: number;
   /** `height` was chosen by the engine's own height model, not the host: a live mount or PNG export
-   *  at auto height, or a small-multiples figure's auto pane heights. A sectioned chart's gaps then
-   *  stay the full sectionGapPx; only a host-supplied height too small for the rows shrinks them
-   *  (axes.ts fittedSectionGapPx). A figure's sparser pane is sized to its own rows at the busiest
-   *  pane's pitch, so its rows can be shorter than its gaps — the reason this is a flag on the
-   *  height's origin rather than a test on its size. Absent → a given `height` is the host's. */
+   *  at auto height. A sectioned chart's gaps then stay the full sectionGapPx; only a host-supplied
+   *  height too small for the rows shrinks them (axes.ts fittedSectionGapPx). Absent → a given
+   *  `height` is the host's. */
   heightFromModel?: boolean;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
@@ -106,13 +104,6 @@ export interface RenderOptions {
    *  legend order + colors stay series_order). The live layer passes a reordered list when series
    *  are selected (selected-to-bottom in click order) so a user can read a series against zero. */
   stackOrder?: string[];
-  /** Shared-mode small multiples, horizontal bars, non-leftmost panes: omit the category labels
-   *  (the horizontal analog of hideYAxisLabels, which only affects the vertical value axis).
-   *  Threaded into MarkContext.hideCategoryLabels. Absent → labels emitted. */
-  hideCategoryLabels?: boolean;
-  /** Shared-mode small multiples, horizontal bars: the shared category-gutter width (px) every
-   *  pane should use. Threaded into MarkContext.categoryGutter. Absent → builder computes its own. */
-  categoryGutter?: number;
   /** Shared-mode small multiples (vertical bars): force the categorical x-axis label layout
    *  ("single"/"wrap"/"rotate") instead of deciding it per-pane. The figure computes the worst-case
    *  mode across all panes so every pane's labels look consistent. */
@@ -151,20 +142,6 @@ export interface RenderOptions {
    *  series_order). A pane's own list can undercount it. Read by the stacked builder's net dot
    *  (spec/bar-stack.ts drawsNetDots). Absent (single chart) → the pane's own distinct count. */
   chartSeriesCount?: number;
-  /** Small multiples on a sectioned category axis: whether the FIGURE keys its rows by section +
-   *  category (spec/section-key.ts `labelsRepeatAcrossSections` over every pane's rows), so a pane
-   *  whose own rows repeat no label still names its rows as its siblings do and the coordinated
-   *  cursor can match them. Absent (single chart) → decided from the pane's own rows. */
-  sectionKeyed?: boolean;
-  /** Small multiples on a sectioned category axis: the FIGURE's row order (`sectionRowOrderOver`
-   *  over every drawn pane's rows), so every pane draws its rows in one order and lines up with the
-   *  headers the left pane draws, whichever order its own data reaches the sections in. Absent
-   *  (single chart) → the pane's own order. */
-  sectionRowOrder?: string[];
-  /** Small multiples, `barStack.mono` stack: this pane's rows before `section_order` scoping
-   *  (renderFigure scopes the figure's rows up front), over which the pane ranks its shades. Absent
-   *  (single chart) → the rows passed in. */
-  rowsBeforeSectionScope?: TidyRow[];
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -416,18 +393,18 @@ export function renderPane(
   }
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
-  const data = prepareRows(spec, rows, cols, adapter, facetInfo, opts.sectionKeyed);
+  const data = prepareRows(spec, rows, cols, adapter, facetInfo);
 
   if (!data.length) throw new Error("No data.");
 
   const monoStack = spec.chartType === "stacked" && spec.barStack?.mono?.base != null;
-  const allSections = !opts.paletteSeries || monoStack ? rowsWithEverySection(spec, opts.rowsBeforeSectionScope ?? rows, cols, adapter, facetInfo, data) : undefined;
+  const allSections = !opts.paletteSeries || monoStack ? rowsWithEverySection(spec, rows, cols, adapter, facetInfo, data) : undefined;
   const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, allSections, data);
   const paneOpts = paletteSeries ? { ...opts, paletteSeries } : opts;
   const monoBasis = monoStack && allSections ? scopeToSeries(spec, allSections) : undefined;
   // In the row order the full render sums them (assemblePaneResult sorts its rows the same way): a
   // series' sign is a float sum, so a different order can flip a near-cancelling one and swap shades.
-  if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope, opts.sectionRowOrder);
+  if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope);
   return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
 }
 
@@ -466,7 +443,6 @@ function prepareRows(
   cols: ResolvedColumns,
   adapter: XAdapter,
   facetInfo: FacetInfo | undefined,
-  sectionKeyed?: boolean,
 ): PreparedRow[] {
   // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
   // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
@@ -485,7 +461,7 @@ function prepareRows(
   rows = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] : null);
   const keyOf =
     sectionField && adapter.xField === "_xc"
-      ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "", sectionKeyed)
+      ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "")
       : null;
   return rows
     .map((r) => {
@@ -698,15 +674,14 @@ function scopeToSeries(spec: ChartSpec, data: PreparedRow[]): { seriesNames: str
  *  series_order, x_order does NOT filter). Stable sort preserves within-category row order. No-op
  *  off the categorical axis.
  *
- *  A sectioned axis then takes the row order `sectionedRowOrder` states (`figureOrder` in a small-
- *  multiples pane). The marks group the sorted rows by section in the order they reach each section,
+ *  A sectioned axis then takes the row order `sectionedRowOrder` states. The marks group the sorted rows by section in the order they reach each section,
  *  so the x_order sort alone moved a section whose category x_order lists above one the data reaches
  *  first. The rows are re-sorted only when the band they would draw differs from that order, so a
  *  chart already drawn in it keeps its row order, and its bytes. */
-function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[], figureOrder?: string[]): void {
+function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[]): void {
   const catOrder = categoryOrderFor(spec);
   const sectioned = isSectionedAxis(spec, dataInScope);
-  const target = sectioned && (figureOrder || catOrder?.length) ? (figureOrder ?? sectionedRowOrder(spec, dataInScope, true)) : null;
+  const target = sectioned && catOrder?.length ? sectionedRowOrder(spec, dataInScope, true) : null;
   if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
     const rank = new Map(catOrder.map((c, i) => [c, i] as const));
     const last = catOrder.length;
@@ -754,21 +729,6 @@ function sectionedRowOrder(spec: ChartSpec, rows: readonly PreparedRow[], withCa
   const unlisted = catOrder?.length ?? 0;
   const rankOf = (c: string): number => rank.get(categoryText(c)) ?? unlisted;
   return sections.flatMap((s) => categories.filter((c) => sectionOf.get(c) === s).sort((a, b) => rankOf(a) - rankOf(b)));
-}
-
-/** The row order every pane of a small-multiples figure draws (RenderOptions.sectionRowOrder):
- *  `sectionedRowOrder` over the rows of every DRAWN pane, read through renderPane's own row prep
- *  and series scope, so the keys match the panes' and a figure whose panes already agreed resolves
- *  the order each pane drew. Undefined when the axis is not sectioned. */
-export function sectionRowOrderOver(spec: ChartSpec, rows: TidyRow[], sectionKeyed?: boolean): string[] | undefined {
-  spec = normalizeSpec(spec);
-  const xType = spec.xAxisType;
-  if (!xType) return undefined;
-  const cols = resolveColumns(spec, rows);
-  if (!cols.section) return undefined;
-  const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
-  const { dataInScope } = scopeToSeries(spec, prepareRows(spec, rows, cols, adapter, undefined, sectionKeyed));
-  return isSectionedAxis(spec, dataInScope) ? sectionedRowOrder(spec, dataInScope, true) : undefined;
 }
 
 /** Point charts: the shape domain. Distinct shape values in spec.shape_order (filter + order; a
@@ -823,7 +783,7 @@ function assemblePaneResult(
     colors.set(seriesNames[0]!, opts.accentColor);
   }
 
-  sortByCategoryOrder(spec, dataInScope, opts.sectionRowOrder);
+  sortByCategoryOrder(spec, dataInScope);
 
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
@@ -1230,9 +1190,6 @@ function assemblePaneResult(
     // active option's color (the bar analogue of the single-series line recolor above). The bar
     // mark makes it win over bar_color/default; multi-series charts keep their palette.
     ...(opts.accentColor ? { accentColor: opts.accentColor } : {}),
-    // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
-    ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
-    ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),
     // This pane's facet identity (per-pane small multiples) — for hooks.valueLabel's ctx.facet.
     ...(opts.paneFacetValue != null ? { facet: opts.paneFacetValue } : {}),
     // Programmatic render hooks (spec/hooks.ts) — only `valueLabel` is consumed by mark builders.
