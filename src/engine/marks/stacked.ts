@@ -336,7 +336,6 @@ export function buildStackedMarks(
   // needs the frame geometry). The builder therefore REPORTS the second half out as
   // `segmentLabelsDropped` rather than letting the pill side re-derive it.
   let segmentLabelsDropped = false;
-  let segmentLabelsRefused: Array<{ category: string; series: string }> | undefined;
   if (stackedSegmentLabelsShown(spec, netMode, pane)) {
     // Mono light tiers (the two lightest, 100 & 200 per the Style-Guide) get dark text;
     // everything else white. monoScale returns darkest-first, so the light tiers are the
@@ -363,7 +362,6 @@ export function buildStackedMarks(
     });
     overlay.push(...segLabels.marks);
     segmentLabelsDropped = segLabels.dropped;
-    segmentLabelsRefused = segLabels.refused;
   }
 
   // --- Rect tagging order ---
@@ -429,7 +427,6 @@ export function buildStackedMarks(
       legendVisualOrder,
       netMode,
       segmentLabelsDropped,
-      segmentLabelsRefused,
       ...segmentGapLayer,
       ...(legendExtras ? { legendExtras } : {}),
     };
@@ -453,7 +450,6 @@ export function buildStackedMarks(
     legendVisualOrder,
     netMode,
     segmentLabelsDropped,
-    segmentLabelsRefused,
     ...segmentGapLayer,
     ...(legendExtras ? { legendExtras } : {}),
   };
@@ -489,7 +485,7 @@ function buildSegmentLabels(
     hooks: MarkContext["hooks"];
     facet: string | undefined;
   },
-): { marks: unknown[]; dropped: boolean; refused: Array<{ category: string; series: string }> } {
+): { marks: unknown[]; dropped: boolean } {
   const {
     catField, rank, posSumByCat, normalize,
     horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet,
@@ -522,8 +518,6 @@ function buildSegmentLabels(
   const rows: LabelRow[] = [];
   // Did any segment that HAS a label-worthy value get its label refused below?
   let dropped = false;
-  // ...and which ones: the temporary `pillGranularity: "segment"` A/B mode pills only these.
-  const refused: Array<{ category: string; series: string }> = [];
   for (const cat of categories) {
     const catRows = data.filter(
       (r) =>
@@ -566,7 +560,6 @@ function buildSegmentLabels(
       const segPx = valueAxisPx > 0 ? (segValue / valueSpan) * valueAxisPx : Infinity;
       if (Number.isFinite(segPx) && segPx < SEGMENT_LABEL_MIN_PX) {
         dropped = true;
-        refused.push({ category: cat, series: r.series });
         continue;
       }
       // Light mono tiers (100/200) get dark text; everything else white (§7).
@@ -581,7 +574,7 @@ function buildSegmentLabels(
     }
   }
 
-  if (!rows.length) return { marks: [], dropped, refused };
+  if (!rows.length) return { marks: [], dropped };
   // Text color: white on categorical/dark mono; dark on light mono tiers (per-row).
   const fill = (d: LabelRow) => (d.light ? TBL.color.heading : WHITE);
   const common = {
@@ -598,6 +591,5 @@ function buildSegmentLabels(
         : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
     ],
     dropped,
-    refused,
   };
 }

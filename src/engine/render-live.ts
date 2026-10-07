@@ -205,26 +205,6 @@ export interface MountOptions {
    *  mount's lifetime — a fresh element passed in on every re-render leaves the previous one's
    *  empty `.tbl-tooltip` div behind, since `getSharedTooltip` keys its cache by this reference. */
   tooltipContainer?: HTMLElement;
-  /** TEMPORARY A/B switch — not a spec field, not in CONFIG-SPEC; one mode goes once a designer
-   *  picks. Stacked charts whose `valueLabels` refused some in-bar labels keep their hover value pills
-   *  (spec/bar-stack.ts resolveValuePills). "band" (default, current): the hovered band, and a
-   *  legend-highlighted series, pill EVERY segment, painted labels included. "segment": pill only the
-   *  segments whose label was refused. Applies only to the pill DEFAULT on a standalone chart that
-   *  painted labels — an explicit `chrome.valuePills` and small-multiples panes are unaffected. */
-  pillGranularity?: "band" | "segment";
-}
-
-/** The temporary "segment" pill gate: true only for a segment whose in-bar label was refused.
- *  Undefined (no gate) in "band" mode, when no labels were attempted, or when the author set
- *  `chrome.valuePills` explicitly. */
-function segmentPillFilter(
-  granularity: MountOptions["pillGranularity"],
-  spec: ChartSpec,
-  refused: Array<{ category: string; series: string }> | undefined,
-): ((category: string, series: string) => boolean) | undefined {
-  if (granularity !== "segment" || !refused || spec.chrome?.valuePills !== undefined) return undefined;
-  const keys = new Set(refused.map((s) => JSON.stringify([s.category, s.series])));
-  return (category, series) => keys.has(JSON.stringify([category, series]));
 }
 
 /** Fire `type`'s host callback (if any) then a bubbling CustomEvent of the same name from `card`,
@@ -976,7 +956,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, netMode,
       shapeLegendItems, colorLegendTitle, shapeLegendTitle, overlayTooltips, segmentLabelsDropped,
-      segmentLabelsRefused, symbolScale, shapeIsSeries, pointOrder,
+      symbolScale, shapeIsSeries, pointOrder,
     } = built;
     // Legend-highlight value pills: attached after the crosshair below, but the legend's
     // onHighlight closure (set when the legend is created) calls through this holder, so the
@@ -1001,9 +981,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // no tooltip behind them). It rides on `built`, i.e. THIS draw's geometry: a resize that shrinks
     // the frame past the fit threshold re-decides it, because draw() re-runs this whole block.
     const chromePills = resolveValuePills(spec, netMode, false, segmentLabelsDropped ?? false);
-    // Temporary A/B gate (MountOptions.pillGranularity). `segmentLabelsRefused` is defined only when
-    // the builder attempted labels, so "segment" leaves label-less charts alone.
-    const pillFilter = segmentPillFilter(opts.pillGranularity, spec, segmentLabelsRefused);
     const onHighlight = (active: Set<string>): void => {
       recolorNetLabels(svg);
       pillDriver?.setActive(active);
@@ -1376,7 +1353,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           yFormat: bandYFormat,
           horizontal: horizontalBar,
           hasNetDots: hasNetDots(netMode),
-          ...(pillFilter ? { pillFilter } : {}),
         });
       }
       if (!useTooltip) {
@@ -1391,7 +1367,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           yFormat: bandYFormat,
           horizontal: horizontalBar,
           showPills: chromePills,
-          ...(pillFilter ? { pillFilter } : {}),
           // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
           // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
           // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.

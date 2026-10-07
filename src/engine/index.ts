@@ -272,8 +272,6 @@ export interface RenderResult {
    *  at least one segment was too thin for its in-bar number. render-live feeds it to
    *  resolveValuePills so the pill default cannot leave those segments with no number at all. */
   segmentLabelsDropped?: boolean;
-  /** Stacked charts only. Mirrors MarkLayers.segmentLabelsRefused — which segments those were. */
-  segmentLabelsRefused?: Array<{ category: string; series: string }>;
   /** Timeline only: the orientation actually rendered. */
   timelineOrientation?: "horizontal" | "vertical";
   /** Treemap only: per-tile hover payload, in DOM order of `rect.tbl-treemap-tile`. */
@@ -1491,7 +1489,6 @@ export function renderChart(
     legendVisualOrder: layers.legendVisualOrder,
     netMode: layers.netMode,
     segmentLabelsDropped: layers.segmentLabelsDropped,
-    segmentLabelsRefused: layers.segmentLabelsRefused,
   };
 }
 
