@@ -1313,6 +1313,11 @@ no callback wired through JavaScript at mount time.
 | Render | `onRender` | Once per mount, once per width-driven resize, once per title-selector reselect, and once per area-chart click-to-restack. `ctx.phase` is `"mount" \| "resize" \| "reselect" \| "restack"`. A small-multiples figure fires once **per pane**. | **The `"mount"` phase is asynchronous** — it fires one microtask after `mountChart()` returns, so a consumer's `onRender` cannot itself throw back into `mountChart()`'s caller. `"resize"`/`"reselect"`/`"restack"` fire synchronously, inside the redraw that caused them. A mount torn down before that microtask runs never fires it at all. `ctx.svg` is always the svg **on screen** when the callback runs: a re-render that lands inside that microtask gap (a title-selector change made immediately after `mountChart()` returns) fires `"reselect"` first, and the `"mount"` call that follows reports the new svg rather than the superseded one. |
 | Legend select | `onLegendSelect` | Any chart with a legend. Reports the full active/dimmed series set. | Fires on a pin (click), **and also on hover, focus, blur, and the reset button** — issue #30's own gloss for this is "pin/**dim**", so hover-firing is intended, not a bug. A consumer that only cares about pins should debounce or de-duplicate. |
 
+**`onHover`'s payload** is `{ category, series, values }`, plus `facet` in a small-multiples pane
+and `section` on a chart with `columns.section`: the hovered row's section, which tells apart two
+rows that share a category across sections. `category` and `section` are the raw data values, not
+their `x_labels` / `section_labels` display names. A chart without sections has no `section` field.
+
 **All three CustomEvents dispatch unconditionally, whether or not a host callback was passed to
 `mountChart`.** A published figure has no host callback to gate on, so this is what lets a page
 observe it at all — but it is also a real behavioural change on every categorical-chart hover for

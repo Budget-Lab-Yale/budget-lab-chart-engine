@@ -1283,7 +1283,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
       }
       const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
-      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
       const horizontalBar = spec.orientation === "horizontal";
       // Waterfall: the hover delta uses the SAME precision as the always-on running-total labels
       // (valueLabels.decimals, else the min the data needs) so the two never disagree.
@@ -2290,7 +2290,7 @@ function wireFigureSvg(
     attachBandCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
-      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
       isStacked,
       totalRow,
       totalPosition: ctx.spec.barStack?.total?.position,

@@ -47,6 +47,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   + category. A sectioned chart without a repeated label renders byte-identically. A
   small-multiples figure decides for all its panes at once, so every pane names a repeated label's
   rows the same way and the coordinated cursor matches them across panes.
+- The `onHover` payload (and the `tbl-hover` event's `detail`) carries `section` on a chart with
+  `columns.section`: the hovered row's raw section value, so a host can tell apart two rows that
+  share a category across sections. Absent on a chart without sections.
 
 ### Changed
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error

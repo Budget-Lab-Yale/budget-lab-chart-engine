@@ -852,12 +852,15 @@ export interface BandHoverCtx {
   series: string[];
   values: Record<string, number>;
   facet?: string;
+  /** The hovered row's raw `columns.section` value, as `category` is the raw category: two rows
+   *  can share a category across sections, and this says which one. Absent without sections. */
+  section?: string;
 }
 
 export interface BandCrosshairOptions {
   /** All rows in scope (dataInScope from renderChart). Each must have `_xc` (the category
-   *  key), `series`, and `_y`. */
-  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+   *  key), `series`, and `_y`; `_section` on a sectioned chart, for onHover's `section`. */
+  rows: Array<{ _xc?: string; series: string; _y: number | null; _section?: string }>;
   /** True for stacked charts — enables the Total row logic in the tooltip. */
   isStacked?: boolean;
   /** The tooltip's Total row style for stacked charts — see spec/bar-stack.ts's `TotalRow`.
@@ -1589,7 +1592,15 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     // false` still report what the engine resolved even though neither draws its own card.
     if (opts.onHover) {
       const { series, values } = resolveCategorySeriesValues(category, opts.rows, opts.seriesOrder);
-      opts.onHover({ category: categoryText(category), series, values, ...(opts.facet != null ? { facet: opts.facet } : {}) });
+      // A category's section is its first row's, as the band groups it (marks/category-band.ts).
+      const section = opts.rows.find((r) => r._xc === category && r._section != null)?._section;
+      opts.onHover({
+        category: categoryText(category),
+        series,
+        values,
+        ...(opts.facet != null ? { facet: opts.facet } : {}),
+        ...(section != null ? { section } : {}),
+      });
     }
     if (emitOnly) return;
 
