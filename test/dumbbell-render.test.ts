@@ -467,6 +467,34 @@ describe("golden SVG — dumbbell", () => {
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/dumbbell-vertical.golden.svg");
   });
 
+  // Sectioned, NO label repeated across sections — the shape of the published PR #67 figure
+  // (effective-tax-rates-top-groups). Recorded before repeated-label identity (section + category)
+  // existed, so it pins that a sectioned chart whose labels are all distinct renders unchanged.
+  it("horizontal sections (no repeated label) is byte-stable", async () => {
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      columns: { category: "group", series: "income_measure", value: "effective_rate", section: "ranking" },
+      series_order: ["Cash income", "Accrual income"],
+      series_marker: undefined,
+      yAxisPolicy: { min: 0 },
+    };
+    const raw: Array<[string, string, string, string]> = [
+      ["Ranked by income", "Top 1% by income", "25.8", "17.3"],
+      ["Ranked by income", "Top 0.1% by income", "28.7", "21.1"],
+      ["Ranked by income", "Top 0.01% by income", "29.4", "23.2"],
+      ["Ranked by net worth", "Top 1% by net worth", "27.3", "13.2"],
+      ["Ranked by net worth", "Top 0.1% by net worth", "28.6", "12.4"],
+      ["Ranked by net worth", "Top 0.01% by net worth", "30.1", "8.6"],
+      ["Ranked by net worth", "Net worth of $1 billion or more", "30.6", "8.0"],
+    ];
+    const rows = raw.flatMap(([ranking, group, cash, accrual]) => [
+      { ranking, group, income_measure: "Cash income", effective_rate: cash },
+      { ranking, group, income_measure: "Accrual income", effective_rate: accrual },
+    ]) as TidyRow[];
+    const { svg } = renderChart(spec, rows, { width: 720, height: computeChartHeight(spec, rows), document });
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/dumbbell-sectioned.golden.svg");
+  });
+
   it("is deterministic (byte-identical across renders)", () => {
     const a = renderChart(GAP_SPEC, ROWS, { ...opts, document }).svg.outerHTML;
     const b = renderChart(GAP_SPEC, ROWS, { ...opts, document }).svg.outerHTML;
