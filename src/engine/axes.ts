@@ -488,6 +488,32 @@ export function horizontalLeftGutter(
   return Math.round(Math.max(min, Math.min(max, longest + pad)));
 }
 
+const HVALUE_TICK_PX = 18; // one value-tick row (top)
+/** Gap between a section header and its section's first bar (spacer-header lift). */
+export const SECTION_HEADER_GAP = 10;
+const HMARGIN_BOTTOM_TICKS = 26;
+const HMARGIN_BOTTOM_BARE = 8;
+
+/** Top/bottom margins for a horizontal bar-family chart (bar, stacked). The category axis is on the
+ *  LEFT, so the bottom only fits the value-tick row — never the vertical chart's category-label
+ *  margin, which is sized for rotated labels and leaves an empty band under the axis. The top fits
+ *  the optional top tick row and, when sectioned, the first section header: `topHeaderLift` (set
+ *  only when a first-section header is drawn) floors the margin so that header is never clipped. */
+export function horizontalValueAxisMargins(
+  xAxisTicks: "bottom" | "top" | "both" | undefined,
+  { sectioned = false, topHeaderLift }: { sectioned?: boolean; topHeaderLift?: number } = {},
+): { marginTop: number; marginBottom: number } {
+  const mode = xAxisTicks ?? "bottom";
+  const topTicks = mode === "top" || mode === "both";
+  return {
+    marginTop: Math.max(
+      (topTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8),
+      topHeaderLift != null ? topHeaderLift + SECTION_HEADER_GAP : 0,
+    ),
+    marginBottom: mode !== "top" ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE,
+  };
+}
+
 /** Category-label font size (px) for FACETED horizontal bars. Larger than the single-chart axis
  *  size so the labels read at the same prominence they would in a standalone chart (the faceted
  *  figure is much taller, which makes the default 10.5px look small). */

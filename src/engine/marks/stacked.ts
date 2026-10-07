@@ -21,7 +21,13 @@ import { Plot } from "../vendor";
 import { markerInk } from "../marker-ink";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
-import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
+import {
+  tblBandYAxis,
+  horizontalLeftGutter,
+  horizontalValueAxisMargins,
+  FACETED_CAT_LABEL_PX,
+  CAT_LABEL_CLASS,
+} from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
@@ -423,6 +429,8 @@ export function buildStackedMarks(
       yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
       xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
+      // The value axis is at the bottom: a horizontal bar's margins, not the vertical category margin.
+      ...horizontalValueAxisMargins(spec.x_axis_ticks),
       seriesColors,
       legendVisualOrder,
       netMode,

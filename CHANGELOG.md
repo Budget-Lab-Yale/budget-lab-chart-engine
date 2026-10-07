@@ -196,6 +196,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   (`1e-320`) made `renderChart` and the PNG export throw, and a negative one rounded short of the
   value it was widening to. Validation rejects 0 and below, and a multiple of `step` that is not
   finite or falls short now moves `max` to the value itself.
+- A horizontal stacked bar took its bottom margin from the vertical chart's category-label rule,
+  which is sized for 45-degree labels under the plot (up to 120px), so long category names left
+  about 100px of empty canvas under the value axis. It now takes a horizontal bar's margins: 26px
+  under the value-tick row (8px with `x_axis_ticks: top`) and room for top ticks when
+  `x_axis_ticks` is `top` or `both`. Live and in the PNG.
 
 ### Docs
 - CONFIG-SPEC `annotations.xAxis`: the vertical rule on the value axis is drawn on horizontal
@@ -327,6 +332,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - **`yAxisPolicy.autoWiden.step` of 0 or below now fails `tbl-chart validate`.** **No published
   figure is affected**: no spec on `main`, on the `pr67-spec-fixes` branch or in its working tree
   sets `autoWiden`. No golden moves.
+- **A horizontal stacked bar's value axis sits 26px from the bottom of the chart** (live and PNG),
+  and with `x_axis_ticks: top` or `both` its top margin grows by 18px for the tick row, as a
+  horizontal bar's does. **No published figure is affected**: the archive's two stacked figures,
+  ai-fiscal's `revenue-by-income-type` and `revenue-by-instrument`, are vertical. The two horizontal
+  stacks on the unpublished `pr67-spec-fixes` branch, `revenue-by-tax-deemed-realization` and
+  `revenue-by-tax-step-up`, go from a 120px to a 26px bottom margin and their bars take the freed
+  height; neither sets `x_axis_ticks`. **Two goldens were re-recorded**, with Sylva's approval:
+  `stacked-horizontal` and `figure-hstacked-shared` (short labels, so 22px became 26px and the plot
+  is 4px shorter).
 
 ## [1.15.0] - 2026-10-01
 
