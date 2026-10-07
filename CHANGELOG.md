@@ -75,6 +75,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   netting below zero read as a gain. It now keeps the minus as the hover card and the waterfall labels
   write it (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.
   Positive nets and the (unsigned) segment labels are unchanged.
+- On a sectioned category axis (`columns.section`), `x_order` / `category_order` could move a whole
+  section: listing a category of a later section drew that section first. They now order categories
+  within each section only; sections follow `section_order`, else the order the data first reaches
+  them. Live and in the PNG export, on horizontal bars, stacks and dumbbells.
+- Faceted sectioned horizontal bars and stacks: a pane whose data reached the sections in another
+  order than the left pane drew its rows in its own order, so its values sat beside the wrong section
+  header (`shared` and `per-pane`, live and in the PNG export). Every pane now draws one figure-wide
+  row order.
 - `section_order` left a section out of the drawing but not out of the chart: its rows still fed the
   value axis, the height, a stack's net marker (a hidden negative gave a visible all-positive stack a
   net dot) and a stack's legend placement. They are now dropped before anything reads them, live,
@@ -273,6 +281,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   and legend placement read them. **No published figure is affected**: the archive's two
   `section_order` specs (the tariff model update's `eta-effect` and `etas`) list every section their
   data carries.
+- **Sections: `x_order` / `category_order` no longer move a section, and faceted panes share one row
+  order.** Rows are re-sorted only when the order they would draw in differs, so a chart already
+  drawn in this order keeps its output byte for byte. **No published figure is affected**: the
+  archive's sectioned specs (`eta-effect`, `etas`, and `effective-tax-rates-top-groups` on the PR #67
+  branch) set neither field and none is faceted.
 - **Sections: a label repeated across sections draws one row per section**, and two rows for the
   same section + category + series are a validation error. **No published figure is affected**: the
   archive's sectioned specs — the tariff model update's `eta-effect` and `etas` (horizontal bar),

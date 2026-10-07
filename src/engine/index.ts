@@ -149,6 +149,11 @@ export interface RenderOptions {
    *  whose own rows repeat no label still names its rows as its siblings do and the coordinated
    *  cursor can match them. Absent (single chart) → decided from the pane's own rows. */
   sectionKeyed?: boolean;
+  /** Small multiples on a sectioned category axis: the FIGURE's row order (`sectionRowOrderOver`
+   *  over every drawn pane's rows), so every pane draws its rows in one order and lines up with the
+   *  headers the left pane draws, whichever order its own data reaches the sections in. Absent
+   *  (single chart) → the pane's own order. */
+  sectionRowOrder?: string[];
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -645,9 +650,17 @@ function scopeToSeries(spec: ChartSpec, data: PreparedRow[]): { seriesNames: str
  *  dataInScope's row order, so a single stable sort fixes the order everywhere. Listed categories
  *  first in x_order; unlisted ones keep their encounter order after (order-only — unlike
  *  series_order, x_order does NOT filter). Stable sort preserves within-category row order. No-op
- *  off the categorical axis. */
-function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[]): void {
+ *  off the categorical axis.
+ *
+ *  A sectioned axis then takes the row order `sectionedRowOrder` states (`figureOrder` in a small-
+ *  multiples pane). The marks group the sorted rows by section in the order they reach each section,
+ *  so the x_order sort alone moved a section whose category x_order lists above one the data reaches
+ *  first. The rows are re-sorted only when the band they would draw differs from that order, so a
+ *  chart already drawn in it keeps its row order, and its bytes. */
+function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[], figureOrder?: string[]): void {
   const catOrder = categoryOrderFor(spec);
+  const sectioned = isSectionedAxis(spec, dataInScope);
+  const target = sectioned && (figureOrder || catOrder?.length) ? (figureOrder ?? sectionedRowOrder(spec, dataInScope, true)) : null;
   if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
     const rank = new Map(catOrder.map((c, i) => [c, i] as const));
     const last = catOrder.length;
@@ -655,6 +668,58 @@ function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[]): void 
     const rankOf = (r: PreparedRow): number => rank.get(categoryText(r._xc ?? "")) ?? last;
     dataInScope.sort((a, b) => rankOf(a) - rankOf(b));
   }
+  if (!target) return;
+  const drawn = sectionedRowOrder(spec, dataInScope, false);
+  const present = new Set(drawn);
+  const want = target.filter((c) => present.has(c));
+  if (want.length === drawn.length && want.every((c, i) => c === drawn[i])) return;
+  const rank = new Map(want.map((c, i) => [c, i] as const));
+  const rankOf = (r: PreparedRow): number => rank.get(r._xc ?? "") ?? want.length;
+  dataInScope.sort((a, b) => rankOf(a) - rankOf(b));
+}
+
+/** Whether these rows draw a sectioned category axis: a horizontal bar, stack or dumbbell (the
+ *  charts whose marks group rows into sections — marks/category-band.ts, marks/dumbbell.ts) with a
+ *  section on some row. */
+function isSectionedAxis(spec: ChartSpec, rows: readonly PreparedRow[]): boolean {
+  return spec.xAxisType === "categorical" && valueAxisIsX(spec) && rows.some((r) => r._section != null);
+}
+
+/** The row order of a sectioned category axis, as category keys (`_xc`): sections in
+ *  `section_order`, else in the order `rows` first reach them; within a section, x_order /
+ *  category_order (when `withCategoryOrder`), then the order `rows` reach its categories. A
+ *  category belongs to the section of its first row, as in the marks. Without `withCategoryOrder`
+ *  this is the order the marks draw `rows` in as they stand. */
+function sectionedRowOrder(spec: ChartSpec, rows: readonly PreparedRow[], withCategoryOrder: boolean): string[] {
+  const sectionOf = new Map<string, string>();
+  const categories: string[] = [];
+  for (const r of rows) {
+    const cat = r._xc;
+    if (!cat || sectionOf.has(cat)) continue;
+    sectionOf.set(cat, r._section ?? "");
+    categories.push(cat);
+  }
+  const encountered = [...new Set(categories.map((c) => sectionOf.get(c) as string))];
+  const sections = spec.section_order?.length ? spec.section_order.filter((s) => encountered.includes(s)) : encountered;
+  const catOrder = withCategoryOrder ? categoryOrderFor(spec) : undefined;
+  const rank = new Map((catOrder ?? []).map((c, i) => [c, i] as const));
+  const rankOf = (c: string): number => rank.get(categoryText(c)) ?? rank.size;
+  return sections.flatMap((s) => categories.filter((c) => sectionOf.get(c) === s).sort((a, b) => rankOf(a) - rankOf(b)));
+}
+
+/** The row order every pane of a small-multiples figure draws (RenderOptions.sectionRowOrder):
+ *  `sectionedRowOrder` over the rows of every DRAWN pane, read through renderPane's own row prep
+ *  and series scope, so the keys match the panes' and a figure whose panes already agreed resolves
+ *  the order each pane drew. Undefined when the axis is not sectioned. */
+export function sectionRowOrderOver(spec: ChartSpec, rows: TidyRow[], sectionKeyed?: boolean): string[] | undefined {
+  spec = withoutRepeatedOrderEntries(spec);
+  const xType = spec.xAxisType;
+  if (!xType) return undefined;
+  const cols = resolveColumns(spec, rows);
+  if (!cols.section) return undefined;
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
+  const { dataInScope } = scopeToSeries(spec, prepareRows(spec, rows, cols, adapter, undefined, sectionKeyed));
+  return isSectionedAxis(spec, dataInScope) ? sectionedRowOrder(spec, dataInScope, true) : undefined;
 }
 
 /** Point charts: the shape domain. Distinct shape values in spec.shape_order (filter + order; a
@@ -708,7 +773,7 @@ function assemblePaneResult(
     colors.set(seriesNames[0]!, opts.accentColor);
   }
 
-  sortByCategoryOrder(spec, dataInScope);
+  sortByCategoryOrder(spec, dataInScope, opts.sectionRowOrder);
 
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a

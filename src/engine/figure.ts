@@ -18,7 +18,7 @@ import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbe
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
+import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent, sectionRowOrderOver } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, withoutRepeatedOrderEntries } from "./util";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
@@ -652,6 +652,12 @@ export function renderFigure(
     return buildShapeLegendItems(spec, { ...layers, shapeNames: figureShapes.filter((s) => drawn.has(s)) }, figureShapes);
   };
   const paneShapes: Array<string[] | undefined> = [];
+  // A sectioned category axis: ONE row order for every pane, over the drawn panes' rows. Each pane
+  // ordering its own rows put a pane that reaches the sections in another order out of line with
+  // the headers the left pane draws (index.ts sortByCategoryOrder).
+  const sectionRowOrder = cols.section
+    ? sectionRowOrderOver(spec, rows.filter((r) => drawnPanes.has(r[facetField] as string)), sectionKeyed)
+    : undefined;
 
   // Per-pane heights: every facet sized by the SAME shared per-slot height (effSlotPx/chromeExtra,
   // computed above from the BUSIEST facet with the floor applied only there), scaled by ITS OWN
@@ -811,6 +817,7 @@ export function renderFigure(
           ...(figureShapes ? { paletteShapes: figureShapes } : {}),
           chartSeriesCount,
           ...(sectionKeyed != null ? { sectionKeyed } : {}),
+          ...(sectionRowOrder ? { sectionRowOrder } : {}),
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
@@ -939,6 +946,7 @@ export function renderFigure(
         paneFacetValue: value,
         ...(binThresholds ? { binThresholds } : {}),
         ...(sectionKeyed != null ? { sectionKeyed } : {}),
+        ...(sectionRowOrder ? { sectionRowOrder } : {}),
       },
       "probe",
     ),
@@ -1001,6 +1009,7 @@ export function renderFigure(
         ...(figureShapes ? { paletteShapes: figureShapes } : {}),
         chartSeriesCount,
         ...(sectionKeyed != null ? { sectionKeyed } : {}),
+        ...(sectionRowOrder ? { sectionRowOrder } : {}),
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
         width: colWidths[col],
