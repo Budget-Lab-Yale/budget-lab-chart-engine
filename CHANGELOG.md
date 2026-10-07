@@ -32,6 +32,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly unlabelled tiles at the
   export width, or more than seven groups without `series_colors`. The `treemap:` block is rejected
   on every other chart type, so no existing spec changes. See CONFIG-SPEC "Treemap options".
+- `columns.section` on a horizontal `stacked` chart: the categories are grouped into sections
+  with bold headers in the left gutter, as on a horizontal bar. Each category is still one stack;
+  its net text or net dot and its segment labels sit on its own row. Hover, legend pin/dim,
+  `x_axis_ticks`, small multiples (`shared` and `per-pane`) and the PNG export follow the sectioned
+  rows. Validation still rejects `columns.section` on a vertical stack. See CONFIG-SPEC "Section
+  axis".
 
 ### Changed
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error
@@ -341,6 +347,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   height; neither sets `x_axis_ticks`. **Two goldens were re-recorded**, with Sylva's approval:
   `stacked-horizontal` and `figure-hstacked-shared` (short labels, so 22px became 26px and the plot
   is 4px shorter).
+- **`columns.section` is now accepted on a horizontal stacked chart** (it was a validation error).
+  **No published figure is affected**: no stacked spec on `main` (ai-fiscal's two, both vertical),
+  on the `pr67-spec-fixes` branch or in its working tree sets `columns.section`. The sectioned-bar
+  layout code moved into a module the stack shares; every bar golden is byte-identical. New goldens
+  only: `stacked-sectioned`, `stacked-sectioned-net-dot`, `stacked-sectioned-net-text`,
+  `figure-hstacked-sectioned`. No existing golden moves.
 
 ## [1.15.0] - 2026-10-01
 

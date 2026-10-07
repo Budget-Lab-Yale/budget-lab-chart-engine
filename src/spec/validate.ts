@@ -266,22 +266,24 @@ function titleSelectorsError(spec: {
 }
 
 
-/** `columns.section` (section-header horizontal-bar grouping) only has an effect on a horizontal
- *  `bar` chart (see bar.ts's `sectioned` gate) — it silently no-ops on every other chartType/
- *  orientation combination, which looks like a config bug (the field appears to do nothing) but
- *  is actually just dead configuration. Reject it early with a pointed message instead. */
+/** `columns.section` groups the category rows of a one-row-per-category HORIZONTAL chart under
+ *  section headers: a horizontal `bar` or `stacked` chart (see marks/category-band.ts) or a
+ *  horizontal `dumbbell` (marks/dumbbell.ts). Every other chartType/orientation has no row band to
+ *  section — a vertical chart's categories run along the bottom — so the field would silently do
+ *  nothing; reject it with a pointed message instead. */
 function sectionColumnError(spec: {
   chartType?: unknown;
   orientation?: unknown;
   columns?: { section?: unknown };
 }): string | null {
   if (spec.columns?.section == null) return null;
-  // A dumbbell is horizontal unless it says vertical; a bar must say horizontal.
+  // A dumbbell is horizontal unless it says vertical; a bar or stack must say horizontal.
   const sectionable =
-    (spec.chartType === "bar" && spec.orientation === "horizontal") || isHorizontalDumbbell(spec);
+    ((spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal") ||
+    isHorizontalDumbbell(spec);
   if (!sectionable) {
     return (
-      `columns.section requires a horizontal "bar" or "dumbbell" chart ` +
+      `columns.section requires a horizontal "bar", "stacked" or "dumbbell" chart ` +
       `(got chartType ${JSON.stringify(spec.chartType)}, orientation ${JSON.stringify(spec.orientation)})`
     );
   }

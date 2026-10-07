@@ -443,7 +443,7 @@ export const CHART_SPEC_SCHEMA = {
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
 
-    // Section axis (horizontal bars; the section COLUMN is mapped via columns.section).
+    // Section axis (horizontal bar/stacked/dumbbell; the section COLUMN is mapped via columns.section).
     section_order: { type: "array", items: { type: "string" } },
     section_labels: { type: "object", additionalProperties: { type: "string" } },
     x_order: { type: "array", items: { type: "string" } },

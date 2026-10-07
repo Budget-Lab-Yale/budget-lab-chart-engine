@@ -751,14 +751,15 @@ function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
 
 // Bar charts facet their category band whenever bar.ts puts it on fx (vertical grouped) or fy
 // (horizontal grouped, OR horizontal sectioned — any series count, since Task 16 unified single-
-// and multi-series sectioned bars onto one fy topology; see bar.ts). The category-band crosshair
+// and multi-series sectioned bars onto one fy topology; see bar.ts). A stack facets only when
+// sectioned (stacked.ts: one bar per fy row; never grouped). The category-band crosshair
 // (attachBandCrosshair) reads rect geometry differently in each case: faceted charts wrap each
 // category in its own translated `<g>` (readCategoryBands/H's `isFaceted` branch); unfaceted charts
 // read raw rect x/y directly. Passing the wrong branch reads a facet-LOCAL coordinate as if it were
 // absolute, misresolving every hover past the first facet.
 function isBarCategoryFaceted(spec: ChartSpec, rows: PreparedRow[], seriesCount: number): boolean {
-  if (spec.chartType !== "bar") return false;
-  if (seriesCount > 1) return true;
+  if (spec.chartType !== "bar" && spec.chartType !== "stacked") return false;
+  if (spec.chartType === "bar" && seriesCount > 1) return true;
   return spec.orientation === "horizontal" && rows.some((r) => r._section != null);
 }
 

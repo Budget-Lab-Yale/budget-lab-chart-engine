@@ -21,24 +21,15 @@ import { ownValue } from "../../spec/own-key";
 import {
   tblBandXAxis,
   tblBandYAxis,
-  tblFacetGroupYAxis,
-  tblSectionTopHeader,
-  sectionSpacerSlot,
-  SECTION_SPACER_SLOTS,
-  isSectionSpacer,
   horizontalLeftGutter,
   horizontalValueAxisMargins,
-  SECTION_HEADER_GAP,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
+import { categoryBand, fyCategoryBandLayer as composeFyCategoryBand, HBAND_PADDING_OUTER } from "./category-band";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
-
-// Outer padding fraction for the horizontal category band, with `align: 0` so the (small) outer
-// pad goes to the BOTTOM only — the first bar then sits flush at marginTop (no empty band above it).
-const HBAND_PADDING_OUTER = 0.02;
 
 // Below this, bars are so dense the chart is out of spec for grouped bars; warn (no throw).
 const TOO_DENSE_PX = 10;
@@ -92,60 +83,17 @@ export function buildBarMarks(
     }
   }
 
-  // Sectioned horizontal category axis (columns.section): order the categories grouped by section.
-  // Sections AFTER the first get a block of empty spacer band slots above them (SECTION_SPACER_SLOTS
-  // each) reserving symmetric whitespace for a bold header; the FIRST section has no spacer (its
-  // header sits in the top margin) so the figure doesn't open with a big empty gap. Only for
-  // horizontal; vertical / unsectioned output is unchanged.
-  const sectioned = horizontal && data.some((r) => r._section != null);
-  let bandDomain = categories;
-  const sectionHeaders: { category: string; label: string }[] = [];
-  let topSectionHeader: { category: string; label: string } | null = null;
-  if (sectioned) {
-    // category → its section (first row wins; categories belong to one section).
-    const sectionOf = new Map<string, string>();
-    for (const r of data) {
-      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
-      if (cat && r._section != null && !sectionOf.has(cat)) sectionOf.set(cat, r._section);
-    }
-    // Section order: spec.section_order (filter + order) else section-encounter order.
-    const encountered: string[] = [];
-    const seenSec = new Set<string>();
-    for (const cat of categories) {
-      const s = sectionOf.get(cat) ?? "";
-      if (!seenSec.has(s)) {
-        seenSec.add(s);
-        encountered.push(s);
-      }
-    }
-    const order =
-      spec.section_order && spec.section_order.length
-        ? spec.section_order.filter((s) => seenSec.has(s))
-        : encountered;
-    const labelOf = (s: string): string => ownValue(spec.section_labels, s) ?? s;
-    const domain: string[] = [];
-    let firstRendered = false;
-    for (const s of order) {
-      const catsInSection = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
-      if (!catsInSection.length) continue;
-      if (!firstRendered) {
-        topSectionHeader = { category: catsInSection[0] as string, label: labelOf(s) };
-        firstRendered = true;
-      } else {
-        for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
-        sectionHeaders.push({ category: catsInSection[0] as string, label: labelOf(s) });
-      }
-      for (const cat of catsInSection) domain.push(cat);
-    }
-    bandDomain = domain;
-  }
+  // Sectioned horizontal category axis (columns.section): categories grouped by section, with
+  // spacer slots for the headers (see category-band.ts). Vertical / unsectioned: the plain band.
+  const band = categoryBand(data, catField, categories, spec, horizontal);
+  const { sectioned, bandDomain } = band;
 
   // Render-order category list for the hover-accent label hook (data-category tagging, below):
   // for the fy topology (sectioned and/or multi-series horizontal), Plot iterates the fy facet
   // DOMAIN — bandDomain, section-grouped — when placing this mark's <text> children in the DOM,
   // NOT the (encounter-order) `categories` array passed to Plot.text; the tagging pass reads DOM
   // order, so it must match. Equals `categories` when unsectioned (bandDomain has no spacers then).
-  const catLabelOrder = bandDomain.filter((c) => !isSectionSpacer(c));
+  const catLabelOrder = band.drawnOrder;
   // Tagging entry for the hover-accent hook: stamps data-category on each rendered category label
   // (in render order, see catLabelOrder above) so the live layer can find + accent the hovered
   // one without matching on textContent. Empty when labels are suppressed (hideCategoryLabels —
@@ -154,17 +102,9 @@ export function buildBarMarks(
     ? []
     : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: catLabelOrder }];
 
-  // First section header: faceted on its first category (facet top = first bar, align:0), lifted so
-  // its baseline lands the SAME ~15px above the bar as the spacer-based headers. The top-anchored
-  // baseline sits ~one font-size below the facet top, and the bottom-anchored spacers sit ~5px
-  // higher, so add that to match. Computed before hMarginTop so the margin can floor on it.
-  const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
-  // Every section header sits SECTION_HEADER_GAP px above its section's first bar (uniform); the
-  // shared margin helper floors the top margin on the first header's lift so it is never clipped.
-  const { marginTop: hMarginTop, marginBottom: hMarginBottom } = horizontalValueAxisMargins(spec.x_axis_ticks, {
-    sectioned,
-    ...(topSectionHeader ? { topHeaderLift } : {}),
-  });
+  // Horizontal value-axis margins for the unsectioned single-series path (the fy paths take theirs
+  // from fyCategoryBandLayer, which adds the section-header floor).
+  const { marginTop: hMarginTop, marginBottom: hMarginBottom } = horizontalValueAxisMargins(spec.x_axis_ticks);
 
   // Highlight/dim: literal fill accessor (not the color scale) so non-highlighted series
   // collapse to annotationDim regardless of their palette slot. Used sparingly per spec.
@@ -197,31 +137,14 @@ export function buildBarMarks(
 
   // --- Shared fy-topology layer pieces (horizontal charts whose CATEGORY band lives on `fy`
   // row facets: multi-series grouped — sectioned or not — AND single-series sectioned). One
-  // composition point for the fy category-band scale and the left-gutter axis marks (fy-bound
-  // category labels + section headers), so the single- and multi-series paths can never drift
-  // apart again — a fix landing on one path while its sibling kept a hand-copied variant is
-  // exactly the shape that produced the original phantom-facet defect (D1). `gutter` is the
-  // caller's resolved left-gutter width (shared/figure-supplied or computed). For unsectioned
-  // multi-series charts `sectionHeaders` is empty and `topSectionHeader` null, so the header
-  // marks contribute nothing — identical to composing the group labels alone.
+  // composition point (category-band.ts, shared with sectioned stacks) for the fy category-band
+  // scale and the left-gutter axis marks, so the paths can never drift apart again — a fix landing
+  // on one path while its sibling kept a hand-copied variant is exactly the shape that produced
+  // the original phantom-facet defect (D1). `gutter` is the caller's resolved left-gutter width.
   const fyCategoryBandLayer = (
     gutter: number,
-  ): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom"> => ({
-    // Category band on `fy` (declaration order; never auto-sort — Style-Guide §9), inter-band
-    // padding, align:0 (outer pad to the bottom only), no axis (categories labeled via the
-    // fy-bound marks below).
-    fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
-    xAxisMarks: ctx.hideCategoryLabels
-      ? []
-      : [
-          ...tblFacetGroupYAxis(categories, gutter, catFont),
-          ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
-          ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
-        ],
-    marginLeft: gutter,
-    marginTop: hMarginTop,
-    marginBottom: hMarginBottom,
-  });
+  ): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom"> =>
+    composeFyCategoryBand(band, { gutter, catFont, hideLabels: ctx.hideCategoryLabels === true, xAxisTicks: spec.x_axis_ticks });
 
   const overlay: unknown[] = [];
 

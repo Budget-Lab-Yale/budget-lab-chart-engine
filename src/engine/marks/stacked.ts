@@ -7,7 +7,9 @@
 //
 // Unlike grouped bars (bar.ts), stacked bars use a SINGLE band x-scale with Plot's
 // automatic stacking (one bar per category, segmented by series) — NO `fx` faceting — so
-// the A6.5 facet chrome does not apply. The generic chrome (gridlines, y-labels, zero
+// the A6.5 facet chrome does not apply. The exception is a SECTIONED horizontal stack
+// (`columns.section`), which puts its category rows on `fy` like a sectioned bar (see
+// category-band.ts and `rowChannels` below). The generic chrome (gridlines, y-labels, zero
 // baseline, category x-labels) is added by assemblePlot; the adapter already labels the
 // categories on `x`, so this builder leaves xAxisMarks undefined for the vertical path.
 //
@@ -36,6 +38,10 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
+import { categoryBand, fyCategoryBandLayer } from "./category-band";
+
+// The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
+const SINGLE_SLOT = "_v";
 
 // Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
 // pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
@@ -129,6 +135,16 @@ export function buildStackedMarks(
       .sort((a, b) => ((sRank.get(a.r.series) ?? 0) - (sRank.get(b.r.series) ?? 0)) || (a.i - b.i))
       .map((x) => x.r);
   }
+
+  // Sections (horizontal only): one bar per category, so a sectioned stack takes the single-series
+  // sectioned bar's layout — the section-grouped category band (with header spacer slots) on `fy`,
+  // one inner `y` slot — and every mark placed on a category row binds to that fy row. Plot stacks
+  // within each facet, so each row is still one stack. See category-band.ts.
+  const band = categoryBand(data, catField, categories, spec, horizontal);
+  const sectioned = band.sectioned;
+  /** Channels that put a mark on its category row; `field` names the category in the mark's data. */
+  const rowChannels = (field: string): Record<string, unknown> =>
+    sectioned ? { fy: field, y: () => SINGLE_SLOT } : { y: field };
 
   // --- Per-category aggregates (computed INDEPENDENTLY of the stack) ---
   // net (Σ _y), positive sum (visual top of positive stack), negative sum.
@@ -260,7 +276,7 @@ export function buildStackedMarks(
     });
   }
   const stackMark = horizontal
-    ? Plot.barX(stackData, { y: catField, x: "_y", fill: fillChannel })
+    ? Plot.barX(stackData, { ...rowChannels(catField), x: "_y", fill: fillChannel })
     : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel });
 
   const overlay: unknown[] = [stackMark];
@@ -304,7 +320,7 @@ export function buildStackedMarks(
       horizontal
         ? Plot.text(netRows, {
             ...common,
-            y: "_xc",
+            ...rowChannels("_xc"),
             x: "posTop",
             textAnchor: reversed ? "end" : "start",
             dx: reversed ? -TBL_VALUE_LABEL.gap : TBL_VALUE_LABEL.gap,
@@ -326,7 +342,7 @@ export function buildStackedMarks(
     const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
     const net = markerInk("net", "");
     const netDot = horizontal
-      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
+      ? Plot.dot(netRows, { ...rowChannels("_xc"), x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
       : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS });
     overlay.push(netDot);
   }
@@ -365,6 +381,7 @@ export function buildStackedMarks(
       fmt: segFmt,
       hooks: ctx.hooks,
       facet: ctx.facet,
+      rowChannels,
     });
     overlay.push(...segLabels.marks);
     segmentLabelsDropped = segLabels.dropped;
@@ -376,13 +393,16 @@ export function buildStackedMarks(
   // stack order. So the tag order must follow the data (which may be series-major, e.g. all
   // "Labor" rows then all "Capital"). Using a category-major order misaligns whenever the data
   // isn't grouped that way — the cause of the legend→segment highlight mismatch.
+  // Sectioned (fy rows): Plot emits the rects facet by facet, in drawn (section-grouped) order, and in
+  // data order within a facet — so the tags follow that, not the plain data order.
   const seriesSet = new Set(seriesNames);
-  const rectSeriesOrder: string[] = data
-    .filter(
-      (r) =>
-        categories.includes((r as unknown as Record<string, unknown>)[catField] as string) &&
-        seriesSet.has(r.series),
-    )
+  const catOf = (r: PreparedRow): string => (r as unknown as Record<string, unknown>)[catField] as string;
+  const rectSeriesOrder: string[] = (
+    sectioned
+      ? band.drawnOrder.flatMap((cat) => data.filter((r) => catOf(r) === cat))
+      : data.filter((r) => categories.includes(catOf(r)))
+  )
+    .filter((r) => seriesSet.has(r.series))
     .map((r) => r.series);
 
   // --- Legend extras: a stack that draws net dots adds a "Total" dot row (A8 renders it) ---
@@ -415,22 +435,36 @@ export function buildStackedMarks(
     const gutter = ctx.hideCategoryLabels
       ? SHARED_LABELLESS_MARGIN_LEFT
       : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+    const bandLayer = sectioned
+      ? {
+          // One inner slot per fy row, padding 0: the bar fills its row (the inter-row padding lives
+          // on fy), as on a sectioned single-series bar.
+          yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
+          ...fyCategoryBandLayer(band, {
+            gutter,
+            catFont,
+            hideLabels: ctx.hideCategoryLabels === true,
+            xAxisTicks: spec.x_axis_ticks,
+          }),
+        }
+      : {
+          yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
+          xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
+          marginLeft: gutter,
+          // The value axis is at the bottom: a horizontal bar's margins, not the vertical category margin.
+          ...horizontalValueAxisMargins(spec.x_axis_ticks),
+        };
     return {
       underlay: [],
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
         ...netTagging,
-        // Hover-accent hook (task 17): no sections/faceting for stacked bars, so render order is
-        // always plain encounter order.
-        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
+        // Hover-accent hook (task 17): labels are drawn in drawn order (fy facet order when sectioned).
+        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: band.drawnOrder },
       ],
       dashedNames: new Set<string>(),
-      yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
-      marginLeft: gutter,
-      // The value axis is at the bottom: a horizontal bar's margins, not the vertical category margin.
-      ...horizontalValueAxisMargins(spec.x_axis_ticks),
+      ...bandLayer,
       seriesColors,
       legendVisualOrder,
       netMode,
@@ -492,11 +526,13 @@ function buildSegmentLabels(
     fmt: (d: number) => string;
     hooks: MarkContext["hooks"];
     facet: string | undefined;
+    /** Horizontal: the channels that put a label on its category's row. */
+    rowChannels: (field: string) => Record<string, unknown>;
   },
 ): { marks: unknown[]; dropped: boolean } {
   const {
     catField, rank, posSumByCat, normalize,
-    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet,
+    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet, rowChannels,
   } = opts;
 
   // Per-category totals (sum of |value| on each side) for normalization shares.
@@ -595,7 +631,7 @@ function buildSegmentLabels(
   return {
     marks: [
       horizontal
-        ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
+        ? Plot.text(rows, { ...common, ...rowChannels("_xc"), x: "mid", textAnchor: "middle" })
         : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
     ],
     dropped,

@@ -58,8 +58,8 @@ describe("validateSpec (structural)", () => {
   });
 
   it("accepts columns.section + section_order + section_labels (on a horizontal bar chart)", () => {
-    // D7: columns.section only has an effect on horizontal bar charts (see validate.ts
-    // sectionColumnError) — this is the combination it should accept.
+    // D7: columns.section only has an effect on horizontal bar/stacked/dumbbell charts (see
+    // validate.ts sectionColumnError) — this is a combination it should accept.
     const r = validateSpec({
       chartType: "bar",
       title: "Demo",
@@ -79,9 +79,10 @@ describe("validateSpec (structural)", () => {
     expect(r.errors.join("\n")).toMatch(/section_order/);
   });
 
-  // --- D7: columns.section silently no-ops on anything but a horizontal bar chart ---
+  // --- D7: columns.section silently no-ops on anything but a horizontal bar/stacked/dumbbell ---
+  // (stacked: test/stacked-sectioned.test.ts; dumbbell: test/dumbbell-default-orientation.test.ts)
 
-  describe("columns.section requires chartType bar + orientation horizontal", () => {
+  describe("columns.section requires a horizontal chart", () => {
     it("rejects columns.section on a (non-bar) line chart", () => {
       const r = validateSpec({ ...VALID, columns: { section: "toplevel" } });
       expect(r.valid).toBe(false);

@@ -492,8 +492,8 @@ export interface ColumnMap {
    *  last token of the hover card's header. Encodes nothing — it identifies the point rather than
    *  mapping it to a channel — so there is no `point_labels` display map: the cell IS the label. */
   point_label?: string;
-  /** Horizontal bar charts: column whose distinct values group the categories into labeled
-   *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
+  /** Horizontal `bar`, `stacked` and `dumbbell` charts: column whose distinct values group the
+   *  categories into labeled sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
    *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
   section?: string;
   /** Waterfall charts: column flagging each step's row TYPE — `total` (an absolute bar anchored
@@ -661,7 +661,7 @@ export interface ChartSpec {
   /** Categorical x: render order for the x-axis categories. Listed categories come first in this
    *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
    *  series_order, this does NOT filter. Ignored off the categorical x-axis.
-   *  With `columns.section` set (horizontal bars), section grouping is authoritative for
+   *  With `columns.section` set (horizontal charts), section grouping is authoritative for
    *  CROSS-section order (sections always render contiguously, in `section_order`/encounter
    *  order) — x_order only reorders categories WITHIN each section; it can never split a
    *  section's categories apart or reorder the sections themselves. */
@@ -684,7 +684,7 @@ export interface ChartSpec {
    *  test/hover-claims-defaults.test.ts. */
   x_labels?: Record<string, string>;
 
-  // Section axis (horizontal bars; the section COLUMN is mapped via `columns.section`).
+  // Section axis (horizontal bar/stacked/dumbbell; the section COLUMN is mapped via `columns.section`).
   /** Section render order along the category axis; also an inclusion filter (like series_order). */
   section_order?: string[];
   /** Section value → display label for the section header. */

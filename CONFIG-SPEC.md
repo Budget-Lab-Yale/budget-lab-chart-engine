@@ -67,7 +67,7 @@ it defaults to `x: time`, `value: value`, `series: series` (a timeline has no va
 | `columns.facet` | string | Column whose distinct values split small-multiples panes. |
 | `columns.shape` | string | Point charts only: column driving the marker **shape** (a second encoding channel, independent of color). |
 | `columns.point_label` | string | **`scatter` only** (validation rejects it on every other chart type): column naming each OBSERVATION — a year, a state, a firm. It encodes nothing; it is appended verbatim to the hover card's header, after the series and any shape token (`Observed · Compressive · 2004`), so a reader can tell which point they are on. Rendered exactly as the cell holds it — no number or date formatting, and `tooltip_decimals` does not apply. A blank cell contributes no token. There is deliberately no `point_labels` display map: the cell already IS the label. Pointing it at the **series** or **shape** column is collapsed to nothing rather than repeating a token the header already carries. Hover-only, like every tooltip field — a PNG export has no hover state, so the label does not appear in a download. |
-| `columns.section` | string | Horizontal bar charts only: column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-bars). |
+| `columns.section` | string | Horizontal `bar`, `stacked` and `dumbbell` charts only (validation rejects it on any other chart type and on a vertical chart): column grouping categories into labeled **sections** along the category axis (e.g. Durable goods / Nondurable goods / Services). See [Section axis](#section-axis-horizontal-charts). |
 | `columns.x0` / `columns.x1` | string | Histograms only: columns holding each row's bin **lower**/**upper** edge, for **pre-binned** input. Map both to switch the histogram to pre-binned mode; mapping only one is a validation error. See [Histogram](#histogram-options). |
 | `columns.end` | string | **Timeline only** — like the three rows below, a validation error on every other chart type. The span's end date, in the [date grammar](#dates). A blank cell makes the row a point event, and `ongoing` (any case) an open-ended span. Any other text, an impossible calendar date (`2026-13-01`), or an end before its start is a validation error naming the row. See [Timeline options](#timeline-options). |
 | `columns.label` | string | **Timeline only.** The event's headline. Default `"label"`. A blank cell is a validation error. |
@@ -1152,11 +1152,15 @@ their own switches — `small_multiples.coordinated_cursor: false` drops the ech
 own full-width category axis, so facets may carry **different** categories (the shared-category
 requirement — see below — applies only when panes share a row).
 
-### Section axis (horizontal bars)
+### Section axis (horizontal charts)
 
-Set `columns.section` to group the category axis into labeled sections (horizontal bar charts only).
-Categories are ordered so each section is contiguous, with a bold section header in the left gutter
-and a gap between sections. Combines with `small_multiples` (the headers show on the leftmost pane).
+Set `columns.section` to group the category axis into labeled sections, on a horizontal `bar`,
+`stacked` or `dumbbell` chart (a dumbbell is horizontal unless it sets `orientation: vertical`).
+Validation rejects it on any other chart type and on a vertical chart. Categories are ordered so each
+section is contiguous, with a bold section header in the left gutter and a gap between sections. A
+stacked chart still draws one stack per category; its net callout (text or dot) and segment labels
+sit on that category's row. On horizontal bars and stacks it combines with `small_multiples` (the
+headers show on the leftmost pane).
 
 | field | type | notes |
 |---|---|---|
@@ -1164,8 +1168,8 @@ and a gap between sections. Combines with `small_multiples` (the headers show on
 | `section_order` | array | Section render order along the category axis; also an inclusion filter (like `series_order`). |
 | `section_labels` | object | `{ <sectionValue>: "Display label" }` for the section headers. |
 
-`columns.section` and `columns.facet` are supported together on faceted horizontal bars (both
-`shared` and `per-pane` `small_multiples.mode`). When panes share a row (`columns > 1`), faceted
+`columns.section` and `columns.facet` are supported together on faceted horizontal bars and stacks
+(both `shared` and `per-pane` `small_multiples.mode`). When panes share a row (`columns > 1`), faceted
 horizontal bars/stacks share one category axis across those panes, so every facet must carry the
 same categories (and sections) — a facet missing a category or a whole section (a **ragged facet**)
 fails validation with an error naming the facet and the missing categories/sections, rather than

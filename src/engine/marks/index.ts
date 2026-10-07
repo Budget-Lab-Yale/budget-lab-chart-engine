@@ -43,7 +43,7 @@ export interface PreparedRow {
    *  the series/shape column (a hover-header dedupe), and a keyed callout must still find its row
    *  then. Present iff `columns.point_label` is configured. */
   _pointKey?: string;
-  /** Horizontal sectioned bars: the row's section value (from columns.section). Drives the
+  /** Horizontal sectioned bars, stacks and dumbbells: the row's section value (from columns.section). Drives the
    *  section-ordered category band + section headers. Absent ⇒ no sections. */
   _section?: string;
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured

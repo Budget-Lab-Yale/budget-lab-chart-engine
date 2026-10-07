@@ -160,7 +160,11 @@ function observe(svg: SVGSVGElement): Cell {
 //   - `histogram.bins` + `histogram.domain` on the histogram fixture: both HAVE defaults (auto bin
 //     count, data extent), and are pinned so the bin the hover lands on is a fixed one;
 //   - `series_order`, on the nine fixtures whose data names two series (bar (grouped), both
-//     stacked, categorical-x line, dotplot, dumbbell, temporal line, area, scatter).
+//     stacked, categorical-x line, dotplot, dumbbell, temporal line, area, scatter), and on the two
+//     sectioned stacks;
+//   - `orientation: horizontal` + `columns.section` on the two sectioned stacks. Layout, not hover
+//     dials: they decide where the rows are drawn (fy facets with header spacers), which is the
+//     thing those rows measure the hover against.
 // Adding anything outside that inventory breaks the file's premise.
 //
 // Why `series_order` is there: it PINS the row order the `cardRows` column asserts instead of
@@ -263,6 +267,40 @@ function hoverPoint(svg: SVGSVGElement, markSel: string): void {
   );
 }
 
+/** Hover the centre of the LAST bar row. On a sectioned stack that row sits below the header
+ *  spacer, so a hover that resolved rows by index without skipping the spacer lands elsewhere. */
+function hoverLastBarRow(svg: SVGSVGElement): void {
+  const rects = Array.from(svg.querySelectorAll<SVGRectElement>(BAR_MARK));
+  const rect = rects[rects.length - 1]!;
+  let x = parseFloat(rect.getAttribute("x")!) + parseFloat(rect.getAttribute("width")!) / 2;
+  let y = parseFloat(rect.getAttribute("y")!) + parseFloat(rect.getAttribute("height")!) / 2;
+  for (let g: Element | null = rect.parentElement; g && g !== svg; g = g.parentElement) {
+    const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(g.getAttribute("transform") ?? "");
+    if (m) { x += +m[1]!; y += +m[2]!; }
+  }
+  svg.querySelector(".tbl-band-crosshair-hit")!.dispatchEvent(
+    new PointerEvent("pointermove", { clientX: x, clientY: y, bubbles: true }),
+  );
+}
+
+/** Horizontal stack with two sections (A, C in "S1"; B in "S2"), interleaved in data order. */
+const sectionedStack = (f: boolean, series: Array<[string, number, number, number]>): Mount => ({
+  spec: spec({
+    chartType: "stacked", xAxisType: "categorical", orientation: "horizontal",
+    series_order: series.map(([s]) => s),
+    columns: { x: "time", value: "value", series: "series", section: "sec", ...(f ? { facet: "pane" } : {}) },
+    ...(f ? { data: "d.csv", ...sm } : {}),
+  }),
+  rows: (f ? ["P1", "P2"] : [""]).flatMap((p) =>
+    series.flatMap(([s, a, b, c]) =>
+      ([["A", "S1", a], ["B", "S2", b], ["C", "S1", c]] as Array<[string, string, number]>).map(([time, sec, v]) => ({
+        ...(p ? { pane: p } : {}), time, sec, series: s, value: String(v),
+      })),
+    ),
+  ) as unknown as TidyRow[],
+  hover: hoverLastBarRow,
+});
+
 type Mount = { spec: ChartSpec; rows: TidyRow[]; hover: (svg: SVGSVGElement) => void };
 
 const TYPES: Array<{ name: string; mount: (f: boolean) => Mount }> = [
@@ -305,6 +343,14 @@ const TYPES: Array<{ name: string; mount: (f: boolean) => Mount }> = [
       rows: cat(f, [["Up", 6, 5], ["Down", -4, -2]]),
       hover: (svg) => hoverFirstMark(svg, BAR_MARK),
     }),
+  },
+  {
+    name: "stacked (horizontal, sectioned, all positive)",
+    mount: (f) => sectionedStack(f, [["Up", 6, 5, 3], ["Down", 4, 2, 1]]),
+  },
+  {
+    name: "stacked (horizontal, sectioned, with a negative)",
+    mount: (f) => sectionedStack(f, [["Up", 6, 5, 3], ["Down", -4, -2, -1]]),
   },
   {
     name: "line (categorical x)",
@@ -396,6 +442,13 @@ const EXPECTED: Record<string, Cell> = {
   "stacked (all positive) · 2-pane":      { card: false, cardRows: [],                        pills: true,  guide: false, dot: false, region: true,  axisLabel: true  },
   "stacked (with a negative) · standalone": { card: true, cardRows: ["Up", "Down", "Total"],  pills: false, guide: false, dot: false, region: false, axisLabel: false },
   "stacked (with a negative) · 2-pane":   { card: true,  cardRows: ["Up", "Down", "Total"],   pills: false, guide: false, dot: false, region: false, axisLabel: false },
+  // Horizontal sectioned stacks, hovered on the row below the section header: the same surface as a
+  // vertical stack except the axis-label echo — a horizontal bar-like chart bolds the hovered row's
+  // label instead of echoing it. Measured equal to the same stacks without sections.
+  "stacked (horizontal, sectioned, all positive) · standalone":    { card: false, cardRows: [], pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
+  "stacked (horizontal, sectioned, all positive) · 2-pane":        { card: false, cardRows: [], pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
+  "stacked (horizontal, sectioned, with a negative) · standalone": { card: true,  cardRows: ["Up", "Down", "Total"], pills: false, guide: false, dot: false, region: false, axisLabel: false },
+  "stacked (horizontal, sectioned, with a negative) · 2-pane":     { card: true,  cardRows: ["Up", "Down", "Total"], pills: false, guide: false, dot: false, region: false, axisLabel: false },
   // Categorical-x line and dot plot: a card standalone, replaced by the in-place echo in a pane.
   // The two panes differ in their echo — the line pane draws a GUIDE, the dot pane shades the BAND.
   "line (categorical x) · standalone":    { card: true,  cardRows: ["A", "B"],                pills: false, guide: false, dot: false, region: false, axisLabel: false },
@@ -495,6 +548,8 @@ const SIBLING_ECHO: Record<string, PaneEcho> = {
   // pure band shade, no pills — the card is that pane's read-out, so a pill would double it up.
   // The same split as the dumbbell row below.
   "stacked (with a negative)": { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
+  "stacked (horizontal, sectioned, all positive)":   { pills: true,  guide: false, dot: false, region: true,  axisLabel: false },
+  "stacked (horizontal, sectioned, with a negative)": { pills: false, guide: false, dot: false, region: true,  axisLabel: false },
   "line (categorical x)":     { pills: true,  guide: true,  dot: true,  region: false, axisLabel: false },
   "dotplot":                  { pills: true,  guide: false, dot: true,  region: true,  axisLabel: false },
   // Dumbbell keeps its per-pane card AND coordinates: the sibling echo is a pure band shade, with
