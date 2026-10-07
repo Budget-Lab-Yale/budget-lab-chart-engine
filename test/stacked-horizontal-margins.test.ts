@@ -77,15 +77,18 @@ describe("horizontal stacked bars: value-axis margins", () => {
     expect(h - lowest).toBeLessThan(10);
   });
 
-  for (const ticks of ["bottom", "top", "both"] as const) {
-    it(`x_axis_ticks: ${ticks} — the margins equal a horizontal bar's`, () => {
+  // Top: 18, plus a value-tick row (18) when the ticks are on top. Bottom: 26 with the value ticks
+  // at the bottom, 8 without.
+  for (const [ticks, top, bottom] of [["bottom", 18, 26], ["top", 36, 8], ["both", 36, 26]] as const) {
+    it(`x_axis_ticks: ${ticks} — margins ${top}/${bottom}, as on a horizontal bar`, () => {
       const stacked = renderChart({ ...SPEC, x_axis_ticks: ticks }, ROWS, { width: 720, height: 400, document }).svg;
       const bar = renderChart(
         { ...SPEC, chartType: "bar", barStack: undefined, x_axis_ticks: ticks },
         ROWS,
         { width: 720, height: 400, document },
       ).svg;
-      expect(margins(stacked)).toEqual(margins(bar));
+      expect(margins(stacked)).toEqual({ top, bottom });
+      expect(margins(bar)).toEqual({ top, bottom });
     });
   }
 

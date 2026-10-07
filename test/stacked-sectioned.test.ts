@@ -141,9 +141,9 @@ describe("validation: columns.section on a stacked bar", () => {
   it("rejects it on a vertical stack, naming the field and the fix", () => {
     const r = validateSpec(base);
     expect(r.valid).toBe(false);
-    expect(r.errors.join("\n")).toMatch(/columns\.section/);
-    expect(r.errors.join("\n")).toMatch(/horizontal/);
-    expect(r.errors.join("\n")).toMatch(/"stacked"/);
+    expect(r.errors).toContain(
+      'columns.section requires a horizontal "bar", "stacked" or "dumbbell" chart (got chartType "stacked", orientation undefined)',
+    );
   });
 });
 
@@ -277,13 +277,15 @@ describe("sectioned horizontal stack: layout", () => {
     );
   });
 
-  for (const ticks of ["bottom", "top", "both"] as const) {
-    it(`x_axis_ticks: ${ticks} — margins equal a sectioned horizontal bar's`, () => {
+  // Top: the first section header's floor (38), or a value-tick row above the headers (40).
+  // Bottom: 26 with the value ticks at the bottom, 8 without.
+  for (const [ticks, top, bottom] of [["bottom", 38, 26], ["top", 40, 8], ["both", 40, 26]] as const) {
+    it(`x_axis_ticks: ${ticks} — margins ${top}/${bottom}, as on a sectioned horizontal bar`, () => {
       const stacked = render({ ...SPEC, x_axis_ticks: ticks }, POS);
       const bar = render({ ...SPEC, chartType: "bar", x_axis_ticks: ticks }, POS);
-      const m = (s: SVGSVGElement) => [s.dataset.marginTop, s.dataset.marginBottom];
-      expect(m(stacked)).toEqual(m(bar));
-      if (ticks !== "bottom") expect(Number(stacked.dataset.marginTop)).toBeGreaterThan(Number(render(SPEC, POS).dataset.marginTop));
+      const m = (s: SVGSVGElement) => [Number(s.dataset.marginTop), Number(s.dataset.marginBottom)];
+      expect(m(stacked)).toEqual([top, bottom]);
+      expect(m(bar)).toEqual([top, bottom]);
     });
   }
 });
@@ -319,6 +321,33 @@ describe("sectioned horizontal stack: small multiples", () => {
     expect(ys(p0!).length).toBe(4);
     expect(ys(p1!)).toEqual(ys(p0!));
     expect([...labelYs(p0!).entries()].sort((a, b) => a[1] - b[1]).map(([c]) => c)).toEqual(DRAWN);
+  });
+});
+
+describe("sectioned horizontal stack: a figure pane's height counts the section spacers", () => {
+  // 24 rows per pane, well above the 400px floor, so the spacers and header show in the height.
+  const figRows = ["P1", "P2"].flatMap((pane) => tallRows(false).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
+  const paneHeights = (root: ParentNode, sel: string): number[] =>
+    Array.from(root.querySelectorAll(sel))
+      .filter((s) => s.querySelector('g[aria-label="bar"]'))
+      .map((s) => Number(s.getAttribute("height")));
+  const live = (spec: ChartSpec, rows: TidyRow[]): number[] => {
+    const c = document.createElement("div");
+    document.body.appendChild(c);
+    mountChart(c, { spec, rows, width: INNER_W });
+    return paneHeights(c, ".figure-pane svg");
+  };
+
+  it("live and export agree, and both are taller than the same figure without sections", () => {
+    const unsectioned: ChartSpec = { ...SHARED_FIG, columns: { ...SHARED_FIG.columns, section: undefined } };
+    const sectioned = live(SHARED_FIG, figRows);
+    const plain = live(unsectioned, figRows);
+    expect(sectioned).toHaveLength(2);
+    expect(plain[0]!).toBeGreaterThan(400);
+    // Two spacer slots plus the first header's lift.
+    expect(sectioned[0]!).toBeGreaterThan(plain[0]! + 40);
+    expect(paneHeights(buildExportSvg(SHARED_FIG, figRows), "svg")).toEqual(sectioned);
+    expect(paneHeights(buildExportSvg(unsectioned, figRows), "svg")).toEqual(plain);
   });
 });
 
@@ -395,4 +424,49 @@ describe("sectioned horizontal stack: hover resolves the row under the pointer",
       expect(cardText()).toContain("Total");
     });
   });
+
+  it("net as text (pr67's shape): every row reports its own category and values, and pills them", () => {
+    const { svg, seen } = mount(NET_TEXT, NEG_POS_NET);
+    DRAWN.forEach((cat, i) => {
+      hoverRow(svg, i);
+      const ctx = seen[seen.length - 1]!;
+      expect(ctx?.category).toBe(cat);
+      for (const s of SERIES) expect(ctx.values[s]).toBe(Number(NEG_POS_NET.find((r) => r.bar === cat && r.tax === s)!.v));
+      // One pill per segment, this row's.
+      const own = SERIES.map((s) => Number(NEG_POS_NET.find((r) => r.bar === cat && r.tax === s)!.v));
+      expect(coordTexts(svg).map(Number)).toEqual(own);
+    });
+  });
+});
+
+describe("sectioned horizontal stack figure: a pane hover resolves the row under the pointer", () => {
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`${mode} mode: each pane's rows report that pane's own category and values`, () => {
+      const spec: ChartSpec = { ...SHARED_FIG, small_multiples: { ...SHARED_FIG.small_multiples!, mode } };
+      const seen: Array<BandHoverCtx | null> = [];
+      const c = document.createElement("div");
+      document.body.appendChild(c);
+      mountChart(c, { spec, rows: FIG_ROWS, width: 900, onHover: (ctx) => seen.push(ctx) });
+      const panes = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+      expect(panes).toHaveLength(2);
+      panes.forEach(mockRect1to1);
+      panes.forEach((svg, k) => {
+        const pane = ["P1", "P2"][k]!;
+        DRAWN.forEach((cat, i) => {
+          const b = rectBox(barFacets(svg)[i]!.querySelector("rect")!, svg);
+          svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+            new PointerEvent("pointermove", { clientX: b.x + b.w / 2, clientY: b.y + b.h / 2, bubbles: true }),
+          );
+          const ctx = seen.filter((x): x is BandHoverCtx => x != null).at(-1)!;
+          expect(ctx.category, `${pane} row ${i}`).toBe(cat);
+          expect(ctx.facet).toBe(pane);
+          for (const s of SERIES) {
+            expect(ctx.values[s], `${pane} ${cat} ${s}`).toBe(
+              Number(FIG_ROWS.find((r) => r.pane === pane && r.bar === cat && r.tax === s)!.v),
+            );
+          }
+        });
+      });
+    });
+  }
 });

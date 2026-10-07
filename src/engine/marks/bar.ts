@@ -27,7 +27,7 @@ import {
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { categoryBand, fyCategoryBandLayer as composeFyCategoryBand, HBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, HBAND_PADDING_OUTER } from "./category-band";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -142,10 +142,8 @@ export function buildBarMarks(
   // scale and the left-gutter axis marks, so the paths can never drift apart again — a fix landing
   // on one path while its sibling kept a hand-copied variant is exactly the shape that produced
   // the original phantom-facet defect (D1). `gutter` is the caller's resolved left-gutter width.
-  const fyCategoryBandLayer = (
-    gutter: number,
-  ): Pick<MarkLayers, "fyScaleOpts" | "xAxisMarks" | "marginLeft" | "marginTop" | "marginBottom"> =>
-    composeFyCategoryBand(band, { gutter, catFont, hideLabels: ctx.hideCategoryLabels === true, xAxisTicks: spec.x_axis_ticks });
+  const fyBandOpts = (gutter: number) =>
+    ({ gutter, catFont, hideLabels: ctx.hideCategoryLabels === true, xAxisTicks: spec.x_axis_ticks });
 
   const overlay: unknown[] = [];
 
@@ -243,7 +241,7 @@ export function buildBarMarks(
           tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder, fill: true }, ...catLabelTagging],
           dashedNames: new Set<string>(),
           yScaleOpts: { type: "band", domain: [onlySeries], padding: 0, axis: null },
-          ...fyCategoryBandLayer(gutter),
+          ...fyCategoryBandLayer(band, fyBandOpts(gutter)),
         };
       }
 
@@ -317,7 +315,7 @@ export function buildBarMarks(
       ],
       dashedNames: new Set<string>(),
       yScaleOpts: innerYBandOpts,
-      ...fyCategoryBandLayer(gutter),
+      ...fyCategoryBandLayer(band, fyBandOpts(gutter)),
     };
   }
 
