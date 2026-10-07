@@ -669,6 +669,76 @@ describe("CONFIG-SPEC: under autoWiden a marker past max moves it (F13 fix 5)", 
   });
 });
 
+// CONFIG-SPEC `autoWiden.step` "must be greater than 0". Validation rejects 0 and below; for any
+// step it accepts (and any an unvalidated renderChart caller passes), the widened bound is finite
+// and reaches the value that overflowed it. A step of 1e-320 used to overflow 61 / step to Infinity
+// and throw inside tick generation; a step of -10 rounded 61 to 60, short of the marker.
+describe("autoWiden.step: positive only, and the widening never throws or falls short", () => {
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterAll(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+  });
+
+  const WIDENING = ["line", "scatter", "dotplot"];
+  const specOf = (type: string, yAxisPolicy: Record<string, unknown>, y: number) =>
+    ({ ...CASES[type]!.spec, data: "d.csv", yAxisPolicy, annotations: { yAxis: [{ y, label: "m" }] } }) as unknown as ChartSpec;
+
+  it("validation rejects a step of 0 or below, naming the field", () => {
+    for (const step of [0, -10]) {
+      const res = validateSpec(specOf("line", { min: 0, max: 40, autoWiden: { step } }, 61));
+      expect(res.valid, String(step)).toBe(false);
+      expect(res.errors.join("\n")).toMatch(/\/yAxisPolicy\/autoWiden\/step: must be > 0/);
+    }
+    expect(validateSpec(specOf("line", { min: 0, max: 40, autoWiden: { step: 1e-320 } }, 61)).errors).toEqual([]);
+  });
+
+  // Ascending: a marker at 61 over max 40. Reversed: a marker at -21 under max 0, the numeric floor.
+  // Only the widened end is asserted: across a span near 1e300 the outward nice moves even a pinned
+  // `min` (true with no autoWiden at all), which is not this test's subject.
+  const STEPS = [1e-320, 5e-324, -10, 1e300, Number.MAX_VALUE];
+  for (const step of STEPS) {
+    it(`step ${step}: live and the PNG render, and the widened bound is finite and reaches the marker`, () => {
+      for (const type of WIDENING) {
+        const rows = CASES[type]!.rows;
+        const asc = specOf(type, { min: 0, max: 40, autoWiden: { step } }, 61);
+        const [lo, hi] = domainBounds(renderPane(asc, rows, OPTS).yDomain);
+        expect(Number.isFinite(lo) && Number.isFinite(hi), `${type} ${lo} ${hi}`).toBe(true);
+        expect(hi, type).toBeGreaterThanOrEqual(61);
+        expect(() => renderChart(asc, rows, OPTS), type).not.toThrow();
+        expect(() => buildExportSvg(asc, rows), type).not.toThrow();
+
+        const rev = specOf(type, { min: 40, max: 0, autoWiden: { step } }, -21);
+        const d = renderPane(rev, rows, OPTS).yDomain;
+        expect(d.every(Number.isFinite), `${type} ${d}`).toBe(true);
+        expect(d[1], type).toBeLessThanOrEqual(-21);
+        expect(() => renderChart(rev, rows, OPTS), type).not.toThrow();
+        expect(() => buildExportSvg(rev, rows), type).not.toThrow();
+      }
+    });
+  }
+
+  it("a multiple too large to represent moves max to the value itself, live and in the PNG", () => {
+    const yTicks = (svg: Element) =>
+      Array.from(svg.querySelectorAll("g.tbl-y-tick-label text")).map((t) => t.textContent);
+    for (const type of WIDENING) {
+      const rows = CASES[type]!.rows;
+      for (const [policy, y, pinned] of [
+        [{ min: 0, max: 40, autoWiden: { step: 1e-320 } }, 61, { min: 0, max: 61 }],
+        [{ min: 40, max: 0, autoWiden: { step: 1e-320 } }, -21, { min: 40, max: -21 }],
+      ] as const) {
+        const widened = specOf(type, policy, y);
+        const same = { ...CASES[type]!.spec, yAxisPolicy: pinned } as unknown as ChartSpec;
+        expect(renderPane(widened, rows, OPTS).yDomain, type).toEqual(renderPane(same, rows, OPTS).yDomain);
+        expect(yTicks(renderChart(widened, rows, OPTS).svg), type).toEqual(yTicks(renderChart(same, rows, OPTS).svg));
+        expect(yTicks(buildExportSvg(widened, rows)), type).toEqual(yTicks(buildExportSvg(same, rows)));
+      }
+    }
+  });
+});
+
 // CONFIG-SPEC "Truncating the axis below the data": every chart type clips its marks to the frame.
 // A shared vertical dumbbell whose pane A (dots 93, 99) takes the lone-max fallback, beside a pane
 // whose marker raised the figure's ceiling to 500, gets a shared floor of 100 (the pre-fallback

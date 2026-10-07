@@ -136,3 +136,85 @@ describe("renderChart (unvalidated) does not fold an undrawn yAxis marker into t
     }
   });
 });
+
+describe("renderChart (unvalidated) keys no legend row for an undrawn yAxis marker", () => {
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterAll(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+  });
+
+  const KEYED = "keyedmark";
+  const labels = (items: { label: string }[] | null) => (items ?? []).map((i) => i.label);
+  const pngHas = (spec: ChartSpec, rows: TidyRow[]) =>
+    Array.from(buildExportSvg(spec, rows).querySelectorAll("text")).some((t) => t.textContent === KEYED);
+
+  for (const name of Object.keys(CASES)) {
+    for (const [how, extra] of [
+      ["annotations.yAxis", { annotations: { yAxis: [{ y: 12, label: KEYED, legend: true }] } }],
+      ["yAxisPolicy.markers", { yAxisPolicy: { markers: [{ y: 12, label: KEYED, legend: true }] } }],
+    ] as const) {
+      it(`${name}, ${how}: no row live, none in the PNG, no dangling data-annotation`, () => {
+        const spec = specOf(name, extra);
+        const rows = CASES[name]!.rows;
+        const live = renderChart(spec, rows, OPTS);
+        expect(labels(live.legendItems)).not.toContain(KEYED);
+        expect(live.svg.querySelector("[data-annotation]")).toBeNull();
+        expect(pngHas(spec, rows)).toBe(false);
+      });
+    }
+  }
+
+  it("contrast: the same keyed marker keys a row on a vertical chart, and a keyed xAxis one on a horizontal chart", () => {
+    for (const name of ["bar", "stacked", "dumbbell"]) {
+      const spec = specOf(name, {
+        orientation: "vertical",
+        annotations: { yAxis: [{ y: 12, label: KEYED, legend: true }] },
+      });
+      const rows = CASES[name]!.rows;
+      expect(labels(renderChart(spec, rows, OPTS).legendItems), name).toContain(KEYED);
+      expect(pngHas(spec, rows), name).toBe(true);
+    }
+    for (const name of Object.keys(CASES)) {
+      const spec = specOf(name, { annotations: { xAxis: [{ x: "12", label: KEYED, legend: true }] } });
+      const rows = CASES[name]!.rows;
+      expect(labels(renderChart(spec, rows, OPTS).legendItems), name).toContain(KEYED);
+      expect(pngHas(spec, rows), name).toBe(true);
+    }
+  });
+});
+
+describe("CONFIG-SPEC annotations.xAxis row: a numeric xAxis marker draws a vertical rule on every horizontal type", () => {
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterAll(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+  });
+
+  /** Vertical rules in a dashed group: the marker's default `style: dashed`. */
+  const vRules = (svg: Element) =>
+    Array.from(svg.querySelectorAll("g[stroke-dasharray] line")).filter(
+      (l) => l.getAttribute("x1") != null && l.getAttribute("x1") === l.getAttribute("x2"),
+    ).length;
+  const hasText = (svg: Element, s: string) => Array.from(svg.querySelectorAll("text")).some((t) => t.textContent === s);
+
+  for (const name of Object.keys(CASES)) {
+    it(`${name}: drawn live and in the PNG; a non-numeric x draws nothing`, () => {
+      const rows = CASES[name]!.rows;
+      const bare = specOf(name);
+      const marked = specOf(name, { annotations: { xAxis: [{ x: "12", label: "xm" }] } });
+      const junk = specOf(name, { annotations: { xAxis: [{ x: "twelve", label: "xm" }] } });
+      for (const render of [(s: ChartSpec) => renderChart(s, rows, OPTS).svg, (s: ChartSpec) => buildExportSvg(s, rows)]) {
+        expect(vRules(render(bare))).toBe(0);
+        expect(vRules(render(marked))).toBe(1);
+        expect(hasText(render(marked), "xm")).toBe(true);
+        expect(vRules(render(junk))).toBe(0);
+        expect(hasText(render(junk), "xm")).toBe(false);
+      }
+    });
+  }
+});

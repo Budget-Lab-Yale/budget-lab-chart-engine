@@ -11,6 +11,7 @@ import { TBL } from "./theme";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveAnnotations, xMarkerLabel, yMarkerLabel } from "../spec/annotations";
 import { resolveRugTracks } from "../spec/rug";
+import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import { overlayDashed, overlayKind, overlayPerSeries } from "../spec/overlays";
 import { overlayLineColor } from "./overlays";
 import type { LegendItem } from "./index";
@@ -225,9 +226,14 @@ export function buildAnnotationLegendItems(
   ann.xAxis.forEach((m) => {
     if (wantsRow(m)) rows.push(ruleRow(m, xMarkerLabel(m)));
   });
-  ann.yAxis.forEach((m) => {
-    if (wantsRow(m)) rows.push(ruleRow(m, yMarkerLabel(m, fallbackFormat)));
-  });
+  // On a horizontal bar / stack / dumbbell a yAxis marker sits on the categorical y scale and draws
+  // nothing (Ruling 78: validation rejects it, renderPane does not fold it), so it keys no row either
+  // — only unvalidated renderChart callers can get here with one.
+  if (!valueAxisIsX(spec)) {
+    ann.yAxis.forEach((m) => {
+      if (wantsRow(m)) rows.push(ruleRow(m, yMarkerLabel(m, fallbackFormat)));
+    });
+  }
 
   // Explicit rug tracks have no band or fill of their own, so nothing above has keyed them.
   resolveRugTracks(spec).forEach((t) => {

@@ -538,6 +538,9 @@ describe("keyed annotations on point / dumbbell charts", () => {
       "dumbbell",
       {
         chartType: "dumbbell",
+        // Vertical: on a horizontal dumbbell (the default) a yAxis marker draws nothing and keys no
+        // row (Ruling 78; test/horizontal-yaxis-marker.test.ts).
+        orientation: "vertical",
         title: "t",
         xAxisType: "categorical",
         columns: { category: "cat", value: "value", series: "series" },

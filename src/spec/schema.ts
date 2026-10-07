@@ -151,7 +151,7 @@ const Y_AXIS_POLICY = {
       type: "object",
       additionalProperties: false,
       required: ["step"],
-      properties: { step: { type: "number" } },
+      properties: { step: { type: "number", exclusiveMinimum: 0 } },
     },
     markers: Y_MARKER_ARRAY,
   },

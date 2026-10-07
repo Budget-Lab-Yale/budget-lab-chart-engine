@@ -19,9 +19,9 @@ export function treemapAreaHeight(width: number): number {
 /** `rank` is the tile's index within its group (overall when flat) by the layout sort, 0 = largest. */
 export interface TileRect { datum: TreemapDatum; x0: number; y0: number; x1: number; y1: number; rank: number }
 /** How tiles are laid out in their region: squarified, or one of these alternatives, which a group
- *  tries in this order when its largest tile's label does not fit under squarify, and which the
- *  whole frame can take (layoutTreemap `tiling`: the tiles of flat data, the group blocks of grouped
- *  data). */
+ *  tries in this order when its first tile in layout order (see layoutTreemap `labelFits`) cannot
+ *  hold its label under squarify, and which the whole frame can take (layoutTreemap `tiling`: the
+ *  tiles of flat data, the group blocks of grouped data). */
 export const TM_RETILINGS = ["slice", "dice", "binary"] as const;
 /** The squarify variants the whole frame can take (Ruling 45), in candidate order: aspect-ratio
  *  target 1 (squarest), d3's default (the golden ratio φ), and 2. */

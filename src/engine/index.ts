@@ -928,13 +928,20 @@ function assemblePaneResult(
     if (policy.autoWiden && yMax != null) {
       const step = policy.autoWiden.step || 1;
       const finite = yForAxis.filter(Number.isFinite) as number[];
+      // Validation requires step > 0, but a tiny one overflows v / step to Infinity (and an
+      // unvalidated negative one rounds the wrong way): a multiple that is not finite or does not
+      // reach v falls back to v itself, so the bound always covers what overflowed it.
+      const widen = (v: number, round: (x: number) => number, reaches: (m: number) => boolean): number => {
+        const m = round(v / step) * step;
+        return Number.isFinite(m) && reaches(m) ? m : v;
+      };
       if (finite.length) {
         if (reversed) {
           const dataMin = Math.min(...finite);
-          if (dataMin < yMax) yMax = Math.floor(dataMin / step) * step;
+          if (dataMin < yMax) yMax = widen(dataMin, Math.floor, (m) => m <= dataMin);
         } else {
           const dataMax = Math.max(...finite);
-          if (dataMax > yMax) yMax = Math.ceil(dataMax / step) * step;
+          if (dataMax > yMax) yMax = widen(dataMax, Math.ceil, (m) => m >= dataMax);
         }
       }
     }

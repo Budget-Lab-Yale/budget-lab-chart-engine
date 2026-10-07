@@ -190,9 +190,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - An `annotations.yAxis` marker (or `yAxisPolicy.markers`) on a horizontal bar, stacked bar or
   dumbbell (`orientation` omitted included) drew nothing, since the value axis is x there, but still
   widened the value axis to reach it. `tbl-chart validate` now rejects it and points at
-  `annotations.xAxis`; `renderChart` no longer widens the axis for it. Live and in the PNG.
+  `annotations.xAxis`; `renderChart` no longer widens the axis for it, nor keys a legend row for it
+  under `legend: true`. Live and in the PNG.
+- `yAxisPolicy.autoWiden.step` must be greater than 0. A positive step tiny beside the value
+  (`1e-320`) made `renderChart` and the PNG export throw, and a negative one rounded short of the
+  value it was widening to. Validation rejects 0 and below, and a multiple of `step` that is not
+  finite or falls short now moves `max` to the value itself.
 
 ### Docs
+- CONFIG-SPEC `annotations.xAxis`: the vertical rule on the value axis is drawn on horizontal
+  stacked bars and dumbbells (`orientation` omitted included) as well as horizontal bars.
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
   small-multiples pane) never used it; the pill takes the running-total labels' precision
   (`valueLabels.decimals`, else what the data needs). A waterfall pane with a card does use it.
@@ -317,6 +324,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   with `annotations.xAxis`, and the `pr67-spec-fixes` branch's `effective-tax-rates-top-groups`
   (dumbbell) and two `revenue-by-tax` stacks, committed and in its working tree, have no
   annotations. No golden moves.
+- **`yAxisPolicy.autoWiden.step` of 0 or below now fails `tbl-chart validate`.** **No published
+  figure is affected**: no spec on `main`, on the `pr67-spec-fixes` branch or in its working tree
+  sets `autoWiden`. No golden moves.
 
 ## [1.15.0] - 2026-10-01
 
