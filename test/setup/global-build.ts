@@ -8,6 +8,9 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 export const BUNDLE_PATH = fileURLToPath(new URL("../.tmp/standalone-live.js", import.meta.url));
+/** The live mount AND the PNG export's SVG builder in one browser bundle (global `BudgetLabExport`),
+ *  so a test can lay both out in the same real page, with the same fonts and text measurement. */
+export const EXPORT_BUNDLE_PATH = fileURLToPath(new URL("../.tmp/live-and-export.js", import.meta.url));
 
 export default async function setup(): Promise<void> {
   const entry = fileURLToPath(new URL("../../src/embed/standalone-entry.ts", import.meta.url));
@@ -19,6 +22,15 @@ export default async function setup(): Promise<void> {
     platform: "browser",
     globalName: "BudgetLabChart",
     outfile: BUNDLE_PATH,
+    logLevel: "silent",
+  });
+  await build({
+    entryPoints: [fileURLToPath(new URL("./live-and-export-entry.ts", import.meta.url))],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    globalName: "BudgetLabExport",
+    outfile: EXPORT_BUNDLE_PATH,
     logLevel: "silent",
   });
 }

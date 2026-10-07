@@ -462,6 +462,8 @@ export function buildExportSvg(
   // `chartTop`; a figure or a single horizontal bar/stacked/dumbbell chart can extend past the
   // fixed frame, everything else fills it.
   let contentHeight: number;
+  // How far below `chartTop` the plot sits: nonzero only beside a taller right-hand legend column.
+  let plotOffset = 0;
   if (!isFigure) {
     // Single chart: horizontal bar/stacked/dumbbell charts size from the shared intrinsic-height
     // helper (growing the export frame with row count); everything else fills the fixed 750 frame.
@@ -481,9 +483,9 @@ export function buildExportSvg(
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
     // title, note and source, and then off the frame. Measure it first (same routine that draws
     // it, so the two cannot drift) and let the chart REGION be at least that tall, with the plot
-    // top-aligned in it; `H_eff` below grows the frame to match. Nothing published takes this path
-    // today, so the arithmetic is here to keep a future many-series chart honest rather than to
-    // fix a current figure.
+    // centred in it as live centres it (below); `H_eff` grows the frame to match. Nothing published
+    // takes this path today, so the arithmetic is here to keep a future many-series chart honest
+    // rather than to fix a current figure.
     const colItems = rightLegend
       ? orderForRightLegend(legendItems, (meta as { legendVisualOrder?: string[] }).legendVisualOrder)
       : [];
@@ -501,6 +503,7 @@ export function buildExportSvg(
     // AND rows above it, so an empty colour group takes none.
     const legendKeyCache = new Map<LegendItem, string | null>();
     const colTitle = hasShapeLegend && colItems.length ? colorLegendTitle : undefined;
+    let legendColumnH = 0;
     if (rightLegend) {
       const COL_TOP_PAD = 12;
       let measured = COL_TOP_PAD;
@@ -513,7 +516,7 @@ export function buildExportSvg(
           shapeLegendTitle || undefined, undefined, legendKeyCache,
         );
       }
-      contentHeight = Math.max(contentHeight, Math.ceil(measured));
+      legendColumnH = Math.ceil(measured);
     }
     const rendered = renderChart(spec, rows, {
       width: chartW,
@@ -525,7 +528,6 @@ export function buildExportSvg(
     });
     const chartSvg = rendered.svg;
     chartSvg.setAttribute("x", String(MARGIN));
-    chartSvg.setAttribute("y", String(chartTop));
     chartSvg.setAttribute("width", String(chartW));
     // A timeline keeps its own layout height (its `plotHeight` is only the pre-draw estimate). A
     // treemap too: its own height is the layout height, and the frame is sized to its ceiling.
@@ -537,6 +539,18 @@ export function buildExportSvg(
       if (!title !== !xAxisTitle) bottomH += title ? 14 : -14;
       xAxisTitle = title;
     }
+    // Live centres the canvas (the plot, with its x-axis title directly under it) against a taller
+    // right-hand legend column: `.figure-body--legend-right { align-items: center }` in styles.ts.
+    // The PNG computes the same offset; the column itself stays at the region's top, where live's
+    // taller column also sits. `contentHeight` stays the region less the title's 14px band, which
+    // `bottomH` already holds.
+    if (rightLegend) {
+      const titleBand = xAxisTitle ? 14 : 0;
+      const region = Math.max(contentHeight + titleBand, legendColumnH);
+      plotOffset = (region - titleBand - contentHeight) / 2;
+      contentHeight = region - titleBand;
+    }
+    chartSvg.setAttribute("y", String(chartTop + plotOffset));
     root.appendChild(chartSvg);
     if (rightLegend) {
       // Beside the plot, ordered top-to-bottom as the stack reads (orderForRightLegend) — the same
@@ -675,9 +689,10 @@ export function buildExportSvg(
   if (xAxisTitle) {
     by += 14;
     // Centred on the PLOT, not the frame: a right-hand legend takes 176px off the right, so the
-    // frame's centre is 88px right of the plot's and the title sat visibly off-axis.
+    // frame's centre is 88px right of the plot's and the title sat visibly off-axis. Directly under
+    // the plot, so `plotOffset` above the region's bottom beside a taller legend column.
     const titleX = rightLegend ? MARGIN + chartW / 2 : frameW / 2;
-    by = drawLines(root, xAxisLines, titleX, by, AXIS_TITLE_LINE_H, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" });
+    by = plotOffset + drawLines(root, xAxisLines, titleX, by - plotOffset, AXIS_TITLE_LINE_H, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" });
   }
   composeBottomChrome(document, root, by, { note, source, width: frameW });
 

@@ -115,18 +115,19 @@ describe("a tall right-hand legend grows the export frame, not the plot", () => 
       expect(exportMarks).toEqual(markGeometry(live));
 
       // Non-vacuity: the legend column really is taller than the plot here, and the frame grows to
-      // hold all of it (every legend label above the frame's bottom, below the plot's top).
-      const chartTop = Number(chart.getAttribute("y"));
+      // hold all of it. The column starts at the chart region's top (its first baseline 12px below);
+      // the plot is centred beside it (test/export-right-legend-centring.test.ts).
       const frameH = Number(root.getAttribute("height"));
       const legendYs = Array.from(root.querySelectorAll("text"))
         .filter((t) => t.closest("svg") === root)
         .filter((t) => Number(t.getAttribute("x")) >= Number(chart.getAttribute("x")) + CHART_W + LEGEND_GAP)
         .map((t) => Number(t.getAttribute("y")));
       expect(legendYs.length).toBeGreaterThan(0);
+      const regionTop = Math.min(...legendYs) - 12;
       const legendBottom = Math.max(...legendYs);
-      expect(legendBottom).toBeGreaterThan(chartTop + liveH);
+      expect(legendBottom - regionTop).toBeGreaterThan(liveH);
+      expect(Number(chart.getAttribute("y"))).toBeGreaterThan(regionTop);
       expect(frameH).toBeGreaterThan(legendBottom);
-      for (const y of legendYs) expect(y).toBeGreaterThan(chartTop);
     });
   }
 });
