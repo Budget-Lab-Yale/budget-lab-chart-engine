@@ -102,7 +102,10 @@ export function horizontalBarHeight(opts: {
   // Uniform band → every category slot is the same height; size it to the taller of the bar budget
   // and the wrapped-label budget so neither is clipped.
   const slotPx = Math.max(catBarPx, labelPx);
-  const inner = nCategories * slotPx + Math.max(0, nSectionBreaks) * sectionGapPx();
+  // The rows get at least as much as the gaps, so the render never shrinks a gap at this height
+  // (axes.ts fittedSectionGapPx).
+  const gapsPx = Math.max(0, nSectionBreaks) * sectionGapPx();
+  const inner = Math.max(nCategories * slotPx, gapsPx) + gapsPx;
   return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx));
 }
 
@@ -613,7 +616,8 @@ export function renderFigure(
       Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6,
     );
     chromeExtra = HORIZONTAL_CHROME_PX + (nSections > 0 ? SECTION_HEADER_TOP_PX : 0);
-    const naturalBusiest = maxPaneCats * slotPxNatural + sectionGapTotal + chromeExtra;
+    // Rows at least as tall as the gaps, as horizontalBarHeight (axes.ts fittedSectionGapPx).
+    const naturalBusiest = Math.max(maxPaneCats * slotPxNatural, sectionGapTotal) + sectionGapTotal + chromeExtra;
     const hBusy = Math.max(HORIZONTAL_HEIGHT_FLOOR, naturalBusiest);
     // Back-solve the per-slot px the busiest facet ACTUALLY got (== slotPxNatural when the floor
     // didn't fire; inflated when it did) so every other facet is scaled by the SAME ratio —

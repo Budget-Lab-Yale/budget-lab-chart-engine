@@ -5,7 +5,7 @@
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, MARK_POINT_R } from "./theme";
-import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth } from "./axes";
+import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth, fittedSectionGapPx } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
   collapseFacetChrome,
@@ -1139,7 +1139,19 @@ export function assemblePlot({
   //    reference line, so no later stroke paints over them.
   marks.push(...labelMarks);
 
-  const sectionGaps = layers.fyScaleOpts && layers.sectionGaps?.before.length ? layers.sectionGaps : undefined;
+  const requestedGaps = layers.fyScaleOpts && layers.sectionGaps?.before.length ? layers.sectionGaps : undefined;
+  // An explicit height too small for the rows plus full gaps shrinks the gaps (fittedSectionGapPx)
+  // rather than squeezing the rows to nothing. The margins are the ones Plot is handed below.
+  const sectionGaps = requestedGaps && height != null
+    ? {
+        ...requestedGaps,
+        px: fittedSectionGapPx(
+          requestedGaps.px,
+          requestedGaps.before.length,
+          height - (layers.marginTop ?? 18) - (layers.marginBottom ?? xOpts.marginBottom ?? 24),
+        ),
+      }
+    : requestedGaps;
   const sectionGapTotal = sectionGaps ? sectionGaps.before.length * sectionGaps.px : 0;
   const plotOpts: Record<string, unknown> = {
     ...tblPlotDefaults({

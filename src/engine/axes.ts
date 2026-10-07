@@ -609,6 +609,14 @@ export function tblFacetGroupYAxis(
 export function sectionGapPx(catFont: number = FACETED_CAT_LABEL_PX): number {
   return 2 * SECTION_HEADER_GAP + catFont;
 }
+/** The section gap actually opened in a chart of a given plot height (its height less the top and
+ *  bottom margins): `px`, unless the `nBreaks` gaps together would take more than half the plot —
+ *  then they share that half equally, so the rows always keep at least half. Only an explicit
+ *  height too small for the rows can trigger it: the height models reserve at least as much for the
+ *  rows as for the gaps (figure.ts horizontalBarHeight and the figure's busiest pane). */
+export function fittedSectionGapPx(px: number, nBreaks: number, plotPx: number): number {
+  return nBreaks > 0 ? Math.min(px, Math.max(0, plotPx) / (2 * nBreaks)) : px;
+}
 /** How far a section header's em-box top sits above its section's first row: the header line plus
  *  SECTION_HEADER_GAP clear below it. */
 export function sectionHeaderLift(catFont: number): number {

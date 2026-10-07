@@ -251,3 +251,101 @@ describe("section gap: spreadSections needs Plot's fy scale", () => {
     expect(spreadSections(svg, { before: [], gapPx: GAP })).toEqual([]);
   });
 });
+
+describe("section gap: an explicit height too small for the full gaps", () => {
+  // Codex's repro: 26 rows in 13 sections at an explicit 400px. Twelve 33px gaps (396px) took the
+  // whole plot, so the band step and every bar collapsed to 0. The gaps now share at most half the
+  // plot (height less margins), so the rows always keep the other half.
+  const SECS = Array.from({ length: 13 }, (_, i) => `S${i + 1}`);
+  /** 13 sections: two rows each (per 2), or two rows in the first and one in each other (per 1,
+   *  which keeps one in-section step for the pitch). */
+  const secOf = (i: number, per: number): string => SECS[per === 2 ? Math.floor(i / 2) : Math.max(0, i - 1)]!;
+  const nRows = (per: number): number => (per === 2 ? 26 : 14);
+  const crampedBar = (per = 2): TidyRow[] =>
+    Array.from({ length: nRows(per) }, (_, i) => ({ cat: `Row ${i + 1}`, sec: secOf(i, per), v: String(1 + (i % 5)) })) as unknown as TidyRow[];
+  const crampedStack = (per = 2): TidyRow[] =>
+    SERIES.flatMap((s, j) =>
+      Array.from({ length: nRows(per) }, (_, i) => ({ bar: `Row ${i + 1}`, sec: secOf(i, per), tax: s, v: String(2 + ((i + j) % 4)) })),
+    ) as unknown as TidyRow[];
+  const crampedDb = (per = 2): TidyRow[] =>
+    Array.from({ length: nRows(per) }, (_, i) => [
+      { group: `Group ${i + 1}`, m: "Cash", v: String(20 + (i % 7)), ranking: secOf(i, per) },
+      { group: `Group ${i + 1}`, m: "Accrual", v: String(8 + (i % 5)), ranking: secOf(i, per) },
+    ]).flat() as unknown as TidyRow[];
+  const CRAMPED: Array<[string, ChartSpec, (per?: number) => TidyRow[]]> = [
+    ["bar", BAR, crampedBar],
+    ["stacked", STACK, crampedStack],
+    ["dumbbell", DUMBBELL, crampedDb],
+  ];
+  const plotPx = (svg: SVGSVGElement): number =>
+    Number(svg.getAttribute("height")) - Number(svg.dataset.marginTop) - Number(svg.dataset.marginBottom);
+  /** The rows keep at least half the plot; the gaps are equal and share the rest. */
+  function expectRowsKeepHalf(svg: SVGSVGElement, what: string): void {
+    const centres = rowCentres(svg);
+    expect(centres, what).toHaveLength(26);
+    const { pitch, breaks } = gaps(centres);
+    expect(breaks, what).toHaveLength(12);
+    expect(new Set(breaks.map((b) => b.toFixed(3))).size, what).toBe(1);
+    const plot = plotPx(svg);
+    expect(12 * breaks[0]!, what).toBeLessThanOrEqual(plot / 2 + 0.01);
+    // Plot rounds the facet band step down to whole px, which can cost each row up to 1px.
+    expect(26 * pitch, what).toBeGreaterThanOrEqual(plot / 2 - 26);
+  }
+  const barHeights = (svg: SVGSVGElement): number[] =>
+    Array.from(svg.querySelectorAll('g[aria-label="bar"] rect')).map((r) => Number(r.getAttribute("height")));
+
+  for (const [name, spec, rowsOf] of CRAMPED) {
+    it(`${name}: renderChart at 400px keeps the rows (and draws real bars)`, () => {
+      const svg = renderChart(spec, rowsOf(), { width: 720, height: 400, document }).svg;
+      expect(Number(svg.getAttribute("height"))).toBe(400);
+      expectRowsKeepHalf(svg, name);
+      if (name !== "dumbbell") for (const h of barHeights(svg)) expect(h).toBeGreaterThan(3);
+    });
+
+    it(`${name}: the live mount at 400px matches renderChart`, () => {
+      const c = document.createElement("div");
+      document.body.appendChild(c);
+      mountChart(c, { spec, rows: rowsOf(), width: 720, height: 400 });
+      const svg = c.querySelector("g.tbl-cat-label")!.closest("svg") as SVGSVGElement;
+      expectRowsKeepHalf(svg, `${name} live`);
+      expect(rowCentres(svg)).toEqual(rowCentres(renderChart(spec, rowsOf(), { width: 720, height: 400, document }).svg));
+    });
+
+    it(`${name}: at auto height the gaps stay a full ${GAP}px, live, export and model agreeing`, () => {
+      // per 1: the rows alone (14 x 22px) are shorter than the gaps (12 x 33px).
+      for (const per of [1, 2]) {
+        const rows = rowsOf(per);
+        const h = horizontalBarChartHeight(spec, rows);
+        expect(computeChartHeight(spec, rows)).toBe(h);
+        const c = document.createElement("div");
+        document.body.appendChild(c);
+        mountChart(c, { spec, rows, width: INNER_W });
+        const l = c.querySelector("g.tbl-cat-label")!.closest("svg") as SVGSVGElement;
+        expect(Number(l.getAttribute("height"))).toBe(h);
+        expect(gaps(rowCentres(l)).breaks, `per ${per}`).toEqual(Array(12).fill(GAP));
+        const e = Array.from(buildExportSvg(spec, rows).querySelectorAll("svg")).find((s) => s.querySelector("g.tbl-cat-label")) as SVGSVGElement;
+        expect(Number(e.getAttribute("height"))).toBe(h);
+        expect(rowCentres(e)).toEqual(rowCentres(l));
+      }
+    });
+  }
+
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`small multiples (${mode}) at an explicit height keep the rows in every pane`, () => {
+      const spec: ChartSpec = { ...STACK, columns: { ...STACK.columns, facet: "pane" }, small_multiples: { columns: 2, mode, pane_order: ["P1", "P2"] } };
+      const rows = ["P1", "P2"].flatMap((pane) => crampedStack().map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
+      const fig = renderFigure(spec, rows, { width: 900, height: 400, document });
+      const [p0, p1] = fig.panes.map((p) => p.svg as SVGSVGElement);
+      expectRowsKeepHalf(p0!, `${mode} p0`);
+      expect(barCentres(p1!)).toEqual(barCentres(p0!));
+      for (const h of barHeights(p1!)) expect(h).toBeGreaterThan(3);
+    });
+
+    it(`small multiples (${mode}) at auto height keep the full gap, one row per section`, () => {
+      const spec: ChartSpec = { ...STACK, columns: { ...STACK.columns, facet: "pane" }, small_multiples: { columns: 2, mode, pane_order: ["P1", "P2"] } };
+      const rows = ["P1", "P2"].flatMap((pane) => crampedStack(1).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];
+      const fig = renderFigure(spec, rows, { width: 900, document });
+      expect(gaps(rowCentres(fig.panes[0]!.svg as SVGSVGElement)).breaks).toEqual(Array(12).fill(GAP));
+    });
+  }
+});
