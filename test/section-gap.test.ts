@@ -11,6 +11,7 @@ import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W } from "../src/embed/figure-chrome";
 import { horizontalBarChartHeight } from "../src/engine/figure";
+import { spreadSections } from "../src/engine/facet-chrome";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -239,5 +240,14 @@ describe("section gap: small multiples", () => {
     const liveH = heights(c, ".figure-pane svg");
     expect(liveH).toHaveLength(2);
     expect(heights(buildExportSvg(FIG, rows), "svg")).toEqual(liveH);
+  });
+});
+
+describe("section gap: spreadSections needs Plot's fy scale", () => {
+  it("throws, rather than silently drawing no gaps, when the svg exposes no fy scale", () => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
+    expect(() => spreadSections(svg, { before: ["Row 4"], gapPx: GAP })).toThrow(/fy scale/);
+    // No gaps asked for: nothing to open, nothing to read.
+    expect(spreadSections(svg, { before: [], gapPx: GAP })).toEqual([]);
   });
 });

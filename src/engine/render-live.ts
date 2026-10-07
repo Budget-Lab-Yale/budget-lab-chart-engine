@@ -1307,8 +1307,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
       // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
       // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
-      // label gutter; vertical: stopping at the baseline, matching faceted), a uniform highlight
-      // height across section spacers, a bolded hovered label (horizontal) / frosted category pill
+      // label gutter; vertical: stopping at the baseline, matching faceted), a one-row highlight
+      // that never covers a section gap, a bolded hovered label (horizontal) / frosted category pill
       // (vertical), and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
       // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
       // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →

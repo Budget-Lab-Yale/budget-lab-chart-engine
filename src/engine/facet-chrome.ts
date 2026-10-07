@@ -105,9 +105,14 @@ interface FyScale {
  * absolute-y gap ranges (row slot edge to row slot edge) for collapseFacetChromeY's gridline breaks.
  */
 export function spreadSections(svg: SVGSVGElement, { before, gapPx }: { before: string[]; gapPx: number }): Array<[number, number]> {
+  if (!before.length) return [];
   const scaleFn = (svg as unknown as { scale?: (name: string) => unknown }).scale;
   const fy = typeof scaleFn === "function" ? (scaleFn.call(svg, "fy") as FyScale | undefined) : undefined;
-  if (!fy?.apply || !before.length) return [];
+  // Without the scale the gaps cannot be placed; failing loudly beats a sectioned chart that
+  // silently loses them (and its header room) after a Plot upgrade changes `svg.scale`.
+  if (!fy?.apply || typeof fy.step !== "number") {
+    throw new Error("spreadSections: Plot's fy scale is unavailable (svg.scale(\"fy\")), so the section gaps cannot be opened");
+  }
   const origin = fy.apply(fy.domain[0]) ?? 0;
   const starts = before
     .map((c) => fy.apply(c))

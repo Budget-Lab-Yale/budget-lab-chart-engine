@@ -199,6 +199,25 @@ describe("sectioned horizontal stack, tooltip hover: the band is the hovered row
     }
     hover(p0, centre(p0, "Beta one"));
     expectAccent(p0, "Beta one");
+    leave(p0);
+    expectAccent(p0, null);
+  });
+
+  it("small multiples: hovering the label-less pane strips its row and accents the label pane's label", () => {
+    const panes = mountPanes(STACK_FIG, [...stackRows(NEG, "P1"), ...stackRows(NEG, "P2")]);
+    const [p0, p1] = panes as [SVGSVGElement, SVGSVGElement];
+    expect(labels(p1)).toHaveLength(0);
+    const pitch = centre(p0, "Alpha two") - centre(p0, "Alpha one");
+    for (const cat of GAP_ROWS) {
+      const c = centre(p0, cat);
+      hover(p1, c);
+      expectRowBand(shownHl(p1, ".tbl-band-crosshair-hl"), p1, c, pitch, `${cat} on the label-less pane`);
+      expectAccent(p0, cat);
+      // The label pane's echo strip is the same row, under the label.
+      expectRowBand(p0.querySelector(".tbl-coord-region"), p0, c, pitch, `${cat} echo on the label pane`);
+    }
+    leave(p1);
+    expectAccent(p0, null);
   });
 });
 
