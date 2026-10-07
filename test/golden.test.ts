@@ -32,6 +32,7 @@ import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
 import { parseDate } from "../src/spec/parse-time";
+import { horizontalBarChartHeight } from "../src/engine/figure";
 
 // Minimal CSV → TidyRow[]. The real data layer (engine step 5) handles quoting/remote
 // sources; these fixtures are deliberately comma-free so a plain split suffices.
@@ -744,6 +745,10 @@ const FIG7_FACETED_SPEC: ChartSpec = {
 };
 
 describe("faceted horizontal bars draw as groups (Figure 7)", () => {
+  // At the height the live mount and the PNG export give it (it grows with its rows), not the
+  // 353px default, which squeezes 80 bars to 2px.
+  const fig7 = (spec: ChartSpec, rows: TidyRow[]) =>
+    renderChart(spec, rows, { width: 900, height: horizontalBarChartHeight(spec, rows), document });
   const groupTitles = (svg: SVGSVGElement): string[] =>
     Array.from(svg.querySelectorAll('g[font-weight="700"] text'))
       .map((t) => ({ text: t.textContent ?? "", y: absY(t) }))
@@ -752,7 +757,7 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("one chart: a title per facet in pane_order over its own rows, one value axis", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = renderChart(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const { svg } = fig7(FIG7_FACETED_SPEC, rows);
     expect(groupTitles(svg)).toEqual(["Section 122 Expires", "Section 122 Extended"]);
     // Both groups' bars: 2 groups × 20 categories × 2 series.
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(80);
@@ -767,7 +772,7 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("wraps long category labels onto multiple lines (no overflow into the plot)", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = renderChart(FIG7_FACETED_SPEC, rows, { width: 900, document });
+    const { svg } = fig7(FIG7_FACETED_SPEC, rows);
     const wrapped = Array.from(svg.querySelectorAll("text")).find((t) =>
       (t.textContent ?? "").startsWith("Food and beverages"),
     );
@@ -777,15 +782,15 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("x_axis_ticks 'both' draws one value-tick row at the top and one at the bottom", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = renderChart({ ...FIG7_FACETED_SPEC, x_axis_ticks: "both" }, rows, { width: 900, document });
+    const { svg } = fig7({ ...FIG7_FACETED_SPEC, x_axis_ticks: "both" }, rows);
     expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(1);
   });
 
   it("is deterministic and matches the golden", async () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const a = renderChart(FIG7_FACETED_SPEC, rows, { width: 900, document }).svg.outerHTML;
-    const b = renderChart(FIG7_FACETED_SPEC, rows, { width: 900, document }).svg.outerHTML;
+    const a = fig7(FIG7_FACETED_SPEC, rows).svg.outerHTML;
+    const b = fig7(FIG7_FACETED_SPEC, rows).svg.outerHTML;
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-grouped.golden.svg");
   });
