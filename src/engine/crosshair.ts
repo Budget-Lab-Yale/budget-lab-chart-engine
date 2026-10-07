@@ -936,6 +936,13 @@ export interface BandCrosshairOptions {
    *  `chrome.tooltip: false` alike (render-live's actual use case: hit-test without the engine's
    *  own card). */
   onHover?: (ctx: BandHoverCtx | null) => void;
+  /** Horizontal: the row strip's x-extent and label accent, as `SecondaryBandOptions`' fields of
+   *  the same names — start at the SVG's left edge (under the category label), run past the right
+   *  edge by `regionExtendRight` (bridging the inter-pane gap), and bold + darken the hovered row's
+   *  label. Unset keeps the strip within the plot and the label as drawn. */
+  regionFromLeftEdge?: boolean;
+  regionExtendRight?: number;
+  accentLabel?: boolean;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -1512,14 +1519,17 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
         })()
       : undefined;
 
+  const accenter = opts.accentLabel && horizontal && !emitOnly ? labelAccenter(svgEl) : null;
+
   /** Show the highlight over the given band geometry, spanning the full plot axis. */
   function showHighlight(bandMin: number, bandMax: number): void {
     if (!hl) return;
     if (horizontal) {
-      // Band is a y-row; highlight spans full plot width.
-      hl.setAttribute("x", String(ml));
+      // Band is a y-row; highlight spans the plot width, or from under the label (rowStripX).
+      const { x, w } = rowStripX(W, ml, mr, opts);
+      hl.setAttribute("x", String(x));
       hl.setAttribute("y", String(bandMin));
-      hl.setAttribute("width", String(W - ml - mr));
+      hl.setAttribute("width", String(w));
       hl.setAttribute("height", String(Math.max(0, bandMax - bandMin)));
     } else {
       // Band is an x-column; highlight spans full plot height.
@@ -1557,9 +1567,13 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
         yMax: wide[i]!.max,
       }));
       category = resolveCategoryFromBandsH(bands, svgY);
-      if (category) {
-        const b = bands.find((x) => x.category === category);
-        if (b) { hlMin = b.yMin; hlMax = b.yMax; }
+      // The pointer resolves by the widened bands (so a gap still picks its nearer row), but the
+      // highlight is the row's own strip, which never covers a section gap or header.
+      const idx = category ? raw.findIndex((x) => x.category === category) : -1;
+      if (idx >= 0) {
+        const s = rowStrip(raw, idx, mt, H - mb);
+        hlMin = s.min;
+        hlMax = s.max;
       }
     } else {
       // Vertical: resolve cursor X → category via x-bands, widened to the midpoints
@@ -1605,6 +1619,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     if (emitOnly) return;
 
     showHighlight(hlMin, hlMax);
+    accenter?.accent(category);
 
     if (!tip) return; // chrome.tooltip: false — highlight shown, no card.
 
@@ -1645,6 +1660,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
   function hide(): void {
     if (hl) hl.setAttribute("opacity", "0");
+    accenter?.restore();
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
     opts.onHover?.(null);
@@ -2128,6 +2144,66 @@ export const CROSSHAIR_HIT_SELECTOR =
 const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
 const COORD_LABEL_DARK = "#1A1A2E";
+
+/** Bold + darken one category's axis label at a time, restoring the last one on the next call. The
+ *  label is found by the `data-category` hook the tagging pass stamps (axes.ts CAT_LABEL_CLASS), not
+ *  by text, so a category that reads like a tick label cannot be confused with it. Weight/colour
+ *  only — the shaded row is the emphasis. One per attachment, so each tracks its own label. */
+function labelAccenter(svgEl: SVGSVGElement): { accent: (category: string) => void; restore: () => void } {
+  const labelEls = new Map<string, SVGTextElement>();
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text[data-category]"))) {
+    const cat = t.getAttribute("data-category");
+    if (cat) labelEls.set(cat, t);
+  }
+  let accented: SVGTextElement | null = null;
+  const restore = (): void => {
+    if (!accented) return;
+    accented.setAttribute("font-weight", "500");
+    accented.setAttribute("fill", TBL.color.axis);
+    accented = null;
+  };
+  return {
+    accent: (category) => {
+      restore();
+      const el = labelEls.get(category);
+      if (!el) return;
+      el.setAttribute("font-weight", "700");
+      el.setAttribute("fill", COORD_LABEL_DARK);
+      accented = el;
+    },
+    restore,
+  };
+}
+
+/** A horizontal category row's hover strip: ONE row pitch tall (the smallest step between adjacent
+ *  rows) centred on the row, clamped to the plot's [top, bottom]. Every row gets the same strip, and
+ *  a row beside a section gap does not reach into the gap or its header — which midpoint widening
+ *  does, since the neighbour across the gap is far away. */
+function rowStrip(
+  bands: ReadonlyArray<{ yMin: number; yMax: number }>,
+  idx: number,
+  top: number,
+  bottom: number,
+): { min: number; max: number; centre: number } {
+  const centers = bands.map((b) => (b.yMin + b.yMax) / 2);
+  let step = Infinity;
+  for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
+  if (!Number.isFinite(step)) step = bands[idx]!.yMax - bands[idx]!.yMin + 8;
+  const c = centers[idx]!;
+  return { min: Math.max(top, c - step / 2), max: Math.min(bottom, c + step / 2), centre: c };
+}
+
+/** A horizontal row strip's x-extent: from the plot's left edge, or the SVG's (under the label), to
+ *  the SVG's right edge plus any inter-pane bridge. Unset options keep the plot-bounded strip. */
+function rowStripX(
+  W: number,
+  ml: number,
+  mr: number,
+  opts: { regionFromLeftEdge?: boolean; regionExtendRight?: number },
+): { x: number; w: number } {
+  if (!opts.regionFromLeftEdge) return { x: ml, w: Math.max(0, W - ml - mr) };
+  return { x: 0, w: W + (opts.regionExtendRight ?? 0) };
+}
 /** Net-total pill text: true black, matching the net dot's black stroke (Style-Guide mark-black). */
 const TOTAL_PILL_COLOR = "#000000";
 
@@ -2969,25 +3045,8 @@ export function attachSecondaryBandCursor(
   const axisRows = makeAxisRows(svgEl, mt + plotH);
 
   // Accent (bold/dark) the hovered category's Y-axis label by mutating the EXISTING label element
-  // (pixel-perfect alignment, vs drawing a duplicate). Found via the `data-category` hook the
-  // axes/tagging layer stamps on every category label (axes.ts CAT_LABEL_CLASS + assemble-plot's
-  // tagging pass) — robust against a category string that happens to equal a tick label's text
-  // (the old textContent-matching approach's collision risk). Track + restore on clear.
-  const labelEls = new Map<string, SVGTextElement>();
-  if (opts.accentLabel) {
-    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text[data-category]"))) {
-      const cat = t.getAttribute("data-category");
-      if (cat) labelEls.set(cat, t);
-    }
-  }
-  let accented: SVGTextElement | null = null;
-  const restoreAccent = (): void => {
-    if (accented) {
-      accented.setAttribute("font-weight", "500");
-      accented.setAttribute("fill", TBL.color.axis);
-      accented = null;
-    }
-  };
+  // (pixel-perfect alignment, vs drawing a duplicate); see labelAccenter.
+  const accenter = opts.accentLabel ? labelAccenter(svgEl) : null;
 
   /** The shaded band for `category` — a rect in viewBox coords — plus that band's centre on the
    *  category axis (which the active pane's category highlight is placed on). ONE computation for
@@ -3005,16 +3064,8 @@ export function attachSecondaryBandCursor(
       } as BandCrosshairOptions);
       const idx = bands.findIndex((b) => b.category === category);
       if (idx < 0) return null;
-      // EQUAL-height row for every category: use the UNIFORM band step (centred on each category),
-      // not the neighbour-midpoint widening — otherwise categories at a section boundary (whose
-      // neighbour is a spacer-gap away) get a taller strip than the rest.
-      const centers = bands.map((bb) => (bb.yMin + bb.yMax) / 2);
-      let step = Infinity;
-      for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
-      if (!Number.isFinite(step)) step = bands[idx]!.yMax - bands[idx]!.yMin + 8;
-      const c = centers[idx]!;
-      const yMin = Math.max(mt, c - step / 2);
-      const yMax = Math.min(mt + plotH, c + step / 2);
+      // EQUAL-height row for every category (rowStrip), the same strip the primary crosshair draws.
+      const { min: yMin, max: yMax, centre: c } = rowStrip(bands, idx, mt, mt + plotH);
       // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
       // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
       const x0 = opts.regionFromLeftEdge ? 0 : ml;
@@ -3045,7 +3096,7 @@ export function attachSecondaryBandCursor(
 
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
-    restoreAccent();
+    accenter?.restore();
     if (category == null) {
       g.setAttribute("opacity", "0");
       return;
@@ -3059,6 +3110,7 @@ export function attachSecondaryBandCursor(
         return;
       }
       addCoordRegion(g, doc, echo.x, echo.w, echo.y, echo.h);
+      accenter?.accent(category);
       g.setAttribute("opacity", "1");
       return;
     }
@@ -3080,14 +3132,7 @@ export function attachSecondaryBandCursor(
       const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
       // Accent the hovered category's Y label by bolding + darkening the existing label element
       // (weight/color only, no background pill — the shaded row already provides the emphasis).
-      if (opts.accentLabel) {
-        const el = labelEls.get(category);
-        if (el) {
-          el.setAttribute("font-weight", "700");
-          el.setAttribute("fill", COORD_LABEL_DARK);
-          accented = el;
-        }
-      }
+      accenter?.accent(category);
       const pillGap = opts.pillGap ?? 6;
       // showPills: false (chrome.valuePills) suppresses only the per-series value pills below — the
       // shaded row region and the accented Y-axis label (above) still render, mirroring
@@ -3370,6 +3415,13 @@ export interface CategoricalLineOptions {
    *  builder's gate (more than one series with a value at the hovered category). Read by the
    *  primary crosshair only; the coordinated cursor draws pills, not a card. */
   showTotal?: boolean;
+  /** Horizontal: the row strip's x-extent and label accent, as `SecondaryBandOptions`' fields of
+   *  the same names — start at the SVG's left edge (under the category label), run past the right
+   *  edge by `regionExtendRight` (bridging the inter-pane gap), and bold + darken the hovered row's
+   *  label. Unset keeps the strip within the plot and the label as drawn. */
+  regionFromLeftEdge?: boolean;
+  regionExtendRight?: number;
+  accentLabel?: boolean;
 }
 
 /**
@@ -3406,8 +3458,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     hl.classList.add("tbl-catline-hl");
     hl.setAttribute("fill", TBL.color.annotationDim);
     if (horizontal) {
-      hl.setAttribute("x", String(ml));
-      hl.setAttribute("width", String(Math.max(0, plotRight - ml)));
+      const { x, w } = rowStripX(W, ml, mr, opts);
+      hl.setAttribute("x", String(x));
+      hl.setAttribute("width", String(w));
     } else {
       hl.setAttribute("y", String(mt));
       hl.setAttribute("height", String(plotBottom - mt));
@@ -3438,6 +3491,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   svgEl.appendChild(hit);
 
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
+  const accenter = opts.accentLabel && horizontal && hl ? labelAccenter(svgEl) : null;
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
   // `resolveHatch` is a module function, so nothing here varies with the cursor.
@@ -3473,6 +3527,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
         hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
       }
       hl.setAttribute("opacity", "0.12");
+      accenter?.accent(category);
     } else if (guide) {
       guide.setAttribute("x1", String(cx));
       guide.setAttribute("x2", String(cx));
@@ -3504,6 +3559,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   function hide(): void {
     if (guide) guide.setAttribute("opacity", "0");
     if (hl) hl.setAttribute("opacity", "0");
+    accenter?.restore();
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
@@ -3560,9 +3616,12 @@ export function attachSecondaryCategoricalLineCursor(
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
   let centers: Array<{ category: string; cx: number }> | null = null;
+  const stripX = rowStripX(W, ml, mr, opts);
+  const accenter = opts.accentLabel && horizontal ? labelAccenter(svgEl) : null;
 
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
+    accenter?.restore();
     if (category == null) { g.setAttribute("opacity", "0"); return; }
     if (!centers)
       centers = opts.centersFromMarks
@@ -3580,7 +3639,8 @@ export function attachSecondaryCategoricalLineCursor(
       const idx = centers.findIndex((x) => x.category === category);
       if (horizontal) {
         const b = uniformBand(centers, idx, mt, mt + plotH);
-        addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+        addCoordRegion(g, doc, stripX.x, stripX.w, b.min, b.max - b.min);
+        accenter?.accent(category);
       } else {
         const b = uniformBand(centers, idx, ml, W - mr);
         addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
@@ -3594,7 +3654,8 @@ export function attachSecondaryCategoricalLineCursor(
       // cursor's core across panes.)
       const idx = centers.findIndex((x) => x.category === category);
       const b = uniformBand(centers, idx, mt, mt + plotH);
-      addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      addCoordRegion(g, doc, stripX.x, stripX.w, b.min, b.max - b.min);
+      accenter?.accent(category);
       // A value pill per series on EVERY pane (matching bars — the whole point of a coordinated
       // cursor is reading values across panes, not just the hovered one); `active` only bolds them.
       // Pills sit just above the row at each dot's value-x, de-collided along X so they never

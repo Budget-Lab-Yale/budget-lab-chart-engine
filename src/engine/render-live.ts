@@ -1234,6 +1234,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         renderedFills: dbFills,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
+        // Horizontal: the row strip runs under the label, which accents — as on a horizontal bar.
+        ...(isHorizontalDumbbell(spec) ? { regionFromLeftEdge: true, accentLabel: true } : {}),
       });
     } else if (spec.xAxisType === "categorical" && (spec.chartType === "line" || spec.chartType === "area")) {
       // Categorical-x LINE or AREA: resolve the category from the x-axis labels (no bars) and show
@@ -1330,6 +1332,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         categoryLabels: spec.x_labels,
         icons: seriesIcons,
         orientation: horizontalBar ? "horizontal" : "vertical",
+        // Horizontal card hover: the same row strip + label accent as the pill hover below.
+        ...(horizontalBar ? { regionFromLeftEdge: true, accentLabel: true } : {}),
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
         onHover: hoverNotifier,
@@ -2094,6 +2098,9 @@ function wireFigureSvg(
       orientation: orientation as "vertical" | "horizontal",
       renderedFills: dbFills,
       markerless: true,
+      // Horizontal: every pane carries its own labels, so each strip (the hovered pane's and the
+      // echoes) runs under the label and accents it — as on a horizontal bar figure.
+      ...(orientation === "horizontal" ? { regionFromLeftEdge: true, accentLabel: true } : {}),
     };
     // NOT emitOnly: every pane shows its own hover TOOLTIP (dot swatches matching the legend) — the
     // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
@@ -2304,6 +2311,14 @@ function wireFigureSvg(
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
       orientation: horizontal ? "horizontal" : "vertical",
+      // Horizontal card hover: the same row strip + label accent the coordinated cursor draws.
+      ...(horizontal
+        ? {
+            regionFromLeftEdge: true,
+            regionExtendRight: ctx.coordExtendRight ?? 0,
+            accentLabel: ctx.coordAccentLabel === true,
+          }
+        : {}),
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
@@ -2402,7 +2417,11 @@ function wireFigureSvg(
         horizontal,
         echoOnly: true,
         ...(horizontal
-          ? { regionFromLeftEdge: true, regionExtendRight: ctx.coordExtendRight ?? 0 }
+          ? {
+              regionFromLeftEdge: true,
+              regionExtendRight: ctx.coordExtendRight ?? 0,
+              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
+            }
           : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
