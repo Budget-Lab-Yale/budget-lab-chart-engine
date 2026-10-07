@@ -120,8 +120,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - A short category label of wide letters could reach the plot on a horizontal bar, stack or dumbbell
   ("Gamma" touched a dumbbell's zero rule): the left gutter is sized from an average letter width,
   which runs short on such labels. The gutter now also clears each one-line label's width, measured
-  from the font's letter widths, by 8px. Live, in the PNG export, the height models and small-multiple
-  panes. A label that already had the room leaves the gutter as it was, so no published figure moves.
+  from the font's letter widths, by 8px. Live, in the PNG export and the height models. A label
+  that already had the room leaves the gutter as it was, so no published figure moves.
 - `barStack.netDisplay: text` printed a negative net as its magnitude ("15" for -15), so a stack
   netting below zero read as a gain. It now prints it with a leading minus, outside any prefix, the
   sign style of the hover card and the waterfall labels (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.
@@ -137,7 +137,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `section_order` scoping reached two more readers. Validation's duplicate-row check counted rows
   of a left-out section, so a valid spec was rejected. And a series found only in a left-out section moved
   every later series one palette colour; colours now index the series list with every section drawn,
-  as small multiples' panes index the figure's list (live, figure legend and PNG export). A
+  as small multiples' panes index the figure's list (live, legend and PNG export). A
   `barStack.mono` stack ranks its shades over the rows with every section drawn, summed in the row
   order the full render sums them (a near-cancelling series could otherwise flip sign), so no drawn
   series changes shade either.
@@ -328,6 +328,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `hstacked-grouped`, rendered as grouped single charts; `figure7-tariff-sectioned`,
   `figure10-shape-sectioned-single` and `figure-hstacked-sectioned`, which set `columns.facet`
   with `columns.section`, are removed, as validation now rejects that pairing.
+- **Horizontal facet charts change for embedders.** On a horizontal `bar`, `stacked` or `dumbbell`
+  chart (orientation omitted included) with `columns.facet`, `onHover` and the `tbl-hover` event
+  report the facet value as `section` and no longer carry `facet`, so a handler reading `facet` must
+  read `section`. `renderFigure` throws on such a spec; draw it with `renderChart` or `render`.
+  `renderChart`, `render`, `mountChart` and `buildExportSvg` throw on one that also sets
+  `columns.section`, which `tbl-chart validate` rejects. **No published figure is affected** (see
+  the entry above).
 - **Sectioned charts get a fixed 33px section gap and indented category labels.** Published figures
   affected: the tariff model update's `etas` and `eta-effect` (sectioned horizontal bars, on
   `main`), and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (sectioned horizontal
@@ -340,7 +347,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   (approved): `bar-sectioned-single`, `figure7-tariff-sectioned`, `figure10-shape-sectioned-single`,
   `dumbbell-sectioned`, `stacked-sectioned`, `stacked-sectioned-net-dot`,
   `stacked-sectioned-net-text`, `figure-hstacked-sectioned`; the same eight again for the
-  label indent (approved).
+  label indent (approved). `figure7-tariff-sectioned`, `figure10-shape-sectioned-single` and
+  `figure-hstacked-sectioned` were since removed (horizontal facets draw as groups, above).
 - **Horizontal charts under 400px are sized to their rows.** One archived figure moves:
   `effective-tax-rates-top-groups` on the unmerged PR #67 branch (a 7-row sectioned dumbbell) goes
   from 400px to 243px on screen and its PNG from 614px to 457px, its rows 22px apart instead of
@@ -350,7 +358,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   horizontal `bar` or `stacked` chart or a `dumbbell`; no other spec is one. The dumbbell bottom-margin change
   reaches none either: the archive's only dumbbell is sectioned. Goldens re-recorded because they
   were floored at 400px (approved): `dumbbell-sectioned`, `figure-hstacked-shared`,
-  `figure-hstacked-sectioned`.
+  `figure-hstacked-sectioned` (the last two since removed: horizontal facets draw as groups, above).
 - **Hover: horizontal card-hover stacks and horizontal dumbbells shade under the label and bold it.**
   Live only. Of the archive, only the PR #67 dumbbell above hovers differently; the stacks on `main`
   (ai-fiscal `revenue-by-income-type`, `revenue-by-instrument`) are vertical.
@@ -362,9 +370,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   and legend placement read them. **No published figure is affected**: the archive's two
   `section_order` specs (the tariff model update's `eta-effect` and `etas`) list every section their
   data carries. The same holds for its validation, grid-column and series-colour readers.
-- **Sections: `x_order` / `category_order` no longer move a section, and faceted panes share one row
-  order.** Rows are re-sorted only when the order they would draw in differs, so a chart already
-  drawn in this order keeps its output byte for byte. **No published figure is affected**: the
+- **Sections: `x_order` / `category_order` no longer move a section.** Rows are re-sorted only
+  when the order they would draw in differs, so a chart already drawn in this order keeps its output byte for byte. **No published figure is affected**: the
   archive's sectioned specs (`eta-effect`, `etas`, and `effective-tax-rates-top-groups` on the PR #67
   branch) set neither field and none is faceted.
 - **Sections: a label repeated across sections draws one row per section**, and two rows for the
@@ -469,13 +476,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `revenue-by-tax-step-up`, go from a 120px to a 26px bottom margin and their bars take the freed
   height; neither sets `x_axis_ticks`. **Two goldens were re-recorded**, with Sylva's approval:
   `stacked-horizontal` and `figure-hstacked-shared` (short labels, so 22px became 26px and the plot
-  is 4px shorter).
+  is 4px shorter). `figure-hstacked-shared` was since replaced by `hstacked-grouped` (horizontal
+  facets draw as groups, above).
 - **`columns.section` is now accepted on a horizontal stacked chart** (it was a validation error).
   **No published figure is affected**: no stacked spec on `main` (ai-fiscal's two, both vertical),
   on the `pr67-spec-fixes` branch or in its working tree sets `columns.section`. The sectioned-bar
   layout code moved into a module the stack shares; every bar golden is byte-identical. New goldens
   only: `stacked-sectioned`, `stacked-sectioned-net-dot`, `stacked-sectioned-net-text`,
-  `figure-hstacked-sectioned`. No existing golden moves.
+  `figure-hstacked-sectioned` (since removed: horizontal facets draw as groups, above). No existing
+  golden moves.
 
 ## [1.15.0] - 2026-10-01
 

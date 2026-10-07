@@ -178,6 +178,11 @@ describe("validation: settings that only mean something for panes", () => {
     const both = { ...bar, columns: { ...bar.columns, section: "m" } };
     expect(errs(both).join("\n")).toMatch(/columns\.facet and columns\.section are both set/);
     expect(() => renderChart(both as ChartSpec, ROWS)).toThrow(/columns\.facet and columns\.section are both set/);
+    expect(() => render(both as ChartSpec, ROWS)).toThrow(/columns\.facet and columns\.section are both set/);
+    expect(() => mountChart(document.createElement("div"), { spec: both as ChartSpec, rows: ROWS, width: INNER_W })).toThrow(
+      /columns\.facet and columns\.section are both set/,
+    );
+    expect(() => buildExportSvg(both as ChartSpec, ROWS)).toThrow(/columns\.facet and columns\.section are both set/);
   });
   it("rejects small_multiples.columns > 1, but accepts 1", () => {
     expect(errs(sm({ columns: 2 })).join("\n")).toMatch(/small_multiples\.columns 2 has no effect.*groups/);
@@ -199,6 +204,25 @@ describe("validation: settings that only mean something for panes", () => {
     const spec = { ...db, annotations: { xAxis: [{ x: "15", label: "L", facet: "Short" }] } };
     expect(errs(spec).join("\n")).toMatch(/annotations\.xAxis\[0\]\.facet has no pane to scope to/);
     expect(errs({ ...db, annotations: { xAxis: [{ x: "15", label: "L" }] } })).toEqual([]);
+  });
+  // The other scoped lists. annotations.yAxis and yAxisPolicy.markers are rejected on a horizontal
+  // chart anyway (value axis is x), and an overlay may be refused for the chart type, so each case
+  // asserts the facet-scope message itself, and its absence without the `facet` key.
+  const scopedCases: Array<[string, (facet?: string) => object]> = [
+    ["annotations.yAxis", (facet) => ({ annotations: { yAxis: [{ y: 15, label: "L", ...(facet ? { facet } : {}) }] } })],
+    ["annotations.points", (facet) => ({ annotations: { points: [{ x: "Q1", y: 15, label: "L", ...(facet ? { facet } : {}) }] } })],
+    ["yAxisPolicy.markers", (facet) => ({ yAxisPolicy: { markers: [{ y: 15, label: "L", ...(facet ? { facet } : {}) }] } })],
+    ["overlays", (facet) => ({ overlays: [{ method: "lm", ...(facet ? { facet } : {}) }] })],
+  ];
+  for (const [at, extra] of scopedCases) {
+    it(`rejects a facet-scoped ${at} entry`, () => {
+      const msg = new RegExp(`${at.replace(".", "\\.")}\\[0\\]\\.facet has no pane to scope to`);
+      expect(errs({ ...db, ...extra("Short") }).join("\n")).toMatch(msg);
+      expect(errs({ ...db, ...extra() }).join("\n")).not.toMatch(msg);
+    });
+  }
+  it("rejects coordinated_cursor even at its default true", () => {
+    expect(errs(sm({ coordinated_cursor: true })).join("\n")).toMatch(/small_multiples\.coordinated_cursor has no effect/);
   });
   it("accepts tooltip_section: the facets are the sections", () => {
     expect(errs({ ...db, tooltip_section: true })).toEqual([]);
