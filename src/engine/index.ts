@@ -722,8 +722,11 @@ function sectionedRowOrder(spec: ChartSpec, rows: readonly PreparedRow[], withCa
   const encountered = [...new Set(categories.map((c) => sectionOf.get(c) as string))];
   const sections = spec.section_order?.length ? spec.section_order.filter((s) => encountered.includes(s)) : encountered;
   const catOrder = withCategoryOrder ? categoryOrderFor(spec) : undefined;
+  // As sortByCategoryOrder: unlisted ranks at the list's length. A repeated entry makes the
+  // distinct count smaller than a listed index, which tied the two.
   const rank = new Map((catOrder ?? []).map((c, i) => [c, i] as const));
-  const rankOf = (c: string): number => rank.get(categoryText(c)) ?? rank.size;
+  const unlisted = catOrder?.length ?? 0;
+  const rankOf = (c: string): number => rank.get(categoryText(c)) ?? unlisted;
   return sections.flatMap((s) => categories.filter((c) => sectionOf.get(c) === s).sort((a, b) => rankOf(a) - rankOf(b)));
 }
 

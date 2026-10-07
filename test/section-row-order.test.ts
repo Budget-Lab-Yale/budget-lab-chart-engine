@@ -134,3 +134,59 @@ describe("small multiples: every pane draws its rows in one figure-wide order", 
     }
   }
 });
+
+describe("a repeated x_order / category_order entry leaves unlisted categories after every listed one", () => {
+  // Codex final-fix repro: rows S/U/1, S/A/2, S/B/3 with x_order ["A", "A", "B"]. B's rank is 2
+  // and an unlisted category ranked by the deduplicated count (2), so U tied B and drew above it.
+  const PAIRS: Array<[string, string, number]> = [["First", "U", 1], ["First", "A", 2], ["First", "B", 3]];
+  for (const chartType of Object.keys(SPECS)) {
+    for (const field of ["x_order", "category_order"] as const) {
+      it(`${chartType}, ${field}: A, B, then U (live and PNG export)`, () => {
+        const spec = { ...SPECS[chartType]!, [field]: ["A", "A", "B"] } as ChartSpec;
+        const rows = rowsFor(chartType, PAIRS);
+        const want = ["[First]", "A", "B", "U"];
+        expect(gutter(renderChart(spec, rows, { width: 720, height: 500, document }).svg)).toEqual(want);
+        expect(gutter(buildExportSvg(spec, rows))).toEqual(want);
+      });
+    }
+  }
+
+  it("small multiples (shared and per-pane): every pane draws A, B, then U", () => {
+    for (const mode of ["shared", "per-pane"] as const) {
+      const spec = {
+        ...SPECS.bar!,
+        columns: { ...SPECS.bar!.columns, facet: "pane" },
+        x_order: ["A", "A", "B"],
+        small_multiples: { columns: 2, mode, pane_order: ["P", "Q"] },
+      } as ChartSpec;
+      const rows = [...rowsFor("bar", PAIRS, { pane: "P" }), ...rowsFor("bar", PAIRS, { pane: "Q" })];
+      const live = renderFigure(spec, rows, { width: 900, document }).panes.map((x) => x.svg as SVGSVGElement);
+      const exported = Array.from(buildExportSvg(spec, rows).querySelectorAll("svg")).filter((s) => s.querySelector('g[aria-label="bar"]'));
+      expect(exported.length).toBe(2);
+      for (const svg of [...live, ...exported]) {
+        // A shared figure's right pane draws no category labels; its bars still show the order.
+        const labels = gutter(svg);
+        if (labels.length) expect(labels).toEqual(["[First]", "A", "B", "U"]);
+        // Values A 2, B 3, U 1: top to bottom A, B, U puts the longest bar in the middle and the
+        // shortest at the bottom.
+        const [a, b, u] = rowEndsTopDown(svg);
+        expect(b!).toBeGreaterThan(a!);
+        expect(a!).toBeGreaterThan(u!);
+      }
+    }
+  });
+
+  it("a sectioned axis orders a repeated list exactly as the same chart without sections", () => {
+    // Whatever rank a repeated entry takes, the section must not change it: x_order sorts the
+    // categories of an unsectioned chart, and the sectioned chart re-sorts by its own reading.
+    for (const order of [["A", "A", "B"], ["A", "B", "A"], ["B", "A", "B", "A"]]) {
+      const sectioned = { ...SPECS.bar!, x_order: order } as ChartSpec;
+      const plain = { ...sectioned, columns: { x: "cat", value: "v" } } as ChartSpec;
+      const rows = rowsFor("bar", PAIRS);
+      const cats = (svg: SVGSVGElement) => gutter(svg).filter((t) => !t.startsWith("["));
+      const plainCats = cats(renderChart(plain, rows, { width: 720, height: 500, document }).svg);
+      expect(plainCats.length).toBe(3);
+      expect(cats(renderChart(sectioned, rows, { width: 720, height: 500, document }).svg)).toEqual(plainCats);
+    }
+  });
+});
