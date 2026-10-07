@@ -418,6 +418,9 @@ export function renderPane(
   const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, allSections, data);
   const paneOpts = paletteSeries ? { ...opts, paletteSeries } : opts;
   const monoBasis = monoStack && allSections ? scopeToSeries(spec, allSections) : undefined;
+  // In the row order the full render sums them (assemblePaneResult sorts its rows the same way): a
+  // series' sign is a float sum, so a different order can flip a near-cancelling one and swap shades.
+  if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope, opts.sectionRowOrder);
   return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
 }
 

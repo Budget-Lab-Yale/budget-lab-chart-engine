@@ -316,3 +316,60 @@ describe("section_order: a monochrome stack keeps every drawn series' shade when
     }
   }
 });
+
+describe("section_order: the mono shade basis sums in the full render's row order", () => {
+  // Codex's repro: Y's three rows cancel to 0 summed in x_order (A, B, C) but to -1 in CSV order
+  // (A, C, B), so a basis summed in CSV order classed Y negative and swapped Y's and Z's shades.
+  const ROWS = [
+    { sec: "Keep", bar: "A", tax: "Y", v: "1e16" },
+    { sec: "Keep", bar: "C", tax: "Y", v: "-1e16" },
+    { sec: "Keep", bar: "B", tax: "Y", v: "-1" },
+    { sec: "Keep", bar: "A", tax: "Z", v: "1" },
+    { sec: "Drop", bar: "D", tax: "X", v: "1" },
+  ] as TidyRow[];
+  const all = {
+    ...base,
+    chartType: "stacked",
+    columns: { x: "bar", series: "tax", value: "v", section: "sec" },
+    series_order: ["Z", "Y", "X"],
+    x_order: ["A", "B", "C"],
+    section_order: ["Keep", "Drop"],
+    barStack: { mono: { base: "blue" } },
+  } as ChartSpec;
+  const kept = { ...all, section_order: ["Keep"] } as ChartSpec;
+  const fills = (svg: Element): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const r of Array.from(svg.querySelectorAll('g[aria-label="bar"] rect[data-series]'))) m.set(r.getAttribute("data-series")!, r.getAttribute("fill")!);
+    return m;
+  };
+  const full = (): Map<string, string> => fills(renderChart(all, ROWS, { width: 720, height: 400, document }).svg);
+
+  it("standalone: Y and Z keep their shades, live and in the PNG export", () => {
+    const want = full();
+    expect(new Set([want.get("Y"), want.get("Z")]).size).toBe(2);
+    const live = renderChart(kept, ROWS, { width: 720, height: 400, document });
+    for (const svg of [live.svg, buildExportSvg(kept, ROWS)]) {
+      const got = fills(svg);
+      expect(got.get("Y")).toBe(want.get("Y"));
+      expect(got.get("Z")).toBe(want.get("Z"));
+    }
+    for (const l of live.legendItems ?? []) expect([l.series, l.color]).toEqual([l.series, want.get(l.series)]);
+  });
+
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`small multiples (${mode}): every pane keeps Y's and Z's shades`, () => {
+      const want = full();
+      const figSpec = { ...kept, columns: { ...kept.columns, facet: "pane" }, small_multiples: { columns: 2, mode } } as ChartSpec;
+      const figRows = ["P", "Q"].flatMap((pane) => ROWS.map((r) => ({ ...r, pane }))) as TidyRow[];
+      const fig = renderFigure(figSpec, figRows, { width: 900, document });
+      const panes = fig.panes.map((p) => p.svg as SVGSVGElement);
+      expect(panes.length).toBe(2);
+      for (const p of panes) {
+        const got = fills(p);
+        expect(got.get("Y")).toBe(want.get("Y"));
+        expect(got.get("Z")).toBe(want.get("Z"));
+      }
+      for (const l of fig.legendItems ?? []) expect([l.series, l.color]).toEqual([l.series, want.get(l.series)]);
+    });
+  }
+});
