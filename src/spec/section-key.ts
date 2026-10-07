@@ -4,54 +4,69 @@
 //
 // Every chart type reads this through one point: renderPane's row prep (engine/index.ts
 // `prepareRows`) rewrites `_xc` to the key, so the band domain, hover resolution and DOM tagging
-// all see distinct rows without any per-mark code. Callers that read raw rows (figure heights,
-// validation) key them through `sectionKeyer` too. Reader-facing text goes back through
-// `categoryText`.
+// all see distinct rows without any per-mark code. Callers that read raw rows (figure heights) key
+// them through `sectionKeyer` too. Reader-facing text goes back through `categoryText`.
 //
 // A chart is keyed ONLY when some label actually repeats across sections. Without a repeat the key
 // is the bare category, so every chart without one — sectioned or not — renders byte-identically.
+// A small-multiples figure decides once for all its panes (`labelsRepeatAcrossSections` over the
+// figure's rows), so every pane names a row the same way and the coordinated cursor can match it.
+//
+// Decoding is by lookup, never by parsing: `categoryText` returns a category only for a string this
+// module minted as a key, so an author label that happens to contain the separator is never split.
+// (An author label byte-equal to a key minted for another chart on the same page would still be
+// read as that key; that needs a label containing U+E000 that spells out another chart's section
+// and category, and is the one case the lookup cannot tell apart.)
 
-/** Separator inside a key. A Private Use Area code point: no author label contains it, and it is
- *  legal XML, which matters because keys are stamped into `data-category` on the live SVG and the
- *  PNG export re-render. */
-const SEP = "";
+/** Prefix of every key. A Private Use Area code point: legal XML, which matters because keys are
+ *  stamped into `data-category` on the live SVG and the PNG export re-render. */
+const SEP = "\uE000";
 
-/** The internal key for a category within a section. */
+/** Every key minted so far, with the category it stands for. */
+const minted = new Map<string, string>();
+
+/** The internal key for a category within a section. JSON-encoding the pair keeps distinct pairs
+ *  distinct whatever characters the section and category hold. */
 export function sectionCategoryKey(section: string, category: string): string {
-  return `${section}${SEP}${category}`;
+  const key = `${SEP}${JSON.stringify([section, category])}`;
+  minted.set(key, category);
+  return key;
 }
 
-/** The text a reader sees for a category key: the category. Identity on a bare category. */
+/** The text a reader sees for a category key: the category. Identity on anything not minted here. */
 export function categoryText(key: string): string {
-  const i = key.indexOf(SEP);
-  return i < 0 ? key : key.slice(i + SEP.length);
+  return minted.get(key) ?? key;
 }
 
-/** The section half of a `sectionCategoryKey` key. */
-export function sectionOfKey(key: string): string {
-  const i = key.indexOf(SEP);
-  return i < 0 ? "" : key.slice(0, i);
-}
-
-/** Map each row to its category key. Keys are `sectionCategoryKey(section, category)` when any
- *  category appears under more than one section in `rows`, else the bare category. A blank
- *  category stays blank, so a row the engine drops for having no category is still dropped. */
-export function sectionKeyer<R>(
+/** Whether some category appears under more than one section in `rows`. */
+export function labelsRepeatAcrossSections<R>(
   rows: readonly R[],
   categoryOf: (r: R) => string | null | undefined,
   sectionOf: (r: R) => string | null | undefined,
-): (r: R) => string {
+): boolean {
   const seen = new Map<string, string>();
-  let repeats = false;
   for (const r of rows) {
     const c = categoryOf(r);
     if (c == null || c === "") continue;
     const s = sectionOf(r) ?? "";
     const prev = seen.get(c);
     if (prev == null) seen.set(c, s);
-    else if (prev !== s) { repeats = true; break; }
+    else if (prev !== s) return true;
   }
-  if (!repeats) return (r) => categoryOf(r) ?? "";
+  return false;
+}
+
+/** Map each row to its category key: `sectionCategoryKey(section, category)` when the chart is
+ *  keyed, else the bare category. `keyed` is the figure's decision when the caller has one (a
+ *  small-multiples pane); absent, it is decided from `rows`. A blank category stays blank, so a
+ *  row the engine drops for having no category is still dropped. */
+export function sectionKeyer<R>(
+  rows: readonly R[],
+  categoryOf: (r: R) => string | null | undefined,
+  sectionOf: (r: R) => string | null | undefined,
+  keyed: boolean = labelsRepeatAcrossSections(rows, categoryOf, sectionOf),
+): (r: R) => string {
+  if (!keyed) return (r) => categoryOf(r) ?? "";
   return (r) => {
     const c = categoryOf(r) ?? "";
     return c === "" ? c : sectionCategoryKey(sectionOf(r) ?? "", c);

@@ -44,7 +44,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `x_order` / `category_order`, `x_labels` and `category_colors` name a bare label and apply to every
   section containing it (`x_order` orders within each section). The same section + category with two
   rows for one series is now a validation error, and the faceted ragged-pane check compares section
-  + category. A sectioned chart without a repeated label renders byte-identically.
+  + category. A sectioned chart without a repeated label renders byte-identically. A
+  small-multiples figure decides for all its panes at once, so every pane names a repeated label's
+  rows the same way and the coordinated cursor matches them across panes.
 
 ### Changed
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error

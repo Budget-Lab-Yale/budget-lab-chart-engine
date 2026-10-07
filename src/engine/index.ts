@@ -144,6 +144,11 @@ export interface RenderOptions {
    *  series_order). A pane's own list can undercount it. Read by the stacked builder's net dot
    *  (spec/bar-stack.ts drawsNetDots). Absent (single chart) → the pane's own distinct count. */
   chartSeriesCount?: number;
+  /** Small multiples on a sectioned category axis: whether the FIGURE keys its rows by section +
+   *  category (spec/section-key.ts `labelsRepeatAcrossSections` over every pane's rows), so a pane
+   *  whose own rows repeat no label still names its rows as its siblings do and the coordinated
+   *  cursor can match them. Absent (single chart) → decided from the pane's own rows. */
+  sectionKeyed?: boolean;
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -395,7 +400,7 @@ export function renderPane(
   }
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
-  const data = prepareRows(spec, rows, cols, adapter, facetInfo);
+  const data = prepareRows(spec, rows, cols, adapter, facetInfo, opts.sectionKeyed);
 
   if (!data.length) throw new Error("No data.");
 
@@ -410,6 +415,7 @@ function prepareRows(
   cols: ResolvedColumns,
   adapter: XAdapter,
   facetInfo: FacetInfo | undefined,
+  sectionKeyed?: boolean,
 ): PreparedRow[] {
   // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
   // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
@@ -422,11 +428,12 @@ function prepareRows(
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
   // series column ⇒ a single implicit series.
   // Sectioned axis: a row's category is its section + category key (spec/section-key.ts), so a
-  // label repeated across sections stays two rows. Bare category when nothing repeats.
+  // label repeated across sections stays two rows. Bare category when nothing repeats (in the
+  // figure, when a small-multiples figure has decided for all its panes).
   const sectionField = cols.section;
   const keyOf =
     sectionField && adapter.xField === "_xc"
-      ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "")
+      ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "", sectionKeyed)
       : null;
   return rows
     .map((r) => {

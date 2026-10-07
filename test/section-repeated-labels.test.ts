@@ -344,3 +344,117 @@ describe("validation — rows are identified by section + category", () => {
     expect(errors.join("\n")).toMatch(/facet "B" is missing category "Top 1%" \(section "Ranked by net worth"\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// E6 fix: a label is only ever split if the engine minted it as a key, and the keying decision is
+// the FIGURE's, so every pane names a row the same way.
+
+describe("an author label containing the separator character is never split", () => {
+  // U+E000, the Private Use Area code point the key format uses. An author can type it.
+  const PUA = String.fromCharCode(0xe000);
+  const LABEL = `Before${PUA}After`;
+
+  it("no repeats: the label is drawn whole, live and in the PNG export", () => {
+    const rows = [
+      { ranking: INCOME, group: LABEL, effective_rate: "10" },
+      { ranking: WEALTH, group: "Other", effective_rate: "20" },
+    ] as TidyRow[];
+    expect(validateChartData(BAR_SINGLE, rows).errors).toEqual([]);
+    const { svg } = renderChart(BAR_SINGLE, rows, { width: 720, height: 500, document });
+    expect(catLabels(svg)).toEqual([LABEL, "Other"]);
+    const exported = buildExportSvg(BAR_SINGLE, rows);
+    expect(Array.from(exported.querySelectorAll("g.tbl-cat-label text")).map((t) => t.textContent)).toEqual([LABEL, "Other"]);
+  });
+
+  it("no repeats: the tooltip header and onHover name the whole label", () => {
+    const rows = [
+      { ranking: INCOME, group: LABEL, effective_rate: "10" },
+      { ranking: WEALTH, group: "Other", effective_rate: "20" },
+    ] as TidyRow[];
+    const seen: Array<BandHoverCtx | null> = [];
+    const { svg } = mount(BAR_SINGLE, rows, { onHover: (ctx: BandHoverCtx | null) => seen.push(ctx) });
+    const r = svg.querySelector('g[aria-label="bar"] rect')!;
+    hoverAt(svg, 400, absPos(r).y + Number(r.getAttribute("height")) / 2);
+    expect(seen.filter((c): c is BandHoverCtx => c != null).at(-1)?.category).toBe(LABEL);
+  });
+
+  it("with repeats: labels and sections that contain the separator keep distinct rows and whole text", () => {
+    // Section "X<PUA>" + "Y" and section "X" + "<PUA>Y" concatenate to the same string around a
+    // separator; they are two rows. "Z" repeats, so the chart is keyed.
+    const rows = [
+      { ranking: `X${PUA}`, group: "Y", effective_rate: "1" },
+      { ranking: `X${PUA}`, group: "Z", effective_rate: "2" },
+      { ranking: "X", group: `${PUA}Y`, effective_rate: "3" },
+      { ranking: "X", group: "Z", effective_rate: "4" },
+    ] as TidyRow[];
+    const { svg } = renderChart(BAR_SINGLE, rows, { width: 720, height: 500, document });
+    expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
+    expect(catLabels(svg)).toEqual(["Y", "Z", `${PUA}Y`, "Z"]);
+  });
+});
+
+describe("keying is decided for the whole figure, so a coordinated hover crosses panes", () => {
+  // Pane P repeats "A" across both sections; pane Q has "A" in one section only. columns: 1 lets
+  // the panes carry different rows. Q must still answer when P's "A" (section S) is hovered.
+  const S = "Section S";
+  const T = "Section T";
+  const FIG_ROWS = [
+    { pane: "P", ranking: S, group: "A", effective_rate: "1" },
+    { pane: "P", ranking: T, group: "A", effective_rate: "2" },
+    { pane: "P", ranking: T, group: "B", effective_rate: "3" },
+    { pane: "Q", ranking: S, group: "A", effective_rate: "4" },
+    { pane: "Q", ranking: T, group: "B", effective_rate: "5" },
+  ] as TidyRow[];
+
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`${mode} mode: hovering P's first "A" echoes Q's "A" value, and back`, () => {
+      const spec = {
+        ...BAR_SINGLE,
+        columns: { x: "group", value: "effective_rate", section: "ranking", facet: "pane" },
+        small_multiples: { columns: 1, mode, pane_order: ["P", "Q"] },
+      } as ChartSpec;
+      expect(validateChartData(spec, FIG_ROWS).errors).toEqual([]);
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      mountChart(container, { spec, rows: FIG_ROWS, width: 720 } as never);
+      const [p, q] = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
+      expect(q).toBeTruthy();
+      mockRect1to1(p!);
+      mockRect1to1(q!);
+      const firstRowY = (svg: SVGSVGElement): number => {
+        const rects = Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
+        return Math.min(...rects.map((r) => absPos(r).y + Number(r.getAttribute("height")) / 2));
+      };
+      hoverAt(p!, 400, firstRowY(p!));
+      expect(coordTexts(p!).some((t) => t.includes("1"))).toBe(true);
+      expect(q!.querySelector("g.tbl-coord")?.getAttribute("opacity")).toBe("1");
+      expect(coordTexts(q!).some((t) => t.includes("4"))).toBe(true);
+      hoverAt(q!, 400, firstRowY(q!));
+      expect(p!.querySelector("g.tbl-coord")?.getAttribute("opacity")).toBe("1");
+      expect(coordTexts(p!).some((t) => t.includes("1"))).toBe(true);
+    });
+  }
+});
+
+describe("hooks.valueLabel names the display category (util.ts applyValueLabelHook)", () => {
+  // Reached through a sectioned horizontal stack: its net text and segment labels go through the hook.
+  it("a sectioned stack with a repeated label hands the hook the bare label, never the key", () => {
+    const spec = {
+      chartType: "stacked",
+      orientation: "horizontal",
+      title: "t",
+      xAxisType: "categorical",
+      columns: { x: "group", series: "income_measure", value: "effective_rate", section: "ranking" },
+      series_order: ["Cash income", "Accrual income"],
+      barStack: { netDisplay: "text" },
+      valueLabels: { show: true },
+      data: "d.csv",
+    } as ChartSpec;
+    const seen: string[] = [];
+    renderChart(spec, ROWS, { width: 720, height: 600, document, hooks: { valueLabel: (ctx) => { seen.push(ctx.category); return null; } } });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const c of seen) expect(leaksKey(c), c).toBe(false);
+    // The net text of both "Top 1%" rows asked under the display name.
+    expect(seen.filter((c) => c === "Top 1%").length).toBeGreaterThanOrEqual(2);
+  });
+});

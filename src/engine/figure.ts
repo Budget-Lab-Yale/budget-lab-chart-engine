@@ -13,7 +13,7 @@ import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "../spec/parse-time";
 import { ownValue } from "../spec/own-key";
-import { sectionKeyer, categoryText } from "../spec/section-key";
+import { sectionKeyer, categoryText, labelsRepeatAcrossSections } from "../spec/section-key";
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
@@ -523,6 +523,10 @@ export function renderFigure(
   const isHorizontalDumbbell = isHorizontalDumbbellSpec(spec);
   // Every pane's categories, in render order: the input both left-gutter measurements below read.
   const keyOf = rowCategoryKey(rows, cols);
+  // One keying decision for every pane (spec/section-key.ts): the one keyOf made over these rows.
+  const sectionKeyed = cols.section
+    ? labelsRepeatAcrossSections(rows, (r) => r[cols.x] as string, (r) => r[cols.section as string] as string)
+    : undefined;
   const sharedCategories = isHorizontalBar || isHorizontalDumbbell ? orderedCategories(rows, keyOf, spec) : [];
   // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
   const hGutter = isHorizontalBar
@@ -798,6 +802,7 @@ export function renderFigure(
           paletteSeries: figureSeries,
           ...(figureShapes ? { paletteShapes: figureShapes } : {}),
           chartSeriesCount,
+          ...(sectionKeyed != null ? { sectionKeyed } : {}),
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
@@ -925,6 +930,7 @@ export function renderFigure(
         pane: true,
         paneFacetValue: value,
         ...(binThresholds ? { binThresholds } : {}),
+        ...(sectionKeyed != null ? { sectionKeyed } : {}),
       },
       "probe",
     ),
@@ -986,6 +992,7 @@ export function renderFigure(
         paletteSeries: figureSeries,
         ...(figureShapes ? { paletteShapes: figureShapes } : {}),
         chartSeriesCount,
+        ...(sectionKeyed != null ? { sectionKeyed } : {}),
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
         width: colWidths[col],

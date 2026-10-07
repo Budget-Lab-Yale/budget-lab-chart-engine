@@ -20,7 +20,6 @@ import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
 import { resolveAnnotations } from "./annotations";
 import { ownValue } from "./own-key";
-import { sectionCategoryKey, sectionOfKey, categoryText } from "./section-key";
 import { resolveRugTracks, fullyHiddenRugTracks, rugBoundPosition } from "./rug";
 import { temporalValueError, quarterValueError } from "./parse-time";
 import type { ResolvedColumns } from "./columns";
@@ -1540,7 +1539,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       // Panes are compared row by row, and a sectioned row is its section + category: "Top 1%"
       // under two sections is two rows a facet must both carry (spec/section-key.ts).
       const rowId = (r: TidyRow): string =>
-        secField ? sectionCategoryKey((r[secField] as string) ?? "", r[xField] as string) : (r[xField] as string);
+        secField ? JSON.stringify([(r[secField] as string) ?? "", r[xField] as string]) : (r[xField] as string);
       const catsByFacet = new Map<string, Set<string>>();
       const allCats = new Set<string>();
       for (const r of rows) {
@@ -1556,7 +1555,10 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         const missing = [...allCats].filter((c) => !cats.has(c));
         if (missing.length) {
           const named = secField
-            ? missing.map((id) => `${JSON.stringify(categoryText(id))} (section ${JSON.stringify(sectionOfKey(id) || "?")})`)
+            ? missing.map((id) => {
+                const [sec, cat] = JSON.parse(id) as [string, string];
+                return `${JSON.stringify(cat)} (section ${JSON.stringify(sec || "?")})`;
+              })
             : missing.map((c) => JSON.stringify(c));
           errors.push(
             `facet "${facet}" is missing categor${missing.length === 1 ? "y" : "ies"} ${named.join(", ")} present in other facets — faceted horizontal bars/stacks share one category axis across panes, so every facet must carry the same categories (and sections); otherwise rows silently misalign across panes`,
