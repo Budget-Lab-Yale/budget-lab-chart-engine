@@ -52,6 +52,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   share a category across sections. Absent on a chart without sections.
 
 ### Changed
+- **Sections: the gap between two sections is a fixed 33px** on top of the usual space between two
+  rows (room for the 13px header line with 10px either side), on horizontal bars, stacks and
+  dumbbells, standalone and in small multiples, live and in the PNG export. It was two empty row
+  slots, so it grew with the row height: 114-120px
+  centre to centre at a 38-40px row pitch. The bottom of each section header's line sits 10px above
+  its first row (was 15px), and the top margin of a sectioned chart shrinks to match (38 to 33px).
+  The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart above
+  the 400px height floor is 11px shorter per gap with its rows unchanged; one at the floor keeps its
+  height and its rows grow into the space. Charts without sections render byte-identically.
+- **Hover on horizontal charts: the shaded strip covers only the hovered row.** A stack that hovers
+  with its card (a net dot, or `barStack.hover: "tooltip"`) spread a section's first row's strip
+  over the gap and the header above it; it is now one row high, as the bar's already was. That
+  stack's strip and a horizontal dumbbell's now also run left under the category label, which is
+  bolded and darkened while hovered, as on a horizontal bar (standalone and small-multiple panes,
+  the dumbbell's echoes included). Live only: the PNG export has no hover.
 - `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error
   naming `ci`. Near 1 the t-quantile is numerically meaningless. No published figure uses one.
 - One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
@@ -284,6 +299,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 
+- **Sectioned charts get a fixed 33px section gap.** Published figures
+  affected: the tariff model update's `etas` and `eta-effect` (sectioned horizontal bars, on
+  `main`), and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (sectioned horizontal
+  dumbbell). Their sections close up from two row heights to 33px and the headers move 5px closer
+  to their first rows, on screen and in the PNG. `etas` and `eta-effect` come out 11px shorter (one
+  break each); the PR #67 dumbbell sits at the 400px floor, so it keeps its height and its rows
+  grow. Found by reading every `chart.yaml` on `main` and on the PR #67 branch for
+  `columns.section`; no other spec sets it. Sectioned goldens were re-recorded for this change
+  (approved): `bar-sectioned-single`, `figure7-tariff-sectioned`, `figure10-shape-sectioned-single`,
+  `dumbbell-sectioned`, `stacked-sectioned`, `stacked-sectioned-net-dot`,
+  `stacked-sectioned-net-text`, `figure-hstacked-sectioned`.
+- **Hover: horizontal card-hover stacks and horizontal dumbbells shade under the label and bold it.**
+  Live only. Of the archive, only the PR #67 dumbbell above hovers differently; the stacks on `main`
+  (ai-fiscal `revenue-by-income-type`, `revenue-by-instrument`) are vertical.
 - **A negative net printed by `barStack.netDisplay: text` gains its minus sign.** **No published
   figure is affected**: the archive's stacks on `main` (ai-fiscal `revenue-by-income-type`,
   `revenue-by-instrument`) use `netDisplay: none`, and PR #67's two `text` stacks have only

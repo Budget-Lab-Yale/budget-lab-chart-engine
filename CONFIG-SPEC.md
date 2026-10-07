@@ -1158,7 +1158,10 @@ requirement — see below — applies only when panes share a row).
 Set `columns.section` to group the category axis into labeled sections, on a horizontal `bar`,
 `stacked` or `dumbbell` chart (a dumbbell is horizontal unless it sets `orientation: vertical`).
 Validation rejects it on any other chart type and on a vertical chart. Categories are ordered so each
-section is contiguous, with a bold section header in the left gutter and a gap between sections. A
+section is contiguous, with a bold section header in the left gutter. Two sections are separated
+by the usual space between rows plus a fixed 33px that holds the later section's header: the
+header's line sits 10px above that section's first bar, with at least 10px between it and the bar
+above. The gap does not grow with the row height. A
 stacked chart still draws one stack per category; its net callout (text or dot) and segment labels
 sit on that category's row. On horizontal bars and stacks it combines with `small_multiples` (the
 headers show on the leftmost pane).
