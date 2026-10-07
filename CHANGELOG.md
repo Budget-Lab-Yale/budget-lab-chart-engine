@@ -47,6 +47,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   + category. A sectioned chart without a repeated label renders byte-identically. A
   small-multiples figure decides for all its panes at once, so every pane names a repeated label's
   rows the same way and the coordinated cursor matches them across panes.
+- `tooltip_section: true` (opt-in, default false) on a sectioned chart puts the hovered row's
+  section in the hover card's header, before the category: `+ Corporate · Before response`, through
+  `section_labels` and `x_labels`. Horizontal dumbbells and card-hover horizontal stacks, standalone
+  and in small-multiples panes; card header only (pills and the coordinated echo are unchanged).
+  Validation rejects it without `columns.section` and on a `bar`, which has no card. See CONFIG-SPEC
+  `tooltip_section`.
 - The `onHover` payload (and the `tbl-hover` event's `detail`) carries `section` on a chart with
   `columns.section`: the hovered row's raw section value, so a host can tell apart two rows that
   share a category across sections. Absent on a chart without sections.

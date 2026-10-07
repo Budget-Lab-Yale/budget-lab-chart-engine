@@ -125,6 +125,13 @@ function scatterPointHoverOptions(a: {
   };
 }
 
+/** `tooltip_section: true` → the card-header options every sectioned hover card takes (stack card,
+ *  dumbbell; standalone and panes). Card only: the pills and the coordinated echo never get them. */
+function tooltipSectionOpts(spec: ChartSpec): { tooltipSection?: boolean; sectionLabels?: Record<string, string> } {
+  if (spec.tooltip_section !== true) return {};
+  return { tooltipSection: true, ...(spec.section_labels ? { sectionLabels: spec.section_labels } : {}) };
+}
+
 function histogramBinLabelOpts(spec: ChartSpec): BinLabelOpts {
   const xType = spec.xAxisType === "temporal" ? "temporal" : "numeric";
   const bw = spec.histogram?.binWidth;
@@ -1222,12 +1229,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
         colors,
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         categoryLabels: spec.x_labels,
+        ...tooltipSectionOpts(spec),
         bandHighlight: true,
         centersFromMarks: true,
         orientation: isHorizontalDumbbell(spec) ? "horizontal" : "vertical",
@@ -1330,6 +1338,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: bandYFormat,
         categoryLabels: spec.x_labels,
+        ...tooltipSectionOpts(spec),
         icons: seriesIcons,
         orientation: horizontalBar ? "horizontal" : "vertical",
         // Horizontal card hover: the same row strip + label accent as the pill hover below.
@@ -2083,7 +2092,7 @@ function wireFigureSvg(
   if (ctx.spec.chartType === "dumbbell") {
     const dbUseCoord = ctx.onResolve != null;
     const orientation = isHorizontalDumbbell(ctx.spec) ? "horizontal" : "vertical";
-    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
     const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ownValue(ctx.spec.series_marker, s) ?? "filled"] as const));
     const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
     const dbOpts = {
@@ -2109,6 +2118,7 @@ function wireFigureSvg(
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
+      ...tooltipSectionOpts(ctx.spec),
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
@@ -2310,6 +2320,7 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
+      ...tooltipSectionOpts(ctx.spec),
       orientation: horizontal ? "horizontal" : "vertical",
       // Horizontal card hover: the same row strip + label accent the coordinated cursor draws.
       ...(horizontal

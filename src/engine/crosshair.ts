@@ -887,6 +887,11 @@ export interface BandCrosshairOptions {
   yFormat?: (v: number) => string;
   /** Raw category value → display label for the tooltip header. */
   categoryLabels?: Record<string, string>;
+  /** `tooltip_section: true` (a sectioned chart): the card header reads "<section> · <category>",
+   *  the section being the hovered category's `_section` row value through `sectionLabels`. */
+  tooltipSection?: boolean;
+  /** `spec.section_labels` — raw section value → its header text, for `tooltipSection`. */
+  sectionLabels?: Record<string, string>;
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -1098,7 +1103,7 @@ export function resolveCategorySeriesValues(
 
 export function buildBandTooltipHtml(
   category: string,
-  rows: Array<{ _xc?: string; series: string; _y: number | null }>,
+  rows: Array<{ _xc?: string; series: string; _y: number | null; _section?: string }>,
   opts: {
     isStacked?: boolean;
     totalRow?: TotalRow;
@@ -1120,6 +1125,10 @@ export function buildBandTooltipHtml(
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
+    /** Prefix the header with the category's section ("<section> · <category>"); see
+     *  BandCrosshairOptions.tooltipSection. */
+    tooltipSection?: boolean;
+    sectionLabels?: Record<string, string>;
     /** Series → its resolved icon FOR THE CATEGORY being built. The ONLY source of a row's key; see
      *  resolveTooltipIcons. The caller re-colours it from the DRAWN fill first (recolourIcons, once
      *  per category — see `readCategoryFills`), which is what keeps a `bar_color` /
@@ -1143,7 +1152,15 @@ export function buildBandTooltipHtml(
 
   // `category` may be a section key; the card, the hook and x_labels see the display text.
   const shown = categoryText(category);
-  let html = `<div class="tbl-tooltip-head">${escapeHtml(ownValue(categoryLabels, shown) ?? shown)}</div>`;
+  const catHead = escapeHtml(ownValue(categoryLabels, shown) ?? shown);
+  // The category's section is its first row's, as the band groups it (marks/category-band.ts).
+  const section = opts.tooltipSection
+    ? rows.find((r) => r._xc === category && r._section != null)?._section
+    : undefined;
+  const head = section
+    ? `${escapeHtml(ownValue(opts.sectionLabels, section) ?? section)} · ${catHead}`
+    : catHead;
+  let html = `<div class="tbl-tooltip-head">${head}</div>`;
   let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
@@ -1640,6 +1657,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       tooltipHook: opts.tooltipHook,
       facet: opts.facet,
       ...(icons ? { icons } : {}),
+      ...(opts.tooltipSection ? { tooltipSection: true, sectionLabels: opts.sectionLabels } : {}),
     });
     tip!.innerHTML = html;
 
@@ -3339,7 +3357,8 @@ function nearestCategory(centers: Array<{ category: string; cx: number }>, svgX:
 }
 
 export interface CategoricalLineOptions {
-  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+  /** `_section` on a sectioned dumbbell, for `tooltipSection`. */
+  rows: Array<{ _xc?: string; series: string; _y: number | null; _section?: string }>;
   colors?: Map<string, string>;
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
@@ -3386,6 +3405,11 @@ export interface CategoricalLineOptions {
    *  deliberately NOT labelled from this: it overlays the rendered axis tick (taking that tick's
    *  box, wrap mode and rotation), and this field is for reading MORE verbosely than the tick. */
   categoryLabels?: Record<string, string>;
+  /** `tooltip_section: true` (a sectioned chart): the card header reads "<section> · <category>",
+   *  the section being the hovered category's `_section` row value through `sectionLabels`. */
+  tooltipSection?: boolean;
+  /** `spec.section_labels` — raw section value → its header text, for `tooltipSection`. */
+  sectionLabels?: Record<string, string>;
   /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend.
    *  Series-keyed, not category-keyed as the band crosshair's is: this is handed in by the CALLER
    *  from the series' own marker style, never read off the marks, and a line/dot mark carries no
@@ -3545,6 +3569,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       facet: opts.facet,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
       ...(opts.showTotal ? { isStacked: true, totalRow: "text" as const } : {}),
+      ...(opts.tooltipSection ? { tooltipSection: true, sectionLabels: opts.sectionLabels } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;

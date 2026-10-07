@@ -153,6 +153,25 @@ function tooltipSeriesNameChartTypeError(spec: {
   return `tooltip_series_name is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the series name labels a tooltip ROW, not the header`;
 }
 
+/** `tooltip_section` puts the section in the hover CARD's header, so it needs sections and a card:
+ *  rejected without `columns.section` (no section to name) and on a bar (a sectioned bar hovers
+ *  with value pills, never a card). PRESENCE, not value, as the sibling gates. `columns.section`
+ *  itself is limited to horizontal bar / stacked / dumbbell by sectionColumnError. */
+function tooltipSectionError(spec: {
+  chartType?: unknown;
+  tooltip_section?: unknown;
+  columns?: { section?: unknown };
+}): string | null {
+  if (spec.tooltip_section === undefined) return null;
+  if (spec.columns?.section == null) {
+    return `tooltip_section needs columns.section — it names the hovered row's section in the hover card's header`;
+  }
+  if (spec.chartType === "bar") {
+    return `tooltip_section is not supported on chartType "bar" — a bar hovers with value pills, not a card with a header`;
+  }
+  return null;
+}
+
 /** `tooltip_x_label` / `tooltip_y_label` rename the SCATTER card's two value-row labels, which are
  *  otherwise the axis titles. Every other chart type's card labels its rows by SERIES, not by axis
  *  (a line/bar card has one row per series, not one row per axis) — an axis-title override has
@@ -795,7 +814,7 @@ export const TIMELINE_ALLOWED_FIELDS: readonly string[] = [
 
 export const TIMELINE_REJECTED_FIELDS: readonly string[] = [
   "title_selectors", "value_prefix", "value_suffix", "x_axis_ticks", "y_axis_title",
-  "tooltip_decimals", "tooltip_series_name", "tooltip_x_format", "tooltip_x_label", "tooltip_y_label",
+  "tooltip_decimals", "tooltip_series_name", "tooltip_section", "tooltip_x_format", "tooltip_x_label", "tooltip_y_label",
   "xAxisPolicy", "yAxisPolicy", "annotations", "series_patterns", "bar_color", "category_colors",
   "series_styles", "section_order", "section_labels", "x_order", "category_order", "x_labels",
   "shape_order", "shape_labels", "shape_legend_title", "confidence_bands", "overlays", "shading",
@@ -853,7 +872,7 @@ export const TREEMAP_ALLOWED_FIELDS: readonly string[] = [
 
 export const TREEMAP_REJECTED_FIELDS: readonly string[] = [
   "value_prefix", "value_suffix", "annotations", "overlays",
-  "title_selectors", "x_axis_title", "x_axis_ticks", "y_axis_title", "tooltip_series_name",
+  "title_selectors", "x_axis_title", "x_axis_ticks", "y_axis_title", "tooltip_series_name", "tooltip_section",
   "tooltip_x_format", "tooltip_x_label", "tooltip_y_label", "xAxisPolicy", "yAxisPolicy",
   "series_patterns", "bar_color", "category_colors", "series_styles", "section_order", "section_labels",
   "x_order", "category_order", "x_labels", "shape_order", "shape_labels", "color_legend_title",
@@ -919,6 +938,10 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (pcErrors.length) return { valid: false, errors: pcErrors };
   const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
   if (tsnErr) return { valid: false, errors: [tsnErr] };
+  const tsecErr = tooltipSectionError(
+    spec as { chartType?: unknown; tooltip_section?: unknown; columns?: { section?: unknown } },
+  );
+  if (tsecErr) return { valid: false, errors: [tsecErr] };
   const talErr = tooltipAxisLabelChartTypeError(
     spec as { chartType?: unknown; tooltip_x_label?: unknown; tooltip_y_label?: unknown },
   );

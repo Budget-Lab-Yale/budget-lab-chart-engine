@@ -407,6 +407,7 @@ export const CHART_SPEC_SCHEMA = {
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
     tooltip_series_name: { type: "boolean" },
+    tooltip_section: { type: "boolean" },
     // A d3 timeFormat pattern. Only the emptiness is structural; "is this axis date-based?" is a
     // cross-field question, so it lives in validate.ts.
     tooltip_x_format: { type: "string", minLength: 1 },
