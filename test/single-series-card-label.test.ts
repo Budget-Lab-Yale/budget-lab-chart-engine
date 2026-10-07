@@ -49,7 +49,8 @@ const TEMPORAL_ROWS = ["2020-01-01", "2020-02-01", "2020-03-01"].map((t, i) => (
 
 const HIST_ROWS = Array.from({ length: 16 }, (_, v) => ({ amount: String(v) })) as unknown as TidyRow[];
 
-/** A stacked chart cards only where the net dot is drawn — i.e. where a stack goes negative. */
+/** A stacked chart cards only where the net resolves to a dot — i.e. where a stack goes negative
+ *  (a single-series stack draws no dot, but still cards). */
 const NEG_CAT_ROWS = [
   { time: "A", value: "-6" },
   { time: "B", value: "-4" },
@@ -91,7 +92,7 @@ const CASES: Case[] = [
     rows: HIST_ROWS, mark: HIST_MARK, value: "5.00",
   },
   // The other two types the band builder cards for, single-series. A stacked chart's card is
-  // DATA-dependent — it is drawn where the net dot is, i.e. where the stack has a genuine negative
+  // DATA-dependent — it is drawn where the net resolves to a dot, i.e. where the stack has a genuine negative
   // (see hover-surface-matrix.test.ts), which is why these rows are negative; that is data, not a
   // dial. A single-series stack gets no Total row either (`orderedSeries.length > 1`), so the card is
   // the one unlabelled value.

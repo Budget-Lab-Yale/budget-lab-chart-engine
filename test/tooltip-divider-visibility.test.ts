@@ -213,3 +213,61 @@ describe.skipIf(!HAS_BROWSER)("barStack.total bold + divider — visible against
   verifyVisibleDivider("explicit total: { bold: true, divider: true }", SPEC_EXPLICIT);
   verifyVisibleDivider("NO barStack.total block at all (the default)", SPEC_DEFAULT);
 });
+
+// treemap.tooltip_note: the note block below the card's rows reuses the same rule token
+// (--tbl-tooltip-rule) as the Total divider. Same real-browser check over a dark tile, plus the
+// wrap: a long note wraps inside the 320px card rather than widening it.
+describe.skipIf(!HAS_BROWSER)("treemap.tooltip_note divider — visible against a dark tile, long note wraps (real browser)", () => {
+  const LONG = "Includes Old-Age and Survivors Insurance and Disability Insurance outlays, net of offsetting receipts and intragovernmental transfers";
+  const TM_SPEC = {
+    chartType: "treemap", title: "Note divider", xAxisType: "categorical", data: "inline",
+    columns: { x: "category", value: "amount", series: "group" },
+    series_colors: { A: DARK },
+    treemap: { tooltip_note: "note" },
+  } as unknown as ChartSpec;
+  const TM_ROWS = [{ group: "A", category: "Only", amount: "10", note: LONG }] as unknown as TidyRow[];
+
+  it("draws a perceptible rule above the note, at regular weight, and wraps the note within the card", async () => {
+    const DPR = 2;
+    const page: Page = await browser.newPage({ viewport: { width: 700, height: 500 }, deviceScaleFactor: DPR });
+    try {
+      const liveJs = readFileSync(BUNDLE_PATH, "utf8");
+      await page.setContent(
+        `<!doctype html><html><head><style>${CHART_CSS}</style></head>` +
+          `<body style="margin:0;background:#fff"><div id="chart" style="width:700px"></div>` +
+          `<script>${liveJs}</script></body></html>`,
+        { waitUntil: "load" },
+      );
+      await page.evaluate(({ spec, rows }) => {
+        const w = window as unknown as { BudgetLabChart: { mountChart: (el: Element, opts: unknown) => void } };
+        w.BudgetLabChart.mountChart(document.getElementById("chart")!, { spec, rows, width: 700 });
+      }, { spec: TM_SPEC, rows: TM_ROWS });
+      const tile = page.locator("rect.tbl-treemap-tile").first();
+      await tile.waitFor({ state: "attached" });
+      const box = (await tile.boundingBox())!;
+      await page.mouse.move(box.x + 30, box.y + 30);
+      const tip = page.locator(".tbl-tooltip");
+      await expect.poll(() => tip.evaluate((el) => (el as HTMLElement).style.opacity)).toBe("1");
+      const geom = await page.evaluate(() => {
+        const t = document.querySelector(".tbl-tooltip")!.getBoundingClientRect();
+        const n = document.querySelector(".tbl-tooltip-note")!;
+        const r = n.getBoundingClientRect();
+        const cs = getComputedStyle(n);
+        return { tipTop: t.top, tipW: t.width, noteTop: r.top, noteH: r.height, weight: cs.fontWeight, lineH: parseFloat(cs.lineHeight) };
+      });
+      expect(Number(geom.weight)).toBeLessThan(700);
+      // Wraps: the card stays at its 320px cap and the note runs to several lines.
+      expect(geom.tipW).toBeLessThanOrEqual(320 + 0.5);
+      expect(geom.noteH).toBeGreaterThan(2.5 * geom.lineH);
+      const png = PNG.sync.read(await tip.screenshot());
+      const ruleY = Math.round((geom.noteTop - geom.tipTop) * DPR);
+      const searchRadius = Math.ceil(3 * DPR);
+      let atMax = -Infinity;
+      for (let dy = -searchRadius; dy <= searchRadius; dy++) atMax = Math.max(atMax, stripLuminance(png, ruleY + dy, 1));
+      const before = stripLuminance(png, ruleY - searchRadius - Math.round(2 * DPR), 2);
+      expect(Math.abs(atMax - before)).toBeGreaterThan(8);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+});

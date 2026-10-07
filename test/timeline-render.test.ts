@@ -206,6 +206,12 @@ describe("timeline render", () => {
     expect(lanes[0]!.getAttribute("text-anchor")).toBe("end");
   });
 
+  it("treats an empty series_order as absent: every event draws, exactly as with none", () => {
+    const empty = r({ series_order: [] }).svg;
+    for (const row of ROWS) expect(empty.textContent).toContain(row.title as string);
+    expect(empty.outerHTML).toBe(r({ series_order: undefined }).svg.outerHTML);
+  });
+
   it("has no legend row when the series column holds one value", () => {
     const rows = ROWS.map((x) => ({ ...x, kind: "policy" })) as TidyRow[];
     const res = r({ series_order: undefined, series_labels: undefined }, 900, rows);

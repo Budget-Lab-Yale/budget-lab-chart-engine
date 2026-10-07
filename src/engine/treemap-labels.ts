@@ -1,0 +1,191 @@
+// Treemap colour and label fitting (spec §4, §5). PURE: no DOM. Every width comes from the calibrated
+// Figtree table (timelineTextWidth), so a label that fits here fits identically in the live mount, the
+// PNG export and the jsdom goldens. Drawing (marks/treemap) consumes these results as-is.
+import { tokens } from "../theme/tokens";
+import { locateOnRamp } from "./palette";
+import { timelineTextWidth } from "./timeline-text";
+import { TM_GEOM, treemapTieKey } from "./treemap-layout";
+import { d3 } from "./vendor";
+
+/** Label text size (px), one per chart: `wide` on a chart at least `wideAt` px wide, else `narrow`
+ *  (the base size). On a chart narrower than `smallBelow`, `small` is also a candidate, taken only
+ *  when it labels more tiles (marks/treemap). A tile label's name (700) and number (500) are both
+ *  drawn at the chart's size. */
+export const TM_LABEL_SIZES = { wide: 14, narrow: 12, wideAt: 600, small: 11, smallBelow: 400 } as const;
+
+/** The base label text size for a chart `chartWidth` px wide. */
+export function treemapLabelSize(chartWidth: number): number {
+  return chartWidth >= TM_LABEL_SIZES.wideAt ? TM_LABEL_SIZES.wide : TM_LABEL_SIZES.narrow;
+}
+
+/** Text-layout constant shared with the drawing (marks/treemap), so what is measured here is what
+ *  is drawn there: line height as a factor of the font size. */
+export const TM_LINE_HEIGHT = 1.2;
+
+const MAX_NAME_LINES = 3;
+
+/** The step for rank r of n across k shades, darkest (0) first: ranks spread evenly. */
+const step = (rank: number, n: number, k: number): number =>
+  Math.min(k - 1, Math.max(0, Math.round((rank * (k - 1)) / Math.max(1, n - 1))));
+
+/** Tiers in a band. */
+const BAND = 4;
+
+/** A colour's shading band (Ruling 37): the BAND tonal tiers nearest it on its ramp,
+ *  one tier darker and two lighter than the colour's own (clamped at either end of the ramp, still
+ *  BAND tiers), as hexes darkest first. So the legend chip, which is that colour, lies inside the
+ *  range its tiles are drawn in — except `navy`, which borrows blue's ramp and is darker than
+ *  blue-700. Null for a colour on no ramp. */
+export function treemapBand(color: string): string[] | null {
+  const ramp = locateOnRamp(color);
+  if (!ramp) return null;
+  const { tiers, index } = ramp; // lightest (50) first
+  const lo = Math.max(0, Math.min(tiers.length - BAND, index - 2));
+  return tiers.slice(lo, lo + BAND).reverse();
+}
+
+/** A colour's shades (Ruling 38): its band (treemapBand) with the CIELAB midpoint of each adjacent
+ *  pair of tiers inserted between them — 7 shades darkest first, e.g. blue 500, 450, 400, 350, 300,
+ *  250, 200. The midpoints are COMPUTED colours, not palette tokens — the house rule is that a
+ *  colour an author specifies is a palette token, while one the engine derives from it need not be.
+ *  Deterministic (d3's Lab interpolation, rounded to 8-bit hex). Null for a colour on no ramp. */
+export function treemapShades(color: string): string[] | null {
+  const band = treemapBand(color);
+  if (!band) return null;
+  const out: string[] = [band[0]!];
+  for (let i = 1; i < band.length; i++) {
+    out.push(d3.color(d3.interpolateLab(band[i - 1]!, band[i]!)(0.5))!.formatHex().toUpperCase(), band[i]!);
+  }
+  return out;
+}
+
+/** Fill hex for a tile under `shading: size`: its colour's 7 shades (treemapShades) by rank, the
+ *  largest darkest — rank within the group, or among all tiles with no groups (whose colour is
+ *  blue). A group (or a flat chart) of exactly one tile is the colour itself, so it matches its
+ *  legend chip (Ruling 40); so is every tile under `shading: none`. A colour on no tonal ramp (a raw
+ *  `series_colors` hex) is used flat for every tile: it has no band to shade within. */
+export function tileFill(hueBase: string, rank: number, n: number, shading: "size" | "none"): string {
+  if (shading === "none" || n <= 1) return hueBase;
+  const shades = treemapShades(hueBase);
+  return shades ? shades[step(rank, n, shades.length)]! : hueBase;
+}
+
+/** CSS4 space/slash syntax (`rgb(0 0 0 / 10%)`, `hsl(0 0% 0%)`) to the comma form d3.color reads
+ *  (`rgba(0, 0, 0, 0.1)`); anything else is returned as-is. */
+function commaColor(color: string): string {
+  const m = /^\s*(rgb|hsl)a?\(\s*([^,()]*?)\s*\)\s*$/i.exec(color);
+  if (!m) return color;
+  const [body, alpha] = m[2]!.split("/").map((s) => s.trim());
+  const parts = body!.split(/\s+/);
+  if (parts.length !== 3) return color;
+  if (alpha === undefined) return `${m[1]}(${parts.join(", ")})`;
+  const a = alpha.endsWith("%") ? Number(alpha.slice(0, -1)) / 100 : Number(alpha);
+  return `${m[1]}a(${parts.join(", ")}, ${a})`;
+}
+
+/** WCAG 2 relative luminance of a colour as painted on the white card: a translucent fill is
+ *  composited over white first. Null when the colour does not parse. */
+function luminance(color: string): number | null {
+  const c = d3.color(commaColor(color));
+  if (!c) return null;
+  const { r, g, b, opacity } = c.rgb();
+  const a = Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
+  // d3 parses "transparent" with NaN channels; at alpha 0 it is the white card whatever they are.
+  const over = (v: number): number => (a === 0 ? 255 : a * v + (1 - a) * 255);
+  const lin = (v0: number): number => {
+    const v = over(v0);
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+function contrast(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/** White or navy, whichever has the higher WCAG contrast on `fill` (composited over white). Ties go
+ *  to white; an unparseable colour gets navy. */
+export function contrastText(fill: string): string {
+  const white = tokens.structural.background;
+  const navy = tokens.structural.text_heading;
+  const lf = luminance(fill);
+  if (lf === null) return navy;
+  return contrast(lf, luminance(white)!) >= contrast(lf, luminance(navy)!) ? white : navy;
+}
+
+export type TileLabel =
+  | { mode: "stacked"; size: number; nameLines: string[]; number: string | null }
+  | { mode: "inline"; size: number; text: string; name: string; number: string }
+  | { mode: "none" };
+
+/** Greedy wrap at spaces to `width` (bold, `size`px). Null if a single word is wider than `width`. */
+function wrapName(name: string, size: number, width: number): string[] | null {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of name.split(" ")) {
+    const next = line ? `${line} ${word}` : word;
+    if (timelineTextWidth(next, size, 700) <= width) {
+      line = next;
+    } else {
+      if (timelineTextWidth(word, size, 700) > width) return null;
+      lines.push(line);
+      line = word;
+    }
+  }
+  lines.push(line);
+  return lines;
+}
+
+/** Fit name (+ number unless null) into the tile's inner box at exactly `size` px (spec §5); never
+ *  a smaller size, never truncated. `w`/`h` are the tile's full size; the inner box is 6px in from
+ *  each edge. Stacked: the name wrapped at spaces (700, ≤ 3 lines) above the number (500), all lines
+ *  at `size`. Else inline: one line `text` = name + " " + number, measured as drawn — `name` at 700,
+ *  then " " and `number` at 500; draw it as those two spans, not as `text` in one weight. Else none. */
+export function fitTileLabel(name: string, number: string | null, w: number, h: number, size: number): TileLabel {
+  const iw = w - 2 * TM_GEOM.pad;
+  const ih = h - 2 * TM_GEOM.pad;
+  if (iw <= 0 || ih <= 0 || name === "") return { mode: "none" };
+  const lines = wrapName(name, size, iw);
+  if (lines && lines.length <= MAX_NAME_LINES &&
+    (number === null || timelineTextWidth(number, size, 500) <= iw) &&
+    (lines.length + (number !== null ? 1 : 0)) * size * TM_LINE_HEIGHT <= ih) {
+    return { mode: "stacked", size, nameLines: lines, number };
+  }
+  // Without a number this never fits: one line that fits already fit stacked.
+  if (number !== null && size * TM_LINE_HEIGHT <= ih &&
+    timelineTextWidth(name, size, 700) + timelineTextWidth(` ${number}`, size, 500) <= iw) {
+    return { mode: "inline", size, text: `${name} ${number}`, name, number };
+  }
+  return { mode: "none" };
+}
+
+/** A tile as label fitting sees it: its text, its group (null when flat), its value, its full size. */
+export interface LabelTile { name: string; number: string | null; group: string | null; value: number; w: number; h: number }
+
+/** Every tile's label, in input (layout) order, all at `size` (the chart's treemapLabelSize), never
+ *  smaller. Top-down per group (flat data is one group): its tiles are visited by value, largest
+ *  first (values equal to 12 significant digits: input order), and each is labelled while its label fits; the first that does not, and
+ *  every tile after it in that group, is unlabelled. So within a group no unlabelled tile is larger
+ *  than a labelled one; groups are not compared with each other. */
+export function fitTileLabels(tiles: LabelTile[], size: number): TileLabel[] {
+  const out: TileLabel[] = tiles.map(() => ({ mode: "none" }));
+  const byGroup = new Map<string | null, number[]>();
+  tiles.forEach((t, i) => {
+    const members = byGroup.get(t.group);
+    if (members) members.push(i);
+    else byGroup.set(t.group, [i]);
+  });
+  for (const members of byGroup.values()) {
+    // The layout's tie rule (12 significant digits), so tiles it treats as equal are visited in its
+    // order, not by a float difference past the 12th digit.
+    members.sort((a, b) => treemapTieKey(tiles[b]!.value) - treemapTieKey(tiles[a]!.value) || a - b);
+    for (const i of members) {
+      const t = tiles[i]!;
+      const label = fitTileLabel(t.name, t.number, t.w, t.h, size);
+      if (label.mode === "none") break;
+      out[i] = label;
+    }
+  }
+  return out;
+}

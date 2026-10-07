@@ -134,19 +134,24 @@ const X_AXIS_POLICY = {
   },
 } as const;
 
+/** The largest |yAxisPolicy.min| / |max| accepted (Ruling 74). A lone bound's open end is placed past
+ *  it, clamped to ±Number.MAX_VALUE; this keeps that end strictly past the bound, so the axis ascends.
+ *  validate.ts formats the error. */
+export const Y_BOUND_LIMIT = 1e300;
+
 const Y_AXIS_POLICY = {
   type: "object",
   additionalProperties: false,
   properties: {
-    min: { type: "number" },
-    max: { type: "number" },
+    min: { type: "number", minimum: -Y_BOUND_LIMIT, maximum: Y_BOUND_LIMIT },
+    max: { type: "number", minimum: -Y_BOUND_LIMIT, maximum: Y_BOUND_LIMIT },
     includeZero: { type: "boolean" },
     tickCount: { type: "integer", minimum: 1 },
     autoWiden: {
       type: "object",
       additionalProperties: false,
       required: ["step"],
-      properties: { step: { type: "number" } },
+      properties: { step: { type: "number", exclusiveMinimum: 0 } },
     },
     markers: Y_MARKER_ARRAY,
   },
@@ -179,7 +184,8 @@ const OVERLAY = {
     intercept: { type: "number" },
     column: { type: "string", minLength: 1 },
     by: { type: "string", enum: ["series", "none"] },
-    ci: { type: "number", exclusiveMinimum: 0, exclusiveMaximum: 1 },
+    // Capped at 0.999: within an ulp of 1 the t-quantile is finite but meaningless (~1e16).
+    ci: { type: "number", exclusiveMinimum: 0, maximum: 0.999 },
     domain: {
       anyOf: [
         { type: "string", enum: ["axis"] },
@@ -355,7 +361,7 @@ export const CHART_SPEC_SCHEMA = {
   additionalProperties: false,
   required: ["chartType", "title", "xAxisType", "data"],
   properties: {
-    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell", "timeline"] },
+    chartType: { type: "string", enum: ["line", "area", "bar", "stacked", "scatter", "dotplot", "waterfall", "histogram", "dumbbell", "timeline", "treemap"] },
 
     // Data column → role mapping (any column names; absent ⇒ defaults x:"time"/value:"value"/series:"series").
     columns: {
@@ -401,6 +407,7 @@ export const CHART_SPEC_SCHEMA = {
     y_axis_title: { type: "string" },
     tooltip_decimals: { type: "integer", minimum: 0, maximum: 10 },
     tooltip_series_name: { type: "boolean" },
+    tooltip_section: { type: "boolean" },
     // A d3 timeFormat pattern. Only the emptiness is structural; "is this axis date-based?" is a
     // cross-field question, so it lives in validate.ts.
     tooltip_x_format: { type: "string", minLength: 1 },
@@ -416,7 +423,8 @@ export const CHART_SPEC_SCHEMA = {
     annotations: ANNOTATIONS,
 
     // Series (the series COLUMN is mapped via `columns.series`)
-    series_order: { type: "array", items: { type: "string" } },
+    // A repeated entry is an author error (validate.ts formats the message naming the value).
+    series_order: { type: "array", items: { type: "string" }, uniqueItems: true },
     series_colors: { type: "object", additionalProperties: { type: "string" } },
     // A closed enum, so an unrecognised hatch (including a matplotlib density repeat like "//")
     // fails at load rather than silently rendering a flat fill.
@@ -436,7 +444,7 @@ export const CHART_SPEC_SCHEMA = {
     },
     series_labels: { type: "object", additionalProperties: { type: "string" } },
 
-    // Section axis (horizontal bars; the section COLUMN is mapped via columns.section).
+    // Section axis (horizontal bar/stacked/dumbbell; the section COLUMN is mapped via columns.section).
     section_order: { type: "array", items: { type: "string" } },
     section_labels: { type: "object", additionalProperties: { type: "string" } },
     x_order: { type: "array", items: { type: "string" } },
@@ -444,7 +452,7 @@ export const CHART_SPEC_SCHEMA = {
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 
     // Shape channel (point charts). The shape COLUMN is mapped via columns.shape.
-    shape_order: { type: "array", items: { type: "string" } },
+    shape_order: { type: "array", items: { type: "string" }, uniqueItems: true },
     shape_labels: { type: "object", additionalProperties: { type: "string" } },
     color_legend_title: { type: "string" },
     shape_legend_title: { type: "string" },
@@ -555,6 +563,33 @@ export const CHART_SPEC_SCHEMA = {
         max_rows: { type: "integer", minimum: 1, maximum: 6 },
         auto_vertical: { type: "boolean" },
         vertical_lanes: { type: "string", enum: ["columns", "single"] },
+      },
+    },
+    treemap: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        label_value: { type: "string", enum: ["share", "value", "none"] },
+        shading: { type: "string", enum: ["size", "none"] },
+        share_decimals: { type: "integer", minimum: 0, maximum: 3 },
+        tooltip_values: { type: "string", enum: ["both", "share", "value", "none"] },
+        share_label: { type: "string", minLength: 1 },
+        value_label: { type: "string", minLength: 1 },
+        tooltip_note: { type: "string", minLength: 1 },
+        tooltip_group: { type: "boolean" },
+        tooltip: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["column"],
+            properties: {
+              column: { type: "string", minLength: 1 },
+              label: { type: "string", minLength: 1 },
+              format: VALUE_FORMAT,
+            },
+          },
+        },
       },
     },
     // Dumbbell (connected dot plot). Categorical axis via xAxisType; orientation flips it.

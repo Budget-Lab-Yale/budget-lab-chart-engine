@@ -8,10 +8,12 @@ import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { readLinearScale } from "./plot-scale";
 import { escapeHtml } from "./util";
+import { categoryText } from "../spec/section-key";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
 import { TOTAL_SERIES_KEY } from "./series-keys";
 import { SINGLE_SERIES_KEY } from "../spec/columns";
+import { ownValue } from "../spec/own-key";
 import { paintedFill } from "./painted-fill";
 import { resolveHatch } from "./hatch";
 import { iconSvgMarkup, iconFromLegendItem, recolourIcons, type IconSpec } from "./icon";
@@ -36,8 +38,9 @@ type Row = Record<string, unknown>;
  *  Every row builder in this file reads this constant -- there are seven emission sites (the
  *  scatter card's x and y rows, the shared series row, the band card's two Total variants, the
  *  cumulative-area Total, and the overlay rows) and they drifted apart on smaller things than
- *  this. Gated by test/card-wrap.test.ts. */
-const LABEL_VALUE_GAP = "\u00a0";
+ *  this. Gated by test/card-wrap.test.ts. The treemap card's rows (treemap-hover.ts) are an eighth
+ *  site, importing this constant; test/treemap-live.test.ts gates that one. */
+export const LABEL_VALUE_GAP = "\u00a0";
 
 export interface CrosshairOptions {
   rows: Row[];
@@ -107,7 +110,7 @@ export interface CrosshairOptions {
 // just this map with exactly one key, `document.body`, which is the default below.
 const tooltipsByParent = new WeakMap<Node, HTMLElement>();
 
-function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body): HTMLElement {
+export function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body): HTMLElement {
   const existing = tooltipsByParent.get(parent);
   if (existing && parent.contains(existing)) return existing;
   const tip = doc.createElement("div");
@@ -145,6 +148,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   const plotH = H - mt - mb;
 
   if (!xParse) {
+    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
+    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
       xParse = (v) => +new Date(String(v));
@@ -517,7 +522,7 @@ export function overlayTooltipRows(
   drawn.forEach(({ o, v }, i) => {
     const name =
       o.series != null && (perLabel.get(o.label) ?? 0) > 1
-        ? `${o.label} (${seriesLabels?.[o.series] ?? o.series})`
+        ? `${o.label} (${ownValue(seriesLabels, o.series) ?? o.series})`
         : o.label;
     const swatch = seriesSwatchHtml({
       shape: "line",
@@ -581,7 +586,7 @@ function tooltipSeriesRowHtml(
   valueText: string,
   opts: { seriesLabels?: Record<string, string>; icons?: Map<string, IconSpec> },
 ): string {
-  const display = (opts.seriesLabels && opts.seriesLabels[series]) || series;
+  const display = ownValue(opts.seriesLabels, series) || series;
   const swatch = seriesSwatchHtml(rowIcon(series, opts.icons));
   const label = display === "" ? "" : `<span class="tbl-tooltip-label">${escapeHtml(display)}:</span>${LABEL_VALUE_GAP}`;
   return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
@@ -680,6 +685,8 @@ export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairO
 
   // x-parse/format inference (mirrors attachCrosshair) when the adapter didn't thread them.
   if (!xParse) {
+    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
+    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
     const sample = panes.find((p) => p.rows.length)?.rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
       xParse = (v) => +new Date(String(v));
@@ -845,12 +852,15 @@ export interface BandHoverCtx {
   series: string[];
   values: Record<string, number>;
   facet?: string;
+  /** The hovered row's raw `columns.section` value, as `category` is the raw category: two rows
+   *  can share a category across sections, and this says which one. Absent without sections. */
+  section?: string;
 }
 
 export interface BandCrosshairOptions {
   /** All rows in scope (dataInScope from renderChart). Each must have `_xc` (the category
-   *  key), `series`, and `_y`. */
-  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+   *  key), `series`, and `_y`; `_section` on a sectioned chart, for onHover's `section`. */
+  rows: Array<{ _xc?: string; series: string; _y: number | null; _section?: string }>;
   /** True for stacked charts — enables the Total row logic in the tooltip. */
   isStacked?: boolean;
   /** The tooltip's Total row style for stacked charts — see spec/bar-stack.ts's `TotalRow`.
@@ -877,6 +887,11 @@ export interface BandCrosshairOptions {
   yFormat?: (v: number) => string;
   /** Raw category value → display label for the tooltip header. */
   categoryLabels?: Record<string, string>;
+  /** `tooltip_section: true` (a sectioned chart): the card header reads "<section> · <category>",
+   *  the section being the hovered category's `_section` row value through `sectionLabels`. */
+  tooltipSection?: boolean;
+  /** `spec.section_labels` — raw section value → its header text, for `tooltipSection`. */
+  sectionLabels?: Record<string, string>;
   /** Chart orientation — "horizontal" puts categories on the Y axis (band rows).
    *  Defaults to vertical (categories on X axis). */
   orientation?: "vertical" | "horizontal";
@@ -926,6 +941,12 @@ export interface BandCrosshairOptions {
    *  `chrome.tooltip: false` alike (render-live's actual use case: hit-test without the engine's
    *  own card). */
   onHover?: (ctx: BandHoverCtx | null) => void;
+  /** Horizontal: the row strip's x-extent and label accent, as `SecondaryBandOptions`' fields of
+   *  the same names — start at the SVG's left edge (under the category label) and run to its right
+   *  edge, and bold + darken the hovered row's label. Unset keeps the strip within the plot and the
+   *  label as drawn. */
+  regionFromLeftEdge?: boolean;
+  accentLabel?: boolean;
 }
 
 /** A resolved band: the category key and its [xMin, xMax] in SVG user units. */
@@ -1068,14 +1089,20 @@ export function resolveCategorySeriesValues(
   const series = seriesOrder && seriesOrder.length
     ? seriesOrder.filter((s) => valBySeries.has(s))
     : [...valBySeries.keys()];
+  // defineProperty, not `values[s] =`: assigning to "__proto__" hits the inherited setter and
+  // drops the series, which then read back as Object.prototype. Defined, it is an own key.
   const values: Record<string, number> = {};
-  for (const s of series) values[s] = valBySeries.get(s)!;
+  for (const s of series) {
+    Object.defineProperty(values, s, {
+      value: valBySeries.get(s)!, enumerable: true, writable: true, configurable: true,
+    });
+  }
   return { series, values };
 }
 
 export function buildBandTooltipHtml(
   category: string,
-  rows: Array<{ _xc?: string; series: string; _y: number | null }>,
+  rows: Array<{ _xc?: string; series: string; _y: number | null; _section?: string }>,
   opts: {
     isStacked?: boolean;
     totalRow?: TotalRow;
@@ -1097,6 +1124,10 @@ export function buildBandTooltipHtml(
     yFormat?: (v: number) => string;
     /** Raw category value → display label for the tooltip header (e.g. "1" → "1st Decile"). */
     categoryLabels?: Record<string, string>;
+    /** Prefix the header with the category's section ("<section> · <category>"); see
+     *  BandCrosshairOptions.tooltipSection. */
+    tooltipSection?: boolean;
+    sectionLabels?: Record<string, string>;
     /** Series → its resolved icon FOR THE CATEGORY being built. The ONLY source of a row's key; see
      *  resolveTooltipIcons. The caller re-colours it from the DRAWN fill first (recolourIcons, once
      *  per category — see `readCategoryFills`), which is what keeps a `bar_color` /
@@ -1118,11 +1149,21 @@ export function buildBandTooltipHtml(
     category, rows, seriesOrder,
   );
 
-  let html = `<div class="tbl-tooltip-head">${escapeHtml(categoryLabels?.[category] ?? category)}</div>`;
+  // `category` may be a section key; the card, the hook and x_labels see the display text.
+  const shown = categoryText(category);
+  const catHead = escapeHtml(ownValue(categoryLabels, shown) ?? shown);
+  // The category's section is its first row's, as the band groups it (marks/category-band.ts).
+  const section = opts.tooltipSection
+    ? rows.find((r) => r._xc === category && r._section != null)?._section
+    : undefined;
+  const head = section
+    ? `${escapeHtml(ownValue(opts.sectionLabels, section) ?? section)} · ${catHead}`
+    : catHead;
+  let html = `<div class="tbl-tooltip-head">${head}</div>`;
   let seriesRows = "";
   let total = 0;
   for (const series of orderedSeries) {
-    const v = valuesBySeries[series];
+    const v = ownValue(valuesBySeries, series);
     if (v == null) continue;
     total += v;
     seriesRows += tooltipSeriesRowHtml(series, fmt(v), {
@@ -1169,11 +1210,12 @@ export function buildBandTooltipHtml(
   // hooks.tooltip (#30, Task 5): screen-only content replacement — the engine still does the
   // hit-testing/positioning/highlight around this card (see the two call sites below). `total`
   // reuses `hasTotalRow` above so it is only handed to the hook when a Total row would actually
-  // show — callers that never pass isStacked/totalRow (e.g. attachCategoricalLineCrosshair) have
-  // no stack "total" concept, and the raw series sum would mislabel one for them.
+  // show — callers that never pass isStacked/totalRow (attachCategoricalLineCrosshair, except for a
+  // categorical-x area's `showTotal`) have no "total" concept, and the raw series sum would
+  // mislabel one for them.
   if (opts.tooltipHook) {
     const hooked = opts.tooltipHook({
-      category,
+      category: shown,
       series: orderedSeries,
       values: valuesBySeries,
       ...(hasTotalRow ? { total } : {}),
@@ -1493,14 +1535,17 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
         })()
       : undefined;
 
+  const accenter = opts.accentLabel && horizontal && !emitOnly ? labelAccenter(svgEl) : null;
+
   /** Show the highlight over the given band geometry, spanning the full plot axis. */
   function showHighlight(bandMin: number, bandMax: number): void {
     if (!hl) return;
     if (horizontal) {
-      // Band is a y-row; highlight spans full plot width.
-      hl.setAttribute("x", String(ml));
+      // Band is a y-row; highlight spans the plot width, or from under the label (rowStripX).
+      const { x, w } = rowStripX(W, ml, mr, opts);
+      hl.setAttribute("x", String(x));
       hl.setAttribute("y", String(bandMin));
-      hl.setAttribute("width", String(W - ml - mr));
+      hl.setAttribute("width", String(w));
       hl.setAttribute("height", String(Math.max(0, bandMax - bandMin)));
     } else {
       // Band is an x-column; highlight spans full plot height.
@@ -1538,9 +1583,13 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
         yMax: wide[i]!.max,
       }));
       category = resolveCategoryFromBandsH(bands, svgY);
-      if (category) {
-        const b = bands.find((x) => x.category === category);
-        if (b) { hlMin = b.yMin; hlMax = b.yMax; }
+      // The pointer resolves by the widened bands (so a gap still picks its nearer row), but the
+      // highlight is the row's own strip, which never covers a section gap or header.
+      const idx = category ? raw.findIndex((x) => x.category === category) : -1;
+      if (idx >= 0) {
+        const s = rowStrip(raw, idx, mt, H - mb);
+        hlMin = s.min;
+        hlMax = s.max;
       }
     } else {
       // Vertical: resolve cursor X → category via x-bands, widened to the midpoints
@@ -1573,11 +1622,20 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     // false` still report what the engine resolved even though neither draws its own card.
     if (opts.onHover) {
       const { series, values } = resolveCategorySeriesValues(category, opts.rows, opts.seriesOrder);
-      opts.onHover({ category, series, values, ...(opts.facet != null ? { facet: opts.facet } : {}) });
+      // A category's section is its first row's, as the band groups it (marks/category-band.ts).
+      const section = opts.rows.find((r) => r._xc === category && r._section != null)?._section;
+      opts.onHover({
+        category: categoryText(category),
+        series,
+        values,
+        ...(opts.facet != null ? { facet: opts.facet } : {}),
+        ...(section != null ? { section } : {}),
+      });
     }
     if (emitOnly) return;
 
     showHighlight(hlMin, hlMax);
+    accenter?.accent(category);
 
     if (!tip) return; // chrome.tooltip: false — highlight shown, no card.
 
@@ -1598,6 +1656,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       tooltipHook: opts.tooltipHook,
       facet: opts.facet,
       ...(icons ? { icons } : {}),
+      ...(opts.tooltipSection ? { tooltipSection: true, sectionLabels: opts.sectionLabels } : {}),
     });
     tip!.innerHTML = html;
 
@@ -1618,6 +1677,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
   function hide(): void {
     if (hl) hl.setAttribute("opacity", "0");
+    accenter?.restore();
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
     opts.onHover?.(null);
@@ -1965,9 +2025,10 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
  * `x0` (data-x): `driver(x0, active)` re-resolves THIS pane's bin (shared mode guarantees identical
  * thresholds, so the bin sets match; keying on x0 also degrades gracefully if edges ever drift),
  * shades its span, and lays a per-series height pill above each bar (staggered on collision). When
- * `active`, the bin range is drawn as an axis pill (same `formatBinLabel` as the hover tooltip).
- * `driver(null)` clears. No pointer handlers (externally driven by the figure bus). Built on the
- * SAME bin geometry as the primary hover (buildHistogramGeom). */
+ * `active`, the bin range is drawn as an axis pill (same `formatBinLabel` as the hover tooltip),
+ * hiding the tick labels it covers (`hideAxisLabelsUnder`). `driver(null)` clears. No pointer
+ * handlers (externally driven by the figure bus). Built on the SAME bin geometry as the primary
+ * hover (buildHistogramGeom). */
 export function attachSecondaryHistogramCursor(
   svgEl: SVGSVGElement,
   opts: HistogramHoverOptions,
@@ -2004,9 +2065,13 @@ export function attachSecondaryHistogramCursor(
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
+  // Tick labels the active pane's bin-range echo is covering; restored at the top of every driver
+  // call, as in attachSecondaryLineCursor.
+  let hiddenTicks: HiddenTick[] = [];
 
   return (key: number | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
+    restoreAxisLabels(hiddenTicks);
     if (key == null) {
       g.setAttribute("opacity", "0");
       return;
@@ -2052,7 +2117,12 @@ export function attachSecondaryHistogramCursor(
       if (rowYs.length) {
         const cx = (spans[idx]!.min + spans[idx]!.max) / 2;
         const text = formatBinLabel(bin.x0, bin.x1, opts.label ?? { xType: "numeric", interval: null });
-        addCoordAxisLabel(g, doc, cx, [{ text, cy: rowYs[0]! }]);
+        const box = addCoordAxisLabel(g, doc, cx, [{ text, cy: rowYs[0]! }]);
+        // A numeric bin range ("10 – 20") is wider than the edge ticks it is centred between, so on
+        // narrow bins the pill covers them and leaves a neighbour's fragment past its edge. Hide
+        // what it covers, as the line cursor does for a wide `tooltip_x_format` echo. Ungated:
+        // the default label is already a range; where it covers nothing, nothing is hidden.
+        if (box) hiddenTicks = hideAxisLabelsUnder(svgEl, mt + plotH, box);
       }
     }
     g.setAttribute("opacity", "1");
@@ -2091,6 +2161,61 @@ export const CROSSHAIR_HIT_SELECTOR =
 const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
 const COORD_LABEL_DARK = "#1A1A2E";
+
+/** Bold + darken one category's axis label at a time, restoring the last one on the next call. The
+ *  label is found by the `data-category` hook the tagging pass stamps (axes.ts CAT_LABEL_CLASS), not
+ *  by text, so a category that reads like a tick label cannot be confused with it. Weight/colour
+ *  only — the shaded row is the emphasis. One per attachment, so each tracks its own label. */
+function labelAccenter(svgEl: SVGSVGElement): { accent: (category: string) => void; restore: () => void } {
+  const labelEls = new Map<string, SVGTextElement>();
+  for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text[data-category]"))) {
+    const cat = t.getAttribute("data-category");
+    if (cat) labelEls.set(cat, t);
+  }
+  let accented: SVGTextElement | null = null;
+  const restore = (): void => {
+    if (!accented) return;
+    accented.setAttribute("font-weight", "500");
+    accented.setAttribute("fill", TBL.color.axis);
+    accented = null;
+  };
+  return {
+    accent: (category) => {
+      restore();
+      const el = labelEls.get(category);
+      if (!el) return;
+      el.setAttribute("font-weight", "700");
+      el.setAttribute("fill", COORD_LABEL_DARK);
+      accented = el;
+    },
+    restore,
+  };
+}
+
+/** A horizontal category row's hover strip: ONE row pitch tall (the smallest step between adjacent
+ *  rows) centred on the row, clamped to the plot's [top, bottom]. Every row gets the same strip, and
+ *  a row beside a section gap does not reach into the gap or its header — which midpoint widening
+ *  does, since the neighbour across the gap is far away. */
+function rowStrip(
+  bands: ReadonlyArray<{ yMin: number; yMax: number }>,
+  idx: number,
+  top: number,
+  bottom: number,
+): { min: number; max: number; centre: number } {
+  const centers = bands.map((b) => (b.yMin + b.yMax) / 2);
+  let step = Infinity;
+  for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
+  if (!Number.isFinite(step)) step = bands[idx]!.yMax - bands[idx]!.yMin + 8;
+  const c = centers[idx]!;
+  return { min: Math.max(top, c - step / 2), max: Math.min(bottom, c + step / 2), centre: c };
+}
+
+/** A horizontal row strip's x-extent: within the plot, or from the SVG's left edge (under the label)
+ *  to its right edge. */
+function rowStripX(W: number, ml: number, mr: number, opts: { regionFromLeftEdge?: boolean }): { x: number; w: number } {
+  if (!opts.regionFromLeftEdge) return { x: ml, w: Math.max(0, W - ml - mr) };
+  return { x: 0, w: W };
+}
 /** Net-total pill text: true black, matching the net dot's black stroke (Style-Guide mark-black). */
 const TOTAL_PILL_COLOR = "#000000";
 
@@ -2384,8 +2509,10 @@ type HiddenTick = { el: SVGTextElement; prev: string };
  * axis whose ticks are `Jun`, so the pill reaches across its neighbour and leaves a fragment of it
  * sticking out past the pill's edge (`Apr` read as `pr`). Hiding just the ticks the pill actually
  * covers keeps the echo where the reader expects it — on the axis row — while the ticks it does
- * NOT reach stay put, so the axis keeps its context. Restored on the next cursor move and on
- * clear; the export path re-renders from the spec and never sees this.
+ * NOT reach stay put, so the axis keeps its context. A histogram pane's bin-range echo hits the
+ * same collision at defaults (a numeric `"10 – 20"` is wider than either edge tick) and uses this.
+ * Restored on the next cursor move and on clear; the export path re-renders from the spec and
+ * never sees this.
  */
 function hideAxisLabelsUnder(
   svgEl: SVGSVGElement,
@@ -2491,10 +2618,12 @@ function addCoordCategoryHighlight(
   svgEl: SVGSVGElement,
   plotBottom: number,
   cx: number,
-  category: string,
+  key: string,
   mode: "single" | "wrap" | "rotate",
   axisRows: number[],
 ): void {
+  // The echo reads, and finds its axis label by, the display text (spec/section-key.ts).
+  const category = categoryText(key);
   const box = findAxisLabelBox(svgEl, plotBottom, category);
   const anchorX = box?.cx ?? cx;
   const anchorY = box?.cy ?? axisRows[0];
@@ -2613,6 +2742,8 @@ export function attachSecondaryLineCursor(
   // single "Jun 2026" on every published multi-pane temporal figure, including the ones that set
   // nothing. Only an author-set `tooltip_x_format` may change what a pane echoes.
   if (!xParse) {
+    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
+    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
     const sample = rows[0]?.[xField];
     if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
     else if (/Q\d/.test(String(sample)))
@@ -2745,13 +2876,9 @@ export interface SecondaryBandOptions {
    *  label gutter too, making the highlight read as one continuous row. Default false (starts at
    *  the plot's left margin). */
   regionFromLeftEdge?: boolean;
-  /** Horizontal: extend the shaded row this many px past the plot's right edge — used to bridge
-   *  the inter-pane grid gap so the row looks continuous across panes. Default 0. */
-  regionExtendRight?: number;
   /** Horizontal: when set, re-draw the hovered category's Y-axis label in bold/dark (accent) — by
    *  weight/color ONLY, no background pill. (Vertical's x-axis category name IS shown on a frosted
-   *  pill via addCoordCategoryHighlight; horizontal's row label is not.) Only the label-bearing
-   *  (leftmost) pane passes this; `font` is the label size. */
+   *  pill via addCoordCategoryHighlight; horizontal's row label is not.) `font` is the label size. */
   accentLabel?: { font: number };
   /** Gap (px) between a bar's tip and its value pill. Default 6. */
   pillGap?: number;
@@ -2926,25 +3053,8 @@ export function attachSecondaryBandCursor(
   const axisRows = makeAxisRows(svgEl, mt + plotH);
 
   // Accent (bold/dark) the hovered category's Y-axis label by mutating the EXISTING label element
-  // (pixel-perfect alignment, vs drawing a duplicate). Found via the `data-category` hook the
-  // axes/tagging layer stamps on every category label (axes.ts CAT_LABEL_CLASS + assemble-plot's
-  // tagging pass) — robust against a category string that happens to equal a tick label's text
-  // (the old textContent-matching approach's collision risk). Track + restore on clear.
-  const labelEls = new Map<string, SVGTextElement>();
-  if (opts.accentLabel) {
-    for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text[data-category]"))) {
-      const cat = t.getAttribute("data-category");
-      if (cat) labelEls.set(cat, t);
-    }
-  }
-  let accented: SVGTextElement | null = null;
-  const restoreAccent = (): void => {
-    if (accented) {
-      accented.setAttribute("font-weight", "500");
-      accented.setAttribute("fill", TBL.color.axis);
-      accented = null;
-    }
-  };
+  // (pixel-perfect alignment, vs drawing a duplicate); see labelAccenter.
+  const accenter = opts.accentLabel ? labelAccenter(svgEl) : null;
 
   /** The shaded band for `category` — a rect in viewBox coords — plus that band's centre on the
    *  category axis (which the active pane's category highlight is placed on). ONE computation for
@@ -2962,22 +3072,12 @@ export function attachSecondaryBandCursor(
       } as BandCrosshairOptions);
       const idx = bands.findIndex((b) => b.category === category);
       if (idx < 0) return null;
-      // EQUAL-height row for every category: use the UNIFORM band step (centred on each category),
-      // not the neighbour-midpoint widening — otherwise categories at a section boundary (whose
-      // neighbour is a spacer-gap away) get a taller strip than the rest.
-      const centers = bands.map((bb) => (bb.yMin + bb.yMax) / 2);
-      let step = Infinity;
-      for (let i = 1; i < centers.length; i++) step = Math.min(step, centers[i]! - centers[i - 1]!);
-      if (!Number.isFinite(step)) step = bands[idx]!.yMax - bands[idx]!.yMin + 8;
-      const c = centers[idx]!;
-      const yMin = Math.max(mt, c - step / 2);
-      const yMax = Math.min(mt + plotH, c + step / 2);
-      // Shade the whole category row. Optionally start at the SVG left edge (cover the label gutter)
-      // and extend past the right edge (bridge the inter-pane gap) so it reads as one continuous row.
+      // EQUAL-height row for every category (rowStrip), the same strip the primary crosshair draws.
+      const { min: yMin, max: yMax, centre: c } = rowStrip(bands, idx, mt, mt + plotH);
+      // Shade the whole category row, to the SVG's right edge (incl. the right margin). Optionally
+      // start at the SVG left edge, covering the label gutter, so it reads as one continuous row.
       const x0 = opts.regionFromLeftEdge ? 0 : ml;
-      // Cover the pane's full width (incl. the right margin) and, for non-last panes, bridge the
-      // inter-pane grid gap (SVG overflow is visible) so the row reads as one continuous strip.
-      const x1 = W + (opts.regionExtendRight ?? 0);
+      const x1 = W;
       return { x: x0, y: yMin, w: x1 - x0, h: yMax - yMin, centre: c };
     }
     // Vertical: the region spans the full band STEP (widened to the midpoints between clusters),
@@ -3002,7 +3102,7 @@ export function attachSecondaryBandCursor(
 
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
-    restoreAccent();
+    accenter?.restore();
     if (category == null) {
       g.setAttribute("opacity", "0");
       return;
@@ -3016,6 +3116,7 @@ export function attachSecondaryBandCursor(
         return;
       }
       addCoordRegion(g, doc, echo.x, echo.w, echo.y, echo.h);
+      accenter?.accent(category);
       g.setAttribute("opacity", "1");
       return;
     }
@@ -3037,14 +3138,7 @@ export function attachSecondaryBandCursor(
       const pillColor = (r: CatRect) => r.fill ?? colorFor(r.series);
       // Accent the hovered category's Y label by bolding + darkening the existing label element
       // (weight/color only, no background pill — the shaded row already provides the emphasis).
-      if (opts.accentLabel) {
-        const el = labelEls.get(category);
-        if (el) {
-          el.setAttribute("font-weight", "700");
-          el.setAttribute("fill", COORD_LABEL_DARK);
-          accented = el;
-        }
-      }
+      accenter?.accent(category);
       const pillGap = opts.pillGap ?? 6;
       // showPills: false (chrome.valuePills) suppresses only the per-series value pills below — the
       // shaded row region and the accented Y-axis label (above) still render, mirroring
@@ -3251,7 +3345,8 @@ function nearestCategory(centers: Array<{ category: string; cx: number }>, svgX:
 }
 
 export interface CategoricalLineOptions {
-  rows: Array<{ _xc?: string; series: string; _y: number | null }>;
+  /** `_section` on a sectioned dumbbell, for `tooltipSection`. */
+  rows: Array<{ _xc?: string; series: string; _y: number | null; _section?: string }>;
   colors?: Map<string, string>;
   seriesLabels?: Record<string, string>;
   seriesOrder?: string[];
@@ -3270,6 +3365,11 @@ export interface CategoricalLineOptions {
   onResolve?: (category: string | null) => void;
   /** series → marker symbol name; the coordinated hover dot takes the series' shape. */
   symbols?: Map<string, string>;
+  /** Dot plots: category → series → the symbol that series' point at that category is DRAWN with.
+   *  When set it replaces `symbols` (a point's shape can change between categories within one
+   *  series), and a series with no entry at the category, a point the chart never drew, gets no
+   *  dot. */
+  pointSymbols?: Map<string, Map<string, string>>;
   /** Dot plots: shade the hovered category's full band (like a bar-chart hover) instead of
    *  drawing a dashed vertical guide line. The band extents are derived from the x-axis label
    *  centers (midpoints to neighbors). */
@@ -3293,6 +3393,11 @@ export interface CategoricalLineOptions {
    *  deliberately NOT labelled from this: it overlays the rendered axis tick (taking that tick's
    *  box, wrap mode and rotation), and this field is for reading MORE verbosely than the tick. */
   categoryLabels?: Record<string, string>;
+  /** `tooltip_section: true` (a sectioned chart): the card header reads "<section> · <category>",
+   *  the section being the hovered category's `_section` row value through `sectionLabels`. */
+  tooltipSection?: boolean;
+  /** `spec.section_labels` — raw section value → its header text, for `tooltipSection`. */
+  sectionLabels?: Record<string, string>;
   /** Series → resolved swatch fill (e.g. ink→ink token) so the tooltip marker matches the legend.
    *  Series-keyed, not category-keyed as the band crosshair's is: this is handed in by the CALLER
    *  from the series' own marker style, never read off the marks, and a line/dot mark carries no
@@ -3317,6 +3422,17 @@ export interface CategoricalLineOptions {
   /** This pane facet value -- see BandCrosshairOptions.facet. undefined on the standalone
    *  mountChart path. */
   facet?: string;
+  /** Categorical-x stacked AREA: append the card's Total row, as `CrosshairOptions.showTotal` does
+   *  on a temporal axis. Built by `buildBandTooltipHtml`'s own Total row, so it carries that
+   *  builder's gate (more than one series with a value at the hovered category). Read by the
+   *  primary crosshair only; the coordinated cursor draws pills, not a card. */
+  showTotal?: boolean;
+  /** Horizontal: the row strip's x-extent and label accent, as `SecondaryBandOptions`' fields of
+   *  the same names — start at the SVG's left edge (under the category label) and run to its right
+   *  edge, and bold + darken the hovered row's label. Unset keeps the strip within the plot and the
+   *  label as drawn. */
+  regionFromLeftEdge?: boolean;
+  accentLabel?: boolean;
 }
 
 /**
@@ -3353,8 +3469,9 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     hl.classList.add("tbl-catline-hl");
     hl.setAttribute("fill", TBL.color.annotationDim);
     if (horizontal) {
-      hl.setAttribute("x", String(ml));
-      hl.setAttribute("width", String(Math.max(0, plotRight - ml)));
+      const { x, w } = rowStripX(W, ml, mr, opts);
+      hl.setAttribute("x", String(x));
+      hl.setAttribute("width", String(w));
     } else {
       hl.setAttribute("y", String(mt));
       hl.setAttribute("height", String(plotBottom - mt));
@@ -3385,6 +3502,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   svgEl.appendChild(hit);
 
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
+  const accenter = opts.accentLabel && horizontal && hl ? labelAccenter(svgEl) : null;
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
   // `resolveHatch` is a module function, so nothing here varies with the cursor.
@@ -3420,6 +3538,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
         hl.setAttribute("width", String(Math.max(0, b.max - b.min)));
       }
       hl.setAttribute("opacity", "0.12");
+      accenter?.accent(category);
     } else if (guide) {
       guide.setAttribute("x1", String(cx));
       guide.setAttribute("x2", String(cx));
@@ -3436,6 +3555,8 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       tooltipHook: opts.tooltipHook,
       facet: opts.facet,
       ...(tooltipIcons ? { icons: tooltipIcons } : {}),
+      ...(opts.showTotal ? { isStacked: true, totalRow: "text" as const } : {}),
+      ...(opts.tooltipSection ? { tooltipSection: true, sectionLabels: opts.sectionLabels } : {}),
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
@@ -3450,6 +3571,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   function hide(): void {
     if (guide) guide.setAttribute("opacity", "0");
     if (hl) hl.setAttribute("opacity", "0");
+    accenter?.restore();
     if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
@@ -3498,13 +3620,20 @@ export function attachSecondaryCategoricalLineCursor(
       : [...vals.keys()];
   };
 
+  // The hover dot's symbol for `series` at `cat`; null = that point was never drawn, so no dot.
+  const dotSymbol = (cat: string, series: string): string | undefined | null =>
+    opts.pointSymbols ? (opts.pointSymbols.get(cat)?.get(series) ?? null) : opts.symbols?.get(series);
+
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
   const axisRows = makeAxisRows(svgEl, mt + plotH);
   let centers: Array<{ category: string; cx: number }> | null = null;
+  const stripX = rowStripX(W, ml, mr, opts);
+  const accenter = opts.accentLabel && horizontal ? labelAccenter(svgEl) : null;
 
   return (category: string | null, active = false): void => {
     while (g.firstChild) g.removeChild(g.firstChild);
+    accenter?.restore();
     if (category == null) { g.setAttribute("opacity", "0"); return; }
     if (!centers)
       centers = opts.centersFromMarks
@@ -3522,7 +3651,8 @@ export function attachSecondaryCategoricalLineCursor(
       const idx = centers.findIndex((x) => x.category === category);
       if (horizontal) {
         const b = uniformBand(centers, idx, mt, mt + plotH);
-        addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+        addCoordRegion(g, doc, stripX.x, stripX.w, b.min, b.max - b.min);
+        accenter?.accent(category);
       } else {
         const b = uniformBand(centers, idx, ml, W - mr);
         addCoordRegion(g, doc, b.min, b.max - b.min, mt, plotH);
@@ -3536,7 +3666,8 @@ export function attachSecondaryCategoricalLineCursor(
       // cursor's core across panes.)
       const idx = centers.findIndex((x) => x.category === category);
       const b = uniformBand(centers, idx, mt, mt + plotH);
-      addCoordRegion(g, doc, ml, plotW, b.min, b.max - b.min);
+      addCoordRegion(g, doc, stripX.x, stripX.w, b.min, b.max - b.min);
+      accenter?.accent(category);
       // A value pill per series on EVERY pane (matching bars — the whole point of a coordinated
       // cursor is reading values across panes, not just the hovered one); `active` only bolds them.
       // Pills sit just above the row at each dot's value-x, de-collided along X so they never
@@ -3547,7 +3678,10 @@ export function attachSecondaryCategoricalLineCursor(
         const weight = active ? 700 : 600;
         const colorFor = (s: string): string => opts.colors?.get(s) || "#666666";
         const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, x: toPx(vals.get(s)!) }));
-        if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, p.x, cy, colorFor(p.s), opts.symbols?.get(p.s));
+        if (!opts.markerless) for (const p of pts) {
+          const sym = dotSymbol(category, p.s);
+          if (sym !== null) addCoordDot(g, doc, p.x, cy, colorFor(p.s), sym);
+        }
         // showPills: false (chrome.valuePills) suppresses only these value pills — the row echo
         // above and the per-series dots just above are untouched, matching
         // SecondaryBandOptions'/HistogramHoverOptions' identical split.
@@ -3580,7 +3714,10 @@ export function attachSecondaryCategoricalLineCursor(
       const pts = orderFor(category).map((s) => ({ s, v: vals.get(s)!, y: toPy(vals.get(s)!), dx: opts.dodge?.get(s) ?? 0 }));
       // Dots sit OVER the actual data points (dodged x for dot plots, band center otherwise).
       // Skipped for the dumbbell (markerless): its own dots are visible; a white ring would recolor them.
-      if (!opts.markerless) for (const p of pts) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), opts.symbols?.get(p.s));
+      if (!opts.markerless) for (const p of pts) {
+        const sym = dotSymbol(category, p.s);
+        if (sym !== null) addCoordDot(g, doc, cx + p.dx, p.y, colorFor(p.s), sym);
+      }
       // showPills: false (chrome.valuePills) suppresses only the value pills in BOTH layouts
       // below — the guide/band echo, the per-series dots just above, and the active pane's
       // category highlight are untouched, matching SecondaryBandOptions'/
@@ -3954,7 +4091,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
     const show = (evt: PointerEvent): void => {
       if (!tip) return;
       const color = opts.colors?.get(p.series) || TBL.color.navy;
-      const sLabel = opts.seriesLabels?.[p.series] ?? p.series;
+      const sLabel = ownValue(opts.seriesLabels, p.series) ?? p.series;
       // Header: the point's actual marker (its symbol, filled in the series color) followed by
       // "series · shape" on one line (e.g. a navy triangle + "Slow · Compressive").
       const symbolName = (p.shape && opts.symbols?.get(p.shape)) || "circle";
@@ -3978,7 +4115,7 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
       // single-series chart resolves to SINGLE_SERIES_KEY (""), and joining that produced a header
       // opening with a dangling "· ".
       const tokens = opts.showSeriesName === false ? [] : [sLabel];
-      if (opts.showShape && p.shape) tokens.push(opts.shapeLabels?.[p.shape] ?? p.shape);
+      if (opts.showShape && p.shape) tokens.push(ownValue(opts.shapeLabels, p.shape) ?? p.shape);
       if (p.pointLabel) tokens.push(p.pointLabel);
       const headText = tokens.filter((t) => t !== "").map(escapeHtml).join(" · ");
       let html = `<div class="tbl-tooltip-head">${swatch}${headText}</div>`;

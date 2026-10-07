@@ -8,6 +8,7 @@
 // `rug.tracks` cover the remaining case: a timeline concept with no band or fill of its own.
 import { resolveAnnotations } from "./annotations";
 import type { ChartSpec, RugInterval, RugTrack } from "./types";
+import { parseDate, parseQuarter, temporalValueError, quarterValueError } from "./parse-time";
 
 /** A track with its color and legend flag resolved, ready to draw or to key. */
 export interface ResolvedRugTrack {
@@ -147,12 +148,14 @@ export function rugRowCount(spec: ChartSpec): number {
   return spec.rug?.rows === "per-track" ? tracks.length : 1;
 }
 
-/** Numeric position of a rug bound on `xAxisType`, for interval math. Bounds that don't parse
- *  return NaN — validation reports those separately. */
+/** Numeric position of a rug bound on `xAxisType`, for interval math and ordering. A bound the
+ *  date grammar rejects (spec/parse-time.ts) returns NaN rather than throwing — validation reports
+ *  it, and must not crash on the way. Temporal positions are `parseDate`'s local midnights, the
+ *  instants the renderer draws at. */
 export function rugBoundPosition(xAxisType: string, value: string): number {
   if (xAxisType === "numeric") return Number(value);
-  if (xAxisType === "temporal") return +new Date(value);
-  if (xAxisType === "quarterly") return Number(value.slice(0, 4)) * 4 + Number(value[5]);
+  if (xAxisType === "temporal") return temporalValueError(value) ? NaN : +parseDate(value);
+  if (xAxisType === "quarterly") return quarterValueError(value) ? NaN : +parseQuarter(value);
   return NaN;
 }
 

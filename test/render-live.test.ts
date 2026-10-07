@@ -225,12 +225,12 @@ describe("computeChartHeight", () => {
     expect(computeChartHeight(spec, catRows(["A", "B"], ["S"]))).toBe(400);
   });
 
-  it("floors short horizontal charts at the fixed default", () => {
+  it("sizes a short horizontal chart to its rows, below the vertical default", () => {
     const spec: ChartSpec = {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal", data: "x",
     };
-    // 3 rows would be ~182px, below the 400 floor.
-    expect(computeChartHeight(spec, catRows(["A", "B", "C"], ["S"]))).toBe(400);
+    // Margins 18 + 26, and 3 rows one 22px slot apart: ceil(22 × (3 − 0.2 + 0.04)).
+    expect(computeChartHeight(spec, catRows(["A", "B", "C"], ["S"]))).toBe(44 + 63);
   });
 
   it("grows a grouped horizontal chart with categories x series", () => {
@@ -254,7 +254,7 @@ describe("computeChartHeight", () => {
     expect(computeChartHeight(spec, catRows(cats, ["X", "Y", "Z"]))).toBe(24 * 22 + 80);
   });
 
-  it("adds height for section spacer rows (first section has no spacer)", () => {
+  it("adds a fixed gap per section break (first section has none)", () => {
     const base: ChartSpec = {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal",
       series_order: ["X", "Y"], data: "x",
@@ -269,9 +269,9 @@ describe("computeChartHeight", () => {
       { ...base, columns: { x: "time", series: "series", section: "sec" } },
       rows,
     );
-    // 2 sections → SECTION_SPACER_SLOTS (2) spacer slots (2 × 44px) + 16px top header → sectioned
-    // is taller.
-    expect(sectioned).toBe(unsectioned + 2 * 44 + 16);
+    // 2 sections → one fixed 33px section gap (not band slots, so not 44px row-sized) + 16px top
+    // header → sectioned is taller.
+    expect(sectioned).toBe(unsectioned + 33 + 16);
   });
 });
 
@@ -1477,50 +1477,6 @@ describe("mountChart small multiples", () => {
     container.querySelectorAll('.figure-grid rect[data-series="2019"]').forEach((r) =>
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
-  });
-
-  // --- Per-pane HORIZONTAL bars (sectioned): the figure sizes explicit per-column widths
-  //     (asymmetric category gutter → unequal outer widths, one shared inner data width), so the
-  //     live caller must pass the TOTAL grid width and consume the returned columnWidths —
-  //     exactly like shared mode. Guards the caller contract, not just the engine math.
-  const HBAR_SECTIONED_PERPANE_SPEC: ChartSpec = {
-    chartType: "bar",
-    title: "Sectioned per-pane horizontal",
-    xAxisType: "categorical",
-    orientation: "horizontal",
-    data: "inline",
-    columns: { x: "cat", value: "value", facet: "facet", section: "sec" },
-    section_order: ["P", "Q"],
-    small_multiples: { columns: 2, mode: "per-pane" },
-  };
-  const HBAR_SECTIONED_ROWS: TidyRow[] = [];
-  for (const [f, base] of [["A", 1], ["B", 2]] as const) {
-    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Cars", sec: "P", value: String(base) } as TidyRow);
-    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Food", sec: "P", value: String(base + 1) } as TidyRow);
-    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Rent", sec: "Q", value: String(base + 2) } as TidyRow);
-    HBAR_SECTIONED_ROWS.push({ facet: f, cat: "Care", sec: "Q", value: String(base + 3) } as TidyRow);
-  }
-
-  it("per-pane sectioned horizontal figure fills the container width with equal data widths", () => {
-    const container = document.createElement("div");
-    mountChart(container, { spec: HBAR_SECTIONED_PERPANE_SPEC, rows: HBAR_SECTIONED_ROWS, width: 900 });
-    const grid = container.querySelector<HTMLElement>(".figure-grid")!;
-    expect(grid).not.toBeNull();
-    // Explicit px grid template consuming the figure's per-column widths (labeled col 0 wider).
-    const tpl = grid.style.gridTemplateColumns.split(" ").map((s) => Number.parseFloat(s));
-    expect(tpl.length).toBe(2);
-    expect(tpl[0]!).toBeGreaterThan(tpl[1]!);
-    // The row of panes tiles the FULL container width (minus the 16px grid gap) — the old
-    // single-pane-width contract rendered the whole figure at ~half the container.
-    expect(tpl[0]! + tpl[1]!).toBeCloseTo(900 - 16, 0);
-    // Pane SVGs are rendered at those widths, and the inner DATA width is identical across the
-    // row despite the asymmetric gutter (same value → same bar length in both panes).
-    const svgs = Array.from(container.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
-    expect(svgs.length).toBe(2);
-    svgs.forEach((s, i) => expect(Number(s.getAttribute("width"))).toBeCloseTo(tpl[i]!, 0));
-    const dataW = (s: SVGSVGElement): number =>
-      Number(s.getAttribute("width")) - Number(s.dataset.marginLeft) - Number(s.dataset.marginRight);
-    expect(dataW(svgs[1]!)).toBeCloseTo(dataW(svgs[0]!), 3);
   });
 });
 

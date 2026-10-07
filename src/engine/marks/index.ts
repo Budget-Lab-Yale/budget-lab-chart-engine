@@ -43,7 +43,7 @@ export interface PreparedRow {
    *  the series/shape column (a hover-header dedupe), and a keyed callout must still find its row
    *  then. Present iff `columns.point_label` is configured. */
   _pointKey?: string;
-  /** Horizontal sectioned bars: the row's section value (from columns.section). Drives the
+  /** Horizontal sectioned bars, stacks and dumbbells: the row's section value (from columns.section). Drives the
    *  section-ordered category band + section headers. Absent ⇒ no sections. */
   _section?: string;
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
@@ -76,6 +76,18 @@ export interface MarkContext {
   colors: Map<string, string>;
   /** Resolved, ordered series names (for bar builders that need positional info). */
   seriesNames?: string[];
+  /** Small multiples: the FIGURE's series list (RenderOptions.paletteSeries). Per-series marker
+   *  symbols index it, as colours do, so every pane keys a series as the figure legend does. Absent
+   *  (single chart) → markers index `seriesNames`. */
+  paletteSeries?: string[];
+  /** Small multiples: the FIGURE's shape list (RenderOptions.paletteShapes). A separate shape
+   *  channel's symbols index it, so every pane keys a shape as the figure's shape legend does.
+   *  Absent (single chart) → symbols index `shapeNames`. */
+  paletteShapes?: string[];
+  /** Stacked `barStack.mono`: this pane's series list and series-scoped rows with every section
+   *  drawn, set only when `section_order` leaves rows out. The shades are ranked over these, so a
+   *  drawn series keeps the shade it has with that section drawn. Absent: ranked over the drawn rows. */
+  monoBasis?: { seriesNames: string[]; dataInScope: PreparedRow[] };
   /** Inner plot width in px (outer width minus left+right margins). Approximate — bar
    *  builders use this for px-based label-suppression logic. */
   plotWidth?: number;
@@ -92,6 +104,11 @@ export interface MarkContext {
    *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
    *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
   pane?: boolean;
+  /** How many DISTINCT series the whole CHART draws: on a small-multiples figure, the figure's
+   *  (RenderOptions.chartSeriesCount), which a pane's own `seriesNames` can undercount. Absent ⇒ the
+   *  distinct entries of `seriesNames` (a standalone chart). Read by
+   *  the stacked builder, whose net dot needs a second series to net (spec/bar-stack.ts drawsNetDots). */
+  chartSeriesCount?: number;
   /** Categorical x-axis label layout ("wrap" → two lines, "rotate" → 45°), decided in renderChart
    *  from width + labels to avoid collision. Grouped bars use it for their `fx` group labels. */
   xLabelMode?: BandLabelMode;
@@ -119,20 +136,12 @@ export interface MarkContext {
    *  the bars match the selector's tinted label (`category_colors` still overrides per-category).
    *  Absent → bars keep bar_color/palette. Set from RenderOptions.accentColor. */
   accentColor?: string;
-  /** Horizontal bars in shared-mode small multiples, non-leftmost panes: omit the category
-   *  (y-band) labels so they show only on the leftmost pane. The category band domain is shared,
-   *  so rows still align. Absent → labels emitted (single-chart + leftmost pane unchanged). */
-  hideCategoryLabels?: boolean;
-  /** Horizontal bars in shared-mode small multiples: the shared left-gutter width (px) to use for
-   *  the category labels + plot left margin, computed once by the figure orchestrator over the
-   *  shared category set so every pane uses the SAME gutter. Absent → the builder computes its own
-   *  via horizontalLeftGutter (single-chart unchanged). */
-  categoryGutter?: number;
   /** The x-adapter's `parseX` — turns a spec x STRING into the value the x scale uses (number,
    *  Date, or the category itself), honoring the chart's xAxisType including quarterly. Threaded so
    *  a builder can resolve author-supplied x bounds (line `shading` from/to) without reaching for
-   *  the adapter itself. Returns null for a value that doesn't parse on this axis. */
-  parseXValue?: (v: string) => number | Date | string | null;
+   *  the adapter itself. Throws on a malformed date (spec/parse-time.ts); a non-number on a
+   *  numeric axis is NaN. */
+  parseXValue?: (v: string) => number | Date | string;
   /** The pane's final computed y-domain (post auto/hard/bar-extent resolution, or the forced
    *  shared-mode override) — the SAME value assemblePlot uses for the value axis. The area
    *  builder's projected-range veil rect needs it to span the full plot height ([y1,y2] =
@@ -214,6 +223,11 @@ export interface MarkLayers {
    *  this signals assemblePlot to run the fy-oriented facet-chrome collapse (continuous
    *  full-height vertical gridlines + one value-axis label row at the bottom). */
   fyScaleOpts?: Record<string, unknown>;
+  /** Sectioned `fy` band: the first category of every non-first section (`before`) and the fixed px
+   *  each of those sections moves down by after Plot renders (facet-chrome.ts spreadSections), so a
+   *  section gap does not scale with the row pitch. assemblePlot carves the gaps out of the
+   *  requested height, so the chart still renders exactly that tall. */
+  sectionGaps?: { before: string[]; px: number };
   /** Optional: a mark layer that owns the y-scale (horizontal bars put the category band
    *  on `y`) supplies y-scale options here; merged over assemblePlot's value-axis y. When
    *  present, assemblePlot treats the chart as horizontal: it skips the vertical value
@@ -268,7 +282,8 @@ export interface MarkLayers {
    *  made on the segment's share of the data (see the threshold note in applySegmentGap). Set in
    *  the same literal as `segmentGap`. */
   segmentLabelSelector?: string;
-  /** Stacked bars: the net (sum) callout actually painted — see spec/bar-stack.ts. The single field
+  /** Stacked bars: the net (sum) callout the stack resolved to — what it painted, except that a
+   *  single-series stack reports "dot" with no dot drawn (see spec/bar-stack.ts). The single field
    *  the hover path needs; the tooltip's Total row, the hover treatment and the pills' net-dot flag
    *  are all DERIVED from this plus the spec, at the sites that read them, rather than forwarded
    *  alongside it. Absent ⇒ not a stacked chart. */

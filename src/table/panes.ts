@@ -2,6 +2,7 @@
 // one untitled pane holding all rows, so callers can treat both cases uniformly.
 import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
+import { ownValue } from "../spec/own-key";
 import type { TableModel } from "./model";
 import type { TableLayout } from "./layout";
 import { buildTableModel, applyCollapse } from "./model";
@@ -45,7 +46,7 @@ export function splitPanes(spec: TableSpec, rows: TidyRow[]): Pane[] {
 
   return values.map((v) => ({
     value: v,
-    title: spec.pane_titles?.[v] ?? v,
+    title: ownValue(spec.pane_titles, v) ?? v,
     rows: groups.get(v) ?? [],
   }));
 }
@@ -55,7 +56,7 @@ export function splitPanes(spec: TableSpec, rows: TidyRow[]): Pane[] {
 export function resolveStubHeader(spec: TableSpec, paneValue: string): string {
   const sh = spec.stub_header;
   if (sh == null) return "";
-  return typeof sh === "string" ? sh : (sh[paneValue] ?? "");
+  return typeof sh === "string" ? sh : (ownValue(sh, paneValue) ?? "");
 }
 
 export interface LaidPane { value: string; title: string; model: TableModel; layout: TableLayout; }

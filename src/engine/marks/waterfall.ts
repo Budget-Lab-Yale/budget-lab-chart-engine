@@ -12,6 +12,7 @@
 import { Plot } from "../vendor";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { resolveColor } from "../palette";
+import { ownValue } from "../../spec/own-key";
 import { CAT_LABEL_CLASS } from "../axes";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
@@ -56,7 +57,7 @@ export function buildWaterfallMarks(
       )
     : null;
   const fillFor = (s: WaterfallStep): string => {
-    const byCat = categoryColorMap?.[s.cat];
+    const byCat = ownValue(categoryColorMap, s.cat);
     if (byCat != null) return byCat;
     if (s.kind === "total") return totColor;
     return s.rise ? incColor : decColor;

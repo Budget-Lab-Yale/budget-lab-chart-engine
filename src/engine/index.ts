@@ -11,15 +11,22 @@ import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from "../spec/columns";
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
+import { ownValue } from "../spec/own-key";
+import { sectionKeyer, categoryText, rowsInSectionOrder } from "../spec/section-key";
+import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import {
   computeYAxis,
+  niceDomain,
   computeBarYExtent,
   computeWaterfallYExtent,
   computeDumbbellValueExtent,
   computeDrawnValueExtent,
   resolveHardDomain,
+  fittedExtent,
+  stackedExtent,
+  areaStackKey,
   domainBounds,
   makeTickFormatter,
 } from "./scales";
@@ -31,10 +38,10 @@ import { parseDate } from "../spec/parse-time";
 import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
-import type { PreparedRow, MarkLayers } from "./marks/index";
+import type { PreparedRow, MarkLayers, MarkContext } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForIndex } from "./theme";
-import { resolveValueAffixes, isTruthyFlag, formatNumericX } from "./util";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
+import { resolveValueAffixes, isTruthyFlag, formatNumericX, normalizeSpec } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
@@ -52,6 +59,11 @@ export { TOTAL_SERIES_KEY } from "./series-keys";
 export interface RenderOptions {
   width?: number;
   height?: number;
+  /** `height` was chosen by the engine's own height model, not the host: a live mount or PNG export
+   *  at auto height. A sectioned chart's gaps then stay the full sectionGapPx; only a host-supplied
+   *  height too small for the rows shrinks them (axes.ts fittedSectionGapPx). Absent → a given
+   *  `height` is the host's. */
+  heightFromModel?: boolean;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;
@@ -92,13 +104,6 @@ export interface RenderOptions {
    *  legend order + colors stay series_order). The live layer passes a reordered list when series
    *  are selected (selected-to-bottom in click order) so a user can read a series against zero. */
   stackOrder?: string[];
-  /** Shared-mode small multiples, horizontal bars, non-leftmost panes: omit the category labels
-   *  (the horizontal analog of hideYAxisLabels, which only affects the vertical value axis).
-   *  Threaded into MarkContext.hideCategoryLabels. Absent → labels emitted. */
-  hideCategoryLabels?: boolean;
-  /** Shared-mode small multiples, horizontal bars: the shared category-gutter width (px) every
-   *  pane should use. Threaded into MarkContext.categoryGutter. Absent → builder computes its own. */
-  categoryGutter?: number;
   /** Shared-mode small multiples (vertical bars): force the categorical x-axis label layout
    *  ("single"/"wrap"/"rotate") instead of deciding it per-pane. The figure computes the worst-case
    *  mode across all panes so every pane's labels look consistent. */
@@ -128,6 +133,15 @@ export interface RenderOptions {
    *  painted the second one blue while the legend said amber). Absent (single chart) → the pane's
    *  own list, unchanged. */
   paletteSeries?: string[];
+  /** Small multiples, point charts with a SEPARATE shape channel: the FIGURE's shape list, resolved
+   *  once over all panes' rows. A shape takes its marker symbol from its index here, as a series
+   *  takes its colour from `paletteSeries`; the pane's own shape list still decides what it draws.
+   *  Absent (single chart) → the pane's own list, unchanged. */
+  paletteShapes?: string[];
+  /** Small multiples: how many DISTINCT series the figure draws (rows in its drawn panes, through
+   *  series_order). A pane's own list can undercount it. Read by the stacked builder's net dot
+   *  (spec/bar-stack.ts drawsNetDots). Absent (single chart) → the pane's own distinct count. */
+  chartSeriesCount?: number;
   /** Histogram small multiples (shared mode): the bin thresholds computed ONCE by the figure
    *  orchestrator over ALL in-scope rows, so every pane bins to the SAME edges (and therefore
    *  shares one continuous x-domain). Threaded into `binValues`/`computeThresholds` as the
@@ -247,8 +261,9 @@ export interface RenderResult {
   /** `overlays[].tooltip: true` lines drawn in this frame — one hover-tooltip row each. Empty when
    *  no overlay opted in. See PaneResult.overlayTooltips. */
   overlayTooltips: OverlayTooltipLine[];
-  /** Visual top-to-bottom stack order of the interactive series, for the RIGHT legend
-   *  (stacked charts only). render-live uses it to order the vertical legend column. */
+  /** Top-to-bottom order of the interactive series in the RIGHT legend column: the visual stack
+   *  order on a stacked chart, the group order on a treemap. render-live and the PNG export order the
+   *  vertical legend column by it; absent, the column reverses the series order. */
   legendVisualOrder?: string[];
   /** Stacked charts only. Mirrors MarkLayers.netMode — see spec/bar-stack.ts. */
   netMode?: NetMode;
@@ -258,6 +273,8 @@ export interface RenderResult {
   segmentLabelsDropped?: boolean;
   /** Timeline only: the orientation actually rendered. */
   timelineOrientation?: "horizontal" | "vertical";
+  /** Treemap only: per-tile hover payload, in DOM order of `rect.tbl-treemap-tile`. */
+  treemapTiles?: TreemapTileInfo[];
 }
 
 function uniqueSeries(rows: PreparedRow[]): string[] {
@@ -279,7 +296,7 @@ export function buildColorMap(
   const palette = tblColorScale(Math.max(seriesNames.length, order.length));
   const m = new Map<string, string>();
   seriesNames.forEach((s, i) => {
-    const override = resolveColor(seriesColorsCfg?.[s]);
+    const override = resolveColor(ownValue(seriesColorsCfg, s));
     const at = order.indexOf(s);
     m.set(s, override || (palette[at >= 0 ? at : i] as string));
   });
@@ -299,6 +316,11 @@ export interface PaneResult {
    *  or the forced opts.yDomain). The shared-mode orchestrator probe-renders over all rows and
    *  reads this to obtain the one shared domain. */
   yDomain: [number, number];
+  /** Set only when a lone `yAxisPolicy` bound had nothing fitted on its open side in THIS pane's
+   *  rows, so its own domain took resolveHardDomain's ascending fallback: the domain the pane would
+   *  have had without it, nice'd as `yDomain` is (reversed or [b, b]). Shared-mode probes read it:
+   *  whenever another pane ascends on its own, the figure unions this in place of `yDomain`. */
+  yDomainWithoutFallback?: [number, number];
   /** Formats a value the way this pane's value AXIS does (decimal places derived from its tick
    *  set, plus the chart's affixes). Carried so a `{value}` token in a keyed annotation's legend
    *  label reads exactly as the in-frame label would have. */
@@ -359,6 +381,7 @@ export function renderPane(
   classNameSuffix?: string,
   facetInfo?: FacetInfo,
 ): PaneResult {
+  spec = normalizeSpec(spec);
   const xType = spec.xAxisType;
   if (!xType) throw new Error("No xAxisType.");
   const cols = resolveColumns(spec, rows);
@@ -370,7 +393,57 @@ export function renderPane(
   }
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
+  const data = prepareRows(spec, rows, cols, adapter, facetInfo);
 
+  if (!data.length) throw new Error("No data.");
+
+  const monoStack = spec.chartType === "stacked" && spec.barStack?.mono?.base != null;
+  const allSections = !opts.paletteSeries || monoStack ? rowsWithEverySection(spec, rows, cols, adapter, facetInfo, data) : undefined;
+  const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, allSections, data);
+  const paneOpts = paletteSeries ? { ...opts, paletteSeries } : opts;
+  const monoBasis = monoStack && allSections ? scopeToSeries(spec, allSections) : undefined;
+  // In the row order the full render sums them (assemblePaneResult sorts its rows the same way): a
+  // series' sign is a float sum, so a different order can flip a near-cancelling one and swap shades.
+  if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope);
+  return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
+}
+
+/** This pane's rows with every section drawn, when `section_order` leaves some of them out; else
+ *  undefined. Colours are resolved over these, so no drawn series changes colour (Ruling 79). */
+function rowsWithEverySection(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  adapter: XAdapter,
+  facetInfo: FacetInfo | undefined,
+  data: PreparedRow[],
+): PreparedRow[] | undefined {
+  if (!cols.section || !spec.section_order?.length) return undefined;
+  const all = prepareRows({ ...spec, section_order: undefined }, rows, cols, adapter, facetInfo);
+  // section_order only removes rows, so an equal count means it removed none.
+  return all.length === data.length ? undefined : all;
+}
+
+/** The series list a chart resolves with every section drawn (`allSections`), when `section_order`
+ *  leaving a section out drops a series from it; else undefined. Colours and markers index this list
+ *  (as a figure's panes index RenderOptions.paletteSeries), so a series found only in an excluded
+ *  section takes no legend row but keeps its palette position, and no drawn series changes colour. */
+function seriesBeforeSectionScope(spec: ChartSpec, allSections: PreparedRow[] | undefined, data: PreparedRow[]): string[] | undefined {
+  if (!allSections) return undefined;
+  const all = scopeToSeries(spec, allSections).seriesNames;
+  const drawn = scopeToSeries(spec, data).seriesNames;
+  return all.length === drawn.length && all.every((s, i) => s === drawn[i]) ? undefined : all;
+}
+
+/** renderPane's row prep: parse + validate rows into the engine's in-memory shape. Shared with
+ *  `shapeDomainOver`, which must read the rows exactly as a pane does. */
+function prepareRows(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  adapter: XAdapter,
+  facetInfo: FacetInfo | undefined,
+): PreparedRow[] {
   // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
   // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
   // byte-identical rows.
@@ -381,7 +454,16 @@ export function renderPane(
   // Parse + validate rows into the engine's in-memory shape. Input columns are mapped onto the
   // engine's canonical fields (series / time / _y) via the resolved `columns` role map; a null
   // series column ⇒ a single implicit series.
-  const data: PreparedRow[] = rows
+  // Sectioned axis: a row's category is its section + category key (spec/section-key.ts), so a
+  // label repeated across sections stays two rows. Bare category when nothing repeats (in the
+  // figure, when a small-multiples figure has decided for all its panes).
+  const sectionField = cols.section;
+  rows = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] : null);
+  const keyOf =
+    sectionField && adapter.xField === "_xc"
+      ? sectionKeyer(rows, (r) => r[cols.x] ?? "", (r) => r[sectionField] ?? "")
+      : null;
+  return rows
     .map((r) => {
       const xRaw = r[cols.x] ?? "";
       const valRaw = r[cols.value];
@@ -404,7 +486,7 @@ export function renderPane(
       if (spec.projected_field) {
         row._projected = isTruthyFlag(r[spec.projected_field]);
       }
-      (row as unknown as Record<string, unknown>)[adapter.xField] = adapter.parseX(xRaw);
+      (row as unknown as Record<string, unknown>)[adapter.xField] = keyOf ? keyOf(r) : adapter.parseX(xRaw);
       for (const band of spec.confidence_bands ?? []) {
         if (row.series === band.series) {
           const lo = r[band.lower];
@@ -443,10 +525,6 @@ export function renderPane(
     .filter((r) => adapter.validate(r as unknown as Record<string, unknown>))
     // Drop rows outside the in-scope pane set (consistent with pane_order filtering).
     .filter((r) => !facetInfo || r._facet != null);
-
-  if (!data.length) throw new Error("No data.");
-
-  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, data);
 }
 
 /** [min(_x0), max(_x1)] over binned rows — the continuous bin-edge span the histogram x-scale
@@ -475,6 +553,22 @@ function renderHistogramPane(
   cols: ResolvedColumns,
   xType: NonNullable<ChartSpec["xAxisType"]>,
 ): PaneResult {
+  const binned = histogramPaneRows(spec, rows, cols, xType, opts.binThresholds);
+  if (!binned.length) throw new Error("No data.");
+
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned), spec.tooltip_x_format);
+  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
+}
+
+/** A histogram pane's binned `_x0/_x1/_y` rows: pre-binned rows read directly, raw rows binned at
+ *  `binThresholds` (the figure's shared thresholds) or their own. */
+function histogramPaneRows(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ResolvedColumns,
+  xType: NonNullable<ChartSpec["xAxisType"]>,
+  binThresholds: number[] | undefined,
+): PreparedRow[] {
   const isTemporal = xType === "temporal";
   let binned: PreparedRow[];
 
@@ -517,7 +611,7 @@ function renderHistogramPane(
     const values = inputs.map((r) => r.x);
     const bw = spec.histogram?.binWidth;
     const thresholds =
-      opts.binThresholds ??
+      binThresholds ??
       (isTemporal
         ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
         : computeThresholds(values, {
@@ -530,11 +624,140 @@ function renderHistogramPane(
       normalize: spec.histogram?.normalize,
     }) as PreparedRow[];
   }
+  return binned;
+}
 
-  if (!binned.length) throw new Error("No data.");
+/** The [min, max] of the value cells `rows` hold as one pane, after renderPane's own row prep and
+ *  series scope (`series_order` filters); a histogram's values are its bin heights, binned at
+ *  `binThresholds`. A statement about the DATA, not the drawing: `tbl-chart validate` reads it, and
+ *  what the axis then draws also answers to headroom, markers, nice rounding and shared domains.
+ *  Pure, no DOM. Null when no value is finite. */
+export function paneValueExtent(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  binThresholds?: number[],
+): { min: number; max: number } | null {
+  spec = normalizeSpec(spec);
+  const xType = spec.xAxisType;
+  if (!xType) return null;
+  const cols = resolveColumns(spec, rows);
+  const data =
+    spec.chartType === "histogram"
+      ? histogramPaneRows(spec, rows, cols, xType, binThresholds)
+      : prepareRows(spec, rows, cols, makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const r of scopeToSeries(spec, data).dataInScope) {
+    const y = r._y as number;
+    if (!Number.isFinite(y)) continue;
+    if (y < min) min = y;
+    if (y > max) max = y;
+  }
+  return min <= max ? { min, max } : null;
+}
 
-  const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned), spec.tooltip_x_format);
-  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
+/** Series order. When series_order is set it acts as both filter and order. Mirrored by
+ *  validateChartData's keyed-callout "drawn nowhere" rules (src/spec/validate.ts) — change both. */
+function scopeToSeries(spec: ChartSpec, data: PreparedRow[]): { seriesNames: string[]; dataInScope: PreparedRow[] } {
+  const seriesNames =
+    spec.series_order && spec.series_order.length
+      ? spec.series_order.filter((s) => data.some((r) => r.series === s))
+      : uniqueSeries(data);
+  const seriesSet = new Set(seriesNames);
+  return { seriesNames, dataInScope: data.filter((r) => seriesSet.has(r.series)) };
+}
+
+/** Categorical x render order, IN PLACE. Every downstream consumer (the band scale via
+ *  adapter.buildXOpts, the mark builders, the x-label collision check) reads the category order from
+ *  dataInScope's row order, so a single stable sort fixes the order everywhere. Listed categories
+ *  first in x_order; unlisted ones keep their encounter order after (order-only — unlike
+ *  series_order, x_order does NOT filter). Stable sort preserves within-category row order. No-op
+ *  off the categorical axis.
+ *
+ *  A sectioned axis then takes the row order `sectionedRowOrder` states. The marks group the sorted rows by section in the order they reach each section,
+ *  so the x_order sort alone moved a section whose category x_order lists above one the data reaches
+ *  first. The rows are re-sorted only when the band they would draw differs from that order, so a
+ *  chart already drawn in it keeps its row order, and its bytes. */
+function sortByCategoryOrder(spec: ChartSpec, dataInScope: PreparedRow[]): void {
+  const catOrder = categoryOrderFor(spec);
+  const sectioned = isSectionedAxis(spec, dataInScope);
+  const target = sectioned && catOrder?.length ? sectionedRowOrder(spec, dataInScope, true) : null;
+  if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
+    const rank = new Map(catOrder.map((c, i) => [c, i] as const));
+    const last = catOrder.length;
+    // A bare name ranks every section's row of that name (spec/section-key.ts).
+    const rankOf = (r: PreparedRow): number => rank.get(categoryText(r._xc ?? "")) ?? last;
+    dataInScope.sort((a, b) => rankOf(a) - rankOf(b));
+  }
+  if (!target) return;
+  const drawn = sectionedRowOrder(spec, dataInScope, false);
+  const present = new Set(drawn);
+  const want = target.filter((c) => present.has(c));
+  if (want.length === drawn.length && want.every((c, i) => c === drawn[i])) return;
+  const rank = new Map(want.map((c, i) => [c, i] as const));
+  const rankOf = (r: PreparedRow): number => rank.get(r._xc ?? "") ?? want.length;
+  dataInScope.sort((a, b) => rankOf(a) - rankOf(b));
+}
+
+/** Whether these rows draw a sectioned category axis: a horizontal bar, stack or dumbbell (the
+ *  charts whose marks group rows into sections — marks/category-band.ts, marks/dumbbell.ts) with a
+ *  section on some row. */
+function isSectionedAxis(spec: ChartSpec, rows: readonly PreparedRow[]): boolean {
+  return spec.xAxisType === "categorical" && valueAxisIsX(spec) && rows.some((r) => r._section != null);
+}
+
+/** The row order of a sectioned category axis, as category keys (`_xc`): sections in
+ *  `section_order`, else in the order `rows` first reach them; within a section, x_order /
+ *  category_order (when `withCategoryOrder`), then the order `rows` reach its categories. A
+ *  category belongs to the section of its first row, as in the marks. Without `withCategoryOrder`
+ *  this is the order the marks draw `rows` in as they stand. */
+function sectionedRowOrder(spec: ChartSpec, rows: readonly PreparedRow[], withCategoryOrder: boolean): string[] {
+  const sectionOf = new Map<string, string>();
+  const categories: string[] = [];
+  for (const r of rows) {
+    const cat = r._xc;
+    if (!cat || sectionOf.has(cat)) continue;
+    sectionOf.set(cat, r._section ?? "");
+    categories.push(cat);
+  }
+  const encountered = [...new Set(categories.map((c) => sectionOf.get(c) as string))];
+  const sections = spec.section_order?.length ? spec.section_order.filter((s) => encountered.includes(s)) : encountered;
+  const catOrder = withCategoryOrder ? categoryOrderFor(spec) : undefined;
+  // As sortByCategoryOrder: unlisted ranks at the list's length. A repeated entry makes the
+  // distinct count smaller than a listed index, which tied the two.
+  const rank = new Map((catOrder ?? []).map((c, i) => [c, i] as const));
+  const unlisted = catOrder?.length ?? 0;
+  const rankOf = (c: string): number => rank.get(categoryText(c)) ?? unlisted;
+  return sections.flatMap((s) => categories.filter((c) => sectionOf.get(c) === s).sort((a, b) => rankOf(a) - rankOf(b)));
+}
+
+/** Point charts: the shape domain. Distinct shape values in spec.shape_order (filter + order; a
+ *  listed blank value counts) else data-encounter order over the (category-sorted) rows, blanks
+ *  left out. This domain is an inclusion filter, mirrored by validateChartData's keyed-callout
+ *  "drawn nowhere" rules (src/spec/validate.ts) — change both. */
+function resolveShapeNames(spec: ChartSpec, dataInScope: readonly PreparedRow[]): string[] {
+  return spec.shape_order && spec.shape_order.length
+    ? spec.shape_order.filter((s) => dataInScope.some((r) => r._shape === s))
+    : Array.from(new Set(dataInScope.map((r) => r._shape).filter((s): s is string => s != null && s !== "")));
+}
+
+/** The shape domain a pane resolves when it draws `rows`: renderPane's own row prep, series scope,
+ *  category order and shape rule, run over these rows. Small multiples call it over every DRAWN
+ *  pane's rows for the figure's one shape list (RenderOptions.paletteShapes). Being the pane rule
+ *  itself is what leaves an already-consistent figure unchanged: each pane's rows, in the order the
+ *  pane reads them, are a subsequence of these, so where every pane's list is a prefix of the
+ *  longest (the panes agreed with each other and with that list as legend) this returns it. A rule
+ *  of the figure's own (dropping a listed blank value, reading rows before x_order sorts them,
+ *  counting rows no pane draws) returned another list and moved those figures' markers. */
+export function shapeDomainOver(spec: ChartSpec, rows: TidyRow[]): string[] {
+  spec = normalizeSpec(spec);
+  const xType = spec.xAxisType;
+  if (!xType) throw new Error("No xAxisType.");
+  const cols = resolveColumns(spec, rows);
+  const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
+  const { dataInScope } = scopeToSeries(spec, prepareRows(spec, rows, cols, adapter, undefined));
+  sortByCategoryOrder(spec, dataInScope);
+  return resolveShapeNames(spec, dataInScope);
 }
 
 /** Shared pane-assembly tail: series order/colors → annotations → y-axis → x-opts → markBuilder →
@@ -549,15 +772,9 @@ function assemblePaneResult(
   adapter: XAdapter,
   cols: ResolvedColumns,
   data: PreparedRow[],
+  monoBasis?: MarkContext["monoBasis"],
 ): PaneResult {
-  // Series order + colors. When series_order is set it acts as both filter and order. Mirrored by
-  // validateChartData's keyed-callout "drawn nowhere" rules (src/spec/validate.ts) — change both.
-  const seriesNames =
-    spec.series_order && spec.series_order.length
-      ? spec.series_order.filter((s) => data.some((r) => r.series === s))
-      : uniqueSeries(data);
-  const seriesSet = new Set(seriesNames);
-  const dataInScope = data.filter((r) => seriesSet.has(r.series));
+  const { seriesNames, dataInScope } = scopeToSeries(spec, data);
   const colors = buildColorMap(seriesNames, spec.series_colors, opts.paletteSeries);
   // Single-series charts driven by a colored inline title selector (e.g. a by-industry picker)
   // adopt the selector's color, so the line matches the selector's tinted label. Multi-series
@@ -566,18 +783,7 @@ function assemblePaneResult(
     colors.set(seriesNames[0]!, opts.accentColor);
   }
 
-  // Categorical x render order. Every downstream consumer (the band scale via adapter.buildXOpts,
-  // the mark builders, the x-label collision check) reads the category order from dataInScope's
-  // row order, so a single stable sort here fixes the order everywhere. Listed categories first in
-  // x_order; unlisted ones keep their encounter order after (order-only — unlike series_order,
-  // x_order does NOT filter). Stable sort preserves within-category row order. No-op off the
-  // categorical axis.
-  const catOrder = categoryOrderFor(spec);
-  if (spec.xAxisType === "categorical" && catOrder && catOrder.length) {
-    const rank = new Map(catOrder.map((c, i) => [c, i] as const));
-    const last = catOrder.length;
-    dataInScope.sort((a, b) => (rank.get(a._xc ?? "") ?? last) - (rank.get(b._xc ?? "") ?? last));
-  }
+  sortByCategoryOrder(spec, dataInScope);
 
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
   // reference-line (yAxisPolicy.markers) values so a marker at/beyond the data extent gets a
@@ -687,11 +893,14 @@ function assemblePaneResult(
     ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
     ...(xExtent ? { xDomain: xExtent } : {}),
   });
+  // annotations.yAxis markers on a chart whose value axis is x draw nothing (they sit on the
+  // categorical y scale), so they reach no value domain (Ruling 78; validation rejects them).
+  const yAxisMarkerYs = valueAxisIsX(spec) ? [] : ann.yAxis.map((m) => m.y);
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
-    ...ann.yAxis.map((m) => m.y),
+    ...yAxisMarkerYs,
     ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
     // See overlayColumnYs above for why a `column` overlay folds in and the constructed kinds do not.
     ...overlayColumnYs,
@@ -700,17 +909,32 @@ function assemblePaneResult(
   const tickCount = policy.tickCount ?? 5;
   const chartType = spec.chartType;
 
+  // A LONE pinned bound (`min` or `max`, the other unset) pins only its own end. The branches that
+  // have no extent of their own fill the open end with what computeYAxis fits from `yForAxis` when
+  // given no domain (the same `fittedExtent`). Without it resolveHardDomain returned null and the
+  // lone bound was silently dropped. Undefined when the values hold nothing finite, which keeps the
+  // axis on computeYAxis' own fallback.
+  const loneBound = (policy.min == null) !== (policy.max == null);
+  const fittedOpenEnd = (zero: boolean): { auto?: { min: number; max: number } } => {
+    const auto = loneBound ? fittedExtent(yForAxis, zero) : null;
+    return auto ? { auto } : {};
+  };
+
   let hardDomain: [number, number] | null;
   let includeZero: boolean;
+  // Set when a lone bound took resolveHardDomain's ascending fallback: the hard domain it replaced
+  // (see PaneResult.yDomainWithoutFallback).
+  let hardDomainWithoutFallback: [number, number] | undefined;
+  const hardOpts = {
+    tickCount,
+    onLoneFallback: (d: [number, number]) => void (hardDomainWithoutFallback = d),
+  };
 
   // Value-axis reference markers, for the branches that fold them in so a marker stays visible.
   // The value axis is x on a horizontal chart, so annotations.xAxis plays the yAxis role there
-  // (see assemblePlot's horizontal xAxis marker path).
+  // (see assemblePlot's horizontal xAxis marker path), and annotations.yAxis plays none.
   const valueAxisMarkers = (): number[] =>
-    [
-      ...ann.yAxis.map((m) => m.y),
-      ...(spec.orientation === "horizontal" ? ann.xAxis.map((m) => Number(m.x)) : []),
-    ].filter(Number.isFinite);
+    [...yAxisMarkerYs, ...(valueAxisIsX(spec) ? ann.xAxis.map((m) => Number(m.x)) : [])].filter(Number.isFinite);
 
   if (chartType === "bar" || chartType === "stacked") {
     // Bar/stacked: zero baseline by default (axis extent from stacked totals + value-label
@@ -721,26 +945,31 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
+      ...hardOpts,
       auto: computeBarYExtent(dataInScope, spec, chartType),
       fold: valueAxisMarkers(),
     });
   } else if (chartType === "dumbbell") {
     // Dumbbell: dots are POSITIONS, so the value axis fits the padded data extent and does NOT
-    // force zero (see computeDumbbellValueExtent). Orientation is handled by the mark (horizontal
-    // puts the value on x via yScaleOpts).
-    includeZero = false;
+    // force zero (see computeDumbbellValueExtent) unless the author sets yAxisPolicy.includeZero.
+    // That has to widen the auto extent itself: this branch always resolves a hard domain, and
+    // computeYAxis never applies its own includeZero to one. A pinned min/max still wins on its side.
+    // Orientation is handled by the mark (horizontal puts the value on x via yScaleOpts).
+    includeZero = policy.includeZero === true;
+    const fitted = computeDumbbellValueExtent(dataInScope.map((d) => d._y));
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      auto: computeDumbbellValueExtent(dataInScope.map((d) => d._y)),
+      ...hardOpts,
+      auto: includeZero ? { min: Math.min(0, fitted.min), max: Math.max(0, fitted.max) } : fitted,
       fold: valueAxisMarkers(),
     });
   } else if (chartType === "histogram") {
     // Histogram: the value axis is the (possibly normalized) bin height `_y`, which yForAxis
-    // already carries. Zero baseline is mandatory (bars grow from 0); an explicit min+max opts
-    // into a fixed domain, otherwise auto-fit-from-zero.
+    // already carries. Zero baseline by default (bars grow from 0); a pinned min/max sets its own
+    // end, and a lone one leaves the other auto-fitted from zero.
     includeZero = true;
-    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max });
+    hardDomain = resolveHardDomain({ min: policy.min, max: policy.max, ...hardOpts, ...fittedOpenEnd(true) });
   } else if (chartType === "waterfall") {
     // Waterfall: the value axis must span the running CUMULATIVE path (bar bases/tops, including
     // total bars), not the raw deltas — computed by the same stepper the mark builder uses so the
@@ -749,6 +978,7 @@ function assemblePaneResult(
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
+      ...hardOpts,
       auto: computeWaterfallYExtent(dataInScope),
       fold: ann.yAxis.map((m) => m.y).filter(Number.isFinite),
     });
@@ -767,19 +997,17 @@ function assemblePaneResult(
       ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
       ...overlayColumnYs,
     ].filter(Number.isFinite);
-    const totalByX = new Map<string, number>();
-    let minVal = 0;
-    for (const r of dataInScope) {
-      if (!Number.isFinite(r._y as number)) continue;
-      const k = r.time || String(r._xn ?? r._xc ?? "");
-      totalByX.set(k, (totalByX.get(k) ?? 0) + (r._y as number));
-      if ((r._y as number) < minVal) minVal = r._y as number;
-    }
-    const stackMax = totalByX.size ? Math.max(...totalByX.values()) : 0;
+    // The floor and ceiling are the stacked NEGATIVE and POSITIVE extents: each sign stacks away
+    // from 0 on its own, so two negatives at one x reach their sum, not the lower of the two, and
+    // positives reach theirs whatever negatives share the x (Ruling 72). Keyed by the parsed x, as
+    // Plot stacks, and the same computation as the clip gate's (computeDrawnValueExtent).
     hardDomain = resolveHardDomain({
       min: policy.min,
       max: policy.max,
-      auto: { min: Math.min(0, minVal), max: stackMax },
+      ...hardOpts,
+      // Areas fill from 0, so the baseline is on the axis whatever the sign of the stack: an
+      // all-negative area's ceiling is 0 (Ruling 70), as a bar's or a stack's is.
+      auto: stackedExtent(dataInScope, areaStackKey) ?? { min: 0, max: 0 },
       fold: markerYs,
     });
   } else {
@@ -793,17 +1021,24 @@ function assemblePaneResult(
     if (policy.autoWiden && yMax != null) {
       const step = policy.autoWiden.step || 1;
       const finite = yForAxis.filter(Number.isFinite) as number[];
+      // Validation requires step > 0, but a tiny one overflows v / step to Infinity (and an
+      // unvalidated negative one rounds the wrong way): a multiple that is not finite or does not
+      // reach v falls back to v itself, so the bound always covers what overflowed it.
+      const widen = (v: number, round: (x: number) => number, reaches: (m: number) => boolean): number => {
+        const m = round(v / step) * step;
+        return Number.isFinite(m) && reaches(m) ? m : v;
+      };
       if (finite.length) {
         if (reversed) {
           const dataMin = Math.min(...finite);
-          if (dataMin < yMax) yMax = Math.floor(dataMin / step) * step;
+          if (dataMin < yMax) yMax = widen(dataMin, Math.floor, (m) => m <= dataMin);
         } else {
           const dataMax = Math.max(...finite);
-          if (dataMax > yMax) yMax = Math.ceil(dataMax / step) * step;
+          if (dataMax > yMax) yMax = widen(dataMax, Math.ceil, (m) => m >= dataMax);
         }
       }
     }
-    hardDomain = resolveHardDomain({ min: policy.min, max: yMax });
+    hardDomain = resolveHardDomain({ min: policy.min, max: yMax, ...hardOpts, ...fittedOpenEnd(includeZero) });
   }
 
   // Shared-mode small multiples: opts.yDomain is the ONE domain the orchestrator computed over
@@ -856,16 +1091,14 @@ function assemblePaneResult(
   // `{series}` reads the `series_labels` name, which may name the implicit single series too
   // (SINGLE_SERIES_KEY = ""); unmapped, that nameless series and a blank point_label cell are
   // `undefined`, which leaves the token literal rather than printing nothing.
-  // Own-property lookups: a data key like "toString" must fall through to the raw key, not to
-  // Object.prototype (the publish boundary rebuilds these maps as ordinary objects).
-  const own = (m: Record<string, string> | undefined, k: string): string | undefined =>
-    m && Object.prototype.hasOwnProperty.call(m, k) ? m[k] : undefined;
+  // Own-property lookups (ownValue): a data key like "toString" must fall through to the raw key,
+  // not to Object.prototype (the publish boundary rebuilds these maps as ordinary objects).
   const seriesLabelFor = (key: string | undefined): string | undefined =>
-    key == null ? undefined : (own(spec.series_labels, key) ?? (key || undefined));
+    key == null ? undefined : (ownValue(spec.series_labels, key) ?? (key || undefined));
   const xTokenFor = (x: string | undefined): string | undefined => {
     if (x == null) return undefined;
     const mx = xOpts.markerToX({ x });
-    if (typeof mx === "string") return own(spec.x_labels, mx) ?? x;
+    if (typeof mx === "string") return ownValue(spec.x_labels, mx) ?? x;
     if (typeof mx === "number") return Number.isFinite(mx) ? formatNumericX(mx) : x;
     const n = mx instanceof Date ? mx.getTime() : NaN;
     return Number.isFinite(n) && xOpts.tooltipXFormat ? xOpts.tooltipXFormat(n) : x;
@@ -901,19 +1134,11 @@ function assemblePaneResult(
   const plotWidth = effWidth - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT;
   const plotHeight = effHeight - TBL_MARGIN_TOP - xOpts.marginBottom;
 
-  // Point charts: the shape-encoding channel. Distinct shape values in spec.shape_order (filter +
-  // order) else data-encounter order; `shapeIsSeries` flags the redundant case (shape column ==
-  // series column) so the symbol scale + legend collapse to a single combined group. This domain is
-  // an inclusion filter, mirrored by validateChartData's keyed-callout "drawn nowhere" rules
-  // (src/spec/validate.ts) — change both.
+  // Point charts: the shape-encoding channel (resolveShapeNames); `shapeIsSeries` flags the
+  // redundant case (shape column == series column) so the symbol scale + legend collapse to a
+  // single combined group.
   const hasShape = cols.shape != null;
-  const shapeNames = hasShape
-    ? spec.shape_order && spec.shape_order.length
-      ? spec.shape_order.filter((s) => dataInScope.some((r) => r._shape === s))
-      : Array.from(
-          new Set(dataInScope.map((r) => r._shape).filter((s): s is string => s != null && s !== "")),
-        )
-    : undefined;
+  const shapeNames = hasShape ? resolveShapeNames(spec, dataInScope) : undefined;
   const shapeIsSeries = hasShape && cols.shape === cols.series;
 
   // Truncated value axis (a hard yAxisPolicy.min/max, or a shared-mode figure domain, narrower than
@@ -949,6 +1174,12 @@ function assemblePaneResult(
     ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     // Pane stroke flag: thins line marks for figure panes (both modes). renderFigure sets it.
     ...(opts.pane ? { pane: true } : {}),
+    // The figure's distinct drawn series (set only by renderFigure): a count a pane can undercount.
+    ...(opts.chartSeriesCount != null ? { chartSeriesCount: opts.chartSeriesCount } : {}),
+    // The figure's series list (set only by renderFigure): per-series marker symbols index it.
+    ...(opts.paletteSeries ? { paletteSeries: opts.paletteSeries } : {}),
+    ...(opts.paletteShapes ? { paletteShapes: opts.paletteShapes } : {}),
+    ...(monoBasis ? { monoBasis } : {}),
     // Grouped bars label their categories on `fx`; pass the layout mode so those labels match
     // the single-band/line labels (the adapter handles the `x` band path).
     ...(xLabelMode !== "single" ? { xLabelMode } : {}),
@@ -959,9 +1190,6 @@ function assemblePaneResult(
     // active option's color (the bar analogue of the single-series line recolor above). The bar
     // mark makes it win over bar_color/default; multi-series charts keep their palette.
     ...(opts.accentColor ? { accentColor: opts.accentColor } : {}),
-    // Horizontal faceted bars: suppress category labels on non-leftmost panes; use the shared gutter.
-    ...(opts.hideCategoryLabels ? { hideCategoryLabels: true } : {}),
-    ...(opts.categoryGutter != null ? { categoryGutter: opts.categoryGutter } : {}),
     // This pane's facet identity (per-pane small multiples) — for hooks.valueLabel's ctx.facet.
     ...(opts.paneFacetValue != null ? { facet: opts.paneFacetValue } : {}),
     // Programmatic render hooks (spec/hooks.ts) — only `valueLabel` is consumed by mark builders.
@@ -1043,6 +1271,7 @@ function assemblePaneResult(
     ...(xAxisDomain ? { xAxisDomain } : {}),
     width: opts.width,
     height: opts.height,
+    ...(opts.heightFromModel ? { heightFromModel: true } : {}),
     marginRight: opts.marginRight,
     document: opts.document,
     classNameSuffix,
@@ -1059,6 +1288,9 @@ function assemblePaneResult(
     colors,
     valueAffixes,
     yDomain,
+    ...(hardDomainWithoutFallback
+      ? { yDomainWithoutFallback: niceDomain(hardDomainWithoutFallback, tickCount) }
+      : {}),
     // Wrapped with the SAME tickLabel hook + ctx assemblePlot used internally for the in-frame
     // annotation label (yTickFallbackFmt) — this is what buildLegendItems passes through as
     // pane.formatValue for a keyed annotation's LEGEND row token. Left un-wrapped, the two would
@@ -1119,10 +1351,14 @@ export function buildSeriesKeyRows(
    *  REQUIRED, like `paintedHatches` and for the same reason: a default would let a new call site
    *  silently fall back to the colour map, which is the bug. */
   paintedColors: Map<string, string>,
+  /** Small multiples: the FIGURE's series list, which numbers the per-series markers as the panes'
+   *  marks and the figure legend do (theme.ts markerSymbolForSeries). A pane's key rows fill the
+   *  hover card for a series the figure legend has no row for, so indexing the pane's own list there
+   *  keyed a different marker from the one drawn. Absent (a single chart) → the row's own index. */
+  symbolOrder?: readonly string[],
 ): LegendItem[] {
   const chartType = spec.chartType;
-  const seriesLabels = spec.series_labels ?? {};
-  const labelFor = (name: string): string => seriesLabels[name] ?? name;
+  const labelFor = (name: string): string => ownValue(spec.series_labels, name) ?? name;
   // When the mark layer is the source of truth for series colors (stacked: mono tiers or
   // categorical), use those for the legend swatches so the legend matches the bars.
   const legendColorFor = (name: string): string | undefined =>
@@ -1149,7 +1385,7 @@ export function buildSeriesKeyRows(
         dashed: false,
       };
       if (layers.shapeIsSeries) {
-        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForIndex(i) };
+        return { ...base, markerShape: "point" as const, markerSymbol: markerSymbolForSeries(name, i, symbolOrder) };
       }
       if (distinctShape) {
         return { ...base, markerShape: "chip" as const };
@@ -1166,7 +1402,7 @@ export function buildSeriesKeyRows(
       dashed: false,
       markerShape: "point" as const,
       markerSymbol: "circle",
-      ...((spec.series_marker?.[name] ?? "filled") === "hollow" ? { hollow: true } : {}),
+      ...((ownValue(spec.series_marker, name) ?? "filled") === "hollow" ? { hollow: true } : {}),
     }));
   } else {
     // Every chart type whose marks are FILLED keys with a chip; only stroked marks get a line
@@ -1189,9 +1425,9 @@ export function buildSeriesKeyRows(
       series: name,
       label: labelFor(name),
       color: legendColorFor(name),
-      dashed: spec.series_styles?.[name]?.dashed === true,
+      dashed: ownValue(spec.series_styles, name)?.dashed === true,
       markerShape,
-      ...(withSymbols ? { markerSymbol: markerSymbolForIndex(i) } : {}),
+      ...(withSymbols ? { markerSymbol: markerSymbolForSeries(name, i, symbolOrder) } : {}),
     }));
   }
 
@@ -1284,14 +1520,16 @@ export function buildLegendItems(
 export function buildShapeLegendItems(
   spec: ChartSpec,
   layers: MarkLayers,
+  /** Small multiples: the figure's shape list the panes' symbols index (RenderOptions.paletteShapes).
+   *  Absent (a single chart) → the row's own index. */
+  symbolOrder?: readonly string[],
 ): ShapeLegendItem[] | null {
   if (spec.legend === false) return null;
   if (!layers.shapeNames || layers.shapeNames.length === 0 || layers.shapeIsSeries) return null;
-  const shapeLabels = spec.shape_labels ?? {};
   return layers.shapeNames.map((shape, i) => ({
     shape,
-    label: shapeLabels[shape] ?? shape,
-    markerSymbol: markerSymbolForIndex(i),
+    label: ownValue(spec.shape_labels, shape) ?? shape,
+    markerSymbol: markerSymbolForSeries(shape, i, symbolOrder),
   }));
 }
 
@@ -1300,9 +1538,12 @@ export function renderChart(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): RenderResult {
+  spec = normalizeSpec(spec);
   // Timeline draws its own SVG (no Plot frame, no value axis): branch before renderPane so no
   // existing chart type's path runs any timeline code.
   if (spec.chartType === "timeline") return renderTimeline(spec, rows, opts);
+  // Treemap likewise draws its own SVG.
+  if (spec.chartType === "treemap") return renderTreemap(spec, rows, opts);
   const pane = renderPane(spec, rows, opts);
   const { svg, seriesNames, colors, valueAffixes, dataInScope, layers } = pane;
 
@@ -1359,14 +1600,19 @@ export { renderFigure } from "./figure";
 export type { FigureRenderResult, FigurePane } from "./figure";
 // Timeline renderer: the same safe cycle — marks/timeline.ts imports buildColorMap back from here.
 import { renderTimeline } from "./marks/timeline";
+// Treemap renderer: the same safe cycle — marks/treemap.ts imports buildColorMap back from here.
+import { renderTreemap } from "./marks/treemap";
+import type { TreemapTileInfo } from "./marks/treemap";
 
 /** Top-level dispatcher: a `small_multiples` spec renders a multi-panel figure (renderFigure),
- *  everything else renders a single chart (renderChart). render-live/export switch to this in
+ *  everything else renders a single chart (renderChart), a horizontal chart's facets included
+ *  (they draw as groups, normalizeSpec). render-live/export switch to this in
  *  B6/B7; for now both renderChart and renderFigure stay exported and callable directly. */
 export function render(
   spec: ChartSpec,
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): RenderResult | FigureRenderResult {
+  spec = normalizeSpec(spec);
   return spec.small_multiples ? renderFigure(spec, rows, opts) : renderChart(spec, rows, opts);
 }

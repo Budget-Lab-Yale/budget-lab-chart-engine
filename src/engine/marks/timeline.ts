@@ -9,14 +9,15 @@
 import { d3 } from "../vendor";
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
-import { isTruthyFlag } from "../util";
+import { isTruthyFlag, withoutRepeatedOrderEntries } from "../util";
 import { LABEL_HALO } from "../assemble-plot";
 import { buildColorMap } from "../index";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
 import type { ChartSpec } from "../../spec/types";
 import type { TidyRow } from "../../data/index";
-import { parseDate } from "../../spec/parse-time";
+import { parseDate, temporalValueError } from "../../spec/parse-time";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
+import { ownValue } from "../../spec/own-key";
 import {
   resolveTimelineConfig, timelineColumns, parseEndCell, deriveDateFormat, TIMELINE_EVENT_WARN_COUNT,
 } from "../../spec/timeline";
@@ -33,7 +34,8 @@ export const TIMELINE_CLASS = "tbl-timeline";
 type Orientation = "horizontal" | "vertical";
 
 /** Rows → layout events, filtered and ordered by `series_order` (inclusion filter and render
- *  order, as on every chart type). `id` is the 0-based CSV row index (the layout's tie-break). */
+ *  order, as on every chart type but treemap, where it orders without filtering). `id` is the
+ *  0-based CSV row index (the layout's tie-break). */
 export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: LayoutEvent[]; seriesNames: string[] } {
   const cfg = resolveTimelineConfig(spec);
   const cols = timelineColumns(spec, rows);
@@ -44,13 +46,17 @@ export function prepareTimeline(spec: ChartSpec, rows: TidyRow[]): { events: Lay
     const k = categoryOf(r);
     if (!encounter.includes(k)) encounter.push(k);
   }
-  const seriesNames = spec.series_order ? spec.series_order.filter((s) => encounter.includes(s)) : encounter;
+  // An empty series_order is no filter, as on every other chart type.
+  const seriesNames = spec.series_order?.length ? spec.series_order.filter((s) => encounter.includes(s)) : encounter;
   const kept = rows
     .map((r, id) => ({ r, id, category: categoryOf(r) }))
     .filter((e) => seriesNames.includes(e.category));
   const parsed = kept.map((e) => {
     const start = parseDate(cell(e.r, cols.x).trim());
     const endCell = parseEndCell(cell(e.r, cols.end));
+    // A malformed end cell throws, as the start cell does (CONFIG-SPEC "Dates"); it used to become
+    // "no end" and draw the row as a point event.
+    if (endCell.kind === "invalid") throw new Error(`timeline end value: ${temporalValueError(endCell.raw)}`);
     const end = endCell.kind === "date" ? parseDate(endCell.value) : null;
     return { ...e, start, end, ongoing: endCell.kind === "ongoing" };
   });
@@ -92,6 +98,23 @@ function lanesDrawn(spec: ChartSpec, laneCount: number, orientation: Orientation
   return orientation === "horizontal" || (laneCount === 2 && cfg.verticalLanes === "columns");
 }
 
+/** Whether the legend shows the series rows. Drawn lanes name their categories (the horizontal
+ *  gutter, or the vertical lane columns' headers), so the rows default off there (Ruling 26); a
+ *  vertical render that draws one track instead must name its colours in the legend. */
+function showsSeriesRows(spec: ChartSpec, seriesCount: number, lanesOn: boolean): boolean {
+  return spec.series_legend === true || (spec.series_legend !== false && seriesCount > 1 && !lanesOn);
+}
+
+/** The legend rows a timeline shows in this orientation — renderTimeline's `legendItems` count,
+ *  without rendering. The export frame and the live card's right-column gate (render-live.ts) ask
+ *  it: a resize can switch the orientation, and with it whether drawn lanes replace the rows. */
+export function timelineLegendRowCount(spec: ChartSpec, rows: TidyRow[], orientation: Orientation): number {
+  if (spec.legend === false) return 0;
+  const { seriesNames } = prepareTimeline(spec, rows);
+  const lanesOn = lanesDrawn(spec, seriesNames.length, orientation);
+  return showsSeriesRows(spec, seriesNames.length, lanesOn) ? seriesNames.length : 0;
+}
+
 /** The one place a spec + width + orientation becomes a layout input, so render, height, the
  *  auto-switch, the export frame and the warnings can never disagree about geometry. `budgetWidth`
  *  is the export's portrait budget (timelineExportFrame); absent everywhere else. */
@@ -101,10 +124,9 @@ function layoutInput(
   const cfg = resolveTimelineConfig(spec);
   const { events, seriesNames } = prepareTimeline(spec, rows);
   const lanesOn = lanesDrawn(spec, seriesNames.length, orientation);
-  const labels = spec.series_labels ?? {};
   const input: TimelineLayoutInput = {
     events, width, orientation, spacing: cfg.spacing,
-    lanes: lanesOn ? seriesNames.map((k) => ({ key: k, label: labels[k] ?? k })) : null,
+    lanes: lanesOn ? seriesNames.map((k) => ({ key: k, label: ownValue(spec.series_labels, k) ?? k })) : null,
     axis: cfg.axis, labelWidth: cfg.labelWidth, maxRows: cfg.maxRows,
     ...(budgetWidth !== undefined ? { budgetWidth } : {}),
   };
@@ -201,12 +223,7 @@ export function timelineExportFrame(spec: ChartSpec, rows: TidyRow[]): TimelineE
     const chartW = Math.min(budgetWidth, Math.max(TL_GEOM.minLiveWidth, Math.ceil(block)));
     return { frameW: chartW + 2 * MARGIN, chartW, rightLegend: false, budgetWidth };
   }
-  if (spec.legend === false) return { frameW: W, chartW: INNER_W, rightLegend: false };
-  const { seriesNames } = prepareTimeline(spec, rows);
-  const lanesOn = lanesDrawn(spec, seriesNames.length, "horizontal");
-  const showRows =
-    spec.series_legend === true || (spec.series_legend !== false && seriesNames.length > 1 && !lanesOn);
-  const legendCount = showRows ? seriesNames.length : 0;
+  const legendCount = timelineLegendRowCount(spec, rows, "horizontal");
   const rightLegend = legendCount > 0 && resolveLegendPosition(spec, legendCount, rows) === "right";
   return { frameW: W, chartW: rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W, rightLegend };
 }
@@ -398,6 +415,7 @@ function draw(doc: Document, layout: TimelineLayout, events: LayoutEvent[], colo
 }
 
 export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
+  spec = withoutRepeatedOrderEntries(spec);
   const width = opts.width ?? 720;
   const orientation = opts.timelineOrientation ?? spec.orientation ?? "horizontal";
   const { layout, events, seriesNames, lanesOn } = build(spec, rows, width, orientation, opts.timelineBudgetWidth);
@@ -406,15 +424,10 @@ export function renderTimeline(spec: ChartSpec, rows: TidyRow[], opts: RenderOpt
 
   const seriesLabels = spec.series_labels ?? {};
   const seriesKeyRows: LegendItem[] = seriesNames.map((name) => ({
-    series: name, label: seriesLabels[name] ?? name, color: colors.get(name), dashed: false,
+    series: name, label: ownValue(seriesLabels, name) ?? name, color: colors.get(name), dashed: false,
     markerShape: "point", markerSymbol: "circle",
   }));
-  // Drawn lanes name their categories (the horizontal gutter, or the vertical lane columns'
-  // headers), so the legend's series rows default off there (Ruling 26); a vertical render that
-  // draws one track instead must name its colours in the legend.
-  const showRows =
-    spec.series_legend === true || (spec.series_legend !== false && seriesNames.length > 1 && !lanesOn);
-  const legendItems = spec.legend === false || !showRows ? null : seriesKeyRows;
+  const legendItems = spec.legend === false || !showsSeriesRows(spec, seriesNames.length, lanesOn) ? null : seriesKeyRows;
 
   // Last, as on every chart type: nothing below touches the SVG.
   if (opts.hooks?.afterRender) opts.hooks.afterRender(svg, { phase: opts.phase ?? "live" });

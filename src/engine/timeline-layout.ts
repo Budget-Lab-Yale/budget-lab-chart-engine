@@ -11,7 +11,7 @@
 // first-fit's (see assignRows). Overflow rows past `maxRows` never drop a label.
 import { d3 } from "./vendor";
 import { TBL } from "./theme";
-import { timelineTextWidth } from "./timeline-text";
+import { graphemes, timelineTextWidth } from "./timeline-text";
 
 export const TL_GEOM = {
   dotR: 4.5,
@@ -150,14 +150,14 @@ const tickTextW = (s: string): number => timelineTextWidth(s, TBL.size.axis, 500
 
 interface TextBlock { roles: LineRole[]; texts: string[]; w: number; h: number }
 
-/** Split a line wider than `framePx` into character chunks that each fit. wrapWords leaves a
+/** Split a line wider than `framePx` into chunks of whole graphemes that each fit. wrapWords leaves a
  *  single over-long word whole, which is right up to the frame (the box widens to the word), but a
  *  word wider than the whole frame could otherwise only be clamped off one edge or the other. */
 function hardBreak(line: string, framePx: number, measure: (s: string) => number): string[] {
   if (measure(line) <= framePx) return [line];
   const out: string[] = [];
   let cur = "";
-  for (const ch of line) {
+  for (const ch of graphemes(line)) {
     if (cur && measure(cur + ch) > framePx) {
       out.push(cur);
       cur = "";
@@ -239,15 +239,15 @@ const dateUnits = (text: string): string[] => dateParts(text).flatMap(dateWordUn
 /** `hardBreak` for one date line, which is only ever over-wide as a single unit (see wrapUnits). A
  *  trailing dash — glued " –" or an unspaced "–" — stays on the last chunk of its word, so no chunk
  *  is a bare dash or starts or ends with a space. If the last chunk plus the dash is still too wide,
- *  its final character (code point, so an emoji's surrogate pair stays whole) moves down with the
- *  dash. */
-function hardBreakDate(line: string, framePx: number, measure: (s: string) => number): string[] {
+ *  its final grapheme (so a flag or ZWJ emoji stays whole) moves down with the dash. Exported for
+ *  its tests. */
+export function hardBreakDate(line: string, framePx: number, measure: (s: string) => number): string[] {
   if (measure(line) <= framePx) return [line];
   const suffix = / ?–$/.exec(line)?.[0] ?? "";
   const body = line.slice(0, line.length - suffix.length);
   if (!suffix || !body) return hardBreak(line, framePx, measure);
   const chunks = hardBreak(body, framePx, measure);
-  const last = [...(chunks.pop() as string)];
+  const last = graphemes(chunks.pop() as string);
   if (measure(last.join("") + suffix) <= framePx || last.length < 2) chunks.push(last.join("") + suffix);
   else chunks.push(last.slice(0, -1).join(""), (last[last.length - 1] as string) + suffix);
   return chunks;

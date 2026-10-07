@@ -27,7 +27,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   mountHover, cardShown, cardText, coordShown, coordTexts, hoverFirstMark,
-  BAR_MARK, DOT_MARK, PLOT_MIDDLE,
+  BAR_MARK, DOT_MARK, HIST_MARK, PLOT_MIDDLE,
 } from "./helpers/hover-harness";
 import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
@@ -65,6 +65,25 @@ const temporalRows = (times: string[]): TidyRow[] =>
  *  card's rows single-row at defaults. */
 const soloTemporalRows = (times: string[]): TidyRow[] =>
   times.map((t, i) => ({ time: t, value: String(3 + i) })) as unknown as TidyRow[];
+
+/** The pane's x-axis tick labels (below the plot), each with whether it is hidden. Shared by the
+ *  `tooltip_x_format` and histogram bin-range echo collision tests. */
+const xTicks = (svg: SVGSVGElement): Array<{ text: string; hidden: boolean }> => {
+  const vb = svg.viewBox.baseVal;
+  const plotBottom = vb.height - (+(svg.dataset.marginBottom ?? "") || 28);
+  return Array.from(svg.querySelectorAll<SVGTextElement>("text"))
+    .filter((t) => !t.closest(".tbl-coord") && !t.closest(".tbl-y-tick-label"))
+    .filter((t) => t.getBoundingClientRect().width > 0)
+    .filter((t) => t.getBoundingClientRect().top >= plotBottom - 2)
+    .map((t) => ({ text: t.textContent ?? "", hidden: t.style.visibility === "hidden" }));
+};
+/** The echo pill's box, from the rect the engine actually drew. */
+const pillBox = (svg: SVGSVGElement) => {
+  const r = svg.querySelector<SVGRectElement>("rect.tbl-coord-axis-label");
+  if (!r) return null;
+  const x = +r.getAttribute("x")!, y = +r.getAttribute("y")!;
+  return { left: x, right: x + +r.getAttribute("width")!, top: y, bot: y + +r.getAttribute("height")! };
+};
 
 const MONTHLY = ["2026-06-01", "2026-07-01", "2026-08-01"];
 const DAILY = ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"];
@@ -107,9 +126,10 @@ describe("x_labels", () => {
     expect(cardText()).toContain("Verbose label for A");
   });
 
+  // Vertical: a horizontal dumbbell draws its facets as groups in one chart, not panes.
   it("dumbbell, 2-pane: the label reaches a FACETED card — a dumbbell keeps its card by design", () => {
     const m = mountHover(
-      spec({ chartType: "dumbbell", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...LABELS }),
+      spec({ chartType: "dumbbell", orientation: "vertical", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...LABELS }),
       twoPane([["A", 3, 4], ["B", 7, 9]]),
       true,
     );
@@ -139,6 +159,35 @@ describe("x_labels", () => {
     expect(document.body.textContent ?? "").not.toContain("Verbose label for A");
   });
 
+  // A bar or waterfall pane that is NOT coordinated hovers with the band card, and the label heads
+  // it: a plain bar under the `coordinated_cursor: false` dial, and a waterfall whose facet resolves
+  // to one pane at defaults (only bar/stacked stay coordinated alone).
+  it("plain bar, 2-pane with coordinated_cursor: false: the card carries the display label", () => {
+    const m = mountHover(
+      spec({
+        chartType: "bar", xAxisType: "categorical", data: "d.csv", ...facetCols, ...LABELS,
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      twoPane([["S", 10, 20]]),
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("Verbose label for A");
+  });
+
+  it("waterfall, faceted but resolving to one pane: the card carries the display label", () => {
+    const m = mountHover(
+      spec({ chartType: "waterfall", xAxisType: "categorical", data: "d.csv", ...facetCols, ...sm, ...LABELS }),
+      catRows([["S", 10, 5]], "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("Verbose label for A");
+  });
+
   it("renders on a diverging stack, standalone AND 2-pane — the one band card drawn at defaults", () => {
     for (const faceted of [false, true]) {
       document.body.innerHTML = "";
@@ -153,6 +202,32 @@ describe("x_labels", () => {
       hoverFirstMark(m.svgs[0]!, BAR_MARK);
       expect(cardText(), `faceted=${faceted}`).toContain("Verbose label for A");
     }
+  });
+
+  it("renders on a SINGLE-SERIES negative stack, standalone AND 2-pane — a card with no net dot drawn", () => {
+    for (const faceted of [false, true]) {
+      document.body.innerHTML = "";
+      const m = mountHover(
+        spec({
+          chartType: "stacked", xAxisType: "categorical", ...LABELS,
+          ...(faceted ? { data: "d.csv", ...facetCols, ...sm } : {}),
+        }),
+        faceted ? twoPane([["Only", -6, 4]]) : catRows([["Only", -6, 4]]),
+        faceted,
+      );
+      expect(m.container.querySelectorAll("g.tbl-net-marker circle"), `faceted=${faceted}`).toHaveLength(0);
+      hoverFirstMark(m.svgs[0]!, BAR_MARK);
+      expect(cardText(), `faceted=${faceted}`).toContain("Verbose label for A");
+    }
+  });
+
+  it("renders on an all-positive stack under the barStack.hover: tooltip dial", () => {
+    const m = mountHover(
+      spec({ chartType: "stacked", xAxisType: "categorical", series_order: ["Up", "Down"], barStack: { hover: "tooltip" }, ...LABELS }),
+      catRows([["Up", 6, 5], ["Down", 4, 2]]),
+    );
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    expect(cardText()).toContain("Verbose label for A");
   });
 });
 
@@ -194,23 +269,6 @@ describe("tooltip_x_format", () => {
   // it shows, then restored. The GEOMETRY here is the harness's mock (a text is `len * 5` wide), not
   // real font metrics, so these prove the mechanism fires and targets the right elements — the
   // absence of a visible collision at real widths is a browser screenshot, not this.
-  const xTicks = (svg: SVGSVGElement): Array<{ text: string; hidden: boolean }> => {
-    const vb = svg.viewBox.baseVal;
-    const plotBottom = vb.height - (+(svg.dataset.marginBottom ?? "") || 28);
-    return Array.from(svg.querySelectorAll<SVGTextElement>("text"))
-      .filter((t) => !t.closest(".tbl-coord") && !t.closest(".tbl-y-tick-label"))
-      .filter((t) => t.getBoundingClientRect().width > 0)
-      .filter((t) => t.getBoundingClientRect().top >= plotBottom - 2)
-      .map((t) => ({ text: t.textContent ?? "", hidden: t.style.visibility === "hidden" }));
-  };
-  /** The echo pill's box, from the rect the engine actually drew. */
-  const pillBox = (svg: SVGSVGElement) => {
-    const r = svg.querySelector<SVGRectElement>("rect.tbl-coord-axis-label");
-    if (!r) return null;
-    const x = +r.getAttribute("x")!, y = +r.getAttribute("y")!;
-    return { left: x, right: x + +r.getAttribute("width")!, top: y, bot: y + +r.getAttribute("height")! };
-  };
-
   it("2-pane MONTHLY temporal line: the echo hides the tick labels it covers, and only those", () => {
     // A year of months puts the ticks close enough together that a long format's pill lands on one.
     const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}-01`);
@@ -322,8 +380,144 @@ describe("tbl-coord-axis-label", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stacked AREA's cumulative `Total` row — standalone only. `showTotal` is passed at both
-// `attachCrosshair` sites, but the Total row is built below `if (emitOnly) return;`.
+// A HISTOGRAM PANE'S BIN-RANGE ECHO ON ITS TICK ROW. The same collision as the `tooltip_x_format`
+// echo above, through the same `addCoordAxisLabel`: the pill is centred on the bin and sized from
+// `"0 – 1"`, not from the tick it lands on, so on narrow bins it covers the bin's edge ticks and
+// leaves a neighbour's fragment past its edge. Unlike that echo it is not gated on a dial — every
+// bin label is a range, wider than either edge's tick. Mocked geometry (a text is `len * 5` wide),
+// so these prove the mechanism fires on the right elements, not the absence of overlap at real
+// font metrics.
+//
+// A STANDALONE histogram draws no echo at all — its hover is a card — so there is no collision to
+// reproduce there; the last test pins that the fix does not reach it.
+// ---------------------------------------------------------------------------
+
+describe("histogram bin-range echo and its axis ticks", () => {
+  /** One value per unit bin on [0, 20) — narrow bins (about 18px in an 838px 2-column figure). */
+  const histRows = (panes: string[] | null): TidyRow[] => {
+    const rows: TidyRow[] = [];
+    for (const pane of panes ?? [null]) {
+      for (let v = 0; v < 20; v++) {
+        rows.push({ ...(pane ? { pane } : {}), amount: String(v + 0.5) } as unknown as TidyRow);
+      }
+    }
+    return rows;
+  };
+  /** `smOverride` replaces the shared-mode `small_multiples` block (faceted only). */
+  const histSpec = (faceted: boolean, smOverride?: Record<string, unknown>): ChartSpec =>
+    spec({
+      chartType: "histogram", xAxisType: "numeric", data: "d.csv",
+      histogram: { bins: 20, domain: [0, 20] },
+      columns: { x: "amount", ...(faceted ? { facet: "pane" } : {}) },
+      ...(faceted ? { small_multiples: { ...sm.small_multiples, ...smOverride } } : {}),
+    });
+  /** Every still-VISIBLE x-axis text the pill's box intersects — the collision itself. */
+  const visibleUnderPill = (svg: SVGSVGElement, box: NonNullable<ReturnType<typeof pillBox>>) =>
+    Array.from(svg.querySelectorAll<SVGTextElement>("text"))
+      .filter((t) => !t.closest(".tbl-coord") && t.style.visibility !== "hidden")
+      .map((t) => ({ text: t.textContent ?? "", r: t.getBoundingClientRect() }))
+      .filter(({ r }) => r.width > 0 && r.top >= box.top - 1)
+      .filter(({ r }) => Math.min(box.right, r.right) - Math.max(box.left, r.left) > 0.5)
+      .filter(({ r }) => Math.min(box.bot, r.bottom) - Math.max(box.top, r.top) > 0.5)
+      .map(({ text }) => text);
+
+  it("2-pane shared histogram: the echo hides the tick labels it covers, and only those", () => {
+    const m = mountHover(histSpec(true), histRows(["P1", "P2"]), true);
+    const svg = m.svgs[0]!;
+    hoverFirstMark(svg, HIST_MARK);
+    expect(cardShown()).toBe(false);
+    const box = pillBox(svg)!;
+    expect(box, "the hovered pane draws a bin-range echo").toBeTruthy();
+    expect(coordTexts(svg)).toContain("0 – 1");
+    // The collision, in mocked geometry: no visible tick label is left under the pill.
+    expect(visibleUnderPill(svg, box)).toEqual([]);
+    // Only the covered ones: the axis keeps the ticks the pill does not reach.
+    const ticks = xTicks(svg);
+    expect(ticks.some((t) => t.hidden), ticks.map((t) => `${t.text}:${t.hidden}`).join("|")).toBe(true);
+    expect(ticks.some((t) => !t.hidden)).toBe(true);
+    // The sibling pane echoes the bin (shaded region) but draws no axis echo, so hides nothing.
+    expect(coordShown(m.svgs[1]!)).toBe(true);
+    expect(xTicks(m.svgs[1]!).filter((t) => t.hidden)).toEqual([]);
+    // Leaving the pane clears the echo and restores every tick.
+    svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+    expect(xTicks(svg).filter((t) => t.hidden)).toEqual([]);
+  });
+
+  it("2-pane shared histogram: moving to another bin restores the ticks the last echo hid", () => {
+    const m = mountHover(histSpec(true), histRows(["P1", "P2"]), true);
+    const svg = m.svgs[0]!;
+    const rects = Array.from(svg.querySelectorAll<SVGRectElement>(HIST_MARK));
+    const centre = (r: SVGRectElement) => +r.getAttribute("x")! + +r.getAttribute("width")! / 2;
+    const move = (clientX: number) =>
+      svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+        new PointerEvent("pointermove", { clientX, clientY: svg.viewBox.baseVal.height / 2, bubbles: true }),
+      );
+    move(centre(rects[0]!));
+    const firstHidden = xTicks(svg).filter((t) => t.hidden).map((t) => t.text);
+    expect(firstHidden.length).toBeGreaterThan(0);
+    move(centre(rects[rects.length - 1]!));
+    const box = pillBox(svg)!;
+    expect(visibleUnderPill(svg, box)).toEqual([]);
+    // Hidden now is exactly what the NEW pill covers: nothing from the first bin's edge stays hidden.
+    const nowHidden = xTicks(svg).filter((t) => t.hidden).map((t) => t.text);
+    expect(nowHidden.some((t) => firstHidden.includes(t))).toBe(false);
+  });
+
+  it("standalone histogram: hover is a card, no echo is drawn and no tick is hidden", () => {
+    const m = mountHover(histSpec(false), histRows(null));
+    const svg = m.svgs[0]!;
+    hoverFirstMark(svg, HIST_MARK);
+    expect(cardShown()).toBe(true);
+    expect(cardText()).toContain("0 – 1");
+    expect(svg.querySelector(".tbl-coord-axis-label")).toBeNull();
+    expect(xTicks(svg).length).toBeGreaterThan(0);
+    expect(xTicks(svg).filter((t) => t.hidden)).toEqual([]);
+  });
+
+  it("2-pane shared histogram: moving to the other pane restores the first pane's ticks", () => {
+    const m = mountHover(histSpec(true), histRows(["P1", "P2"]), true);
+    const [a, b] = [m.svgs[0]!, m.svgs[1]!];
+    hoverFirstMark(a, HIST_MARK);
+    expect(xTicks(a).some((t) => t.hidden)).toBe(true);
+    // No pointerleave in between: the bus calls pane A's driver with active=false, which must
+    // restore A's axis on its own.
+    hoverFirstMark(b, HIST_MARK);
+    expect(a.querySelector(".tbl-coord-axis-label")).toBeNull();
+    expect(xTicks(a).filter((t) => t.hidden)).toEqual([]);
+    expect(xTicks(b).some((t) => t.hidden)).toBe(true);
+    expect(visibleUnderPill(b, pillBox(b)!)).toEqual([]);
+  });
+
+  // The echo (and so the hidden ticks) needs the coordinated cursor: a faceted histogram with
+  // `small_multiples.mode` shared, `coordinated_cursor` not false, and more than one pane
+  // (render-live: `coordinated` in mountFigure, `histCoord` in wireFigureSvg). Every other faceted
+  // histogram hovers with a card, as a standalone one does. CONFIG-SPEC `histogram.bin_label`.
+  const cardCases: Array<[string, Record<string, unknown> | undefined, string[]]> = [
+    ["2-pane per-pane histogram", { mode: "per-pane" }, ["P1", "P2"]],
+    ["2-pane shared histogram with coordinated_cursor: false", { coordinated_cursor: false }, ["P1", "P2"]],
+    ["shared histogram whose facet resolves to one pane", undefined, ["P1"]],
+  ];
+  for (const [name, smOverride, panes] of cardCases) {
+    it(`${name}: hover is a card, no echo is drawn and no tick is hidden`, () => {
+      const m = mountHover(histSpec(true, smOverride), histRows(panes), true);
+      expect(m.svgs.length).toBe(panes.length);
+      const svg = m.svgs[0]!;
+      hoverFirstMark(svg, HIST_MARK);
+      expect(cardShown()).toBe(true);
+      expect(cardText()).toContain("0 – 1");
+      for (const s of m.svgs) {
+        expect(s.querySelector(".tbl-coord-axis-label")).toBeNull();
+        expect(xTicks(s).length).toBeGreaterThan(0);
+        expect(xTicks(s).filter((t) => t.hidden)).toEqual([]);
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Stacked AREA's cumulative `Total` row — wherever the card is drawn. `showTotal` is passed at both
+// `attachCrosshair` sites (mountChart's and wireFigureSvg's), and the Total row is built below
+// `if (emitOnly) return;`, so a coordinated pane has none; a lone pane or an uncoordinated one does.
 // ---------------------------------------------------------------------------
 
 describe("stacked-area Total row", () => {
@@ -370,6 +564,155 @@ describe("stacked-area Total row", () => {
     expect(cardShown()).toBe(false);
     expect(svg.textContent ?? "").not.toContain("Total");
     expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(2);
+  });
+
+  // CONFIG-SPEC: "a single-pane area chart, or `small_multiples.coordinated_cursor: false`, keeps
+  // the card and its Total." Both are FACETED figures that hover with a card, so the Total row has
+  // to come from wireFigureSvg's attachCrosshair, not only from mountChart's.
+  it("faceted, facet resolves to ONE pane: the card carries the Total row", () => {
+    const m = mountHover(
+      spec({ chartType: "area", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm }),
+      temporalRows(MONTHLY).filter((r) => (r as unknown as { pane: string }).pane === "P1"),
+      true,
+    );
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Total");
+    // P1's middle month: A = 4, B = 4.
+    expect(cardText()).toContain("8.00");
+  });
+
+  it("2-pane with coordinated_cursor: false: each pane's card carries the Total row", () => {
+    const m = mountHover(
+      spec({
+        chartType: "area", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols,
+        small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false },
+      }),
+      temporalRows(MONTHLY),
+      true,
+    );
+    expect(m.svgs.length).toBe(2);
+    hoverFirstMark(m.svgs[1]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Total");
+    // P2's middle month: A = 6, B = 6.
+    expect(cardText()).toContain("12.00");
+  });
+
+  // The same promise on a CATEGORICAL x. An area chart has no bar rects, so the band crosshair
+  // (which resolves the category from them) found nothing and drew no card at all. The card and its
+  // Total come from the categorical-line crosshair, which resolves the category from the axis
+  // labels, as temporal area takes the line crosshair.
+  const catAreaRows = (pane?: string): TidyRow[] =>
+    ["x", "y", "z"].flatMap((t) =>
+      ([["A", 3], ["B", 5]] as const).map(([s, v]) => ({ ...(pane ? { pane } : {}), time: t, series: s, value: String(v) })),
+    ) as unknown as TidyRow[];
+  const catArea = (extra: Record<string, unknown> = {}): ChartSpec =>
+    spec({ chartType: "area", xAxisType: "categorical", series_order: ["A", "B"], ...extra });
+
+  it("categorical x, standalone: the card carries A, B and the Total", () => {
+    const m = mountHover(catArea(), catAreaRows());
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("3.00");
+    expect(cardText()).toContain("5.00");
+    expect(cardText()).toContain("Total");
+    expect(cardText()).toContain("8.00");
+  });
+
+  it("categorical x, faceted, facet resolves to ONE pane: the card carries the Total row", () => {
+    const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), catAreaRows("P1"), true);
+    expect(m.svgs.length).toBe(1);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("3.00");
+    expect(cardText()).toContain("5.00");
+    expect(cardText()).toContain("Total");
+    expect(cardText()).toContain("8.00");
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  it("categorical x, 2-pane with coordinated_cursor: false: each pane's card carries the Total row", () => {
+    const m = mountHover(
+      catArea({ data: "d.csv", ...facetCols, small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false } }),
+      [...catAreaRows("P1"), ...catAreaRows("P2")],
+      true,
+    );
+    expect(m.svgs.length).toBe(2);
+    hoverFirstMark(m.svgs[1]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Total");
+    expect(cardText()).toContain("8.00");
+  });
+
+  it("categorical x, 2-pane coordinated (default): no card and no Total — pills, as temporal", () => {
+    const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), [...catAreaRows("P1"), ...catAreaRows("P2")], true);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    const svg = m.svgs[0]!;
+    expect(coordShown(svg)).toBe(true);
+    expect(cardShown()).toBe(false);
+    expect(svg.textContent ?? "").not.toContain("Total");
+    expect(svg.querySelectorAll(".tbl-coord-pill").length).toBe(2);
+    expect(m.calls()).toBe(0);
+  });
+
+  // The card is the categorical-line family's, so it carries that family's two other promises:
+  // `x_labels` heads it, and `hooks.tooltip` fires on it.
+  it("categorical x, standalone: x_labels heads the card and hooks.tooltip fires", () => {
+    const m = mountHover(catArea({ x_labels: { x: "Verbose label for x" } }), catAreaRows());
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    // PLOT_MIDDLE resolves the middle category; hover the first one by its own axis label.
+    const first = Array.from(m.svgs[0]!.querySelectorAll<SVGTextElement>("text")).find((t) => t.textContent === "x")!;
+    m.svgs[0]!.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: first.getBoundingClientRect().left + 1, clientY: 100, bubbles: true }),
+    );
+    expect(cardText()).toContain("Verbose label for x");
+    expect(m.calls()).toBeGreaterThan(0);
+  });
+
+  // CONFIG-SPEC x_labels: categorical-x area carries it "faceted wherever the card survives
+  // coordination" — a facet resolving to one pane, and every pane under coordinated_cursor: false.
+  it("categorical x, faceted: x_labels heads a pane's card (one pane, and coordinated_cursor: false)", () => {
+    const labels = { x_labels: { y: "Verbose label for y" } };
+    const one = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm, ...labels }), catAreaRows("P1"), true);
+    expect(one.svgs.length).toBe(1);
+    hoverFirstMark(one.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Verbose label for y");
+    document.body.innerHTML = "";
+    const two = mountHover(
+      catArea({ data: "d.csv", ...facetCols, small_multiples: { columns: 2, mode: "shared", coordinated_cursor: false }, ...labels }),
+      [...catAreaRows("P1"), ...catAreaRows("P2")],
+      true,
+    );
+    expect(two.svgs.length).toBe(2);
+    hoverFirstMark(two.svgs[1]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("Verbose label for y");
+  });
+
+  it("categorical x, faceted, one pane, ONE series: no Total row", () => {
+    const rows = catAreaRows("P1").filter((r) => (r as unknown as { series: string }).series === "A");
+    const m = mountHover(catArea({ data: "d.csv", ...facetCols, ...sm }), rows, true);
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("3.00");
+    expect(cardText()).not.toContain("Total");
+  });
+
+  it("faceted, one pane, ONE series: no Total row, as standalone", () => {
+    const rows = soloTemporalRows(MONTHLY).map((r) => ({ ...r, pane: "P1" })) as unknown as TidyRow[];
+    const m = mountHover(
+      spec({ chartType: "area", xAxisType: "temporal", data: "d.csv", columns: { x: "time", value: "value", facet: "pane" }, ...sm }),
+      rows,
+      true,
+    );
+    hoverFirstMark(m.svgs[0]!, PLOT_MIDDLE);
+    expect(cardShown(), "no card shown, so this measures nothing").toBe(true);
+    expect(cardText()).toContain("4.00");
+    expect(cardText()).not.toContain("Total");
   });
 });
 
@@ -564,4 +907,72 @@ describe("waterfall value pills survive a single-valued series column", () => {
       ).toEqual(["+5"]);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// CONFIG-SPEC `tooltip_decimals`: where a waterfall hovers with its value pill (standalone, or a
+// coordinated small-multiples pane), the pill takes the running-total labels' precision
+// (`valueLabels.decimals`, else the fewest decimals the data needs, at most 2), never
+// `tooltip_decimals`. A waterfall pane that hovers with a card instead uses `tooltip_decimals`. A
+// plain bar's pill is the control: there `tooltip_decimals` applies.
+// ---------------------------------------------------------------------------
+
+describe("tooltip_decimals and a waterfall's hover: the pill ignores it, a card uses it", () => {
+  const rows = [["Up", "5"], ["Down", "-3"]].map(([step, value]) => ({ step, value })) as unknown as TidyRow[];
+  const wf = (extra: Record<string, unknown>): ChartSpec =>
+    spec({ chartType: "waterfall", xAxisType: "categorical", columns: { x: "step", value: "value" }, ...extra });
+  const pill = (s: ChartSpec, r: TidyRow[] = rows): string[] => {
+    const m = mountHover(s, r);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    return Array.from(m.svgs[0]!.querySelectorAll(".tbl-coord-pill-text")).map((t) => t.textContent ?? "");
+  };
+
+  it("waterfall: tooltip_decimals 3 still prints the data's own precision", () => {
+    expect(pill(wf({}))).toEqual(["+5"]);
+    expect(pill(wf({ tooltip_decimals: 3 }))).toEqual(["+5"]);
+  });
+
+  it("waterfall: valueLabels.decimals sets it", () => {
+    expect(pill(wf({ tooltip_decimals: 3, valueLabels: { decimals: 1 } }))).toEqual(["+5.0"]);
+  });
+
+  // Small multiples: a coordinated pane hovers with the same pill (data precision); a pane that
+  // hovers with a card instead — coordinated_cursor: false, or a figure with one pane (a waterfall
+  // figure is not coordinated with nothing to coordinate) — formats the card with tooltip_decimals.
+  const faceted = (cc?: boolean): ChartSpec => wf({
+    data: "d.csv", tooltip_decimals: 3, columns: { x: "step", value: "value", facet: "pane" },
+    small_multiples: { columns: 2, mode: "shared", ...(cc === undefined ? {} : { coordinated_cursor: cc }) },
+  });
+  const paneRows = (panes: string[]): TidyRow[] =>
+    panes.flatMap((pane) => [["Up", "5"], ["Down", "-3"]].map(([step, value]) => ({ pane, step, value }))) as unknown as TidyRow[];
+  const hoverPane = (s: ChartSpec, r: TidyRow[]) => {
+    const m = mountHover(s, r, true);
+    hoverFirstMark(m.svgs[0]!, BAR_MARK);
+    return {
+      panes: m.svgs.length,
+      pills: Array.from(m.svgs[0]!.querySelectorAll(".tbl-coord-pill-text")).map((t) => t.textContent ?? ""),
+      card: cardShown() ? cardText() : null,
+    };
+  };
+
+  it("coordinated small-multiples waterfall pane: the pill keeps the data's precision", () => {
+    expect(hoverPane(faceted(), paneRows(["P1", "P2"]))).toEqual({ panes: 2, pills: ["+5"], card: null });
+  });
+
+  it("coordinated_cursor: false: the pane's card uses tooltip_decimals", () => {
+    const h = hoverPane(faceted(false), paneRows(["P1", "P2"]));
+    expect(h.panes).toBe(2);
+    expect(h.card).toContain("5.000");
+  });
+
+  it("a waterfall figure that resolves to one pane: its card uses tooltip_decimals", () => {
+    const h = hoverPane(faceted(), paneRows(["P1"]));
+    expect(h.panes).toBe(1);
+    expect(h.card).toContain("5.000");
+  });
+
+  it("control: a plain bar's pill does take tooltip_decimals", () => {
+    const bar = spec({ chartType: "bar", xAxisType: "categorical", columns: { x: "step", value: "value" }, tooltip_decimals: 3 });
+    expect(pill(bar)).toEqual(["5.000"]);
+  });
 });

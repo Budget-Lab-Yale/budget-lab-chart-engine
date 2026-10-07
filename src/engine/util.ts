@@ -1,5 +1,32 @@
-import type { ValueAffixes } from "../spec/types";
+import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
+import { categoryText } from "../spec/section-key";
+import { facetsAsGroups } from "../spec/facet-groups";
+
+/** `spec` as every exported entry that takes one renders it: renderChart, renderFigure, mountChart,
+ *  buildExportSvg, and the renderers they dispatch to that are exported in their own right
+ *  (renderPane, shapeDomainOver, renderTreemap, renderTimeline). Repeated order entries are dropped
+ *  (withoutRepeatedOrderEntries) and a horizontal chart's `columns.facet` is drawn as groups
+ *  (spec/facet-groups.ts, Ruling 80). A spec neither touches is returned as is, the same object. */
+export function normalizeSpec(spec: ChartSpec): ChartSpec {
+  return facetsAsGroups(withoutRepeatedOrderEntries(spec));
+}
+
+/** `spec` with each repeated `series_order` / `shape_order` entry dropped, the first kept. A repeat is
+ *  an author error that validation rejects (Ruling 66), but renderChart does not validate, so every
+ *  exported entry runs this first (through normalizeSpec; a timeline or treemap, which has no facets,
+ *  directly). The legend, marks, key rows, hover maps, palette, marker index and a horizontal bar's
+ *  height then all read one list. A spec with no repeat is returned as is, the same object. */
+export function withoutRepeatedOrderEntries(spec: ChartSpec): ChartSpec {
+  let out: ChartSpec | undefined;
+  for (const field of ["series_order", "shape_order"] as const) {
+    const list = spec[field];
+    if (!list) continue;
+    const unique = [...new Set(list)];
+    if (unique.length !== list.length) (out ??= { ...spec })[field] = unique;
+  }
+  return out ?? spec;
+}
 
 /** HTML-escape a value for safe interpolation into innerHTML (tooltip/legend). */
 export function escapeHtml(s: unknown): string {
@@ -91,7 +118,8 @@ export function applyValueLabelHook(
 ): string {
   const hook = hooks?.valueLabel;
   if (!hook) return rendered;
-  return hook({ ...ctx, rendered }) ?? rendered;
+  // The hook names a category by its display text, never a section key (spec/section-key.ts).
+  return hook({ ...ctx, category: categoryText(ctx.category), rendered }) ?? rendered;
 }
 
 /** Parses a `projected_field` (or similar boolean-flag CSV column) value: `1`/`true`/`yes`

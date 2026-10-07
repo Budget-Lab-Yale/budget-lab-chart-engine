@@ -12,13 +12,18 @@ import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { NetMode } from "../spec/bar-stack";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "../spec/columns";
 import { parseDate } from "../spec/parse-time";
+import { ownValue } from "../spec/own-key";
+import { sectionKeyer, categoryText, rowsInSectionOrder } from "../spec/section-key";
+import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
+import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems } from "./index";
+import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
-import { resolveValueAffixes } from "./util";
-import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, SECTION_SPACER_SLOTS } from "./axes";
+import { resolveValueAffixes, normalizeSpec } from "./util";
+import { rowBandGeometry } from "./marks/category-band";
+import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 import type { SeriesHatch } from "./hatch";
@@ -64,8 +69,7 @@ function defaultColumns(n: number): number {
   return Math.min(4, Math.max(1, Math.ceil(Math.sqrt(n))));
 }
 
-// Horizontal-bar height model (shared by the single-chart computeChartHeight and the faceted
-// figure). A horizontal bar/figure grows with the number of category band SLOTS so the bars stay
+// Horizontal-bar height model (computeChartHeight and the PNG export). A horizontal bar chart grows with the number of category band SLOTS so the bars stay
 // legible and the rows aren't cramped; the stakeholder blessed very tall horizontals.
 /** Per-bar vertical budget (px): a grouped category reserves this PER SERIES, a single/stacked
  *  category reserves one. Tuned for legible-but-compact rows in tall horizontal charts. */
@@ -76,39 +80,86 @@ export const HORIZONTAL_CHROME_PX = 80;
 export const SECTION_HEADER_TOP_PX = 16;
 /** Estimated wrapped-label line height (px), sized for the faceted category-label font. */
 const HORIZONTAL_LABEL_LINE_PX = 16;
-/** Floor so a short horizontal chart isn't smaller than a vertical one. */
-const HORIZONTAL_HEIGHT_FLOOR = 400;
+/** A row-sized chart whose chrome-estimate height (horizontalBarHeight) is at least this keeps
+ *  that height, byte for byte: these are the charts the old 400px floor never touched, every one
+ *  already published among them. A shorter one is fitted to its rendered row band instead
+ *  (fitRowsHeight), so its rows sit at exactly the slot pitch rather than spreading the estimate's
+ *  spare chrome over a few rows. */
+const CHROME_ESTIMATE_KEPT_PX = 400;
 
-/** Intrinsic height (px) of a horizontal bar chart / faceted figure. Each category band slot is
- *  tall enough for its bars (grouped → nSeries bars) OR its wrapped label, whichever is taller;
- *  section spacer slots add one slot each. Floored at the vertical default. */
+/** The chrome-estimate height (px) of a horizontal bar chart: each category band
+ *  slot is tall enough for its bars (grouped → nSeries bars) OR its wrapped label, whichever is
+ *  taller; each section break adds the fixed section gap; HORIZONTAL_CHROME_PX covers the rest
+ *  (generously — the real margins are about half of it). */
 export function horizontalBarHeight(opts: {
   nCategories: number;
   nSeries: number;
   grouped: boolean;
-  nSpacers: number;
+  /** Section breaks (sections − 1): each adds `sectionGapPx()`, not a band slot. */
+  nSectionBreaks: number;
   maxLabelLines: number;
   /** Extra top-margin px (sectioned charts reserve room for the first section header). */
   extraTopPx?: number;
 }): number {
-  const { nCategories, nSeries, grouped, nSpacers, maxLabelLines, extraTopPx = 0 } = opts;
-  const barsPerCat = grouped ? Math.max(1, nSeries) : 1;
-  const catBarPx = barsPerCat * HORIZONTAL_PX_PER_BAR;
-  const labelPx = Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6;
-  // Uniform band → every slot (category or spacer) is the same height; size it to the taller of
-  // the bar budget and the wrapped-label budget so neither is clipped.
-  const slotPx = Math.max(catBarPx, labelPx);
-  const inner = (nCategories + Math.max(0, nSpacers)) * slotPx;
-  return Math.max(HORIZONTAL_HEIGHT_FLOOR, Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx));
+  const { nCategories, nSeries, grouped, nSectionBreaks, maxLabelLines, extraTopPx = 0 } = opts;
+  // Uniform band → every category slot is the same height; size it to the taller of the bar budget
+  // and the wrapped-label budget so neither is clipped.
+  const slotPx = rowSlotPx(grouped ? Math.max(1, nSeries) : 1, maxLabelLines);
+  // The rows get at least as much as the gaps, so the render never shrinks a gap at this height
+  // (axes.ts fittedSectionGapPx).
+  const gapsPx = Math.max(0, nSectionBreaks) * sectionGapPx();
+  const inner = Math.max(nCategories * slotPx, gapsPx) + gapsPx;
+  return Math.round(inner + HORIZONTAL_CHROME_PX + extraTopPx);
 }
 
-/** Intrinsic px height of a SINGLE horizontal bar/stacked chart. Single source of truth shared by
- *  the live mount (computeChartHeight) and the PNG export (buildExportSvg), so per-row height,
- *  section-spacer reservation and the export frame all agree. Caller must confirm the chart is a
- *  horizontal bar/stacked before calling. */
+type RowBand = { margins: number; inner: number; outer: number };
+
+/** Plot's band-step divisor for `nRows` rows (rowBandGeometry). */
+const bandSteps = (nRows: number, band: RowBand): number => Math.max(1, nRows - band.inner + 2 * band.outer);
+
+/** The rows px at which a band of `nRows` rows renders exactly `pitch` (whole) px apart: the step
+ *  is then under a px over `pitch` and wastes under a px in all, so Plot rounds it down to it. */
+function rowsPxAtPitch(pitch: number, nRows: number, band: RowBand): number {
+  return Math.ceil(pitch * bandSteps(nRows, band) - 1e-9);
+}
+
+/** Height of a row-sized chart. `estimate` (horizontalBarHeight) is kept from
+ *  CHROME_ESTIMATE_KEPT_PX up; below that the height is the real margins + the section gaps +
+ *  exactly `slotPx` per row, the rows taking at least as much as the gaps (as horizontalBarHeight). */
+function fitRowsHeight(estimate: number, nRows: number, slotPx: number, gapsPx: number, band: RowBand): number {
+  if (estimate >= CHROME_ESTIMATE_KEPT_PX) return estimate;
+  return band.margins + gapsPx + Math.max(rowsPxAtPitch(slotPx, nRows, band), gapsPx);
+}
+
+/** The row slot (px) of a row-sized chart: one bar budget per bar in a category (a grouped bar has
+ *  nSeries, a stack or dumbbell one), or the wrapped-label budget, whichever is taller. */
+function rowSlotPx(barsPerCat: number, maxLabelLines: number): number {
+  return Math.max(barsPerCat * HORIZONTAL_PX_PER_BAR, Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6);
+}
+
+/** Whether a chart's height grows with its category rows: horizontal bar/stacked, and a horizontal
+ *  dumbbell (orientation omitted included). The one predicate the live mount (computeChartHeight)
+ *  and the PNG export (buildExportSvg) both ask, so the two cannot drift apart. Such a chart is
+ *  never a small-multiples figure: its facets draw as groups (spec/facet-groups.ts). */
+export function growsWithRows(spec: ChartSpec): boolean {
+  return (
+    ((spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal") ||
+    isHorizontalDumbbellSpec(spec)
+  );
+}
+
+/** Intrinsic px height of a SINGLE chart whose height grows with its rows (`growsWithRows`:
+ *  horizontal bar/stacked or horizontal dumbbell — a dumbbell is never grouped, so it sizes like a
+ *  single-series bar). Single source of truth shared by the live mount (computeChartHeight) and the
+ *  PNG export (buildExportSvg), so per-row height, section-gap reservation and the export frame
+ *  all agree. No floor: a chart with few rows is short, its rows at the slot pitch (fitRowsHeight).
+ *  Caller must confirm `growsWithRows(spec)` before calling. */
 export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+  spec = normalizeSpec(spec);
   const cols = resolveColumns(spec, rows);
-  const categories = orderedCategories(rows, cols.x, spec);
+  rows = inSectionOrder(spec, cols, rows);
+  const keyOf = rowCategoryKey(rows, cols);
+  const categories = orderedCategories(rows, keyOf, spec);
   const nCats = Math.max(1, categories.length);
   const series = new Set<string>();
   for (const r of rows) {
@@ -118,48 +169,70 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
   const nSeries =
     spec.series_order && spec.series_order.length ? spec.series_order.length : Math.max(1, series.size);
   const grouped = spec.chartType === "bar" && nSeries > 1;
-  const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, categories) : 0;
-  const nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
-  const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX });
+  const nSections = cols.section ? countSections(rows, keyOf, cols.section, spec, categories) : 0;
+  // Sectioned labels are indented; the gutter grows by the indent, so the text width is unchanged.
+  const indent = cols.section ? SECTION_LABEL_INDENT : 0;
+  const gutter = horizontalLeftGutter(categories, { fontSize: FACETED_CAT_LABEL_PX, indent });
   const maxLabelLines = categories.reduce(
-    (m, c) => Math.max(m, labelLineCount(c, gutter - GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX)),
+    (m, c) => Math.max(m, labelLineCount(categoryText(c), gutter - GUTTER_TEXT_PAD - indent, FACETED_CAT_LABEL_PX)),
     1,
   );
-  return horizontalBarHeight({
+  const nSectionBreaks = Math.max(0, nSections - 1);
+  const estimate = horizontalBarHeight({
     nCategories: nCats,
     nSeries,
     grouped,
-    nSpacers,
+    nSectionBreaks,
     maxLabelLines,
     extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
   });
+  return fitRowsHeight(
+    estimate,
+    nCats,
+    rowSlotPx(grouped ? nSeries : 1, maxLabelLines),
+    nSectionBreaks * sectionGapPx(),
+    rowBandGeometry(spec.chartType, spec.x_axis_ticks, nSections > 0),
+  );
 }
 
 /** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of
  *  truth shared by the live figure mount (render-live) and the PNG export (export-png), so the
  *  two can't drift (the export previously omitted waterfall's taller pane, squashing it to 240).
- *  Returns undefined for horizontal bar/stacked figures, whose height GROWS with row count:
- *  renderFigure computes it from horizontalBarHeight when opts.height is undefined. */
-export function figurePaneHeight(spec: ChartSpec): number | undefined {
-  const horizontal = spec.orientation === "horizontal";
-  if (horizontal && (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell")) return undefined;
+ *  A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups), so a dumbbell
+ *  pane here is a vertical one. */
+export function figurePaneHeight(spec: ChartSpec): number {
   if (spec.chartType === "waterfall") return 420;
   if (spec.chartType === "dotplot" || spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell") return 320;
   return 240;
 }
 
+/** Each raw row's category key, as renderPane's row prep assigns it (spec/section-key.ts): section +
+ *  category when a label repeats across sections, else the category. Height and gutter sizing
+ *  count rows by this key, so a repeated label is counted once per section, as it is drawn. */
+function rowCategoryKey(rows: TidyRow[], cols: { x: string; section?: string | null }): (r: TidyRow) => string {
+  const sectionField = cols.section;
+  if (!sectionField) return (r) => (r[cols.x] as string) ?? "";
+  return sectionKeyer(rows, (r) => r[cols.x] as string, (r) => r[sectionField] as string);
+}
+
+/** `rows` without those of a section `section_order` leaves out, as a pane's row prep drops them. */
+function inSectionOrder(spec: ChartSpec, cols: { section?: string | null }, rows: TidyRow[]): TidyRow[] {
+  const sectionField = cols.section;
+  return rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null);
+}
+
 /** Count the distinct sections present (filtered + ordered by section_order, else encounter order)
- *  — i.e. the number of section spacer slots a sectioned horizontal axis inserts. */
+ *  — one more than the number of fixed section gaps a sectioned horizontal axis opens. */
 function countSections(
   rows: TidyRow[],
-  xField: string,
+  keyOf: (r: TidyRow) => string,
   sectionField: string,
   spec: ChartSpec,
   categories: string[],
 ): number {
   const sectionOf = new Map<string, string>();
   for (const r of rows) {
-    const cat = r[xField] as string;
+    const cat = keyOf(r);
     const sec = r[sectionField] as string;
     if (cat && sec != null && !sectionOf.has(cat)) sectionOf.set(cat, sec);
   }
@@ -171,14 +244,13 @@ function countSections(
   return present.size;
 }
 
-/** The category (band) values in render order, SHARED across every pane (so each pane's category
- *  band — and the left-gutter sizing — match): x_order first when set, then data-encounter order.
- *  Used by faceted horizontal bars to size the one shared category gutter. */
-function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): string[] {
+/** A row-sized chart's category (band) values in render order, for its gutter and height: x_order
+ *  first when set, then data-encounter order. */
+function orderedCategories(rows: TidyRow[], keyOf: (r: TidyRow) => string, spec: ChartSpec): string[] {
   const seen: string[] = [];
   const set = new Set<string>();
   for (const r of rows) {
-    const v = r[xField] as string;
+    const v = keyOf(r);
     if (v != null && v !== "" && !set.has(v)) {
       set.add(v);
       seen.push(v);
@@ -187,7 +259,8 @@ function orderedCategories(rows: TidyRow[], xField: string, spec: ChartSpec): st
   const order = categoryOrderFor(spec);
   if (order && order.length) {
     const rank = new Map(order.map((c, i) => [c, i] as const));
-    seen.sort((a, b) => (rank.get(a) ?? order.length) - (rank.get(b) ?? order.length));
+    const rankOf = (c: string): number => rank.get(categoryText(c)) ?? order.length;
+    seen.sort((a, b) => rankOf(a) - rankOf(b));
   }
   return seen;
 }
@@ -217,8 +290,8 @@ export function sharedColumnWidths(
   leftMargin: number = TBL_MARGIN_LEFT,
   weights?: number[],
 ): { dataW: number; colWidths: number[]; marginLeft: number[] } {
-  // The leftmost (labeled) column's left margin. For vertical charts this is the y-label gutter
-  // (TBL_MARGIN_LEFT); for faceted horizontal bars the caller passes the wider category gutter.
+  // The leftmost (labeled) column's left margin: the y-label gutter (TBL_MARGIN_LEFT) unless the
+  // caller passes another.
   const LM = leftMargin;
   const lm = SHARED_LABELLESS_MARGIN_LEFT;
   const R = TBL_MARGIN_RIGHT;
@@ -329,9 +402,6 @@ export interface FigureRenderResult {
    *  width. The live grid sets `grid-template-columns` to these px widths and the PNG export lays
    *  the panes out the same way. Undefined for per-pane mode (equal `1fr` columns). */
   columnWidths?: number[];
-  /** Per-pane pixel heights (length === panes.length) when horizontal bar/stacked facets are sized
-   *  individually to their own row counts; undefined when every pane shares one height. */
-  paneHeights?: number[];
   legendItems: LegendItem[] | null;
   /** Point-chart figures with dual color/shape encoding: the SHAPE legend rows (else null). */
   shapeLegendItems?: ShapeLegendItem[] | null;
@@ -354,6 +424,75 @@ export interface FigureRenderResult {
   netMode?: NetMode;
 }
 
+/** Histogram shared mode: the ONE set of bin thresholds every pane bins to, computed over all rows.
+ *  Undefined in per-pane mode (each pane bins its own rows), for pre-binned data (the edges are in
+ *  the data), and off histograms. */
+function figureBinThresholds(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  cols: ReturnType<typeof resolveColumns>,
+  mode: "shared" | "per-pane",
+): number[] | undefined {
+  if (spec.chartType !== "histogram" || mode === "per-pane" || isPreBinned(cols)) return undefined;
+  const isTemporal = spec.xAxisType === "temporal";
+  const values = rows
+    .map((r) => (isTemporal ? parseDate(r[cols.x] ?? "").getTime() : +(r[cols.x] ?? "")))
+    .filter((v) => Number.isFinite(v));
+  const bw = spec.histogram?.binWidth;
+  return isTemporal
+    ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
+    : computeThresholds(values, {
+        bins: spec.histogram?.bins,
+        binWidth: typeof bw === "number" ? bw : undefined,
+        domain: spec.histogram?.domain,
+      });
+}
+
+/** The figure's panes, in order: distinct facet values in data-encounter order, then reordered and
+ *  filtered by `small_multiples.pane_order` when set (it names the included panes, in order). A
+ *  blank facet cell is not a pane. Both drops are mirrored by validateChartData's keyed-callout
+ *  "drawn nowhere" rules (src/spec/validate.ts) — change both. */
+function figurePaneValues(spec: ChartSpec, rows: TidyRow[], facetField: string): string[] {
+  const encounterOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const v = r[facetField] as string;
+    if (v != null && v !== "" && !seen.has(v)) {
+      seen.add(v);
+      encounterOrder.push(v);
+    }
+  }
+  const order = spec.small_multiples?.pane_order;
+  return order && order.length ? order.filter((v) => seen.has(v)) : encounterOrder;
+}
+
+/**
+ * `tbl-chart validate` warnings for a LONE `yAxisPolicy.min` strictly above every value in the data,
+ * or a lone `max` strictly below every value (Ruling 74): per pane on a small-multiples figure,
+ * naming the pane. A statement about the DATA only (`paneValueExtent`), never about what the chart
+ * shows, which also answers to headroom, markers, nice rounding, autoWiden and shared domains. A
+ * value exactly on the bound is not past it. Both bounds or neither: none.
+ */
+export function loneBoundWarnings(spec: ChartSpec, rows: TidyRow[]): string[] {
+  // A horizontal chart's facets are groups of one chart, on one axis (spec/facet-groups.ts).
+  spec = normalizeSpec(spec);
+  const { min, max } = spec.yAxisPolicy ?? {};
+  if ((min == null) === (max == null)) return [];
+  const past = (ext: { min: number; max: number } | null): boolean =>
+    ext != null && (min != null ? min > ext.max : (max as number) < ext.min);
+  const noun = spec.chartType === "histogram" ? "bin height" : "value";
+  const what = min != null ? `yAxisPolicy.min (${min}) is above every ${noun}` : `yAxisPolicy.max (${max}) is below every ${noun}`;
+  const cols = resolveColumns(spec, rows);
+  if (!spec.small_multiples || !cols.facet) {
+    return past(paneValueExtent(spec, rows)) ? [`${what} in the data`] : [];
+  }
+  const facetField = cols.facet;
+  const binThresholds = figureBinThresholds(spec, rows, cols, spec.small_multiples.mode ?? "shared");
+  return figurePaneValues(spec, rows, facetField)
+    .filter((v) => past(paneValueExtent(spec, rows.filter((r) => (r[facetField] as string) === v), binThresholds)))
+    .map((v) => `${what} in pane "${v}"`);
+}
+
 /**
  * Render a small-multiples figure. Requires `spec.small_multiples`.
  *
@@ -366,6 +505,12 @@ export function renderFigure(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): FigureRenderResult {
+  if (facetsDrawAsGroups(spec)) {
+    throw new Error(
+      "renderFigure: a horizontal bar, stacked or dumbbell chart draws columns.facet as groups in one chart, not as panes (Ruling 80) — render it with renderChart or render.",
+    );
+  }
+  spec = normalizeSpec(spec);
   const sm = spec.small_multiples;
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
   const mode = sm.mode ?? "shared";
@@ -386,6 +531,10 @@ export function renderFigure(
   // instead (RenderOptions.paletteSeries), and the figure-level legend is built from it rather than
   // from pane 0, so a series the FIRST pane happens to lack still gets a key.
   //
+  // Resolved before section_order scoping, for the same reason: a series found only in an excluded
+  // section takes no legend row (drawnSeries, below) but keeps its slot, so no drawn series changes
+  // colour.
+  //
   // First-encounter order over a subset preserves the parent's relative order, so a figure whose
   // panes all carry every series resolves exactly what pane 0 resolved — nothing moves.
   const seenSeries = new Set<string>();
@@ -400,6 +549,7 @@ export function renderFigure(
   const figureSeries = spec.series_order?.length
     ? spec.series_order.filter((s) => seenSeries.has(s))
     : seriesEncountered;
+  rows = inSectionOrder(spec, cols, rows);
   const figureColors = buildColorMap(figureSeries, spec.series_colors);
   // Mirrors assemblePaneResult: a figure that resolves to ONE series adopts the title selector's
   // colour, so the figure-level legend matches the panes.
@@ -408,159 +558,65 @@ export function renderFigure(
   }
 
   // Histogram shared mode (default): bin every pane to ONE set of thresholds computed over ALL
-  // in-scope rows, so panes share a common continuous x-domain and their bars line up. Per-pane
-  // mode omits these (each pane bins its own rows). Pre-binned histograms carry their edges in the
-  // data, so there is nothing to compute. Threaded into every pane's renderPane via opts.binThresholds.
-  let binThresholds: number[] | undefined;
-  if (spec.chartType === "histogram" && mode !== "per-pane" && !isPreBinned(cols)) {
-    const isTemporal = spec.xAxisType === "temporal";
-    const values = rows
-      .map((r) => (isTemporal ? parseDate(r[cols.x] ?? "").getTime() : +(r[cols.x] ?? "")))
-      .filter((v) => Number.isFinite(v));
-    const bw = spec.histogram?.binWidth;
-    binThresholds = isTemporal
-      ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
-      : computeThresholds(values, {
-          bins: spec.histogram?.bins,
-          binWidth: typeof bw === "number" ? bw : undefined,
-          domain: spec.histogram?.domain,
-        });
-  }
+  // in-scope rows, so panes share a common continuous x-domain and their bars line up. Threaded into
+  // every pane's renderPane via opts.binThresholds.
+  const binThresholds = figureBinThresholds(spec, rows, cols, mode);
 
-  // Horizontal bars: the category axis runs down the left gutter (shared across panes). Compute the
-  // shared category set, gutter, section-spacer count and tallest wrapped label ONCE here, so the
-  // gutter sizing, category-label suppression and the auto-grown figure HEIGHT all agree across
-  // panes. (Vertical / non-bar figures keep the default chrome + caller height.)
-  // Horizontal bar AND horizontal stacked share the left-gutter / category-label / auto-height
-  // chrome. A stack is one bar slot per category (never grouped-by-series), so isHorizontalStacked
-  // gates the two places that differ: the auto-height `grouped` flag and the equal-bar weight.
-  const isHorizontalStacked = spec.chartType === "stacked" && spec.orientation === "horizontal";
-  const isHorizontalBar =
-    (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
-  // Horizontal dumbbells are wide (a value axis spanning the frame); their facets STACK vertically
-  // (one pane per row, full width) rather than sitting side by side, and each pane's height grows
-  // with its own category-row count — like a horizontal bar. (Vertical dumbbells facet in a grid.)
-  const isHorizontalDumbbell = spec.chartType === "dumbbell" && spec.orientation === "horizontal";
-  const sharedCategories = isHorizontalBar ? orderedCategories(rows, cols.x, spec) : [];
-  // Size the gutter at the (larger) faceted category-label font so wrapped labels fit.
-  const hGutter = isHorizontalBar
-    ? horizontalLeftGutter(sharedCategories, { fontSize: FACETED_CAT_LABEL_PX })
-    : TBL_MARGIN_LEFT;
-  // Auto-height: grow the panes with the row count when the caller doesn't force a height. The
-  // per-facet inputs (nSpacers/catsByFacet, plus the shared per-slot budget effSlotPx/chromeExtra)
-  // are hoisted to this outer scope (not just computed inline) because perPaneHeights, below —
-  // computed AFTER paneValues exists — reuses them.
-  //
-  // IMPORTANT: heights are NOT computed via one horizontalBarHeight() call PER FACET. That would
-  // apply HORIZONTAL_HEIGHT_FLOOR (400px) INDEPENDENTLY to each facet, so two facets that both
-  // fall under the floor (the common case for modest row counts — e.g. 5 vs 3 categories) would
-  // BOTH floor to 400px and render with wildly different bar thickness despite equal heights (the
-  // floor swallows the category-count signal that's supposed to drive uniform thickness). Instead:
-  // compute ONE shared per-slot pixel height from the BUSIEST facet (the floor applies only
-  // there), then size every facet by that SAME per-slot height × its own slot count, so bar
-  // thickness stays uniform whether or not the busiest facet itself needed the floor.
-  let autoHeight: number | undefined;
-  let nSpacers = 0;
-  let catsByFacet: Map<string, Set<string>> | undefined;
-  let effSlotPx = 0;
-  let chromeExtra = 0;
-  if (isHorizontalBar && opts.height == null) {
-    const nSeries =
-      spec.series_order && spec.series_order.length
-        ? spec.series_order.length
-        : new Set(rows.map((r) => (cols.series ? (r[cols.series] as string) : "")).filter((s) => s !== "")).size;
-    // First section has no spacer slot (its header sits in the top margin), so spacers = sections − 1,
-    // each reserving a SECTION_SPACER_SLOTS-slot block.
-    const nSections = cols.section ? countSections(rows, cols.x, cols.section, spec, sharedCategories) : 0;
-    nSpacers = Math.max(0, nSections - 1) * SECTION_SPACER_SLOTS;
-    const maxPx = hGutter - GUTTER_TEXT_PAD;
-    const maxLabelLines = sharedCategories.reduce(
-      (m, c) => Math.max(m, labelLineCount(c, maxPx, FACETED_CAT_LABEL_PX)),
-      1,
-    );
-    // Height sizes to the BUSIEST pane's category count, not the union: with one-facet-per-row
-    // (disjoint categories) each pane should be sized to its own rows, not the total. When facets
-    // share categories (the common case), the busiest pane == the union, so this is unchanged.
-    catsByFacet = new Map<string, Set<string>>();
-    for (const r of rows) {
-      const f = facetField ? (r[facetField] as string) : "";
-      const c = r[cols.x] as string;
-      if (!c) continue;
-      if (!catsByFacet.has(f)) catsByFacet.set(f, new Set());
-      catsByFacet.get(f)!.add(c);
-    }
-    const maxPaneCats = Math.max(1, ...[...catsByFacet.values()].map((s) => s.size));
-    // Shared per-slot height: one bar budget per category (a stack is one bar; a grouped bar
-    // reserves nSeries bars), or the wrapped-label budget, whichever is taller — the SAME inputs
-    // horizontalBarHeight uses internally, kept in lockstep with it deliberately.
-    const barsPerCat = nSeries > 1 && !isHorizontalStacked ? Math.max(1, nSeries) : 1;
-    const slotPxNatural = Math.max(
-      barsPerCat * HORIZONTAL_PX_PER_BAR,
-      Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6,
-    );
-    chromeExtra = HORIZONTAL_CHROME_PX + (nSections > 0 ? SECTION_HEADER_TOP_PX : 0);
-    const busiestSlots = maxPaneCats + nSpacers;
-    const naturalBusiest = busiestSlots * slotPxNatural + chromeExtra;
-    const hBusy = Math.max(HORIZONTAL_HEIGHT_FLOOR, naturalBusiest);
-    // Back-solve the per-slot px the busiest facet ACTUALLY got (== slotPxNatural when the floor
-    // didn't fire; inflated when it did) so every other facet is scaled by the SAME ratio —
-    // otherwise a sub-floor busiest facet would silently give sparser facets thinner bars.
-    effSlotPx = (hBusy - chromeExtra) / busiestSlots;
-    autoHeight = Math.round(hBusy);
-  }
-  const effHeight = opts.height ?? autoHeight;
+  // A horizontal bar, stacked or dumbbell chart never reaches here: its facets draw as groups of one
+  // chart (spec/facet-groups.ts), and the guard at the top refuses it. So every figure is a vertical
+  // (or non-categorical) grid, with no category gutter, row-sized height or sections.
+  const keyOf = rowCategoryKey(rows, cols);
+  const effHeight = opts.height;
 
-  // 1. Partition + order panes. Distinct facet values in data-encounter order, then reorder +
-  //    filter by pane_order when set (pane_order names the included panes, in order). A blank facet
-  //    cell is not a pane. Both drops are mirrored by validateChartData's keyed-callout "drawn
-  //    nowhere" rules (src/spec/validate.ts) — change both.
-  const encounterOrder: string[] = [];
-  const seen = new Set<string>();
-  for (const r of rows) {
-    const v = r[facetField] as string;
-    if (v != null && v !== "" && !seen.has(v)) {
-      seen.add(v);
-      encounterOrder.push(v);
-    }
-  }
-  const paneValues =
-    sm.pane_order && sm.pane_order.length
-      ? sm.pane_order.filter((v) => seen.has(v))
-      : encounterOrder;
+  // 1. Partition + order panes (see figurePaneValues).
+  const paneValues = figurePaneValues(spec, rows, facetField);
 
   if (!paneValues.length) throw new Error("No panes: facet_field produced no values in scope.");
 
-  // Per-pane heights: every facet sized by the SAME shared per-slot height (effSlotPx/chromeExtra,
-  // computed above from the BUSIEST facet with the floor applied only there), scaled by ITS OWN
-  // slot count — so bar thickness is uniform across ragged facets (the horizontal analog of
-  // pane_widths "equal-bar") even when the busiest facet's natural height fell under
-  // HORIZONTAL_HEIGHT_FLOOR. Only for horizontal bar/stacked auto-height; other cases keep the
-  // single effHeight for every pane (undefined here ⇒ every pane below falls back to effHeight).
-  const perPaneHeights: number[] | undefined =
-    isHorizontalBar && opts.height == null
-      ? paneValues.map((v) => {
-          const slots = Math.max(1, catsByFacet?.get(v)?.size ?? 1) + nSpacers;
-          return Math.round(slots * effSlotPx + chromeExtra);
-        })
-      : isHorizontalDumbbell && opts.height == null
-        ? // Each stacked pane grows with its OWN category count (facets can be ragged — e.g. a
-          // 5-quintile pane above a 3-row top-decile pane), sized by the shared horizontal-bar
-          // height helper (grouped=false → one row per category).
-          paneValues.map((v) => horizontalBarChartHeight(spec, rows.filter((r) => (r[facetField] as string) === v)))
-        : undefined;
+  // How many DISTINCT series the figure draws: rows in a drawn pane, through series_order's filter.
+  // The stacked net dot needs two (spec/bar-stack.ts drawsNetDots). Not `figureSeries.length`, which
+  // also counts series found only in panes pane_order leaves out.
+  const drawnPanes = new Set(paneValues);
+  const drawnSeries = new Set<string>();
+  for (const r of rows) {
+    if (drawnPanes.has(r[facetField] as string)) drawnSeries.add(cols.series ? (r[cols.series] ?? "") : SINGLE_SERIES_KEY);
+  }
+  const listedSeries = spec.series_order?.length ? new Set(spec.series_order) : null;
+  const chartSeriesCount = [...drawnSeries].filter((s) => !listedSeries || listedSeries.has(s)).length;
+  // The figure legend keys only the series a pane draws: one found only in a pane pane_order leaves
+  // out is drawn nowhere. Its rows are still built over `figureSeries` and then filtered, so every
+  // drawn series keeps the row it had — colour and marker both index the full list.
+  const legendSeries = figureSeries.filter((s) => drawnSeries.has(s));
+  const drawnKeyRows = (rows: LegendItem[]): LegendItem[] => rows.filter((r) => drawnSeries.has(r.series));
 
+  // A point chart's SEPARATE shape channel (columns.shape not the series): ONE shape list, which
+  // every pane's symbols and the shape legend index. A pane numbering its own shapes drew a shape
+  // another pane also has with a different marker, and the legend (pane 0's) had no row for a shape
+  // pane 0 lacks. The list is renderPane's own shape rule run over the rows of every DRAWN pane
+  // (index.ts shapeDomainOver), so a figure whose panes already agreed resolves the list each pane
+  // did and renders unchanged. Unlike a series' colour position, a shape found only in a pane
+  // pane_order leaves out takes no position: the panes never counted it, and neither did the legend.
+  const figureShapes =
+    cols.shape && cols.shape !== cols.series && (spec.chartType === "scatter" || spec.chartType === "dotplot")
+      ? shapeDomainOver(spec, rows.filter((r) => drawnPanes.has(r[facetField] as string)))
+      : undefined;
+  // The figure's shape legend: every shape some pane draws (a pane's `shapeNames` is its symbol
+  // domain, which is also its draw filter), in the figure's order and with the figure's symbols.
+  const figureShapeLegend = (firstLayers: MarkLayers | undefined, paneShapes: Array<string[] | undefined>) => {
+    const layers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
+    if (!figureShapes || !layers.shapeNames || layers.shapeIsSeries) return buildShapeLegendItems(spec, layers);
+    const drawn = new Set(paneShapes.flatMap((s) => s ?? []));
+    return buildShapeLegendItems(spec, { ...layers, shapeNames: figureShapes.filter((s) => drawn.has(s)) }, figureShapes);
+  };
+  const paneShapes: Array<string[] | undefined> = [];
   // 2. Grid layout. columns = config else default; rows = ceil(n / columns). col = i % columns,
   //    row = floor(i / columns).
   // Column count: a live-layer override (responsive reflow) wins, else the spec config, else the
   // default — which is a SINGLE ROW when pane_widths is set (variable widths are per-column across
   // one row of panes), and the ≈ceil(sqrt(n)) grid otherwise. Clamp to [1, paneValues.length].
   const variableWidths = sm.pane_widths != null && sm.pane_widths !== "equal";
-  // Horizontal dumbbells ALWAYS stack vertically (one full-width pane per row) — this wins over the
-  // responsive `opts.columns` reflow and the sqrt-grid default, because a horizontal value axis
-  // needs the full width to be readable and side-by-side horizontal panes crowd it.
-  const requestedColumns = isHorizontalDumbbell
-    ? 1
-    : opts.columns && opts.columns > 0
+  const requestedColumns =
+    opts.columns && opts.columns > 0
       ? opts.columns
       : sm.columns && sm.columns > 0
         ? sm.columns
@@ -570,8 +626,7 @@ export function renderFigure(
   const columns = Math.max(1, Math.min(requestedColumns, paneValues.length));
   const gridRows = Math.ceil(paneValues.length / columns);
 
-  const titles = sm.pane_titles ?? {};
-  const titleFor = (value: string): string => titles[value] ?? value;
+  const titleFor = (value: string): string => ownValue(sm.pane_titles, value) ?? value;
   const seriesLabels = spec.series_labels ?? {};
 
   // Variable pane widths (`pane_widths`) — used by BOTH modes. Resolve the per-column weight
@@ -591,15 +646,12 @@ export function renderFigure(
         const catSet = new Set<string>();
         const serSet = new Set<string>();
         for (const r of pr) {
-          const c = r[cols.x] as string;
+          const c = keyOf(r);
           if (c) catSet.add(c);
           const s = cols.series ? (r[cols.series] as string) : "";
           if (s) serSet.add(s);
         }
-        // A stack is one bar per category; a grouped bar is category × series bars.
-        return isHorizontalStacked
-          ? Math.max(1, catSet.size)
-          : Math.max(1, catSet.size) * Math.max(1, serSet.size);
+        return Math.max(1, catSet.size) * Math.max(1, serSet.size);
       };
       const weights = Array.from({ length: columns }, () => 0);
       paneValues.forEach((v, i) => {
@@ -615,11 +667,11 @@ export function renderFigure(
   // count, so a pane that rotates (or has longer labels) reserves a taller bottom margin and drops
   // its baseline below the others'. Given each column's inner DATA width, force (a) the WORST-CASE
   // mode across panes for a consistent look, and (b) the MAX bottom margin so every pane reserves
-  // the same space. Returns {} for horizontal bars / non-categorical x (no coordination needed).
+  // the same space. Returns {} for a non-categorical x (no coordination needed).
   const coordinateXLabels = (
     dataWByCol: number[],
   ): { mode?: BandLabelMode; marginBottom?: number } => {
-    if (isHorizontalBar || spec.xAxisType !== "categorical") return {};
+    if (spec.xAxisType !== "categorical") return {};
     const rank: Record<BandLabelMode, number> = { single: 0, wrap: 1, rotate: 2 };
     const paneCats = paneValues.map((value, i) => {
       const col = i % columns;
@@ -645,17 +697,9 @@ export function renderFigure(
     // Variable pane widths in per-pane mode: distribute the inner data width by the resolved
     // weights, but EVERY column keeps its own full y-label gutter (independent axes). Absent
     // (equal) ⇒ leave widths undefined so the live grid uses equal `1fr` columns as before.
-    // EXCEPT horizontal bars: the category gutter is asymmetric (pane 0 carries the shared
-    // gutter, col>0 panes only the small label-less margin — see the categoryGutter threading
-    // below), so equal OUTER widths would give col>0 panes a much wider inner DATA width and the
-    // same value would render as visibly different bar lengths across panes. Use the shared-mode
-    // width math (sharedColumnWidths with the category gutter as col 0's left margin) so the
-    // inner data width is IDENTICAL across a row, exactly like the shared branch.
-    const perPaneWidths = isHorizontalBar
-      ? sharedColumnWidths(availW, columns, gridGap, hGutter, colWeights).colWidths
-      : variableWidths
-        ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
-        : undefined;
+    const perPaneWidths = variableWidths
+      ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
+      : undefined;
     // Coordinate x-label rotation/wrap + bottom margin across panes so their baselines align — each
     // pane draws its own x-axis, so a pane with longer/rotated labels would otherwise sit lower.
     // Data width per column: the variable per-pane widths, else the single equal pane width.
@@ -682,24 +726,15 @@ export function renderFigure(
         paneRows,
         {
           ...opts,
-          height: perPaneHeights ? perPaneHeights[i] : effHeight,
+          height: effHeight,
           pane: true,
           paneFacetValue: value,
           paletteSeries: figureSeries,
+          ...(figureShapes ? { paletteShapes: figureShapes } : {}),
+          chartSeriesCount,
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
-          // Horizontal bars: mirror the shared-mode category-gutter/label suppression (see below)
-          // so a sectioned per-pane facet also reads as one figure — pane 0 carries the section
-          // headers + category labels, other panes in the row keep only their bars + value ticks.
-          // Independent y-domains are unaffected (that's what "per-pane" governs); this only
-          // assumes every pane shares one category axis, same as shared mode always has.
-          ...(isHorizontalBar
-            ? {
-                categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
-                hideCategoryLabels: col > 0,
-              }
-            : {}),
         },
         `p${i}`,
       );
@@ -709,6 +744,7 @@ export function renderFigure(
       }
       panePainted.push(p.seriesHatches);
       paneFills.push(p.seriesPainted);
+      paneShapes.push(p.layers.shapeNames);
       // Escape hatch, per pane: a figure has no single SVG (each pane is its own), so this fires
       // once per pane, LAST — after renderPane's own assembly — with ctx.facet set to the SAME
       // FigurePane.value the tooltip hook (Task 5) already uses, not a second derivation of it.
@@ -732,7 +768,7 @@ export function renderFigure(
         overlayTooltips: p.overlayTooltips,
         netMode: p.layers.netMode,
         legendVisualOrder: p.layers.legendVisualOrder,
-        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
+        seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted, figureSeries),
       };
     });
 
@@ -744,10 +780,10 @@ export function renderFigure(
     const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
     const legendItems = buildLegendItems(
       spec,
-      figureSeries,
+      legendSeries,
       figureColors,
       figureLayers,
-      buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills)),
+      drawnKeyRows(buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills))),
       firstFormatValue,
     );
 
@@ -758,9 +794,8 @@ export function renderFigure(
       columns,
       rows: gridRows,
       ...(perPaneWidths ? { columnWidths: perPaneWidths } : {}),
-      ...(perPaneHeights ? { paneHeights: perPaneHeights } : {}),
       legendItems,
-      shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
+      shapeLegendItems: figureShapeLegend(firstLayers, paneShapes),
       colorLegendTitle: spec.color_legend_title,
       shapeLegendTitle: spec.shape_legend_title,
       seriesLabels,
@@ -793,13 +828,17 @@ export function renderFigure(
   //    monotonic — yields exactly the combined-probe domain for line/single-series/grouped bars,
   //    so those stay unchanged. Each per-pane probe already applies the bar zero-baseline +
   //    value-label headroom, so the union endpoints carry it. Probe SVGs are discarded.
-  let yLo = Infinity;
-  let yHi = -Infinity;
-  for (const value of paneValues) {
-    const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-    const [lo, hi] = renderPane(
+  //    A lone yAxisPolicy bound's ascending fallback is decided on the FIGURE (Ruling 74): whenever
+  //    another pane ascends on its own, a pane whose own axis needed it (nothing on the bound's open
+  //    side) contributes the domain it had before the fallback existed (reversed or [b, b]), not its
+  //    fallback domain. That keeps its pinned end as its own markers extend it (a facet-scoped marker
+  //    beyond a bar's ceiling), and leaves those figures exactly as they were before the fallback.
+  //    Dropping the pane instead lost such a marker's extent and drew it off the frame. Only when
+  //    every pane needs the fallback does the figure take it, as the union of their fallback domains.
+  const probes = paneValues.map((value) =>
+    renderPane(
       spec,
-      paneRows,
+      rows.filter((r) => (r[facetField] as string) === value),
       {
         ...opts,
         height: effHeight,
@@ -808,14 +847,17 @@ export function renderFigure(
         ...(binThresholds ? { binThresholds } : {}),
       },
       "probe",
-    ).yDomain;
+    ),
+  );
+  const anyAscends = probes.some((p) => !p.yDomainWithoutFallback);
+  let yLo = Infinity;
+  let yHi = -Infinity;
+  for (const p of probes) {
+    const [lo, hi] = (anyAscends && p.yDomainWithoutFallback) || p.yDomain;
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }
   const sharedYDomain: [number, number] = [yLo, yHi];
-
-  // (isHorizontalBar / hGutter / effHeight were computed once at the top so the gutter, label
-  //  suppression and the auto-grown height all agree across panes.)
 
   // 3. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
   //    columns drop the label gutter for a small left margin; column OUTER widths are made unequal
@@ -825,7 +867,7 @@ export function renderFigure(
     availW,
     columns,
     gridGap,
-    hGutter,
+    TBL_MARGIN_LEFT,
     colWeights,
   );
 
@@ -837,9 +879,7 @@ export function renderFigure(
   );
 
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
-  //    the shared y-domain. Vertical panes hide the y-tick LABELS on non-leftmost columns; horizontal
-  //    bars instead pass the shared category gutter + suppress the CATEGORY labels there (and let the
-  //    bar layer own the left margin, so the gutter sizing in the mark builder is authoritative).
+  //    the shared y-domain. Panes hide the y-tick LABELS on non-leftmost columns.
   let firstLayers: MarkLayers | undefined;
   // Shared mode: every pane shares one value scale, so this IS the figure's value formatter.
   let firstFormatValue: ((v: number) => string) | undefined;
@@ -855,24 +895,19 @@ export function renderFigure(
       paneRows,
       {
         ...opts,
-        height: perPaneHeights ? perPaneHeights[i] : effHeight,
+        height: effHeight,
         pane: true,
         paneFacetValue: value,
         paletteSeries: figureSeries,
+        ...(figureShapes ? { paletteShapes: figureShapes } : {}),
+        chartSeriesCount,
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
         width: colWidths[col],
         ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
         ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),
-        ...(isHorizontalBar
-          ? {
-              categoryGutter: col === 0 ? hGutter : SHARED_LABELLESS_MARGIN_LEFT,
-              hideCategoryLabels: col > 0,
-            }
-          : {
-              hideYAxisLabels: col > 0,
-              marginLeft: colMarginLeft[col],
-            }),
+        hideYAxisLabels: col > 0,
+        marginLeft: colMarginLeft[col],
       },
       `p${i}`,
     );
@@ -881,6 +916,7 @@ export function renderFigure(
       firstFormatValue = p.formatValue;
     }
     panePainted.push(p.seriesHatches);
+    paneShapes.push(p.layers.shapeNames);
     // Pushed in BOTH pane loops or the figure legend lies. `paneFills` was declared here and pushed
     // only in the per-pane branch, so shared mode — the DEFAULT — handed firstPainted() an empty map
     // and the legend fell through to the palette: panes painted a `highlightSeries`-dimmed series
@@ -908,7 +944,7 @@ export function renderFigure(
       overlayTooltips: p.overlayTooltips,
       netMode: p.layers.netMode,
       legendVisualOrder: p.layers.legendVisualOrder,
-      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted),
+      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted, figureSeries),
     };
   });
 
@@ -920,10 +956,10 @@ export function renderFigure(
   const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
   const legendItems = buildLegendItems(
     spec,
-    figureSeries,
+    legendSeries,
     figureColors,
     figureLayers,
-    buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills)),
+    drawnKeyRows(buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills))),
     firstFormatValue,
   );
 
@@ -934,9 +970,8 @@ export function renderFigure(
     columns,
     rows: gridRows,
     columnWidths: colWidths,
-    ...(perPaneHeights ? { paneHeights: perPaneHeights } : {}),
     legendItems,
-    shapeLegendItems: buildShapeLegendItems(spec, firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set() }),
+    shapeLegendItems: figureShapeLegend(firstLayers, paneShapes),
     colorLegendTitle: spec.color_legend_title,
     shapeLegendTitle: spec.shape_legend_title,
     seriesLabels,

@@ -3,6 +3,8 @@
 // two-line temporal x-axis). Marks are returned as opaque Plot mark objects.
 import { Plot, d3 } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT } from "./theme";
+import { categoryText } from "../spec/section-key";
+import { INDENT_STEP } from "../table/layout";
 
 type Mark = unknown;
 
@@ -428,6 +430,31 @@ export function estimateLabelWidth(text: string, fontSize: number = TBL.size.axi
   return text.length * fontSize * AVG_CHAR_EM;
 }
 
+/** Figtree's advance width (1/1000 em) at the category-label weight (500) for each printable ASCII
+ *  character, U+0020 to U+007E, measured in Chromium with the embedded font. */
+const FIGTREE_500_ADVANCE = [
+  244, 302, 345, 629, 561, 793, 645, 212, 360, 360, 483, 626, 235, 414, 219, 401,
+  643, 416, 564, 547, 624, 576, 569, 542, 614, 569, 266, 271, 626, 626, 626, 506,
+  990, 687, 611, 722, 691, 591, 546, 756, 751, 276, 525, 625, 524, 849, 774, 779,
+  586, 782, 631, 612, 561, 706, 701, 967, 632, 616, 638, 329, 401, 329, 559, 437,
+  233, 516, 589, 542, 588, 548, 376, 591, 561, 240, 275, 500, 227, 857, 561, 580,
+  594, 581, 349, 466, 384, 561, 530, 798, 492, 540, 488, 388, 257, 388, 595,
+];
+/** A category label's rendered width (px): Figtree's advances summed, kerning ignored; a character
+ *  outside printable ASCII counts AVG_CHAR_EM. The widest line of a label with hard breaks. */
+export function measuredLabelWidth(text: string, fontSize: number = TBL.size.axis): number {
+  let widest = 0;
+  for (const line of text.split("\n")) {
+    let em = 0;
+    for (const ch of line) {
+      const code = ch.codePointAt(0) as number;
+      em += code >= 32 && code < 127 ? (FIGTREE_500_ADVANCE[code - 32] as number) / 1000 : AVG_CHAR_EM;
+    }
+    widest = Math.max(widest, em * fontSize);
+  }
+  return widest;
+}
+
 /** Greedily word-wrap a label into as many lines as needed so each line's estimated width is
  *  ≤ `maxPx` (a single over-long word still gets its own line). Returns the lines joined by "\n"
  *  (Plot renders that as multi-line text). A label that already fits returns unchanged (no "\n"),
@@ -470,6 +497,11 @@ export function labelLineCount(label: string, maxPx: number, fontSize: number = 
 /** Padding (px) reserved between the wrapped category label and the bars in the left gutter. */
 export const GUTTER_TEXT_PAD = 8;
 
+/** Indent (px) of a sectioned chart's category labels under their flush-left section header: the
+ *  table's member-row indent, so a sectioned chart reads like a table's row groups. The gutter grows
+ *  by it (horizontalLeftGutter `indent`), so the label text keeps its unsectioned width and wrapping. */
+export const SECTION_LABEL_INDENT = INDENT_STEP;
+
 // Responsive LEFT GUTTER for horizontal bars: the y-axis category labels live in the left
 // margin (left-justified at svg x=0), so the margin must be wide enough for the LONGEST
 // label or it clips into the plot. Derived from the longest category at the axis font size
@@ -482,10 +514,46 @@ export function horizontalLeftGutter(
     min = TBL_MARGIN_LEFT,
     max = 240,
     fontSize = TBL.size.axis,
-  }: { pad?: number; min?: number; max?: number; fontSize?: number } = {},
+    indent = 0,
+  }: { pad?: number; min?: number; max?: number; fontSize?: number; indent?: number } = {},
 ): number {
-  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(c, fontSize)), 0);
-  return Math.round(Math.max(min, Math.min(max, longest + pad)));
+  const longest = categories.reduce((w, c) => Math.max(w, estimateLabelWidth(categoryText(c), fontSize)), 0);
+  const estimated = Math.max(min, Math.min(max, longest + pad));
+  // The estimate runs short on a short label of wide glyphs ("Gamma" is 45.5px at 13px, estimated
+  // 35.75), so the label reached the plot. Floor the gutter at each one-line label's glyph-measured
+  // width plus GUTTER_TEXT_PAD. A label that already had that room leaves the gutter unchanged; a
+  // label the estimate wraps (it reaches `max`) is left to the wrap.
+  const measured = categories.reduce((w, c) => {
+    const text = categoryText(c);
+    return estimateLabelWidth(text, fontSize) + pad > max ? w : Math.max(w, measuredLabelWidth(text, fontSize));
+  }, 0);
+  return Math.round(Math.max(estimated, Math.min(max, measured + GUTTER_TEXT_PAD)) + indent);
+}
+
+const HVALUE_TICK_PX = 18; // one value-tick row (top)
+/** Clear space between a section header's line and the rows around it (sectionGapPx/sectionHeaderLift). */
+export const SECTION_HEADER_GAP = 10;
+const HMARGIN_BOTTOM_TICKS = 26;
+const HMARGIN_BOTTOM_BARE = 8;
+
+/** Top/bottom margins for a horizontal bar-family chart (bar, stacked). The category axis is on the
+ *  LEFT, so the bottom only fits the value-tick row — never the vertical chart's category-label
+ *  margin, which is sized for rotated labels and leaves an empty band under the axis. The top fits
+ *  the optional top tick row and, when sectioned, the first section header: `topHeaderLift` (set
+ *  only when a first-section header is drawn) floors the margin so that header is never clipped. */
+export function horizontalValueAxisMargins(
+  xAxisTicks: "bottom" | "top" | "both" | undefined,
+  { sectioned = false, topHeaderLift }: { sectioned?: boolean; topHeaderLift?: number } = {},
+): { marginTop: number; marginBottom: number } {
+  const mode = xAxisTicks ?? "bottom";
+  const topTicks = mode === "top" || mode === "both";
+  return {
+    marginTop: Math.max(
+      (topTicks ? HVALUE_TICK_PX : 0) + SECTION_HEADER_GAP + (sectioned ? 12 : 8),
+      topHeaderLift != null ? topHeaderLift + SECTION_HEADER_GAP : 0,
+    ),
+    marginBottom: mode !== "top" ? HMARGIN_BOTTOM_TICKS : HMARGIN_BOTTOM_BARE,
+  };
 }
 
 /** Category-label font size (px) for FACETED horizontal bars. Larger than the single-chart axis
@@ -539,16 +607,19 @@ export function tblFacetGroupYAxis(
   categories: string[],
   marginLeft: number = TBL_MARGIN_LEFT,
   fontSize: number = TBL.size.axis,
+  /** SECTION_LABEL_INDENT on a sectioned chart (the gutter already includes it), else 0. */
+  indent = 0,
 ): Mark[] {
   const rows = categories.map((c) => ({ c }));
-  const maxPx = marginLeft - GUTTER_TEXT_PAD;
-  const anyMultiline = categories.some((c) => wrapToWidth(c, maxPx, fontSize).includes("\n"));
+  const maxPx = marginLeft - GUTTER_TEXT_PAD - indent;
+  // `fy` is the row's key; the label is its display text (spec/section-key.ts).
+  const anyMultiline = categories.some((c) => wrapToWidth(categoryText(c), maxPx, fontSize).includes("\n"));
   return [
     Plot.text(rows, {
       fy: (d: { c: string }) => d.c,
-      text: (d: { c: string }) => wrapToWidth(d.c, maxPx, fontSize),
+      text: (d: { c: string }) => wrapToWidth(categoryText(d.c), maxPx, fontSize),
       frameAnchor: "left",
-      dx: -marginLeft,
+      dx: -marginLeft + indent,
       textAnchor: "start",
       fill: TBL.color.axis,
       fontSize,
@@ -561,31 +632,33 @@ export function tblFacetGroupYAxis(
 
 // --- Sectioned horizontal category axis ---------------------------------------------------
 // A sectioned category axis (columns.section) groups categories into contiguous sections along the
-// `fy`/`y` band. A block of SECTION_SPACER_SLOTS empty spacer band slots is inserted before each
-// non-first section — it carries no data rows (so no bars render in it) and gives the section's
-// bold header symmetric whitespace above and below once lifted off its first bar. The sentinel
-// prefix uses a leading space so it never collides with a real category value (which the engine
-// trims/ignores). Every section header (first section included) is drawn via the single
-// `tblSectionTopHeader` mark below, lifted by a fixed px from its section's first bar.
+// `fy` band. The band itself holds only the categories; each non-first section is then moved down by
+// a FIXED `sectionGapPx` after Plot renders (facet-chrome.ts spreadSections), so the gap holds the
+// section's bold header and does not grow with the row pitch, as a run of empty band slots did. Every
+// section header (first section included) is drawn via the single `tblSectionTopHeader` mark below,
+// lifted `sectionHeaderLift` px above its section's first row.
 
-/** Sentinel prefix marking a section's empty spacer band slot. */
-export const SECTION_SPACER_PREFIX = " section:";
-/** Number of empty band slots reserved above each non-first section. Two slots (~2×row) give the
- *  header symmetric whitespace above and below at the dense row heights that exposed the defect;
- *  the header is lifted a fixed px from its section's first bar, so both gaps read as deliberate. */
-export const SECTION_SPACER_SLOTS = 2;
-/** The i-th spacer band value for a section (unique per slot so the band domain has no dup keys). */
-export function sectionSpacerSlot(section: string, i: number): string {
-  return `${SECTION_SPACER_PREFIX}${i}:${section}`;
+/** Px a section break adds between the last row slot of one section and the first row slot of the
+ *  next: one header line at the category font with SECTION_HEADER_GAP clear above and below it. */
+export function sectionGapPx(catFont: number = FACETED_CAT_LABEL_PX): number {
+  return 2 * SECTION_HEADER_GAP + catFont;
 }
-/** Whether a band value is a section spacer sentinel (not a real category). */
-export function isSectionSpacer(v: string): boolean {
-  return v.startsWith(SECTION_SPACER_PREFIX);
+/** The section gap actually opened in a chart of a given plot height (its height less the top and
+ *  bottom margins): `px`, unless the `nBreaks` gaps together would take more than half the plot —
+ *  then they share that half equally, so the rows always keep at least half. Applied only to a
+ *  HOST-supplied height (assemblePlot skips it under RenderOptions.heightFromModel); the engine's
+ *  own height model always gives the rows at least as much as the gaps. */
+export function fittedSectionGapPx(px: number, nBreaks: number, plotPx: number): number {
+  return nBreaks > 0 ? Math.min(px, Math.max(0, plotPx) / (2 * nBreaks)) : px;
+}
+/** How far a section header's em-box top sits above its section's first row: the header line plus
+ *  SECTION_HEADER_GAP clear below it. */
+export function sectionHeaderLift(catFont: number): number {
+  return SECTION_HEADER_GAP + catFont;
 }
 
-// The FIRST section has no leading spacer slot (so the figure doesn't open with a big empty gap);
-// its header is faceted on that section's FIRST CATEGORY and lifted up into the (enlarged) top
-// margin via a negative dy, so it sits just above the section's first bar at the very top.
+// A section header is faceted on its section's FIRST CATEGORY and lifted above that row via a
+// negative dy: into the section gap, or for the first section into the (enlarged) top margin.
 export function tblSectionTopHeader(
   header: { category: string; label: string },
   marginLeft: number = TBL_MARGIN_LEFT,

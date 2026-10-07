@@ -22,6 +22,7 @@ import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
+import { treemapHeight } from "../src/engine/marks/treemap";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import type { RenderHooks } from "../src/spec/hooks";
@@ -310,7 +311,7 @@ describe("afterRender parity has a limit: the two SVGs usually differ in size", 
 // The other side of that limit: the export frame is chosen without reference to the card, so the
 // sizes only USUALLY differ. A timeline's chart height is its content's on both paths, so a
 // horizontal one whose live chart is the export's 920px is handed an identically sized SVG.
-describe("afterRender on a horizontal timeline at 920px gets the same-sized SVG on both paths", () => {
+describe("afterRender on a horizontal timeline or a treemap at 920px gets the same-sized SVG on both paths", () => {
   const sizes = (spec: ChartSpec, rows: TidyRow[], width: number) => {
     const seen: Array<{ phase: string; w: string | null; h: string | null }> = [];
     const hooks: RenderHooks = {
@@ -327,6 +328,17 @@ describe("afterRender on a horizontal timeline at 920px gets the same-sized SVG 
     const seen = sizes(TL, rows, 920);
     expect(seen.map((s) => s.phase)).toEqual(["live", "export"]);
     expect(seen[0]!.w).toBe("920");
+    expect(seen[1]).toEqual({ ...seen[0], phase: "export" });
+  });
+
+  // A treemap's export height is its content's too (the treemap area), never the fixed frame's.
+  it("treemap, at 920", () => {
+    const TMAP = { chartType: "treemap", title: "t", xAxisType: "categorical", data: "d.csv", columns: { x: "c", value: "v" } } as ChartSpec;
+    const rows = [{ c: "Big", v: "1000000" }, { c: "Tiny", v: "1" }, { c: "Alpha", v: "400000" }] as TidyRow[];
+    const seen = sizes(TMAP, rows, 920);
+    expect(seen.map((s) => s.phase)).toEqual(["live", "export"]);
+    expect(seen[0]!.w).toBe("920");
+    expect(seen[0]!.h).toBe(String(treemapHeight(920)));
     expect(seen[1]).toEqual({ ...seen[0], phase: "export" });
   });
 });

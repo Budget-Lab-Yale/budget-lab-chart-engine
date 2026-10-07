@@ -1,13 +1,19 @@
 import type { FormatRule, TableSpec } from "../spec/table-types";
+import { ownValue } from "../spec/own-key";
 
 export function resolveFormat(args: {
   leafKey: string; groupKeys: string[]; rowLabel: string; spec: TableSpec;
 }): FormatRule {
   const f = args.spec.format ?? {};
   let rule: FormatRule = { type: "number", decimals: 1, ...(f.default ?? {}) };
-  if (f.columns?.[args.leafKey]) rule = { ...rule, ...f.columns[args.leafKey] };
-  for (const g of args.groupKeys) if (f.groups?.[g]) rule = { ...rule, ...f.groups[g] };
-  if (f.rows?.[args.rowLabel]) rule = { ...rule, ...f.rows[args.rowLabel] };
+  const byColumn = ownValue(f.columns, args.leafKey);
+  if (byColumn) rule = { ...rule, ...byColumn };
+  for (const g of args.groupKeys) {
+    const byGroup = ownValue(f.groups, g);
+    if (byGroup) rule = { ...rule, ...byGroup };
+  }
+  const byRow = ownValue(f.rows, args.rowLabel);
+  if (byRow) rule = { ...rule, ...byRow };
   if (args.spec.sign_color) rule = { signColor: true, ...rule };
   return rule;
 }

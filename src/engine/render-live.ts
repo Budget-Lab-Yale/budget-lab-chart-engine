@@ -9,10 +9,13 @@ import type { RenderHooks } from "../spec/hooks.js";
 import type { NetMode } from "../spec/bar-stack.js";
 import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
+import { rowsInSectionOrder } from "../spec/section-key.js";
+import { ownValue } from "../spec/own-key.js";
+import { isHorizontalDumbbell } from "../spec/dumbbell-orientation.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
-  legendSeriesCount,
+  legendInRightColumn,
   orderForRightLegend,
   resolveLegendPosition,
 } from "./legend-layout.js";
@@ -27,11 +30,14 @@ import type { PreparedRow } from "./marks/index.js";
 import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
-import { resolveTimelineOrientation, timelineHeight } from "./marks/timeline.js";
+import { resolveTimelineOrientation, timelineHeight, timelineLegendRowCount } from "./marks/timeline.js";
 import { TL_GEOM } from "./timeline-layout.js";
+import { treemapHeight } from "./marks/treemap.js";
+import { TM_GEOM } from "./treemap-layout.js";
+import { attachTreemapHover } from "./treemap-hover.js";
 import { waterfallValueDecimals } from "./scales.js";
-import { applyValueAffixes, formatNumericX } from "./util.js";
-import { renderFigure, horizontalBarChartHeight, figurePaneHeight } from "./figure.js";
+import { applyValueAffixes, formatNumericX, normalizeSpec } from "./util.js";
+import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
@@ -58,7 +64,7 @@ import { renderSourceLine } from "./source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
-import { TBL, markerSymbolForIndex } from "./theme.js";
+import { TBL, markerSymbolForSeries } from "./theme.js";
 import { TOTAL_SERIES_KEY } from "./series-keys.js";
 
 const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
@@ -117,6 +123,14 @@ function scatterPointHoverOptions(a: {
     ...(a.overlayTooltips ? { overlays: a.overlayTooltips } : {}),
     showTooltip: a.chromeTooltip,
   };
+}
+
+/** `tooltip_section: true` → the card-header options every sectioned hover card takes (stack card,
+ *  dumbbell; standalone and panes; a bar or stack pane under `coordinated_cursor: false`). Card
+ *  only: the pills and the coordinated echo never get them. */
+function tooltipSectionOpts(spec: ChartSpec): { tooltipSection?: boolean; sectionLabels?: Record<string, string> } {
+  if (spec.tooltip_section !== true) return {};
+  return { tooltipSection: true, ...(spec.section_labels ? { sectionLabels: spec.section_labels } : {}) };
 }
 
 function histogramBinLabelOpts(spec: ChartSpec): BinLabelOpts {
@@ -217,21 +231,21 @@ const MIN_CHART_WIDTH = 390;
 const FIXED_CHART_HEIGHT = 400;
 
 /** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
- *  band slots (grouped → nSeries bars per category; stacked/single → one), plus section spacer
- *  slots and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
+ *  band slots (grouped → nSeries bars per category; stacked/single → one), plus the fixed section
+ *  gaps and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
- *  fixed default; the helper floors short horizontals at it too. */
+ *  fixed default; a horizontal chart with few rows is shorter than it. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+  spec = normalizeSpec(spec);
   // Timeline height is content-derived (label rows, or the stacked vertical column); renderChart
   // computes it again at the real width, so this is only the pre-draw estimate.
   if (spec.chartType === "timeline") return timelineHeight(spec, rows, 720);
+  // Treemap: the same pre-draw estimate; its height follows its width (spec §6).
+  if (spec.chartType === "treemap") return treemapHeight(720);
   // Horizontal bar/stacked AND horizontal dumbbell grow their height with the category-row count
   // (one row per category — dumbbell is never grouped, so horizontalBarChartHeight sizes it the
-  // same as a single-series horizontal bar, section spacers included).
-  const growsWithRows =
-    spec.orientation === "horizontal" &&
-    (spec.chartType === "bar" || spec.chartType === "stacked" || spec.chartType === "dumbbell");
-  if (!growsWithRows) {
+  // same as a single-series horizontal bar, section gaps included).
+  if (!growsWithRows(spec)) {
     // Waterfall carries long (often rotated) step labels under the plot — give it more room.
     return spec.chartType === "waterfall" ? 460 : FIXED_CHART_HEIGHT;
   }
@@ -659,7 +673,8 @@ function buildDownloadActions(
  *       div.figure-canvas          ← the re-rendered SVG goes here
  *     div.figure-meta              note + source + Data/Image download buttons
  *
- * Card structure (right-legend variant — stacked ≥5 series or explicit legendPosition:"right"):
+ * Card structure (right-legend variant — stacked ≥5 series or explicit legendPosition:"right",
+ * with legend rows to show):
  *   div.figure-card
  *     div.figure-header
  *     div.figure-body--legend-right  (flex row: canvas-side left, legend-column right)
@@ -746,14 +761,15 @@ function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
 
 // Bar charts facet their category band whenever bar.ts puts it on fx (vertical grouped) or fy
 // (horizontal grouped, OR horizontal sectioned — any series count, since Task 16 unified single-
-// and multi-series sectioned bars onto one fy topology; see bar.ts). The category-band crosshair
+// and multi-series sectioned bars onto one fy topology; see bar.ts). A stack facets only when
+// sectioned (stacked.ts: one bar per fy row; never grouped). The category-band crosshair
 // (attachBandCrosshair) reads rect geometry differently in each case: faceted charts wrap each
 // category in its own translated `<g>` (readCategoryBands/H's `isFaceted` branch); unfaceted charts
 // read raw rect x/y directly. Passing the wrong branch reads a facet-LOCAL coordinate as if it were
 // absolute, misresolving every hover past the first facet.
 function isBarCategoryFaceted(spec: ChartSpec, rows: PreparedRow[], seriesCount: number): boolean {
-  if (spec.chartType !== "bar") return false;
-  if (seriesCount > 1) return true;
+  if (spec.chartType !== "bar" && spec.chartType !== "stacked") return false;
+  if (spec.chartType === "bar" && seriesCount > 1) return true;
   return spec.orientation === "horizontal" && rows.some((r) => r._section != null);
 }
 
@@ -781,6 +797,8 @@ function sectionOrderedCategories(spec: ChartSpec, rows: PreparedRow[], cats: st
 }
 
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
+  const unique = normalizeSpec(opts.spec);
+  if (unique !== opts.spec) opts = { ...opts, spec: unique };
   // Small-multiples figures take a separate mount path (shared faceted SVG, or a responsive
   // per-pane grid) so the heavily-tuned single-chart controller below stays untouched.
   if (opts.spec.small_multiples) return mountFigure(container, opts);
@@ -789,6 +807,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // Explicit height (callers / golden path) wins; otherwise horizontal bars grow taller
   // with the bar/row count and everything else uses the fixed default.
   const height = opts.height ?? computeChartHeight(spec, rows);
+  // The engine chose the height, not the host (RenderOptions.heightFromModel).
+  const heightFromModel = opts.height == null;
   const doc = container.ownerDocument;
   // See MountOptions.tooltipContainer for why body is the default rather than `container` itself.
   const tooltipContainer = opts.tooltipContainer ?? doc.body;
@@ -868,6 +888,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // --- chart controller: re-render at the container width on resize ---
   let lastWidth = -1;
   let currentOverlay: OverlayEl | null = null;
+  // Treemap only: hides the hover card a draw left showing. The card sits outside the svg, so a
+  // redraw or unmount under a still pointer would otherwise strand it (Ruling 21).
+  let hideTreemapHover: (() => void) | null = null;
   // The svg CURRENTLY in the canvas, re-read (not captured) by the deferred "mount" onRender
   // dispatch below — see it for why. Null between a failed render and the next successful one:
   // draw()'s catch replaces the canvas with a .figure-error and there is no live svg to report.
@@ -887,21 +910,31 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let currentSeriesNames: string[] = [];
 
 
-  const draw = (
-    outerWidth: number,
-    legendPos: "top" | "right",
-    renderPhase?: "mount" | "resize" | "reselect" | "restack",
-  ): void => {
+  /** The width the chart is drawn at on a card `outerWidth` wide with the legend at `legendPos`. */
+  const chartTarget = (outerWidth: number, legendPos: "top" | "right"): number => {
     // For right-legend, the chart width is computed from the OUTER card width (stable),
     // not from canvasScroll (which would shrink as the legend takes space → feedback loop).
     const chartAvail = legendPos === "right"
       ? outerWidth - LEGEND_COLUMN_WIDTH - LEGEND_GAP
       : outerWidth;
-    // A timeline goes vertical instead of scrolling, so it renders at the real width down to a phone.
-    const minW = spec.chartType === "timeline" ? TL_GEOM.minLiveWidth : MIN_CHART_WIDTH;
-    const target = Math.max(minW, Math.round(chartAvail));
+    // A timeline goes vertical instead of scrolling, so it renders at the real width down to a phone;
+    // a treemap re-lays itself out at any width, down to its own 280px floor.
+    const minW = spec.chartType === "timeline" ? TL_GEOM.minLiveWidth
+      : spec.chartType === "treemap" ? TM_GEOM.minLiveWidth
+      : MIN_CHART_WIDTH;
+    return Math.max(minW, Math.round(chartAvail));
+  };
+
+  const draw = (
+    outerWidth: number,
+    legendPos: "top" | "right",
+    renderPhase?: "mount" | "resize" | "reselect" | "restack",
+  ): void => {
+    const target = chartTarget(outerWidth, legendPos);
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
+    hideTreemapHover?.();
+    hideTreemapHover = null;
 
     // Color accent feed: resolve the active title-selector option's color (raw
     // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
@@ -922,6 +955,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       built = renderChart(spec, rows, {
         width: target,
         height,
+        ...(heightFromModel ? { heightFromModel: true } : {}),
         hooks: opts.hooks,
         ...(timelineOrientation ? { timelineOrientation } : {}),
         ...(restackOrder ? { stackOrder: restackOrder } : {}),
@@ -1087,8 +1121,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
         // Activate the right-legend layout on first use (or if switching from top).
-        // A timeline can reach here already "right" with no wrapper built: an earlier draw
-        // (horizontal with lanes) had no legend items, so it recorded the position without one.
+        // `!rightLegendSlot` is defensive: a right draw with no legend rows to show takes the top
+        // position instead (specPos below), so none records "right" without building the column.
         if (currentLegendPos !== "right" || !rightLegendSlot) {
           // Move canvasScroll into the body wrapper.
           const bodyWrapper = doc.createElement("div");
@@ -1145,6 +1179,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     if (spec.chartType === "timeline") {
       // Static by design: every label is on the page, so screen and PNG agree. Legend pin/dim
       // still works through the data-series attributes.
+    } else if (spec.chartType === "treemap") {
+      // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false. That flag
+      // suppresses only the card, as on every chart type (CONFIG-SPEC `chrome.tooltip`).
+      hideTreemapHover = attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer });
     } else if (spec.chartType === "scatter") {
       // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
       attachPointHover(svg, scatterPointHoverOptions({
@@ -1191,27 +1229,31 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
       // lists each series' value with a DOT swatch that matches the legend/chart marker — hollow
       // ring / ink / filled). Reuses the categorical crosshair with orientation.
-      const dbMarkers = new Map(seriesOrder.map((s) => [s, spec.series_marker?.[s] ?? "filled"] as const));
+      const dbMarkers = new Map(seriesOrder.map((s) => [s, ownValue(spec.series_marker, s) ?? "filled"] as const));
       const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
       attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
         colors,
         seriesLabels,
         seriesOrder,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         categoryLabels: spec.x_labels,
+        ...tooltipSectionOpts(spec),
         bandHighlight: true,
         centersFromMarks: true,
-        orientation: spec.orientation === "horizontal" ? "horizontal" : "vertical",
+        orientation: isHorizontalDumbbell(spec) ? "horizontal" : "vertical",
         renderedFills: dbFills,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
+        // Horizontal: the row strip runs under the label, which accents — as on a horizontal bar.
+        ...(isHorizontalDumbbell(spec) ? { regionFromLeftEdge: true, accentLabel: true } : {}),
       });
-    } else if (spec.xAxisType === "categorical" && spec.chartType === "line") {
-      // Categorical-x LINE: resolve the category from the x-axis labels (no bars) and show a
-      // guide + tooltip.
+    } else if (spec.xAxisType === "categorical" && (spec.chartType === "line" || spec.chartType === "area")) {
+      // Categorical-x LINE or AREA: resolve the category from the x-axis labels (no bars) and show
+      // a guide + tooltip. Area takes this path, not the band crosshair below, because the band
+      // crosshair resolves the category from bar rects an area chart does not draw.
       attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
@@ -1223,6 +1265,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         categoryLabels: spec.x_labels,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
+        // Stacked area: a Total row, as the temporal attachCrosshair call below.
+        ...(spec.chartType === "area" ? { showTotal: true } : {}),
       });
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
@@ -1255,7 +1299,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
       }
       const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
-      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
+      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
       const horizontalBar = spec.orientation === "horizontal";
       // Waterfall: the hover delta uses the SAME precision as the always-on running-total labels
       // (valueLabels.decimals, else the min the data needs) so the two never disagree.
@@ -1268,8 +1312,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
       // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
       // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
-      // label gutter; vertical: stopping at the baseline, matching faceted), a uniform highlight
-      // height across section spacers, a bolded hovered label (horizontal) / frosted category pill
+      // label gutter; vertical: stopping at the baseline, matching faceted), a one-row highlight
+      // that never covers a section gap, a bolded hovered label (horizontal) / frosted category pill
       // (vertical), and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
       // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
       // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →
@@ -1299,8 +1343,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         seriesOrder,
         yFormat: bandYFormat,
         categoryLabels: spec.x_labels,
+        ...tooltipSectionOpts(spec),
         icons: seriesIcons,
         orientation: horizontalBar ? "horizontal" : "vertical",
+        // Horizontal card hover: the same row strip + label accent as the pill hover below.
+        ...(horizontalBar ? { regionFromLeftEdge: true, accentLabel: true } : {}),
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
         onHover: hoverNotifier,
@@ -1392,7 +1439,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
-    currentOverlay = spec.chartType === "timeline" ? null : attachYAxisOverlay(canvasScroll, svg);
+    currentOverlay = spec.chartType === "timeline" || spec.chartType === "treemap" ? null : attachYAxisOverlay(canvasScroll, svg);
 
     // --- Reciprocal annotation highlight: hovering a rug block lights up its legend row and every
     // other chart element carrying the same key (its bands, its fills, its other blocks), and dims
@@ -1516,18 +1563,44 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // else a real mount would fire a mutating, possibly side-effecting hook twice: once uselessly
   // on this throwaway probe, once more on the real draw() below. Every other hook is a pure
   // formatter, unaffected by running against output nobody sees.
-  let prelimSeriesCount = 1;
+  let prelimLegendItems: NonNullable<ReturnType<typeof renderChart>["legendItems"]> = [];
+  let prelimShapeRows = 0;
   try {
     const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
-    const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: prelimHooks });
-    prelimSeriesCount = legendSeriesCount(prelim.legendItems ?? []);
+    const prelim = renderChart(spec, rows, {
+      width: initialCardWidth,
+      height,
+      ...(heightFromModel ? { heightFromModel: true } : {}),
+      hooks: prelimHooks,
+    });
+    prelimLegendItems = prelim.legendItems ?? [];
+    prelimShapeRows = prelim.shapeLegendItems?.length ?? 0;
   } catch {
     // Ignore — draw() will surface the error.
   }
+  // The spec's legend position on a card `cardW` wide, by the export's rule (legendInRightColumn):
+  // "right" only for a legend with rows to show. A legend with none — a single series,
+  // `series_legend: false` with no other rows, a treemap's flat data — reserves no column, so the
+  // plot takes the card's full width, as in the PNG. Legend rows do not depend on the chart's width
+  // (pinned per row source in test/right-legend-no-rows.test.ts), so the probe's rows hold at
+  // every width — except a timeline's: a resize can switch its
+  // orientation, and with it whether drawn lanes replace the rows, so it is asked at the width the
+  // column would leave.
+  const specPos = (cardW: number): "top" | "right" => {
+    if (spec.chartType !== "timeline") {
+      return legendInRightColumn(spec, prelimLegendItems, prelimShapeRows, rows) ? "right" : "top";
+    }
+    // A timeline's position never depends on its row count (only a stacked chart's does), so this
+    // check is cheap and skips the orientation layout for every timeline that is not "right".
+    if (resolveLegendPosition(spec, 0, rows) !== "right") return "top";
+    const orientation = resolveTimelineOrientation(spec, rows, chartTarget(cardW, "right"));
+    return timelineLegendRowCount(spec, rows, orientation) > 0 ? "right" : "top";
+  };
   // Fall back to top if the card is too narrow for the right-legend column.
   const resolvedPos = (): "top" | "right" => {
-    const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
-    if (pos === "right" && (card.clientWidth || initialWidth || 720) < LEGEND_RIGHT_MIN_CARD_WIDTH) {
+    const cardW = card.clientWidth || initialWidth || 720;
+    const pos = specPos(cardW);
+    if (pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH) {
       return "top";
     }
     return pos;
@@ -1567,7 +1640,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
         const cardW = card.clientWidth;
-        const pos = resolveLegendPosition(spec, prelimSeriesCount, rows);
+        const pos = specPos(cardW);
         const effectivePos: "top" | "right" =
           pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
         draw(cardW, effectivePos, "resize");
@@ -1578,6 +1651,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   return () => {
     disposed = true;
+    hideTreemapHover?.();
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
@@ -1590,15 +1664,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 // --- Small-multiples figure mount ----------------------------------------------------------
 // Below this pane width the grid reflows to fewer columns (3→2→1). Used by both modes.
 const PANE_MIN_WIDTH = 240;
-// Minimum DATA width per pane for faceted horizontal bars (the shared category gutter is
-// reserved separately — see HBAR_GUTTER_RESERVE). Matches the vertical PANE_MIN_WIDTH: a
-// horizontal pane reads fine at this width, and the earlier 300px premium forced a natural
-// figure width (2×300 + gutter) that overflowed a normal content column, so faceted horizontal
-// charts scrolled horizontally even at wide viewports.
-const HBAR_PANE_MIN_WIDTH = 240;
-// Width reserved (once) for the shared category-label gutter on the leftmost horizontal pane
-// when computing the no-stack natural width.
-const HBAR_GUTTER_RESERVE = 200;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
 
@@ -1851,7 +1916,7 @@ function buildSelectorTitle(
       label: opt.label ?? opt.id,
       // Explicit option color wins; else the figure's series color for the option's label (the
       // shared per-series map) — mirrors spec/title.ts#resolveActiveOptionColor.
-      color: opt.color ?? seriesColors?.[opt.label ?? opt.id],
+      color: opt.color ?? ownValue(seriesColors, opt.label ?? opt.id),
     }));
     // The mounts always pass a resolveSelections() map (every key populated), so the fallback is
     // defensive only — buildFigureHeader is exported, and an external caller could hand-roll an
@@ -1968,6 +2033,9 @@ function wireFigureSvg(
     shapeIsSeries?: boolean;
     pointOrder?: PreparedRow[];
     netMode?: NetMode;
+    /** The FIGURE's series list (FigureRenderResult.seriesOrder): the coordinated cursor's
+     *  per-series hover-dot symbols index it, as the panes' marks and the figure legend do. */
+    symbolSeries?: string[];
     /** Series → its resolved icon, from the figure's legend rows. */
     icons?: Map<string, IconSpec>;
     /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
@@ -1977,12 +2045,6 @@ function wireFigureSvg(
      *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
      *  can suppress the hovered category's pills. */
     onPillDriver?: (handle: HighlightPillsHandle) => void;
-    /** Horizontal coordinated cursor: extend the shaded row this many px past the plot's right edge
-     *  to bridge the inter-pane gap (so the highlight reads as one continuous row). */
-    coordExtendRight?: number;
-    /** Horizontal coordinated cursor: this pane shows the category labels (leftmost), so accent the
-     *  hovered category's label on hover. */
-    coordAccentLabel?: boolean;
     /** Programmatic render hooks (mountFigure's `opts.hooks`) — only `tooltip` is read here,
      *  forwarded into each pane's attachBandCrosshair/attachCategoricalLineCrosshair call so a
      *  small-multiples figure's hook coverage matches a standalone chart's (see mountChart's
@@ -2019,14 +2081,14 @@ function wireFigureSvg(
   // and it is passed explicitly (rather than defaulted) so a future pane that DID paint labels would
   // have to come back and answer the question instead of silently inheriting "nothing was dropped".
   const chromePills = resolveValuePills(ctx.spec, ctx.netMode, true, false);
-  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that band (a row for
-  // horizontal, a column for vertical) and echoes it on every pane; the hovered pane shows the
-  // tooltip. Resolves the category from the dot marks (data-category), orientation-aware.
+  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that column and
+  // echoes it on every pane; the hovered pane shows the tooltip. Resolves the category from the dot
+  // marks (data-category). Only a vertical dumbbell reaches a figure: a horizontal one draws its
+  // facets as groups in one chart (facetsAsGroups).
   if (ctx.spec.chartType === "dumbbell") {
     const dbUseCoord = ctx.onResolve != null;
-    const orientation = ctx.spec.orientation === "horizontal" ? "horizontal" : "vertical";
-    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y }));
-    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ctx.spec.series_marker?.[s] ?? "filled"] as const));
+    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
+    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ownValue(ctx.spec.series_marker, s) ?? "filled"] as const));
     const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
     const dbOpts = {
       rows: dbRows,
@@ -2037,7 +2099,7 @@ function wireFigureSvg(
       categoryLabels: ctx.spec.x_labels,
       bandHighlight: true,
       centersFromMarks: true,
-      orientation: orientation as "vertical" | "horizontal",
+      orientation: "vertical" as const,
       renderedFills: dbFills,
       markerless: true,
     };
@@ -2048,6 +2110,7 @@ function wireFigureSvg(
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
+      ...tooltipSectionOpts(ctx.spec),
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
@@ -2064,7 +2127,22 @@ function wireFigureSvg(
   // from axis-label centers (points have no rects). The marker dots take each series' symbol.
   if (ctx.spec.chartType === "dotplot") {
     const dotUseCoord = ctx.onResolve != null;
-    const symbols = new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const));
+    // Each hover dot draws the marker of the point it sits on: that point's own shape through this
+    // pane's symbol scale. A series-keyed map was wrong whenever shape is its own column (and a
+    // shape can change between categories within one series). No shape channel: every point is a
+    // circle, and so is every dot.
+    let pointSymbols: Map<string, Map<string, string>> | undefined;
+    if (ctx.symbolScale) {
+      const scale = ctx.symbolScale;
+      const symbolOf = new Map(scale.domain.map((d, i) => [d, scale.range[i]!] as const));
+      pointSymbols = new Map();
+      for (const r of ctx.pointOrder ?? []) {
+        const sym = symbolOf.get(r._shape ?? "");
+        if (sym == null || !r._xc) continue;
+        if (!pointSymbols.has(r._xc)) pointSymbols.set(r._xc, new Map());
+        pointSymbols.get(r._xc)!.set(r.series, sym);
+      }
+    }
     // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
     // offsets so they land over the actual points (panes dodge at the pane gap).
     const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
@@ -2103,7 +2181,7 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        symbols,
+        ...(pointSymbols ? { pointSymbols } : {}),
         bandHighlight: true,
         centersFromMarks: true,
         dodge,
@@ -2130,24 +2208,24 @@ function wireFigureSvg(
   }
 
   const categorical = ctx.spec.xAxisType === "categorical";
-  // Coordinated cursor: the band crosshair resolves a CATEGORY (works for both orientations —
-  // categories on X for vertical, on Y for horizontal), so horizontal bars get the coordinated
-  // row-highlight + value pills too (not a per-pane tooltip). `useCoord` gates the no-tooltip
-  // emitOnly + coordinated-renderer path.
-  const horizontal = ctx.spec.orientation === "horizontal";
+  // Coordinated cursor: the band crosshair resolves a CATEGORY. Every figure pane is vertical: a
+  // horizontal bar or stack draws its facets as groups in one chart (facetsAsGroups). `useCoord`
+  // gates the no-tooltip emitOnly + coordinated-renderer path.
   const useCoord = ctx.onResolve != null;
   // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
-  // match the static marker. Keyed by series index, matching the chart's symbol scale.
+  // match the static marker. Keyed by the series' position in the figure's list, as the pane's
+  // symbol scale (marks/line.ts) and the figure legend are.
   const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
-    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForIndex(i)] as const))
+    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForSeries(s, i, ctx.symbolSeries)] as const))
     : undefined;
   // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
   // (single-series bar panes have no legend but still need hover tooltips). Selection (the
   // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
   // an interactive legend.
-  if (categorical && ctx.spec.chartType === "line") {
-    // Categorical-x LINE pane: resolve the category from the x-axis labels (no bars). Coordinated
-    // panes hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
+  if (categorical && (ctx.spec.chartType === "line" || ctx.spec.chartType === "area")) {
+    // Categorical-x LINE or AREA pane: resolve the category from the x-axis labels (no bars — the
+    // band branch below reads bar rects, so an area pane there drew no card). Coordinated panes
+    // hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
     attachCategoricalLineCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
@@ -2160,6 +2238,8 @@ function wireFigureSvg(
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
+      // As mountChart's call. Reaches only a pane that hovers with a card (emitOnly builds none).
+      ...(ctx.spec.chartType === "area" ? { showTotal: true } : {}),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     });
     if (handle) {
@@ -2189,8 +2269,7 @@ function wireFigureSvg(
     // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
     const isStacked = ctx.spec.chartType === "stacked";
     // A grouped per-pane bar IS fx-faceted within its own frame (xScaleField === "fx" in
-    // bar.ts); a sectioned horizontal per-pane bar (any series count) is fy-faceted — see
-    // isBarCategoryFaceted above.
+    // bar.ts) — see isBarCategoryFaceted above.
     const isFaceted = isBarCategoryFaceted(ctx.spec, ctx.dataInScope, ctx.seriesOrder.length);
     const catsSeen = new Set<string>();
     const catsRaw: string[] = [];
@@ -2218,7 +2297,7 @@ function wireFigureSvg(
     attachBandCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
-      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
+      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
       isStacked,
       totalRow,
       totalPosition: ctx.spec.barStack?.total?.position,
@@ -2230,7 +2309,8 @@ function wireFigureSvg(
       seriesOrder: ctx.seriesOrder,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       categoryLabels: ctx.spec.x_labels,
-      orientation: horizontal ? "horizontal" : "vertical",
+      ...tooltipSectionOpts(ctx.spec),
+      orientation: "vertical",
       showTooltip: chromeTooltip,
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
@@ -2262,7 +2342,6 @@ function wireFigureSvg(
         colors: ctx.colors,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        horizontal,
         hasNetDots: hasNetDots(ctx.netMode),
       });
       // The bus suppresses the hovered category in the legend-highlight pills so they don't double
@@ -2305,32 +2384,18 @@ function wireFigureSvg(
         seriesLabels: ctx.seriesLabels,
         seriesOrder: ctx.seriesOrder,
         yFormat: (v) => formatValue(v, ctx.valueAffixes, wfDecimals ?? ctx.spec.tooltip_decimals),
-        horizontal,
         showPills: chromePills,
-        ...(horizontal
-          ? {
-              regionFromLeftEdge: true,
-              regionExtendRight: ctx.coordExtendRight ?? 0,
-              ...(ctx.coordAccentLabel ? { accentLabel: { font: FACETED_CAT_LABEL_PX } } : {}),
-            }
-          : {}),
         ...(wfCursor ? { waterfall: wfCursor } : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     if (echoWithCard) {
       // Echo only: no colors/labels/formatter, because it draws no pills — just the band geometry
-      // inputs (`readCategoryBands`/`readCategoryBandsH` read rows + the category list) and, for
-      // horizontal, the same row-continuity options the pills path passes, so the echoed strip
-      // bridges the inter-pane gap exactly as it does in a pills figure.
+      // inputs (`readCategoryBands` reads rows + the category list).
       return attachSecondaryBandCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
         isFaceted,
         categories: cats,
-        horizontal,
         echoOnly: true,
-        ...(horizontal
-          ? { regionFromLeftEdge: true, regionExtendRight: ctx.coordExtendRight ?? 0 }
-          : {}),
       }) as (key: unknown, active?: boolean) => void;
     }
     return undefined;
@@ -2382,6 +2447,9 @@ function wireFigureSvg(
     ...(ctx.icons ? { icons: ctx.icons } : {}),
     seriesLabels: ctx.seriesLabels,
     seriesOrder: ctx.seriesOrder,
+    // As mountChart's standalone call. A coordinated pane (`emitOnly`) never builds the card, so
+    // this reaches only a pane that hovers with one: a lone pane, or `coordinated_cursor: false`.
+    showTotal: ctx.spec.chartType === "area",
     ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
     showTooltip: chromeTooltip,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
@@ -2477,12 +2545,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Body: BOTH modes use the responsive `.figure-grid` of independent per-pane mini-SVGs.
   // (Shared mode is no longer a single faceted SVG — it is the same per-pane composition with
   // one shared y-domain + y-labels only on the left column, all handled inside renderFigure.)
-  // Horizontal-bar and variable-width figures never reflow to extra rows — they keep their columns
-  // and scroll horizontally when narrow, so their grid lives inside a horizontal-scroll wrapper.
+  // Variable-width figures never reflow to extra rows — they keep their columns and scroll
+  // horizontally when narrow, so their grid lives inside a horizontal-scroll wrapper.
   const smCfg = spec.small_multiples!;
   const variableWidths = smCfg.pane_widths != null && smCfg.pane_widths !== "equal";
-  const noStack =
-    (spec.chartType === "bar" && spec.orientation === "horizontal") || variableWidths;
+  const noStack = variableWidths;
   const grid = doc.createElement("div");
   grid.className = "figure-grid";
   if (noStack) {
@@ -2513,10 +2580,15 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
   // width even when there are fewer panes than the reflow/config would allow.
-  const facetCol = resolveColumns(spec, rows).facet;
+  // Counted over the rows renderFigure draws: a pane holding only rows of a section section_order
+  // leaves out is never rendered, so it must not take a grid column.
+  const figCols = resolveColumns(spec, rows);
+  const facetCol = figCols.facet;
+  const sectionCol = figCols.section;
+  const drawnRows = rowsInSectionOrder(rows, spec.section_order, sectionCol ? (r) => r[sectionCol] as string : null);
   const paneCount = (): number => {
     const distinct = new Set<string>();
-    for (const r of rows) {
+    for (const r of drawnRows) {
       const v = facetCol ? r[facetCol] : undefined;
       if (typeof v === "string" && v !== "") distinct.add(v);
     }
@@ -2540,42 +2612,32 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // reflow floor (fewer, roomier columns) than a plain bar pane.
   const isWaterfallFig = spec.chartType === "waterfall";
   const paneMinWidth = isPointFigure ? 160 : isWaterfallFig ? 320 : PANE_MIN_WIDTH;
-  // Horizontal bar AND horizontal stacked figures grow their height with the row count — let
-  // renderFigure compute it (passing undefined) rather than forcing the fixed pane height. Also
-  // drives the pane-title offset (both share the left-gutter fy topology — see figure.ts).
-  const isHorizontalBarFig =
-    (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
   // Categorical (band) figures whose hover is the shade + bar-end pill (like the standalone bar
   // chart), not the floating tooltip. Used to give a lone pane that treatment (see `coordinated`).
   const isCategoricalBarFig = spec.chartType === "bar" || spec.chartType === "stacked";
-  // Dot-plot AND bar/stacked (vertical) panes render ~33% taller (320); waterfall panes taller
-  // still (420) to clear rotated step labels; line/scatter keep the default (240); horizontal
-  // bar/stacked panes grow with row count (undefined). Single source of truth shared with the
-  // PNG export (export-png.ts) so the two paths can't drift.
+  // Dot-plot AND bar/stacked panes render ~33% taller (320); waterfall panes taller still (420) to
+  // clear rotated step labels; line/scatter keep the default (240). Single source of truth shared
+  // with the PNG export (export-png.ts) so the two paths can't drift. (A horizontal bar, stack or
+  // dumbbell is never a figure: its facets draw as groups, spec/facet-groups.ts.)
   const figHeight = figurePaneHeight(spec);
 
   const drawGrid = (outerWidth: number, renderPhase?: "mount" | "resize" | "reselect"): void => {
     const baseCols = sm.columns && sm.columns > 0 ? sm.columns : 0; // 0 → reflow-driven
     // Reflow: how many columns fit at >= paneMinWidth each, capped by config and pane count
     // (so renderFigure won't re-clamp and leave paneW mismatched against the grid cells).
-    // NO-STACK figures (horizontal bars / variable widths) never reduce columns for width — they
-    // keep the configured columns (else a single row) and scroll horizontally instead.
+    // NO-STACK figures (variable widths) never reduce columns for width — they keep the configured
+    // columns (else a single row) and scroll horizontally instead.
     const fitCols = Math.max(1, Math.floor((outerWidth + GRID_GAP) / (paneMinWidth + GRID_GAP)));
     const cols = noStack
       ? Math.max(1, Math.min(baseCols || paneCount(), paneCount()))
       : Math.max(1, Math.min(baseCols || fitCols, fitCols, paneCount()));
     // No-stack: keep panes at a readable minimum and let the row overflow into the scroll wrapper.
-    // (Horizontal panes reserve the left category gutter on top of the data, so allow extra.)
-    const minPerPane = isHorizontalBarFig ? HBAR_PANE_MIN_WIDTH : paneMinWidth;
-    const naturalW = cols * minPerPane + (cols - 1) * GRID_GAP + (isHorizontalBarFig ? HBAR_GUTTER_RESERVE : 0);
+    const naturalW = cols * paneMinWidth + (cols - 1) * GRID_GAP;
     const gridW = noStack ? Math.max(outerWidth, naturalW) : outerWidth;
     // Pass the TOTAL inner grid width + gap whenever renderFigure sizes explicit per-column widths
-    // — SHARED mode (unequal labeled/label-less columns), variable pane_widths in either mode, OR
-    // per-pane HORIZONTAL bars (the category gutter is asymmetric — pane 0 wide, others narrow —
-    // so renderFigure compensates the outer widths for one shared inner data width and needs the
-    // total row width, exactly like shared mode). Otherwise (equal per-pane) pass one shared pane
-    // width for 1fr columns.
-    const useGridWidth = isShared || variableWidths || isHorizontalBarFig;
+    // — SHARED mode (unequal labeled/label-less columns), or variable pane_widths in either mode.
+    // Otherwise (equal per-pane) pass one shared pane width for 1fr columns.
+    const useGridWidth = isShared || variableWidths;
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
@@ -2626,13 +2688,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       const title = doc.createElement("div");
       title.className = "figure-pane-title";
       title.textContent = pane.title;
-      // Faceted horizontal bars: the leftmost pane reserves a wide category gutter on its left, so
-      // align the pane title with the DATA area (offset by that pane's left margin) instead of
-      // letting it sit over the category labels. Other panes have a negligible margin (no shift).
-      if (isHorizontalBarFig && pane.svg) {
-        const ml = Number((pane.svg as SVGSVGElement).dataset.marginLeft) || 0;
-        if (ml > 0) title.style.paddingInlineStart = `${ml}px`;
-      }
       cell.appendChild(title);
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
@@ -2688,7 +2743,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
     fig.panes.forEach((pane, idx) => {
       if (!pane.svg) { drivers.push(() => {}); return; }
-      const col = idx % fig.columns;
       const driver = wireFigureSvg(pane.svg, handle, {
         spec,
         tooltipContainer,
@@ -2704,6 +2758,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         shapeIsSeries: pane.shapeIsSeries,
         pointOrder: pane.pointOrder,
         netMode: pane.netMode,
+        symbolSeries: fig.seriesOrder,
         // One shared key for the whole figure, so every pane's tooltip agrees with it. The
         // fallback is per-PANE: per-pane mode resolves each pane's colours independently, and a
         // single-series figure has no legend rows to read at all.
@@ -2715,14 +2770,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         hooks: opts.hooks,
         facet: pane.value,
         onHover: hoverNotifier,
-        // Horizontal coordinated cursor: bridge the inter-pane gap (all but the last column) so the
-        // shaded row is continuous, and accent the category label on the leftmost (label-bearing) pane.
-        ...(isHorizontalBarFig
-          ? {
-              coordExtendRight: col < fig.columns - 1 ? GRID_GAP : 0,
-              coordAccentLabel: col === 0,
-            }
-          : {}),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));

@@ -10,18 +10,21 @@
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
+import { ownValue } from "../../spec/own-key";
+import { isHorizontalDumbbell } from "../../spec/dumbbell-orientation";
 import {
   tblBandYAxis,
   tblFacetGroupYAxis,
   tblSectionTopHeader,
-  horizontalLeftGutter,
+  SECTION_LABEL_INDENT,
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
-  sectionSpacerSlot,
-  SECTION_SPACER_SLOTS,
+  sectionGapPx,
+  sectionHeaderLift,
+  horizontalValueAxisMargins,
 } from "../axes";
-import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { markerInk, type MarkerInk, type MarkerStyle } from "../marker-ink";
+import { bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, HDUMBBELL_BAND_PADDING, HDUMBBELL_MARGIN_BOTTOM } from "./category-band";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -48,7 +51,7 @@ export function buildDumbbellMarks(
   const seriesNames = ctx.seriesNames ?? [];
   // Orientation defaults to horizontal (categories on screen-y) — long income-group labels read
   // best down the left gutter.
-  const horizontal = spec.orientation !== "vertical";
+  const horizontal = isHorizontalDumbbell(spec);
   const catFont = horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
   const r = spec.dot_radius ?? DEFAULT_DOT_R;
   // Shared-mode small multiples: bind fx/fy so marks face into the grid (Plot allows a category
@@ -90,16 +93,15 @@ export function buildDumbbellMarks(
       if (!seenSec.has(s)) { seenSec.add(s); encountered.push(s); }
     }
     const order = spec.section_order?.length ? spec.section_order.filter((s) => seenSec.has(s)) : encountered;
-    const labels = spec.section_labels ?? {};
+    const labelOf = (s: string): string => ownValue(spec.section_labels, s) ?? s;
     const domain: string[] = [];
     for (const s of order) {
       const cats = categories.filter((cat) => (sectionOf.get(cat) ?? "") === s);
       if (!cats.length) continue;
       if (domain.length === 0) {
-        topSectionHeader = { category: cats[0] as string, label: labels[s] ?? s };
+        topSectionHeader = { category: cats[0] as string, label: labelOf(s) };
       } else {
-        for (let i = 0; i < SECTION_SPACER_SLOTS; i++) domain.push(sectionSpacerSlot(s, i));
-        sectionHeaders.push({ category: cats[0] as string, label: labels[s] ?? s });
+        sectionHeaders.push({ category: cats[0] as string, label: labelOf(s) });
       }
       for (const cat of cats) domain.push(cat);
     }
@@ -110,7 +112,7 @@ export function buildDumbbellMarks(
   // icons read too, so a key cannot describe a different middle from the dot it names — a hollow end
   // is a HOLE (the stem shows through) and only the shared description says so. The WIDTH stays here:
   // it belongs to this chart's geometry, not to the ink.
-  const markerOf = (s: string): MarkerStyle => spec.series_marker?.[s] ?? "filled";
+  const markerOf = (s: string): MarkerStyle => ownValue(spec.series_marker, s) ?? "filled";
   const seriesColor = (s: string): string => colors.get(s) || TBL.color.blue;
   const inkFor = (s: string): MarkerInk => markerInk(markerOf(s), seriesColor(s));
   const fillFor = (s: string): string => inkFor(s).fill;
@@ -137,8 +139,8 @@ export function buildDumbbellMarks(
   const connWidth = connCfg.width ?? 1.5;
   const connDash =
     connCfg.style === "dashed" ? "5 3" : connCfg.style === "dotted" ? "1 3" : undefined;
-  // Category-axis binding. Sectioned horizontal puts each category (and spacer) on an `fy` facet
-  // row with a single inner-y slot — the bar section topology — so header/spacing is Plot-managed.
+  // Category-axis binding. Sectioned horizontal puts each category on an `fy` facet row with a
+  // single inner-y slot — the bar section topology, section gaps included.
   // Otherwise the category is the plain band (y for horizontal, x for vertical). Sections and
   // small-multiples panes both want `fy`, so they are mutually exclusive (sectioned → no panes).
   const SINGLE_SLOT = "_v";
@@ -256,44 +258,43 @@ export function buildDumbbellMarks(
   };
 
   if (horizontal) {
-    const gutter = ctx.hideCategoryLabels
-      ? SHARED_LABELLESS_MARGIN_LEFT
-      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+    const gutter = bandGutter(categories, catFont, sectioned);
 
     if (sectioned) {
-      // fy-facet topology (identical to horizontal bars): category band on `fy` (incl. spacer
-      // slots), a single inner-y slot for the dots, value on `x`. Headers + labels come from the
-      // shared fy-bound helpers (tblFacetGroupYAxis + tblSectionTopHeader) so spacing is Plot-managed.
-      const SECTION_HEADER_GAP = 10;
-      const topHeaderLift = SECTION_HEADER_GAP + catFont + 5;
-      const hMarginTop = Math.max(SECTION_HEADER_GAP + 12, topSectionHeader ? topHeaderLift + SECTION_HEADER_GAP : 0);
+      // fy-facet topology (identical to horizontal bars): category band on `fy`, a single inner-y
+      // slot for the dots, value on `x`. Headers + labels, the header lift, the section gap and the
+      // top margin come from the same shared helpers the bar builders use (category-band.ts).
+      const topHeaderLift = sectionHeaderLift(catFont);
+      const hMarginTop = horizontalValueAxisMargins(undefined, {
+        sectioned: true,
+        ...(topSectionHeader ? { topHeaderLift } : {}),
+      }).marginTop;
       // With fy faceting Plot emits dots facet-by-facet (category order), series within — so tag in
       // that order, not the series-major draw order used for the flat band.
       const tagOrder = categories.flatMap((cat) =>
         dotData.filter((d) => (d as unknown as Record<string, string>)[catField] === cat),
       );
       // The section gap is cleared by BREAKING the continuous value gridlines/baseline across it
-      // (assemble-plot's collapseFacetChromeY reads the fy spacer slots) — so no mask is needed and
-      // the header sits in genuinely empty space.
+      // (assemble-plot's collapseFacetChromeY, from the gaps spreadSections opens) — so no mask is
+      // needed and the header sits in genuinely empty space.
       return {
         underlay,
         overlay,
         tagging: [
           { selector: 'g[aria-label="dot"] circle', seriesOrder: tagOrder.map((d) => d.series), categoryOrder: tagOrder.map((d) => (d as unknown as Record<string, string>)[catField] ?? "") },
-          ...(ctx.hideCategoryLabels
-            ? []
-            : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
+          { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories },
         ],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
-        fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: 0.02, align: 0, axis: null },
-        xAxisMarks: ctx.hideCategoryLabels
-          ? []
-          : [
-              ...tblFacetGroupYAxis(categories, gutter, catFont),
-              ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
-              ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
-            ],
+        fyScaleOpts: { domain: bandDomain, paddingInner: HBAND_PADDING_INNER, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
+        ...(sectionHeaders.length
+          ? { sectionGaps: { before: sectionHeaders.map((h) => h.category), px: sectionGapPx(catFont) } }
+          : {}),
+        xAxisMarks: [
+          ...tblFacetGroupYAxis(categories, gutter, catFont, SECTION_LABEL_INDENT),
+          ...sectionHeaders.flatMap((h) => tblSectionTopHeader(h, gutter, topHeaderLift, catFont)),
+          ...(topSectionHeader ? tblSectionTopHeader(topSectionHeader, gutter, topHeaderLift, catFont) : []),
+        ],
         marginLeft: gutter,
         marginTop: hMarginTop,
         marginBottom: 26,
@@ -307,14 +308,15 @@ export function buildDumbbellMarks(
       overlay,
       tagging: [
         dotTagging,
-        ...(ctx.hideCategoryLabels
-          ? []
-          : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
+        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories },
       ],
       dashedNames: new Set<string>(),
-      yScaleOpts: { type: "band", domain: bandDomain, padding: 0.4, axis: null },
-      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
+      yScaleOpts: { type: "band", domain: bandDomain, padding: HDUMBBELL_BAND_PADDING, axis: null },
+      xAxisMarks: tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
+      // One value-tick row. Left to the categorical x adapter, this was the VERTICAL category-label
+      // margin, which grows to fit wrapped or rotated labels the horizontal chart never draws there.
+      marginBottom: HDUMBBELL_MARGIN_BOTTOM,
       seriesColors,
     };
   }

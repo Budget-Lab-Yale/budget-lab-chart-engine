@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { layoutTimeline, plainFirstFitFits, verticalNoSwapLayout, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
+import { layoutTimeline, hardBreakDate, plainFirstFitFits, verticalNoSwapLayout, TL_GEOM, LANE_SIZE, LANE_LINE_H, LINE_STYLE, type LayoutEvent, type TimelineLayoutInput, type TimelineLayout } from "../src/engine/timeline-layout";
 import { parseDate } from "../src/spec/parse-time";
-import { timelineTextWidth } from "../src/engine/timeline-text";
+import { graphemes, timelineTextWidth } from "../src/engine/timeline-text";
 import { TBL } from "../src/engine/theme";
 
 let nextId = 0;
@@ -2314,5 +2314,73 @@ describe("vertical: every column hugs its placed content and the block is centre
       for (let w = 280; w <= 1400; w += 8) out.push(JSON.stringify(relative(make(name, { width: w }))));
     }
     expect(createHash("sha256").update(out.join("\n")).digest("hex").slice(0, 16)).toBe("ce344858b9d58fe6");
+  });
+});
+
+describe("hard breaks never split a grapheme (F5)", () => {
+  // A word wider than the frame is split into chunks (hardBreak, hardBreakDate, a lane name's
+  // hardBreak). Cutting by code point could strand a regional-indicator half of a flag, a skin-tone
+  // modifier, a ZWJ part, a keycap's combining mark or a combining accent at the start of a line.
+  const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
+  const RUN = "🇺🇸👍🏽👨‍👩‍👧1️⃣🇬🇧é🧔🏻‍♂️".repeat(5);
+  /** Lines that rejoin to `text` and each start on one of its grapheme boundaries. */
+  const expectWholeGraphemes = (lines: string[], text: string): void => {
+    expect(lines.join("")).toBe(text);
+    const bounds = new Set([...seg.segment(text)].map((s) => s.index));
+    let at = 0;
+    for (const ln of lines) {
+      expect(bounds.has(at), `line "${ln}" starts mid-grapheme`).toBe(true);
+      at += ln.length;
+    }
+  };
+  it("splits titles, dates and lane names only between graphemes", () => {
+    let splits = 0;
+    for (const orientation of ["horizontal", "vertical"] as const) {
+      for (let width = 280; width <= 440; width += 8) {
+        const lanes = [{ key: "a", label: RUN }, { key: "b", label: "Second" }];
+        const e = ev("2020", RUN, { category: "a", dateText: `${RUN} –`, ongoing: true });
+        const l = layoutTimeline(base([e, ev("2040", "z", { category: "b" })], { width, orientation, lanes }));
+        const lab = labelOf(l, e.id);
+        const title = lab.lines.filter((ln) => ln.role === "title").map((ln) => ln.text);
+        expectWholeGraphemes(title, RUN);
+        const date = lab.lines.filter((ln) => ln.role === "date").map((ln) => ln.text);
+        expectWholeGraphemes(date, `${RUN} –`);
+        const lane = l.laneLabels.find((n) => n.text === RUN)!;
+        expectWholeGraphemes(lane.lines, RUN);
+        splits += title.length + date.length + lane.lines.length - 3;
+      }
+    }
+    expect(splits).toBeGreaterThan(0); // the runs really were split
+  });
+  it("moves a whole final grapheme down with a date's dash", () => {
+    // hardBreakDate's second branch: the last chunk plus " –" overflows, so its final grapheme moves
+    // down with the dash. Measured at 10px a grapheme, a 30px frame takes three per chunk.
+    const tenPerGrapheme = (s: string): number => 10 * graphemes(s).length;
+    expect(hardBreakDate("🇺🇸👍🏽🇺🇸👍🏽🇺🇸👍🏽 –", 30, tenPerGrapheme)).toEqual(["🇺🇸👍🏽🇺🇸", "👍🏽🇺🇸", "👍🏽 –"]);
+    expect(hardBreakDate("🇺🇸👍🏽🇺🇸👍🏽🇺🇸👍🏽–", 30, tenPerGrapheme)).toEqual(["🇺🇸👍🏽🇺🇸", "👍🏽🇺🇸", "👍🏽–"]);
+  });
+
+  it("splits a long emoji title identically with and without Intl.Segmenter", async () => {
+    const title = "🇺🇸👍🏽".repeat(20);
+    const lines = (layout: typeof layoutTimeline): string[] => {
+      const e = ev("2020", title);
+      const l = layout(base([e, ev("2040", "z")], { width: 280, orientation: "vertical" }));
+      return labelOf(l, e.id).lines.filter((ln) => ln.role === "title").map((ln) => ln.text);
+    };
+    const withSegmenter = lines(layoutTimeline);
+    const segmenter = Object.getOwnPropertyDescriptor(Intl, "Segmenter")!;
+    let without: string[];
+    try {
+      delete (Intl as { Segmenter?: unknown }).Segmenter;
+      vi.resetModules();
+      const fresh = await import("../src/engine/timeline-layout");
+      without = lines(fresh.layoutTimeline);
+    } finally {
+      Object.defineProperty(Intl, "Segmenter", segmenter);
+      vi.resetModules();
+    }
+    expect(withSegmenter.length).toBeGreaterThan(1);
+    expect(without).toEqual(withSegmenter);
+    expectWholeGraphemes(withSegmenter, title);
   });
 });

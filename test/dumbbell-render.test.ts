@@ -129,7 +129,7 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
     expect(lastIdx("static")).toBeLessThan(firstIdx("collected"));
   });
 
-  it("horizontal facets stack vertically (columns forced to 1)", () => {
+  it("horizontal facets draw as groups in one chart (Ruling 80)", () => {
     const rows: TidyRow[] = [
       { pane: "A", group: "Q1", measure: "static", rate: "2" },
       { pane: "A", group: "Q1", measure: "collected", rate: "3" },
@@ -141,9 +141,11 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
       columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
       small_multiples: { mode: "shared" },
     };
-    const fig = renderFigure(spec, rows, { width: 900, document });
-    expect(fig.columns).toBe(1); // horizontal → one full-width pane per row
-    expect(fig.panes.length).toBe(2);
+    const svg = renderChart(spec, rows, { width: 900, document }).svg as SVGSVGElement;
+    const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
+    expect(titles).toEqual(expect.arrayContaining(["A", "B"]));
+    // The repeated "Q1" is a row under each group.
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(4);
   });
 
   it("vertical facets sit side by side (grid columns > 1)", () => {
@@ -179,7 +181,7 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
   });
 });
 
-describe("dumbbell mark — faceting (both orientations)", () => {
+describe("dumbbell mark — faceting (vertical)", () => {
   // Two facet panes: main quintiles and the top-decile breakout, sharing series/colors/legend.
   const FACET_ROWS: TidyRow[] = [
     { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
@@ -201,8 +203,8 @@ describe("dumbbell mark — faceting (both orientations)", () => {
   });
 
   // Each pane must contain ONLY its own facet's categories (proof the facet split is real, not one
-  // pane drawing everything). Checked for both orientations.
-  for (const orientation of ["horizontal", "vertical"] as const) {
+  // pane drawing everything). A horizontal dumbbell draws its facets as groups instead (above).
+  for (const orientation of ["vertical"] as const) {
     it(`${orientation}: each pane draws only its facet's category dots`, () => {
       const result = renderFigure(facetSpec(orientation), FACET_ROWS, { width: 838, height: 440, document });
       expect(result.panes.length).toBe(2);
@@ -273,9 +275,9 @@ describe("dumbbell mark — structure", () => {
     expect(labels.length).toBe(1);
   });
 
-  it("composes with faceting (top-decile breakout as a separate pane)", () => {
-    // Main quintiles in one facet, the top-decile breakout in another — each pane a dumbbell that
-    // shares the series/colors/legend and (default) a common value scale.
+  it("composes with faceting (top-decile breakout as a separate group)", () => {
+    // Main quintiles in one facet, the top-decile breakout in another — on a horizontal dumbbell
+    // each facet is a group of one chart, sharing the series/colors/legend and the value scale.
     const facetRows: TidyRow[] = [
       { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
       { pane: "Quintiles", group: "Q1", measure: "collected", rate: "2.0" },
@@ -291,16 +293,12 @@ describe("dumbbell mark — structure", () => {
       series_order: ["static", "collected"],
       series_marker: { static: "hollow", collected: "filled" },
       columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-      small_multiples: { columns: 2, mode: "shared" },
+      small_multiples: { mode: "shared" },
     };
-    let result!: ReturnType<typeof renderFigure>;
-    expect(() => { result = renderFigure(spec, facetRows, { width: 838, height: 420, document }); }).not.toThrow();
-    expect(result.panes.length).toBe(2);
-    const totalCircles = result.panes.reduce(
-      (n, p) => n + (p.svg?.querySelectorAll('g[aria-label="dot"] circle').length ?? 0),
-      0,
-    );
-    expect(totalCircles).toBe(8);
+    const svg = renderChart(spec, facetRows, { width: 838, height: 420, document }).svg as SVGSVGElement;
+    const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
+    expect(titles).toEqual(expect.arrayContaining(["Quintiles", "Top decile"]));
+    expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(8);
   });
 
   it("builds a per-series dot legend honoring series_marker (hollow ring for the hollow series)", () => {
@@ -352,18 +350,20 @@ describe("dumbbell mark — structure", () => {
       { group: "Top 1%", band: "Top decile", measure: "collected", rate: "35.1" },
     ] as TidyRow[];
     const { svg } = renderChart(spec, rows, { ...opts, document });
-    // 3 categories × 2 series = 6 dots (spacer slots carry no dots).
+    // 3 categories × 2 series = 6 dots.
     expect(svg.querySelectorAll('g[aria-label="dot"] circle').length).toBe(6);
     // Sections render on the bar fy-topology; headers are Plot text (tblSectionTopHeader).
     const topHeader = textByContent(svg, "Top decile");
     expect(textByContent(svg, "Quintiles")).toBeTruthy();
     expect(topHeader).toBeTruthy();
     // Regression guard: the "Top decile" header sits JUST ABOVE its section's first row (Top 1%),
-    // not stranded a full empty slot above it — above the row and within ~2 row-heights of it.
+    // not stranded a slot above it — its em-box top is the shared header lift (13px category font +
+    // 10px clear) above the top of that row's band (the row is 0.8 of the pitch, centred on the dot).
     const firstRowY = absPos(dot(svg, "Top 1%", "static")).y;
+    const pitch = absPos(dot(svg, "Q5", "static")).y - absPos(dot(svg, "Q1", "static")).y;
     const headerY = absPos(topHeader ?? null).y;
     expect(headerY).toBeLessThan(firstRowY);
-    expect(firstRowY - headerY).toBeLessThan(60);
+    expect(Math.abs(firstRowY - 0.4 * pitch - headerY - 23)).toBeLessThanOrEqual(1);
   });
 
   it("horizontal sections: the value gridlines/baseline BREAK across the section gap (no line crosses it)", () => {
@@ -465,6 +465,34 @@ describe("golden SVG — dumbbell", () => {
   it("vertical is byte-stable", async () => {
     const { svg } = renderChart({ ...DUMBBELL_H, orientation: "vertical" }, ROWS, { ...opts, document });
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/dumbbell-vertical.golden.svg");
+  });
+
+  // Sectioned, NO label repeated across sections — the shape of the published PR #67 figure
+  // (effective-tax-rates-top-groups). Recorded before repeated-label identity (section + category)
+  // existed, so it pins that a sectioned chart whose labels are all distinct renders unchanged.
+  it("horizontal sections (no repeated label) is byte-stable", async () => {
+    const spec: ChartSpec = {
+      ...DUMBBELL_H,
+      columns: { category: "group", series: "income_measure", value: "effective_rate", section: "ranking" },
+      series_order: ["Cash income", "Accrual income"],
+      series_marker: undefined,
+      yAxisPolicy: { min: 0 },
+    };
+    const raw: Array<[string, string, string, string]> = [
+      ["Ranked by income", "Top 1% by income", "25.8", "17.3"],
+      ["Ranked by income", "Top 0.1% by income", "28.7", "21.1"],
+      ["Ranked by income", "Top 0.01% by income", "29.4", "23.2"],
+      ["Ranked by net worth", "Top 1% by net worth", "27.3", "13.2"],
+      ["Ranked by net worth", "Top 0.1% by net worth", "28.6", "12.4"],
+      ["Ranked by net worth", "Top 0.01% by net worth", "30.1", "8.6"],
+      ["Ranked by net worth", "Net worth of $1 billion or more", "30.6", "8.0"],
+    ];
+    const rows = raw.flatMap(([ranking, group, cash, accrual]) => [
+      { ranking, group, income_measure: "Cash income", effective_rate: cash },
+      { ranking, group, income_measure: "Accrual income", effective_rate: accrual },
+    ]) as TidyRow[];
+    const { svg } = renderChart(spec, rows, { width: 720, height: computeChartHeight(spec, rows), document });
+    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/dumbbell-sectioned.golden.svg");
   });
 
   it("is deterministic (byte-identical across renders)", () => {

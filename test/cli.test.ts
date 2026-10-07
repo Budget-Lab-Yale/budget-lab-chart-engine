@@ -122,6 +122,25 @@ describe("runValidate — series_order names missing series", () => {
   });
 });
 
+describe("runValidate — series_order lists a series twice", () => {
+  it("returns exitCode 1 and names the field and the repeated series", async () => {
+    const dir = join(tmpdir(), `cli-test-series-dup-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, "time,series,value\n2021-01-01,a,1.0\n2021-01-01,b,2.0\n", "utf8");
+    writeFileSync(
+      specPath,
+      ["chartType: line", "title: Test", "xAxisType: temporal", "data: data.csv", "series_order: [a, b, a]"].join("\n") + "\n",
+      "utf8",
+    );
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toBe(`${specPath}: /series_order: "a" appears more than once`);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // validate: timeline warnings
 // ---------------------------------------------------------------------------
@@ -321,5 +340,217 @@ describe("runRender with shared assets", () => {
     expect(html).toContain('<script src="../../embed/v1/engine-2.0.0.js"></script>');
     expect(html).toContain('<link rel="stylesheet" href="../../embed/v1/chart-2.0.0.css">');
     expect(html).not.toContain("body{}");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validate: treemap warnings
+// ---------------------------------------------------------------------------
+
+describe("runValidate — treemap warnings", () => {
+  function treemapSpec(rowsCsv: string, extraYaml: string[] = []): string {
+    const dir = mkdtempSync(join(tmpdir(), "cli-test-treemap-"));
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, rowsCsv, "utf8");
+    writeFileSync(
+      specPath,
+      ["chartType: treemap", "title: Test", "xAxisType: categorical", "data: data.csv", "columns:", "  x: category", "  value: amount", ...extraYaml].join("\n") + "\n",
+      "utf8",
+    );
+    return specPath;
+  }
+  const csv = (rows: Array<[string, number]>) => "category,amount\n" + rows.map(([c, a]) => `${c},${a}`).join("\n") + "\n";
+  const count = (s: string, needle: string) => s.split(needle).length - 1;
+
+  it("warns once about more than 30 tiles and exits 0", async () => {
+    const specPath = treemapSpec(csv(Array.from({ length: 40 }, (_, i): [string, number] => [`Cat ${i}`, 100 + i])));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/^OK: /);
+    expect(count(result.message, "40 tiles")).toBe(1);
+    expect(result.message).toMatch(/warning: treemap: 40 tiles; consider grouping small categories into "Other"/);
+  });
+
+  it("prints each warning exactly once (no double emission of the data warnings)", async () => {
+    const specPath = treemapSpec(csv([["Big", 100], ["Nothing", 0]]));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(count(result.message, "zero-value row not drawn")).toBe(1);
+  });
+
+  it("warns when most tiles are unlabelled at the 920px export width, naming that width", async () => {
+    const specPath = treemapSpec(csv([["Big", 1_000_000], ...Array.from({ length: 6 }, (_, i): [string, number] => [`Tiny${i}`, 1])]));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/warning: treemap: 6 of 7 tiles are unlabelled at 920px wide/);
+  });
+
+  it("judges a grouped treemap with a right-hand legend at the narrower width the export draws it at (744px)", async () => {
+    const rows = [["A", "Big", 1_000_000], ["B", "Big two", 1_000_000], ...Array.from({ length: 6 }, (_, i) => ["B", `Tiny${i}`, 1])];
+    const specPath = treemapSpec("group,category,amount\n" + rows.map((r) => r.join(",")).join("\n") + "\n", ["  series: group", "legendPosition: right"]);
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toMatch(/warning: treemap: 6 of 8 tiles are unlabelled at 744px wide/);
+  });
+
+  it("prints no warnings for a well-labelled treemap", async () => {
+    const specPath = treemapSpec(csv([["Alpha", 500], ["Beta", 300], ["Gamma", 200]]));
+    const result = await runValidate(specPath);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).not.toMatch(/warning:/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validate: a lone yAxisPolicy bound past every value in the data (Ruling 74)
+// ---------------------------------------------------------------------------
+
+// The warning is a statement about the DATA, never about what the chart draws: the drawn axis also
+// answers to nice rounding, label headroom, reference markers, autoWiden and (in shared small
+// multiples) the other panes, so a claim about visibility was false in some case whatever it said.
+describe("runValidate — a lone yAxisPolicy bound past every value in the data", () => {
+  function chartSpec(chartType: string, rowsCsv: string, extraYaml: string[], xAxisType = "categorical"): string {
+    const dir = mkdtempSync(join(tmpdir(), "cli-test-lone-bound-"));
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    tempFiles.push(specPath, csvPath);
+    writeFileSync(csvPath, rowsCsv, "utf8");
+    writeFileSync(
+      specPath,
+      [`chartType: ${chartType}`, "title: Test", `xAxisType: ${xAxisType}`, "data: data.csv", ...extraYaml].join("\n") + "\n",
+      "utf8",
+    );
+    return specPath;
+  }
+  const flat = "c,v\na,8\nb,31\n";
+  const faceted = "f,c,v\nA,a,8\nA,b,31\nB,a,60\nB,b,80\n";
+  const bar = (policy: string[]) => chartSpec("bar", flat, ["columns:", "  x: c", "  value: v", "yAxisPolicy:", ...policy]);
+  const warningsOf = (message: string) => message.split("\n").filter((l) => l.includes("warning:"));
+
+  it("warns, naming the bound, when a lone min is above every value (exit 0)", async () => {
+    const result = await runValidate(bar(["  min: 50"]));
+    expect(result.exitCode).toBe(0);
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/: warning: yAxisPolicy\.min \(50\) is above every value in the data$/),
+    ]);
+  });
+
+  it("warns when a lone max is below every value, whatever the bars draw from their 0 base", async () => {
+    const neg = await runValidate(bar(["  max: -5"]));
+    expect(warningsOf(neg.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.max \(-5\) is below every value in the data$/),
+    ]);
+    // Each bar still draws its 0–5 stretch here; the warning says only what is true of the data.
+    const partial = await runValidate(bar(["  max: 5"]));
+    expect(warningsOf(partial.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.max \(5\) is below every value in the data$/),
+    ]);
+  });
+
+  it("makes no claim about what the chart shows", async () => {
+    for (const policy of [["  min: 50"], ["  max: -5"]]) {
+      const lines = warningsOf((await runValidate(bar(policy))).message);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]!.split("warning:")[1]).not.toMatch(/show|draw|visible|hid/);
+    }
+  });
+
+  it("names only the pane whose values all lie past the bound, in either mode", async () => {
+    for (const mode of ["shared", "per-pane"]) {
+      const result = await runValidate(
+        chartSpec("bar", faceted, [
+          "columns:", "  x: c", "  value: v", "  facet: f", "small_multiples:", "  columns: 2", `  mode: ${mode}`,
+          "yAxisPolicy:", "  min: 50",
+        ]),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(warningsOf(result.message), mode).toEqual([
+        expect.stringMatching(/warning: yAxisPolicy\.min \(50\) is above every value in pane "A"$/),
+      ]);
+    }
+  });
+
+  it("does not warn when some value lies on the open side, or both bounds are pinned", async () => {
+    for (const policy of [["  min: 20"], ["  max: 50"], ["  min: 50", "  max: 100"], ["  min: 100", "  max: 50"]]) {
+      expect(warningsOf((await runValidate(bar(policy))).message), policy.join(" ")).toEqual([]);
+    }
+  });
+
+  it("is strict: a value exactly on the bound is not past it", async () => {
+    // A flat line at 7 under min: 7 is drawn along the frame's edge; 8–31 under min: 31 draws its 31.
+    const line = (csv: string, policy: string) =>
+      chartSpec("line", csv, ["columns:", "  x: t", "  value: v", "yAxisPolicy:", policy], "numeric");
+    expect(warningsOf((await runValidate(line("t,v\n1,7\n2,7\n", "  min: 7"))).message)).toEqual([]);
+    expect(warningsOf((await runValidate(line("t,v\n1,7\n2,7\n", "  max: 7"))).message)).toEqual([]);
+    expect(warningsOf((await runValidate(line("t,v\n1,8\n2,31\n", "  min: 31"))).message)).toEqual([]);
+    expect(warningsOf((await runValidate(bar(["  max: 8"]))).message)).toEqual([]);
+  });
+
+  it("reads each value cell, not a stack's totals: a min above both segments warns", async () => {
+    const stacked = "c,s,v\na,A,8\na,B,15\n";
+    const result = await runValidate(
+      chartSpec("stacked", stacked, ["columns:", "  x: c", "  value: v", "  series: s", "yAxisPolicy:", "  min: 20"]),
+    );
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.min \(20\) is above every value in the data$/),
+    ]);
+  });
+
+  it("counts only the series the chart keeps (series_order filters)", async () => {
+    const csv = "t,s,v\n1,A,8\n2,A,31\n1,B,80\n";
+    const spec = (order: string[]) =>
+      chartSpec(
+        "line",
+        csv,
+        ["columns:", "  x: t", "  value: v", "  series: s", `series_order: [${order.join(", ")}]`, "yAxisPolicy:", "  min: 50"],
+        "numeric",
+      );
+    expect(warningsOf((await runValidate(spec(["A"]))).message)).toHaveLength(1);
+    expect(warningsOf((await runValidate(spec(["A", "B"]))).message)).toEqual([]);
+  });
+
+  it("counts a shape_order-filtered point as data, so the statement stays true", async () => {
+    // The 80 is not drawn (shape_order drops it), but it is a value in the data: 50 is not above it.
+    const csv = "t,v,k\n1,8,keep\n2,80,drop\n";
+    const result = await runValidate(
+      chartSpec(
+        "scatter",
+        csv,
+        ["columns:", "  x: t", "  value: v", "  shape: k", "shape_order: [keep]", "yAxisPolicy:", "  min: 50"],
+        "numeric",
+      ),
+    );
+    expect(result.exitCode).toBe(0);
+    expect(warningsOf(result.message)).toEqual([]);
+  });
+
+  it("states the bound as written, whatever autoWiden then does to the axis", async () => {
+    const result = await runValidate(
+      chartSpec(
+        "scatter",
+        "t,v\n1,8\n2,31\n",
+        ["columns:", "  x: t", "  value: v", "yAxisPolicy:", "  max: 2", "  autoWiden:", "    step: 25"],
+        "numeric",
+      ),
+    );
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.max \(2\) is below every value in the data$/),
+    ]);
+  });
+
+  it("a histogram's values are its bin heights", async () => {
+    const result = await runValidate(
+      chartSpec(
+        "histogram",
+        "lo,hi,n\n0,5,8\n5,10,31\n",
+        ["columns:", "  x0: lo", "  x1: hi", "  value: n", "yAxisPolicy:", "  min: 50"],
+        "numeric",
+      ),
+    );
+    expect(warningsOf(result.message)).toEqual([
+      expect.stringMatching(/warning: yAxisPolicy\.min \(50\) is above every bin height in the data$/),
+    ]);
   });
 });

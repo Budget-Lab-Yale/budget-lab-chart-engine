@@ -4,14 +4,487 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.16.0] - 2026-10-07
+
+### Added
+- `chartType: treemap` — a part-to-whole composition as nested tiles, one CSV row per tile
+  (`columns.x` name, `columns.value` size, optional `columns.series` group). Deterministic; tile
+  area is proportional to value at one scale across the chart, less the gutters; tiles shaded by
+  size rank within a band around their colour (each group's, or blue with no groups): the four tonal
+  tiers nearest it plus the CIELAB midpoint of each adjacent pair, seven shades in all (blue: 500,
+  450, … 200); a one-tile group is drawn in its colour as resolved, the legend chip's. The midpoints
+  are computed, not palette tokens, and have no name a figure could set (a raw hex equal to one is
+  accepted, and fills its group flat). Labels top-left at one size per chart (14px, 12px below 600px
+  wide), placed largest first within each group and stopping at the first that does not fit, so a
+  group never labels a tile while leaving a larger one bare. The tiles of flat data are drawn
+  squarified (aiming at aspect ratio 1, d3's default or 2, whichever labels the most), or as rows,
+  columns or a balanced split only when that labels at least 2 more tiles; grouped data's blocks are
+  squarified at 600px and wider and compete the same way below; below 400px wide 11px text competes
+  too. A group whose largest tile cannot hold its label is re-laid out inside its own block (rows,
+  columns or a balanced split) where that lets it fit. Groups are named by the standard legend (top,
+  or `legendPosition: right`, which reserves no column when there are no legend rows; `legend` and
+  `series_legend` work as on other charts), whose rows highlight their group's tiles. A tile left
+  unlabelled is named by its hover card and screen-reader label. New `treemap:` block
+  (`label_value`, `shading`, `share_decimals`, `tooltip_values`, `share_label`, `value_label`,
+  `tooltip_group`, `tooltip_note`, `tooltip` rows). On a treemap, `value_format` groups thousands,
+  and `series_order` sets hue order and breaks ties between equal group totals, without filtering.
+  Hover card on screen; the PNG export re-renders at 920px (744px beside a right-hand legend).
+  `tbl-chart validate` warns on zero-value rows, more than 30 tiles, mostly unlabelled tiles at the
+  export width, or more than seven groups without `series_colors`. The `treemap:` block is rejected
+  on every other chart type, so no existing spec changes. See CONFIG-SPEC "Treemap options".
+- `columns.section` on a horizontal `stacked` chart: the categories are grouped into sections
+  with bold headers in the left gutter, as on a horizontal bar. Each category is still one stack;
+  its net text or net dot and its segment labels sit on its own row. Hover, legend pin/dim,
+  `x_axis_ticks` and the PNG export follow the sectioned rows. Validation still rejects `columns.section` on a vertical stack. See CONFIG-SPEC "Section
+  axis".
+- A label may repeat across sections (`columns.section`, horizontal bar, stacked and dumbbell). A row is
+  identified by section + category and still displays the category, so "Top 1%" under two sections
+  draws two rows, each hovering its own values; before, the second merged silently into the first.
+  `x_order` / `category_order`, `x_labels` and `category_colors` name a bare label and apply to every
+  section containing it (`x_order` orders within each section). The same section + category with two
+  rows for one series is now a validation error. A sectioned chart without a repeated label renders
+  byte-identically.
+- `tooltip_section: true` (opt-in, default false) on a sectioned chart puts the hovered row's
+  section in the hover card's header, before the category: `+ Corporate · Before response`, through
+  `section_labels` and `x_labels`. Horizontal dumbbells and card-hover horizontal stacks; card header only (pills and the coordinated echo are unchanged, so it
+  does nothing where the chart hovers with pills). Validation rejects it without `columns.section`.
+  See CONFIG-SPEC `tooltip_section`.
+- The `onHover` payload (and the `tbl-hover` event's `detail`) carries `section` on a chart with
+  `columns.section`: the hovered row's raw section value, so a host can tell apart two rows that
+  share a category across sections. Absent on a chart without sections.
+
+### Changed
+- **Horizontal charts draw `columns.facet` as groups, not small-multiple panes** (Ruling 80). On a
+  horizontal `bar`, `stacked` or `dumbbell` chart (orientation omitted included), each facet value is
+  a group of one chart, drawn exactly as a `columns.section` section: one plot on one value axis, a
+  bold group title flush left, its rows indented 14px under it, the fixed 33px gap between groups.
+  `small_multiples.pane_order` orders the groups and `pane_titles` titles them; `small_multiples`
+  may be omitted. Groups may carry different categories. Hover, legend, PNG export and height are a
+  sectioned chart's, and `onHover` reports the group as `section` (it was `facet`). Validation now
+  rejects on these charts `columns.facet` with `columns.section`, `small_multiples.columns` above 1,
+  `mode: per-pane`, `pane_widths`, `coordinated_cursor`, `section_order` / `section_labels` beside
+  `columns.facet`, and a `facet` key on an annotation, `yAxisPolicy.markers` or `overlays` entry;
+  `tooltip_section` is accepted with `columns.facet`. `renderFigure` throws on such a spec, pointing
+  at `renderChart` / `render`. The ragged-facet check is gone with the shared category axis it
+  protected. Vertical charts keep their panes, byte for byte. See CONFIG-SPEC "Small multiples".
+- **Sections: the gap between two sections is a fixed 33px** on top of the usual space between two
+  rows (room for the 13px header line with 10px either side), on horizontal bars, stacks and
+  dumbbells, live and in the PNG export. It was two empty row
+  slots, so it grew with the row height: 114-120px
+  centre to centre at a 38-40px row pitch. The bottom of each section header's line sits 10px above
+  its first row (was 15px), and the top margin of a sectioned chart shrinks to match (38 to 33px).
+  The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart of
+  400px or more is 11px shorter per gap with its rows unchanged; a shorter one is sized to its rows
+  (see the 400px entry below). Charts without sections render byte-identically. The
+  chart's height gives the rows at least as much room as the gaps (a chart of many one-row sections
+  grows to fit). The gaps stay 33px at any height the engine picks; only a host's own explicit
+  `renderChart` or `mountChart` height too small for the rows shrinks them so they take at most
+  half the plot, rather than squeezing the rows to nothing.
+- **Sections: category labels are indented 14px under their section header**, as a table indents
+  the rows of a row group, so the bold header reads as a title over its rows. The header stays flush
+  left. The left gutter grows by the 14px, so the labels wrap as before. Horizontal bars, stacks and
+  dumbbells, live and in the PNG export. Charts without sections
+  render byte-identically.
+- **Hover on horizontal charts: the shaded strip covers only the hovered row.** A stack that hovers
+  with its card (a net dot, or `barStack.hover: "tooltip"`) spread a section's first row's strip
+  over the gap and the header above it; it is now one row high, as the bar's already was. That
+  stack's strip and a horizontal dumbbell's now also run left under the category label, which is
+  bolded and darkened while hovered, as on a horizontal bar. Live only: the PNG export has no hover.
+- `overlays[].ci` is now capped at 0.999 (still above 0); a level above it is a validation error
+  naming `ci`. Near 1 the t-quantile is numerically meaningless. No published figure uses one.
+- One date grammar for validation and rendering (CONFIG-SPEC "Dates"). **Embedders calling
+  `renderChart` with a malformed date now get an error** naming the value, instead of a silently
+  wrong x: `2024Q5` rolled into 2025Q1, `2024-13-01` into January 2025, `March 1, 2024` (or any
+  other spelling) was read by JavaScript's `Date`, and a malformed timeline `end` cell drew its
+  event as a point. Validation also tightens: it now rejects a day the month does not have
+  (`2024-02-30`, which it passed before), and checks every spec-side x coordinate on a temporal or
+  quarterly axis (`annotations` markers, bands and callouts, the legacy `xAxisPolicy` ones,
+  `shading` bounds) against the grammar. Every published figure was scanned and re-rendered before
+  and after: none is rejected and none changes.
+- A `series_order` or `shape_order` that lists a value twice is now a validation error naming the
+  field and the value (`/series_order: "M" appears more than once`), on every chart type.
+  `renderChart`, which does not validate, drops the repeat and keeps the first entry, so such a spec
+  renders as the list without it, live and in the PNG. Before, the marks took the first entry while
+  the legend, key rows, hover markers, colours and a horizontal bar's height counted the repeat, so
+  they disagreed.
+- **Horizontal bars, stacks and dumbbells are no longer stretched to 400px.** A chart whose height
+  grows with its rows was floored at 400px, so a 3-row chart's rows sat over 100px apart. Below 400px the height is now
+  the chart's margins, its section gaps, and its rows one slot apart (22px per bar, or the wrapped
+  label's height if taller): a 3-row horizontal bar chart is 107px tall, its rows 22px apart. A
+  chart whose height came to 400px or more keeps it, byte for byte. Live and the PNG export agree. An
+  unsectioned horizontal dumbbell's bottom margin is now one value-tick row (22px) at any label
+  length; it was the vertical chart's category-label margin, which grew to 36px or 120px with long
+  labels the horizontal chart never draws there.
 
 ### Fixed
+- A short category label of wide letters could reach the plot on a horizontal bar, stack or dumbbell
+  ("Gamma" touched a dumbbell's zero rule): the left gutter is sized from an average letter width,
+  which runs short on such labels. The gutter now also clears each one-line label's width, measured
+  from the font's letter widths, by 8px. Live, in the PNG export and the height models. A label
+  that already had the room leaves the gutter as it was, so no published figure moves.
+- `barStack.netDisplay: text` printed a negative net as its magnitude ("15" for -15), so a stack
+  netting below zero read as a gain. It now prints it with a leading minus, outside any prefix, the
+  sign style of the hover card and the waterfall labels (`-15`, `-$15`), live and in the PNG export, on vertical, horizontal and sectioned stacks.
+  Positive nets and the (unsigned) segment labels are unchanged.
+- On a sectioned category axis (`columns.section`), `x_order` / `category_order` could move a whole
+  section: listing a category of a later section drew that section first. They now order categories
+  within each section only; sections follow `section_order`, else the order the data first reaches
+  them. Live and in the PNG export, on horizontal bars, stacks and dumbbells.
+- `section_order` left a section out of the drawing but not out of the chart: its rows still fed the
+  value axis, the height, a stack's net marker (a hidden negative gave a visible all-positive stack a
+  net dot) and a stack's legend placement. They are now dropped before anything reads them, live
+  and in the PNG export, on horizontal bars, stacks and dumbbells.
+- `section_order` scoping reached two more readers. Validation's duplicate-row check counted rows
+  of a left-out section, so a valid spec was rejected. And a series found only in a left-out section moved
+  every later series one palette colour; colours now index the series list with every section drawn,
+  as small multiples' panes index the figure's list (live, legend and PNG export). A
+  `barStack.mono` stack ranks its shades over the rows with every section drawn, summed in the row
+  order the full render sums them (a near-cancelling series could otherwise flip sign), so no drawn
+  series changes shade either.
+- A colour named `constructor`, `toString`, `__proto__` or another `Object.prototype` key passed
+  validation as a palette name and could make the chart throw at render; it is now rejected at load
+  like any unknown name, on every chart type. No published figure uses one.
+- A series, category, group, facet, section or shape named like an `Object.prototype` key
+  (`constructor`, `toString`, `__proto__`, …) drew a function as its colour and printed its source
+  as its label; under `category_colors` its bar was not drawn at all (bar and waterfall), a dumbbell
+  with `series_marker` set threw at render, and in a table's rich text `\constructor` was read as a
+  Greek letter instead of reported as an unsupported macro. Every author map is now read by own key,
+  so it takes its default colour and its own name, on every chart type and in tables. No published
+  figure uses such a name.
+- A timeline with an empty `series_order: []` drew no events; it now draws every event, as with no
+  `series_order`, matching every other chart type.
+- Timeline and treemap text in scripts Figtree lacks measures wider, so it runs past its column or
+  tile far less often. A Cyrillic or Greek letter (Cyrillic Extended-B included) measures at its
+  widest advance among Arial, Segoe UI, Liberation Sans, DejaVu Sans, Noto Sans, FreeSans, Source
+  Sans 3 and Roboto, at weight 500 including Segoe UI's semibold face, which Chromium on Windows
+  draws there (of Roboto only the 400 and 700 faces were measured; Roboto Medium, where installed,
+  was not). Any other such script measures an em a code point (Unifont's width; 1.08em at weight
+  700). That is not a bound: on Windows some single Tamil, Malayalam and Myanmar letters draw at
+  2–2.7em, so a word dense in them can still run past. macOS fonts were not measured. A line now
+  breaks only between graphemes, the same way in every runtime, so a flag, skin-toned, keycap or ZWJ
+  emoji or an accented letter stays whole. Emoji joiners, variation selectors, tag characters and
+  keycap marks now measure nothing (a keycap 1.4em, was 1.7em; a Scotland flag 1.4em, was 9.8em);
+  flags, skin-toned emoji and ZWJ sequences measure 1.4em per part (a flag 2.8em, as before). ◽ ◾
+  measure as emoji. Latin text, Latin Extended-E (U+AB30–AB6F) included, measures as in 1.15.0; no
+  published figure is a timeline or treemap.
 - **A right-hand legend now survives a resize below the right-column minimum and back.** Narrowed,
   the chart stayed squeezed beside the old right column with a second legend drawn on top; widened
   again, the redraw threw `NotFoundError` and stopped partway. The column is now taken down when the
   legend moves to the top and rebuilt when it moves back, as timelines already did. Live only: the
   first draw and the PNG export are unchanged, and no published figure resolves to a right legend.
+- `legendPosition: right` (explicit or defaulted) with no legend rows to show now takes the full
+  width on screen, as the PNG export already did, on every chart type; no published figure changes.
+- A shared-mode (coordinated) faceted histogram's bin-range hover label (`10 – 20`) now hides the
+  axis tick labels it covers instead of leaving a neighbouring tick's fragment past its edge. Hover
+  only.
+- A stacked chart with a single series no longer draws a net dot or a legend "Total" row where
+  `netDisplay` resolves to a dot (by default, any negative value; an explicit `dot` included): with
+  one series each bar's net is its own end. Its hover card, which already omitted the Total row, is
+  unchanged, and it still paints no segment labels. A small-multiples figure counts the distinct
+  series in the panes it draws, not a pane's. With no legend rows left, its defaulted right legend
+  takes no column.
+- A faceted area chart whose pane hovers with a card (a facet resolving to one pane, or
+  `small_multiples.coordinated_cursor: false`) now shows the card's cumulative Total row, as
+  CONFIG-SPEC promised and a standalone area chart already did. Hover only.
+- An area chart on a categorical x (`xAxisType: categorical`) now hovers at all: standalone, and in
+  a pane that hovers with a card, it shows the card with each series and the Total row; a
+  coordinated multi-pane figure shows the guide and value pills, as on a temporal x. Before, the
+  hover looked for bar rectangles an area chart does not draw, and showed nothing. The card is the
+  categorical-x line's, so `x_labels` heads it and `hooks.tooltip` reaches it. Hover only.
+- A small-multiples figure legend no longer keys a series whose rows sit only in panes
+  `small_multiples.pane_order` leaves out, which is drawn nowhere; live and in the PNG. Colours are
+  unchanged: the palette still counts that series, so every drawn series keeps its colour.
+- A small-multiples pane now draws each series with the point marker the figure legend keys it with
+  (`line` with `points: true`, and a `scatter` or `dotplot` whose `columns.shape` is the series
+  column), as colours already did. A pane used to number markers by its own series, so a pane
+  missing a series, or meeting its series in another order with no `series_order`, drew a series
+  with another series' marker. The coordinated cursor's hover dot follows, and so does the hover
+  card's key for a series the legend has no row for (`series_legend: false`, `legend: false`, or a
+  figure drawing one series). Live and in the PNG.
+- A small-multiples `scatter` or `dotplot` whose `columns.shape` is its own column (not the series)
+  now draws each shape with the marker the figure's shape legend keys it with, in every pane, and the
+  shape legend lists every shape a pane draws. Each pane numbered symbols by its own shapes, even
+  with `shape_order`, so a pane missing a shape drew the next one with another shape's marker, and
+  the legend (the first pane's) had no row for a shape the first pane lacked. The figure now
+  resolves one shape list by the rule each pane applies to its own rows (`shape_order`, a listed
+  blank value included, else first appearance with categories read in `x_order`), run over the
+  rows of every drawn pane; a shape found only in a pane `pane_order` leaves out takes no position.
+  A figure whose panes already agreed with each other and with the shape legend renders unchanged.
+  Live and in the PNG.
+- A small-multiples dot plot's coordinated hover dot now draws the marker of the point it sits on.
+  It took a marker per series, so with a separate `columns.shape` it could draw a circle over a
+  square, and with no shape column it drew series symbols over circles. A point `shape_order`
+  leaves out gets no hover dot. Hover only.
+- A horizontal chart (bar, stacked bar, dumbbell) no longer draws its zero rule when 0 is outside
+  the value axis: a dumbbell fitted to its data (8–31, say), or a bar axis truncated with
+  `yAxisPolicy.min`. The rule was drawn at x = 0 outside the plot, across the category labels. A
+  vertical chart already drew it only when 0 is in range. Live and in the PNG.
+- A dumbbell (connected dot plot) ignored `yAxisPolicy.includeZero: true`; it now extends the
+  fitted value axis to 0, standalone and in small multiples. A pinned `min` or `max` still sets its
+  own end. Omitted, the axis stays fitted to the dots as before.
+- A lone `yAxisPolicy.min` or `max` (the other unset) was ignored on `line`, `scatter`, `dotplot`
+  and `histogram` charts, which auto-fitted the whole axis; CONFIG-SPEC calls them a hard floor and
+  ceiling. It now pins its own end and the other end stays fitted, as bars, stacks, areas,
+  waterfalls and dumbbells already did. `autoWiden` now acts on a lone `max` on `line`, `scatter`
+  and `dotplot` too (it has no effect on any other chart type, histograms included), and
+  `includeZero` extends only an unpinned end. Standalone, small multiples and the PNG. CONFIG-SPEC's
+  `min`, `max` and `includeZero` rows now say so.
+- A lone `yAxisPolicy.min` or `max` past all of the data reversed the axis (a line with data 8–31
+  and `min: 50` drew 50 at the bottom and 30 at the top; bars under `max: -5` drew [0, -5]), though
+  CONFIG-SPEC reads a lone bound as ascending. The axis now ascends on every value-axis chart type:
+  the bound stays where it was written and the open end lies past it (`min: 50` there draws 50–60),
+  finite at any bound. In `per-pane` small multiples each pane decides this for itself; in `shared`
+  mode the figure decides it for its one axis, so a pane whose data all lie on the other side of
+  the bound moves that axis only through what it holds on the open side or a marker that raises
+  its pinned end, as it did before. `yAxisPolicy.min` and `max` beyond ±1e300 are now validation
+  errors. `tbl-chart validate` now warns, naming the bound, when a lone `min` is above every value in the
+  data or a lone `max` below every value (per pane on a small-multiples figure; bin heights on a
+  histogram). CONFIG-SPEC's `min` and `max` rows and its reversed-axis section state the rule, and
+  the `autoWiden.step` row now says it applies to `line`, `scatter` and `dotplot` only.
+- An `area` chart whose stack is negative at every x drew no 0 baseline: the value axis stopped at
+  the stack's top (-5, say), though areas fill from 0. Its ceiling is now 0, as on bars and stacks.
+- An `area` chart's value-axis floor was its lowest single value, though negatives stack down from
+  0, so two negative series at one x (-20 and -11) got a floor of -20 and the stack's bottom (-31)
+  was clipped. The floor is now the stacked negative extent. Its ceiling had the mirror defect: it
+  was the net total per x, so mixed signs (+12, -2, -1 at one x) got a ceiling of 10 under a band
+  reaching 12; it is now the stacked positive extent. Both are keyed by the parsed x, as Plot
+  stacks, so a numeric x spelled `1` in one row and `1.0` in another is one stack, not two. Live and
+  in the PNG.
+- A dumbbell with `orientation` omitted is horizontal, as CONFIG-SPEC documents and the dots were
+  already drawn, but everything around the mark treated it as vertical: a standalone chart kept a
+  fixed height and hovered by column on screen, its `annotations.xAxis` markers were not folded into
+  the value axis, and `columns.section` was rejected. It now renders exactly as `orientation: horizontal`,
+  live and in the PNG.
+- A standalone horizontal dumbbell's PNG kept the fixed 750px frame while the live chart grows with
+  its rows, so the download stretched a short chart's rows apart and squeezed a long one's together.
+  The export now sizes it with the live chart's height rule, as it already did for horizontal bars,
+  so each row sits at the page's spacing and the frame grows or shrinks to fit.
+- A right-hand legend column taller than the plot stretched the plot in the PNG: the export drew
+  the chart at the legend's height, so its rows moved away from where the page draws them (a
+  horizontal stacked bar with 30 series: 732px in the PNG, 400px on the page). The plot now keeps
+  its own height and the frame grows to hold the legend. As on the page, the plot is centred
+  against the taller column with its x-axis title directly under it (the PNG had top-aligned the
+  plot and put the title below the legend). Live is unchanged.
+- An `annotations.yAxis` marker (or `yAxisPolicy.markers`) on a horizontal bar, stacked bar or
+  dumbbell (`orientation` omitted included) drew nothing, since the value axis is x there, but still
+  widened the value axis to reach it. `tbl-chart validate` now rejects it and points at
+  `annotations.xAxis`; `renderChart` no longer widens the axis for it, nor keys a legend row for it
+  under `legend: true`. Live and in the PNG.
+- `yAxisPolicy.autoWiden.step` must be greater than 0. A positive step tiny beside the value
+  (`1e-320`) made `renderChart` and the PNG export throw, and a negative one rounded short of the
+  value it was widening to. Validation rejects 0 and below, and a multiple of `step` that is not
+  finite or falls short now moves `max` to the value itself.
+- A horizontal stacked bar took its bottom margin from the vertical chart's category-label rule,
+  which is sized for 45-degree labels under the plot (up to 120px), so long category names left
+  about 100px of empty canvas under the value axis. It now takes a horizontal bar's margins: 26px
+  under the value-tick row (8px with `x_axis_ticks: top`) and room for top ticks when
+  `x_axis_ticks` is `top` or `both`. Live and in the PNG.
+
+### Docs
+- CONFIG-SPEC's `x_axis_ticks` row said "Horizontal bars only"; validation also accepts it on a
+  horizontal stack, which draws the top tick row. It now says bars and stacks, and that
+  every other chart type, a horizontal dumbbell included, is rejected.
+- CONFIG-SPEC `annotations.xAxis`: the vertical rule on the value axis is drawn on horizontal
+  stacked bars and dumbbells (`orientation` omitted included) as well as horizontal bars.
+- CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
+  small-multiples pane) never used it; the pill takes the running-total labels' precision
+  (`valueLabels.decimals`, else what the data needs). A waterfall pane with a card does use it.
+- CONFIG-SPEC `overlays[].ci`: the reason for the 0.999 cap is now stated as the t quantile growing
+  without bound near 1, not as an interval "too wide to mean anything".
+- CONFIG-SPEC `series_order`: an empty `series_order: []` filters nothing.
+- CONFIG-SPEC: statements of when a small-multiples pane hovers with a card instead of the
+  coordinated cursor were wider than the code. `small_multiples.coordinated_cursor` now names the
+  cases that never coordinate (a scatter, a `per-pane` histogram, a single pane of any type but bar
+  or stacked); the `hooks.tooltip` table and `x_labels` no longer say bar and waterfall have no card
+  "in any configuration" (an uncoordinated pane has one, and so does a dot plot or categorical line
+  resolving to one pane); the texture notes count a single-pane faceted area, histogram or waterfall
+  as hovering with a card.
+- CONFIG-SPEC `barStack.netDisplay` said it "chooses the marker and nothing else" and no longer
+  decides the hover. Resolving to a dot also sets the default hover (the card, unless
+  `barStack.hover` is set) and refuses segment labels; the row now says so, and that `text` prints
+  nothing in a `small_multiples` pane.
+- CONFIG-SPEC `x_labels`: its list of cards that carry the label now includes an uncoordinated `bar`
+  or `waterfall` pane, and its test note no longer calls the `coordinated_cursor: false` case a
+  default-settings one.
+- CONFIG-SPEC `yAxisPolicy.min`/`max` described them as a hard floor and ceiling with no exception,
+  and its reversed-axis table said reference markers fold in without moving either pinned bound.
+  On `bar`, `stacked`, `waterfall`, `dumbbell` and `area` a marker above the numeric ceiling (`max`,
+  or `min` reversed) raises it, with one bound pinned or both (bars under `max: 20` with a marker at
+  40 get [0, 40]); under `autoWiden` on `line`, `scatter` and `dotplot` a marker or callout past
+  `max` moves it as data does, on a reversed axis too, where `max` is the floor. A new note,
+  **Markers beyond a pinned bound**, says which markers count on which types; the rows keep their
+  "Hard floor/ceiling" wording, now qualified, and they and the table point to the note. The
+  `autoWiden.step` row now says markers and callouts widen `max` too and that `min` is never
+  widened; the reversed-axis table's `autoWiden` row said it extends "whichever end the data
+  overflows", and now says it extends `max` only.
+
+### Upgrading
+
+- **Horizontal facets draw as groups.** **No published figure is affected**: no `chart.yaml` on
+  `main` or on the PR #67 branch is a horizontal `bar` or `stacked` chart or a `dumbbell` with
+  `columns.facet` (the archive's 17 faceted specs are vertical line, bar, stacked, dotplot and
+  waterfall charts). Horizontal small-multiple goldens were replaced (approved):
+  `figure7-tariff` and `figure-hstacked-shared` by `figure7-tariff-grouped` and
+  `hstacked-grouped`, rendered as grouped single charts; `figure7-tariff-sectioned`,
+  `figure10-shape-sectioned-single` and `figure-hstacked-sectioned`, which set `columns.facet`
+  with `columns.section`, are removed, as validation now rejects that pairing.
+- **Horizontal facet charts change for embedders.** On a horizontal `bar`, `stacked` or `dumbbell`
+  chart (orientation omitted included) with `columns.facet`, `onHover` and the `tbl-hover` event
+  report the facet value as `section` and no longer carry `facet`, so a handler reading `facet` must
+  read `section`. `renderFigure` throws on such a spec; draw it with `renderChart` or `render`.
+  `renderChart`, `render`, `mountChart` and `buildExportSvg` throw on one that also sets
+  `columns.section`, which `tbl-chart validate` rejects. **No published figure is affected** (see
+  the entry above).
+- **Sectioned charts get a fixed 33px section gap and indented category labels.** Published figures
+  affected: the tariff model update's `etas` and `eta-effect` (sectioned horizontal bars, on
+  `main`), and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (sectioned horizontal
+  dumbbell). Their sections close up from two row heights to 33px and the headers move 5px closer
+  to their first rows, on screen and in the PNG. `etas` and `eta-effect` come out 11px shorter (one
+  break each); the PR #67 dumbbell is under 400px, so it is sized to its rows (next entry). In all
+  three the category labels move 14px right under their headers and the plot area
+  narrows by 14px to make room. Found by reading every `chart.yaml` on `main` and on the PR #67 branch for
+  `columns.section`; no other spec sets it. Sectioned goldens were re-recorded for this change
+  (approved): `bar-sectioned-single`, `figure7-tariff-sectioned`, `figure10-shape-sectioned-single`,
+  `dumbbell-sectioned`, `stacked-sectioned`, `stacked-sectioned-net-dot`,
+  `stacked-sectioned-net-text`, `figure-hstacked-sectioned`; the same eight again for the
+  label indent (approved). `figure7-tariff-sectioned`, `figure10-shape-sectioned-single` and
+  `figure-hstacked-sectioned` were since removed (horizontal facets draw as groups, above).
+- **Horizontal charts under 400px are sized to their rows.** One archived figure moves:
+  `effective-tax-rates-top-groups` on the unmerged PR #67 branch (a 7-row sectioned dumbbell) goes
+  from 400px to 243px on screen and its PNG from 614px to 457px, its rows 22px apart instead of
+  stretched. `etas` and `eta-effect` on `main`, and PR #67's `revenue-by-tax-step-up` (422px) and
+  `revenue-by-tax-deemed-realization` (536px), are 400px or more and render byte-identically, live
+  and in the PNG. Found by reading every `chart.yaml` on `main` and in the PR #67 working tree for a
+  horizontal `bar` or `stacked` chart or a `dumbbell`; no other spec is one. The dumbbell bottom-margin change
+  reaches none either: the archive's only dumbbell is sectioned. Goldens re-recorded because they
+  were floored at 400px (approved): `dumbbell-sectioned`, `figure-hstacked-shared`,
+  `figure-hstacked-sectioned` (the last two since removed: horizontal facets draw as groups, above).
+- **Hover: horizontal card-hover stacks and horizontal dumbbells shade under the label and bold it.**
+  Live only. Of the archive, only the PR #67 dumbbell above hovers differently; the stacks on `main`
+  (ai-fiscal `revenue-by-income-type`, `revenue-by-instrument`) are vertical.
+- **A negative net printed by `barStack.netDisplay: text` gains its minus sign.** **No published
+  figure is affected**: the archive's stacks on `main` (ai-fiscal `revenue-by-income-type`,
+  `revenue-by-instrument`) use `netDisplay: none`, and PR #67's two `text` stacks have only
+  positive nets.
+- **`section_order` drops the rows of a section it leaves out** before the axis, height, net marker
+  and legend placement read them. **No published figure is affected**: the archive's two
+  `section_order` specs (the tariff model update's `eta-effect` and `etas`) list every section their
+  data carries. The same holds for its validation, grid-column and series-colour readers.
+- **Sections: `x_order` / `category_order` no longer move a section.** Rows are re-sorted only
+  when the order they would draw in differs, so a chart already drawn in this order keeps its output byte for byte. **No published figure is affected**: the
+  archive's sectioned specs (`eta-effect`, `etas`, and `effective-tax-rates-top-groups` on the PR #67
+  branch) set neither field and none is faceted.
+- **Sections: a label repeated across sections draws one row per section**, and two rows for the
+  same section + category + series are a validation error. **No published figure is affected**: the
+  archive's sectioned specs — the tariff model update's `eta-effect` and `etas` (horizontal bar),
+  and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (dumbbell) — repeat no label
+  across sections and carry no duplicate row, and none is faceted. Their rendered SVG and PNG export
+  are unchanged.
+- **Hover: the bin-range label now hides the tick it covers.** Drawn only on the hovered pane of a
+  shared-mode small-multiples histogram with two or more panes and `coordinated_cursor` not `false`;
+  every other histogram (standalone, `per-pane`, `coordinated_cursor: false`, or a facet resolving
+  to one pane) hovers with a card and draws no such label. **No published figure is affected**: the
+  archive's only histogram, the deficit-management scorecard's `deviation-distribution`, is
+  standalone. Rendered SVG and the PNG export are unchanged.
+- **A single-series stack, of any sign, loses its net dot and its legend "Total" row**, on screen
+  and in the PNG; with that row gone a defaulted right legend has no rows, so the plot takes the
+  full width. **No published figure is affected**: the archive's only stacked charts, ai-fiscal's
+  `revenue-by-income-type` and `revenue-by-instrument`, have four series in every pane and set
+  `netDisplay: none`. No golden covers a single-series stack.
+- **Hover: a faceted area chart's card gains its Total row** where the pane hovers with a card (one
+  pane, or `coordinated_cursor: false`). **No published figure is affected**: the archive has no
+  area chart. Rendered SVG and the PNG export are unchanged.
+- **Hover: a categorical-x area chart gains its card (or, coordinated, its pills).** **No published
+  figure is affected**: the archive has no area chart. Rendered SVG and the PNG export are
+  unchanged.
+- **A figure legend drops a row for a series drawn in no pane** (live and PNG). **No published
+  figure is affected**: all 17 archived small-multiples specs set `pane_order`, and none leaves out
+  a facet value present in its data. No golden moves.
+- **A pane's point markers follow the figure legend** where the pane's own series list numbered
+  them differently (live and PNG). **No published figure is affected**: of the 17 archived
+  small-multiples specs, the 11 that draw per-series markers (10 `line` with `points: true`, one
+  `dotplot` with shape = series) give every series the same position in every pane as in the
+  figure; all 47 archived specs render byte-identical panes, legends and PNG export before and
+  after. No golden moves. The same holds for the follow-up fixes (hover-card keys, a separate shape
+  channel, the dot plot's hover dot): no archived faceted spec has a separate shape channel (the two
+  that do, ai-fiscal's `revenue-vs-factor-income` and `revenue-vs-pretax-income`, are standalone),
+  and `inequality-gini`'s hover dots are unchanged.
+- **A spec that lists a value twice in `series_order` or `shape_order` now fails `tbl-chart
+  validate`**; remove the repeat. Embedders calling `renderChart` directly get the list without the
+  repeat instead. **No published figure is affected**: none of the 47 archived specs repeats an
+  entry. No golden moves.
+- **`renderChart` now throws on a malformed date it used to guess at** (see the date-grammar entry
+  under Changed). Specs that pass `tbl-chart validate` are unaffected.
+- **A horizontal chart whose value axis excludes 0 loses its zero rule** (live and PNG). **No
+  published figure is affected**: the only horizontal specs among the 47 archived ones,
+  tariff-model-update-july2026's `eta-effect` and `etas` (sectioned bars, no `yAxisPolicy`), include
+  0. Nor are the three horizontal figures on the unpublished `pr67-spec-fixes` branch:
+  `effective-tax-rates-top-groups` (a dumbbell with `yAxisPolicy.min: 0`) and the two
+  `revenue-by-tax` stacks include 0. All five draw one zero rule before and after. No golden moves.
+- **A dumbbell with `yAxisPolicy.includeZero: true` now starts (or ends) its value axis at 0.**
+  **No published figure is affected**: the archive has no dumbbell, and the one on the unpublished
+  `pr67-spec-fixes` branch, `effective-tax-rates-top-groups`, does not set `includeZero` (it pins
+  `min: 0`). No golden moves.
+- **A lone `yAxisPolicy.min` or `max` on a line, scatter, dot plot or histogram now pins its end.**
+  **No published figure is affected**: every `yAxisPolicy` among the 47 archived specs sets both
+  `min` and `max` or neither, and the one lone bound on the unpublished `pr67-spec-fixes` branch
+  (`effective-tax-rates-top-groups`, `min: 0`) is a dumbbell, which already honoured it. No golden
+  moves.
+- **A lone `yAxisPolicy` bound past all of the data now gives an ascending axis** instead of a
+  reversed one. **No published figure is affected**: the archive has no lone bound, and the one on
+  the unpublished `pr67-spec-fixes` branch (`effective-tax-rates-top-groups`, `min: 0`) is below all
+  of its data (8.0–30.6), so its axis is unchanged and validate does not warn. No golden moves.
+- **`yAxisPolicy.min` and `max` must lie within ±1e300.** **No published figure is affected**: every
+  bound on `main`, on the `pr67-spec-fixes` branch and in its working tree lies within ±4000.
+- **An all-negative `area` chart's value axis now reaches 0.** **No published figure is affected**:
+  there is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree.
+  No golden moves.
+- **An `area` chart's value axis can reach further, to its stacked extents.** The floor moves only
+  when some x's negatives sum below the lowest single value; the ceiling moves only when some x's
+  positives sum above every x's net total (and above 0), which takes negatives at that x; and either
+  moves where one x is spelled two ways (`1` and `1.0`). **No published figure is affected**: there
+  is no `area` chart in the archive, on the `pr67-spec-fixes` branch or in its working tree. No
+  golden moves.
+- **A dumbbell with `orientation` omitted now renders as `orientation: horizontal`** throughout.
+  **No published figure is
+  affected**: the archive has no dumbbell, and the one on the unpublished `pr67-spec-fixes` branch
+  sets `orientation: horizontal` and has no facets. No golden moves.
+- **A standalone horizontal dumbbell's PNG is sized to its rows**, as the live chart is. The live
+  chart does not change. **No published figure is affected**: the archive has no dumbbell. The one
+  on the unpublished `pr67-spec-fixes` branch, `effective-tax-rates-top-groups` (7 rows in 2
+  sections), now downloads 599px tall instead of 750px at 1x, with its rows 38px apart as on the
+  page rather than 55px. No golden moves.
+- **A PNG whose right-hand legend is taller than its plot keeps the plot at its own height,
+  centred against the column, with the x-axis title under the plot** (PNG only). **No published
+  figure is affected**: no spec on `main`, on the `pr67-spec-fixes` branch or in its working tree
+  resolves to a right legend, and every one exports byte-identical before and after. No golden
+  moves.
+- **`annotations.yAxis` (or `yAxisPolicy.markers`) on a horizontal bar, stack or dumbbell now fails
+  `tbl-chart validate`**; move the marker to `annotations.xAxis`. **No published figure is
+  affected**: of the horizontal specs, `main`'s `eta-effect` and `etas` (bars) mark the value axis
+  with `annotations.xAxis`, and the `pr67-spec-fixes` branch's `effective-tax-rates-top-groups`
+  (dumbbell) and two `revenue-by-tax` stacks, committed and in its working tree, have no
+  annotations. No golden moves.
+- **`yAxisPolicy.autoWiden.step` of 0 or below now fails `tbl-chart validate`.** **No published
+  figure is affected**: no spec on `main`, on the `pr67-spec-fixes` branch or in its working tree
+  sets `autoWiden`. No golden moves.
+- **A horizontal stacked bar's value axis sits 26px from the bottom of the chart** (live and PNG),
+  and with `x_axis_ticks: top` or `both` its top margin grows by 18px for the tick row, as a
+  horizontal bar's does. **No published figure is affected**: the archive's two stacked figures,
+  ai-fiscal's `revenue-by-income-type` and `revenue-by-instrument`, are vertical. The two horizontal
+  stacks on the unpublished `pr67-spec-fixes` branch, `revenue-by-tax-deemed-realization` and
+  `revenue-by-tax-step-up`, go from a 120px to a 26px bottom margin and their bars take the freed
+  height; neither sets `x_axis_ticks`. **Two goldens were re-recorded**, with Sylva's approval:
+  `stacked-horizontal` and `figure-hstacked-shared` (short labels, so 22px became 26px and the plot
+  is 4px shorter). `figure-hstacked-shared` was since replaced by `hstacked-grouped` (horizontal
+  facets draw as groups, above).
+- **`columns.section` is now accepted on a horizontal stacked chart** (it was a validation error).
+  **No published figure is affected**: no stacked spec on `main` (ai-fiscal's two, both vertical),
+  on the `pr67-spec-fixes` branch or in its working tree sets `columns.section`. The sectioned-bar
+  layout code moved into a module the stack shares; every bar golden is byte-identical. New goldens
+  only: `stacked-sectioned`, `stacked-sectioned-net-dot`, `stacked-sectioned-net-text`,
+  `figure-hstacked-sectioned` (since removed: horizontal facets draw as groups, above). No existing
+  golden moves.
 
 ## [1.15.0] - 2026-10-01
 
@@ -812,11 +1285,7 @@ could not reach the PNG export, which re-renders from the spec rather than seria
   today: 21.6 at `red-50`, 32.5 at `sky`). The geometry is
   deliberately coarse (16px period, 7px band; 4px for the crossed characters, which overlap their
   own ink) so the pair reads as two colours banded together rather than pinstripes over a colour.
-  The texture reaches the marks, the legend key, the export, and the hover tooltip on the chart types
-  that draw one — which among the filled types is standalone `area`, standalone `histogram` and a
-  stacked chart with a net dot; `bar` and `waterfall` hover with value pills and have no tooltip key,
-  and neither does a coordinated small-multiples pane (corrected in 1.12.0; the original wording
-  over-claimed). A key draws ONE centred
+  The texture reaches the marks, the legend key, the hover tooltip and the export. A key draws ONE centred
   instance of the texture as a glyph rather than a patch of the tiling — at 14px a tiling shows an
   edge with no direction in it — so `"/"` reads as three bands, `"+"` as a plus, `"x"` as an x. A
   rasterising test measures all six from their pixels. An unrecognised
@@ -1689,8 +2158,7 @@ backward-compatible — existing chart specs render unchanged.
   `shape_order`, `shape_labels`, with separate `color_legend_title` / `shape_legend_title`),
   category dodge, per-point hover tooltips, and a coordinated cursor.
 - **Area** (`chartType: "area"`). Stacked areas, with a single series filling to the zero
-  baseline. The hover tooltip adds a cumulative **Total** row (standalone only — a coordinated
-  small-multiples pane has no card; clarified in 1.12.0). **Click-to-restack**: selecting
+  baseline. The hover tooltip adds a cumulative **Total** row. **Click-to-restack**: selecting
   series animates them to the bottom of the stack (in click order) so they can be read against
   zero; deselecting restores the default order.
 

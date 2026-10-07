@@ -13,6 +13,7 @@
 // here; the type-only import of `LegendItem` from ./index.js carries no runtime edge, and
 // engine/index.ts does not import this file, so nothing new is circular.
 import { resolveColumns } from "../spec/columns.js";
+import { rowsInSectionOrder } from "../spec/section-key.js";
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
@@ -31,6 +32,23 @@ export const LEGEND_GAP = 16;
  */
 export function legendSeriesCount(items: readonly LegendItem[]): number {
   return items.filter((i) => !i.nonInteractive && !i.isExtra).length;
+}
+
+/**
+ * Whether a legend goes in a right-hand column: it has rows to show (colour rows, or `shapeRows`
+ * rows of the neutral shape legend) and its position resolves to "right". A legend with no rows
+ * takes no column. The PNG export's rule (embed/export-png.ts), shared by the live card on every chart
+ * type (render-live.ts; a timeline there applies it to the rows of the orientation it would draw) and
+ * by a treemap's export width (marks/treemap.ts).
+ */
+export function legendInRightColumn(
+  spec: ChartSpec,
+  legendItems: readonly LegendItem[],
+  shapeRows: number,
+  rows: TidyRow[],
+): boolean {
+  return (legendItems.length > 0 || shapeRows > 0) &&
+    resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right";
 }
 
 /**
@@ -59,8 +77,12 @@ export function resolveLegendPosition(
   }
   if (spec.chartType === "stacked") {
     if (seriesCount >= 5) return "right";
-    const valueCol = resolveColumns(spec, rows).value;
-    const isDiverging = rows.some((r) => {
+    const cols = resolveColumns(spec, rows);
+    const valueCol = cols.value;
+    // A section that section_order leaves out is not drawn, so its negatives make nothing diverge.
+    const sectionField = cols.section;
+    const drawn = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null);
+    const isDiverging = drawn.some((r) => {
       const v = typeof r._y === "number" ? r._y : Number(r[valueCol]);
       return Number.isFinite(v) && v < 0;
     });
@@ -72,8 +94,9 @@ export function resolveLegendPosition(
 /**
  * Order legend items for a right-hand column so the rows read top→bottom as the stack does.
  *
- *   - When the engine supplies `legendVisualOrder` (stacked charts), series rows follow that order
- *     ([positives reversed] ++ [negatives in declaration order]).
+ *   - When the engine supplies `legendVisualOrder`, series rows follow that order: a stacked chart's
+ *     is [positives reversed] ++ [negatives in declaration order]; a treemap's is its groups in hue
+ *     order, the same order as its top legend.
  *   - Otherwise fall back to REVERSED declaration order (top-of-stack first).
  *   - Extra rows (the interactive Total pseudo-series, the neutral shape legend) are appended at
  *     the END in their original relative order.

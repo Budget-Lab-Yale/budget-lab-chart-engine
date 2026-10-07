@@ -28,6 +28,8 @@ import type { ChartSpec } from "../spec/types";
 import { resolveColumns } from "../spec/columns";
 import type { TidyRow } from "../data/index";
 import { timelineWarnings, timelineExportChartWidth } from "../engine/marks/timeline";
+import { treemapWarnings, treemapExportChartWidth } from "../engine/marks/treemap";
+import { loneBoundWarnings } from "../engine/figure";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -193,7 +195,13 @@ export async function runValidate(specPath: string): Promise<ValidateResult> {
   const warnings =
     typedSpec.chartType === "timeline"
       ? timelineWarnings(typedSpec, rows, timelineExportChartWidth(typedSpec, rows))
-      : [];
+      : typedSpec.chartType === "treemap"
+        // Includes the data warnings (>30 tiles, zero-value rows; negatives are validation errors),
+        // at the width the export draws the treemap at.
+        ? treemapWarnings(typedSpec, rows, treemapExportChartWidth(typedSpec, rows))
+        // A lone yAxisPolicy min above, or max below, every value in a pane's data. A statement
+        // about the data, not the drawing.
+        : loneBoundWarnings(typedSpec, rows);
   return {
     exitCode: 0,
     message: [

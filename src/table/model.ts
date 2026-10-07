@@ -1,5 +1,6 @@
 import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
+import { ownValue } from "../spec/own-key";
 import { resolveFormat, formatCell } from "./format";
 
 export interface LeafColumn { key: string; path: string[]; lastValue: string; label: string; sublabel?: string; isText?: boolean; }
@@ -102,8 +103,8 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       key,
       path,
       lastValue,
-      label: spec.header_labels?.[lastValue] ?? spec.column_labels?.[lastValue] ?? lastValue,
-      ...(spec.sublabels?.[lastValue] != null ? { sublabel: spec.sublabels[lastValue] } : {}),
+      label: ownValue(spec.header_labels, lastValue) ?? ownValue(spec.column_labels, lastValue) ?? lastValue,
+      ...(ownValue(spec.sublabels, lastValue) != null ? { sublabel: ownValue(spec.sublabels, lastValue)! } : {}),
     });
   }
   let leaves = [...leafMap.values()];
@@ -222,7 +223,7 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       // applies header_labels → column_labels → raw); banner/upper cells apply header_labels only.
       const text = isLeafBottom
         ? leaf.label
-        : (spec.header_labels?.[rawValue] ?? rawValue);
+        : (ownValue(spec.header_labels, rawValue) ?? rawValue);
       const cell: HeaderCell = { text, colSpan, rowSpan };
       if (isLeafBottom) cell.leafKey = leaf.key;
       headerRows[t]!.push(cell);
@@ -328,13 +329,13 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
         // Display label may be overridden in the spec (so math/markup can live in YAML); the raw
         // CSV value `gLabel` stays the key for group_notes, format.groups, and collapsible matching.
         const group: RowGroup = {
-          label: spec.group_labels?.[gLabel] ?? gLabel,
+          label: ownValue(spec.group_labels, gLabel) ?? gLabel,
           level: lvl,
           key: groupKeyToken(groupPath.slice(0, lvl + 1)),
           parents: groupPath.slice(0, lvl).map((_, i) => groupKeyToken(groupPath.slice(0, i + 1))),
           collapsed: resolveCollapsedDefault(gLabel, spec.collapsible),
         };
-        const note = spec.group_notes?.[gLabel];
+        const note = ownValue(spec.group_notes, gLabel);
         if (note != null) group.note = note;
         body.push({ kind: "group", group });
       }
@@ -383,7 +384,7 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
         stubPath: path,
         // Display label may be overridden in the spec; raw `label` (above) stays the key for
         // emphasis_rows, format.rows, and row_order.
-        label: spec.row_labels?.[label] ?? label,
+        label: ownValue(spec.row_labels, label) ?? label,
         level: groupPath.length,
         groupKeys: groupPath,
         groupTokens: groupPath.map((_, i) => groupKeyToken(groupPath.slice(0, i + 1))),

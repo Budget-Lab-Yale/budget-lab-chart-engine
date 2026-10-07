@@ -47,6 +47,13 @@ export interface ResolveHardDomainOptions {
   auto?: { min: number; max: number };
   /** Values that must stay inside the frame — reference-marker levels, callout `y`s. */
   fold?: number[];
+  /** `yAxisPolicy.tickCount` (default 5): sizes the step a lone bound's open end takes when the
+   *  data leave nothing on the open side. */
+  tickCount?: number;
+  /** Called when a lone bound took the ascending fallback below, with the domain it replaced (the
+   *  bound and fitted extent paired as they came: reversed or [b, b]). renderFigure's shared mode
+   *  reads it (PaneResult.yDomainWithoutFallback) to decide the fallback on the figure's domain. */
+  onLoneFallback?: (withoutFallback: [number, number]) => void;
 }
 
 /**
@@ -61,12 +68,24 @@ export interface ResolveHardDomainOptions {
  *
  * The floor/ceiling asymmetry below is pre-existing behavior, kept exactly: a fold beyond the pinned
  * CEILING widens it, a pinned FLOOR is authoritative. It keeps ascending output byte-identical.
+ *
+ * A LONE bound (`min` or `max`, the other unset) is always read as ascending (CONFIG-SPEC: "`min`
+ * alone, or `max` alone, is read as ascending"). When nothing fitted (the data, any 0 base or label
+ * headroom the chart type folds into `auto`, the fold values) lies on the open side of it, the open
+ * end is placed one step past the bound (`loneOpenEnd`): d3's tick step at `tickCount` across the
+ * span from the fitted extent to the bound, or 1 if that span is empty. Without this the pin and the
+ * data's far end were paired as they came and a bound past all of the data reversed the axis. Only
+ * that case changes: a both-bound or no-bound domain, and a lone bound with anything fitted on its
+ * open side, resolve exactly as before. CONFIG-SPEC promises only "ascending, pinned end at the
+ * bound, open end past it", so the step itself is free to change.
  */
 export function resolveHardDomain({
   min,
   max,
   auto,
   fold,
+  tickCount = 5,
+  onLoneFallback,
 }: ResolveHardDomainOptions): [number, number] | null {
   const reversed = min != null && max != null && min > max;
   const pinnedLo = reversed ? max : min;
@@ -78,7 +97,53 @@ export function resolveHardDomain({
   if (lo == null || hiBase == null) return null;
   const hi = Math.max(hiBase, ...folds);
 
+  const lone = (min == null) !== (max == null);
+  if (lone && auto && !(lo < hi)) {
+    // The bound and the fitted extent it would have replaced, as one span.
+    const bound = min ?? hi;
+    const spanLo = Math.min(bound, auto.min, ...folds);
+    const spanHi = Math.max(bound, auto.max, ...folds);
+    const step = spanHi > spanLo ? d3.tickStep(spanLo, spanHi, tickCount) : 1;
+    onLoneFallback?.([lo, hi]);
+    return min != null ? [lo, loneOpenEnd(lo, 1, step)] : [loneOpenEnd(hi, -1, step), hi];
+  }
+
   return reversed ? [hi, lo] : [lo, hi];
+}
+
+/** The open end `step` past a lone `bound` (`dir` +1 above a min, -1 below a max), made to move and
+ *  to stay finite (Ruling 74). A step that does not move the end by four ulps of the bound (0 from
+ *  d3 at subnormal magnitudes, 1 lost to rounding at 1e20) becomes the larger of 1 and those four
+ *  ulps; an end past ±Number.MAX_VALUE (the span overflowed, so the step is Infinity) is clamped to
+ *  it. The schema keeps a bound within ±1e300, so the clamped end is always past it. */
+function loneOpenEnd(bound: number, dir: 1 | -1, step: number): number {
+  const minMove = 4 * Math.max(Number.MIN_VALUE, Math.abs(bound) * Number.EPSILON);
+  let open = bound + dir * step;
+  if (!(Math.abs(open - bound) >= minMove)) open = bound + dir * Math.max(1, minMove);
+  return Number.isFinite(open) ? open : dir * Number.MAX_VALUE;
+}
+
+/** The y extent `computeYAxis` fits when it is given no domain: the finite values' [min, max],
+ *  widened to 0 under `includeZero`. Null when nothing is finite. Shared with the lone-bound path in
+ *  renderPane, whose open end must be fitted exactly as an unpinned axis is. */
+export function fittedExtent(
+  yValues: Array<number | null | undefined>,
+  includeZero: boolean,
+): { min: number; max: number } | null {
+  const nums = yValues.map((v) => +(v as number)).filter(Number.isFinite);
+  if (!nums.length) return null;
+  let [lo, hi] = d3.extent(nums) as [number, number];
+  if (includeZero) {
+    lo = Math.min(0, lo);
+    hi = Math.max(0, hi);
+  }
+  return { min: lo, max: hi };
+}
+
+/** `domain` nice'd outward at `tickCount` exactly as computeYAxis nices a supplied domain, without
+ *  computing ticks (d3 cannot tick some domains a lone bound's fallback replaces, e.g. subnormal). */
+export function niceDomain(domain: [number, number], tickCount: number): [number, number] {
+  return d3.scaleLinear().domain(domain).nice(tickCount).domain() as [number, number];
 }
 
 /** Compute a "nice" y-domain + tick array up front so gridlines and labels can be
@@ -91,14 +156,9 @@ export function computeYAxis(
     const scale = d3.scaleLinear().domain(domain).nice(tickCount);
     return { domain: scale.domain(), ticks: scale.ticks(tickCount) };
   }
-  const nums = yValues.map((v) => +(v as number)).filter(Number.isFinite);
-  if (!nums.length) return { domain: [0, 1], ticks: [0, 1] };
-  let [lo, hi] = d3.extent(nums) as [number, number];
-  if (includeZero) {
-    lo = Math.min(0, lo);
-    hi = Math.max(0, hi);
-  }
-  const scale = d3.scaleLinear().domain([lo, hi]).nice(tickCount);
+  const fitted = fittedExtent(yValues, includeZero);
+  if (!fitted) return { domain: [0, 1], ticks: [0, 1] };
+  const scale = d3.scaleLinear().domain([fitted.min, fitted.max]).nice(tickCount);
   return { domain: scale.domain(), ticks: scale.ticks(tickCount) };
 }
 
@@ -312,8 +372,9 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
  */
 /** Cumulative stack tops/bottoms per x — positives stack up from zero, negatives down — with zero
  *  always included because the stack is drawn from it. Shared by stacked bars and areas, which
- *  differ only in how an x is keyed. */
-function stackedExtent(
+ *  differ only in how an x is keyed. An area's axis (renderPane) and its clip gate (below) both
+ *  read it, keyed by `areaStackKey`, so the two cannot disagree about one stack. */
+export function stackedExtent(
   data: PreparedRow[],
   keyOf: (r: PreparedRow) => string,
 ): { min: number; max: number } | null {
@@ -331,6 +392,15 @@ function stackedExtent(
     min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
     max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
   };
+}
+
+/** The x an area stacks a row at: its PARSED coordinate (one of `_xd`/`_xn`/`_xc`, whichever the
+ *  x-adapter set), which is what Plot's stack transform groups on. Keying by the raw cell split one
+ *  numeric x spelled "1" and "1.0" into two stacks, so the axis missed the drawn stack's extent. */
+export function areaStackKey(r: PreparedRow): string {
+  if (r._xd instanceof Date) return `d${r._xd.getTime()}`;
+  if (r._xn != null) return `n${r._xn}`;
+  return `c${r._xc ?? ""}`;
 }
 
 export function computeDrawnValueExtent(
@@ -374,9 +444,8 @@ export function computeDrawnValueExtent(
   }
 
   if (chartType === "area") {
-    // Same cumulative-top geometry as a stacked bar, but an area's x may be numeric or temporal, so
-    // key the stack the way renderPane's own area branch does.
-    return stackedExtent(data, (r) => r.time || String(r._xn ?? r._xc ?? ""));
+    // Same cumulative-top geometry as a stacked bar, keyed on the x Plot stacks an area on.
+    return stackedExtent(data, areaStackKey);
   }
 
   if (chartType === "dumbbell") {

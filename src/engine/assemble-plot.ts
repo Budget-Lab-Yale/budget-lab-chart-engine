@@ -5,11 +5,12 @@
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, MARK_POINT_R } from "./theme";
-import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth } from "./axes";
+import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth, fittedSectionGapPx } from "./axes";
 import type { PaneTitleCell } from "./axes";
 import {
   collapseFacetChrome,
   collapseFacetChromeY,
+  spreadSections,
   collapseFacetGridChrome,
   GRIDLINE_CLASS,
   ZERO_BASELINE_CLASS,
@@ -25,6 +26,7 @@ import { paintedFill } from "./painted-fill";
 import { resolveColor, resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
 import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
+import { ownValue } from "../spec/own-key";
 import {
   resolveAnnotations,
   filterAnnotationsByFacet,
@@ -250,6 +252,9 @@ export interface AssembleOptions {
   xAxisDomain?: [number, number];
   width?: number;
   height?: number;
+  /** RenderOptions.heightFromModel: `height` came from the engine's height model, so section gaps
+   *  are never fitted to it (fittedSectionGapPx applies to a host-supplied height only). */
+  heightFromModel?: boolean;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests). */
   document?: Document;
@@ -355,6 +360,7 @@ export function assemblePlot({
   xAxisDomain,
   width,
   height,
+  heightFromModel,
   marginRight,
   document,
   classNameSuffix,
@@ -660,14 +666,21 @@ export function assemblePlot({
     }
     // 3h. Category labels (single-stack: y band; grouped: fy group facets) — layer-supplied.
     marks.push(...(layers.xAxisMarks ?? []));
-    // 4h. Vertical zero baseline.
-    marks.push(
-      Plot.ruleX([0], {
-        stroke: TBL.color.axisStroke,
-        strokeWidth: 1,
-        ...(fyFaceted ? { className: ZERO_BASELINE_CLASS } : {}),
-      }),
-    );
+    // 4h. Zero baseline for a HORIZONTAL chart: a vertical rule at x(0), since the value axis is
+    //     x here. Drawn ONLY when 0 is within the value domain, the same gate as the vertical-chart
+    //     branch (4, below). A fitted dot plot (e.g. 8–31) otherwise painted the rule at x(0),
+    //     outside the plot, through the category-label gutter. The fy collapse pass skips the
+    //     class when no copy exists.
+    const [hZeroLo, hZeroHi] = domainBounds(yDomain);
+    if (hZeroLo <= 0 && hZeroHi >= 0) {
+      marks.push(
+        Plot.ruleX([0], {
+          stroke: TBL.color.axisStroke,
+          strokeWidth: 1,
+          ...(fyFaceted ? { className: ZERO_BASELINE_CLASS } : {}),
+        }),
+      );
+    }
   } else {
     // 2. Gridlines + y-tick labels. 3. X-axis. (extend across both label columns so the
     //    chart edges sit flush with the canvas.)
@@ -1130,12 +1143,29 @@ export function assemblePlot({
   //    reference line, so no later stroke paints over them.
   marks.push(...labelMarks);
 
+  const requestedGaps = layers.fyScaleOpts && layers.sectionGaps?.before.length ? layers.sectionGaps : undefined;
+  // A host's explicit height too small for the rows plus full gaps shrinks the gaps
+  // (fittedSectionGapPx) rather than squeezing the rows to nothing. A height the engine's own model
+  // chose never does. The margins are the ones Plot is handed below.
+  const sectionGaps = requestedGaps && height != null && !heightFromModel
+    ? {
+        ...requestedGaps,
+        px: fittedSectionGapPx(
+          requestedGaps.px,
+          requestedGaps.before.length,
+          height - (layers.marginTop ?? 18) - (layers.marginBottom ?? xOpts.marginBottom ?? 24),
+        ),
+      }
+    : requestedGaps;
+  const sectionGapTotal = sectionGaps ? sectionGaps.before.length * sectionGaps.px : 0;
   const plotOpts: Record<string, unknown> = {
     ...tblPlotDefaults({
       // Horizontal bars override marginBottom (the value-tick row is short; the inherited
       // categorical-label bottom margin would leave a big empty band under the axis).
       marginBottom: layers.marginBottom ?? xOpts.marginBottom,
-      ...(height != null ? { height } : {}),
+      // A sectioned fy band renders its section gaps after Plot (spreadSections), so Plot gets the
+      // height without them and the finished chart is exactly `height` tall.
+      ...(height != null ? { height: height - sectionGapTotal } : {}),
       ...(marginRight != null ? { marginRight } : {}),
       // Horizontal bars supply a responsive left gutter sized to their longest category
       // label (axes.horizontalLeftGutter); vertical charts leave it undefined → default. The
@@ -1231,6 +1261,8 @@ export function assemblePlot({
     );
   }
 
+  const sectionGapRanges = sectionGaps ? spreadSections(svg, { before: sectionGaps.before, gapPx: sectionGaps.px }) : [];
+
   svg.dataset.marginLeft = String((plotOpts.marginLeft as number) ?? 0);
   svg.dataset.marginRight = String((plotOpts.marginRight as number) ?? 8);
   svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
@@ -1249,15 +1281,12 @@ export function assemblePlot({
     // Horizontal grouped: collapse the per-row-facet value chrome to continuous full-height
     // vertical gridlines + one value-axis tick-label row at the bottom.
     const svgHeight =
-      Number(svg.getAttribute("height")) || (plotOpts.height as number) || 400;
+      Number(svg.getAttribute("height")) || (plotOpts.height as number) + sectionGapTotal || 400;
     collapseFacetChromeY(svg, {
       height: svgHeight,
       marginTop: (plotOpts.marginTop as number) ?? 18,
       marginBottom: (plotOpts.marginBottom as number) ?? 24,
-      // The fy band domain (categories + section spacers) drives the section-gap gridline break.
-      ...(Array.isArray(layers.fyScaleOpts?.domain)
-        ? { fyDomain: layers.fyScaleOpts!.domain as string[] }
-        : {}),
+      ...(sectionGapRanges.length ? { sectionGaps: sectionGapRanges } : {}),
     });
   } else if (gridFaceted) {
     // Shared-mode small-multiples grid: Plot repeated the y-tick labels in every column and
@@ -1316,7 +1345,7 @@ export function assemblePlot({
       const series = seriesOrder[i] as string | undefined;
       // Read once, before any texture is written over it: the walk is the expensive part, and after
       // `style.fill` becomes a `url(#…)` the flat colour underneath is no longer what it returns.
-      const char = fill && series !== undefined ? hatchChars[series] : undefined;
+      const char = fill && series !== undefined ? ownValue(hatchChars, series) : undefined;
       // Walked only when the answer is wanted: a hatch needs the ground of THIS element (a
       // `category_colors` bar grounds per category), while `seriesPainted` only needs the first, so
       // an untextured chart walks once per series rather than once per bar.

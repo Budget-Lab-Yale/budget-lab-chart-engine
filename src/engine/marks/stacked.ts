@@ -7,7 +7,9 @@
 //
 // Unlike grouped bars (bar.ts), stacked bars use a SINGLE band x-scale with Plot's
 // automatic stacking (one bar per category, segmented by series) — NO `fx` faceting — so
-// the A6.5 facet chrome does not apply. The generic chrome (gridlines, y-labels, zero
+// the A6.5 facet chrome does not apply. The exception is a SECTIONED horizontal stack
+// (`columns.section`), which puts its category rows on `fy` like a sectioned bar (see
+// category-band.ts and `rowChannels` below). The generic chrome (gridlines, y-labels, zero
 // baseline, category x-labels) is added by assemblePlot; the adapter already labels the
 // categories on `x`, so this builder leaves xAxisMarks undefined for the vertical path.
 //
@@ -21,15 +23,23 @@ import { Plot } from "../vendor";
 import { markerInk } from "../marker-ink";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
-import { tblBandYAxis, horizontalLeftGutter, FACETED_CAT_LABEL_PX, CAT_LABEL_CLASS } from "../axes";
-import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
+import {
+  tblBandYAxis,
+  horizontalValueAxisMargins,
+  FACETED_CAT_LABEL_PX,
+  CAT_LABEL_CLASS,
+} from "../axes";
 import { monoScale } from "../palette";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import type { ChartSpec } from "../../spec/types";
-import { resolveNetMode, stackedSegmentLabelsShown } from "../../spec/bar-stack";
+import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING } from "./category-band";
+
+// The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
+const SINGLE_SLOT = "_v";
 
 // Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
 // pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
@@ -49,13 +59,28 @@ const SEGMENT_LABEL_MIN_PX = 25;
 const SEGMENT_LABEL_CLASS = "tbl-segment-label";
 const WHITE = "#FFFFFF";
 
-/** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable).
- *  Mirrors bar.ts: minimum decimal precision across the rendered values; `signed`
- *  prepends an explicit + / U+2212. */
+/** `names` split by the sign of each series' SUMMED value over `rows` (negative below 0, else
+ *  positive), each half in `names` order. */
+function splitBySign(names: string[], rows: readonly PreparedRow[]): { negs: string[]; poss: string[] } {
+  const sumBySeries = new Map<string, number>();
+  for (const r of rows) {
+    const y = r._y;
+    if (!Number.isFinite(y as number) || y == null) continue;
+    sumBySeries.set(r.series, (sumBySeries.get(r.series) ?? 0) + (y as number));
+  }
+  const negative = (s: string): boolean => (sumBySeries.get(s) ?? 0) < 0;
+  return { negs: names.filter(negative), poss: names.filter((s) => !negative(s)) };
+}
+
+/** A pure value-label formatter (no toLocaleString/locale, so goldens stay byte-stable): minimum
+ *  decimal precision across the rendered values. `keepMinus` writes a negative value's "-" as
+ *  formatValue (the hover card) and the waterfall labels do, outside any prefix ("-$15"); without
+ *  it every value prints as its magnitude, which suits a segment label, whose side of zero already
+ *  carries the sign. */
 function makeValueFormatter(
   values: number[],
   affixes: ValueAffixes,
-  signed: boolean,
+  keepMinus: boolean,
   decimals?: number,
 ): (d: number) => string {
   // Fixed precision when set; else the minimum the data needs, CAPPED at 2 so raw floats don't
@@ -74,11 +99,7 @@ function makeValueFormatter(
         );
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
-    // `mag` is unsigned, so the affix helper's minus-handling is inert here and the explicit
-    // −/+ below lands outside the prefix: −$5, not $−5.
-    const body = applyValueAffixes(Math.abs(d).toFixed(maxFrac), affixes);
-    if (!signed) return body;
-    return d < 0 ? `−${body}` : `+${body}`;
+    return applyValueAffixes((keepMinus ? d : Math.abs(d)).toFixed(maxFrac), affixes);
   };
 }
 
@@ -124,6 +145,16 @@ export function buildStackedMarks(
       .map((x) => x.r);
   }
 
+  // Sections (horizontal only): one bar per category, so a sectioned stack takes the single-series
+  // sectioned bar's layout — the section-grouped category band (with its section gaps) on `fy`,
+  // one inner `y` slot — and every mark placed on a category row binds to that fy row. Plot stacks
+  // within each facet, so each row is still one stack. See category-band.ts.
+  const band = categoryBand(data, catField, categories, spec, horizontal);
+  const sectioned = band.sectioned;
+  /** Channels that put a mark on its category row; `field` names the category in the mark's data. */
+  const rowChannels = (field: string): Record<string, unknown> =>
+    sectioned ? { fy: field, y: () => SINGLE_SLOT } : { y: field };
+
   // --- Per-category aggregates (computed INDEPENDENTLY of the stack) ---
   // net (Σ _y), positive sum (visual top of positive stack), negative sum.
   const rank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
@@ -161,13 +192,16 @@ export function buildStackedMarks(
       : {};
 
   const netMode = resolveNetMode(spec, hasNegatives);
+  // The dot and its legend row need a second series to net; see drawsNetDots. Counted over the whole
+  // chart (a figure's panes can each hold fewer), so every pane and the figure legend agree.
+  const netDots = drawsNetDots(netMode, ctx.chartSeriesCount ?? seriesNames.length);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data
     .map((r) => r._y)
     .filter((v): v is number => Number.isFinite(v as number));
-  // Net text above a cumulative stack is unsigned (always positive); diverging net is signed.
-  const netFmt = makeValueFormatter([...netByCat.values()], affixes, netMode === "dot", spec.valueLabels?.decimals);
+  // The net text keeps a negative net's minus (only text mode prints it; the dot carries no label).
+  const netFmt = makeValueFormatter([...netByCat.values()], affixes, true, spec.valueLabels?.decimals);
   const segFmt = makeValueFormatter(allValues, affixes, false, spec.valueLabels?.decimals);
 
   // --- Color: categorical (default) or monochromatic by stack position ---
@@ -179,16 +213,7 @@ export function buildStackedMarks(
   // if its total is < 0, positive otherwise. Edge case: a genuinely mixed-sign series is
   // classified by the sign of its sum, which can place it on the "wrong" visual side for
   // individual categories — acceptable, and the only well-defined single classification.
-  const sumBySeries = new Map<string, number>();
-  for (const r of data) {
-    const y = r._y;
-    if (!Number.isFinite(y as number) || y == null) continue;
-    sumBySeries.set(r.series, (sumBySeries.get(r.series) ?? 0) + (y as number));
-  }
-  const sign = new Map<string, number>();
-  for (const s of seriesNames) sign.set(s, (sumBySeries.get(s) ?? 0) < 0 ? -1 : 1);
-  const negs = seriesNames.filter((s) => sign.get(s) === -1);
-  const poss = seriesNames.filter((s) => sign.get(s) !== -1);
+  const { negs, poss } = splitBySign(seriesNames, data);
 
   // Visual stack order, top→bottom (bar-stacked.md §8.2): positives stack up from 0 in
   // declaration order (first-declared just above 0) so visual top→bottom = positives
@@ -200,11 +225,15 @@ export function buildStackedMarks(
   // series → mono tier hex (darkest at bottom of the visual stack), or null when categorical.
   let monoTierForSeries: Map<string, string> | null = null;
   let fillChannel: string | ((d: PreparedRow) => string);
+  // Ranked over every section's rows when section_order leaves some out (ctx.monoBasis), so a
+  // drawn series keeps its shade.
+  const monoSeries = ctx.monoBasis?.seriesNames ?? seriesNames;
+  const monoSplit = ctx.monoBasis ? splitBySign(monoSeries, ctx.monoBasis.dataInScope) : { negs, poss };
   if (monoBase) {
-    const tiers = monoScale(monoBase, seriesNames.length); // darkest-first
+    const tiers = monoScale(monoBase, monoSeries.length); // darkest-first
     // Bottom→top: bottommost negative first. Negatives stack downward in declaration
     // order, so the last-declared negative sits at the visual bottom → reverse them.
-    const bottomToTop = [...negs.slice().reverse(), ...poss];
+    const bottomToTop = [...monoSplit.negs.slice().reverse(), ...monoSplit.poss];
     const tierForSeries = new Map<string, string>();
     bottomToTop.forEach((s, i) => {
       tierForSeries.set(s, tiers[Math.min(i, tiers.length - 1)] as string);
@@ -251,7 +280,7 @@ export function buildStackedMarks(
     });
   }
   const stackMark = horizontal
-    ? Plot.barX(stackData, { y: catField, x: "_y", fill: fillChannel })
+    ? Plot.barX(stackData, { ...rowChannels(catField), x: "_y", fill: fillChannel })
     : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel });
 
   const overlay: unknown[] = [stackMark];
@@ -295,7 +324,7 @@ export function buildStackedMarks(
       horizontal
         ? Plot.text(netRows, {
             ...common,
-            y: "_xc",
+            ...rowChannels("_xc"),
             x: "posTop",
             textAnchor: reversed ? "end" : "start",
             dx: reversed ? -TBL_VALUE_LABEL.gap : TBL_VALUE_LABEL.gap,
@@ -308,7 +337,7 @@ export function buildStackedMarks(
             dy: reversed ? TBL_VALUE_LABEL.gapBelow : -TBL_VALUE_LABEL.gap,
           }),
     );
-  } else if (netMode === "dot") {
+  } else if (netDots) {
     // Black-stroked WHITE dot at the true net y (KEPT in panes). The white is this marker's own ink,
     // not an assumption about the ground: the dot sits ON its stack and has to occlude it. It comes
     // from marker-ink.ts so the legend's Total key is painted from the same description — keying it as
@@ -317,7 +346,7 @@ export function buildStackedMarks(
     const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
     const net = markerInk("net", "");
     const netDot = horizontal
-      ? Plot.dot(netRows, { y: "_xc", x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
+      ? Plot.dot(netRows, { ...rowChannels("_xc"), x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
       : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS });
     overlay.push(netDot);
   }
@@ -339,7 +368,7 @@ export function buildStackedMarks(
     // last two hexes assigned.
     let lightSeries: Set<string> | null = null;
     if (monoTierForSeries) {
-      const lightHexes = new Set(monoScale(monoBase as string, seriesNames.length).slice(-2));
+      const lightHexes = new Set(monoScale(monoBase as string, monoSeries.length).slice(-2));
       lightSeries = new Set<string>();
       for (const [s, hex] of monoTierForSeries) if (lightHexes.has(hex)) lightSeries.add(s);
     }
@@ -356,6 +385,7 @@ export function buildStackedMarks(
       fmt: segFmt,
       hooks: ctx.hooks,
       facet: ctx.facet,
+      rowChannels,
     });
     overlay.push(...segLabels.marks);
     segmentLabelsDropped = segLabels.dropped;
@@ -367,20 +397,23 @@ export function buildStackedMarks(
   // stack order. So the tag order must follow the data (which may be series-major, e.g. all
   // "Labor" rows then all "Capital"). Using a category-major order misaligns whenever the data
   // isn't grouped that way — the cause of the legend→segment highlight mismatch.
+  // Sectioned (fy rows): Plot emits the rects facet by facet, in drawn (section-grouped) order, and in
+  // data order within a facet — so the tags follow that, not the plain data order.
   const seriesSet = new Set(seriesNames);
-  const rectSeriesOrder: string[] = data
-    .filter(
-      (r) =>
-        categories.includes((r as unknown as Record<string, unknown>)[catField] as string) &&
-        seriesSet.has(r.series),
-    )
+  const catOf = (r: PreparedRow): string => (r as unknown as Record<string, unknown>)[catField] as string;
+  const rectSeriesOrder: string[] = (
+    sectioned
+      ? band.drawnOrder.flatMap((cat) => data.filter((r) => catOf(r) === cat))
+      : data.filter((r) => categories.includes(catOf(r)))
+  )
+    .filter((r) => seriesSet.has(r.series))
     .map((r) => r.series);
 
-  // --- Legend extras: diverging stacks add a "Total" dot row (A8 renders it) ---
+  // --- Legend extras: a stack that draws net dots adds a "Total" dot row (A8 renders it) ---
   // The row carries TOTAL_SERIES_KEY, shared with the net dot's data-series below, so the
   // legend row + net dots pin/hover/dim as one pseudo-series.
   const legendExtras =
-    netMode === "dot"
+    netDots
       ? [{ series: TOTAL_SERIES_KEY, label: "Total", markerShape: "dot" as const }]
       : undefined;
 
@@ -389,7 +422,7 @@ export function buildStackedMarks(
   // tag every one with TOTAL_SERIES_KEY so the existing pin/dim system treats them as the Total
   // pseudo-series.
   const netTagging =
-    netMode === "dot"
+    netDots
       ? [
           {
             selector: `g.${NET_DOT_CLASS} circle`,
@@ -400,26 +433,33 @@ export function buildStackedMarks(
 
   if (horizontal) {
     // Responsive left gutter so the longest category label is not clipped (see bar.ts); sized to
-    // the (now larger, faceted-matching) catFont so the wider glyphs still fit. Faceted small
-    // multiples: the figure passes the shared gutter (categoryGutter) so panes align, and
-    // hideCategoryLabels suppresses labels on non-leftmost panes (band domain is shared).
-    const gutter = ctx.hideCategoryLabels
-      ? SHARED_LABELLESS_MARGIN_LEFT
-      : ctx.categoryGutter ?? horizontalLeftGutter(categories, { fontSize: catFont });
+    // the (now larger, faceted-matching) catFont so the wider glyphs still fit.
+    const gutter = bandGutter(categories, catFont, sectioned);
+    const bandLayer = sectioned
+      ? {
+          // One inner slot per fy row, padding 0: the bar fills its row (the inter-row padding lives
+          // on fy), as on a sectioned single-series bar.
+          yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
+          ...fyCategoryBandLayer(band, { gutter, catFont, xAxisTicks: spec.x_axis_ticks }),
+        }
+      : {
+          yScaleOpts: { type: "band", domain: categories, padding: HSTACK_BAND_PADDING, axis: null },
+          xAxisMarks: tblBandYAxis(categories, gutter, catFont),
+          marginLeft: gutter,
+          // The value axis is at the bottom: a horizontal bar's margins, not the vertical category margin.
+          ...horizontalValueAxisMargins(spec.x_axis_ticks),
+        };
     return {
       underlay: [],
       overlay,
       tagging: [
         { selector: 'g[aria-label="bar"] rect', seriesOrder: rectSeriesOrder, fill: true },
         ...netTagging,
-        // Hover-accent hook (task 17): no sections/faceting for stacked bars, so render order is
-        // always plain encounter order.
-        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
+        // Hover-accent hook (task 17): labels are drawn in drawn order (fy facet order when sectioned).
+        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: band.drawnOrder },
       ],
       dashedNames: new Set<string>(),
-      yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
-      xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
-      marginLeft: gutter,
+      ...bandLayer,
       seriesColors,
       legendVisualOrder,
       netMode,
@@ -481,11 +521,13 @@ function buildSegmentLabels(
     fmt: (d: number) => string;
     hooks: MarkContext["hooks"];
     facet: string | undefined;
+    /** Horizontal: the channels that put a label on its category's row. */
+    rowChannels: (field: string) => Record<string, unknown>;
   },
 ): { marks: unknown[]; dropped: boolean } {
   const {
     catField, rank, posSumByCat, normalize,
-    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet,
+    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet, rowChannels,
   } = opts;
 
   // Per-category totals (sum of |value| on each side) for normalization shares.
@@ -584,7 +626,7 @@ function buildSegmentLabels(
   return {
     marks: [
       horizontal
-        ? Plot.text(rows, { ...common, y: "_xc", x: "mid", textAnchor: "middle" })
+        ? Plot.text(rows, { ...common, ...rowChannels("_xc"), x: "mid", textAnchor: "middle" })
         : Plot.text(rows, { ...common, x: "_xc", y: "mid", textAnchor: "middle" }),
     ],
     dropped,

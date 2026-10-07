@@ -6,6 +6,7 @@
 // export-png.ts and bundle-standalone.ts use resolveTitleText to get the plain-text title with
 // tokens substituted by their active option's label.
 import type { TitleSelector } from "./types";
+import { ownValue } from "./own-key";
 
 /** Structural subset of ChartSpec these helpers need — lets TableSpec-shaped objects (which
  *  never have title_selectors) pass through resolveTitleText unchanged, matching the
@@ -118,7 +119,7 @@ export function resolveActiveOptionColor(
     const activeId = effectiveSelections[key];
     const opt = selector.options.find((o) => o.id === activeId);
     if (!opt) continue;
-    const color = opt.color ?? seriesColors?.[opt.label ?? opt.id];
+    const color = opt.color ?? ownValue(seriesColors, opt.label ?? opt.id);
     if (color) return color;
   }
   return undefined;

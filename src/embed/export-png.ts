@@ -6,9 +6,11 @@ import type { RenderHooks } from "../spec/hooks.js";
 import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
+import { normalizeSpec } from "../engine/util.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
-import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight } from "../engine/figure.js";
+import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
+import { treemapHeight } from "../engine/marks/treemap.js";
 import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
@@ -16,9 +18,8 @@ import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWid
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
-  legendSeriesCount,
+  legendInRightColumn,
   orderForRightLegend,
-  resolveLegendPosition,
 } from "../engine/legend-layout.js";
 import {
   W,
@@ -341,10 +342,16 @@ export function buildExportSvg(
   rows: TidyRow[],
   opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
 ): SVGSVGElement {
+  spec = normalizeSpec(spec);
   const isFigure = spec.small_multiples != null;
-  const isSingleHorizontalBar =
-    !isFigure && (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
+  // A single chart whose height grows with its category rows: horizontal bar/stacked, and a
+  // horizontal dumbbell — the same predicate computeChartHeight (render-live) asks before sizing
+  // from horizontalBarChartHeight, so the download's row pitch matches the page's.
+  const rowSized = !isFigure && growsWithRows(spec);
   const isTimeline = !isFigure && spec.chartType === "timeline";
+  // A treemap has no portrait frame: frame height = content. Its legend (grouped data) takes the
+  // ordinary top/right paths below; treemapExportChartWidth mirrors the width they leave it.
+  const isTreemap = !isFigure && spec.chartType === "treemap";
 
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
@@ -412,8 +419,7 @@ export function buildExportSvg(
     !isFigure &&
     (tlFrame
       ? tlFrame.rightLegend
-      : (legendItems.length > 0 || shapeLegendItems.length > 0) &&
-        resolveLegendPosition(spec, legendSeriesCount(legendItems), rows) === "right");
+      : legendInRightColumn(spec, legendItems, shapeLegendItems.length, rows));
   const chartW = tlFrame ? tlFrame.chartW : rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
@@ -453,23 +459,33 @@ export function buildExportSvg(
   if (xAxisTitle) bottomH += 14;
 
   // Chart region. `contentHeight` is the height occupied by the chart/figure body below
-  // `chartTop`; a figure or a single horizontal bar/stacked chart can extend past the fixed
-  // frame, everything else fills it.
+  // `chartTop`; a figure or a single horizontal bar/stacked/dumbbell chart can extend past the
+  // fixed frame, everything else fills it.
   let contentHeight: number;
+  // How far below `chartTop` the plot sits: nonzero only beside a taller right-hand legend column.
+  let plotOffset = 0;
   if (!isFigure) {
-    // Single chart: horizontal bar/stacked charts size from the shared intrinsic-height helper
-    // (growing the export frame with row count); everything else fills the fixed 750 frame.
-    contentHeight = isSingleHorizontalBar
+    // Single chart: horizontal bar/stacked/dumbbell charts size from the shared intrinsic-height
+    // helper (growing the export frame with row count); everything else fills the fixed 750 frame.
+    contentHeight = rowSized
       ? horizontalBarChartHeight(spec, rows)
       : isTimeline
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
-        : Math.max(160, H - chartTop - bottomH);
+        : isTreemap
+          // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
+          ? Math.ceil(treemapHeight(chartW))
+          : Math.max(160, H - chartTop - bottomH);
+    // The plot's own height. A right-hand legend never changes it: the live card keeps
+    // computeChartHeight's height beside a taller legend column, so stretching the plot here moved
+    // every row of the download away from the page (Ruling 71).
+    const plotHeight = contentHeight;
     // A right-hand legend column is laid out beside the plot but is NOT bounded by it: enough
     // series, or enough wrapped labels, and it runs past the plot's bottom — over the x-axis
     // title, note and source, and then off the frame. Measure it first (same routine that draws
-    // it, so the two cannot drift) and let the chart region be at least that tall; `H_eff` below
-    // grows the frame to match. Nothing published takes this path today, so the arithmetic is here
-    // to keep a future many-series chart honest rather than to fix a current figure.
+    // it, so the two cannot drift) and let the chart REGION be at least that tall, with the plot
+    // centred in it as live centres it (below); `H_eff` grows the frame to match. Nothing published
+    // takes this path today, so the arithmetic is here to keep a future many-series chart honest
+    // rather than to fix a current figure.
     const colItems = rightLegend
       ? orderForRightLegend(legendItems, (meta as { legendVisualOrder?: string[] }).legendVisualOrder)
       : [];
@@ -487,6 +503,7 @@ export function buildExportSvg(
     // AND rows above it, so an empty colour group takes none.
     const legendKeyCache = new Map<LegendItem, string | null>();
     const colTitle = hasShapeLegend && colItems.length ? colorLegendTitle : undefined;
+    let legendColumnH = 0;
     if (rightLegend) {
       const COL_TOP_PAD = 12;
       let measured = COL_TOP_PAD;
@@ -499,11 +516,13 @@ export function buildExportSvg(
           shapeLegendTitle || undefined, undefined, legendKeyCache,
         );
       }
-      contentHeight = Math.max(contentHeight, Math.ceil(measured));
+      legendColumnH = Math.ceil(measured);
     }
     const rendered = renderChart(spec, rows, {
       width: chartW,
-      height: contentHeight,
+      height: plotHeight,
+      // The download takes no host height: a row-sized chart's is horizontalBarChartHeight's.
+      ...(rowSized ? { heightFromModel: true } : {}),
       hooks: opts.hooks,
       phase: "export",
       ...(accentColor ? { accentColor } : {}),
@@ -511,11 +530,10 @@ export function buildExportSvg(
     });
     const chartSvg = rendered.svg;
     chartSvg.setAttribute("x", String(MARGIN));
-    chartSvg.setAttribute("y", String(chartTop));
     chartSvg.setAttribute("width", String(chartW));
-    // A timeline keeps its own layout height: a right legend taller than it grows `contentHeight`,
-    // and stretching the SVG to that would centre the timeline (xMidYMid meet) beside the legend.
-    if (!isTimeline) chartSvg.setAttribute("height", String(contentHeight));
+    // A timeline keeps its own layout height (its `plotHeight` is only the pre-draw estimate). A
+    // treemap too: its own height is the layout height, and the frame is sized to its ceiling.
+    if (!isTimeline && !isTreemap) chartSvg.setAttribute("height", String(plotHeight));
     // A timeline's x-axis title follows the ticks of THIS render, at `chartW`: the metadata pass ran
     // at INNER_W, and a vertical timeline can drop its ticks at the narrower right-legend width.
     if (isTimeline) {
@@ -523,6 +541,18 @@ export function buildExportSvg(
       if (!title !== !xAxisTitle) bottomH += title ? 14 : -14;
       xAxisTitle = title;
     }
+    // Live centres the canvas (the plot, with its x-axis title directly under it) against a taller
+    // right-hand legend column: `.figure-body--legend-right { align-items: center }` in styles.ts.
+    // The PNG computes the same offset; the column itself stays at the region's top, where live's
+    // taller column also sits. `contentHeight` stays the region less the title's 14px band, which
+    // `bottomH` already holds.
+    if (rightLegend) {
+      const titleBand = xAxisTitle ? 14 : 0;
+      const region = Math.max(contentHeight + titleBand, legendColumnH);
+      plotOffset = (region - titleBand - contentHeight) / 2;
+      contentHeight = region - titleBand;
+    }
+    chartSvg.setAttribute("y", String(chartTop + plotOffset));
     root.appendChild(chartSvg);
     if (rightLegend) {
       // Beside the plot, ordered top-to-bottom as the stack reads (orderForRightLegend) — the same
@@ -548,30 +578,20 @@ export function buildExportSvg(
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
-    // Horizontal bar/stacked figures grow with their row count — figurePaneHeight returns
-    // undefined for them, so renderFigure computes the height and we read it back from the
-    // rendered SVG for the layout math below.
+    // A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups,
+    // spec/facet-groups.ts), so every pane takes figurePaneHeight's fixed height.
     const paneChartH = figurePaneHeight(spec);
-    const isHorizontalBarFig =
-      (spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal";
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
-    // PER-PANE mode: equal columns, EXCEPT horizontal bars — their category gutter is asymmetric
-    // (pane 0 wide, others narrow), so renderFigure sizes unequal outer widths and needs the
-    // TOTAL row width (gridWidth), exactly like shared mode; the cell layout then consumes the
-    // returned columnWidths.
+    // PER-PANE mode: equal columns.
     const shared = isShared ? sharedColumnWidths(INNER_W, cols, COL_GAP) : null;
     const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
-    const useGridW = isShared || isHorizontalBarFig;
-    const fig = useGridW
+    const fig = isShared
       ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
       : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
-    // Cell width per column: shared keeps its precomputed helper widths (byte-identical to
-    // before); per-pane horizontal consumes the figure's columnWidths; else equal columns.
-    const figColWidths = !isShared && isHorizontalBarFig ? fig.columnWidths : undefined;
-    const colWidth = (col: number): number =>
-      shared?.colWidths[col] ?? figColWidths?.[col] ?? equalPaneW;
+    // Cell width per column: shared keeps its precomputed helper widths; else equal columns.
+    const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
     // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
     const colX: number[] = [];
     let acc = MARGIN;
@@ -579,16 +599,10 @@ export function buildExportSvg(
       colX.push(acc);
       acc += colWidth(c) + COL_GAP;
     }
-    // Per-pane height: read each pane's own rendered height (ragged horizontal bar/stacked facets
-    // are sized individually via fig.paneHeights — see figure.ts), else the fixed pane height from
-    // figurePaneHeight. Reads the rendered SVG's height attribute directly (always set by
-    // renderFigure), so the `?? 240` fallback is a type-level floor that never fires in practice.
+    // Per-pane height: each pane's own rendered height (always set by renderFigure, to paneChartH).
     const paneH = (i: number): number =>
-      Number((fig.panes[i]?.svg as SVGSVGElement | undefined)?.getAttribute("height")) || paneChartH || 240;
-    // Each grid ROW's height = the tallest pane in that row (ragged facets keep their own height
-    // within the row; a busier sibling in the same row only grows the shared row band, never
-    // stretches a shorter pane's own SVG). Reduces to one uniform value when every paneH(i) is
-    // equal (the common case, and every non-horizontal-bar figure), matching the pre-fix math.
+      Number((fig.panes[i]?.svg as SVGSVGElement | undefined)?.getAttribute("height")) || paneChartH;
+    // Each grid ROW's height = the tallest pane in that row (every pane is paneChartH tall).
     const rowHeights: number[] = [];
     for (let r = 0; r < gridRows; r++) {
       let h = 0;
@@ -614,14 +628,7 @@ export function buildExportSvg(
       const w = colWidth(col);
       const y = rowY[row]!;
       const h = paneH(i);
-      // Horizontal bars: align the pane title with the DATA area (offset by the pane's left gutter)
-      // rather than over the category labels.
-      const titleDx = isHorizontalBarFig
-        ? Number((pane.svg as SVGSVGElement | undefined)?.dataset.marginLeft) || 0
-        : 0;
-      root.appendChild(
-        textEl(x + titleDx, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }),
-      );
+      root.appendChild(textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }));
       if (pane.svg) {
         const ps = pane.svg;
         ps.setAttribute("x", String(x));
@@ -636,7 +643,7 @@ export function buildExportSvg(
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
   // single row of panes) doesn't leave a big band of whitespace below. Single horizontal bar/
-  // stacked charts do the same (their row count can outgrow the 750 frame); every other single
+  // stacked/dumbbell charts do the same (their row count can outgrow the 750 frame); every other single
   // chart keeps the fixed 4:3 frame.
   // A right-hand legend taller than the plot grows the frame too, for the same reason a
   // horizontal bar chart does: the content genuinely needs the room, and clipping it would
@@ -648,7 +655,7 @@ export function buildExportSvg(
     : [xAxisTitle];
   if (portrait) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
   const H_eff =
-    isFigure || isSingleHorizontalBar || isTimeline || chartTop + contentHeight + bottomH > H
+    isFigure || rowSized || isTimeline || isTreemap || chartTop + contentHeight + bottomH > H
       ? Math.round(chartTop + contentHeight + bottomH)
       : H;
   if (H_eff !== H) {
@@ -661,9 +668,10 @@ export function buildExportSvg(
   if (xAxisTitle) {
     by += 14;
     // Centred on the PLOT, not the frame: a right-hand legend takes 176px off the right, so the
-    // frame's centre is 88px right of the plot's and the title sat visibly off-axis.
+    // frame's centre is 88px right of the plot's and the title sat visibly off-axis. Directly under
+    // the plot, so `plotOffset` above the region's bottom beside a taller legend column.
     const titleX = rightLegend ? MARGIN + chartW / 2 : frameW / 2;
-    by = drawLines(root, xAxisLines, titleX, by, AXIS_TITLE_LINE_H, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" });
+    by = plotOffset + drawLines(root, xAxisLines, titleX, by - plotOffset, AXIS_TITLE_LINE_H, { size: 12, weight: W_SEMI, fill: AXIS, anchor: "middle" });
   }
   composeBottomChrome(document, root, by, { note, source, width: frameW });
 

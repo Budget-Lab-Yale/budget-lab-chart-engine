@@ -48,7 +48,7 @@ export interface BuildXOptsOptions {
 }
 
 export interface XAdapter {
-  parseX: (v: string) => number | Date | string | null;
+  parseX: (v: string) => number | Date | string;
   xField: string;
   validate: (r: Record<string, unknown>) => boolean;
   /** Build the per-chart x options. See BuildXOptsOptions. */
@@ -135,7 +135,7 @@ export function makeXAdapter(
     return {
       parseX: (v) => parseXValue("temporal", v),
       xField: "_xd",
-      validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
+      validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
         // An ANNUAL series — every point on 1 January — is identified by its year alone, so the
         // month in the card is noise: `Jan 1950` under an axis reading `1950`. The axis already
@@ -181,7 +181,7 @@ export function makeXAdapter(
     return {
       parseX: (v) => parseXValue("quarterly", v),
       xField: "_xd",
-      validate: (r) => !!r._xd && !Number.isNaN(+(r._xd as Date)),
+      validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
       buildXOpts(data, { faceted = false, bottomGutter = 0 } = {}) {
         const xs = data.map((r) => +r._xd);
         const xDomain: [Date, Date] = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
@@ -189,7 +189,7 @@ export function makeXAdapter(
           marginBottom: temporalMarginBottom(xDomain) + bottomGutter,
           axisMarks: tblTemporalXAxis(xDomain, 1, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter),
           markerToX: (m) => parseQuarter(m.x),
-          tooltipXParse: (v) => +(parseQuarter(v) as Date),
+          tooltipXParse: (v) => +parseQuarter(v),
           tooltipXFormat: tooltipXFormatPattern
             ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
             : (v) => formatQuarter(new Date(v)),

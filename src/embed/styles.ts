@@ -612,6 +612,16 @@ body {
   margin-top: 3px;
   padding-top: 3px;
 }
+/* treemap.tooltip_note: a free-text note closing the card, set off by the same rule device and token
+   as the Total divider and the overlay block (--tbl-tooltip-rule, visible over a dark backdrop --
+   test/tooltip-divider-visibility.test.ts). Regular weight: it is a note, not a value. It wraps
+   with the card (white-space and overflow-wrap are inherited from .tbl-tooltip). */
+.tbl-tooltip-note {
+  border-top: 1px solid var(--tbl-tooltip-rule);
+  margin-top: 4px;
+  padding-top: 4px;
+  font-weight: var(--tw-body);
+}
 .tbl-tooltip-row--total-rule-below {
   border-bottom: 1px solid var(--tbl-tooltip-rule);
   margin-bottom: 4px;

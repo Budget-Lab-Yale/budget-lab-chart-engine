@@ -1,0 +1,13 @@
+group,category,amount
+Mandatory,Social Security,1461
+Mandatory,Medicare,874
+Mandatory,Medicaid,618
+Mandatory,Income security,415
+Mandatory,Veterans benefits,200
+Mandatory,Federal retirement,190
+Mandatory,Other mandatory,90
+Discretionary,Defense,850
+Discretionary,Nondefense,917
+Net interest,Net interest,881
+Other spending,Allowances,20
+Other spending,Undistributed receipts,15

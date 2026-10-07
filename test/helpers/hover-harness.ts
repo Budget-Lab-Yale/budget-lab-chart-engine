@@ -10,6 +10,18 @@ import { CROSSHAIR_HIT_SELECTOR } from "../../src/engine/crosshair";
 import type { ChartSpec } from "../../src/spec/types";
 import type { TidyRow } from "../../src/data/index";
 
+/** The summed `translate(x, y)` of `el` and its ancestors up to (not including) `svg`. */
+function ancestorTranslate(el: Element | null, svg: SVGSVGElement): [number, number] {
+  let x = 0, y = 0;
+  let cur: Element | null = el;
+  while (cur && cur !== svg) {
+    const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(cur.getAttribute("transform") ?? "");
+    if (m) { x += +m[1]!; y += +m[2]!; }
+    cur = cur.parentElement;
+  }
+  return [x, y];
+}
+
 /** jsdom has no layout: map the SVG's own rect 1:1 onto its viewBox so clientX/Y are user-space,
  *  and give every <text> and <circle> a rect derived from its own coords plus its ancestors'
  *  transforms. Both are load-bearing: `readCategoryCentersFromAxis` measures axis-label rects and
@@ -22,16 +34,7 @@ export function mockRect1to1(svg: SVGSVGElement): void {
     value: () => ({ width: vb.width, height: vb.height, top: 0, left: 0, right: vb.width, bottom: vb.height, x: 0, y: 0 }),
     configurable: true,
   });
-  const translate = (el: Element | null): [number, number] => {
-    let x = 0, y = 0;
-    let cur: Element | null = el;
-    while (cur && cur !== svg) {
-      const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(cur.getAttribute("transform") ?? "");
-      if (m) { x += +m[1]!; y += +m[2]!; }
-      cur = cur.parentElement;
-    }
-    return [x, y];
-  };
+  const translate = (el: Element | null): [number, number] => ancestorTranslate(el, svg);
   const box = (el: Element, cx: number, cy: number, w: number, h: number): void => {
     Object.defineProperty(el, "getBoundingClientRect", {
       value: () => ({ left: cx - w / 2, right: cx + w / 2, top: cy - h / 2, bottom: cy + h / 2, width: w, height: h, x: cx - w / 2, y: cy - h / 2 }),
@@ -97,18 +100,25 @@ export function coordTexts(svg: SVGSVGElement): string[] {
 }
 
 /** Hover the horizontal centre of the first mark matching `markSel`, on whichever hit rect the
- *  chart attached. Falls back to the middle of the pane when there is no such mark. */
+ *  chart attached. Falls back to the middle of the pane when there is no such mark. A dot is hovered
+ *  at its own height too: a horizontal dumbbell (the default orientation) resolves its category
+ *  from the pointer's y, so the pane's middle row would name another category. */
 export function hoverFirstMark(svg: SVGSVGElement, markSel: string): void {
   const vb = svg.viewBox.baseVal;
   const mark = svg.querySelector<SVGGraphicsElement>(markSel);
   let cx = vb.width / 2;
+  let cy = vb.height / 2;
   if (mark) {
+    // The mark's own attributes are in its parent's frame: add every ancestor translate (a facet
+    // pane's, a stack's) on whichever axis the mark supplies, so the pointer lands on the mark.
+    const [tx, ty] = ancestorTranslate(mark.parentElement, svg);
     const x = mark.getAttribute("x");
-    if (x != null) cx = parseFloat(x) + parseFloat(mark.getAttribute("width") ?? "0") / 2;
-    else if (mark.getAttribute("cx") != null) cx = parseFloat(mark.getAttribute("cx")!);
+    if (x != null) cx = parseFloat(x) + parseFloat(mark.getAttribute("width") ?? "0") / 2 + tx;
+    else if (mark.getAttribute("cx") != null) cx = parseFloat(mark.getAttribute("cx")!) + tx;
+    if (mark.getAttribute("cy") != null) cy = parseFloat(mark.getAttribute("cy")!) + ty;
   }
   svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
-    new PointerEvent("pointermove", { clientX: cx, clientY: vb.height / 2, bubbles: true }),
+    new PointerEvent("pointermove", { clientX: cx, clientY: cy, bubbles: true }),
   );
 }
 

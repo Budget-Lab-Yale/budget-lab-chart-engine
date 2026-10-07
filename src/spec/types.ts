@@ -3,9 +3,9 @@
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
-// is a union so each new type is additive; it now carries ten — see below, and CONFIG-SPEC.md.
+// is a union so each new type is additive; it now carries eleven — see below, and CONFIG-SPEC.md.
 
-export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell" | "timeline";
+export type ChartType = "line" | "area" | "bar" | "stacked" | "scatter" | "dotplot" | "waterfall" | "histogram" | "dumbbell" | "timeline" | "treemap";
 
 export type XAxisType = "numeric" | "temporal" | "quarterly" | "categorical";
 
@@ -31,6 +31,43 @@ export interface TimelineConfig {
    *  (default): exactly two lanes draw as two side-by-side tracks, each named at the top; any other
    *  lane count draws one track. `single`: always one track. */
   vertical_lanes?: "columns" | "single";
+}
+
+/** One extra hover row on a treemap tile: the cell of `column` for that tile's row. */
+export interface TreemapTooltipRow {
+  column: string;
+  /** Row label. Default: the column name. */
+  label?: string;
+  /** Number format for the cell. Set, a numeric cell is formatted with it (thousands grouping, as
+   *  `value_format` on a treemap) and a text cell prints verbatim. Absent, every cell prints verbatim,
+   *  numbers included (a Year of 2024 prints "2024"). */
+  format?: ValueFormat;
+}
+
+/** `chartType: treemap` options. Every field optional; defaults are applied in
+ *  `spec/treemap.ts#resolveTreemapConfig`. */
+export interface TreemapConfig {
+  /** Number printed under a tile's name. Default `share`. */
+  label_value?: "share" | "value" | "none";
+  /** `size` (default): tonal shade follows tile size within its group. `none`: one shade per group. */
+  shading?: "size" | "none";
+  /** Decimals on a share percentage, integer 0-3. Default 1. */
+  share_decimals?: number;
+  /** Which built-in hover-card rows show: `both` (default: Value then Share), `share`, `value`, or
+   *  `none` (the card keeps its header, the `tooltip` rows and the `tooltip_note` cell). */
+  tooltip_values?: "both" | "share" | "value" | "none";
+  /** Label of the hover card's Share row. Default "Share". */
+  share_label?: string;
+  /** Label of the hover card's Value row. Default "Value". */
+  value_label?: string;
+  /** Whether the hover card's header names the tile's group after its name ("Medicare ·
+   *  Mandatory"). Default true; false shows the tile name alone. No effect on flat data. */
+  tooltip_group?: boolean;
+  /** A column whose cell, for the hovered tile, closes the hover card: below a divider, in regular
+   *  weight, verbatim. A blank cell shows no note (and no divider). Must be a column in the data. */
+  tooltip_note?: string;
+  /** Extra hover rows, in order, after the built-in rows. */
+  tooltip?: TreemapTooltipRow[];
 }
 
 /** A named palette color (resolved via the Style-Guide tokens) or a raw "#hex". */
@@ -294,7 +331,7 @@ export interface Overlay {
   /** `method` and `column`: one line per colour series (`series`, default) or one over every in-scope
    *  point (`none`). Rejected on `fun` and `slope`+`intercept`, which do not read the data. */
   by?: "series" | "none";
-  /** `method` only. Confidence level for a pointwise ribbon around the fit, e.g. 0.95. Omitted ⇒ no
+  /** `method` only. Confidence level for a pointwise ribbon around the fit, in (0, 0.999], e.g. 0.95. Omitted ⇒ no
    *  ribbon. Needs residual degrees of freedom (n > degree + 1); a fit without them draws the line
    *  and no band. */
   ci?: number;
@@ -455,8 +492,8 @@ export interface ColumnMap {
    *  last token of the hover card's header. Encodes nothing — it identifies the point rather than
    *  mapping it to a channel — so there is no `point_labels` display map: the cell IS the label. */
   point_label?: string;
-  /** Horizontal bar charts: column whose distinct values group the categories into labeled
-   *  sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
+  /** Horizontal `bar`, `stacked` and `dumbbell` charts: column whose distinct values group the
+   *  categories into labeled sections along the category axis (e.g. Durable goods / Nondurable goods / Services). Each
    *  section is contiguous with a bold header in the left gutter. Omit ⇒ no sections. */
   section?: string;
   /** Waterfall charts: column flagging each step's row TYPE — `total` (an absolute bar anchored
@@ -624,7 +661,7 @@ export interface ChartSpec {
   /** Categorical x: render order for the x-axis categories. Listed categories come first in this
    *  order; any unlisted categories follow in data-encounter order. Order-only — unlike
    *  series_order, this does NOT filter. Ignored off the categorical x-axis.
-   *  With `columns.section` set (horizontal bars), section grouping is authoritative for
+   *  With `columns.section` set (horizontal charts), section grouping is authoritative for
    *  CROSS-section order (sections always render contiguously, in `section_order`/encounter
    *  order) — x_order only reorders categories WITHIN each section; it can never split a
    *  section's categories apart or reorder the sections themselves. */
@@ -647,7 +684,7 @@ export interface ChartSpec {
    *  test/hover-claims-defaults.test.ts. */
   x_labels?: Record<string, string>;
 
-  // Section axis (horizontal bars; the section COLUMN is mapped via `columns.section`).
+  // Section axis (horizontal bar/stacked/dumbbell; the section COLUMN is mapped via `columns.section`).
   /** Section render order along the category axis; also an inclusion filter (like series_order). */
   section_order?: string[];
   /** Section value → display label for the section header. */
@@ -700,7 +737,8 @@ export interface ChartSpec {
   projected_style?: { dashed?: boolean; fillOpacity?: number };
 
   // Bar / stacked bar
-  /** Chart orientation; defaults to "vertical" (value axis is Y). */
+  /** Chart orientation; defaults to "vertical" (value axis is Y), except a dumbbell, which defaults
+   *  to "horizontal" (see dumbbell-orientation.ts). */
   orientation?: "vertical" | "horizontal";
   /** In-bar value labels. `decimals` fixes the label precision; omitted ⇒ the minimum precision
    *  the data needs, capped at 2 (so raw floats don't print 15 digits). */
@@ -711,7 +749,12 @@ export interface ChartSpec {
      * - "auto" (default): dot when any value is negative, otherwise text.
      * - "text": text above the top of each cumulative stack.
      * - "dot": white-stroked black dot at the true net value.
-     * - "none": suppress all net markers and the "Total" legend entry. */
+     * - "none": suppress all net markers and the "Total" legend entry.
+     * Resolving to "dot" also sets the default hover (the card; `hover` decouples it) and refuses
+     * segment labels. A single-series stack draws no net dot and no "Total" legend row whatever this
+     * resolves to, explicit "dot" on all-positive data included (one series has nothing to net; a
+     * figure counts the distinct series in its drawn panes, not a pane's). It keeps the other two
+     * effects: the hover card, and no segment labels. */
     netDisplay?: "auto" | "text" | "dot" | "none";
     /** Monochrome override: render all segments using shades of one base color. */
     mono?: { base: ColorRef };
@@ -772,6 +815,9 @@ export interface ChartSpec {
   /** `chartType: timeline` options. Rejected on every other chart type. */
   timeline?: TimelineConfig;
 
+  /** `chartType: treemap` options. Rejected on every other chart type. */
+  treemap?: TreemapConfig;
+
   // Dumbbell (connected dot plot). A categorical axis × numeric value axis rendered as per-category
   // dots joined by a connector; `orientation` flips it (horizontal = categories on screen-y). The
   // categorical axis is declared via `xAxisType: categorical` (like bars), NOT a separate yAxisType.
@@ -806,11 +852,16 @@ export interface ChartSpec {
    * negative value) OR has ≥5 series defaults to "right" — where the ≥5 count is of the series rows
    * the legend actually SHOWS (`series_legend: false` removes them).
    *
-   * Four routes ignore this field entirely, an explicit value included: `legend: false` resolves
-   * "top" before the field is read (unobservable — nothing is drawn), a card narrower than
-   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top" at mount (a card narrowed AFTER mounting keeps
-   * its right column — the resize path re-resolves but does not tear one down), a `small_multiples`
-   * figure has only a top legend slot, and the PNG export always draws the legend above the chart.
+   * Five routes ignore this field entirely, an explicit value included (CONFIG-SPEC `legendPosition`
+   * is the authority): `legend: false` resolves "top" before the field is read; a card narrower than
+   * LEGEND_RIGHT_MIN_CARD_WIDTH falls back to "top", at mount and on resize; a `small_multiples`
+   * figure has only a top legend slot; a vertical timeline's PNG export puts the legend on top; and a
+   * legend with no rows to show takes no column on any chart type (full-width plot), live as in the
+   * PNG — live, a timeline's rows are judged in the orientation it would draw beside the column. A
+   * stacked chart's Total row counts: it is drawn exactly when `barStack.netDisplay` resolves to a
+   * dot and the chart has two or more series (explicit `dot` on 2+ series; `auto` on diverging data;
+   * never `text`, `none`, `normalize`, or a single series, explicit `dot` included).
+   * Otherwise the PNG follows this field.
    * Where a right legend is possible at all, an explicit value wins over the defaults above.
    */
   legendPosition?: "top" | "right";
@@ -827,6 +878,12 @@ export interface ChartSpec {
    *  `point_label` tokens. Other chart types use the series name as a ROW label against a value, so
    *  suppressing it there would leave unlabelled numbers — validation rejects it. Default true. */
   tooltip_series_name?: boolean;
+  /** Sectioned charts (`columns.section`) whose hover shows a card — a horizontal dumbbell, a
+   *  horizontal stack hovering with its card, and a bar or stack pane of a small-multiples figure
+   *  with `coordinated_cursor: false`: the card's header reads "<section> · <category>", each
+   *  through `section_labels` / `x_labels`. A no-op where the chart hovers with value pills.
+   *  Validation rejects it without `columns.section`. Default false. */
+  tooltip_section?: boolean;
   /** Scatter only: override the x-value row's label in the hover card. Falls back to `x_axis_title`,
    *  and to the literal "x" when that too is absent. An axis title is written to span the plot; a
    *  card row label is read in a narrow floating card, so a long title makes an oversized card —

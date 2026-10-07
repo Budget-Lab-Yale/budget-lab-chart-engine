@@ -112,6 +112,21 @@ describe("overlays — field applicability", () => {
     expect(err(check([{ fun: "x", ci: 0.95 }]))).toMatch(/`ci` applies to `method`/);
   });
 
+  it("bounds ci to (0, 0.999], naming the field", () => {
+    const m = { method: "lm" };
+    for (const ci of [0.9991, 0.99999, 1, 1.5]) {
+      const r = check([{ ...m, ci }]);
+      expect(r.valid, `ci ${ci}`).toBe(false);
+      expect(err(r), `ci ${ci}`).toBe("/overlays/0/ci: must be <= 0.999");
+    }
+    for (const ci of [0, -0.1]) {
+      const r = check([{ ...m, ci }]);
+      expect(r.valid, `ci ${ci}`).toBe(false);
+      expect(err(r), `ci ${ci}`).toBe("/overlays/0/ci: must be > 0");
+    }
+    for (const ci of [0.001, 0.95, 0.999]) expect(check([{ ...m, ci }]).valid, `ci ${ci}`).toBe(true);
+  });
+
   it("rejects n on anything but a fun", () => {
     expect(err(check([{ column: "yhat", n: 50 }]))).toMatch(/`n` applies to `fun`/);
   });
