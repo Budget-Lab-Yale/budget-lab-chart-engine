@@ -252,6 +252,9 @@ export interface AssembleOptions {
   xAxisDomain?: [number, number];
   width?: number;
   height?: number;
+  /** RenderOptions.heightFromModel: `height` came from the engine's height model, so section gaps
+   *  are never fitted to it (fittedSectionGapPx applies to a host-supplied height only). */
+  heightFromModel?: boolean;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests). */
   document?: Document;
@@ -357,6 +360,7 @@ export function assemblePlot({
   xAxisDomain,
   width,
   height,
+  heightFromModel,
   marginRight,
   document,
   classNameSuffix,
@@ -1140,9 +1144,10 @@ export function assemblePlot({
   marks.push(...labelMarks);
 
   const requestedGaps = layers.fyScaleOpts && layers.sectionGaps?.before.length ? layers.sectionGaps : undefined;
-  // An explicit height too small for the rows plus full gaps shrinks the gaps (fittedSectionGapPx)
-  // rather than squeezing the rows to nothing. The margins are the ones Plot is handed below.
-  const sectionGaps = requestedGaps && height != null
+  // A host's explicit height too small for the rows plus full gaps shrinks the gaps
+  // (fittedSectionGapPx) rather than squeezing the rows to nothing. A height the engine's own model
+  // chose never does. The margins are the ones Plot is handed below.
+  const sectionGaps = requestedGaps && height != null && !heightFromModel
     ? {
         ...requestedGaps,
         px: fittedSectionGapPx(

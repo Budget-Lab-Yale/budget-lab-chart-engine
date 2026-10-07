@@ -1165,11 +1165,13 @@ group; the left gutter is 14px wider than it would be without sections, so the l
 same. Two sections are separated
 by the usual space between rows plus a fixed 33px that holds the later section's header: the
 header's line sits 10px above that section's first bar, with at least 10px between it and the bar
-above. The gap does not grow with the row height. At the height the engine gives a chart (which
-grows with its rows) the gap is always the full 33px. A host that renders at an explicit height
-too small for the rows and full gaps (`renderChart` / `mountChart` `height`) gets smaller gaps
-instead: together they take at most half the plot, shared equally, so the rows keep the other half,
-and the headers may then crowd the rows above them. A
+above. The gap does not grow with the row height. Wherever the engine picks the height (which
+grows with the rows) the gap is always the full 33px: a live chart or figure and the PNG export,
+in every pane of a small-multiples figure, including a pane with fewer rows than gaps. Only a host
+that renders at its own explicit height (`renderChart` / `renderFigure` `height`, or `mountChart`
+`height` on a single chart) too small for the rows and full gaps gets smaller gaps instead:
+together they take at most half the plot, shared equally, so the rows keep the other half, and the
+headers may then crowd the rows above them. A
 stacked chart still draws one stack per category; its net callout (text or dot) and segment labels
 sit on that category's row. On horizontal bars and stacks it combines with `small_multiples` (the
 headers show on the leftmost pane).

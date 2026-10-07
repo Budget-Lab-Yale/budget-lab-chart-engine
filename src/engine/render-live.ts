@@ -806,6 +806,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // Explicit height (callers / golden path) wins; otherwise horizontal bars grow taller
   // with the bar/row count and everything else uses the fixed default.
   const height = opts.height ?? computeChartHeight(spec, rows);
+  // The engine chose the height, not the host (RenderOptions.heightFromModel).
+  const heightFromModel = opts.height == null;
   const doc = container.ownerDocument;
   // See MountOptions.tooltipContainer for why body is the default rather than `container` itself.
   const tooltipContainer = opts.tooltipContainer ?? doc.body;
@@ -952,6 +954,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       built = renderChart(spec, rows, {
         width: target,
         height,
+        ...(heightFromModel ? { heightFromModel: true } : {}),
         hooks: opts.hooks,
         ...(timelineOrientation ? { timelineOrientation } : {}),
         ...(restackOrder ? { stackOrder: restackOrder } : {}),
@@ -1563,7 +1566,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let prelimShapeRows = 0;
   try {
     const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
-    const prelim = renderChart(spec, rows, { width: initialCardWidth, height, hooks: prelimHooks });
+    const prelim = renderChart(spec, rows, {
+      width: initialCardWidth,
+      height,
+      ...(heightFromModel ? { heightFromModel: true } : {}),
+      hooks: prelimHooks,
+    });
     prelimLegendItems = prelim.legendItems ?? [];
     prelimShapeRows = prelim.shapeLegendItems?.length ?? 0;
   } catch {

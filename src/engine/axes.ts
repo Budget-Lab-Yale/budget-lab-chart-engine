@@ -611,9 +611,10 @@ export function sectionGapPx(catFont: number = FACETED_CAT_LABEL_PX): number {
 }
 /** The section gap actually opened in a chart of a given plot height (its height less the top and
  *  bottom margins): `px`, unless the `nBreaks` gaps together would take more than half the plot —
- *  then they share that half equally, so the rows always keep at least half. Only an explicit
- *  height too small for the rows can trigger it: the height models reserve at least as much for the
- *  rows as for the gaps (figure.ts horizontalBarHeight and the figure's busiest pane). */
+ *  then they share that half equally, so the rows always keep at least half. Applied only to a
+ *  HOST-supplied height (assemblePlot skips it under RenderOptions.heightFromModel): a figure's
+ *  sparser pane is sized to its own rows at the busiest pane's row height, so its rows can be
+ *  shorter than its gaps at a height the engine chose. */
 export function fittedSectionGapPx(px: number, nBreaks: number, plotPx: number): number {
   return nBreaks > 0 ? Math.min(px, Math.max(0, plotPx) / (2 * nBreaks)) : px;
 }

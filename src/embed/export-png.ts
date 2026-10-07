@@ -521,6 +521,8 @@ export function buildExportSvg(
     const rendered = renderChart(spec, rows, {
       width: chartW,
       height: plotHeight,
+      // The download takes no host height: a row-sized chart's is horizontalBarChartHeight's.
+      ...(rowSized ? { heightFromModel: true } : {}),
       hooks: opts.hooks,
       phase: "export",
       ...(accentColor ? { accentColor } : {}),

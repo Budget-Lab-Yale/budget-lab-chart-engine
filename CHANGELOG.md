@@ -68,9 +68,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart above
   the 400px height floor is 11px shorter per gap with its rows unchanged; one at the floor keeps its
   height and its rows grow into the space. Charts without sections render byte-identically. The
-  chart's height gives the rows at least as much room as the gaps (a chart of many one-row sections
-  grows to fit); an explicit `renderChart` / `mountChart` height too small for that shrinks the gaps
-  so they take at most half the plot, rather than squeezing the rows to nothing.
+  chart's height (a figure's: its busiest pane's) gives the rows at least as much room as the gaps
+  (a chart of many one-row sections grows to fit). The gaps stay 33px at any height the engine
+  picks, every pane included; only a host's own explicit `renderChart` / `renderFigure` height, or
+  `mountChart` height on a single chart, too small for the rows shrinks them so they take at most
+  half the plot, rather than squeezing the rows to nothing.
 - **Sections: category labels are indented 14px under their section header**, as a table indents
   the rows of a row group, so the bold header reads as a title over its rows. The header stays flush
   left. The left gutter grows by the 14px, so the labels wrap as before. Horizontal bars, stacks and

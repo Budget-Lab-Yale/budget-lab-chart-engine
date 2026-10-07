@@ -341,6 +341,37 @@ describe("section gap: an explicit height too small for the full gaps", () => {
       for (const h of barHeights(p1!)) expect(h).toBeGreaterThan(3);
     });
 
+    it(`small multiples (${mode}), ragged, at auto height: every pane keeps the full gap`, () => {
+      // The review's probe: P1 has 21 rows in S1 and one in each of S2..S10; P2 has 2 rows in S1
+      // and one in each of S2..S10. The engine sizes P2 to its own rows at P1's row height, so P2's
+      // rows are shorter than its 9 gaps; that height is the engine's, so the gaps stay full.
+      const spec: ChartSpec = { ...BAR, columns: { ...BAR.columns, facet: "pane" }, small_multiples: { columns: 1, mode, pane_order: ["P1", "P2"] } };
+      const paneRows = (pane: string, firstSection: number): TidyRow[] => [
+        ...Array.from({ length: firstSection }, (_, i) => ({ pane, cat: `A${i + 1}`, sec: "S1", v: String(1 + (i % 5)) })),
+        ...Array.from({ length: 9 }, (_, i) => ({ pane, cat: `B${i + 2}`, sec: `S${i + 2}`, v: String(1 + (i % 5)) })),
+      ];
+      const rows = [...paneRows("P1", 21), ...paneRows("P2", 2)] as unknown as TidyRow[];
+      const fig = renderFigure(spec, rows, { width: 900, document });
+      const [p1, p2] = fig.panes.map((p) => p.svg as SVGSVGElement);
+      const g1 = gaps(rowCentres(p1!));
+      const g2 = gaps(rowCentres(p2!));
+      expect(rowCentres(p2!)).toHaveLength(11);
+      expect(g1.breaks).toEqual(Array(9).fill(GAP));
+      expect(g2.breaks).toEqual(Array(9).fill(GAP));
+      // Live and export draw the same panes at the same heights, with the same rows.
+      const c = document.createElement("div");
+      document.body.appendChild(c);
+      mountChart(c, { spec, rows, width: INNER_W });
+      const live = Array.from(c.querySelectorAll<SVGSVGElement>(".figure-pane svg")).filter((s) => s.querySelector("g.tbl-cat-label"));
+      const exp = Array.from(buildExportSvg(spec, rows).querySelectorAll<SVGSVGElement>("svg")).filter((s) => s.querySelector("g.tbl-cat-label"));
+      expect(live).toHaveLength(2);
+      expect(exp.map((s) => s.getAttribute("height"))).toEqual(live.map((s) => s.getAttribute("height")));
+      for (const [i, svg] of live.entries()) {
+        expect(gaps(rowCentres(svg)).breaks, `live pane ${i}`).toEqual(Array(9).fill(GAP));
+        expect(rowCentres(exp[i]!), `export pane ${i}`).toEqual(rowCentres(svg));
+      }
+    });
+
     it(`small multiples (${mode}) at auto height keep the full gap, one row per section`, () => {
       const spec: ChartSpec = { ...STACK, columns: { ...STACK.columns, facet: "pane" }, small_multiples: { columns: 2, mode, pane_order: ["P1", "P2"] } };
       const rows = ["P1", "P2"].flatMap((pane) => crampedStack(1).map((r) => ({ ...r, pane }))) as unknown as TidyRow[];

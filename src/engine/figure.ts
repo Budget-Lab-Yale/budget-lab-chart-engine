@@ -626,6 +626,9 @@ export function renderFigure(
     autoHeight = Math.round(hBusy);
   }
   const effHeight = opts.height ?? autoHeight;
+  // Without a host height every pane height below is the engine's own (RenderOptions.heightFromModel),
+  // so a ragged figure's sparser pane keeps the full section gaps.
+  const modelHeight: { heightFromModel?: true } = opts.height == null ? { heightFromModel: true } : {};
 
   // 1. Partition + order panes (see figurePaneValues).
   const paneValues = figurePaneValues(spec, rows, facetField);
@@ -827,6 +830,7 @@ export function renderFigure(
         {
           ...opts,
           height: perPaneHeights ? perPaneHeights[i] : effHeight,
+          ...modelHeight,
           pane: true,
           paneFacetValue: value,
           paletteSeries: figureSeries,
@@ -959,6 +963,7 @@ export function renderFigure(
       {
         ...opts,
         height: effHeight,
+        ...modelHeight,
         pane: true,
         paneFacetValue: value,
         ...(binThresholds ? { binThresholds } : {}),
@@ -1020,6 +1025,7 @@ export function renderFigure(
       {
         ...opts,
         height: perPaneHeights ? perPaneHeights[i] : effHeight,
+        ...modelHeight,
         pane: true,
         paneFacetValue: value,
         paletteSeries: figureSeries,

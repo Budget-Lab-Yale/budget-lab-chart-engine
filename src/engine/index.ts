@@ -59,6 +59,13 @@ export { TOTAL_SERIES_KEY } from "./series-keys";
 export interface RenderOptions {
   width?: number;
   height?: number;
+  /** `height` was chosen by the engine's own height model, not the host: a live mount or PNG export
+   *  at auto height, or a small-multiples figure's auto pane heights. A sectioned chart's gaps then
+   *  stay the full sectionGapPx; only a host-supplied height too small for the rows shrinks them
+   *  (axes.ts fittedSectionGapPx). A figure's sparser pane is sized to its own rows at the busiest
+   *  pane's pitch, so its rows can be shorter than its gaps — the reason this is a flag on the
+   *  height's origin rather than a test on its size. Absent → a given `height` is the host's. */
+  heightFromModel?: boolean;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;
@@ -1307,6 +1314,7 @@ function assemblePaneResult(
     ...(xAxisDomain ? { xAxisDomain } : {}),
     width: opts.width,
     height: opts.height,
+    ...(opts.heightFromModel ? { heightFromModel: true } : {}),
     marginRight: opts.marginRight,
     document: opts.document,
     classNameSuffix,
