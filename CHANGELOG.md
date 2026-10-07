@@ -187,6 +187,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   its own height and the frame grows to hold the legend. As on the page, the plot is centred
   against the taller column with its x-axis title directly under it (the PNG had top-aligned the
   plot and put the title below the legend). Live is unchanged.
+- An `annotations.yAxis` marker (or `yAxisPolicy.markers`) on a horizontal bar, stacked bar or
+  dumbbell (`orientation` omitted included) drew nothing, since the value axis is x there, but still
+  widened the value axis to reach it. `tbl-chart validate` now rejects it and points at
+  `annotations.xAxis`; `renderChart` no longer widens the axis for it. Live and in the PNG.
 
 ### Docs
 - CONFIG-SPEC `tooltip_decimals`: a waterfall's value pill (standalone, or a coordinated
@@ -209,12 +213,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - CONFIG-SPEC `x_labels`: its list of cards that carry the label now includes an uncoordinated `bar`
   or `waterfall` pane, and its test note no longer calls the `coordinated_cursor: false` case a
   default-settings one.
-- CONFIG-SPEC `yAxisPolicy.min`/`max` called them a hard floor and ceiling, and its reversed-axis
-  table said reference markers fold in without moving either pinned bound. On `bar`, `stacked`,
-  `waterfall`, `dumbbell` and `area` a marker above the numeric ceiling (`max`, or `min` reversed)
-  raises it, with one bound pinned or both (bars under `max: 20` with a marker at 40 get [0, 40]).
-  A new note, **Markers beyond a pinned bound**, says which markers count on which types; the rows
-  and the table point to it.
+- CONFIG-SPEC `yAxisPolicy.min`/`max` described them as a hard floor and ceiling with no exception,
+  and its reversed-axis table said reference markers fold in without moving either pinned bound.
+  On `bar`, `stacked`, `waterfall`, `dumbbell` and `area` a marker above the numeric ceiling (`max`,
+  or `min` reversed) raises it, with one bound pinned or both (bars under `max: 20` with a marker at
+  40 get [0, 40]); under `autoWiden` on `line`, `scatter` and `dotplot` a marker or callout past
+  `max` moves it as data does, on a reversed axis too, where `max` is the floor. A new note,
+  **Markers beyond a pinned bound**, says which markers count on which types; the rows keep their
+  "Hard floor/ceiling" wording, now qualified, and they and the table point to the note. The
+  `autoWiden.step` row now says markers and callouts widen `max` too and that `min` is never
+  widened; the reversed-axis table's `autoWiden` row said it extends "whichever end the data
+  overflows", and now says it extends `max` only.
 
 ### Upgrading
 
@@ -302,6 +311,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   figure is affected**: no spec on `main`, on the `pr67-spec-fixes` branch or in its working tree
   resolves to a right legend, and every one exports byte-identical before and after. No golden
   moves.
+- **`annotations.yAxis` (or `yAxisPolicy.markers`) on a horizontal bar, stack or dumbbell now fails
+  `tbl-chart validate`**; move the marker to `annotations.xAxis`. **No published figure is
+  affected**: of the horizontal specs, `main`'s `eta-effect` and `etas` (bars) mark the value axis
+  with `annotations.xAxis`, and the `pr67-spec-fixes` branch's `effective-tax-rates-top-groups`
+  (dumbbell) and two `revenue-by-tax` stacks, committed and in its working tree, have no
+  annotations. No golden moves.
 
 ## [1.15.0] - 2026-10-01
 

@@ -12,7 +12,7 @@ import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY, categoryOrderFor } from
 import type { ResolvedColumns } from "../spec/columns";
 import { resolveAnnotations, filterAnnotationsByFacet } from "../spec/annotations";
 import { ownValue } from "../spec/own-key";
-import { isHorizontalDumbbell } from "../spec/dumbbell-orientation";
+import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import type { TidyRow } from "../data/index";
 import { tblColorScale, resolveColor } from "./palette";
 import {
@@ -800,11 +800,14 @@ function assemblePaneResult(
     ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),
     ...(xExtent ? { xDomain: xExtent } : {}),
   });
+  // annotations.yAxis markers on a chart whose value axis is x draw nothing (they sit on the
+  // categorical y scale), so they reach no value domain (Ruling 78; validation rejects them).
+  const yAxisMarkerYs = valueAxisIsX(spec) ? [] : ann.yAxis.map((m) => m.y);
   const yForAxis: Array<number | null | undefined> = [
     ...dataInScope.map((d) => d._y),
     ...dataInScope.map((d) => d._lo).filter(Number.isFinite),
     ...dataInScope.map((d) => d._hi).filter(Number.isFinite),
-    ...ann.yAxis.map((m) => m.y),
+    ...yAxisMarkerYs,
     ...resolvedPoints.map((p) => p.y).filter((v): v is number => Number.isFinite(v as number)),
     // See overlayColumnYs above for why a `column` overlay folds in and the constructed kinds do not.
     ...overlayColumnYs,
@@ -836,12 +839,9 @@ function assemblePaneResult(
 
   // Value-axis reference markers, for the branches that fold them in so a marker stays visible.
   // The value axis is x on a horizontal chart, so annotations.xAxis plays the yAxis role there
-  // (see assemblePlot's horizontal xAxis marker path).
+  // (see assemblePlot's horizontal xAxis marker path), and annotations.yAxis plays none.
   const valueAxisMarkers = (): number[] =>
-    [
-      ...ann.yAxis.map((m) => m.y),
-      ...(spec.orientation === "horizontal" || isHorizontalDumbbell(spec) ? ann.xAxis.map((m) => Number(m.x)) : []),
-    ].filter(Number.isFinite);
+    [...yAxisMarkerYs, ...(valueAxisIsX(spec) ? ann.xAxis.map((m) => Number(m.x)) : [])].filter(Number.isFinite);
 
   if (chartType === "bar" || chartType === "stacked") {
     // Bar/stacked: zero baseline by default (axis extent from stacked totals + value-label

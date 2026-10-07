@@ -108,7 +108,8 @@ export function horizontalBarHeight(opts: {
  *  dumbbell (orientation omitted included). The one predicate the live mount (computeChartHeight),
  *  the small-multiples pane height (figurePaneHeight) and the PNG export (buildExportSvg) all ask,
  *  so the three cannot drift apart again. Not the left-gutter/title topology (export-png's
- *  `isHorizontalBarFig`, which excludes dumbbell) nor validate's sections rule (bar only). */
+ *  `isHorizontalBarFig`, which excludes dumbbell) nor validate's sections rule (a horizontal bar or
+ *  dumbbell; a stack takes no sections). */
 export function growsWithRows(spec: ChartSpec): boolean {
   return (
     ((spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal") ||

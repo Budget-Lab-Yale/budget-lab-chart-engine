@@ -532,8 +532,11 @@ describe("CONFIG-SPEC: a reference marker beyond a pinned ceiling (F13 fix 4)", 
 
   it("on bar, stacked, waterfall, dumbbell and area a marker above max raises the ceiling to it", () => {
     for (const type of FOLDING) {
+      // A yAxis marker counts on a vertical chart only (Ruling 78), and a dumbbell is horizontal
+      // unless it says otherwise; the horizontal case is the xAxis test below.
+      const vertical = type === "dumbbell" ? { orientation: "vertical" } : {};
       for (const yAxisPolicy of [{ max: 40 }, { min: 0, max: 40 }]) {
-        expect(domainBounds(domain(CASES[type]!, { yAxisPolicy, ...marker(60) }))[1], type).toBe(60);
+        expect(domainBounds(domain(CASES[type]!, { yAxisPolicy, ...vertical, ...marker(60) }))[1], type).toBe(60);
       }
     }
   });
@@ -577,6 +580,153 @@ describe("CONFIG-SPEC: a reference marker beyond a pinned ceiling (F13 fix 4)", 
     expect(domain(CASES.bar!, { yAxisPolicy: { min: 40, max: 0 }, ...marker(-10) })).toEqual([40, 0]);
     const callout = { annotations: { points: [{ x: 2021, y: 60, label: "c" }] } };
     expect(domain(CASES.area!, { yAxisPolicy: { min: 40, max: 0 }, ...callout })).toEqual([60, 0]);
+  });
+});
+
+// CONFIG-SPEC "Markers beyond a pinned bound", the `max`/`autoWiden.step` rows and the reversed-axis
+// table: `autoWiden` rounds `max` out over everything the axis fits (yForAxis), markers and callouts
+// included, so on line, scatter and dot plot a marker past `max` moves it. `min` never widens.
+describe("CONFIG-SPEC: under autoWiden a marker past max moves it (F13 fix 5)", () => {
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterAll(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+  });
+
+  const WIDENING = ["line", "scatter", "dotplot"];
+  // A callout x on each case's own axis.
+  const CALLOUT_X: Record<string, string | number> = { line: 2021, scatter: 2, dotplot: "b" };
+  const withAnn = (type: string, yAxisPolicy: Record<string, unknown>, annotations: Record<string, unknown>) =>
+    ({ ...CASES[type]!.spec, yAxisPolicy, annotations }) as unknown as ChartSpec;
+  /** [first, last] drawn y-tick values, lowest first: live (renderChart) and the PNG (buildExportSvg). */
+  const drawn = (spec: ChartSpec, rows: TidyRow[]) => {
+    const ends = (svg: Element): [number, number] => {
+      const v = Array.from(svg.querySelectorAll("g.tbl-y-tick-label text"))
+        .map((t) => parseFloat((t.textContent ?? "").replace(/[^0-9.-]/g, "")))
+        .sort((a, b) => a - b);
+      return [v[0]!, v[v.length - 1]!];
+    };
+    return { live: ends(renderChart(spec, rows, OPTS).svg), png: ends(buildExportSvg(spec, rows)) };
+  };
+  const ASC = { min: 0, max: 40, autoWiden: { step: 10 } };
+  const REV = { min: 40, max: 0, autoWiden: { step: 10 } };
+
+  it("ascending: min 0 max 40 step 10 with a marker at 60 gets [0, 60], live and in the PNG", () => {
+    for (const type of WIDENING) {
+      const spec = withAnn(type, ASC, { yAxis: [{ y: 60, label: "m" }] });
+      expect(renderPane(spec, CASES[type]!.rows, OPTS).yDomain, type).toEqual([0, 60]);
+      expect(drawn(spec, CASES[type]!.rows), type).toEqual({ live: [0, 60], png: [0, 60] });
+    }
+  });
+
+  it("reversed: min 40 max 0 step 10 with a marker at -20 gets [40, -20], live and in the PNG", () => {
+    for (const type of WIDENING) {
+      const spec = withAnn(type, REV, { yAxis: [{ y: -20, label: "m" }] });
+      expect(renderPane(spec, CASES[type]!.rows, OPTS).yDomain, type).toEqual([40, -20]);
+      expect(drawn(spec, CASES[type]!.rows), type).toEqual({ live: [-20, 40], png: [-20, 40] });
+    }
+  });
+
+  it("a callout past max moves it the same way", () => {
+    for (const type of WIDENING) {
+      const asc = withAnn(type, ASC, { points: [{ x: CALLOUT_X[type], y: 60, label: "c" }] });
+      expect(renderPane(asc, CASES[type]!.rows, OPTS).yDomain, type).toEqual([0, 60]);
+      const rev = withAnn(type, REV, { points: [{ x: CALLOUT_X[type], y: -20, label: "c" }] });
+      expect(renderPane(rev, CASES[type]!.rows, OPTS).yDomain, type).toEqual([40, -20]);
+    }
+  });
+
+  it("min never moves for a marker, data or callout, with autoWiden or without", () => {
+    for (const type of WIDENING) {
+      // Ascending: a marker below min 10 leaves the floor at 10.
+      const asc = withAnn(type, { min: 10, max: 40, autoWiden: { step: 10 } }, { yAxis: [{ y: -20, label: "m" }] });
+      expect(domainBounds(renderPane(asc, CASES[type]!.rows, OPTS).yDomain)[0], type).toBe(10);
+      // Reversed: a marker above min 40 (the numeric ceiling) leaves it at 40...
+      const rev = withAnn(type, REV, { yAxis: [{ y: 60, label: "m" }] });
+      expect(renderPane(rev, CASES[type]!.rows, OPTS).yDomain, type).toEqual([40, 0]);
+      // ...and so does data above it: autoWiden extends `max` only.
+      const revData = withAnn(type, { min: 20, max: 0, autoWiden: { step: 10 } }, {});
+      expect(renderPane(revData, CASES[type]!.rows, OPTS).yDomain, type).toEqual([20, 0]);
+    }
+  });
+
+  it("on a reversed axis no other setting lets a marker move max, the numeric floor, on any type", () => {
+    for (const [type, c] of Object.entries(CASES)) {
+      const rev = { ...c.spec, yAxisPolicy: { min: 40, max: 0 }, annotations: { yAxis: [{ y: -20, label: "m" }] } };
+      expect(renderPane(rev as unknown as ChartSpec, c.rows, OPTS).yDomain, type).toEqual([40, 0]);
+    }
+  });
+
+  it("without autoWiden the same markers leave both pinned ends where they are", () => {
+    for (const type of WIDENING) {
+      const asc = withAnn(type, { min: 0, max: 40 }, { yAxis: [{ y: 60, label: "m" }] });
+      expect(renderPane(asc, CASES[type]!.rows, OPTS).yDomain, type).toEqual([0, 40]);
+      const rev = withAnn(type, { min: 40, max: 0 }, { yAxis: [{ y: -20, label: "m" }] });
+      expect(renderPane(rev, CASES[type]!.rows, OPTS).yDomain, type).toEqual([40, 0]);
+    }
+  });
+});
+
+// CONFIG-SPEC "Truncating the axis below the data": every chart type clips its marks to the frame.
+// A shared vertical dumbbell whose pane A (dots 93, 99) takes the lone-max fallback, beside a pane
+// whose marker raised the figure's ceiling to 500, gets a shared floor of 100 (the pre-fallback
+// domain is reversed, so nice rounds its union-side end inward). Pane A's dots fall below that
+// floor; they and their connector are clipped to the frame, live and in the PNG.
+describe("a shared dumbbell pane's dots below the figure's floor are clipped (F13 fix 5)", () => {
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterAll(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+  });
+
+  const spec = {
+    ...CASES.dumbbell!.spec,
+    orientation: "vertical",
+    columns: { category: "c", value: "v", series: "s", facet: "f" },
+    yAxisPolicy: { max: -10 },
+    small_multiples: { columns: 2, mode: "shared" },
+    annotations: { yAxis: [{ y: 500, label: "m", facet: "B" }] },
+  } as unknown as ChartSpec;
+  const rows = [
+    r({ f: "A", c: "a", s: "A", v: 93 }), r({ f: "A", c: "a", s: "B", v: 99 }),
+    r({ f: "B", c: "a", s: "A", v: 200 }), r({ f: "B", c: "a", s: "B", v: 300 }),
+  ];
+  /** Every pane-A mark: its own y, and the bottom of the clip rect it sits under (NaN if none). */
+  const clipped = (svg: Element, selector: string, yAttr: string) =>
+    Array.from(svg.querySelectorAll(selector)).map((el) => {
+      const id = /url\(#([^)]+)\)/.exec(el.closest("[clip-path]")?.getAttribute("clip-path") ?? "")?.[1];
+      const rect = id ? svg.querySelector(`clipPath[id="${id}"] rect`) : null;
+      const bottom = rect ? parseFloat(rect.getAttribute("y")!) + parseFloat(rect.getAttribute("height")!) : NaN;
+      return { y: parseFloat(el.getAttribute(yAttr) ?? "NaN"), bottom };
+    });
+  const expectClippedBelowFloor = (paneA: Element) => {
+    const dots = clipped(paneA, "circle", "cy");
+    expect(dots).toHaveLength(2);
+    // Both dots lie below the frame's bottom edge, and under a clip rect that ends there.
+    for (const d of dots) expect(d.y).toBeGreaterThan(d.bottom);
+    const connectors = clipped(paneA, "g.tbl-dumbbell-connector line", "y1");
+    expect(connectors).toHaveLength(1);
+    expect(Number.isFinite(connectors[0]!.bottom)).toBe(true);
+  };
+
+  it("live", () => {
+    const fig = renderFigure(spec, rows, OPTS);
+    const ticks = ascendingTicks(fig.panes[0]!.svg!);
+    expect([ticks[0], ticks[ticks.length - 1]]).toEqual([100, 500]);
+    expectClippedBelowFloor(fig.panes[0]!.svg!);
+  });
+
+  it("in the PNG", () => {
+    // Pane B's marks are inside its frame and so unclipped: the clipped ones are pane A's.
+    const png = buildExportSvg(spec, rows);
+    const dots = clipped(png, "circle", "cy").filter((d) => Number.isFinite(d.bottom));
+    expect(dots).toHaveLength(2);
+    for (const d of dots) expect(d.y).toBeGreaterThan(d.bottom);
+    expect(clipped(png, "g.tbl-dumbbell-connector line", "y1").filter((d) => Number.isFinite(d.bottom))).toHaveLength(1);
   });
 });
 

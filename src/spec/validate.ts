@@ -14,7 +14,7 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 // Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
-import { isHorizontalDumbbell } from "./dumbbell-orientation";
+import { isHorizontalDumbbell, valueAxisIsX } from "./dumbbell-orientation";
 import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
@@ -286,6 +286,19 @@ function sectionColumnError(spec: {
     );
   }
   return null;
+}
+
+/** Ruling 78: on a horizontal bar, stack or dumbbell the value axis is x, so a value-axis reference
+ *  line is an `annotations.xAxis` marker. An `annotations.yAxis` one (or the legacy
+ *  `yAxisPolicy.markers`, which `resolveAnnotations` reads in its place) would sit on the categorical
+ *  y scale and draw nothing. Named by the block the author wrote. */
+function horizontalYAxisMarkerError(spec: ChartSpec): string | null {
+  if (!valueAxisIsX(spec) || resolveAnnotations(spec).yAxis.length === 0) return null;
+  const at = spec.annotations?.yAxis ? "annotations.yAxis" : "yAxisPolicy.markers";
+  return (
+    `${at} draws nothing on a horizontal ${JSON.stringify(spec.chartType)} chart: its value axis runs ` +
+    `along x, so a value-axis reference line goes in annotations.xAxis (with x set to the value)`
+  );
 }
 
 /** `x_axis_ticks` (top/both value-axis tick row) only has an effect on a HORIZONTAL bar/stacked
@@ -915,6 +928,8 @@ export function validateSpec(spec: unknown): ValidationResult {
     spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
   );
   if (secErr) return { valid: false, errors: [secErr] };
+  const hymErr = horizontalYAxisMarkerError(spec as ChartSpec);
+  if (hymErr) return { valid: false, errors: [hymErr] };
   const ticksErr = xAxisTicksOrientationError(
     spec as { x_axis_ticks?: unknown; chartType?: unknown; orientation?: unknown },
   );
