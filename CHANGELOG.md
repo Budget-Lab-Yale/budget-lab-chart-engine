@@ -65,9 +65,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   slots, so it grew with the row height: 114-120px
   centre to centre at a 38-40px row pitch. The bottom of each section header's line sits 10px above
   its first row (was 15px), and the top margin of a sectioned chart shrinks to match (38 to 33px).
-  The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart above
-  the 400px height floor is 11px shorter per gap with its rows unchanged; one at the floor keeps its
-  height and its rows grow into the space. Charts without sections render byte-identically. The
+  The chart's height counts each gap at 33px rather than two 22px rows, so a sectioned chart of
+  400px or more is 11px shorter per gap with its rows unchanged; a shorter one is sized to its rows
+  (see the 400px entry below). Charts without sections render byte-identically. The
   chart's height (a figure's: its busiest pane's) gives the rows at least as much room as the gaps
   (a chart of many one-row sections grows to fit). The gaps stay 33px at any height the engine
   picks, every pane included; only a host's own explicit `renderChart` / `renderFigure` height, or
@@ -101,6 +101,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   renders as the list without it, live and in the PNG. Before, the marks took the first entry while
   the legend, key rows, hover markers, colours and a horizontal bar's height counted the repeat, so
   they disagreed.
+- **Horizontal bars, stacks and dumbbells are no longer stretched to 400px.** A chart whose height
+  grows with its rows was floored at 400px, so a 3-row chart's rows sat over 100px apart, and in
+  small multiples every pane took the busiest pane's stretched pitch. Below 400px the height is now
+  the chart's margins, its section gaps, and its rows one slot apart (22px per bar, or the wrapped
+  label's height if taller): a 3-row horizontal bar chart is 107px tall, its rows 22px apart. A
+  chart whose height came to 400px or more keeps it, byte for byte. Small-multiples panes all take
+  the busiest pane's row pitch and are each as tall as their own rows need; before, a sparser pane
+  spread the height model's spare px over its own fewer rows, so its rows sat 2-3px further apart (25px
+  against 23px). Plot can leave the pitch of a pane of more than 30 rows fractional, and a shorter
+  pane then matches it to the nearest whole px. Live, the PNG export and small multiples agree. An
+  unsectioned horizontal dumbbell's bottom margin is now one value-tick row (22px) at any label
+  length; it was the vertical chart's category-label margin, which grew to 36px or 120px with long
+  labels the horizontal chart never draws there.
 
 ### Fixed
 - `barStack.netDisplay: text` printed a negative net as its magnitude ("15" for -15), so a stack
@@ -322,14 +335,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `main`), and `effective-tax-rates-top-groups` on the unmerged PR #67 branch (sectioned horizontal
   dumbbell). Their sections close up from two row heights to 33px and the headers move 5px closer
   to their first rows, on screen and in the PNG. `etas` and `eta-effect` come out 11px shorter (one
-  break each); the PR #67 dumbbell sits at the 400px floor, so it keeps its height and its rows
-  grow. In all three the category labels move 14px right under their headers and the plot area
+  break each); the PR #67 dumbbell is under 400px, so it is sized to its rows (next entry). In all
+  three the category labels move 14px right under their headers and the plot area
   narrows by 14px to make room. Found by reading every `chart.yaml` on `main` and on the PR #67 branch for
   `columns.section`; no other spec sets it. Sectioned goldens were re-recorded for this change
   (approved): `bar-sectioned-single`, `figure7-tariff-sectioned`, `figure10-shape-sectioned-single`,
   `dumbbell-sectioned`, `stacked-sectioned`, `stacked-sectioned-net-dot`,
   `stacked-sectioned-net-text`, `figure-hstacked-sectioned`; the same eight again for the
   label indent (approved).
+- **Horizontal charts under 400px are sized to their rows.** One archived figure moves:
+  `effective-tax-rates-top-groups` on the unmerged PR #67 branch (a 7-row sectioned dumbbell) goes
+  from 400px to 243px on screen and its PNG from 614px to 457px, its rows 22px apart instead of
+  stretched. `etas` and `eta-effect` on `main`, and PR #67's `revenue-by-tax-step-up` (422px) and
+  `revenue-by-tax-deemed-realization` (536px), are 400px or more and render byte-identically, live
+  and in the PNG. Found by reading every `chart.yaml` on `main` and in the PR #67 working tree for a
+  horizontal `bar` or `stacked` chart or a `dumbbell`; no other spec is one, and none is faceted, so
+  the small-multiples pitch change reaches no published figure. The dumbbell bottom-margin change
+  reaches none either: the archive's only dumbbell is sectioned. Goldens re-recorded because they
+  were floored at 400px (approved): `dumbbell-sectioned`, `figure-hstacked-shared`,
+  `figure-hstacked-sectioned`.
 - **Hover: horizontal card-hover stacks and horizontal dumbbells shade under the label and bold it.**
   Live only. Of the archive, only the PR #67 dumbbell above hovers differently; the stacks on `main`
   (ai-fiscal `revenue-by-income-type`, `revenue-by-instrument`) are vertical.

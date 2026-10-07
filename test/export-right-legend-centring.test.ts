@@ -57,7 +57,8 @@ const DUMBBELL = {
   note: "n",
   data: "d.csv",
 } as unknown as ChartSpec;
-const DUMBBELL_ROWS = Array.from({ length: 7 }, (_, i) => [
+// 16 rows, so the plot (past 400px) stays taller than the two-row legend column in a real browser.
+const DUMBBELL_ROWS = Array.from({ length: 16 }, (_, i) => [
   { c: `Group ${i + 1}`, m: LONG_A, v: String(20 + i) },
   { c: `Group ${i + 1}`, m: LONG_B, v: String(8 + i) },
 ]).flat() as unknown as TidyRow[];

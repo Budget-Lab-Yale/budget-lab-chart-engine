@@ -234,7 +234,7 @@ const FIXED_CHART_HEIGHT = 400;
  *  band slots (grouped → nSeries bars per category; stacked/single → one), plus the fixed section
  *  gaps and taller rows for wrapped labels — via the shared engine helper `horizontalBarChartHeight`,
  *  so the single-chart and faceted-figure heights agree. Vertical / non-bar charts return the
- *  fixed default; the helper floors short horizontals at it too. */
+ *  fixed default; a horizontal chart with few rows is shorter than it. */
 export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
   // Timeline height is content-derived (label rows, or the stacked vertical column); renderChart
   // computes it again at the real width, so this is only the pre-draw estimate.

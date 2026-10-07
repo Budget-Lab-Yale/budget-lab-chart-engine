@@ -37,7 +37,7 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
-import { categoryBand, fyCategoryBandLayer, bandGutter } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING } from "./category-band";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
@@ -453,7 +453,7 @@ export function buildStackedMarks(
           }),
         }
       : {
-          yScaleOpts: { type: "band", domain: categories, padding: 0.2, axis: null },
+          yScaleOpts: { type: "band", domain: categories, padding: HSTACK_BAND_PADDING, axis: null },
           xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
           marginLeft: gutter,
           // The value axis is at the bottom: a horizontal bar's margins, not the vertical category margin.

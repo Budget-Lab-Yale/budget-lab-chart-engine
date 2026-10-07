@@ -225,12 +225,12 @@ describe("computeChartHeight", () => {
     expect(computeChartHeight(spec, catRows(["A", "B"], ["S"]))).toBe(400);
   });
 
-  it("floors short horizontal charts at the fixed default", () => {
+  it("sizes a short horizontal chart to its rows, below the vertical default", () => {
     const spec: ChartSpec = {
       chartType: "bar", title: "h", xAxisType: "categorical", orientation: "horizontal", data: "x",
     };
-    // 3 rows would be ~182px, below the 400 floor.
-    expect(computeChartHeight(spec, catRows(["A", "B", "C"], ["S"]))).toBe(400);
+    // Margins 18 + 26, and 3 rows one 22px slot apart: ceil(22 × (3 − 0.2 + 0.04)).
+    expect(computeChartHeight(spec, catRows(["A", "B", "C"], ["S"]))).toBe(44 + 63);
   });
 
   it("grows a grouped horizontal chart with categories x series", () => {

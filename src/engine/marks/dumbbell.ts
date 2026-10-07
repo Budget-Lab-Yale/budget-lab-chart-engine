@@ -25,7 +25,7 @@ import {
 } from "../axes";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import { markerInk, type MarkerInk, type MarkerStyle } from "../marker-ink";
-import { bandGutter } from "./category-band";
+import { bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, HDUMBBELL_BAND_PADDING, HDUMBBELL_MARGIN_BOTTOM } from "./category-band";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -291,7 +291,7 @@ export function buildDumbbellMarks(
         ],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
-        fyScaleOpts: { domain: bandDomain, paddingInner: 0.2, paddingOuter: 0.02, align: 0, axis: null },
+        fyScaleOpts: { domain: bandDomain, paddingInner: HBAND_PADDING_INNER, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
         ...(sectionHeaders.length
           ? { sectionGaps: { before: sectionHeaders.map((h) => h.category), px: sectionGapPx(catFont) } }
           : {}),
@@ -320,9 +320,12 @@ export function buildDumbbellMarks(
           : [{ selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories }]),
       ],
       dashedNames: new Set<string>(),
-      yScaleOpts: { type: "band", domain: bandDomain, padding: 0.4, axis: null },
+      yScaleOpts: { type: "band", domain: bandDomain, padding: HDUMBBELL_BAND_PADDING, axis: null },
       xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),
       marginLeft: gutter,
+      // One value-tick row. Left to the categorical x adapter, this was the VERTICAL category-label
+      // margin, which grows to fit wrapped or rotated labels the horizontal chart never draws there.
+      marginBottom: HDUMBBELL_MARGIN_BOTTOM,
       seriesColors,
     };
   }

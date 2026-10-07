@@ -15,12 +15,51 @@ import {
   horizontalValueAxisMargins,
   horizontalLeftGutter,
   SECTION_LABEL_INDENT,
+  FACETED_CAT_LABEL_PX,
 } from "../axes";
+import { TBL_MARGIN_TOP } from "../theme";
 import type { MarkLayers, PreparedRow } from "./index";
 
 // Outer padding fraction for the horizontal category band, with `align: 0` so the (small) outer
 // pad goes to the BOTTOM only — the first bar then sits flush at marginTop (no empty band above it).
 export const HBAND_PADDING_OUTER = 0.02;
+/** Inner padding fraction between the rows of that band. */
+export const HBAND_PADDING_INNER = 0.2;
+/** Band padding (inner and outer) of an unsectioned horizontal stack's category band. */
+export const HSTACK_BAND_PADDING = 0.2;
+/** Band padding (inner and outer) of an unsectioned horizontal dumbbell's category band. */
+export const HDUMBBELL_BAND_PADDING = 0.4;
+/** Bottom margin of an unsectioned horizontal dumbbell: one value-tick row. */
+export const HDUMBBELL_MARGIN_BOTTOM = 22;
+
+/** The vertical geometry of a horizontal bar, stack or dumbbell's row band as its builder draws it
+ *  (bar.ts, stacked.ts, dumbbell.ts, and fyCategoryBandLayer below), for the height model
+ *  (figure.ts). `margins` is the top plus bottom margin; `inner` and `outer` the band's padding
+ *  fractions. Over n rows drawn in rowsPx, Plot's band step is rowsPx / max(1, n − inner + 2·outer),
+ *  rounded down to whole px when that wastes at most 30px in all (its autoScaleRound). */
+export function rowBandGeometry(
+  chartType: ChartSpec["chartType"],
+  xAxisTicks: ChartSpec["x_axis_ticks"],
+  sectioned: boolean,
+): { margins: number; inner: number; outer: number } {
+  const rows = { inner: HBAND_PADDING_INNER, outer: HBAND_PADDING_OUTER };
+  if (sectioned) {
+    // Every sectioned chart puts its rows on fy, with the first section's header in the top margin.
+    const m = horizontalValueAxisMargins(chartType === "dumbbell" ? undefined : xAxisTicks, {
+      sectioned: true,
+      topHeaderLift: sectionHeaderLift(FACETED_CAT_LABEL_PX),
+    });
+    return { margins: m.marginTop + m.marginBottom, ...rows };
+  }
+  if (chartType === "dumbbell") {
+    return { margins: TBL_MARGIN_TOP + HDUMBBELL_MARGIN_BOTTOM, inner: HDUMBBELL_BAND_PADDING, outer: HDUMBBELL_BAND_PADDING };
+  }
+  const m = horizontalValueAxisMargins(xAxisTicks);
+  return {
+    margins: m.marginTop + m.marginBottom,
+    ...(chartType === "stacked" ? { inner: HSTACK_BAND_PADDING, outer: HSTACK_BAND_PADDING } : rows),
+  };
+}
 
 type Header = { category: string; label: string };
 
@@ -111,7 +150,7 @@ export function fyCategoryBandLayer(
   const lift = sectionHeaderLift(catFont);
   return {
     // Declaration order; never auto-sort (Style-Guide §9). No axis: labelled by the marks below.
-    fyScaleOpts: { domain: band.bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
+    fyScaleOpts: { domain: band.bandDomain, paddingInner: HBAND_PADDING_INNER, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
     xAxisMarks: hideLabels
       ? []
       : [

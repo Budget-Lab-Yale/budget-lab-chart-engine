@@ -26,7 +26,7 @@ import {
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER } from "./category-band";
 import { SHARED_LABELLESS_MARGIN_LEFT } from "../theme";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
@@ -248,7 +248,7 @@ export function buildBarMarks(
         overlay,
         tagging: [{ selector: 'g[aria-label="bar"] rect', seriesOrder, fill: true }, ...catLabelTagging],
         dashedNames: new Set<string>(),
-        yScaleOpts: { type: "band", domain: bandDomain, paddingInner: 0.2, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
+        yScaleOpts: { type: "band", domain: bandDomain, paddingInner: HBAND_PADDING_INNER, paddingOuter: HBAND_PADDING_OUTER, align: 0, axis: null },
         // This is the NON-sectioned single-series horizontal path (sectioned routes to fy above),
         // so there are no section headers to place here — just the plain category labels.
         xAxisMarks: ctx.hideCategoryLabels ? [] : tblBandYAxis(categories, gutter, catFont),

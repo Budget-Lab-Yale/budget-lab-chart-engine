@@ -216,8 +216,9 @@ describe("section gap: small multiples", () => {
 
   it("every pane has the fixed gap, at two pitches, and the panes' rows line up", () => {
     const pitches: number[] = [];
-    for (const n of [6, 36]) {
-      const fig = renderFigure(FIG, figRows(n), { width: 900, document });
+    // 6 rows at a host's 400px (roomy rows, as the old 400px floor drew them), 36 at the model's.
+    for (const [n, height] of [[6, 400], [36, undefined]] as const) {
+      const fig = renderFigure(FIG, figRows(n), { width: 900, document, ...(height ? { height } : {}) });
       const [p0, p1] = fig.panes.map((p) => p.svg as SVGSVGElement);
       const g0 = gaps(barCentres(p0!));
       pitches.push(g0.pitch);
