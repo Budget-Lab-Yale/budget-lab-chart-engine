@@ -4,12 +4,15 @@
 // from the embedded font (timeline-metrics.ts; scripts/gen-timeline-metrics.mjs), so it is as
 // deterministic as the estimate — no DOM, canvas or getBBox — and the live mount, the PNG export
 // and the jsdom goldens still agree. Kerning is ignored, so the sum is not an upper bound: against
-// Chromium's rendering (getComputedTextLength, the embedded Figtree), 95,108 drawn lines of vertical
-// timelines at 280–440px ran from 1.5% narrower than it (kerned pairs tighten) to 0.23% wider, never
-// more than 0.05px wider (round-3 final fix probe). Text with a character outside the table
-// (Latin-1 plus common punctuation) is measured by grapheme (`graphemes`): a multi-code-point
-// emoji is one unit, one EMOJI_EM per emoji part (graphemesEm). Any other grapheme sums its code
-// points, each by class:
+// Chromium's rendering on Windows (getComputedTextLength, the embedded Figtree, glyphs positioned at
+// sub-pixel advances), 95,108 drawn lines of vertical timelines at 280–440px ran from 1.5% narrower
+// than it (kerned pairs tighten) to 0.23% wider, never more than 0.05px wider (round-3 final fix
+// probe). Chromium on Linux at device scale 1, as in the CI Playwright image, rounds each glyph's
+// advance to a whole pixel, so there a line runs up to half a pixel per glyph wider than the sum
+// ("2022" in 13px bold draws 32px against 31.005; test/text-scripts-frame-chrome.test.ts). Text
+// with a character outside the table (Latin-1 plus common punctuation) is measured by grapheme
+// (`graphemes`): a multi-code-point emoji is one unit, one EMOJI_EM per emoji part (graphemesEm).
+// Any other grapheme sums its code points, each by class:
 //   - EMOJI_EM (1.4em): astral (emoji, supplementary CJK) and the BMP emoji/symbol blocks in
 //     EMOJI_RANGES — at least what Chromium's fallback fonts draw (😀 1.37em, ✅ ⭐ ☀ ~1.3em);
 //   - WIDE_EM (1em): BMP East Asian Wide/Fullwidth (WIDE_RANGES) — Chromium draws those an em wide;
@@ -19,8 +22,9 @@
 //   - SCRIPT_EM: any other character of a script Figtree lacks (SCRIPT_RANGES) — Unifont's em, not
 //     the widest any font draws (Ruling 52);
 //   - FIGTREE_FALLBACK (the Latin letter mean): everything else (Latin Extended, symbols).
-// So a line wrapped to a column renders inside it, to within that fraction of a pixel, for the
-// table's characters and the two wide classes (Rulings 48, 49); and Cyrillic and Greek, in the fonts
+// So a line wrapped to a column renders inside it, to within that fraction of a pixel (where glyph
+// advances are rounded to whole pixels, to within that rounding), for the table's characters and
+// the two wide classes (Rulings 48, 49); and Cyrillic and Greek, in the fonts
 // measured (macOS fonts were not), short only where kerning tightens a pair; at 500 the table also
 // covers Segoe UI's semibold face, which Chromium on Windows draws there (Ruling 57). Text in another
 // script runs past its column where the reader's font draws it wider than SCRIPT_EM, as Windows does
