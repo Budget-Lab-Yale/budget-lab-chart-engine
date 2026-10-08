@@ -2,7 +2,7 @@
 // The document argument lets callers pass any DOM (browser or jsdom) without importing globals.
 import type { TableModel, BodyRow, RowGroup } from "./model";
 import type { TableLayout } from "./layout";
-import { INDENT_STEP } from "./layout";
+import { INDENT_STEP, columnAlignOf } from "./layout";
 
 // Base left padding on stub cells, matching the CSS `.tbl-table tbody th` padding and the SVG
 // renderer's PAD_X — so the corner, group headers, and row labels share one left edge.
@@ -99,6 +99,9 @@ export function renderTableHtml(
       // A leaf header over a text column left-aligns to match its (left-aligned) cells.
       const leafForCell = hCell.leafKey != null ? leaves.find((l) => l.key === hCell.leafKey) : undefined;
       if (leafForCell?.isText) th.classList.add("is-text");
+      // column_align: the leaf header follows its column's cells.
+      const headAlign = leafForCell ? columnAlignOf(spec, leafForCell.lastValue) : undefined;
+      if (headAlign) th.classList.add(`is-align-${headAlign}`);
 
       // Banner cells (spanning >1 column) get flanking rules. The flex layout that draws the
       // rules MUST live on an inner wrapper, not the <th> itself — `display:flex` on a table
@@ -242,6 +245,8 @@ export function renderTableHtml(
         // column_wrap: force this column's body cells to wrap within their fixed width (is-wrap
         // mirrors the stub's .is-wrap). Harmless on is-text cells (already wrapping).
         if (colWrapEnabled(leaves[i]!.lastValue)) td.classList.add("is-wrap");
+        const align = columnAlignOf(spec, leaves[i]!.lastValue);
+        if (align) td.classList.add(`is-align-${align}`);
         td.setAttribute("data-col", leaves[i]!.key);
 
         // Sign class

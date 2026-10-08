@@ -17,6 +17,8 @@ const FORMAT_RULE = {
   },
 } as const;
 
+const COLUMN_ALIGN = { type: "string", enum: ["left", "center", "right"] } as const;
+
 const STUB_ITEM = {
   anyOf: [
     { type: "string" },
@@ -114,6 +116,12 @@ export const TABLE_SPEC_SCHEMA = {
       anyOf: [
         { type: "boolean" },
         { type: "object", additionalProperties: { type: "boolean" } },
+      ],
+    },
+    column_align: {
+      anyOf: [
+        COLUMN_ALIGN,
+        { type: "object", additionalProperties: COLUMN_ALIGN },
       ],
     },
     header_max_lines: { type: "number" },

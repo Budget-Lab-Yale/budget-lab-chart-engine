@@ -871,6 +871,12 @@ td.is-wrap {
   overflow-wrap: break-word;
 }
 
+/* column_align: an author-set alignment for a data column's cells and its leaf header, whatever the
+   cell type. Specificity (0,2,2) beats td.is-num / td.is-text and, by source order, th.is-text. */
+.tbl-table tbody td.is-align-left, .tbl-table thead th.is-align-left { text-align: left; }
+.tbl-table tbody td.is-align-center, .tbl-table thead th.is-align-center { text-align: center; }
+.tbl-table tbody td.is-align-right, .tbl-table thead th.is-align-right { text-align: right; }
+
 /* Stub (row label) cells: left-aligned. */
 th.tbl-table-stub {
   text-align: left;

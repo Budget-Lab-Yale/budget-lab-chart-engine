@@ -161,6 +161,99 @@ export function splitBreaks(s: string): string[] {
   return segs;
 }
 
+/** Whitespace a wrapped line may break at: any whitespace EXCEPT the no-break space (U+00A0), which
+ *  the browser never breaks at either — so the layout's wrap points match the live table's. */
+const WORD_SEP = /[^\S\u00a0]+/;
+
+/** True when some math region (`\( … \)`, `\[ … \]`, `$$ … $$`) contains whitespace — the only case in
+ *  which splitting the raw source at spaces would cut a delimiter pair in half. */
+function mathHasSpace(s: string): boolean {
+  if (!hasMath(s)) return false;
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "\\" && s[i + 1] === "\\") { i += 2; continue; }
+    const opener = openerAt(s, i);
+    if (opener != null) {
+      const start = i + opener.open.length;
+      const close = s.indexOf(opener.close, start);
+      if (/\s/.test(close < 0 ? s.slice(start) : s.slice(start, close))) return true;
+      if (close < 0) return false;
+      i = close + opener.close.length;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
+/** Re-serialize one styled run piece as a self-contained rich string, so a word cut out of a math
+ *  region still renders in its style on its own line. */
+function scriptBody(text: string, italic: boolean): string {
+  return italic ? `\\textit{${text}}` : `\\text{${text}}`;
+}
+
+/**
+ * The words a break-free rich segment may wrap between, each a self-contained rich string (joining
+ * them with " " gives a line the renderers draw correctly).
+ *
+ * Text whose math has no inner whitespace splits on the raw source, exactly as before. Otherwise a
+ * raw split would leave `\(\textit{a` on one line and `b}\)` on the next — the export then drew the
+ * delimiter fragments literally — so the words are built from the parsed runs instead.
+ */
+export function splitRichWords(s: string): string[] {
+  if (!mathHasSpace(s)) return s.split(WORD_SEP).filter(Boolean);
+  const words: string[] = [];
+  let cur = "";
+  const flush = () => { if (cur) { words.push(cur); cur = ""; } };
+  for (const run of parseRich(s)) {
+    if (run.kind === "text") {
+      for (const part of run.text.split(/([^\S\u00a0]+)/)) {
+        if (!part) continue;
+        if (/^[^\S\u00a0]+$/.test(part)) {
+          flush();
+        } else {
+          // Plain text holding `$` or `\` goes inside \text{} so it cannot open a delimiter.
+          cur += run.italic ? `\\(\\textit{${part}}\\)` : /[$\\]/.test(part) ? `\\(\\text{${part}}\\)` : part;
+        }
+      }
+    } else if (run.kind === "super" || run.kind === "sub") {
+      cur += `\\(${run.kind === "super" ? "^" : "_"}{${scriptBody(run.text, run.italic)}}\\)`;
+    } else if (run.kind === "subsup") {
+      cur += `\\({}_{${scriptBody(run.sub, run.subItalic)}}^{${scriptBody(run.sup, run.supItalic)}}\\)`;
+    }
+  }
+  flush();
+  // Re-serializing can reintroduce syntax the parse consumed (an escaped `\$\$` becomes a `$$`
+  // delimiter; a brace inside italic text unbalances `\textit{…}`). Use the words only if they draw
+  // exactly what the source draws; otherwise keep the raw split, as before this existed.
+  if (runSignature(words.join(" ")) !== runSignature(s)) return s.split(WORD_SEP).filter(Boolean);
+  return words;
+}
+
+/** What a rich string draws, as a comparable string: each glyph with its style, breakable
+ *  whitespace collapsed to one space (wrapping never preserves it). */
+function runSignature(s: string): string {
+  return parseRich(s)
+    .map((r) => {
+      if (r.kind === "text") {
+        return Array.from(r.text, (c) => (/^[^\S\u00a0]$/.test(c) ? " " : (r.italic ? "i" : "u") + c)).join("");
+      }
+      if (r.kind === "subsup") return `[${r.sub}|${r.sup}|${r.subItalic}|${r.supItalic}]`;
+      if (r.kind === "break") return "\n";
+      return `[${r.kind}|${r.text}|${r.italic}]`;
+    })
+    .join("")
+    .replace(/ +/g, " ")
+    .trim();
+}
+
+/** A table note's hard-break segments (trimmed), or undefined when it has no `\\` — in which case
+ *  the note renders exactly as it always did. Table notes only: chart notes never call this. */
+export function noteBreakLines(note: string | undefined): string[] | undefined {
+  if (!note || !hasBreak(note)) return undefined;
+  return splitBreaks(note).map((s) => s.trim());
+}
+
 /** Append a text run, merging into the previous run when both are plain non-italic text. */
 function pushText(runs: RichRun[], text: string, italic: boolean): void {
   if (text === "") return;

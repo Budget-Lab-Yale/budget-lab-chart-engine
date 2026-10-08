@@ -7,10 +7,10 @@
 // exactly the lines this module measured, and the two cannot disagree on line counts (which would
 // otherwise mismatch the reserved height and overlap neighboring rows).
 import type { TableModel, HeaderCell, BodyRow, RowGroup } from "./model";
-import type { TableSpec } from "../spec/table-types";
+import type { TableSpec, ColumnAlign } from "../spec/table-types";
 import { ownValue } from "../spec/own-key";
 import { TBL } from "../engine/theme";
-import { richWidth, hasBreak, splitBreaks } from "./richtext";
+import { richWidth, hasBreak, splitBreaks, splitRichWords } from "./richtext";
 
 export interface LayoutOptions {
   width: number;
@@ -57,6 +57,10 @@ const bodyFontPx = 13;                       // 13 — body cell type size (matc
 const noteFontPx = TBL.size.annotation;      // 11 — group-note / sublabel type size
 const headerWeight = 700;
 const bodyWeight = 400;
+// The weights body cells render at LIVE (styles.ts --tw-body / --tw-bold on .is-emphasis), heavier
+// than the 400 / 700 the export draws. Used only for the word floor, which must hold in both.
+const liveBodyWeight = 500;
+const liveEmphasisWeight = 800;
 const padX = 16;            // total horizontal padding per cell (left + right)
 const tierHeight = 26;      // one banner tier's row height (HTML header ≈ 12px + 6+6 padding)
 const sublabelLine = 14;    // extra height on the bottom tier when any leaf has a sublabel
@@ -106,23 +110,51 @@ function wrapToLines(s: string, maxWidth: number, maxLines: number, measure: (s:
  * single-element array when the text fits on one line. */
 function wrapSegment(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
   if (maxLines <= 1 || measure(s) <= maxWidth) return [s];
-  const words = s.split(/\s+/).filter(Boolean);
+  const words = splitRichWords(s);
   const lines: string[] = [];
   let cur = "";
-  for (const w of words) {
+  let consumed = 0; // words already pushed onto `lines`
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
     const next = cur ? `${cur} ${w}` : w;
     if (measure(next) <= maxWidth || cur === "") {
       cur = next;
     } else {
       lines.push(cur);
+      consumed = i;
       cur = w;
       if (lines.length === maxLines - 1) break;
     }
   }
-  const consumed = lines.join(" ").split(/\s+/).filter(Boolean).length;
   const rest = words.slice(consumed).join(" ");
   if (rest) lines.push(rest);
   return lines.length ? lines.slice(0, maxLines) : [s];
+}
+
+/** Widest unbreakable word among the cells of leaf `i` that soft-wrap — the narrowest the column
+ *  can be without a word being split (live, overflow-wrap: break-word) or overflowing (export). */
+function widestWrappingWord(
+  bodyRows: BodyRow[], i: number, wrapsAll: boolean, measure: (s: string, weight: number) => number,
+): number {
+  let widest = 0;
+  for (const row of bodyRows) {
+    const cell = row.cells[i];
+    if (!cell || cell.text === "" || !(wrapsAll || cell.isText)) continue;
+    // Measured at the heavier of the two renderings (live CSS vs the export's SVG), so the word fits both.
+    const weight = cell.emphasis ? liveEmphasisWeight : liveBodyWeight;
+    for (const seg of splitBreaks(cell.text)) {
+      for (const w of splitRichWords(seg)) widest = Math.max(widest, measure(w, weight));
+    }
+  }
+  return widest;
+}
+
+/** The author's column_align for a leaf (keyed by leaf VALUE, like column_width), or undefined for
+ *  the type-driven default. Shared by the HTML and SVG renderers so both align identically. */
+export function columnAlignOf(spec: TableSpec | undefined, leafValue: string): ColumnAlign | undefined {
+  const ca = spec?.column_align;
+  if (ca == null) return undefined;
+  return typeof ca === "string" ? ca : ownValue(ca, leafValue);
 }
 
 /** Translate the per-table spec sizing fields into LayoutOptions (shared by the HTML and PNG
@@ -177,9 +209,16 @@ export function layoutTable(model: TableModel, opts: LayoutOptions): TableLayout
   // When header_max_lines is set, the leaf header label is allowed to WRAP, so it does NOT force
   // the column wide enough for the full label (only the sublabel + body cells do). A per-leaf
   // columnWidth override always wins.
+  const measureBodyText = (s: string, weight: number) => richWidth(s, bodyFontPx, weight, measureText);
   const colW = leaves.map((leaf, i) => {
     const override = colWidthOverride(leaf.lastValue);
-    if (override != null) return override;
+    if (override != null) {
+      // A cap narrower than a wrapping cell's widest word would split that word mid-way on screen
+      // and run it into the next column in the export, so the cap floors at that word.
+      const word = widestWrappingWord(bodyRows, i, colWrapEnabled(leaf.lastValue), measureBodyText);
+      // Rounded up: the browser compares the same width, and a sub-pixel shortfall would wrap it.
+      return word > 0 ? Math.max(override, Math.ceil(word) + padX) : override;
+    }
     let natural = headerMaxLines != null ? 0 : measureHeader(leaf.label);
     if (leaf.sublabel != null) {
       natural = Math.max(natural, richWidth(leaf.sublabel, headerFontPx, bodyWeight, measureText));

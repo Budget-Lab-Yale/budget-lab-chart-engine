@@ -28,9 +28,12 @@ function appendLinkedText(parent: Node, s: string, doc: Document): void {
   }
 }
 
+/** `noteLines` (tables only): the note already split at its hard breaks; the segments render
+ *  joined by <br>. Charts never pass it, so a chart note keeps `\\` as literal text. */
 export function renderSourceLine(
   container: HTMLElement,
-  { note, source, actions }: { note?: string; source?: string; actions?: HTMLElement } = {},
+  { note, noteLines, source, actions }:
+    { note?: string; noteLines?: string[]; source?: string; actions?: HTMLElement } = {},
 ): void {
   if (!note && !source && !actions) return;
   const doc = container.ownerDocument;
@@ -42,7 +45,14 @@ export function renderSourceLine(
   if (note) {
     const p = doc.createElement("p");
     p.className = "figure-note";
-    appendLinkedText(p, note, doc);
+    if (noteLines && noteLines.length > 1) {
+      noteLines.forEach((seg, i) => {
+        if (i > 0) p.appendChild(doc.createElement("br"));
+        appendLinkedText(p, seg, doc);
+      });
+    } else {
+      appendLinkedText(p, note, doc);
+    }
     text.appendChild(p);
   }
   if (source) {
