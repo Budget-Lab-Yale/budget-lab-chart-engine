@@ -420,6 +420,38 @@ function redrawWhenFontsLoad(doc: Document, card: HTMLElement, redraw: () => voi
   void fonts.ready.then(() => { if (card.isConnected) redraw(); });
 }
 
+/**
+ * Mark a sticky-first table `tbl-table--fits` when it fits its scroll box, so nothing can scroll
+ * behind the pinned column and styles.ts drops that column's opaque fill. Measured only once the
+ * box is attached and laid out; until then the class stays off and the pin stays opaque. Every
+ * draw re-measures; watchFit covers what can change the fit without a redraw.
+ */
+function markFit(scroll: HTMLElement, table: HTMLTableElement, spec: TableSpec): void {
+  if (!spec.sticky?.firstColumn) return;
+  const measured = scroll.isConnected && scroll.clientWidth > 0;
+  table.classList.toggle("tbl-table--fits", measured && scroll.scrollWidth <= scroll.clientWidth);
+}
+
+/**
+ * Re-measure the fit when it can change without a redraw: the scroll box resizing on its own, or
+ * the webfont loading and widening content that overflows its cell. Only toggles a class, so it
+ * cannot feed back into the observer. Returns a disconnect.
+ */
+function watchFit(doc: Document, card: HTMLElement, scrolls: HTMLElement[], spec: TableSpec): () => void {
+  if (!spec.sticky?.firstColumn) return () => {};
+  const refit = (): void => {
+    for (const scroll of scrolls) {
+      const table = scroll.querySelector("table");
+      if (table) markFit(scroll, table, spec);
+    }
+  };
+  redrawWhenFontsLoad(doc, card, refit);
+  if (typeof ResizeObserver === "undefined") return () => {};
+  const ro = new ResizeObserver(refit);
+  for (const scroll of scrolls) ro.observe(scroll);
+  return () => ro.disconnect();
+}
+
 /** Current group keys in a rendered region (read live so a re-render is always reflected). */
 function liveGroupKeys(region: HTMLElement): string[] {
   return Array.from(region.querySelectorAll("tr.tbl-table-group[data-group-key]")).map(
@@ -513,6 +545,7 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
         table.querySelector("thead th.tbl-table-stub-header")?.appendChild(collapseAllEl);
       }
     }
+    markFit(canvasScroll, table, spec);
   }
 
   // Collapse-all control: built once (the element is stable across re-renders); placement depends
@@ -566,9 +599,11 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     });
     ro.observe(card);
   }
+  const unwatchFit = watchFit(doc, card, [canvasScroll], spec);
 
   return () => {
     ro?.disconnect();
+    unwatchFit();
     card.remove();
   };
 }
@@ -645,6 +680,10 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
     if (spec.collapsible && collapsibleControl === "stub-header" && collapseAllEl) {
       paneScrolls[0]!.querySelector("thead th.tbl-table-stub-header")?.appendChild(collapseAllEl);
     }
+    for (const scroll of paneScrolls) {
+      const table = scroll.querySelector("table");
+      if (table) markFit(scroll, table, spec);
+    }
     fnBlock.replaceChildren();
     if (fnMap.size > 0) {
       for (const [marker, text] of fnMap) {
@@ -713,9 +752,11 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
     });
     ro.observe(card);
   }
+  const unwatchFit = watchFit(doc, card, paneScrolls, spec);
 
   return () => {
     ro?.disconnect();
+    unwatchFit();
     card.remove();
   };
 }

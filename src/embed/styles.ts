@@ -734,6 +734,10 @@ body {
  * ========================================================================= */
 
 /* ---- Table element ---- */
+/* Cells are transparent, like the chart (see the body rule): an embedded table takes the host
+   page's background. Only deliberate tints fill a cell (emphasis, hover), plus the pinned first
+   column while the table overflows (see Sticky first column). The PNG export is unaffected: it
+   re-renders onto its own white ground (createExportRoot). */
 .tbl-table {
   font-family: var(--tbl-font-sans);
   font-weight: var(--tw-body);
@@ -764,7 +768,7 @@ body {
   color: var(--tbl-text-heading);
   font-size: 12px;
   padding: 6px 8px;
-  background: var(--tbl-bg);
+  background: transparent;
   text-align: center;
   vertical-align: bottom;
   white-space: nowrap;
@@ -844,7 +848,7 @@ body {
   padding: 5px 8px;
   border-bottom: 1px solid var(--tbl-gridline);
   font-size: 13px;
-  background: var(--tbl-bg);
+  background: transparent;
   /* Base of the sticky stacking ladder: scrolling body cells sit below the sticky thead (z 2)
      and the pinned first column (z 3) / header corner (z 4). */
   position: relative;
@@ -1061,8 +1065,7 @@ td.is-neg {
   position: sticky;
   left: 0;
   z-index: 3;
-  /* Opaque background so scrolling cells pass behind the pinned column. */
-  background: var(--tbl-bg);
+  background: var(--tbl-pin-bg);
 }
 /* The header corner is pinned at the left and must sit above the scrolling thead so header cells
    disappear under it in lockstep with their data column. */
@@ -1070,8 +1073,15 @@ td.is-neg {
   position: sticky;
   left: 0;
   z-index: 4;
-  background: var(--tbl-bg);
+  background: var(--tbl-pin-bg);
 }
+/* The pinned cells are opaque so scrolling cells pass BEHIND them, but only where that can happen:
+   mount.ts adds .tbl-table--fits when the table fits its scroll box (nothing can scroll), and the
+   pinned column is then transparent like every other cell. Opaque is the default, so a table whose
+   fit is not yet measured never shows scrolled text through the pin. Set through a custom property
+   rather than a higher-specificity background rule so the hover and emphasis tints still win. */
+.tbl-table--sticky-first { --tbl-pin-bg: var(--tbl-bg); }
+.tbl-table--sticky-first.tbl-table--fits { --tbl-pin-bg: transparent; }
 
 /* ---- Disable the sticky first column at phone widths ---- */
 /* Below ~420px a pinned stub eats too much of the viewport, leaving the data columns cramped and
@@ -1084,6 +1094,8 @@ td.is-neg {
   .tbl-table--sticky-first .tbl-table-group-inner {
     left: auto;
   }
+  /* Not pinned, so nothing passes behind: transparent even while the table overflows. */
+  .tbl-table--sticky-first { --tbl-pin-bg: transparent; }
 }
 
 /* ---- Footnote definition list ---- */
