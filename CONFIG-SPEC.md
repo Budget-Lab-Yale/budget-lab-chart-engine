@@ -1460,7 +1460,10 @@ by a repeated leaf value applies to every leaf sharing that value.
 | `sign_color` | boolean | Apply sign coloring to all cells (overridable per `FormatRule.signColor`). |
 
 Non-numeric, non-empty values render verbatim as left-aligned **text cells** (no number
-formatting).
+formatting); `column_align` overrides the alignment. In a text cell a **marker glyph stays on the
+line of the word it annotates**: the space after a triangle (`▲ ▼ △ ▽ ▶ ◀` and their small forms,
+U+25B2 to U+25C5) and the space before a lone trailing `°`, `†` or `‡` render as a no-break space,
+so `▲ Income` and `estates °` never wrap apart. Text without those glyphs is untouched.
 
 ### Cells, footnotes & emphasis
 
@@ -1480,8 +1483,9 @@ formatting).
 | `stub_min_width` | number | Minimum stub width — a floor on the auto-sized width, or (with `stub_wrap`) the width labels wrap toward. |
 | `stub_wrap` | boolean | Allow row labels to wrap onto multiple lines so the stub can be narrower than the longest label. Default false. |
 | `stub_nowrap` | boolean | Keep row labels on one line (the stub is sized to the longest). Default false. |
-| `column_width` | number \| object | Fixed px width for data columns: one number for all, or `{ <leafKey>: px }`. |
+| `column_width` | number \| object | Fixed px width for data columns: one number for all, or `{ <leafKey>: px }`. A column whose cells wrap (text cells, or any cell under `column_wrap`) is never narrower than its widest word plus padding: a narrower width is raised to fit that word, so a word is never split across lines on screen or run into the next column in the PNG export. A triangle or trailing marker counts as part of the word it is attached to (see text cells above). The table can then be wider than its frame; it scrolls horizontally (pin the row labels with `sticky.firstColumn`). |
 | `column_wrap` | boolean \| object | Wrap **body** data cells onto multiple lines within the column width: `true` (all data columns) or `{ <leafKey>: true }` (named ones). Default false. Pair with `column_width` to cap the width — without a cap the column sizes to its natural width and nothing wraps. Column headers are unaffected (use `header_max_lines` / the `\\` break token for those). |
+| `column_align` | enum \| object | Horizontal alignment of a data column's body cells **and** its column header, whatever the cell type: `left`, `center` or `right` for every data column, or `{ <leafKey>: left \| center \| right }` for named ones (keyed like the `column_width` map). Omit for the default: numbers centered, text left. The row-label column is unaffected. Applies on screen and in the PNG export. |
 | `header_max_lines` | number | Wrap leaf-column headers to at most N lines. |
 | `spanner_rules` | boolean | Draw flanking rules on multi-column banner headers. Default true. |
 | `header_tier_rules` | boolean | Draw horizontal rules between header tiers. Default false. |
@@ -1500,7 +1504,7 @@ collapse state (or the spec's defaults, when exported without interaction).
 |---|---|---|
 | `subtitle` | string | Below the title. |
 | `source` | string | Source line below the table. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. A URL longer than 2048 characters is not a link either — the parser stops looking there, which is what keeps a malformed line from being expensive to parse. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
-| `notes` | string \| array | Explanatory note(s). An array is **joined into a single note paragraph** (it does not render one paragraph per entry). Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. A URL longer than 2048 characters is not a link either — the parser stops looking there, which is what keeps a malformed line from being expensive to parse. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
+| `notes` | string \| array | Explanatory note(s). An array is **joined into a single note paragraph** (it does not render one paragraph per entry). `\\` starts a new line at that point, on screen and in the PNG export (same token and YAML quoting as below; a block scalar such as `>-` keeps it as written). Inline math is **not** rendered in `notes`. A chart's `note` does not take `\\`. Supports inline links: `[text](url)` renders the text as a link on screen. **The URL needs an explicit `http://`, `https://` or `mailto:` scheme** — anything else (including a bare `www.` or a relative path) is not a link and renders as the literal characters you typed, silently. Nothing else from Markdown is supported, there is no escape syntax, and any incomplete construct is literal text, so existing lines are untouched. A URL longer than 2048 characters is not a link either — the parser stops looking there, which is what keeps a malformed line from being expensive to parse. In a **PNG export** the link text is underlined but not clickable and the URL is not shown — a raster image cannot carry a link target. |
 
 ### Inline math & special characters
 
@@ -1511,7 +1515,7 @@ website**:
 - `\( … \)` — inline math (also `\[ … \]` and `$$ … $$`).
 - `\$` — a literal dollar sign.
 - `\\` — a **hard line break** (anywhere text renders: cells, row/column labels, headers, group
-  labels & notes). It splits the text onto a new line at that exact point, and it works even in a
+  labels & notes, and the table's `notes` line). It splits the text onto a new line at that exact point, and it works even in a
   one-line (`stub_nowrap` / non-wrapping) cell — a break forces two lines there without turning on
   general wrapping. Recognized only **outside** a math delimiter: `\\(` reads as a break then a
   literal `(`. Leading/trailing/consecutive `\\` produce empty lines.
@@ -1535,6 +1539,9 @@ Inside a delimiter, the supported **linear** subset of LaTeX is:
 | Operators / relations | `\cdot \times \leq \geq \approx \pm \sum \int …` | `\(\sigma \leq 1\)` → σ ≤ 1 |
 
 Latin letters and lowercase Greek render italic (math variables); digits, uppercase Greek, and symbols upright.
+
+A wrapping cell may break **inside** an inline-math run that contains spaces (e.g. a long
+`\(\textit{…}\)` phrase): each line keeps the run's styling, on screen and in the PNG export.
 
 **Not supported:** two-dimensional constructs — `\frac`, `\sqrt`, matrices, `\binom`, over/under
 braces. These are **rejected at validation** with a clear message (they are never silently

@@ -13,6 +13,7 @@ import { renderSourceLine } from "../engine/source-line.js";
 import { rowsToCsvBrowser } from "../data/csv-browser.js";
 import { exportTablePng } from "../embed/export-table-png.js";
 import { makeMeasureText } from "./measure.js";
+import { noteBreakLines } from "./richtext.js";
 
 // Tray-with-down-arrow glyph — same as in render-live.ts, inlined to avoid a cross-module
 // private-symbol dependency.
@@ -396,6 +397,29 @@ function buildCollapseAllButton(
   return { el: btn, sync };
 }
 
+/**
+ * True when a `column_width` cap may be floored at a wrapping cell's widest word (see layoutTable).
+ * That floor is a measured text width, and the first draw runs before the webfont has loaded — so
+ * it is measured in the fallback font, and the browser then splits the word it was meant to fit.
+ * Such tables draw again once the fonts are ready. Gated to them so every other table's live
+ * layout is exactly what it was.
+ */
+function floorsColumns(spec: TableSpec, rows: TidyRow[]): boolean {
+  if (spec.column_width == null) return false;
+  if (spec.column_wrap === true || (typeof spec.column_wrap === "object" && Object.values(spec.column_wrap).includes(true))) return true;
+  // Per pane: a combined model keys cells by stub/header path alone, so one pane's number could
+  // mask another pane's text cell at the same coordinate.
+  return splitPanes(spec, rows).some((p) =>
+    buildTableModel(spec, p.rows).body.some((b) => b.kind === "row" && b.row.cells.some((c) => c.isText)));
+}
+
+/** Run `redraw` once the document's fonts have loaded, if they have not already. */
+function redrawWhenFontsLoad(doc: Document, card: HTMLElement, redraw: () => void): void {
+  const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts;
+  if (!fonts || fonts.status === "loaded") return;
+  void fonts.ready.then(() => { if (card.isConnected) redraw(); });
+}
+
 /** Current group keys in a rendered region (read live so a re-render is always reflected). */
 function liveGroupKeys(region: HTMLElement): string[] {
   return Array.from(region.querySelectorAll("tr.tbl-table-group[data-group-key]")).map(
@@ -512,6 +536,7 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
   // Initial render — use the provided width, the container's current width, or a default.
   const initialWidth = opts.width ?? (container.clientWidth || 720);
   draw(initialWidth);
+  if (floorsColumns(spec, rows)) redrawWhenFontsLoad(doc, card, () => draw(card.clientWidth || initialWidth));
 
   // Source/notes footer with Data download.
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
@@ -522,8 +547,10 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
   if (collapseAllEl && collapsibleControl === "footer") {
     actions.insertBefore(collapseAllEl, actions.firstChild);
   }
+  const noteLines = noteBreakLines(note);
   renderSourceLine(card, {
     note,
+    ...(noteLines ? { noteLines } : {}),
     source: spec.source,
     actions,
   });
@@ -653,6 +680,7 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
 
   const initialWidth = opts.width ?? (container.clientWidth || 720);
   drawAll(initialWidth);
+  if (floorsColumns(spec, rows)) redrawWhenFontsLoad(doc, card, () => drawAll(card.clientWidth || initialWidth));
 
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
   // PNG export threading: the union of every pane's collapsed keys. Keys are stub-path tokens, so
@@ -667,8 +695,10 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
   if (collapseAllEl && collapsibleControl === "footer") {
     actions.insertBefore(collapseAllEl, actions.firstChild);
   }
+  const noteLines = noteBreakLines(note);
   renderSourceLine(card, {
     note,
+    ...(noteLines ? { noteLines } : {}),
     source: spec.source,
     actions,
   });

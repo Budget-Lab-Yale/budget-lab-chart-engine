@@ -11,6 +11,7 @@ import { layoutTable, layoutOptionsFromSpec } from "../table/layout.js";
 import { renderTableSvg } from "../table/render-svg.js";
 import { makeMeasureText } from "../table/measure.js";
 import { layoutPanes } from "../table/panes.js";
+import { noteBreakLines } from "../table/richtext.js";
 import {
   W,
   MARGIN,
@@ -43,6 +44,12 @@ const PANE_GAP = 22; // gap between one pane's table and the next pane's subhead
 const FN_TOP_GAP = 10;
 const FN_LINE = 16;
 const FN_FONT = 11;
+
+/** The table note's hard-break segments for the chrome, when it has any (`\\` in `notes`). */
+function noteOpt(note: string): { noteLines?: string[] } {
+  const noteLines = noteBreakLines(note);
+  return noteLines ? { noteLines } : {};
+}
 
 /** Slug a title for a default download filename. */
 function slugify(title: string): string {
@@ -121,10 +128,10 @@ export function buildTableExportSvg(
 
   // Bottom chrome below the table.
   const by = bodyTop + layout.totalHeight;
-  composeBottomChrome(document, root, by, { note, source, width });
+  composeBottomChrome(document, root, by, { note, ...noteOpt(note), source, width });
 
   // Final frame height = body bottom + reserved bottom-chrome space.
-  const height = Math.round(by + bottomChromeHeight({ note, source, width }));
+  const height = Math.round(by + bottomChromeHeight({ note, ...noteOpt(note), source, width }));
   root.setAttribute("height", String(height));
   bgRect.setAttribute("height", String(height));
 
@@ -198,8 +205,8 @@ function buildMultiPaneExportSvg(
   }
 
   const by = cursor;
-  composeBottomChrome(document, root, by, { note, source, width });
-  const height = Math.round(by + bottomChromeHeight({ note, source, width }));
+  composeBottomChrome(document, root, by, { note, ...noteOpt(note), source, width });
+  const height = Math.round(by + bottomChromeHeight({ note, ...noteOpt(note), source, width }));
   root.setAttribute("height", String(height));
   bgRect.setAttribute("height", String(height));
 

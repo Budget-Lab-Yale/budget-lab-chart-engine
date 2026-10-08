@@ -4,6 +4,35 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.16.1] - 2026-10-08
+
+### Added
+- Tables: `column_align` sets a data column's horizontal alignment (`left` / `center` / `right`),
+  body cells and column header alike, whatever the cell type: one value for every data column or a
+  `{ <leafKey>: … }` map. Omitted, nothing changes. On screen and in the PNG export.
+- Tables: `\\` in `notes` is a hard line break, on screen and in the PNG export. A note without it
+  renders as before. Chart `note` is unchanged and keeps `\\` literal.
+
+### Fixed
+- Tables: a `column_width` cap narrower than a wrapping cell's widest word split the word mid-way
+  on screen ("Underreportin / g") and ran it into the next column in the PNG export. The column now
+  floors at its widest word plus padding. Such tables also lay out again once the webfont has
+  loaded, because the first draw measured words in the fallback font; other tables still draw once.
+- Tables: a triangle marker (`▲ ▼`, U+25B2 to U+25C5) no longer wraps onto a line of its own, apart
+  from the word after it, and a lone trailing `°` / `†` / `‡` no longer wraps away from the word
+  before it (the space beside them becomes a no-break space, in text cells only).
+- Tables, PNG export: a wrapped cell whose inline math contained spaces (a `\(\textit{…}\)` phrase)
+  drew delimiter fragments (`responds}\)`), dropped the italic after the first line and clipped the
+  first line's last letter. Each line is now drawn in the run's style.
+
+### Upgrading
+- One published table moves, found by rendering every `table.yaml` in budget-lab-charts with 1.16.0
+  and with this release and comparing the live card (760 and 1100px) and the PNG export:
+  `articles/2026/10/revenue-potential-top-taxes/appendix-tax-base-interactions`, through the three
+  fixes above (its columns widen to their widest words, the ▲/▼ and ° markers stay attached, its
+  italic cells wrap correctly in the PNG). The other eight tables are byte-identical. No golden
+  moved.
+
 ## [1.16.0] - 2026-10-07
 
 ### Added

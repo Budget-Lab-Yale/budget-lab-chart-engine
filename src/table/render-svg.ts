@@ -9,6 +9,8 @@
 // `document` via opts so it works under jsdom (tests) and in the browser (export).
 import type { TableModel } from "./model";
 import type { TableLayout, CellRect } from "./layout";
+import { columnAlignOf } from "./layout";
+import type { ColumnAlign } from "../spec/table-types";
 import {
   INDENT_STEP,
   FOOTNOTE_TOP_GAP,
@@ -187,8 +189,10 @@ export function renderTableSvg(
         // otherwise it is centered.
         const leaf = model.leaves.find((l) => l.key === cell.leafKey);
         const isTextCol = leaf?.isText === true;
-        const hx = isTextCol ? rect.x + PAD_X : cx;
-        const anchor = isTextCol ? "start" : "middle";
+        const align = leaf ? columnAlignOf(spec, leaf.lastValue) : undefined;
+        const { x: hx, anchor } = align
+          ? alignedX(rect, align)
+          : { x: isTextCol ? rect.x + PAD_X : cx, anchor: isTextCol ? ("start" as const) : ("middle" as const) };
         const lines = entry.lines ?? [cell.text];
         if (lines.length > 1) {
           const firstBaseline = leafLabelBottom - (lines.length - 1) * HEADER_LINE_HEIGHT;
@@ -376,22 +380,24 @@ export function renderTableSvg(
         cell.signClass === "pos" ? SIGN_POS : cell.signClass === "neg" ? SIGN_NEG : TBL.color.text;
       const weight = cell.emphasis ? 700 : 400;
       const cellLines = entry.cellLines?.[i];
+      const align = columnAlignOf(spec, model.leaves[i]!.lastValue);
       if (cell.isText) {
-        const tx = cr.x + PAD_X;
+        const { x: tx, anchor } = align ? alignedX(cr, align) : { x: cr.x + PAD_X, anchor: "start" as const };
         if (cellLines && cellLines.length > 1) {
           const blockH = (cellLines.length - 1) * STUB_LINE_HEIGHT;
           const firstBaseline = cr.y + cr.h / 2 - blockH / 2 + BODY_FONT / 3;
           for (const el2 of drawLines(cellLines, tx, firstBaseline, STUB_LINE_HEIGHT, {
-            anchor: "start", weight, fill: TBL.color.text, size: BODY_FONT,
+            anchor, weight, fill: TBL.color.text, size: BODY_FONT,
           })) cg.appendChild(el2);
         } else {
-          cg.appendChild(drawText(tx, baseY, cell.text, { anchor: "start", weight, fill: TBL.color.text, size: BODY_FONT }));
+          cg.appendChild(drawText(tx, baseY, cell.text, { anchor, weight, fill: TBL.color.text, size: BODY_FONT }));
         }
         rg.appendChild(cg);
         return;
       }
-      const t = drawText(cr.x + cr.w / 2, baseY, cell.text, {
-        anchor: "middle",
+      const num = align ? alignedX(cr, align) : { x: cr.x + cr.w / 2, anchor: "middle" as const };
+      const t = drawText(num.x, baseY, cell.text, {
+        anchor: num.anchor,
         weight,
         fill,
         size: BODY_FONT,
@@ -434,6 +440,13 @@ export function renderTableSvg(
   }
 
   return svg;
+}
+
+/** Text x + anchor for a column_align value inside a cell rect (insets match the HTML padding). */
+function alignedX(r: CellRect, align: ColumnAlign): { x: number; anchor: "start" | "middle" | "end" } {
+  if (align === "left") return { x: r.x + PAD_X, anchor: "start" };
+  if (align === "right") return { x: r.x + r.w - PAD_X, anchor: "end" };
+  return { x: r.x + r.w / 2, anchor: "middle" };
 }
 
 // Deterministic rough text width for placing the flanking rules on a banner cell (no canvas

@@ -14,6 +14,9 @@ export interface FormatRule {
   suffix?: string;
 }
 
+/** Horizontal alignment for a data column (column_align). */
+export type ColumnAlign = "left" | "center" | "right";
+
 /** A table spec: layout, data source, and formatting.
  *  Tidy/long data: one row per (stub-path × header-path × value) cell.
  *  Stub entries nest to form the row hierarchy (all but last → groups; last → row label).
@@ -141,6 +144,10 @@ export interface TableSpec {
    * `column_width` to cap the width; without a cap the column sizes to its natural width and nothing
    * wraps. Affects body cells only — column headers keep header_max_lines / the `\\` break token. */
   column_wrap?: boolean | Record<string, boolean>;
+  /** Horizontal alignment of a data column's body cells AND its leaf header, regardless of cell
+   * type: one value for every data column, or a { leafKey: value } map (keyed like column_width).
+   * Omit for the type-driven default (numbers centered, text left). The stub is unaffected. */
+  column_align?: ColumnAlign | Record<string, ColumnAlign>;
   /** Wrap bottom-tier (leaf) header labels to at most N lines. */
   header_max_lines?: number;
   /** Data source line (e.g. "U.S. Bureau of Labor Statistics"). */

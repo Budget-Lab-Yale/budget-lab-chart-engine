@@ -71,6 +71,16 @@ function resolveCollapsedDefault(rawValue: string, collapsible: TableSpec["colla
   return collapsible.default === "collapsed";
 }
 
+/** Keep marker glyphs on the line of the word they annotate, by turning the space beside them into
+ *  a no-break space (U+00A0; neither the browser nor the layout breaks there): a triangle
+ *  (U+25B2 to U+25C5, e.g. the up/down arrows) joins the word after it; a lone trailing degree sign,
+ *  dagger or double dagger joins the word before it. Text without these markers is unchanged. */
+const LEADING_MARKER = /([\u25B2-\u25C5])[ \t]+(?=\S)/g;
+const TRAILING_MARKER = /(\S)[ \t]+([\u00B0\u2020\u2021])(?=[\s.,;:!?)\]}]|$)/g;
+function glueMarkers(s: string): string {
+  return s.replace(LEADING_MARKER, "$1\u00a0").replace(TRAILING_MARKER, "$1\u00a0$2");
+}
+
 export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
   const stubCols = spec.stub.map(colOf);
   const headerCols = spec.header;
@@ -356,7 +366,7 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       // column_labels/sublabels/column_order, all of which resolve against lastValue too. A format
       // rule keyed by a repeated leaf value applies to every leaf sharing that value.
       const rule = resolveFormat({ leafKey: leaf.lastValue, groupKeys: groupPath, rowLabel: label, spec });
-      const text = isText ? rawTrim : formatCell(value, rule);
+      const text = isText ? glueMarkers(rawTrim) : formatCell(value, rule);
       const cell: Cell = isText ? { value: null, text, isText: true } : { value, text };
 
       // Emphasis: row in emphasis_rows OR emphasis_column truthy on the source row.

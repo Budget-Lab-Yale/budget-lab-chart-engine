@@ -336,13 +336,29 @@ function drawRunLines(doc: Document, root: SVGElement, lines: ChromeRun[][], top
   return top + (lines.length - 1) * 15;
 }
 
-export function bottomChromeHeight(opts: { note?: string; source?: string; width?: number }): number {
+/** Wrap the note: as one paragraph, or — when the caller passes its hard-break segments
+ *  (`noteLines`, tables only) — each segment wrapped on its own and the lines concatenated. */
+function wrapNote(
+  note: string,
+  noteLines: string[] | undefined,
+  font: string,
+  innerW: number,
+): { lines: ChromeRun[][]; linked: boolean } | null {
+  if (!note) return null;
+  if (!noteLines || noteLines.length < 2) return wrapChrome(note, font, innerW);
+  const parts = noteLines.map((seg) => wrapChrome(seg, font, innerW));
+  return { lines: parts.flatMap((p) => p.lines), linked: parts.some((p) => p.linked) };
+}
+
+export function bottomChromeHeight(
+  opts: { note?: string; noteLines?: string[]; source?: string; width?: number },
+): number {
   const width = opts.width ?? W;
   const innerW = width - MARGIN * 2;
   const note = opts.note ?? "";
   const source = opts.source ?? "";
   const font = `${W_BODY} 11px ${FONT}`;
-  const noteLines = note ? wrapChrome(note, font, innerW).lines : [];
+  const noteLines = wrapNote(note, opts.noteLines, font, innerW)?.lines ?? [];
   const sourceLines = source ? wrapChrome(source, font, innerW, SOURCE_PREFIX).lines : [];
   let bottomH = 0;
   if (noteLines.length) bottomH += 18 + (noteLines.length - 1) * 15;
@@ -359,14 +375,14 @@ export function composeBottomChrome(
   doc: Document,
   root: SVGElement,
   by: number,
-  opts: { note?: string; source?: string; width?: number },
+  opts: { note?: string; noteLines?: string[]; source?: string; width?: number },
 ): number {
   const width = opts.width ?? W;
   const innerW = width - MARGIN * 2;
   const note = opts.note ?? "";
   const source = opts.source ?? "";
   const font = `${W_BODY} 11px ${FONT}`;
-  const noteWrap = note ? wrapChrome(note, font, innerW) : null;
+  const noteWrap = wrapNote(note, opts.noteLines, font, innerW);
 
   if (noteWrap?.lines.length) {
     if (noteWrap.linked) {
