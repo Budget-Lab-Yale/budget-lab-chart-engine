@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.16.2] - 2026-10-08
 
 ### Changed
 - Tables render on a transparent background, like charts: header and body cells no longer paint
