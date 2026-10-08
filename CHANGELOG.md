@@ -4,6 +4,20 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- Tables render on a transparent background, like charts: header and body cells no longer paint
+  white, so an embedded table takes the host page's colour. Emphasis rows and row/column hover keep
+  their tint. With `sticky.firstColumn`, the pinned column stays opaque while the table overflows
+  its frame, so cells scrolled under it stay hidden, and is transparent when the table fits. The PNG
+  export is unchanged: it keeps the white ground the chart export uses.
+
+### Upgrading
+- On a white host page nothing visible moves. On a non-white host, a published table's cells show
+  the host colour, and a `sticky.firstColumn` table that overflows its frame shows a white pinned
+  column. No golden or export output changes.
+
 ## [1.16.1] - 2026-10-08
 
 ### Added

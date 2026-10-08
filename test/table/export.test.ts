@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildTableExportSvg } from "../../src/embed/export-table-png";
+import { buildExportSvg } from "../../src/embed/export-png";
+import type { ChartSpec } from "../../src/spec/types";
 import { buildTableModel } from "../../src/table/model";
 import { layoutTable } from "../../src/table/layout";
 import type { TableSpec } from "../../src/spec/table-types";
@@ -142,5 +144,34 @@ describe("buildTableExportSvg — collapsed groups (Task 4)", () => {
     const svg = buildTableExportSvg(DEFAULT_COLLAPSED, GROUPED_ROWS, { collapsed: ["Canada"] });
     expect(svg.textContent).toContain("111"); // China expanded
     expect(svg.textContent).not.toContain("333"); // Canada collapsed
+  });
+});
+
+// The live table is transparent on screen (it takes the host page's colour, like a chart), but the
+// PNG export is a standalone image with no host page: it keeps the opaque white ground the chart
+// export uses. Pinned so a change to either side shows up as a divergence between the two.
+describe("buildTableExportSvg — background matches the chart export", () => {
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  beforeAll(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterAll(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+  });
+
+  const groundFill = (svg: SVGSVGElement): string | null =>
+    svg.querySelector(":scope > rect")?.getAttribute("fill") ?? null;
+
+  it("paints the same opaque white background rect as a chart export", () => {
+    const chart = buildExportSvg(
+      { chartType: "line", title: "t", xAxisType: "numeric", columns: { x: "t", value: "v", series: "s" }, data: "d.csv" } as unknown as ChartSpec,
+      [{ t: "2020", s: "A", v: "1" }, { t: "2021", s: "A", v: "2" }] as unknown as TidyRow[],
+    );
+    const table = buildTableExportSvg(SPEC, ROWS);
+    expect(groundFill(chart)).toBe("#FFFFFF");
+    expect(groundFill(table)).toBe(groundFill(chart));
+    const rect = table.querySelector(":scope > rect")!;
+    expect(rect.getAttribute("width")).toBe(table.getAttribute("width"));
+    expect(rect.getAttribute("height")).toBe(table.getAttribute("height"));
   });
 });
