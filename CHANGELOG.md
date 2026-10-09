@@ -4,6 +4,21 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Small multiples: on a temporal line or area figure whose x is a bare year (`2026`), the
+  coordinated cursor's x echo printed the raw timestamp (`2398395600000`) instead of the year. The
+  echo chose its form by sniffing the raw cell for `YYYY-MM-DD` and missed the other valid temporal
+  spelling; it now goes by `xAxisType`. An annual series now echoes the bare year on one line, as
+  its axis and hover card print it, where a `YYYY-01-01` series drew `Jan` over the year.
+
+### Upgrading
+- Hover only; no golden or export output changes. No published figure moves: the archive's only
+  faceted temporal line/area figure (ui-recipiency Figure 2) is monthly, so its echo is unchanged.
+  ecec-macro Appendix Figure 1 (bare years) worked around this with `tooltip_x_format: "%Y"`,
+  which it may keep or drop; the echo reads the same either way.
+
 ## [1.16.2] - 2026-10-08
 
 ### Changed

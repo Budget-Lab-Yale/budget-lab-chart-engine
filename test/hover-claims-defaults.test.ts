@@ -234,7 +234,8 @@ describe("x_labels", () => {
 // ---------------------------------------------------------------------------
 // `tooltip_x_format` — `render-live.ts` forwards it into `attachSecondaryLineCursor` as `xFormat`,
 // which now draws the coordinated x echo with it when the spec set the field. Absent the field the
-// echo keeps its axis-matching two-line `%b` / `%Y`, so no figure that does not set it moves.
+// echo keeps its axis-matching two-line `%b` / `%Y` (the bare year on an annual series), so no
+// figure that does not set it moves.
 // ---------------------------------------------------------------------------
 
 describe("tooltip_x_format", () => {
@@ -324,6 +325,27 @@ describe("tooltip_x_format", () => {
     expect(texts).toContain("2026");
     expect(texts.some((t) => /^[A-Z][a-z]{2}$/.test(t))).toBe(true);
   });
+
+  // ANNUAL series, FIELD ABSENT. The echo used to pick its format by sniffing the raw cell for
+  // `YYYY-MM-DD`, so a bare `YYYY` (the natural spelling of an annual series, and a valid temporal
+  // value) fell through to `String()` of the parsed timestamp: `2398395600000` for 2046. And an
+  // annual series spelled `YYYY-01-01` drew `Jan` over the year, under an axis that prints the year
+  // alone. Both now echo the bare year on one line — the same annual rule the card follows.
+  for (const [name, fmt] of [["bare YYYY", (y: number) => `${y}`], ["YYYY-01-01", (y: number) => `${y}-01-01`]] as const) {
+    it(`2-pane ANNUAL temporal line spelled ${name}, FIELD ABSENT: the echo is the bare year, one line`, () => {
+      const YEARS = Array.from({ length: 16 }, (_, i) => fmt(2030 + i));
+      const m = mountHover(
+        spec({ chartType: "line", xAxisType: "temporal", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm }),
+        temporalRows(YEARS),
+        true,
+      );
+      const svg = m.svgs[0]!;
+      hoverFirstMark(svg, PLOT_MIDDLE);
+      const echo = Array.from(svg.querySelectorAll(".tbl-coord-axis-label-text")).map((t) => t.textContent);
+      expect(echo.length, coordTexts(svg).join("|")).toBe(1);
+      expect(echo[0]).toMatch(/^20[34]\d$/);
+    });
+  }
 
   it("2-pane DAILY temporal line: the field draws an x readout where there is no axis tick to echo", () => {
     const m = mountHover(
