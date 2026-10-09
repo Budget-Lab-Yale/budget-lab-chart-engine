@@ -6,7 +6,7 @@ import { d3 } from "./vendor";
 import { tblXAxis, tblTemporalXAxis, temporalXTicks, tblBandXAxis, bandLabelMarginBottom, type BandLabelMode } from "./axes";
 import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseXValue, parseDate, parseQuarter, formatQuarter } from "../spec/parse-time";
-import { formatNumericX, formatNumericTick } from "./util";
+import { formatNumericX, formatNumericTick, isAnnualSeries } from "./util";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
 
 type Mark = unknown;
@@ -144,11 +144,8 @@ export function makeXAdapter(
         // MONTHLY series across eighty years also gets decade ticks, and there the month is the
         // only thing that tells two adjacent points apart. An explicit `tooltip_x_format` wins.
         const annualData =
-          data.length > 0 &&
-          data.every((d: any) => {
-            const t = d._xd as unknown;
-            return t instanceof Date && t.getMonth() === 0 && t.getDate() === 1;
-          });
+          data.every((d: any) => (d._xd as unknown) instanceof Date) &&
+          isAnnualSeries(data.map((d: any) => d._xd as Date));
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
         let xDomain: [Date, Date];
         if (histogramDomain) {

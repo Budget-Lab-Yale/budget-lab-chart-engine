@@ -104,6 +104,14 @@ export function formatNumericTick(v: number): string {
   return Number(s.replace(/,/g, "")) === v ? s : `${v}`;
 }
 
+/** True for an ANNUAL temporal series: every point on 1 January (local, as `parseDate` places
+ *  them), so the year alone identifies a point and a hover reading prints `%Y`. The hover card
+ *  (`x-adapter.ts`) and the coordinated cursor's x echo (`crosshair.ts`) both decide by this, so
+ *  the two cannot disagree. Tested on the DATA, not the tick cadence — see `x-adapter.ts`. */
+export function isAnnualSeries(dates: Date[]): boolean {
+  return dates.length > 0 && dates.every((t) => t.getMonth() === 0 && t.getDate() === 1);
+}
+
 /** Apply the `valueLabel` hook to one in-mark label's text. `rendered` is the engine's own
  *  formatted text; the hook receives it (plus the label's series/category/value/facet) and may
  *  return a replacement, or `null` for "engine default". Absent hook / `hooks: {}` / a `null`

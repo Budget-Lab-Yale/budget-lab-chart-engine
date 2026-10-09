@@ -7,7 +7,7 @@
 import { d3 } from "./vendor";
 import { TBL } from "./theme";
 import { readLinearScale } from "./plot-scale";
-import { escapeHtml } from "./util";
+import { escapeHtml, isAnnualSeries } from "./util";
 import { categoryText } from "../spec/section-key";
 import { symbolPathD } from "./symbols";
 import { wrapBandLabel } from "./axes";
@@ -22,6 +22,7 @@ import { overlayValueAt } from "./overlays";
 import type { OverlayTooltipLine } from "./overlays";
 import type { TotalRow } from "../spec/bar-stack";
 import type { TooltipHookCtx } from "../spec/hooks";
+import type { XAxisType } from "../spec/types";
 
 type Row = Record<string, unknown>;
 
@@ -52,9 +53,12 @@ export interface CrosshairOptions {
   /** True when `xFormat` came from the spec's own `tooltip_x_format` rather than the x-adapter's
    *  axis-matching default. Read ONLY by `attachSecondaryLineCursor`, which shares this options
    *  type: its x echo annotates the axis ticks, so it draws the author's single-line format when
-   *  the author asked for one and keeps the two-line `%b` / `%Y` (one line per axis tick row) when
-   *  nobody did. `attachCrosshair`'s card has one line to fill either way and ignores this. */
+   *  the author asked for one and keeps the two-line `%b` / `%Y` (one line per axis tick row; the
+   *  bare year on an annual series) when nobody did. `attachCrosshair`'s card has one line to fill either way and ignores this. */
   xFormatExplicit?: boolean;
+  /** The spec's `xAxisType`. Read ONLY by `attachSecondaryLineCursor`, to choose its x echo's form
+   *  from the axis rather than from the raw cell — see the fallback there for callers without it. */
+  xAxisType?: XAxisType;
   yFormat?: (v: number) => string;
   /** Series → colour, for the COORDINATED cursor's echo dots and value pills
    *  (attachSecondaryLineCursor, which shares this options type). NOT the tooltip key's colour —
@@ -2704,7 +2708,7 @@ function coordPillWidth(text: string): number {
  * current x value is shown at the axis. `driver(null)` clears. No pointer handlers.
  *
  * The x echo has two forms. By DEFAULT it mirrors the axis ticks — one line per tick row, `%b`
- * over `%Y` — and so needs tick rows to sit on: `makeAxisRows` finds none on a temporal span
+ * over `%Y`, or the bare year alone on an annual series — and so needs tick rows to sit on: `makeAxisRows` finds none on a temporal span
  * shorter than a month, and the echo is skipped. With `xFormatExplicit` (the spec set
  * `tooltip_x_format`) it draws that format on ONE line, anchored to the tick rows where they exist
  * and just below the plot where they do not — an author who states an x format is telling us the x
@@ -2769,11 +2773,15 @@ export function attachSecondaryLineCursor(
   const order =
     seriesOrder && seriesOrder.length ? seriesOrder.filter((s) => bySeries.has(s)) : [...bySeries.keys()];
 
-  // x-axis label format: temporal (two lines: month / year), quarterly, or plain. Drives the
-  // active pane's highlighted x value so its line breaks match the axis.
+  // x-axis label format: temporal (two lines: month / year; one line, the year, for an annual
+  // series, as the axis and the card print it), quarterly, or plain. Drives the active pane's
+  // highlighted x value so its line breaks match the axis. The form comes from `xAxisType` when the
+  // caller passes it; sniffing the raw cell is only the fallback, and it misses a bare `YYYY` — a
+  // valid temporal value, whose parsed timestamp then fell through to `String()`.
   const sampleX = String(rows[0]?.[xField] ?? "");
-  const isDate = /^\d{4}-\d{2}-\d{2}/.test(sampleX);
-  const isQuarter = /Q\d/.test(sampleX);
+  const isDate = opts.xAxisType ? opts.xAxisType === "temporal" : /^\d{4}-\d{2}-\d{2}/.test(sampleX);
+  const isQuarter = opts.xAxisType ? opts.xAxisType === "quarterly" : /Q\d/.test(sampleX);
+  const isAnnual = isDate && isAnnualSeries(xs.map((x) => new Date(x)));
 
   const doc = svgEl.ownerDocument;
   const g = makeCoordGroup(svgEl);
@@ -2822,7 +2830,9 @@ export function attachSecondaryLineCursor(
         if (box) hiddenTicks = hideAxisLabelsUnder(svgEl, mt + plotH, box);
       } else if (ys.length) {
         let lines: Array<{ text: string; cy: number }>;
-        if (isDate) {
+        if (isAnnual) {
+          lines = [{ text: d3.timeFormat("%Y")(new Date(nx)), cy: ys[0]! }];
+        } else if (isDate) {
           const dt = new Date(nx);
           lines = [
             { text: d3.timeFormat("%b")(dt), cy: ys[0]! },

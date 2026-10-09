@@ -2475,6 +2475,7 @@ function wireFigureSvg(
       // axis-matching "%b %Y"), so the cursor cannot tell an author's format from the default and
       // would otherwise collapse its two-line echo on every figure. The spec field is the signal.
       xFormatExplicit: ctx.spec.tooltip_x_format != null,
+      xAxisType: ctx.spec.xAxisType,
       yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
       colors: ctx.colors,
       seriesLabels: ctx.seriesLabels,
