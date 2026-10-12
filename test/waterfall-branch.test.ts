@@ -112,7 +112,7 @@ describe("waterfall branch step: rendered and hovered", () => {
     expect(texts).toEqual(["10", "15", "13"]); // branch: 10 + 5; next builds from 10, not 15
   });
 
-  it("a NEGATIVE branch is labelled at the end its bar reaches (its bottom), below the bar", () => {
+  it("a NEGATIVE branch is labelled with the level its bar ends at (10 - 4), past its lower end on an ascending axis", () => {
     const labelled = { ...spec, valueLabels: { show: true } } as unknown as ChartSpec;
     const neg = [["Start", "10", "total"], ["Side", "-4", "branch"], ["Next", "3", "delta"]]
       .map(([time, value, kind]) => ({ time, value, kind })) as unknown as TidyRow[];
