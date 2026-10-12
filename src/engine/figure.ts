@@ -22,7 +22,7 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, normalizeSpec } from "./util";
-import { rowBandGeometry } from "./marks/category-band";
+import { rowBandGeometry, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./marks/category-band";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
@@ -634,8 +634,8 @@ export function renderFigure(
   const seriesLabels = spec.series_labels ?? {};
 
   // Variable pane widths (`pane_widths`) — used by BOTH modes. Resolve the per-column weight
-  // vector once here: a proportion array is used directly; "equal-bar" weights each column by its
-  // busiest pane's bar count; "equal"/unset ⇒ undefined (uniform). The TOTAL inner grid width is
+  // vector once here: a proportion array is used directly; "equal-bar" weights each column by the
+  // band span of its busiest pane (see barSpan); "equal"/unset ⇒ undefined (uniform). The TOTAL inner grid width is
   // `opts.gridWidth` (live grid) else `opts.width` (golden tests pass one width as the row total).
   const gridGap = opts.gridGap ?? 0;
   const availW = opts.gridWidth ?? opts.width ?? 720;
@@ -645,7 +645,7 @@ export function renderFigure(
     if (Array.isArray(pw) && pw.length === columns) {
       colWeights = pw;
     } else if (pw === "equal-bar") {
-      const barCount = (value: string): number => {
+      const barCount = (value: string): { cats: number; perCat: number } => {
         const pr = rows.filter((r) => (r[facetField] as string) === value);
         const catSet = new Set<string>();
         const serSet = new Set<string>();
@@ -655,12 +655,22 @@ export function renderFigure(
           const s = cols.series ? (r[cols.series] as string) : "";
           if (s) serSet.add(s);
         }
-        return Math.max(1, catSet.size) * Math.max(1, serSet.size);
+        return { cats: Math.max(1, catSet.size), perCat: Math.max(1, serSet.size) };
+      };
+      // A vertical band of n categories spans n + 2·outer − inner steps of the data width, not n
+      // (d3 band: step = width / (n − inner + 2·outer)), and each step holds `perCat` bars (a
+      // grouped bar's inner series band has no padding). Weighting by bar count alone left the
+      // busier pane's bars wider. Horizontal bars take their thickness from the pane's height, so
+      // their weighting stays the plain bar count.
+      const horizontal = spec.orientation === "horizontal";
+      const barSpan = (value: string): number => {
+        const { cats, perCat } = barCount(value);
+        return horizontal ? cats * perCat : perCat * (cats + 2 * VBAND_PADDING_OUTER - VBAND_PADDING_INNER);
       };
       const weights = Array.from({ length: columns }, () => 0);
       paneValues.forEach((v, i) => {
         const col = i % columns;
-        weights[col] = Math.max(weights[col] as number, barCount(v));
+        weights[col] = Math.max(weights[col] as number, barSpan(v));
       });
       colWeights = weights;
     }

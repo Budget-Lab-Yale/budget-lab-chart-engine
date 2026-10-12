@@ -9,7 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Added
 - Export frame: `buildExportSvg(spec, rows, { frame })` takes `frame: { width, height, logoTop?,
   fillPanes? }` (CSS px) in place of the default 1000x750 frame. `logoTop` is the padding above the
-  title row and defaults to the 40 px margin. The smallest frame is 320x240; a smaller one throws.
+  title row and defaults to the 40 px margin; a negative or non-finite `logoTop` throws. The
+  smallest frame is 320x240; a smaller one throws.
   With no `frame`, the output is unchanged. `height` is a target: a chart that sizes to its content
   (a figure without `fillPanes`, a row-sized bar chart, a treemap, a timeline) can come out shorter,
   and content that needs more room can come out taller. A timeline keeps its own width and height.
@@ -18,6 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     frame; if the frame leaves less room than the panes' own height, the panes keep that height.
   - A treemap's height is capped by the room the frame leaves it, not by the fixed 460 px.
   - A long x-axis title wraps to the width it is centred in.
+  - A legend label wider than a whole legend row wraps (colour and shape legends).
+  - When a title word cannot fit in the column beside the logo (in a 320 px frame that column is
+    66 px), the logo takes a row of its own above the title. The 640 and 1280 px slide frames keep
+    the side-by-side layout for any ordinary title.
   - A right-hand legend moves above the chart when the frame's inner width is under 566 px, as the
     live card does.
 - `buildExportSvg` is on the `BudgetLabChart` browser-bundle global.
@@ -28,6 +33,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Fixed
 - PNG export of `small_multiples.pane_widths` figures: each pane is placed at the width it was
   rendered at (see Upgrading).
+- `small_multiples.pane_widths: "equal-bar"` now gives equal bars. It weighted each column by its
+  bar count, but a band of n categories spans n + 0.2 steps (outer padding 0.2 at each end, inner 0.2),
+  so the busier pane's bars came out wider: 63 vs 62 px at the default export width, 86 vs 82 px
+  in a 1280 px frame. Columns are now weighted by that span, on screen and in the export.
 
 ### Upgrading
 - **PNG export of `small_multiples.pane_widths` figures.** The download now places each pane at the
@@ -38,10 +47,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   untracked `charts/trackers/`), so a repin moves no published chart. The only user is
   `budget-lab-interactives`' State of Tariffs `gdp-by-category` figure (shared mode,
   `pane_widths: "equal-bar"`, 2 columns, in every scenario and vintage). Its PNG download changes
-  to equal-width bars when that tool next re-vendors the engine. The on-screen chart is unchanged.
-  Figures without `pane_widths` export exactly as before.
-- The `frame` option and the waterfall `branch` kind are opt-in. No published spec uses `branch`
-  (the validator rejected it before 1.17.0), and no golden moved.
+  to equal-width bars when that tool next re-vendors the engine, and its on-screen chart changes
+  slightly too: the "equal-bar" weighting fix narrows the pane with more bars a little and widens
+  the other, so the two panes' bars match. Figures without `pane_widths` render and export exactly
+  as before.
+- The `frame` option and the waterfall `branch` kind are opt-in, as are the legend-label wrap and
+  the logo row, which apply only under a `frame`. No published spec uses `branch` (the validator
+  rejected it before 1.17.0), and no golden moved.
 
 ## [1.16.3] - 2026-10-09
 

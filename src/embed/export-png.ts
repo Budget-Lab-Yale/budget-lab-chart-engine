@@ -42,6 +42,7 @@ import {
   drawLines as drawLinesDoc,
   createExportRoot,
   composeTopChrome,
+  titleFitsBesideLogo,
   bottomChromeHeight,
   composeBottomChrome,
 } from "./figure-chrome.js";
@@ -108,8 +109,8 @@ function drawLegend(
   /** Where a row wraps: the frame's right margin (a vertical timeline's portrait frame is narrower
    *  than `W`). */
   maxRight: number = MARGIN + INNER_W,
-  /** Wrap a label too wide for a whole row onto several lines (Ruling 41). Only the portrait frame
-   *  sets it: elsewhere such a label keeps its one line, byte-identical to before. */
+  /** Wrap a label too wide for a whole row onto several lines (Ruling 41). The portrait frame and a
+   *  caller-given `frame` set it; frame-less output keeps such a label on one line, as before. */
   wrapLong = false,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
@@ -327,7 +328,9 @@ function drawLegendColumn(
 
 /**
  * Output frame for `buildExportSvg`, in CSS px (the PNG rasterises it at 2x). Omitted, the export is
- * the default 1000×750 frame and its output is unchanged. A frame smaller than 320×240 throws.
+ * the default 1000×750 frame and its output is unchanged. A frame smaller than 320×240 throws, as
+ * does a negative or non-finite `logoTop`. A frame too narrow for a title word to fit beside the
+ * logo puts the logo on a row of its own (titleFitsBesideLogo).
  *
  * `height` is the TARGET frame, not a guarantee. A chart that fills the frame (a single line, bar-
  * column, area, scatter or similar chart; a figure with `fillPanes`) comes out at `height`. A chart
@@ -342,7 +345,7 @@ function drawLegendColumn(
 export interface ExportFrame {
   width: number;
   height: number;
-  /** Top padding above the logo/title baseline row; default MARGIN (40). */
+  /** Top padding above the logo/title baseline row; default MARGIN (40). Must be finite and ≥ 0. */
   logoTop?: number;
   /**
    * Small-multiples figures only: stretch every pane row equally so the grid fills the frame's
@@ -375,6 +378,8 @@ export function buildExportSvg(
   const frame = opts.frame;
   if (frame && (!(frame.width >= 320) || !(frame.height >= 240)))
     throw new Error(`export frame must be at least 320×240 (got ${frame.width}×${frame.height})`);
+  if (frame?.logoTop !== undefined && !(Number.isFinite(frame.logoTop) && frame.logoTop >= 0))
+    throw new Error(`export frame logoTop must be a finite number of at least 0 (got ${frame.logoTop})`);
   const FW = frame?.width ?? W;
   const FH = frame?.height ?? H;
   const FIW = FW - MARGIN * 2;
@@ -435,7 +440,11 @@ export function buildExportSvg(
   const { root, bgRect } = createExportRoot(document, frameW, FH);
 
   // --- top chrome: title (+ logo), subtitle ---
-  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow: portrait, topPad: frame?.logoTop });
+  // A caller-given frame narrow enough that a title word cannot fit beside the logo (a 320px frame
+  // leaves a 66px column) puts the logo on a row of its own, as the portrait frame always does.
+  // The slide frames (640 and 1280 wide) keep the side-by-side layout for any ordinary title.
+  const logoRow = portrait || (frame != null && !titleFitsBesideLogo(title, frameW));
+  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow, topPad: frame?.logoTop });
 
   // Legend POSITION, from the same decision the live card makes (engine/legend-layout.ts). The
   // export never consulted it, so a stacked chart with five or more series — or a diverging one —
@@ -476,9 +485,14 @@ export function buildExportSvg(
   const reserveXTitleEarly = frame != null && !isTimeline;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
+  // A label wider than a whole legend row wraps in the portrait frame and in any caller-given
+  // `frame`, which can be narrow enough (a 640px slide, or a right legend fallen back on top) that
+  // the label would run off the frame. Frame-less output keeps it on one line, as before.
+  const wrapLongLegend = portrait || frame != null;
   if (legendItems.length && !rightLegend) {
     cursor = drawLegend(
-      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN, portrait,
+      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN,
+      wrapLongLegend,
     );
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
@@ -493,7 +507,7 @@ export function buildExportSvg(
     if (!rightLegend) {
       cursor = drawLegend(
         root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined, undefined, frameW - MARGIN,
-        portrait,
+        wrapLongLegend,
       );
     }
   }

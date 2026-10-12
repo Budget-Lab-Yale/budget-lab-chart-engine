@@ -27,6 +27,12 @@ export const HBAND_PADDING_OUTER = 0.02;
 export const HBAND_PADDING_INNER = 0.2;
 /** Band padding (inner and outer) of an unsectioned horizontal stack's category band. */
 export const HSTACK_BAND_PADDING = 0.2;
+/** Inner and outer padding of the VERTICAL category band: single-series and grouped bars (the
+ *  grouped figure's `fx` group band), vertical stacks and waterfalls. `pane_widths: "equal-bar"`
+ *  (figure.ts) reads these too: a band of n bars spans n + 2·outer − inner steps, so a column's
+ *  width has to follow that span, not n, for its bars to match another column's. */
+export const VBAND_PADDING_INNER = 0.2;
+export const VBAND_PADDING_OUTER = 0.2;
 /** Band padding (inner and outer) of an unsectioned horizontal dumbbell's category band. */
 export const HDUMBBELL_BAND_PADDING = 0.4;
 /** Bottom margin of an unsectioned horizontal dumbbell: one value-tick row. */

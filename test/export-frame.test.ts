@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildExportSvg } from "../src/embed/export-png";
-import { W, H, MARGIN, W_SEMI, FONT, measureText, bottomChromeHeight } from "../src/embed/figure-chrome";
+import { W, H, MARGIN, W_SEMI, W_BODY, W_BOLD, FONT, LOGO_W, LOGO_H, LOGO_BASELINE_FRAC, measureText, bottomChromeHeight } from "../src/embed/figure-chrome";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP, LEGEND_RIGHT_MIN_CARD_WIDTH } from "../src/engine/legend-layout";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -21,7 +21,10 @@ const rows = [20, 25, 30, 35].flatMap((r, i) => [
 const ser = (el: Element) => new XMLSerializer().serializeToString(el);
 
 describe("buildExportSvg frame option", () => {
-  it("an explicit default frame is byte-identical to no frame", () => {
+  // Only for a chart with nothing a framed export wraps: an x-axis title wider than the frame, or a
+  // legend label wider than a whole legend row, wraps under any explicit frame (see the wrap tests
+  // below) and stays on one line without one. LINE has neither.
+  it("an explicit default frame is byte-identical to no frame when nothing needs wrapping", () => {
     const a = ser(buildExportSvg(LINE, rows));
     const b = ser(buildExportSvg(LINE, rows, { frame: { width: W, height: H } }));
     expect(b).toBe(a);
@@ -39,6 +42,16 @@ describe("buildExportSvg frame option", () => {
   });
   it("rejects a frame smaller than 320×240", () => {
     expect(() => buildExportSvg(LINE, rows, { frame: { width: 200, height: 618 } })).toThrow(/frame/);
+  });
+  it("rejects a frame shorter than 240, and accepts exactly 320×240", () => {
+    expect(() => buildExportSvg(LINE, rows, { frame: { width: 1280, height: 239 } })).toThrow(/320×240/);
+    expect(() => buildExportSvg(LINE, rows, { frame: { width: 320, height: 240 } })).not.toThrow();
+  });
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])("rejects logoTop %s", (logoTop) => {
+    expect(() => buildExportSvg(LINE, rows, { frame: { width: 1280, height: 618, logoTop } })).toThrow(/logoTop/);
+  });
+  it("accepts logoTop 0", () => {
+    expect(() => buildExportSvg(LINE, rows, { frame: { width: 1280, height: 618, logoTop: 0 } })).not.toThrow();
   });
 });
 
@@ -184,5 +197,78 @@ describe("framed export: right legend falls back to top on a narrow frame (the l
   it("frame-less output keeps the right column", () => {
     const w = Number(chartSvg(buildExportSvg(RIGHT, rows)).getAttribute("width"));
     expect(w).toBe(W - 2 * MARGIN - LEGEND_COLUMN_WIDTH - LEGEND_GAP);
+  });
+});
+
+describe("framed export: a long legend label wraps inside a narrow frame", () => {
+  const LONG = "Revenue under the current-law baseline with every scheduled expiration taking effect as written";
+  // The label's own pieces, as drawn: root-level <text> whose words all come from LONG.
+  const words = new Set(LONG.split(" "));
+  const pieces = (svg: SVGSVGElement) =>
+    [...svg.children].filter((c) => c.tagName.toLowerCase() === "text" &&
+      (c.textContent ?? "").trim().split(" ").every((w) => words.has(w)) && (c.textContent ?? "").length > 3);
+  const inside = (svg: SVGSVGElement, fw: number) => {
+    const ps = pieces(svg);
+    expect(ps.length).toBeGreaterThan(1); // wrapped onto several lines
+    expect(ps.map((p) => p.textContent).join(" ")).toBe(LONG);
+    for (const p of ps) {
+      const x = Number(p.getAttribute("x"));
+      expect(x).toBeGreaterThanOrEqual(MARGIN);
+      expect(x + measureText(p.textContent ?? "", `${W_BODY} 13px ${FONT}`)).toBeLessThanOrEqual(fw - MARGIN + 0.01);
+    }
+  };
+  it("colour legend: 640x618 with a right legend falls back on top and wraps the label", () => {
+    const spec = { ...LINE, legendPosition: "right" as const };
+    const longRows = rows.map((r) => (r.regime === "A" ? { ...r, regime: LONG } : r)) as unknown as TidyRow[];
+    inside(buildExportSvg(spec, longRows, { frame: { width: 640, height: 618 } }), 640);
+  });
+  it("shape legend: 640x618 wraps the label too", () => {
+    const spec = {
+      chartType: "scatter", title: "T", xAxisType: "numeric",
+      columns: { x: "x", value: "v", shape: "s" }, series_legend: false, legendPosition: "right", data: "d.csv",
+    } as unknown as ChartSpec;
+    const shapeRows = [["1", "1", LONG], ["2", "2", "square"]]
+      .map(([x, v, s]) => ({ x, v, s })) as unknown as TidyRow[];
+    inside(buildExportSvg(spec, shapeRows, { frame: { width: 640, height: 618 } }), 640);
+  });
+  it("frame-less output keeps the label on one line", () => {
+    const longRows = rows.map((r) => (r.regime === "A" ? { ...r, regime: LONG } : r)) as unknown as TidyRow[];
+    const svg = buildExportSvg(LINE, longRows);
+    expect(pieces(svg).map((p) => p.textContent)).toEqual([LONG]);
+  });
+});
+
+describe("framed export: the title never runs under the logo", () => {
+  const logo = (svg: SVGSVGElement) => {
+    const img = svg.querySelector("image")!;
+    return { x: Number(img.getAttribute("x")), y: Number(img.getAttribute("y")) };
+  };
+  // The title's lines: root-level <text> in the title's 22px bold.
+  const titleLines = (svg: SVGSVGElement) =>
+    [...svg.children].filter((c) => c.tagName.toLowerCase() === "text" && c.getAttribute("font-size") === "22");
+  it("320x400: a one-word title too wide for the column beside the logo moves below it", () => {
+    const spec = { ...LINE, title: "Macroeconomic" };
+    const svg = buildExportSvg(spec, rows, { frame: { width: 320, height: 400 } });
+    const lines = titleLines(svg);
+    expect(lines.length).toBeGreaterThan(0);
+    const l = logo(svg);
+    for (const line of lines) {
+      const x = Number(line.getAttribute("x"));
+      const right = x + measureText(line.textContent ?? "", `${W_BOLD} 22px ${FONT}`);
+      const baseline = Number(line.getAttribute("y"));
+      // No overlap: either clear of the logo horizontally, or its cap height starts below the logo.
+      const clearH = right <= l.x;
+      const clearV = baseline - 22 >= l.y + LOGO_H;
+      expect(clearH || clearV).toBe(true);
+      expect(right).toBeLessThanOrEqual(320 - MARGIN + 0.01);
+    }
+  });
+  it.each([
+    [640, 618], [1280, 618], [1280, 720],
+  ])("%ix%i with logoTop 20 (the slide frames): logo and title stay side by side", (fw, fh) => {
+    const spec = { ...LINE, title: "Tariff revenue under current policy" };
+    const svg = buildExportSvg(spec, rows, { frame: { width: fw, height: fh, logoTop: 20 } });
+    expect(logo(svg)).toEqual({ x: fw - MARGIN - LOGO_W, y: 20 + 22 - LOGO_H * LOGO_BASELINE_FRAC });
+    expect(Number(titleLines(svg)[0]!.getAttribute("y"))).toBe(20 + 22);
   });
 });

@@ -36,7 +36,7 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
@@ -482,7 +482,7 @@ export function buildStackedMarks(
     dashedNames: new Set<string>(),
     // Single category band on `x`; refine outer pad like single-series bars. xScaleField
     // stays "x" → adapter's x labels are correct, no xAxisMarks override needed.
-    xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
+    xScaleOpts: { paddingInner: VBAND_PADDING_INNER, paddingOuter: VBAND_PADDING_OUTER },
     seriesColors,
     legendVisualOrder,
     netMode,

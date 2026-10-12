@@ -14,6 +14,7 @@ import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { resolveColor } from "../palette";
 import { ownValue } from "../../spec/own-key";
 import { CAT_LABEL_CLASS } from "../axes";
+import { VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import { computeWaterfallSteps, waterfallValueDecimals, isReversedDomain } from "../scales";
@@ -186,6 +187,6 @@ export function buildWaterfallMarks(
     dashedNames: new Set<string>(),
     // Explicit band domain (declaration order, incl. skip slots) so a skipped step still reserves
     // its axis position; padding matches single-series bars.
-    xScaleOpts: { domain: categories, paddingInner: 0.2, paddingOuter: 0.2 },
+    xScaleOpts: { domain: categories, paddingInner: VBAND_PADDING_INNER, paddingOuter: VBAND_PADDING_OUTER },
   };
 }

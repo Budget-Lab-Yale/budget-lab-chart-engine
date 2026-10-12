@@ -104,12 +104,35 @@ describe("waterfall branch step: rendered and hovered", () => {
     expect(coordTexts(svg).filter((s) => /5/.test(s))).toHaveLength(1);
   });
 
-  it("the value label on a branch is the top of its own bar, not the running total", () => {
+  it("the value label on a positive branch is the level its own bar ends at, not the running total", () => {
     const labelled = { ...spec, valueLabels: { show: true } } as unknown as ChartSpec;
     const { svgs } = mountHover(labelled, rows);
     // Value labels carry their bar's colour as a `fill`; axis tick text does not.
     const texts = Array.from(svgs[0]!.querySelectorAll("text[fill]")).map((t) => t.textContent);
     expect(texts).toEqual(["10", "15", "13"]); // branch: 10 + 5; next builds from 10, not 15
+  });
+
+  it("a NEGATIVE branch is labelled at the end its bar reaches (its bottom), below the bar", () => {
+    const labelled = { ...spec, valueLabels: { show: true } } as unknown as ChartSpec;
+    const neg = [["Start", "10", "total"], ["Side", "-4", "branch"], ["Next", "3", "delta"]]
+      .map(([time, value, kind]) => ({ time, value, kind })) as unknown as TidyRow[];
+    const { svg } = renderChart(labelled, neg, { width: 720, height: 400, document });
+    const texts = Array.from(svg.querySelectorAll("text[fill]"));
+    // Running total plus its own value (10 - 4), not the running total (10) the bar starts from.
+    expect(texts.map((t) => t.textContent).sort()).toEqual(["10", "13", "6"]);
+    const label = texts.find((t) => t.textContent === "6")!;
+    const ty = (el: Element): number => {
+      let y = 0;
+      for (let cur: Element | null = el; cur && cur !== svg; cur = cur.parentElement) {
+        const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(cur.getAttribute("transform") ?? "");
+        if (m) y += +m[2]!;
+      }
+      return y;
+    };
+    const bar = Array.from(svg.querySelectorAll(BAR_MARK))[1]!;
+    const barTop = parseFloat(bar.getAttribute("y")!);
+    const barBottom = barTop + parseFloat(bar.getAttribute("height")!);
+    expect(ty(label)).toBeGreaterThan(barBottom); // sits below the bar's lower end
   });
 
   it("a skip step draws no bar of its own height but keeps its category slot", () => {

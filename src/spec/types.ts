@@ -460,8 +460,9 @@ export interface SmallMultiplesConfig {
   coordinated_cursor?: boolean;
   /** How a row's width is split among its columns (shared across all rows; vertical bar facets).
    *  - "equal" (default): every column the same data width.
-   *  - "equal-bar": each column's width ∝ its bar count, so bars render at the same width (exact for
-   *    a single row; multi-row sizes each column to the max bar count among its panes).
+   *  - "equal-bar": each column's data width ∝ its bars' band span (n + 2·paddingOuter − paddingInner
+   *    for n bars), so bars render at the same width in a single row; multi-row sizes each column to
+   *    the busiest of its panes.
    *  - number[]: explicit per-column proportions, length === the grid column count, applied to every
    *    row (e.g. [2, 1] → column 0 twice as wide as column 1). */
   pane_widths?: "equal" | "equal-bar" | number[];

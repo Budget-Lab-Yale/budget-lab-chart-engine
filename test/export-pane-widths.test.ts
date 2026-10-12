@@ -44,17 +44,39 @@ describe("export honours pane_widths", () => {
     }
   });
 
-  it("draws bars of equal width in both panes", () => {
+  // Bars are the rects of the pane's `bar` mark group, in viewBox units; scale to placed pixels.
+  const barW = (p: SVGSVGElement): number => {
+    const w = [...p.querySelectorAll('g[aria-label="bar"] rect')].map((r) => num(r, "width")).filter((n) => n > 0);
+    expect(w.length).toBeGreaterThan(0);
+    return Math.max(...w) * drawScale(p);
+  };
+
+  // Within 0.5px, at the default frame and at a slide frame. A band of n bars spans
+  // n + 2·paddingOuter − paddingInner steps, not n, so weighting the columns by bar count alone
+  // left the 7-bar pane's bars wider (63 vs 62 px at 1000, 86 vs 82 px at 1280). Before the
+  // export placed panes at their rendered widths they differed by ~15px.
+  it("draws bars of equal width in both panes (default frame)", () => {
     const panes = panesOf(buildExportSvg(SPEC, rows));
-    // Bars are the rects of the pane's `bar` mark group, in viewBox units; scale to placed pixels.
-    const barW = (p: SVGSVGElement): number => {
-      const w = [...p.querySelectorAll('g[aria-label="bar"] rect')].map((r) => num(r, "width")).filter((n) => n > 0);
-      expect(w.length).toBeGreaterThan(0);
-      return Math.max(...w) * drawScale(p);
-    };
-    // Within 1px: both panes' bands are 82.2px wide, but Plot rounds band positions to whole pixels
-    // (bars of 63 and 62). Before the fix they differed by ~15px.
-    expect(Math.abs(barW(panes[0]!) - barW(panes[1]!))).toBeLessThanOrEqual(1);
+    expect(Math.abs(barW(panes[0]!) - barW(panes[1]!))).toBeLessThanOrEqual(0.5);
+  });
+
+  it("draws bars of equal width in both panes (1280x618 frame)", () => {
+    const panes = panesOf(buildExportSvg(SPEC, rows, { frame: { width: 1280, height: 618 } }));
+    expect(panes).toHaveLength(2);
+    expect(Math.abs(barW(panes[0]!) - barW(panes[1]!))).toBeLessThanOrEqual(0.5);
+  });
+
+  it("grouped bars: equal width across panes with different category counts", () => {
+    const spec: ChartSpec = { ...SPEC, columns: { x: "cat", value: "v", facet: "grp", series: "s" } };
+    const grouped = [
+      ...["A", "B", "C"].flatMap((c) => ["x", "y"].map((s) => ({ cat: c, grp: "Wide", s, v: "2" }))),
+      ...["D"].flatMap((c) => ["x", "y"].map((s) => ({ cat: c, grp: "Narrow", s, v: "1" }))),
+    ] as unknown as TidyRow[];
+    for (const frame of [undefined, { width: 1280, height: 618 }]) {
+      const panes = panesOf(buildExportSvg(spec, grouped, frame ? { frame } : {}));
+      expect(panes).toHaveLength(2);
+      expect(Math.abs(barW(panes[0]!) - barW(panes[1]!))).toBeLessThanOrEqual(0.5);
+    }
   });
 
   it("per-pane mode: splits the row's data width by the pane_widths proportions", () => {

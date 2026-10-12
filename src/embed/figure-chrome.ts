@@ -240,6 +240,22 @@ export function createExportRoot(
 // Top chrome: title (+ logo) and subtitle.
 // ---------------------------------------------------------------------------
 
+/** Gap between the title column and the logo beside it. */
+const TITLE_LOGO_GAP = 24;
+const TITLE_FONT = `${W_BOLD} 22px ${FONT}`;
+
+/**
+ * Whether `title` fits in the column the side-by-side layout leaves it beside the logo
+ * (`width − 2·MARGIN − LOGO_W − TITLE_LOGO_GAP`: 66px in a 320px frame, 386px at 640, 1026px at
+ * 1280). The title wraps only between words, so a single word wider than that column runs under
+ * the logo. A caller-given export frame takes the logo row (`composeTopChrome`'s `logoRow`) when
+ * this is false.
+ */
+export function titleFitsBesideLogo(title: string, width: number): boolean {
+  const col = width - MARGIN * 2 - LOGO_W - TITLE_LOGO_GAP;
+  return wrapText(title, TITLE_FONT, col).every((line) => measureText(line, TITLE_FONT) <= col);
+}
+
 /**
  * Draw the title (wrapped, navy, bold), the right-flush logo, and the optional subtitle into
  * `root`. Returns the y cursor at the last drawn baseline (the caller adds its own gap before
@@ -262,7 +278,7 @@ export function composeTopChrome(
   const logoBaseline = (opts.topPad ?? MARGIN) + 22;
   const logoY = logoBaseline - LOGO_H * LOGO_BASELINE_FRAC;
   const titleFirstBaseline = opts.logoRow ? Math.ceil(logoY + LOGO_H) + 10 + 22 : logoBaseline;
-  const titleLines = wrapText(title, `${W_BOLD} 22px ${FONT}`, opts.logoRow ? innerW : innerW - LOGO_W - 24);
+  const titleLines = wrapText(title, TITLE_FONT, opts.logoRow ? innerW : innerW - LOGO_W - TITLE_LOGO_GAP);
   let cursor = drawLines(doc, root, titleLines, MARGIN, titleFirstBaseline, 28, {
     size: 22,
     weight: W_BOLD,
