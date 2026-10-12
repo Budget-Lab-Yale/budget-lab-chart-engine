@@ -22,6 +22,14 @@ import type { LegendItem } from "./index.js";
 export const LEGEND_COLUMN_WIDTH = 160;
 export const LEGEND_GAP = 16;
 
+/** Below this width a live chart stops shrinking and its scroll wrapper takes over (the tracker's
+ *  mobile/stacked-header breakpoint). */
+export const MIN_CHART_WIDTH = 390;
+/** A card narrower than this takes a top legend even where the spec resolves to "right": it cannot
+ *  fit both the chart floor and the legend column. The live card applies it to its own width; a
+ *  framed PNG export applies it to the frame's inner width (embed/export-png.ts). */
+export const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGEND_GAP;
+
 /**
  * The series rows a legend actually keys — the count the position rule is defined on.
  *
@@ -62,9 +70,9 @@ export function legendInRightColumn(
  * `stacked` AND (five or more series, OR diverging — any row with a negative value), because a tall
  * stack's legend reads better beside it than wrapped above it.
  *
- * The LIVE path additionally falls back to "top" when the card is too narrow for the column; that
- * belongs to the caller, which is the only place a card width is known. The export's frame is a
- * fixed 1000px and never hits it.
+ * The LIVE path additionally falls back to "top" when the card is too narrow for the column
+ * (LEGEND_RIGHT_MIN_CARD_WIDTH); that belongs to the caller, which is the only place a card width is
+ * known. The default export frame is a fixed 1000px and never hits it; a narrow `frame` can.
  */
 export function resolveLegendPosition(
   spec: ChartSpec,

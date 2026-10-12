@@ -64,6 +64,11 @@ export interface RenderOptions {
    *  height too small for the rows shrinks them (axes.ts fittedSectionGapPx). Absent → a given
    *  `height` is the host's. */
   heightFromModel?: boolean;
+  /** Treemap only: cap the treemap area's height at this instead of TM_GEOM.maxHeight (its height
+   *  is otherwise its width's aspect height, at most 460px). Only a framed PNG export passes it, so
+   *  the tiles and their labels are laid out in the region the frame reserved. Absent → the default
+   *  cap, as live. */
+  treemapMaxHeight?: number;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;

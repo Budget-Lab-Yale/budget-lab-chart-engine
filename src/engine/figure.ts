@@ -398,8 +398,10 @@ export interface FigureRenderResult {
   columns: number;
   rows: number;
   /** The per-column OUTER pixel widths (length === `columns`) the panes were rendered at. SHARED
-   *  mode: always set — col 0 wider (labeled), col>0 narrower (label-less), the inner data width
-   *  split equally or by `pane_widths`. PER-PANE mode: set only with a non-"equal" `pane_widths`
+   *  mode: always set — col 0 carries the y-label gutter and col>0 do not, the inner data width
+   *  split equally or by `pane_widths`. With equal weights, col 0 is wider by its label gutter;
+   *  with unequal `pane_widths` any column can be the widest (e.g. `[1, 7]` on a 920px row with a
+   *  20px gap: 162.75 / 737.25). PER-PANE mode: set only with a non-"equal" `pane_widths`
    *  (perPaneColumnWidths, every column keeping its own label gutter); undefined otherwise (equal
    *  `1fr` columns). The live grid sets `grid-template-columns` to these px widths and the PNG
    *  export places each pane in a cell of this width. */

@@ -15,6 +15,8 @@ import { isHorizontalDumbbell } from "../spec/dumbbell-orientation.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
+  LEGEND_RIGHT_MIN_CARD_WIDTH,
+  MIN_CHART_WIDTH,
   legendInRightColumn,
   orderForRightLegend,
   resolveLegendPosition,
@@ -225,9 +227,8 @@ function notify<T>(card: HTMLElement, type: string, detail: T, cb?: (detail: T) 
   card.dispatchEvent(new CustomEvent(type, { detail, bubbles: true }));
 }
 
-// Below this width the chart stops shrinking and the scroll wrapper takes over (matches the
-// tracker's mobile/stacked-header breakpoint). Height is held constant as the width changes.
-const MIN_CHART_WIDTH = 390;
+// MIN_CHART_WIDTH (legend-layout.ts): below it the chart stops shrinking and the scroll wrapper
+// takes over. Height is held constant as the width changes.
 const FIXED_CHART_HEIGHT = 400;
 
 /** Compute the live-mount height for a chart. Horizontal bars scale with the number of category
@@ -259,8 +260,8 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
 // feedback loop).
 
 // When the card is too narrow to fit both the chart floor and the legend column, fall back to
-// the top legend so the chart remains usable.
-const LEGEND_RIGHT_MIN_CARD_WIDTH = MIN_CHART_WIDTH + LEGEND_COLUMN_WIDTH + LEGEND_GAP;
+// the top legend so the chart remains usable: LEGEND_RIGHT_MIN_CARD_WIDTH (legend-layout.ts, shared
+// with a framed PNG export).
 
 
 type OverlayEl = HTMLElement & { _ro?: ResizeObserver };

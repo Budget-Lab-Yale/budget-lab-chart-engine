@@ -96,10 +96,10 @@ export function treemapChoice(spec: ChartSpec, rows: TidyRow[], width: number): 
   return choose(spec, rows, width).choice;
 }
 
-function choose(spec: ChartSpec, rows: TidyRow[], width: number):
+function choose(spec: ChartSpec, rows: TidyRow[], width: number, maxHeight?: number):
   { built: Built; choice: { candidates: ScoredCandidate[]; chosen: number } } {
   const grouped = treemapData(spec, rows).some((d) => d.group !== null);
-  const builds = candidates(width, grouped).map((cand) => ({ cand, b: buildAt(spec, rows, width, cand) }));
+  const builds = candidates(width, grouped).map((cand) => ({ cand, b: buildAt(spec, rows, width, cand, maxHeight) }));
   const scored = builds.map(({ cand, b }): ScoredCandidate => ({ ...cand, labelled: b.tiles.filter((t) => t.label.mode !== "none").length }));
   const chosen = pickCandidate(scored);
   return { built: builds[chosen]!.b, choice: { candidates: scored, chosen } };
@@ -129,9 +129,10 @@ export function pickCandidate(scored: ScoredCandidate[]): number {
 }
 
 /** The one place a spec + rows + width becomes geometry, colours and labels, so the render and the
- *  warnings can never disagree: the chosen candidate's build. */
-function build(spec: ChartSpec, rows: TidyRow[], width: number): Built {
-  return choose(spec, rows, width).built;
+ *  warnings can never disagree: the chosen candidate's build. `maxHeight` caps the area (default
+ *  TM_GEOM.maxHeight); only a framed export's render passes one (RenderOptions.treemapMaxHeight). */
+function build(spec: ChartSpec, rows: TidyRow[], width: number, maxHeight?: number): Built {
+  return choose(spec, rows, width, maxHeight).built;
 }
 
 /** The groups in hue order, their resolved colours and their legend rows — width-independent. */
@@ -154,7 +155,7 @@ function treemapGroups(spec: ChartSpec, data: TreemapDatum[]): {
 }
 
 /** A spec + rows + width drawn as one candidate. */
-function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapCandidate): Built {
+function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapCandidate, maxHeight?: number): Built {
   const cfg = resolveTreemapConfig(spec);
   const data = treemapData(spec, rows);
   const { groupNames, colors, keyRows, labelOf } = treemapGroups(spec, data);
@@ -165,7 +166,7 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
   const shareText = (v: number): string => formatTreemapShare(total > 0 ? v / total : 0, cfg.shareDecimals);
   const valueText = (v: number): string => formatTreemapValue(v, spec.value_format);
 
-  const areaH = treemapAreaHeight(width);
+  const areaH = treemapAreaHeight(width, maxHeight);
   const size = cand.size;
   const numberOf = (v: number): string | null =>
     cfg.labelValue === "share" ? shareText(v) : cfg.labelValue === "value" ? valueText(v) : null;
@@ -307,7 +308,7 @@ function draw(doc: Document, spec: ChartSpec, b: Built): SVGSVGElement {
 
 export function renderTreemap(spec: ChartSpec, rows: TidyRow[], opts: RenderOptions = {}): RenderResult {
   spec = withoutRepeatedOrderEntries(spec);
-  const b = build(spec, rows, opts.width ?? 720);
+  const b = build(spec, rows, opts.width ?? 720, opts.treemapMaxHeight);
   const svg = draw(opts.document ?? document, spec, b);
   const treemapTiles: TreemapTileInfo[] = b.tiles.map((t) => ({
     name: t.datum.name, group: t.datum.group, groupLabel: t.groupLabel, value: t.datum.value, share: t.share,
