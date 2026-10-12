@@ -4,6 +4,45 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] - 2026-10-12
+
+### Added
+- Export frame: `buildExportSvg(spec, rows, { frame })` takes `frame: { width, height, logoTop?,
+  fillPanes? }` (CSS px) in place of the default 1000x750 frame. `logoTop` is the padding above the
+  title row and defaults to the 40 px margin. The smallest frame is 320x240; a smaller one throws.
+  With no `frame`, the output is unchanged. `height` is a target: a chart that sizes to its content
+  (a figure without `fillPanes`, a row-sized bar chart, a treemap, a timeline) can come out shorter,
+  and content that needs more room can come out taller. A timeline keeps its own width and height.
+  A framed export also changes how some chart parts lay out:
+  - `fillPanes: true` stretches every pane row of a small-multiples figure so the grid fills the
+    frame; if the frame leaves less room than the panes' own height, the panes keep that height.
+  - A treemap's height is capped by the room the frame leaves it, not by the fixed 460 px.
+  - A long x-axis title wraps to the width it is centred in.
+  - A right-hand legend moves above the chart when the frame's inner width is under 566 px, as the
+    live card does.
+- `buildExportSvg` is on the `BudgetLabChart` browser-bundle global.
+- Waterfall: `columns.kind` accepts `branch`. A branch draws a bar from the running total by its
+  value, like a delta, but does not move the running total, and an unfilled box from zero to its
+  level is drawn over its slot. The `columns.kind` row is now in CONFIG-SPEC.md.
+
+### Fixed
+- PNG export of `small_multiples.pane_widths` figures: each pane is placed at the width it was
+  rendered at (see Upgrading).
+
+### Upgrading
+- **PNG export of `small_multiples.pane_widths` figures.** The download now places each pane at the
+  width it was rendered at. Before, panes were rendered at their `pane_widths` widths and then
+  rescaled into equal-width cells, so with `pane_widths: "equal-bar"` the bars came out a different
+  width in each pane (and per-pane mode squeezed the whole split into one cell's width). Archive
+  scan: no figure in `budget-lab-charts` uses `pane_widths` (origin/main 82d6974, plus the
+  untracked `charts/trackers/`), so a repin moves no published chart. The only user is
+  `budget-lab-interactives`' State of Tariffs `gdp-by-category` figure (shared mode,
+  `pane_widths: "equal-bar"`, 2 columns, in every scenario and vintage). Its PNG download changes
+  to equal-width bars when that tool next re-vendors the engine. The on-screen chart is unchanged.
+  Figures without `pane_widths` export exactly as before.
+- The `frame` option and the waterfall `branch` kind are opt-in. No published spec uses `branch`
+  (the validator rejected it before 1.17.0), and no golden moved.
+
 ## [1.16.3] - 2026-10-09
 
 ### Fixed

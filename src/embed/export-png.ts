@@ -325,19 +325,37 @@ function drawLegendColumn(
 // buildExportSvg
 // ---------------------------------------------------------------------------
 
-/** Output frame for `buildExportSvg`. Omitted, the export is the fixed 1000×750 frame. */
+/**
+ * Output frame for `buildExportSvg`, in CSS px (the PNG rasterises it at 2x). Omitted, the export is
+ * the default 1000×750 frame and its output is unchanged. A frame smaller than 320×240 throws.
+ *
+ * `height` is the TARGET frame, not a guarantee. A chart that fills the frame (a single line, bar-
+ * column, area, scatter or similar chart; a figure with `fillPanes`) comes out at `height`. A chart
+ * that sizes to its content can come out shorter: a figure without `fillPanes`, a row-sized
+ * horizontal bar/stacked/dumbbell chart, a treemap (whose height is capped by the room the frame
+ * leaves it), a timeline. Content that needs more room than `height` leaves comes out taller (many
+ * bar rows, a right-hand legend column taller than the plot, chrome that leaves a single chart less
+ * than its 160px minimum). The output's height is the SVG's `height` attribute; the caller decides
+ * what to do with a mismatch. A timeline keeps its own width and height (timelineExportFrame,
+ * timelineHeight): of the frame it takes only `logoTop`, and the wrap of a long x-axis title.
+ */
 export interface ExportFrame {
   width: number;
   height: number;
-  /** Top padding above the logo/title baseline row; default MARGIN. */
+  /** Top padding above the logo/title baseline row; default MARGIN (40). */
   logoTop?: number;
-  /** Reserved: pane-fill behaviour (not yet implemented). */
+  /**
+   * Small-multiples figures only: stretch every pane row equally so the grid fills the frame's
+   * remaining height. When that height is less than the figure's own pane height, the panes keep
+   * their own height and the output comes out taller than `height`. No effect on a single chart.
+   */
   fillPanes?: boolean;
 }
 
 /**
  * Build a self-contained export SVG for the given chart spec and data rows.
- * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame. The chart
+ * Pure — no canvas, no async, no external resources. The default frame is 1000×750 (4:3); `opts.frame`
+ * (ExportFrame) sets another width/height, logo padding and pane fill. The chart
  * fills the height left after the title/subtitle/legend chrome. A timeline's frame height is its
  * content's, and a vertical timeline's frame is portrait: as wide as the timeline needs, at most
  * 640px (timelineExportFrame, E3), with every piece of chrome laid out at that width.
