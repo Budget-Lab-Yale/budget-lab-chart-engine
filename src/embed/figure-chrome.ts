@@ -248,7 +248,7 @@ export function createExportRoot(
 export function composeTopChrome(
   doc: Document,
   root: SVGElement,
-  opts: { title: string; subtitle?: string; width?: number; logoRow?: boolean },
+  opts: { title: string; subtitle?: string; width?: number; logoRow?: boolean; topPad?: number },
 ): number {
   const width = opts.width ?? W;
   const innerW = width - MARGIN * 2;
@@ -259,7 +259,7 @@ export function composeTopChrome(
   // `logoRow` (a vertical timeline's portrait frame, Ruling 50) the logo keeps that position on a row
   // of its own and the title starts below it at the full inner width: beside the logo, a 360px frame
   // leaves the title a 106px column, narrower than ordinary 22px words, which then ran into the logo.
-  const logoBaseline = MARGIN + 22;
+  const logoBaseline = (opts.topPad ?? MARGIN) + 22;
   const logoY = logoBaseline - LOGO_H * LOGO_BASELINE_FRAC;
   const titleFirstBaseline = opts.logoRow ? Math.ceil(logoY + LOGO_H) + 10 + 22 : logoBaseline;
   const titleLines = wrapText(title, `${W_BOLD} 22px ${FONT}`, opts.logoRow ? innerW : innerW - LOGO_W - 24);

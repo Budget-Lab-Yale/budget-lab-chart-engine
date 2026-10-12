@@ -324,6 +324,16 @@ function drawLegendColumn(
 // buildExportSvg
 // ---------------------------------------------------------------------------
 
+/** Output frame for `buildExportSvg`. Omitted, the export is the fixed 1000×750 frame. */
+export interface ExportFrame {
+  width: number;
+  height: number;
+  /** Top padding above the logo/title baseline row; default MARGIN. */
+  logoTop?: number;
+  /** Reserved: pane-fill behaviour (not yet implemented). */
+  fillPanes?: boolean;
+}
+
 /**
  * Build a self-contained export SVG for the given chart spec and data rows.
  * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame. The chart
@@ -340,9 +350,15 @@ function drawLegendColumn(
 export function buildExportSvg(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
+  opts: { selections?: Record<string, string>; hooks?: RenderHooks; frame?: ExportFrame } = {},
 ): SVGSVGElement {
   spec = normalizeSpec(spec);
+  const frame = opts.frame;
+  if (frame && (!(frame.width >= 320) || !(frame.height >= 240)))
+    throw new Error(`export frame must be at least 320×240 (got ${frame.width}×${frame.height})`);
+  const FW = frame?.width ?? W;
+  const FH = frame?.height ?? H;
+  const FIW = FW - MARGIN * 2;
   const isFigure = spec.small_multiples != null;
   // A single chart whose height grows with its category rows: horizontal bar/stacked, and a
   // horizontal dumbbell — the same predicate computeChartHeight (render-live) asks before sizing
@@ -364,8 +380,8 @@ export function buildExportSvg(
   // (idempotent), so passing them through unchanged here is harmless.
   const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: INNER_W, hooks: metaHooks })
-    : renderChart(spec, rows, { width: INNER_W, hooks: metaHooks });
+    ? renderFigure(spec, rows, { width: FIW, hooks: metaHooks })
+    : renderChart(spec, rows, { width: FIW, hooks: metaHooks });
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -394,13 +410,13 @@ export function buildExportSvg(
   // validate` decides it — timelineExportFrame, no DOM render needed — so the two can never drift
   // apart (Ruling 17 / task-8 fix round 1). Every other chart keeps the fixed W frame.
   const tlFrame = isTimeline ? timelineExportFrame(spec, rows) : null;
-  const frameW = tlFrame?.frameW ?? W;
+  const frameW = tlFrame?.frameW ?? FW;
   const portrait = tlFrame?.budgetWidth !== undefined;
 
-  const { root, bgRect } = createExportRoot(document, frameW, H);
+  const { root, bgRect } = createExportRoot(document, frameW, FH);
 
   // --- top chrome: title (+ logo), subtitle ---
-  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow: portrait });
+  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow: portrait, topPad: frame?.logoTop });
 
   // Legend POSITION, from the same decision the live card makes (engine/legend-layout.ts). The
   // export never consulted it, so a stacked chart with five or more series — or a diverging one —
@@ -420,7 +436,7 @@ export function buildExportSvg(
     (tlFrame
       ? tlFrame.rightLegend
       : legendInRightColumn(spec, legendItems, shapeLegendItems.length, rows));
-  const chartW = tlFrame ? tlFrame.chartW : rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+  const chartW = tlFrame ? tlFrame.chartW : rightLegend ? FIW - LEGEND_COLUMN_WIDTH - LEGEND_GAP : FIW;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
   if (legendItems.length && !rightLegend) {
@@ -474,7 +490,7 @@ export function buildExportSvg(
         : isTreemap
           // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
           ? Math.ceil(treemapHeight(chartW))
-          : Math.max(160, H - chartTop - bottomH);
+          : Math.max(160, FH - chartTop - bottomH);
     // The plot's own height. A right-hand legend never changes it: the live card keeps
     // computeChartHeight's height beside a taller legend column, so stretching the plot here moved
     // every row of the download away from the page (Ruling 71).
@@ -585,10 +601,10 @@ export function buildExportSvg(
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
     // PER-PANE mode: equal columns.
-    const shared = isShared ? sharedColumnWidths(INNER_W, cols, COL_GAP) : null;
-    const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
+    const shared = isShared ? sharedColumnWidths(FIW, cols, COL_GAP) : null;
+    const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
     const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
+      ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
       : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: shared keeps its precomputed helper widths; else equal columns.
     const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
@@ -655,10 +671,10 @@ export function buildExportSvg(
     : [xAxisTitle];
   if (portrait) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
   const H_eff =
-    isFigure || rowSized || isTimeline || isTreemap || chartTop + contentHeight + bottomH > H
+    isFigure || rowSized || isTimeline || isTreemap || chartTop + contentHeight + bottomH > FH
       ? Math.round(chartTop + contentHeight + bottomH)
-      : H;
-  if (H_eff !== H) {
+      : FH;
+  if (H_eff !== FH) {
     root.setAttribute("height", String(H_eff));
     bgRect.setAttribute("height", String(H_eff));
   }
