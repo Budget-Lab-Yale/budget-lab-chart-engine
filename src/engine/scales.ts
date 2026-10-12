@@ -281,7 +281,7 @@ export function computeDumbbellValueExtent(
   return { min: lo - pad, max: hi + pad };
 }
 
-export type WaterfallKind = "delta" | "total" | "skip";
+export type WaterfallKind = "delta" | "total" | "skip" | "branch";
 
 /** One resolved waterfall step, in DATA (= category declaration) order. `base`/`top` are the
  *  bar's value-axis extent (bottom/top); `level` is the running cumulative AFTER this step (the
@@ -291,7 +291,7 @@ export interface WaterfallStep {
   row: PreparedRow;
   cat: string;
   kind: WaterfallKind;
-  /** The step's own value: the signed delta (delta), the absolute level (total), 0 (skip). */
+  /** The step's own value: the signed delta (delta, branch), the absolute level (total), 0 (skip). */
   delta: number;
   base: number;
   top: number;
@@ -302,10 +302,10 @@ export interface WaterfallStep {
   rise: boolean;
 }
 
-/** Reads the `_kind` field set from `columns.kind` (delta/total/skip; empty ⇒ delta). */
+/** Reads the `_kind` field set from `columns.kind` (delta/total/skip/branch; empty ⇒ delta). */
 function kindOf(row: PreparedRow): WaterfallKind {
   const k = ((row._kind as string | undefined) ?? "").trim();
-  return k === "total" || k === "skip" ? k : "delta";
+  return k === "total" || k === "skip" || k === "branch" ? k : "delta";
 }
 
 /**
@@ -317,6 +317,8 @@ function kindOf(row: PreparedRow): WaterfallKind {
  * - total: an explicit value rebases (`running := value`, bar `0 → value`); a blank value draws
  *   the auto running total (bar `0 → running`) and leaves `running` unchanged.
  * - skip: no bar; `running` unchanged (a downstream connector bridges the slot).
+ * - branch: a bar `running → running + value` like a delta, but `running` is NOT advanced, so the
+ *   next step builds from the same total (a side path off the main walk).
  */
 export function computeWaterfallSteps(data: PreparedRow[]): WaterfallStep[] {
   let running = 0;
@@ -338,7 +340,7 @@ export function computeWaterfallSteps(data: PreparedRow[]): WaterfallStep[] {
     }
     const v = Number.isFinite(row._y as number) ? (row._y as number) : 0;
     const after = before + v;
-    running = after;
+    if (kind !== "branch") running = after;
     steps.push({ row, cat, kind, delta: v, base: Math.min(before, after), top: Math.max(before, after), level: after, before, rise: v >= 0 });
   }
   return steps;

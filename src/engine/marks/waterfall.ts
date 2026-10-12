@@ -83,7 +83,10 @@ export function buildWaterfallMarks(
     const connColor = resolveColor(wf.connectorColor) ?? TBL.color.annotationDim;
     const connRows: Array<{ x1: string; x2: string; y: number }> = [];
     for (let i = 0; i < barSteps.length - 1; i++) {
-      connRows.push({ x1: barSteps[i]!.cat, x2: barSteps[i + 1]!.cat, y: barSteps[i]!.level });
+      // A branch bar does not advance the running total, so the connector leaves at the level
+      // entering the next bar rather than at the branch's own level.
+      const a = barSteps[i]!, b = barSteps[i + 1]!;
+      connRows.push({ x1: a.cat, x2: b.cat, y: a.kind === "branch" ? b.before : a.level });
     }
     overlay.push(
       Plot.link(connRows, {
@@ -104,6 +107,15 @@ export function buildWaterfallMarks(
   overlay.push(
     Plot.barY(barRows, { x: "_xc", y1: "_base", y2: "_top", fill: (d: { _fill: string }) => d._fill, ...clipOpt }),
   );
+
+  // A branch step's bar floats on the running total; an unfilled box from zero to its level shows
+  // the cumulative it reaches. Drawn after the bars, so it is not tagged for the live layer.
+  const hollow = barSteps.filter((s) => s.kind === "branch").map((s) => ({ _xc: s.cat, _top: s.level }));
+  if (hollow.length) {
+    overlay.push(
+      Plot.barY(hollow, { x: "_xc", y1: 0, y2: "_top", fill: "none", stroke: TBL.color.annotationDim, strokeWidth: 1, ...clipOpt }),
+    );
+  }
 
   // --- Always-on running-total labels (opt-in): the cumulative level AFTER each step, above a
   //     rising bar / below a falling one. Color-matched to the bar and drawn at ONE uniform
