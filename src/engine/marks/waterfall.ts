@@ -22,6 +22,9 @@ import { SINGLE_SERIES_KEY } from "../../spec/columns";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
+/** Class on the hollow branch box's group; assemble-plot relabels that group (see the mark). */
+export const BRANCH_BOX_CLASS = "tbl-branch-box";
+
 const DEFAULT_INCREASE = "blue";
 const DEFAULT_DECREASE = "red";
 const DEFAULT_TOTAL = "navy";
@@ -113,7 +116,11 @@ export function buildWaterfallMarks(
   const hollow = barSteps.filter((s) => s.kind === "branch").map((s) => ({ _xc: s.cat, _top: s.level }));
   if (hollow.length) {
     overlay.push(
-      Plot.barY(hollow, { x: "_xc", y1: 0, y2: "_top", fill: "none", stroke: TBL.color.annotationDim, strokeWidth: 1, ...clipOpt }),
+      Plot.barY(hollow, { x: "_xc", y1: 0, y2: "_top", fill: "none", stroke: TBL.color.annotationDim, strokeWidth: 1,
+        // Plot labels this group "bar", and the hover cursor reads every `g[aria-label="bar"] rect` as
+        // bar geometry, so the box would draw a second value pill on its category. assemble-plot
+        // relabels `g.tbl-branch-box` (BRANCH_BOX_CLASS) to keep it out of that selector.
+        className: BRANCH_BOX_CLASS, ...clipOpt }),
     );
   }
 

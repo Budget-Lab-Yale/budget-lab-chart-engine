@@ -481,7 +481,7 @@ function prepareRows(
       // such a column still finds its row. Same exact-match contract as validateChartData.
       if (spec.columns?.point_label) row._pointKey = r[spec.columns.point_label] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
-      // Waterfall step kind (delta/total/skip).
+      // Waterfall step kind (delta/total/skip/branch).
       if (cols.kind) row._kind = r[cols.kind] ?? "";
       if (spec.projected_field) {
         row._projected = isTruthyFlag(r[spec.projected_field]);

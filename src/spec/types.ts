@@ -499,8 +499,9 @@ export interface ColumnMap {
   /** Waterfall charts: column flagging each step's row TYPE — `total` (an absolute bar anchored
    *  at zero; an explicit value rebases the running cumulative, a blank value = the auto running
    *  total), `skip` (no bar — the category slot is kept so facets stay aligned; label the gap
-   *  with a point annotation), or `delta` (the default — a signed step floating on the running
-   *  cumulative). Omit ⇒ every row is a delta. */
+   *  with a point annotation), `branch` (a bar floating on the running cumulative like a delta, but the
+   *  running cumulative is not advanced), or `delta` (the default — a signed step floating on the
+   *  running cumulative). Omit ⇒ every row is a delta. */
   kind?: string;
   /** Histogram pre-binned data: columns holding each bin's lower/upper edge. When BOTH are mapped,
    *  the histogram treats data as pre-binned (no engine binning) and `value` is the bar height. */

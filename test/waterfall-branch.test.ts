@@ -6,6 +6,7 @@ import { validateChart } from "../src/spec/validate";
 import type { PreparedRow, MarkContext } from "../src/engine/marks/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { renderChart } from "../src/engine/index";
 import { mountHover, hoverFirstMark, coordShown, coordTexts, BAR_MARK } from "./helpers/hover-harness";
 
 const row = (cat: string, y: number, kind = ""): PreparedRow =>
@@ -63,24 +64,52 @@ describe("waterfall branch step: rendered and hovered", () => {
   const rows = [["Start", "10", "total"], ["Side", "5", "branch"], ["Next", "3", "delta"]]
     .map(([time, value, kind]) => ({ time, value, kind })) as unknown as TidyRow[];
 
-  it("draws one unfilled box beside the three bars", () => {
+  it("draws one unfilled box beside the three bars, outside the bar group", () => {
     const { svgs } = mountHover(spec, rows);
     const rects = Array.from(svgs[0]!.querySelectorAll(BAR_MARK));
-    expect(rects).toHaveLength(4);
-    const hollow = rects[3]!;
+    expect(rects).toHaveLength(3); // the box is not a "bar" to the hover cursor
+    const boxes = Array.from(svgs[0]!.querySelectorAll('g[aria-label="branch box"] rect'));
+    expect(boxes).toHaveLength(1);
+    const hollow = boxes[0]!;
     expect(hollow.parentElement!.getAttribute("fill")).toBe("none");
-    // 0 → 15 is three times the height of the branch bar's own 10 → 15 span, on the branch's slot.
+    // 0 -> 15 is three times the height of the branch bar's own 10 -> 15 span, on the branch's slot.
     expect(parseFloat(hollow.getAttribute("height")!)).toBeCloseTo(3 * parseFloat(rects[1]!.getAttribute("height")!), 5);
     expect(hollow.getAttribute("x")).toBe(rects[1]!.getAttribute("x"));
-    expect(rects[3]!.hasAttribute("data-series")).toBe(false);
+    expect(hollow.hasAttribute("data-series")).toBe(false);
   });
 
-  it("hovering a branch bar shows a signed value pill, as a delta does", () => {
+  it("the export path draws the box too", () => {
+    const { svg } = renderChart(spec, rows, { width: 720, height: 400, document });
+    expect(svg.querySelectorAll('g[aria-label="branch box"] rect')).toHaveLength(1);
+    expect(svg.querySelectorAll(BAR_MARK)).toHaveLength(3);
+  });
+
+  it("hovering a branch bar shows exactly one signed value pill, as a delta does", () => {
     const { svgs } = mountHover(spec, rows);
     const svg = svgs[0]!;
     hoverFirstMark(svg, `${BAR_MARK}:nth-of-type(2)`);
     expect(coordShown(svg)).toBe(true);
-    expect(coordTexts(svg).join(" ")).toMatch(/\+5/);
+    expect(coordTexts(svg).filter((s) => s.includes("+5"))).toHaveLength(1);
+    expect(svg.querySelectorAll("g.tbl-coord .tbl-coord-pill")).toHaveLength(1);
+  });
+
+  it("a negative branch in first position also gets one pill", () => {
+    const neg = [["Side", "-5", "branch"], ["Next", "3", "delta"]]
+      .map(([time, value, kind]) => ({ time, value, kind })) as unknown as TidyRow[];
+    const { svgs } = mountHover(spec, neg);
+    const svg = svgs[0]!;
+    hoverFirstMark(svg, BAR_MARK);
+    expect(coordShown(svg)).toBe(true);
+    expect(svg.querySelectorAll("g.tbl-coord .tbl-coord-pill")).toHaveLength(1);
+    expect(coordTexts(svg).filter((s) => /5/.test(s))).toHaveLength(1);
+  });
+
+  it("the value label on a branch is the top of its own bar, not the running total", () => {
+    const labelled = { ...spec, valueLabels: { show: true } } as unknown as ChartSpec;
+    const { svgs } = mountHover(labelled, rows);
+    // Value labels carry their bar's colour as a `fill`; axis tick text does not.
+    const texts = Array.from(svgs[0]!.querySelectorAll("text[fill]")).map((t) => t.textContent);
+    expect(texts).toEqual(["10", "15", "13"]); // branch: 10 + 5; next builds from 10, not 15
   });
 
   it("a skip step draws no bar of its own height but keeps its category slot", () => {
