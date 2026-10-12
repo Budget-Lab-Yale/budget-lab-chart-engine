@@ -605,14 +605,21 @@ export function buildExportSvg(
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
-    // PER-PANE mode: equal columns.
+    // PER-PANE mode: equal columns, unless `pane_widths` splits the row (see colWidth below).
     const shared = isShared ? sharedColumnWidths(FIW, cols, COL_GAP) : null;
     const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
     const fig = isShared
       ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
-      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
-    // Cell width per column: shared keeps its precomputed helper widths; else equal columns.
-    const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
+      : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
+        // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
+        // reads only `width`, so equal per-pane figures are unchanged.
+        renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
+    // Cell width per column: the width each pane was RENDERED at. A pane's viewBox is its rendered
+    // width, so a cell of any other width rescales the whole pane: with `pane_widths` the bars came
+    // out a different width in every pane. renderFigure reports the widths whenever they are not
+    // equal columns (shared mode always; per-pane with pane_widths); without pane_widths they equal
+    // the shared helper's widths, so those figures place exactly as before.
+    const colWidth = (col: number): number => fig.columnWidths?.[col] ?? shared?.colWidths[col] ?? equalPaneW;
     // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
     const colX: number[] = [];
     let acc = MARGIN;

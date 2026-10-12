@@ -92,12 +92,12 @@ export interface RenderOptions {
    *  keeps TBL_MARGIN_LEFT; the label-less columns pass a small margin so they don't reserve the
    *  ~44px label gutter. Absent → TBL_MARGIN_LEFT (single-chart + per-pane byte-identical). */
   marginLeft?: number;
-  /** SHARED-mode small multiples (figure orchestrator only): the TOTAL inner width the row of
-   *  panes spans. renderFigure uses it (with `gridGap`) to compute the per-column OUTER widths
-   *  via the shared width helper so the inner DATA width is identical across a row. Absent →
-   *  `opts.width` is treated as the total grid width. Ignored outside the shared branch. */
+  /** Small multiples (figure orchestrator only): the TOTAL inner width the row of panes spans.
+   *  renderFigure uses it (with `gridGap`) to compute the per-column OUTER widths: in shared mode
+   *  always (sharedColumnWidths), in per-pane mode only with a non-"equal" `pane_widths`
+   *  (perPaneColumnWidths). Absent → `opts.width` is treated as the total grid width. */
   gridWidth?: number;
-  /** SHARED-mode small multiples: the inter-column gap (px) used by the per-column width math.
+  /** Small multiples: the inter-column gap (px) used by the per-column width math (see gridWidth).
    *  Must match the live grid's column-gap. Absent → 0. */
   gridGap?: number;
   /** Area charts: visual stack order bottom→top (overrides series_order for stacking only —

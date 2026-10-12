@@ -397,10 +397,12 @@ export interface FigureRenderResult {
   panes: FigurePane[];
   columns: number;
   rows: number;
-  /** SHARED mode only: the per-column OUTER pixel widths (length === `columns`) the panes were
-   *  rendered at — col 0 wider (labeled), col>0 narrower (label-less), all sharing one inner data
-   *  width. The live grid sets `grid-template-columns` to these px widths and the PNG export lays
-   *  the panes out the same way. Undefined for per-pane mode (equal `1fr` columns). */
+  /** The per-column OUTER pixel widths (length === `columns`) the panes were rendered at. SHARED
+   *  mode: always set — col 0 wider (labeled), col>0 narrower (label-less), the inner data width
+   *  split equally or by `pane_widths`. PER-PANE mode: set only with a non-"equal" `pane_widths`
+   *  (perPaneColumnWidths, every column keeping its own label gutter); undefined otherwise (equal
+   *  `1fr` columns). The live grid sets `grid-template-columns` to these px widths and the PNG
+   *  export places each pane in a cell of this width. */
   columnWidths?: number[];
   legendItems: LegendItem[] | null;
   /** Point-chart figures with dual color/shape encoding: the SHAPE legend rows (else null). */
