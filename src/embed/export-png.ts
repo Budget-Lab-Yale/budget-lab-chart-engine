@@ -489,7 +489,7 @@ export function buildExportSvg(
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
         : isTreemap
           // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
-          ? Math.ceil(treemapHeight(chartW))
+          ? Math.ceil(frame ? treemapHeight(chartW, Math.max(160, FH - chartTop - bottomH)) : treemapHeight(chartW))
           : Math.max(160, FH - chartTop - bottomH);
     // The plot's own height. A right-hand legend never changes it: the live card keeps
     // computeChartHeight's height beside a taller legend column, so stretching the plot here moved
@@ -596,7 +596,12 @@ export function buildExportSvg(
     const gridRows = figMeta.rows;
     // A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups,
     // spec/facet-groups.ts), so every pane takes figurePaneHeight's fixed height.
-    const paneChartH = figurePaneHeight(spec);
+    // Every pane of a figure takes this one height (row-sized chart types are never figures), so
+    // fillPanes stretches all grid rows equally; without a frame it is a no-op.
+    const paneChartH0 = figurePaneHeight(spec);
+    const paneChartH = frame?.fillPanes
+      ? Math.max(paneChartH0, Math.floor((FH - chartTop - bottomH - gridRows * PANE_TITLE_H - (gridRows - 1) * ROW_GAP) / gridRows))
+      : paneChartH0;
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.

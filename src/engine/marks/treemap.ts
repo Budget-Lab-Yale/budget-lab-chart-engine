@@ -199,8 +199,8 @@ function buildAt(spec: ChartSpec, rows: TidyRow[], width: number, cand: TreemapC
 
 /** Total SVG height at `width`, as renderTreemap draws it: the treemap area alone, which depends on
  *  the width only. */
-export function treemapHeight(width: number): number {
-  return treemapAreaHeight(width);
+export function treemapHeight(width: number, maxHeight?: number): number {
+  return treemapAreaHeight(width, maxHeight);
 }
 
 /** Whether the legend draws its group rows: grouped data with more than one group, unless `legend:

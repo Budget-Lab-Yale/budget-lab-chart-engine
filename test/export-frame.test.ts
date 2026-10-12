@@ -40,3 +40,44 @@ describe("buildExportSvg frame option", () => {
     expect(() => buildExportSvg(LINE, rows, { frame: { width: 200, height: 618 } })).toThrow(/frame/);
   });
 });
+
+const FIG: ChartSpec = {
+  chartType: "bar", title: "By sector", xAxisType: "categorical", orientation: "vertical",
+  columns: { x: "cat", value: "v", facet: "grp" }, small_multiples: { mode: "shared", columns: 2 },
+  data: "d.csv",
+};
+const figRows = [["A","G1",1],["B","G1",-2],["C","G1",3],["D","G2",2],["E","G2",-1]]
+  .map(([cat, grp, v]) => ({ cat, grp, v: String(v) })) as unknown as TidyRow[];
+
+describe("fillPanes and the frame-derived treemap cap", () => {
+  it("fillPanes stretches a one-row figure to the frame height", () => {
+    const plain = buildExportSvg(FIG, figRows, { frame: { width: 1280, height: 618 } });
+    const filled = buildExportSvg(FIG, figRows, { frame: { width: 1280, height: 618, fillPanes: true } });
+    expect(Number(plain.getAttribute("height"))).toBeLessThan(618); // figures size to content
+    expect(Math.abs(Number(filled.getAttribute("height")) - 618)).toBeLessThanOrEqual(1);
+  });
+  it("fillPanes fills a two-row figure too", () => {
+    const twoRow = { ...FIG, small_multiples: { mode: "shared" as const, columns: 1 } };
+    // Two content-sized rows already need 795px, so the frame must be taller for there to be room to fill.
+    const svg = buildExportSvg(twoRow, figRows, { frame: { width: 1280, height: 900, fillPanes: true } });
+    expect(Math.abs(Number(svg.getAttribute("height")) - 900)).toBeLessThanOrEqual(1);
+  });
+  it("fillPanes never shrinks panes below their content size in a short frame", () => {
+    const twoRow = { ...FIG, small_multiples: { mode: "shared" as const, columns: 1 } };
+    const plain = buildExportSvg(twoRow, figRows, { frame: { width: 1280, height: 720 } });
+    const filled = buildExportSvg(twoRow, figRows, { frame: { width: 1280, height: 720, fillPanes: true } });
+    expect(ser(filled)).toBe(ser(plain));
+  });
+  it("fillPanes without a frame changes nothing", () => {
+    expect(ser(buildExportSvg(FIG, figRows, {}))).toBe(ser(buildExportSvg(FIG, figRows)));
+  });
+  it("a framed treemap fills more of a tall frame than the default cap allows", () => {
+    const TM: ChartSpec = { chartType: "treemap", title: "Shares", xAxisType: "categorical",
+      columns: { x: "cat", value: "v" }, data: "d.csv" };
+    const tmRows = ["A","B","C","D"].map((c, i) => ({ cat: c, v: String(10 + i) })) as unknown as TidyRow[];
+    const h0 = Number(buildExportSvg(TM, tmRows).getAttribute("height"));
+    const h1 = Number(buildExportSvg(TM, tmRows, { frame: { width: 1280, height: 720 } }).getAttribute("height"));
+    expect(h1).toBeGreaterThan(h0);
+    expect(h1).toBeLessThanOrEqual(720);
+  });
+});
