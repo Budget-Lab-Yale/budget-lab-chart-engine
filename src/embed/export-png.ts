@@ -78,6 +78,9 @@ const WRAP_LINE_H = 16; // a wrapped legend label's line pitch (the right-hand c
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
 const AXIS_TITLE_LINE_H = 16; // a wrapped x-axis title's line pitch (the y-axis title's)
+/** The least height a frame-filling chart, a framed treemap or a `fillPanes` pane is given, however
+ *  little room the frame leaves; content that needs more comes out taller than the frame. */
+const MIN_CHART_H = 160;
 
 // ---------------------------------------------------------------------------
 // Legend
@@ -333,14 +336,17 @@ function drawLegendColumn(
  * logo puts the logo on a row of its own (titleFitsBesideLogo).
  *
  * `height` is the TARGET frame, not a guarantee. A chart that fills the frame (a single line, bar-
- * column, area, scatter or similar chart; a figure with `fillPanes`) comes out at `height`. A chart
- * that sizes to its content can come out shorter: a figure without `fillPanes`, a row-sized
- * horizontal bar/stacked/dumbbell chart, a treemap (whose height is capped by the room the frame
- * leaves it), a timeline. Content that needs more room than `height` leaves comes out taller (many
- * bar rows, a right-hand legend column taller than the plot, chrome that leaves a single chart less
- * than its 160px minimum). The output's height is the SVG's `height` attribute; the caller decides
- * what to do with a mismatch. A timeline keeps its own width and height (timelineExportFrame,
- * timelineHeight): of the frame it takes only `logoTop`, and the wrap of a long x-axis title.
+ * column, area, scatter or similar chart; a figure with `fillPanes`; a row-sized chart with
+ * `fitRows` that is taller than the frame) comes out at `height`. A chart that sizes to its content
+ * can come out shorter: a figure without `fillPanes`, a row-sized horizontal bar/stacked/dumbbell
+ * chart (with or without `fitRows`, which never expands), a treemap (whose height is capped by the
+ * room the frame leaves it), a timeline. Content that needs more room than `height` leaves comes out
+ * taller (many bar rows without `fitRows`, or more than its floor allows with it; `fillPanes` panes at
+ * their 160px floor; a right-hand legend column taller than the plot; chrome that leaves a single
+ * chart less than its 160px minimum). The output's height is the SVG's `height` attribute; the
+ * caller decides what to do with a mismatch. A timeline keeps its own width and height
+ * (timelineExportFrame, timelineHeight): of the frame it takes only `logoTop`, and the wrap of a long
+ * x-axis title.
  */
 export interface ExportFrame {
   width: number;
@@ -348,11 +354,24 @@ export interface ExportFrame {
   /** Top padding above the logo/title baseline row; default MARGIN (40). Must be finite and ≥ 0. */
   logoTop?: number;
   /**
-   * Small-multiples figures only: stretch every pane row equally so the grid fills the frame's
-   * remaining height. When that height is less than the figure's own pane height, the panes keep
-   * their own height and the output comes out taller than `height`. No effect on a single chart.
+   * Small-multiples figures only: size every pane row equally so the grid fills the frame's
+   * remaining height exactly, growing the panes past their own height or shrinking them below it,
+   * but never below 160px. When the frame leaves less than that, the panes stay at 160px and the
+   * output comes out taller than `height`. No effect on a single chart. `true`, `false` or absent;
+   * anything else throws.
    */
   fillPanes?: boolean;
+  /**
+   * Row-sized single charts only (horizontal bar/stacked, horizontal dumbbell): when the chart is
+   * taller than the room the frame leaves it, compress its row pitch so it fits that room exactly
+   * (horizontalBarChartHeight's `maxHeight`). Margins and section gaps keep their size, and a chart
+   * that already fits is unchanged, never expanded. The pitch stops at a floor that keeps labels
+   * legible: 16px per category-label line (FIT_LABEL_LINE_PX) and 15px per bar in the row
+   * (FIT_MIN_PX_PER_BAR: a grouped row of three bars needs 45px), whichever is larger. When the floor
+   * binds the output comes out taller than `height`. No effect on any other chart or a figure.
+   * `true`, `false` or absent; anything else throws.
+   */
+  fitRows?: boolean;
 }
 
 /**
@@ -380,6 +399,11 @@ export function buildExportSvg(
     throw new Error(`export frame must be at least 320×240 (got ${frame.width}×${frame.height})`);
   if (frame?.logoTop !== undefined && !(Number.isFinite(frame.logoTop) && frame.logoTop >= 0))
     throw new Error(`export frame logoTop must be a finite number of at least 0 (got ${frame.logoTop})`);
+  for (const key of ["fillPanes", "fitRows"] as const) {
+    const v: unknown = frame?.[key];
+    if (v !== undefined && typeof v !== "boolean")
+      throw new Error(`export frame ${key} must be true, false or absent (got ${String(v)})`);
+  }
   const FW = frame?.width ?? W;
   const FH = frame?.height ?? H;
   const FIW = FW - MARGIN * 2;
@@ -538,15 +562,19 @@ export function buildExportSvg(
     // A framed treemap is capped by the frame's remaining height rather than the default 460px. The
     // SAME cap goes to renderChart below (treemapMaxHeight), so the tiles and their labels are laid
     // out in exactly the region reserved here.
-    const treemapCap = isTreemap && frame ? Math.max(160, FH - chartTop - bottomH) : undefined;
+    const treemapCap = isTreemap && frame ? Math.max(MIN_CHART_H, FH - chartTop - bottomH) : undefined;
+    // `fitRows`: a row-sized chart taller than the room the frame leaves it compresses its row pitch
+    // to fit, down to a legible floor (horizontalBarChartHeight's `maxHeight`). The room may be
+    // fractional (chartTop can be), so a fitted chart lands on the frame height exactly.
+    const rowsCap = rowSized && frame?.fitRows === true ? FH - chartTop - bottomH : undefined;
     contentHeight = rowSized
-      ? horizontalBarChartHeight(spec, rows)
+      ? horizontalBarChartHeight(spec, rows, rowsCap !== undefined ? { maxHeight: rowsCap } : {})
       : isTimeline
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
         : isTreemap
           // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
           ? Math.ceil(treemapHeight(chartW, treemapCap))
-          : Math.max(160, FH - chartTop - bottomH);
+          : Math.max(MIN_CHART_H, FH - chartTop - bottomH);
     // The plot's own height. A right-hand legend never changes it: the live card keeps
     // computeChartHeight's height beside a taller legend column, so stretching the plot here moved
     // every row of the download away from the page (Ruling 71).
@@ -654,12 +682,15 @@ export function buildExportSvg(
     // A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups,
     // spec/facet-groups.ts), so every pane takes figurePaneHeight's fixed height.
     // Every pane of a figure takes this one height (row-sized chart types are never figures), so
-    // fillPanes stretches all grid rows equally; without a frame it is a no-op.
+    // fillPanes sizes all grid rows equally to fill the frame, growing or shrinking them, but never
+    // below MIN_CHART_H: there the panes stop and the output comes out taller than the frame. Without
+    // a frame it is a no-op.
     const paneChartH0 = figurePaneHeight(spec);
     const fillAvail = FH - chartTop - bottomH - gridRows * PANE_TITLE_H - (gridRows - 1) * ROW_GAP;
     const fillH = Math.floor(fillAvail / gridRows);
-    const fills = frame?.fillPanes === true && fillH >= paneChartH0;
-    const paneChartH = fills ? fillH : paneChartH0;
+    const fillPanes = frame?.fillPanes === true;
+    const fills = fillPanes && fillH >= MIN_CHART_H;
+    const paneChartH = fills ? fillH : fillPanes ? MIN_CHART_H : paneChartH0;
     // Flooring per row leaves up to gridRows − 1 whole pixels unfilled; renderFigure draws every pane
     // at one height, so they go to the gaps between rows, one each (at most one per gap). Only the
     // sub-pixel remainder is left, as on a one-row figure.

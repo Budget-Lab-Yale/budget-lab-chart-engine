@@ -22,10 +22,10 @@ import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, normalizeSpec } from "./util";
-import { rowBandGeometry, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./marks/category-band";
+import { rowBandGeometry, HBAND_PADDING_INNER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./marks/category-band";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT, TBL_VALUE_LABEL } from "./theme";
 import type { SeriesHatch } from "./hatch";
 import type { OverlayTooltipLine } from "./overlays";
 
@@ -137,6 +137,42 @@ function rowSlotPx(barsPerCat: number, maxLabelLines: number): number {
   return Math.max(barsPerCat * HORIZONTAL_PX_PER_BAR, Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6);
 }
 
+/** The floors of a FITTED row slot (horizontalBarChartHeight's `maxHeight`, a framed export's
+ *  `fitRows`), which compresses the pitch toward these and never past them.
+ *
+ *  Per label line: HORIZONTAL_LABEL_LINE_PX, without rowSlotPx's 6px pad. A wrapped label's lines
+ *  are drawn 1em (FACETED_CAT_LABEL_PX, 13px) apart, so 16px a line still leaves 3px clear between
+ *  neighbouring labels. With the pad, a one-line label's floor would be 22px, the unfitted pitch
+ *  itself, and no single-series chart could be fitted at all. */
+export const FIT_LABEL_LINE_PX = HORIZONTAL_LABEL_LINE_PX;
+/** Per bar: a bar at least as thick as its value label is tall (TBL_VALUE_LABEL.fontSize), so labels
+ *  beside neighbouring bars cannot overlap. A bar is the slot less the band's inner padding
+ *  (HBAND_PADDING_INNER), and a grouped row splits its slot among its bars: 12 / 0.8 = 15px a bar. */
+export const FIT_MIN_PX_PER_BAR = Math.ceil(TBL_VALUE_LABEL.fontSize / (1 - HBAND_PADDING_INNER));
+
+/** The smallest row slot (px) a fitted chart may compress to (FIT_LABEL_LINE_PX, FIT_MIN_PX_PER_BAR). */
+function minRowSlotPx(barsPerCat: number, maxLabelLines: number): number {
+  return Math.max(barsPerCat * FIT_MIN_PX_PER_BAR, Math.max(1, maxLabelLines) * FIT_LABEL_LINE_PX);
+}
+
+/** A row-sized chart of `natural` height fitted under `maxHeight` by compressing its row pitch only:
+ *  margins and section gaps keep their size. A chart that already fits is unchanged (never
+ *  expanded). The rows never compress below `minSlotPx` (Plot rounds a fractional step down to whole
+ *  px, and the floor is whole, so the rendered pitch is at least the floor) nor below the gaps' total
+ *  (as fitRowsHeight); when that floor binds, the height is the floor's and exceeds `maxHeight`. */
+function fitRowsUnder(
+  natural: number,
+  maxHeight: number,
+  nRows: number,
+  minSlotPx: number,
+  gapsPx: number,
+  band: RowBand,
+): number {
+  if (natural <= maxHeight) return natural;
+  const floorPx = band.margins + gapsPx + Math.max(rowsPxAtPitch(minSlotPx, nRows, band), gapsPx);
+  return Math.min(natural, Math.max(maxHeight, floorPx));
+}
+
 /** Whether a chart's height grows with its category rows: horizontal bar/stacked, and a horizontal
  *  dumbbell (orientation omitted included). The one predicate the live mount (computeChartHeight)
  *  and the PNG export (buildExportSvg) both ask, so the two cannot drift apart. Such a chart is
@@ -153,8 +189,12 @@ export function growsWithRows(spec: ChartSpec): boolean {
  *  single-series bar). Single source of truth shared by the live mount (computeChartHeight) and the
  *  PNG export (buildExportSvg), so per-row height, section-gap reservation and the export frame
  *  all agree. No floor: a chart with few rows is short, its rows at the slot pitch (fitRowsHeight).
- *  Caller must confirm `growsWithRows(spec)` before calling. */
-export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+ *  Caller must confirm `growsWithRows(spec)` before calling.
+ *
+ *  `maxHeight` (a framed export's `fitRows`; the live mount never passes it) compresses the row
+ *  pitch of a chart taller than it so the chart is exactly `maxHeight` tall, down to the floor of
+ *  minRowSlotPx (fitRowsUnder). It never makes a chart taller. */
+export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[], opts: { maxHeight?: number } = {}): number {
   spec = normalizeSpec(spec);
   const cols = resolveColumns(spec, rows);
   rows = inSectionOrder(spec, cols, rows);
@@ -186,13 +226,12 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
     maxLabelLines,
     extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
   });
-  return fitRowsHeight(
-    estimate,
-    nCats,
-    rowSlotPx(grouped ? nSeries : 1, maxLabelLines),
-    nSectionBreaks * sectionGapPx(),
-    rowBandGeometry(spec.chartType, spec.x_axis_ticks, nSections > 0),
-  );
+  const barsPerCat = grouped ? nSeries : 1;
+  const gapsPx = nSectionBreaks * sectionGapPx();
+  const band = rowBandGeometry(spec.chartType, spec.x_axis_ticks, nSections > 0);
+  const natural = fitRowsHeight(estimate, nCats, rowSlotPx(barsPerCat, maxLabelLines), gapsPx, band);
+  if (opts.maxHeight === undefined) return natural;
+  return fitRowsUnder(natural, opts.maxHeight, nCats, minRowSlotPx(barsPerCat, maxLabelLines), gapsPx, band);
 }
 
 /** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of

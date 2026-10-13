@@ -76,11 +76,12 @@ describe("fillPanes and the frame-derived treemap cap", () => {
     const svg = buildExportSvg(twoRow, figRows, { frame: { width: 1280, height: 900, fillPanes: true } });
     expect(Math.abs(Number(svg.getAttribute("height")) - 900)).toBeLessThanOrEqual(1);
   });
-  it("fillPanes never shrinks panes below their content size in a short frame", () => {
+  it("fillPanes shrinks panes below their content size to fill a short frame", () => {
     const twoRow = { ...FIG, small_multiples: { mode: "shared" as const, columns: 1 } };
     const plain = buildExportSvg(twoRow, figRows, { frame: { width: 1280, height: 720 } });
     const filled = buildExportSvg(twoRow, figRows, { frame: { width: 1280, height: 720, fillPanes: true } });
-    expect(ser(filled)).toBe(ser(plain));
+    expect(Number(plain.getAttribute("height"))).toBeGreaterThan(720);
+    expect(Number(filled.getAttribute("height"))).toBe(720);
   });
   it("fillPanes without a frame changes nothing", () => {
     expect(ser(buildExportSvg(FIG, figRows, {}))).toBe(ser(buildExportSvg(FIG, figRows)));

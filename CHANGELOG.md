@@ -8,15 +8,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Added
 - Export frame: `buildExportSvg(spec, rows, { frame })` takes `frame: { width, height, logoTop?,
-  fillPanes? }` (CSS px) in place of the default 1000x750 frame. `logoTop` is the padding above the
+  fillPanes?, fitRows? }` (CSS px) in place of the default 1000x750 frame. `logoTop` is the padding above the
   title row and defaults to the 40 px margin; a negative or non-finite `logoTop` throws. The
-  smallest frame is 320x240; a smaller one throws.
+  smallest frame is 320x240; a smaller one throws. `fillPanes` and `fitRows` take `true`, `false`
+  or nothing; any other value throws.
   With no `frame`, the output is unchanged. `height` is a target: a chart that sizes to its content
-  (a figure without `fillPanes`, a row-sized bar chart, a treemap, a timeline) can come out shorter,
-  and content that needs more room can come out taller. A timeline keeps its own width and height.
+  (a figure without `fillPanes`, a row-sized bar chart that fits, a treemap, a timeline) can come out
+  shorter, and content that needs more room can come out taller, including under `fillPanes` and
+  `fitRows` when their floors bind. A timeline keeps its own width and height.
   A framed export also changes how some chart parts lay out:
-  - `fillPanes: true` stretches every pane row of a small-multiples figure so the grid fills the
-    frame; if the frame leaves less room than the panes' own height, the panes keep that height.
+  - `fillPanes: true` sizes every pane row of a small-multiples figure so the grid fills the frame
+    exactly, growing or shrinking the panes, but not below 160 px (the least height a framed single
+    chart gets). If the frame leaves less room than that, the panes stay at 160 px and the output
+    comes out taller than the frame.
+  - `fitRows: true` fits a row-sized chart (horizontal bar or stack, horizontal dumbbell) that is
+    taller than the frame by compressing its row pitch, so it fills the frame exactly. Margins and
+    section gaps keep their size, and a chart that already fits is not stretched. The pitch stops at
+    16 px per category-label line and 15 px per bar in the row (12 px value-label height over the
+    band's 0.8 bar share; a grouped row of three bars needs 45 px), whichever is larger. Past that
+    floor the output comes out taller than the frame. The on-screen chart is unchanged.
   - A treemap's height is capped by the room the frame leaves it, not by the fixed 460 px.
   - A long x-axis title wraps to the width it is centred in.
   - A legend label wider than a whole legend row wraps (colour and shape legends).
@@ -51,7 +61,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   slightly too: the "equal-bar" weighting fix narrows the pane with more bars a little and widens
   the other, so the two panes' bars match. Figures without `pane_widths` render and export exactly
   as before.
-- The `frame` option and the waterfall `branch` kind are opt-in, as are the legend-label wrap and
+- The `frame` option (with `fillPanes` and `fitRows`) and the waterfall `branch` kind are opt-in, as are the legend-label wrap and
   the logo row, which apply only under a `frame`. No published spec uses `branch` (the validator
   rejected it before 1.17.0), and no golden moved.
 
