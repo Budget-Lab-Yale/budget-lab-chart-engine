@@ -36,7 +36,7 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
@@ -48,6 +48,22 @@ export const NET_DOT_CLASS = "tbl-net-marker";
 // Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.
 const NET_DOT_R = 8;
 const NET_DOT_PANE_R = 5.6;
+const NET_DOT_STROKE_W = 2;
+/** The height a standalone chart's net dot takes on its row (px): its diameter plus its outline. The
+ *  height model (figure.ts) floors a fitted row pitch on it. Row-sized charts are never panes. */
+export const NET_DOT_ROW_PX = 2 * NET_DOT_R + NET_DOT_STROKE_W;
+
+/** Whether any in-scope value is negative: the one data input to resolveNetMode. */
+function hasNegativeValues(data: PreparedRow[]): boolean {
+  return data.some((r) => Number.isFinite(r._y as number) && (r._y as number) < 0);
+}
+
+/** Whether a stack over `data` (its in-scope rows, as the builder receives them) draws net dots, given
+ *  the chart's drawn series count. The builder decides with this, and so does the height model (via
+ *  index.ts singleChartDrawsNetDots), so a fitted row pitch is floored for exactly the dots drawn. */
+export function netDotsDrawn(spec: ChartSpec, data: PreparedRow[], seriesCount: number): boolean {
+  return drawsNetDots(resolveNetMode(spec, hasNegativeValues(data)), seriesCount);
+}
 
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
@@ -168,7 +184,7 @@ export function buildStackedMarks(
     if (y >= 0) posSumByCat.set(cat, (posSumByCat.get(cat) ?? 0) + y);
   }
 
-  const hasNegatives = data.some((r) => Number.isFinite(r._y as number) && (r._y as number) < 0);
+  const hasNegatives = hasNegativeValues(data);
 
   // Net display mode (bar-stacked.md §6): "auto" → dot when any negative, else text.
   // Normalized stacks always top at 100% so a net callout is meaningless — suppress.
@@ -194,7 +210,7 @@ export function buildStackedMarks(
   const netMode = resolveNetMode(spec, hasNegatives);
   // The dot and its legend row need a second series to net; see drawsNetDots. Counted over the whole
   // chart (a figure's panes can each hold fewer), so every pane and the figure legend agree.
-  const netDots = drawsNetDots(netMode, ctx.chartSeriesCount ?? seriesNames.length);
+  const netDots = netDotsDrawn(spec, data, ctx.chartSeriesCount ?? seriesNames.length);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data
@@ -346,8 +362,8 @@ export function buildStackedMarks(
     const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
     const net = markerInk("net", "");
     const netDot = horizontal
-      ? Plot.dot(netRows, { ...rowChannels("_xc"), x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
-      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS });
+      ? Plot.dot(netRows, { ...rowChannels("_xc"), x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: NET_DOT_STROKE_W, className: NET_DOT_CLASS })
+      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: NET_DOT_STROKE_W, className: NET_DOT_CLASS });
     overlay.push(netDot);
   }
 
@@ -482,7 +498,7 @@ export function buildStackedMarks(
     dashedNames: new Set<string>(),
     // Single category band on `x`; refine outer pad like single-series bars. xScaleField
     // stays "x" → adapter's x labels are correct, no xAxisMarks override needed.
-    xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
+    xScaleOpts: { paddingInner: VBAND_PADDING_INNER, paddingOuter: VBAND_PADDING_OUTER },
     seriesColors,
     legendVisualOrder,
     netMode,

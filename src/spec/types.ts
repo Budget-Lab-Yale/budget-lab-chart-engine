@@ -460,8 +460,9 @@ export interface SmallMultiplesConfig {
   coordinated_cursor?: boolean;
   /** How a row's width is split among its columns (shared across all rows; vertical bar facets).
    *  - "equal" (default): every column the same data width.
-   *  - "equal-bar": each column's width ∝ its bar count, so bars render at the same width (exact for
-   *    a single row; multi-row sizes each column to the max bar count among its panes).
+   *  - "equal-bar": each column's data width ∝ its bars' band span (n + 2·paddingOuter − paddingInner
+   *    for n bars), so bars render at the same width in a single row; multi-row sizes each column to
+   *    the busiest of its panes.
    *  - number[]: explicit per-column proportions, length === the grid column count, applied to every
    *    row (e.g. [2, 1] → column 0 twice as wide as column 1). */
   pane_widths?: "equal" | "equal-bar" | number[];
@@ -499,8 +500,9 @@ export interface ColumnMap {
   /** Waterfall charts: column flagging each step's row TYPE — `total` (an absolute bar anchored
    *  at zero; an explicit value rebases the running cumulative, a blank value = the auto running
    *  total), `skip` (no bar — the category slot is kept so facets stay aligned; label the gap
-   *  with a point annotation), or `delta` (the default — a signed step floating on the running
-   *  cumulative). Omit ⇒ every row is a delta. */
+   *  with a point annotation), `branch` (a bar floating on the running cumulative like a delta, but the
+   *  running cumulative is not advanced), or `delta` (the default — a signed step floating on the
+   *  running cumulative). Omit ⇒ every row is a delta. */
   kind?: string;
   /** Histogram pre-binned data: columns holding each bin's lower/upper edge. When BOTH are mapped,
    *  the histogram treats data as pre-binned (no engine binning) and `value` is the bar height. */

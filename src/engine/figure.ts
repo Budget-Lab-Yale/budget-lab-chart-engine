@@ -19,13 +19,15 @@ import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
+import { renderPane, singleChartDrawsNetDots, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, normalizeSpec } from "./util";
-import { rowBandGeometry } from "./marks/category-band";
+import { dumbbellRowExtent } from "./marks/dumbbell";
+import { NET_DOT_ROW_PX } from "./marks/stacked";
+import { rowBandGeometry, HBAND_PADDING_INNER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./marks/category-band";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
-import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
+import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT, TBL_VALUE_LABEL } from "./theme";
 import type { SeriesHatch } from "./hatch";
 import type { OverlayTooltipLine } from "./overlays";
 
@@ -137,6 +139,60 @@ function rowSlotPx(barsPerCat: number, maxLabelLines: number): number {
   return Math.max(barsPerCat * HORIZONTAL_PX_PER_BAR, Math.max(1, maxLabelLines) * HORIZONTAL_LABEL_LINE_PX + 6);
 }
 
+/** The floors of a FITTED row slot (horizontalBarChartHeight's `maxHeight`, a framed export's
+ *  `fitRows`), which compresses the pitch toward these and never past them.
+ *
+ *  Per label line: HORIZONTAL_LABEL_LINE_PX, without rowSlotPx's 6px pad. A wrapped label's lines
+ *  are drawn 1em (FACETED_CAT_LABEL_PX, 13px) apart, so 16px a line still leaves 3px clear between
+ *  neighbouring labels. With the pad, a one-line label's floor would be 22px, the unfitted pitch
+ *  itself, and no single-series chart could be fitted at all. */
+export const FIT_LABEL_LINE_PX = HORIZONTAL_LABEL_LINE_PX;
+/** Per bar: a bar at least as thick as its value label is tall (TBL_VALUE_LABEL.fontSize), so labels
+ *  beside neighbouring bars cannot overlap. A bar is the slot less the band's inner padding
+ *  (HBAND_PADDING_INNER), and a grouped row splits its slot among its bars: 12 / 0.8 = 15px a bar. */
+export const FIT_MIN_PX_PER_BAR = Math.ceil(TBL_VALUE_LABEL.fontSize / (1 - HBAND_PADDING_INNER));
+
+/** Clear space a fitted row keeps between its own marks and its neighbours' (px): what the label floor
+ *  leaves between neighbouring one-line labels, 16px a line less the 13px font. */
+export const FIT_ROW_CLEAR_PX = FIT_LABEL_LINE_PX - FACETED_CAT_LABEL_PX;
+
+/** The pitch (px) a row-sized chart's per-row MARKS need beyond its bars and labels, or 0: a horizontal
+ *  dumbbell's dots, connector and gap label (dumbbellRowExtent), and a stack's net dot when it draws
+ *  one (index.ts singleChartDrawsNetDots: the renderer's own row prep, series scope and predicate). Each row's marks are centred on the row, so a row needs its own reach above
+ *  the centre plus the reach below the centre of the row before it, plus FIT_ROW_CLEAR_PX. */
+function rowMarksPx(spec: ChartSpec, rows: TidyRow[]): number {
+  if (isHorizontalDumbbellSpec(spec)) {
+    const { above, below } = dumbbellRowExtent(spec);
+    return Math.ceil(above + below + FIT_ROW_CLEAR_PX);
+  }
+  if (singleChartDrawsNetDots(spec, rows)) return Math.ceil(NET_DOT_ROW_PX + FIT_ROW_CLEAR_PX);
+  return 0;
+}
+
+/** The smallest row slot (px) a fitted chart may compress to (FIT_LABEL_LINE_PX, FIT_MIN_PX_PER_BAR,
+ *  and the row's own marks, rowMarksPx). */
+function minRowSlotPx(barsPerCat: number, maxLabelLines: number, marksPx: number): number {
+  return Math.max(barsPerCat * FIT_MIN_PX_PER_BAR, Math.max(1, maxLabelLines) * FIT_LABEL_LINE_PX, marksPx);
+}
+
+/** A row-sized chart of `natural` height fitted under `maxHeight` by compressing its row pitch only:
+ *  margins and section gaps keep their size. A chart that already fits is unchanged (never
+ *  expanded). The rows never compress below `minSlotPx` (Plot rounds a fractional step down to whole
+ *  px, and the floor is whole, so the rendered pitch is at least the floor) nor below the gaps' total
+ *  (as fitRowsHeight); when that floor binds, the height is the floor's and exceeds `maxHeight`. */
+function fitRowsUnder(
+  natural: number,
+  maxHeight: number,
+  nRows: number,
+  minSlotPx: number,
+  gapsPx: number,
+  band: RowBand,
+): number {
+  if (natural <= maxHeight) return natural;
+  const floorPx = band.margins + gapsPx + Math.max(rowsPxAtPitch(minSlotPx, nRows, band), gapsPx);
+  return Math.min(natural, Math.max(maxHeight, floorPx));
+}
+
 /** Whether a chart's height grows with its category rows: horizontal bar/stacked, and a horizontal
  *  dumbbell (orientation omitted included). The one predicate the live mount (computeChartHeight)
  *  and the PNG export (buildExportSvg) both ask, so the two cannot drift apart. Such a chart is
@@ -153,8 +209,12 @@ export function growsWithRows(spec: ChartSpec): boolean {
  *  single-series bar). Single source of truth shared by the live mount (computeChartHeight) and the
  *  PNG export (buildExportSvg), so per-row height, section-gap reservation and the export frame
  *  all agree. No floor: a chart with few rows is short, its rows at the slot pitch (fitRowsHeight).
- *  Caller must confirm `growsWithRows(spec)` before calling. */
-export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
+ *  Caller must confirm `growsWithRows(spec)` before calling.
+ *
+ *  `maxHeight` (a framed export's `fitRows`; the live mount never passes it) compresses the row
+ *  pitch of a chart taller than it so the chart is exactly `maxHeight` tall, down to the floor of
+ *  minRowSlotPx (fitRowsUnder). It never makes a chart taller. */
+export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[], opts: { maxHeight?: number } = {}): number {
   spec = normalizeSpec(spec);
   const cols = resolveColumns(spec, rows);
   rows = inSectionOrder(spec, cols, rows);
@@ -186,13 +246,13 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[]): numb
     maxLabelLines,
     extraTopPx: nSections > 0 ? SECTION_HEADER_TOP_PX : 0,
   });
-  return fitRowsHeight(
-    estimate,
-    nCats,
-    rowSlotPx(grouped ? nSeries : 1, maxLabelLines),
-    nSectionBreaks * sectionGapPx(),
-    rowBandGeometry(spec.chartType, spec.x_axis_ticks, nSections > 0),
-  );
+  const barsPerCat = grouped ? nSeries : 1;
+  const gapsPx = nSectionBreaks * sectionGapPx();
+  const band = rowBandGeometry(spec.chartType, spec.x_axis_ticks, nSections > 0);
+  const natural = fitRowsHeight(estimate, nCats, rowSlotPx(barsPerCat, maxLabelLines), gapsPx, band);
+  if (opts.maxHeight === undefined) return natural;
+  const marksPx = rowMarksPx(spec, rows);
+  return fitRowsUnder(natural, opts.maxHeight, nCats, minRowSlotPx(barsPerCat, maxLabelLines, marksPx), gapsPx, band);
 }
 
 /** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of
@@ -397,10 +457,14 @@ export interface FigureRenderResult {
   panes: FigurePane[];
   columns: number;
   rows: number;
-  /** SHARED mode only: the per-column OUTER pixel widths (length === `columns`) the panes were
-   *  rendered at — col 0 wider (labeled), col>0 narrower (label-less), all sharing one inner data
-   *  width. The live grid sets `grid-template-columns` to these px widths and the PNG export lays
-   *  the panes out the same way. Undefined for per-pane mode (equal `1fr` columns). */
+  /** The per-column OUTER pixel widths (length === `columns`) the panes were rendered at. SHARED
+   *  mode: always set — col 0 carries the y-label gutter and col>0 do not, the inner data width
+   *  split equally or by `pane_widths`. With equal weights, col 0 is wider by its label gutter;
+   *  with unequal `pane_widths` any column can be the widest (e.g. `[1, 7]` on a 920px row with a
+   *  20px gap: 162.75 / 737.25). PER-PANE mode: set only with a non-"equal" `pane_widths`
+   *  (perPaneColumnWidths, every column keeping its own label gutter); undefined otherwise (equal
+   *  `1fr` columns). The live grid sets `grid-template-columns` to these px widths and the PNG
+   *  export places each pane in a cell of this width. */
   columnWidths?: number[];
   legendItems: LegendItem[] | null;
   /** Point-chart figures with dual color/shape encoding: the SHAPE legend rows (else null). */
@@ -630,8 +694,8 @@ export function renderFigure(
   const seriesLabels = spec.series_labels ?? {};
 
   // Variable pane widths (`pane_widths`) — used by BOTH modes. Resolve the per-column weight
-  // vector once here: a proportion array is used directly; "equal-bar" weights each column by its
-  // busiest pane's bar count; "equal"/unset ⇒ undefined (uniform). The TOTAL inner grid width is
+  // vector once here: a proportion array is used directly; "equal-bar" weights each column by the
+  // band span of its busiest pane (see barSpan); "equal"/unset ⇒ undefined (uniform). The TOTAL inner grid width is
   // `opts.gridWidth` (live grid) else `opts.width` (golden tests pass one width as the row total).
   const gridGap = opts.gridGap ?? 0;
   const availW = opts.gridWidth ?? opts.width ?? 720;
@@ -641,7 +705,7 @@ export function renderFigure(
     if (Array.isArray(pw) && pw.length === columns) {
       colWeights = pw;
     } else if (pw === "equal-bar") {
-      const barCount = (value: string): number => {
+      const barCount = (value: string): { cats: number; perCat: number } => {
         const pr = rows.filter((r) => (r[facetField] as string) === value);
         const catSet = new Set<string>();
         const serSet = new Set<string>();
@@ -651,12 +715,22 @@ export function renderFigure(
           const s = cols.series ? (r[cols.series] as string) : "";
           if (s) serSet.add(s);
         }
-        return Math.max(1, catSet.size) * Math.max(1, serSet.size);
+        return { cats: Math.max(1, catSet.size), perCat: Math.max(1, serSet.size) };
+      };
+      // A vertical band of n categories spans n + 2·outer − inner steps of the data width, not n
+      // (d3 band: step = width / (n − inner + 2·outer)), and each step holds `perCat` bars (a
+      // grouped bar's inner series band has no padding). Weighting by bar count alone left the
+      // busier pane's bars wider. Horizontal bars take their thickness from the pane's height, so
+      // their weighting stays the plain bar count.
+      const horizontal = spec.orientation === "horizontal";
+      const barSpan = (value: string): number => {
+        const { cats, perCat } = barCount(value);
+        return horizontal ? cats * perCat : perCat * (cats + 2 * VBAND_PADDING_OUTER - VBAND_PADDING_INNER);
       };
       const weights = Array.from({ length: columns }, () => 0);
       paneValues.forEach((v, i) => {
         const col = i % columns;
-        weights[col] = Math.max(weights[col] as number, barCount(v));
+        weights[col] = Math.max(weights[col] as number, barSpan(v));
       });
       colWeights = weights;
     }

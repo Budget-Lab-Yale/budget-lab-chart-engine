@@ -34,6 +34,36 @@ const DEFAULT_DOT_R = 5;
 // (the connector is a rule like a gridline; the gap label is text like the axis ticks).
 const CONNECTOR_CLASS = "tbl-dumbbell-connector";
 const GAP_LABEL_CLASS = "tbl-dumbbell-gap";
+/** A dot's outline: a hollow end's ring is drawn heavier than a filled dot's edge. */
+const HOLLOW_STROKE_W = 1.5;
+const FILLED_STROKE_W = 1;
+const DEFAULT_CONNECTOR_W = 1.5;
+/** The gap label sits this far beyond the dot radius from its stem (horizontal: above it). */
+const GAP_LABEL_LIFT = 5;
+const GAP_LABEL_PX = TBL.size.annotation - 0.5;
+/** Plot's text mark centres a line on its y with dy 0.32em (lineAnchor "middle"). A line's glyphs
+ *  are taken to span 0.8em above the baseline to 0.2em below, the em box. */
+const PLOT_MIDDLE_DY_EM = 0.32;
+const EM_ABOVE_BASELINE = 0.8;
+const EM_BELOW_BASELINE = 0.2;
+
+/** How far a HORIZONTAL dumbbell row's own marks reach above and below the row's centre line (px),
+ *  from the placement below: the dots (radius `dot_radius`, plus half the widest outline), the
+ *  connector (half its width), and with `gap_annotation` the gap label, lifted `r + GAP_LABEL_LIFT`
+ *  above the stem. The height model (figure.ts) floors a fitted row pitch on it, so neighbouring
+ *  rows' dots and labels cannot meet. */
+export function dumbbellRowExtent(spec: ChartSpec): { above: number; below: number } {
+  const r = spec.dot_radius ?? DEFAULT_DOT_R;
+  const anyHollow = Object.values(spec.series_marker ?? {}).includes("hollow");
+  const dot = r + (anyHollow ? HOLLOW_STROKE_W : FILLED_STROKE_W) / 2;
+  const half = Math.max(dot, (spec.connector?.width ?? DEFAULT_CONNECTOR_W) / 2);
+  if (!spec.gap_annotation) return { above: half, below: half };
+  const baseline = -(r + GAP_LABEL_LIFT) + PLOT_MIDDLE_DY_EM * GAP_LABEL_PX;
+  return {
+    above: Math.max(half, -(baseline - EM_ABOVE_BASELINE * GAP_LABEL_PX)),
+    below: Math.max(half, baseline + EM_BELOW_BASELINE * GAP_LABEL_PX),
+  };
+}
 
 /** `{value}`-style number formatter for gap labels (pure — no locale, so goldens stay byte-stable). */
 function fmtValue(v: number, f: ValueFormat | undefined): string {
@@ -117,7 +147,7 @@ export function buildDumbbellMarks(
   const inkFor = (s: string): MarkerInk => markerInk(markerOf(s), seriesColor(s));
   const fillFor = (s: string): string => inkFor(s).fill;
   const strokeFor = (s: string): string => inkFor(s).stroke;
-  const strokeWidthFor = (s: string): number => (markerOf(s) === "hollow" ? 1.5 : 1);
+  const strokeWidthFor = (s: string): number => (markerOf(s) === "hollow" ? HOLLOW_STROKE_W : FILLED_STROKE_W);
 
   // --- Connector stems: per category, span min→max of that category's present dots ---
   // A single dot (or exactly-coincident dots) has no gap to span, so no stem is drawn there.
@@ -136,7 +166,7 @@ export function buildDumbbellMarks(
 
   const connCfg = spec.connector ?? {};
   const connColor = connCfg.color ? resolveColor(connCfg.color) ?? DEFAULT_CONNECTOR : DEFAULT_CONNECTOR;
-  const connWidth = connCfg.width ?? 1.5;
+  const connWidth = connCfg.width ?? DEFAULT_CONNECTOR_W;
   const connDash =
     connCfg.style === "dashed" ? "5 3" : connCfg.style === "dotted" ? "1 3" : undefined;
   // Category-axis binding. Sectioned horizontal puts each category on an `fy` facet row with a
@@ -229,15 +259,15 @@ export function buildDumbbellMarks(
         const common = {
           text: (d: { text: string }) => d.text,
           fill: TBL.color.muted,
-          fontSize: TBL.size.annotation - 0.5,
+          fontSize: GAP_LABEL_PX,
           fontWeight: 600,
           className: GAP_LABEL_CLASS,
           ...catChannels,
         };
         overlay.push(
           horizontal
-            ? Plot.text(gapRows, { ...bandBind("cat"), ...common, x: "mid", textAnchor: "middle", dy: -(r + 5) })
-            : Plot.text(gapRows, { ...common, x: "cat", y: "mid", textAnchor: "start", dx: r + 5 }),
+            ? Plot.text(gapRows, { ...bandBind("cat"), ...common, x: "mid", textAnchor: "middle", dy: -(r + GAP_LABEL_LIFT) })
+            : Plot.text(gapRows, { ...common, x: "cat", y: "mid", textAnchor: "start", dx: r + GAP_LABEL_LIFT }),
         );
       }
     }

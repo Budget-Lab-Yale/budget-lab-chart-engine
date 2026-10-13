@@ -49,7 +49,7 @@ export interface PreparedRow {
   /** Small-multiples (shared mode): the pane's facet value (distinct value of the configured
    *  facet_field that splits this row's pane). */
   _facet?: string;
-  /** Waterfall charts: the row's step kind from `columns.kind` — "total"/"skip"/else delta.
+  /** Waterfall charts: the row's step kind from `columns.kind` — "total"/"skip"/"branch"/else delta.
    *  Absent when the column isn't mapped (⇒ every row is a delta). */
   _kind?: string;
   /** Small-multiples (shared mode): the pane's grid COLUMN index as a String, bound to Plot's

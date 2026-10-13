@@ -8,9 +8,10 @@ import type { TreemapDatum } from "../spec/treemap";
 export const TM_GEOM = { tileGutter: 2, groupGutter: 4, pad: 6,
   aspectWide: 2.0, aspectNarrow: 0.8, wideAt: 720, narrowAt: 280, maxHeight: 460, minLiveWidth: 280 } as const;
 
-/** Treemap area height for a chart width (spec §6): aspect interpolated, capped. */
-export function treemapAreaHeight(width: number): number {
-  const { aspectWide, aspectNarrow, wideAt, narrowAt, maxHeight } = TM_GEOM;
+/** Treemap area height for a chart width (spec §6): aspect interpolated, capped (at `maxHeight`,
+ *  default TM_GEOM.maxHeight; a framed export passes a frame-derived cap). */
+export function treemapAreaHeight(width: number, maxHeight: number = TM_GEOM.maxHeight): number {
+  const { aspectWide, aspectNarrow, wideAt, narrowAt } = TM_GEOM;
   const t = Math.min(1, Math.max(0, (width - narrowAt) / (wideAt - narrowAt)));
   const aspect = aspectNarrow + t * (aspectWide - aspectNarrow);
   return Math.min(maxHeight, width / aspect);

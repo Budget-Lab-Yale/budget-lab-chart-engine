@@ -1140,7 +1140,7 @@ describe("figure — variable pane widths", () => {
     expect(dataW(w[0]!, 0)).toBeCloseTo(dataW(w[1]!, 1), 4);
   });
 
-  it("equal-bar: a pane's data width is proportional to its bar count (4 vs 2 → 2:1)", () => {
+  it("equal-bar: a pane's data width is proportional to its band span (4 vs 2 bars → 4.2 : 2.2), so bars match", () => {
     const rows = parseCsv("./fixtures/facet-varwidth.csv");
     const spec: ChartSpec = {
       ...BASE,
@@ -1148,7 +1148,12 @@ describe("figure — variable pane widths", () => {
     };
     const fig = renderFigure(spec, rows, { width: 900, document });
     const w = fig.columnWidths!;
-    expect(dataW(w[0]!, 0)).toBeCloseTo(2 * dataW(w[1]!, 1), 3);
+    // n bars span n + 2·paddingOuter − paddingInner = n + 0.2 band steps (not n: 2:1 left the
+    // 4-bar pane's bars wider).
+    expect(dataW(w[0]!, 0) / dataW(w[1]!, 1)).toBeCloseTo(4.2 / 2.2, 6);
+    const barW = (i: number): number =>
+      Number(fig.panes[i]!.svg!.querySelector('g[aria-label="bar"] rect')!.getAttribute("width"));
+    expect(Math.abs(barW(0) - barW(1))).toBeLessThanOrEqual(0.5);
     // Bars per pane unchanged (4 and 2).
     expect(fig.panes[0]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(4);
     expect(fig.panes[1]!.svg!.querySelectorAll('g[aria-label="bar"] rect').length).toBe(2);

@@ -53,6 +53,7 @@ import {
 } from "./overlays";
 import type { OverlayTooltipLine } from "./overlays";
 import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
+import { netDotsDrawn } from "./marks/stacked";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -64,6 +65,11 @@ export interface RenderOptions {
    *  height too small for the rows shrinks them (axes.ts fittedSectionGapPx). Absent → a given
    *  `height` is the host's. */
   heightFromModel?: boolean;
+  /** Treemap only: cap the treemap area's height at this instead of TM_GEOM.maxHeight (its height
+   *  is otherwise its width's aspect height, at most 460px). Only a framed PNG export passes it, so
+   *  the tiles and their labels are laid out in the region the frame reserved. Absent → the default
+   *  cap, as live. */
+  treemapMaxHeight?: number;
   marginRight?: number;
   /** Headless rendering: the document Plot should build into (jsdom in tests/SSR). */
   document?: Document;
@@ -92,12 +98,12 @@ export interface RenderOptions {
    *  keeps TBL_MARGIN_LEFT; the label-less columns pass a small margin so they don't reserve the
    *  ~44px label gutter. Absent → TBL_MARGIN_LEFT (single-chart + per-pane byte-identical). */
   marginLeft?: number;
-  /** SHARED-mode small multiples (figure orchestrator only): the TOTAL inner width the row of
-   *  panes spans. renderFigure uses it (with `gridGap`) to compute the per-column OUTER widths
-   *  via the shared width helper so the inner DATA width is identical across a row. Absent →
-   *  `opts.width` is treated as the total grid width. Ignored outside the shared branch. */
+  /** Small multiples (figure orchestrator only): the TOTAL inner width the row of panes spans.
+   *  renderFigure uses it (with `gridGap`) to compute the per-column OUTER widths: in shared mode
+   *  always (sharedColumnWidths), in per-pane mode only with a non-"equal" `pane_widths`
+   *  (perPaneColumnWidths). Absent → `opts.width` is treated as the total grid width. */
   gridWidth?: number;
-  /** SHARED-mode small multiples: the inter-column gap (px) used by the per-column width math.
+  /** Small multiples: the inter-column gap (px) used by the per-column width math (see gridWidth).
    *  Must match the live grid's column-gap. Absent → 0. */
   gridGap?: number;
   /** Area charts: visual stack order bottom→top (overrides series_order for stacking only —
@@ -481,7 +487,7 @@ function prepareRows(
       // such a column still finds its row. Same exact-match contract as validateChartData.
       if (spec.columns?.point_label) row._pointKey = r[spec.columns.point_label] ?? "";
       if (cols.section) row._section = r[cols.section] ?? "";
-      // Waterfall step kind (delta/total/skip).
+      // Waterfall step kind (delta/total/skip/branch).
       if (cols.kind) row._kind = r[cols.kind] ?? "";
       if (spec.projected_field) {
         row._projected = isTruthyFlag(r[spec.projected_field]);
@@ -654,6 +660,19 @@ export function paneValueExtent(
     if (y > max) max = y;
   }
   return min <= max ? { min, max } : null;
+}
+
+/** Whether a SINGLE stacked chart of these rows draws net dots: renderPane's own row prep and series
+ *  scope (blank series names and `series_order`'s filter included), then the builder's own predicate
+ *  (marks/stacked.ts netDotsDrawn) over the series count renderChart gives it. The fitted row-pitch
+ *  floor (figure.ts) reads it. Pure, no DOM. */
+export function singleChartDrawsNetDots(spec: ChartSpec, rows: TidyRow[]): boolean {
+  spec = normalizeSpec(spec);
+  if (spec.chartType !== "stacked" || !spec.xAxisType) return false;
+  const cols = resolveColumns(spec, rows);
+  const data = prepareRows(spec, rows, cols, makeXAdapter(spec.xAxisType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
+  const { seriesNames, dataInScope } = scopeToSeries(spec, data);
+  return netDotsDrawn(spec, dataInScope, seriesNames.length);
 }
 
 /** Series order. When series_order is set it acts as both filter and order. Mirrored by

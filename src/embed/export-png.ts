@@ -18,6 +18,7 @@ import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWid
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
+  LEGEND_RIGHT_MIN_CARD_WIDTH,
   legendInRightColumn,
   orderForRightLegend,
 } from "../engine/legend-layout.js";
@@ -41,6 +42,7 @@ import {
   drawLines as drawLinesDoc,
   createExportRoot,
   composeTopChrome,
+  titleFitsBesideLogo,
   bottomChromeHeight,
   composeBottomChrome,
 } from "./figure-chrome.js";
@@ -76,6 +78,9 @@ const WRAP_LINE_H = 16; // a wrapped legend label's line pitch (the right-hand c
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
 const AXIS_TITLE_LINE_H = 16; // a wrapped x-axis title's line pitch (the y-axis title's)
+/** The least height a frame-filling chart, a framed treemap or a `fillPanes` pane is given, however
+ *  little room the frame leaves; content that needs more comes out taller than the frame. */
+const MIN_CHART_H = 160;
 
 // ---------------------------------------------------------------------------
 // Legend
@@ -107,8 +112,8 @@ function drawLegend(
   /** Where a row wraps: the frame's right margin (a vertical timeline's portrait frame is narrower
    *  than `W`). */
   maxRight: number = MARGIN + INNER_W,
-  /** Wrap a label too wide for a whole row onto several lines (Ruling 41). Only the portrait frame
-   *  sets it: elsewhere such a label keeps its one line, byte-identical to before. */
+  /** Wrap a label too wide for a whole row onto several lines (Ruling 41). The portrait frame and a
+   *  caller-given `frame` set it; frame-less output keeps such a label on one line, as before. */
   wrapLong = false,
 ): number {
   const legendFont = `${W_BODY} 13px ${FONT}`;
@@ -325,8 +330,56 @@ function drawLegendColumn(
 // ---------------------------------------------------------------------------
 
 /**
+ * Output frame for `buildExportSvg`, in CSS px (the PNG rasterises it at 2x). Omitted, the export is
+ * the default 1000×750 frame and its output is unchanged. A frame smaller than 320×240 throws, as
+ * does a negative or non-finite `logoTop`. A frame too narrow for a title word to fit beside the
+ * logo puts the logo on a row of its own (titleFitsBesideLogo).
+ *
+ * `height` is the TARGET frame, not a guarantee. A chart that fills the frame (a single line, bar-
+ * column, area, scatter or similar chart; a figure with `fillPanes`; a row-sized chart with
+ * `fitRows` that is taller than the frame) comes out at `height`. A chart that sizes to its content
+ * can come out shorter: a figure without `fillPanes`, a row-sized horizontal bar/stacked/dumbbell
+ * chart (with or without `fitRows`, which never expands), a treemap (whose height is capped by the
+ * room the frame leaves it), a timeline. Content that needs more room than `height` leaves comes out
+ * taller (many bar rows without `fitRows`, or more than its floor allows with it; `fillPanes` panes at
+ * their 160px floor; a right-hand legend column taller than the plot; chrome that leaves a single
+ * chart less than its 160px minimum). The output's height is the SVG's `height` attribute; the
+ * caller decides what to do with a mismatch. A timeline keeps its own width and height
+ * (timelineExportFrame, timelineHeight): of the frame it takes only `logoTop`, and the wrap of a long
+ * x-axis title.
+ */
+export interface ExportFrame {
+  width: number;
+  height: number;
+  /** Top padding above the logo/title baseline row; default MARGIN (40). Must be finite and ≥ 0. */
+  logoTop?: number;
+  /**
+   * Small-multiples figures only: size every pane row equally so the grid fills the frame's
+   * remaining height exactly, growing the panes past their own height or shrinking them below it,
+   * but never below 160px. When the frame leaves less than that, the panes stay at 160px and the
+   * output comes out taller than `height`. No effect on a single chart. `true`, `false` or absent;
+   * anything else throws.
+   */
+  fillPanes?: boolean;
+  /**
+   * Row-sized single charts only (horizontal bar/stacked, horizontal dumbbell): when the chart is
+   * taller than the room the frame leaves it, compress its row pitch so it fits that room exactly
+   * (horizontalBarChartHeight's `maxHeight`). Margins and section gaps keep their size, and a chart
+   * that already fits is unchanged, never expanded. The pitch stops at a floor that keeps labels
+   * legible: 16px per category-label line (FIT_LABEL_LINE_PX), 15px per bar in the row
+   * (FIT_MIN_PX_PER_BAR: a grouped row of three bars needs 45px), and the room the row's own marks
+   * reach above and below it plus 3px clear (a dumbbell's dots, connector and gap label; a diverging
+   * stack's net dot, 21px), whichever is largest. When the floor
+   * binds the output comes out taller than `height`. No effect on any other chart or a figure.
+   * `true`, `false` or absent; anything else throws.
+   */
+  fitRows?: boolean;
+}
+
+/**
  * Build a self-contained export SVG for the given chart spec and data rows.
- * Pure — no canvas, no async, no external resources. Fixed 1000×750 (4:3) frame. The chart
+ * Pure — no canvas, no async, no external resources. The default frame is 1000×750 (4:3); `opts.frame`
+ * (ExportFrame) sets another width/height, logo padding and pane fill. The chart
  * fills the height left after the title/subtitle/legend chrome. A timeline's frame height is its
  * content's, and a vertical timeline's frame is portrait: as wide as the timeline needs, at most
  * 640px (timelineExportFrame, E3), with every piece of chrome laid out at that width.
@@ -340,9 +393,22 @@ function drawLegendColumn(
 export function buildExportSvg(
   spec: ChartSpec,
   rows: TidyRow[],
-  opts: { selections?: Record<string, string>; hooks?: RenderHooks } = {},
+  opts: { selections?: Record<string, string>; hooks?: RenderHooks; frame?: ExportFrame } = {},
 ): SVGSVGElement {
   spec = normalizeSpec(spec);
+  const frame = opts.frame;
+  if (frame && (!(frame.width >= 320) || !(frame.height >= 240)))
+    throw new Error(`export frame must be at least 320×240 (got ${frame.width}×${frame.height})`);
+  if (frame?.logoTop !== undefined && !(Number.isFinite(frame.logoTop) && frame.logoTop >= 0))
+    throw new Error(`export frame logoTop must be a finite number of at least 0 (got ${frame.logoTop})`);
+  for (const key of ["fillPanes", "fitRows"] as const) {
+    const v: unknown = frame?.[key];
+    if (v !== undefined && typeof v !== "boolean")
+      throw new Error(`export frame ${key} must be true, false or absent (got ${String(v)})`);
+  }
+  const FW = frame?.width ?? W;
+  const FH = frame?.height ?? H;
+  const FIW = FW - MARGIN * 2;
   const isFigure = spec.small_multiples != null;
   // A single chart whose height grows with its category rows: horizontal bar/stacked, and a
   // horizontal dumbbell — the same predicate computeChartHeight (render-live) asks before sizing
@@ -364,8 +430,8 @@ export function buildExportSvg(
   // (idempotent), so passing them through unchanged here is harmless.
   const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: INNER_W, hooks: metaHooks })
-    : renderChart(spec, rows, { width: INNER_W, hooks: metaHooks });
+    ? renderFigure(spec, rows, { width: FIW, hooks: metaHooks })
+    : renderChart(spec, rows, { width: FIW, hooks: metaHooks });
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -394,38 +460,65 @@ export function buildExportSvg(
   // validate` decides it — timelineExportFrame, no DOM render needed — so the two can never drift
   // apart (Ruling 17 / task-8 fix round 1). Every other chart keeps the fixed W frame.
   const tlFrame = isTimeline ? timelineExportFrame(spec, rows) : null;
-  const frameW = tlFrame?.frameW ?? W;
+  const frameW = tlFrame?.frameW ?? FW;
   const portrait = tlFrame?.budgetWidth !== undefined;
 
-  const { root, bgRect } = createExportRoot(document, frameW, H);
+  const { root, bgRect } = createExportRoot(document, frameW, FH);
 
   // --- top chrome: title (+ logo), subtitle ---
-  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow: portrait });
+  // A caller-given frame narrow enough that a title word cannot fit beside the logo (a 320px frame
+  // leaves a 66px column) puts the logo on a row of its own, as the portrait frame always does.
+  // The slide frames (640 and 1280 wide) keep the side-by-side layout for any ordinary title.
+  const logoRow = portrait || (frame != null && !titleFitsBesideLogo(title, frameW));
+  let cursor = composeTopChrome(document, root, { title, subtitle, width: frameW, logoRow, topPad: frame?.logoTop });
 
   // Legend POSITION, from the same decision the live card makes (engine/legend-layout.ts). The
   // export never consulted it, so a stacked chart with five or more series — or a diverging one —
   // showed its legend beside the chart on screen and above it in the download. A small_multiples
   // figure keeps the top layout: its legend is figure-level, and the live path never puts that in a
-  // column either. The frame is a fixed 1000px, so the live path's narrow-card fallback to "top"
-  // cannot apply here — except in a vertical timeline's portrait frame, which is always that
-  // narrow, so its legend always goes on top (timelineExportFrame).
+  // column either. The default frame is a fixed 1000px, so the live path's narrow-card fallback to
+  // "top" cannot apply there — except in a vertical timeline's portrait frame, which is always that
+  // narrow, so its legend always goes on top (timelineExportFrame). A narrow `frame` applies it below.
   // `legendItems || shapeLegendItems.length` mirrors render-live.ts's own gate. Testing only
   // `legendItems` missed a chart whose ONLY visible legend is the shape legend — `series_legend:
   // false`, or a lone scatter series, leaves `buildLegendItems` null while the shape rows remain —
   // so live laid it out on the right and the export drew it above a full-width plot: the very
   // divergence this file's legend work exists to remove.
   // A timeline takes both from `tlFrame` rather than from this call's own rendered legend metadata.
+  // A caller-given `frame` can be as narrow as a live card, so it takes the live card's fallback
+  // too: an inner width below LEGEND_RIGHT_MIN_CARD_WIDTH puts the legend on top (the frame's inner
+  // width is the card width here: both leave the chart that width less the column and gap). A
+  // timeline is exempt: its frame comes from timelineExportFrame, not from `frame`.
   const rightLegend =
     !isFigure &&
     (tlFrame
       ? tlFrame.rightLegend
-      : legendInRightColumn(spec, legendItems, shapeLegendItems.length, rows));
-  const chartW = tlFrame ? tlFrame.chartW : rightLegend ? INNER_W - LEGEND_COLUMN_WIDTH - LEGEND_GAP : INNER_W;
+      : legendInRightColumn(spec, legendItems, shapeLegendItems.length, rows) &&
+        !(frame && FIW < LEGEND_RIGHT_MIN_CARD_WIDTH));
+  const chartW = tlFrame ? tlFrame.chartW : rightLegend ? FIW - LEGEND_COLUMN_WIDTH - LEGEND_GAP : FIW;
+
+  // The x-axis title wraps in a vertical timeline's portrait frame (Ruling 51b), and in any
+  // caller-given `frame`, which can be much narrower than the title (a 640px slide frame); every
+  // other export keeps one line. It wraps to the width it is centred in: the plot beside a right-hand
+  // legend, else the frame's inner width.
+  const wrapsXTitle = portrait || frame != null;
+  const xTitleWrapW = portrait ? frameW - 2 * MARGIN : rightLegend ? chartW : frameW - 2 * MARGIN;
+  const wrapXTitle = (t: string): string[] =>
+    t && wrapsXTitle ? wrapToColumn(t, `${W_SEMI} 12px ${FONT}`, xTitleWrapW) : [t];
+  // A framed chart that fills the frame must reserve the extra lines BEFORE its height is chosen, or
+  // the output grows past the frame. A timeline's height is its content's, and its title can change
+  // with its own render (below), so it reserves them at the end, as the portrait frame always has.
+  const reserveXTitleEarly = frame != null && !isTimeline;
 
   // --- legend(s) + y-axis title (chart-specific chrome) ---
+  // A label wider than a whole legend row wraps in the portrait frame and in any caller-given
+  // `frame`, which can be narrow enough (a 640px slide, or a right legend fallen back on top) that
+  // the label would run off the frame. Frame-less output keeps it on one line, as before.
+  const wrapLongLegend = portrait || frame != null;
   if (legendItems.length && !rightLegend) {
     cursor = drawLegend(
-      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN, portrait,
+      root, legendItems, cursor + 26, hasShapeLegend ? colorLegendTitle : undefined, opts.hooks, frameW - MARGIN,
+      wrapLongLegend,
     );
   }
   // Point charts with dual encoding: a second, neutral-gray SHAPE legend below the color legend.
@@ -440,7 +533,7 @@ export function buildExportSvg(
     if (!rightLegend) {
       cursor = drawLegend(
         root, shapeRows, cursor + (legendItems.length ? 20 : 26), shapeLegendTitle || undefined, undefined, frameW - MARGIN,
-        portrait,
+        wrapLongLegend,
       );
     }
   }
@@ -457,6 +550,7 @@ export function buildExportSvg(
   // Reserve the bottom-chrome height so the chart fills the rest (total == H).
   let bottomH = bottomChromeHeight({ note, source, width: frameW });
   if (xAxisTitle) bottomH += 14;
+  if (reserveXTitleEarly) bottomH += (wrapXTitle(xAxisTitle).length - 1) * AXIS_TITLE_LINE_H;
 
   // Chart region. `contentHeight` is the height occupied by the chart/figure body below
   // `chartTop`; a figure or a single horizontal bar/stacked/dumbbell chart can extend past the
@@ -467,14 +561,22 @@ export function buildExportSvg(
   if (!isFigure) {
     // Single chart: horizontal bar/stacked/dumbbell charts size from the shared intrinsic-height
     // helper (growing the export frame with row count); everything else fills the fixed 750 frame.
+    // A framed treemap is capped by the frame's remaining height rather than the default 460px. The
+    // SAME cap goes to renderChart below (treemapMaxHeight), so the tiles and their labels are laid
+    // out in exactly the region reserved here.
+    const treemapCap = isTreemap && frame ? Math.max(MIN_CHART_H, FH - chartTop - bottomH) : undefined;
+    // `fitRows`: a row-sized chart taller than the room the frame leaves it compresses its row pitch
+    // to fit, down to a legible floor (horizontalBarChartHeight's `maxHeight`). The room may be
+    // fractional (chartTop can be), so a fitted chart lands on the frame height exactly.
+    const rowsCap = rowSized && frame?.fitRows === true ? FH - chartTop - bottomH : undefined;
     contentHeight = rowSized
-      ? horizontalBarChartHeight(spec, rows)
+      ? horizontalBarChartHeight(spec, rows, rowsCap !== undefined ? { maxHeight: rowsCap } : {})
       : isTimeline
         ? timelineHeight(spec, rows, chartW, undefined, tlFrame?.budgetWidth)
         : isTreemap
           // Whole pixels: a fractional height would leave a sub-pixel gap or clip in the frame.
-          ? Math.ceil(treemapHeight(chartW))
-          : Math.max(160, H - chartTop - bottomH);
+          ? Math.ceil(treemapHeight(chartW, treemapCap))
+          : Math.max(MIN_CHART_H, FH - chartTop - bottomH);
     // The plot's own height. A right-hand legend never changes it: the live card keeps
     // computeChartHeight's height beside a taller legend column, so stretching the plot here moved
     // every row of the download away from the page (Ruling 71).
@@ -527,6 +629,7 @@ export function buildExportSvg(
       phase: "export",
       ...(accentColor ? { accentColor } : {}),
       ...(tlFrame?.budgetWidth !== undefined ? { timelineBudgetWidth: tlFrame.budgetWidth } : {}),
+      ...(treemapCap !== undefined ? { treemapMaxHeight: treemapCap } : {}),
     });
     const chartSvg = rendered.svg;
     chartSvg.setAttribute("x", String(MARGIN));
@@ -580,18 +683,39 @@ export function buildExportSvg(
     const gridRows = figMeta.rows;
     // A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups,
     // spec/facet-groups.ts), so every pane takes figurePaneHeight's fixed height.
-    const paneChartH = figurePaneHeight(spec);
+    // Every pane of a figure takes this one height (row-sized chart types are never figures), so
+    // fillPanes sizes all grid rows equally to fill the frame, growing or shrinking them, but never
+    // below MIN_CHART_H: there the panes stop and the output comes out taller than the frame. Without
+    // a frame it is a no-op.
+    const paneChartH0 = figurePaneHeight(spec);
+    const fillAvail = FH - chartTop - bottomH - gridRows * PANE_TITLE_H - (gridRows - 1) * ROW_GAP;
+    const fillH = Math.floor(fillAvail / gridRows);
+    const fillPanes = frame?.fillPanes === true;
+    const fills = fillPanes && fillH >= MIN_CHART_H;
+    const paneChartH = fills ? fillH : fillPanes ? MIN_CHART_H : paneChartH0;
+    // Flooring per row leaves up to gridRows − 1 whole pixels unfilled; renderFigure draws every pane
+    // at one height, so they go to the gaps between rows, one each (at most one per gap). Only the
+    // sub-pixel remainder is left, as on a one-row figure.
+    const extraGapPx = fills ? Math.min(gridRows - 1, Math.max(0, Math.floor(fillAvail - gridRows * fillH))) : 0;
+    const rowGapAfter = (r: number): number => ROW_GAP + (r < extraGapPx ? 1 : 0);
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — same helper as the live grid, so the export matches the live look.
-    // PER-PANE mode: equal columns.
-    const shared = isShared ? sharedColumnWidths(INNER_W, cols, COL_GAP) : null;
-    const equalPaneW = Math.floor((INNER_W - COL_GAP * (cols - 1)) / cols);
+    // PER-PANE mode: equal columns, unless `pane_widths` splits the row (see colWidth below).
+    const shared = isShared ? sharedColumnWidths(FIW, cols, COL_GAP) : null;
+    const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
     const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: INNER_W, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
-      : renderFigure(spec, rows, { width: equalPaneW, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
-    // Cell width per column: shared keeps its precomputed helper widths; else equal columns.
-    const colWidth = (col: number): number => shared?.colWidths[col] ?? equalPaneW;
+      ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
+      : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
+        // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
+        // reads only `width`, so equal per-pane figures are unchanged.
+        renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
+    // Cell width per column: the width each pane was RENDERED at. A pane's viewBox is its rendered
+    // width, so a cell of any other width rescales the whole pane: with `pane_widths` the bars came
+    // out a different width in every pane. renderFigure reports the widths whenever they are not
+    // equal columns (shared mode always; per-pane with pane_widths); without pane_widths they equal
+    // the shared helper's widths, so those figures place exactly as before.
+    const colWidth = (col: number): number => fig.columnWidths?.[col] ?? shared?.colWidths[col] ?? equalPaneW;
     // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
     const colX: number[] = [];
     let acc = MARGIN;
@@ -618,7 +742,7 @@ export function buildExportSvg(
       let acc = chartTop;
       for (let r = 0; r < gridRows; r++) {
         rowY.push(acc);
-        acc += PANE_TITLE_H + rowHeights[r]! + ROW_GAP;
+        acc += PANE_TITLE_H + rowHeights[r]! + rowGapAfter(r);
       }
     }
     fig.panes.forEach((pane, i) => {
@@ -638,7 +762,7 @@ export function buildExportSvg(
         root.appendChild(ps);
       }
     });
-    contentHeight = rowHeights.reduce((s, h) => s + PANE_TITLE_H + h, 0) + (gridRows - 1) * ROW_GAP;
+    contentHeight = rowHeights.reduce((s, h) => s + PANE_TITLE_H + h, 0) + (gridRows - 1) * ROW_GAP + extraGapPx;
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a
@@ -648,17 +772,15 @@ export function buildExportSvg(
   // A right-hand legend taller than the plot grows the frame too, for the same reason a
   // horizontal bar chart does: the content genuinely needs the room, and clipping it would
   // silently drop legend rows from the download.
-  // The portrait frame wraps the x-axis title to its inner width, centred (Ruling 51b): one line can
-  // be wider than a 360px frame. Its extra lines are reserved here; every other export keeps one line.
-  const xAxisLines = xAxisTitle && portrait
-    ? wrapToColumn(xAxisTitle, `${W_SEMI} 12px ${FONT}`, frameW - 2 * MARGIN)
-    : [xAxisTitle];
-  if (portrait) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
+  // The wrapped x-axis title (wrapXTitle, above): a portrait frame's or a framed timeline's extra
+  // lines are reserved here; a framed chart's were reserved before its height was chosen.
+  const xAxisLines = wrapXTitle(xAxisTitle);
+  if (wrapsXTitle && !reserveXTitleEarly) bottomH += (xAxisLines.length - 1) * AXIS_TITLE_LINE_H;
   const H_eff =
-    isFigure || rowSized || isTimeline || isTreemap || chartTop + contentHeight + bottomH > H
+    isFigure || rowSized || isTimeline || isTreemap || chartTop + contentHeight + bottomH > FH
       ? Math.round(chartTop + contentHeight + bottomH)
-      : H;
-  if (H_eff !== H) {
+      : FH;
+  if (H_eff !== FH) {
     root.setAttribute("height", String(H_eff));
     bgRect.setAttribute("height", String(H_eff));
   }

@@ -25,7 +25,7 @@ export interface ResolvedColumns {
   point_label: string | null;
   /** Column grouping categories into sections (horizontal bars), or null. */
   section: string | null;
-  /** Column flagging a waterfall step's kind (delta/total/skip), or null. */
+  /** Column flagging a waterfall step's kind (delta/total/skip/branch), or null. */
   kind: string | null;
   /** Histogram pre-binned data: column holding each bin's lower edge, or null. */
   x0: string | null;

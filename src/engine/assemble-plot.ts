@@ -1324,6 +1324,10 @@ export function assemblePlot({
   // correctly. FIRST element in DOM order wins, exactly as for a hatch ground.
   const seriesPainted = new Map<string, string>();
 
+  // The waterfall's hollow branch box is a Plot bar, labelled "bar" like the data bars; relabel it
+  // before tagging and before any cursor runs, so no `g[aria-label="bar"] rect` selector sees it.
+  svg.querySelectorAll("g.tbl-branch-box").forEach((g) => g.setAttribute("aria-label", "branch box"));
+
   for (const { selector, seriesOrder, shapeOrder, categoryOrder, annotationOrder, fill } of layers.tagging) {
     svg.querySelectorAll(selector).forEach((el, i) => {
       // Sparse, like `annotationOrder` below: an undefined slot holds the element's POSITION (so

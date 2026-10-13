@@ -1660,14 +1660,14 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
     }
   }
 
-  // Waterfall: the kind column (columns.kind) may only hold delta / total / skip (empty ⇒ delta),
+  // Waterfall: the kind column (columns.kind) may only hold delta / total / skip / branch (empty ⇒ delta),
   // and a waterfall is single-series (one bar per step — no series channel). The value-axis reads
   // a running cumulative, so faceted waterfalls share ONE category axis: every facet must carry the
   // same steps (use a `skip` row to hold a category slot a facet lacks), mirroring the horizontal
   // bar ragged-facet guard.
   if (spec.chartType === "waterfall") {
     if (cols.kind && columns.has(cols.kind)) {
-      const ALLOWED = new Set(["", "delta", "total", "skip"]);
+      const ALLOWED = new Set(["", "delta", "total", "skip", "branch"]);
       const bad = new Set<string>();
       for (const r of rows) {
         const k = ((r[cols.kind] as string) ?? "").trim();
@@ -1675,7 +1675,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       }
       if (bad.size) {
         errors.push(
-          `columns.kind "${cols.kind}" has unknown value(s) ${JSON.stringify([...bad])} — waterfall kinds are "delta", "total", or "skip" (empty ⇒ delta)`,
+          `columns.kind "${cols.kind}" has unknown value(s) ${JSON.stringify([...bad])} — waterfall kinds are "delta", "total", "skip", or "branch" (empty ⇒ delta)`,
         );
       }
     }

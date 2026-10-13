@@ -262,6 +262,18 @@ describe("shared-asset fallback when the runtime does not arrive", () => {
 // readable here. Both kinds of marker are checked anyway: the paths pin exactly which module pulled
 // it in, and the ajv source strings would survive a minified build too.
 describe("browser bundle contents", () => {
+  it("exposes buildExportSvg on the BudgetLabChart global", () => {
+    const js = readFileSync(BUNDLE_PATH, "utf8");
+    const dom = new JSDOM("<!doctype html><body></body>", { runScripts: "dangerously", pretendToBeVisual: true });
+    // Execute the bundle as a <script> element, as a browser would (no eval in the repo).
+    const script = dom.window.document.createElement("script");
+    script.textContent = js;
+    dom.window.document.body.appendChild(script);
+    const api = (dom.window as unknown as { BudgetLabChart: Record<string, unknown> }).BudgetLabChart;
+    expect(typeof api.mountChart).toBe("function");
+    expect(typeof api.buildExportSvg).toBe("function");
+  });
+
   const FORBIDDEN: Array<[string, string]> = [
     ["node_modules/ajv/", "ajv itself"],
     ["src/spec/validate.ts", "the validator, which instantiates Ajv at module scope"],

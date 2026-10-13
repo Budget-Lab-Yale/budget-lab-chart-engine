@@ -26,7 +26,7 @@ import {
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -262,7 +262,7 @@ export function buildBarMarks(
       dashedNames: new Set<string>(),
       // Refine the adapter's band x with a slightly larger outer pad so bars do not kiss
       // the frame. (Adapter set type:band/domain/axis already.)
-      xScaleOpts: { paddingInner: 0.2, paddingOuter: 0.2 },
+      xScaleOpts: { paddingInner: VBAND_PADDING_INNER, paddingOuter: VBAND_PADDING_OUTER },
       // xAxisMarks/xScaleField left undefined -> adapter labels categories on `x`.
     };
   }
@@ -320,7 +320,7 @@ export function buildBarMarks(
   // auto-sort groups; Plot would otherwise sort the fx domain alphabetically). Inter-group
   // padding, equalized outer pads, no axis (groups are labeled via xAxisMarks). Inner
   // series band: domain in series order, padding 0 so bars touch within the group.
-  const groupBandOpts = { domain: categories, padding: 0.2, paddingOuter: 0.2, axis: null };
+  const groupBandOpts = { domain: categories, padding: VBAND_PADDING_INNER, paddingOuter: VBAND_PADDING_OUTER, axis: null };
   const innerBandOpts = { domain: seriesNames, padding: 0, axis: null };
 
   return {

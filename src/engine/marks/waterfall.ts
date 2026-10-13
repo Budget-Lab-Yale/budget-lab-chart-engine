@@ -14,6 +14,7 @@ import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { resolveColor } from "../palette";
 import { ownValue } from "../../spec/own-key";
 import { CAT_LABEL_CLASS } from "../axes";
+import { VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 import { applyValueAffixes, resolveValueAffixes, applyValueLabelHook } from "../util";
 import type { ValueAffixes } from "../../spec/types";
 import { computeWaterfallSteps, waterfallValueDecimals, isReversedDomain } from "../scales";
@@ -21,6 +22,9 @@ import type { WaterfallStep } from "../scales";
 import { SINGLE_SERIES_KEY } from "../../spec/columns";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
+
+/** Class on the hollow branch box's group; assemble-plot relabels that group (see the mark). */
+export const BRANCH_BOX_CLASS = "tbl-branch-box";
 
 const DEFAULT_INCREASE = "blue";
 const DEFAULT_DECREASE = "red";
@@ -83,7 +87,10 @@ export function buildWaterfallMarks(
     const connColor = resolveColor(wf.connectorColor) ?? TBL.color.annotationDim;
     const connRows: Array<{ x1: string; x2: string; y: number }> = [];
     for (let i = 0; i < barSteps.length - 1; i++) {
-      connRows.push({ x1: barSteps[i]!.cat, x2: barSteps[i + 1]!.cat, y: barSteps[i]!.level });
+      // A branch bar does not advance the running total, so the connector leaves at the level
+      // entering the next bar rather than at the branch's own level.
+      const a = barSteps[i]!, b = barSteps[i + 1]!;
+      connRows.push({ x1: a.cat, x2: b.cat, y: a.kind === "branch" ? b.before : a.level });
     }
     overlay.push(
       Plot.link(connRows, {
@@ -104,6 +111,19 @@ export function buildWaterfallMarks(
   overlay.push(
     Plot.barY(barRows, { x: "_xc", y1: "_base", y2: "_top", fill: (d: { _fill: string }) => d._fill, ...clipOpt }),
   );
+
+  // A branch step's bar floats on the running total; an unfilled box from zero to its level shows
+  // the cumulative it reaches. Drawn after the bars, so it is not tagged for the live layer.
+  const hollow = barSteps.filter((s) => s.kind === "branch").map((s) => ({ _xc: s.cat, _top: s.level }));
+  if (hollow.length) {
+    overlay.push(
+      Plot.barY(hollow, { x: "_xc", y1: 0, y2: "_top", fill: "none", stroke: TBL.color.annotationDim, strokeWidth: 1,
+        // Plot labels this group "bar", and the hover cursor reads every `g[aria-label="bar"] rect` as
+        // bar geometry, so the box would draw a second value pill on its category. assemble-plot
+        // relabels `g.tbl-branch-box` (BRANCH_BOX_CLASS) to keep it out of that selector.
+        className: BRANCH_BOX_CLASS, ...clipOpt }),
+    );
+  }
 
   // --- Always-on running-total labels (opt-in): the cumulative level AFTER each step, above a
   //     rising bar / below a falling one. Color-matched to the bar and drawn at ONE uniform
@@ -167,6 +187,6 @@ export function buildWaterfallMarks(
     dashedNames: new Set<string>(),
     // Explicit band domain (declaration order, incl. skip slots) so a skipped step still reserves
     // its axis position; padding matches single-series bars.
-    xScaleOpts: { domain: categories, paddingInner: 0.2, paddingOuter: 0.2 },
+    xScaleOpts: { domain: categories, paddingInner: VBAND_PADDING_INNER, paddingOuter: VBAND_PADDING_OUTER },
   };
 }

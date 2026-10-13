@@ -4,6 +4,69 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] - 2026-10-13
+
+### Added
+- Export frame: `buildExportSvg(spec, rows, { frame })` takes `frame: { width, height, logoTop?,
+  fillPanes?, fitRows? }` (CSS px) in place of the default 1000x750 frame. `logoTop` is the padding above the
+  title row and defaults to the 40 px margin; a negative or non-finite `logoTop` throws. The
+  smallest frame is 320x240; a smaller one throws. `fillPanes` and `fitRows` take `true`, `false`
+  or nothing; any other value throws.
+  With no `frame`, the output is unchanged. `height` is a target: a chart that sizes to its content
+  (a figure without `fillPanes`, a row-sized bar chart that fits, a treemap, a timeline) can come out
+  shorter, and content that needs more room can come out taller, including under `fillPanes` and
+  `fitRows` when their floors bind. A timeline keeps its own width and height.
+  A framed export also changes how some chart parts lay out:
+  - `fillPanes: true` sizes every pane row of a small-multiples figure so the grid fills the frame
+    exactly, growing or shrinking the panes, but not below 160 px (the least height a framed single
+    chart gets). If the frame leaves less room than that, the panes stay at 160 px and the output
+    comes out taller than the frame.
+  - `fitRows: true` fits a row-sized chart (horizontal bar or stack, horizontal dumbbell) that is
+    taller than the frame by compressing its row pitch, so it fills the frame exactly. Margins and
+    section gaps keep their size, and a chart that already fits is not stretched. The pitch stops at
+    16 px per category-label line, 15 px per bar in the row (12 px value-label height over the
+    band's 0.8 bar share; a grouped row of three bars needs 45 px), and the height of the row's own
+    marks plus 3 px clear: a horizontal dumbbell's dots (`dot_radius` and outline), connector and
+    `gap_annotation` label, and a diverging stack's net dot (21 px). The largest of these wins. Past
+    that floor the output comes out taller than the frame. The on-screen chart is unchanged.
+  - A treemap's height is capped by the room the frame leaves it, not by the fixed 460 px.
+  - A long x-axis title wraps to the width it is centred in.
+  - A legend label wider than a whole legend row wraps (colour and shape legends).
+  - When a title word cannot fit in the column beside the logo (in a 320 px frame that column is
+    66 px), the logo takes a row of its own above the title. The 640 and 1280 px slide frames keep
+    the side-by-side layout for any ordinary title.
+  - A right-hand legend moves above the chart when the frame's inner width is under 566 px, as the
+    live card does.
+- `buildExportSvg` is on the `BudgetLabChart` browser-bundle global.
+- Waterfall: `columns.kind` accepts `branch`. A branch draws a bar from the running total by its
+  value, like a delta, but does not move the running total, and an unfilled box from zero to its
+  level is drawn over its slot. The `columns.kind` row is now in CONFIG-SPEC.md.
+
+### Fixed
+- PNG export of `small_multiples.pane_widths` figures: each pane is placed at the width it was
+  rendered at (see Upgrading).
+- `small_multiples.pane_widths: "equal-bar"` now gives equal bars. It weighted each column by its
+  bar count, but a band of n categories spans n + 0.2 steps (outer padding 0.2 at each end, inner 0.2),
+  so the busier pane's bars came out wider: 63 vs 62 px at the default export width, 86 vs 82 px
+  in a 1280 px frame. Columns are now weighted by that span, on screen and in the export.
+
+### Upgrading
+- **PNG export of `small_multiples.pane_widths` figures.** The download now places each pane at the
+  width it was rendered at. Before, panes were rendered at their `pane_widths` widths and then
+  rescaled into equal-width cells, so with `pane_widths: "equal-bar"` the bars came out a different
+  width in each pane (and per-pane mode squeezed the whole split into one cell's width). Archive
+  scan: no figure in `budget-lab-charts` uses `pane_widths` (origin/main 82d6974, plus the
+  untracked `charts/trackers/`), so a repin moves no published chart. The only user is
+  `budget-lab-interactives`' State of Tariffs `gdp-by-category` figure (shared mode,
+  `pane_widths: "equal-bar"`, 2 columns, in every scenario and vintage). Its PNG download changes
+  to equal-width bars when that tool next re-vendors the engine, and its on-screen chart changes
+  slightly too: the "equal-bar" weighting fix narrows the pane with more bars a little and widens
+  the other, so the two panes' bars match. Figures without `pane_widths` render and export exactly
+  as before.
+- The `frame` option (with `fillPanes` and `fitRows`) and the waterfall `branch` kind are opt-in, as are the legend-label wrap and
+  the logo row, which apply only under a `frame`. No published spec uses `branch` (the validator
+  rejected it before 1.17.0), and no golden moved.
+
 ## [1.16.3] - 2026-10-09
 
 ### Fixed
