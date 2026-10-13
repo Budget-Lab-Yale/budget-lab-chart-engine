@@ -4,7 +4,7 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.17.0] - 2026-10-12
+## [1.17.0] - 2026-10-13
 
 ### Added
 - Export frame: `buildExportSvg(spec, rows, { frame })` takes `frame: { width, height, logoTop?,
