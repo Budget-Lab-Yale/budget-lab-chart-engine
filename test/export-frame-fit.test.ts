@@ -465,6 +465,41 @@ describe("fitRows floor covers each row's own marks", () => {
   });
 });
 
+describe("fitRows net-dot floor follows the renderer's series semantics", () => {
+  const STK = { ...BARS, chartType: "stacked", columns: { x: "cat", value: "v", series: "s" } } as ChartSpec;
+  const netDots = (chart: Element) => [...chart.querySelectorAll("circle.tbl-net-marker, g.tbl-net-marker circle")].map((c) => {
+    const cy = translateY(c, chart) + Number(c.getAttribute("cy") ?? 0);
+    const reach = Number(c.getAttribute("r")) + strokeOf(c) / 2;
+    return { top: cy - reach, bottom: cy + reach, text: String(cy) };
+  });
+
+  it("a blank series name counts as a series: its net dots get the 21px floor and never meet", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => [
+      { cat: `Category ${i + 1}`, s: "", v: "5" },
+      { cat: `Category ${i + 1}`, s: "Down", v: "-2" },
+    ]).flat() as unknown as TidyRow[];
+    const chart = chartOf(buildExportSvg(STK, rows, { frame: { width: 1280, height: 618, logoTop: 20, fitRows: true } }));
+    const dots = netDots(chart);
+    expect(dots).toHaveLength(40);
+    expect(pitchOf(chart)).toBe(21);
+    expectNoOverlap(dots, "net dots");
+  });
+
+  it("a negative series series_order leaves out draws no net dots and does not raise the floor", () => {
+    const spec = { ...STK, series_order: ["A", "B"] } as ChartSpec;
+    const rows = Array.from({ length: 40 }, (_, i) => [
+      { cat: `Category ${i + 1}`, s: "A", v: String(3 + (i % 4)) },
+      { cat: `Category ${i + 1}`, s: "B", v: "2" },
+      { cat: `Category ${i + 1}`, s: "C", v: "-1" },
+    ]).flat() as unknown as TidyRow[];
+    const frame = { width: 1280, height: 900, logoTop: 20 };
+    expect(heightOf(buildExportSvg(spec, rows, { frame }))).toBeGreaterThan(900);
+    const fitted = buildExportSvg(spec, rows, { frame: { ...frame, fitRows: true } });
+    expect(netDots(chartOf(fitted))).toHaveLength(0);
+    expect(heightOf(fitted)).toBe(900);
+  });
+});
+
 describe("frame option validation", () => {
   it.each([["fitRows", "yes"], ["fitRows", 1], ["fillPanes", "true"], ["fillPanes", null]])("rejects %s: %s", (key, value) => {
     const frame = { width: 1280, height: 618, [key]: value } as unknown as { width: number; height: number };

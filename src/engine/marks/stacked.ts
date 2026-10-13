@@ -53,6 +53,18 @@ const NET_DOT_STROKE_W = 2;
  *  height model (figure.ts) floors a fitted row pitch on it. Row-sized charts are never panes. */
 export const NET_DOT_ROW_PX = 2 * NET_DOT_R + NET_DOT_STROKE_W;
 
+/** Whether any in-scope value is negative: the one data input to resolveNetMode. */
+function hasNegativeValues(data: PreparedRow[]): boolean {
+  return data.some((r) => Number.isFinite(r._y as number) && (r._y as number) < 0);
+}
+
+/** Whether a stack over `data` (its in-scope rows, as the builder receives them) draws net dots, given
+ *  the chart's drawn series count. The builder decides with this, and so does the height model (via
+ *  index.ts singleChartDrawsNetDots), so a fitted row pitch is floored for exactly the dots drawn. */
+export function netDotsDrawn(spec: ChartSpec, data: PreparedRow[], seriesCount: number): boolean {
+  return drawsNetDots(resolveNetMode(spec, hasNegativeValues(data)), seriesCount);
+}
+
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
 const SEGMENT_LABEL_MIN_PX = 25;
@@ -172,7 +184,7 @@ export function buildStackedMarks(
     if (y >= 0) posSumByCat.set(cat, (posSumByCat.get(cat) ?? 0) + y);
   }
 
-  const hasNegatives = data.some((r) => Number.isFinite(r._y as number) && (r._y as number) < 0);
+  const hasNegatives = hasNegativeValues(data);
 
   // Net display mode (bar-stacked.md §6): "auto" → dot when any negative, else text.
   // Normalized stacks always top at 100% so a net callout is meaningless — suppress.
@@ -198,7 +210,7 @@ export function buildStackedMarks(
   const netMode = resolveNetMode(spec, hasNegatives);
   // The dot and its legend row need a second series to net; see drawsNetDots. Counted over the whole
   // chart (a figure's panes can each hold fewer), so every pane and the figure legend agree.
-  const netDots = drawsNetDots(netMode, ctx.chartSeriesCount ?? seriesNames.length);
+  const netDots = netDotsDrawn(spec, data, ctx.chartSeriesCount ?? seriesNames.length);
 
   const affixes = resolveValueAffixes(spec);
   const allValues = data

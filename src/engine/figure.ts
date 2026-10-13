@@ -19,12 +19,11 @@ import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
+import { renderPane, singleChartDrawsNetDots, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
 import { resolveValueAffixes, normalizeSpec } from "./util";
 import { dumbbellRowExtent } from "./marks/dumbbell";
 import { NET_DOT_ROW_PX } from "./marks/stacked";
-import { resolveNetMode, drawsNetDots } from "../spec/bar-stack";
 import { rowBandGeometry, HBAND_PADDING_INNER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./marks/category-band";
 import { horizontalLeftGutter, labelLineCount, GUTTER_TEXT_PAD, FACETED_CAT_LABEL_PX, bandLabelMode, bandLabelMarginBottom, sectionGapPx, SECTION_LABEL_INDENT } from "./axes";
 import type { BandLabelMode } from "./axes";
@@ -159,17 +158,14 @@ export const FIT_ROW_CLEAR_PX = FIT_LABEL_LINE_PX - FACETED_CAT_LABEL_PX;
 
 /** The pitch (px) a row-sized chart's per-row MARKS need beyond its bars and labels, or 0: a horizontal
  *  dumbbell's dots, connector and gap label (dumbbellRowExtent), and a stack's net dot when it draws
- *  one (drawsNetDots). Each row's marks are centred on the row, so a row needs its own reach above
+ *  one (index.ts singleChartDrawsNetDots: the renderer's own row prep, series scope and predicate). Each row's marks are centred on the row, so a row needs its own reach above
  *  the centre plus the reach below the centre of the row before it, plus FIT_ROW_CLEAR_PX. */
-function rowMarksPx(spec: ChartSpec, rows: TidyRow[], valueField: string, nSeries: number): number {
+function rowMarksPx(spec: ChartSpec, rows: TidyRow[]): number {
   if (isHorizontalDumbbellSpec(spec)) {
     const { above, below } = dumbbellRowExtent(spec);
     return Math.ceil(above + below + FIT_ROW_CLEAR_PX);
   }
-  if (spec.chartType === "stacked") {
-    const hasNegatives = rows.some((r) => Number(r[valueField]) < 0);
-    if (drawsNetDots(resolveNetMode(spec, hasNegatives), nSeries)) return Math.ceil(NET_DOT_ROW_PX + FIT_ROW_CLEAR_PX);
-  }
+  if (singleChartDrawsNetDots(spec, rows)) return Math.ceil(NET_DOT_ROW_PX + FIT_ROW_CLEAR_PX);
   return 0;
 }
 
@@ -255,10 +251,7 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[], opts:
   const band = rowBandGeometry(spec.chartType, spec.x_axis_ticks, nSections > 0);
   const natural = fitRowsHeight(estimate, nCats, rowSlotPx(barsPerCat, maxLabelLines), gapsPx, band);
   if (opts.maxHeight === undefined) return natural;
-  // The series a stack draws (series_order filters), for drawsNetDots.
-  const listed = spec.series_order?.length ? new Set(spec.series_order) : null;
-  const drawnSeries = [...series].filter((s) => !listed || listed.has(s)).length;
-  const marksPx = rowMarksPx(spec, rows, cols.value, drawnSeries);
+  const marksPx = rowMarksPx(spec, rows);
   return fitRowsUnder(natural, opts.maxHeight, nCats, minRowSlotPx(barsPerCat, maxLabelLines, marksPx), gapsPx, band);
 }
 

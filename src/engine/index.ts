@@ -53,6 +53,7 @@ import {
 } from "./overlays";
 import type { OverlayTooltipLine } from "./overlays";
 import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
+import { netDotsDrawn } from "./marks/stacked";
 
 export { TOTAL_SERIES_KEY } from "./series-keys";
 
@@ -659,6 +660,19 @@ export function paneValueExtent(
     if (y > max) max = y;
   }
   return min <= max ? { min, max } : null;
+}
+
+/** Whether a SINGLE stacked chart of these rows draws net dots: renderPane's own row prep and series
+ *  scope (blank series names and `series_order`'s filter included), then the builder's own predicate
+ *  (marks/stacked.ts netDotsDrawn) over the series count renderChart gives it. The fitted row-pitch
+ *  floor (figure.ts) reads it. Pure, no DOM. */
+export function singleChartDrawsNetDots(spec: ChartSpec, rows: TidyRow[]): boolean {
+  spec = normalizeSpec(spec);
+  if (spec.chartType !== "stacked" || !spec.xAxisType) return false;
+  const cols = resolveColumns(spec, rows);
+  const data = prepareRows(spec, rows, cols, makeXAdapter(spec.xAxisType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
+  const { seriesNames, dataInScope } = scopeToSeries(spec, data);
+  return netDotsDrawn(spec, dataInScope, seriesNames.length);
 }
 
 /** Series order. When series_order is set it acts as both filter and order. Mirrored by
