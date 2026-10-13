@@ -324,6 +324,147 @@ describe("fitRows compresses a row-sized chart to the frame", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// fitRows floor: a row's own marks (dumbbell dots + gap labels, stacked net dots)
+// ---------------------------------------------------------------------------
+
+const DUMBBELL: ChartSpec = {
+  chartType: "dumbbell", orientation: "horizontal", title: "Rates", xAxisType: "categorical",
+  columns: { category: "cat", series: "m", value: "v" }, series_order: ["Before", "After"], data: "d.csv",
+} as ChartSpec;
+const dumbbellRows = (n: number) =>
+  Array.from({ length: n }, (_, i) => [
+    { cat: `Group ${i + 1}`, m: "Before", v: String(10 + (i % 5)) },
+    { cat: `Group ${i + 1}`, m: "After", v: String(18 + (i % 7)) },
+  ]).flat() as unknown as TidyRow[];
+
+const strokeOf = (el: Element): number => {
+  for (let n: Element | null = el; n; n = n.parentElement) {
+    const sw = n.getAttribute("stroke-width");
+    if (sw) return Number(sw);
+  }
+  return 1;
+};
+/** Each row's vertical reach: its dots (radius + half the outline), its connector (half its width) and
+ *  its gap label's em box. Rows are found from the dots' centres; a connector or label belongs to the
+ *  row it sits on (labels pair with rows in order: one per row, above it). */
+function dumbbellRows_(chart: Element): Box[] {
+  const dots = [...chart.querySelectorAll('g[aria-label="dot"] circle')].map((c) => {
+    const cy = translateY(c, chart) + Number(c.getAttribute("cy") ?? 0);
+    const reach = Number(c.getAttribute("r")) + strokeOf(c) / 2;
+    return { cy, top: cy - reach, bottom: cy + reach };
+  });
+  const rows = new Map<string, Box>();
+  for (const d of dots) {
+    const k = d.cy.toFixed(3);
+    const b = rows.get(k);
+    rows.set(k, b ? { top: Math.min(b.top, d.top), bottom: Math.max(b.bottom, d.bottom), text: k } : { top: d.top, bottom: d.bottom, text: k });
+  }
+  const sorted = [...rows.values()].sort((a, b) => a.top - b.top);
+  const centre = (b: Box) => Number(b.text);
+  const extend = (i: number, top: number, bottom: number) => {
+    const b = sorted[i]!;
+    sorted[i] = { ...b, top: Math.min(b.top, top), bottom: Math.max(b.bottom, bottom) };
+  };
+  for (const l of chart.querySelectorAll("g.tbl-dumbbell-connector line")) {
+    const y = translateY(l, chart) + Number(l.getAttribute("y1"));
+    const half = strokeOf(l) / 2;
+    const i = sorted.findIndex((b) => Math.abs(centre(b) - y) < 0.01);
+    expect(i).toBeGreaterThanOrEqual(0);
+    extend(i, y - half, y + half);
+  }
+  const labels = [...chart.querySelectorAll("g.tbl-dumbbell-gap text")].map((t) => textBox(t, chart)).sort((a, b) => a.top - b.top);
+  if (labels.length) {
+    expect(labels).toHaveLength(sorted.length);
+    labels.forEach((l, i) => {
+      expect(l.bottom).toBeLessThan(centre(sorted[i]!)); // above its own stem
+      extend(i, l.top, l.bottom);
+    });
+  }
+  return sorted;
+}
+const dumbbellPitch = (rows: Box[]): number => {
+  const c = rows.map((b) => Number(b.text));
+  return Math.min(...c.slice(1).map((v, i) => +(v - c[i]!).toFixed(3)));
+};
+
+describe("fitRows floor covers each row's own marks", () => {
+  const frame = { width: 1280, height: 618, logoTop: 20, fitRows: true };
+
+  it("a default dumbbell still compresses, to the 16px label floor", () => {
+    const plain = buildExportSvg(DUMBBELL, dumbbellRows(40), { frame: { ...frame, fitRows: false } });
+    const fitted = buildExportSvg(DUMBBELL, dumbbellRows(40), { frame });
+    expect(heightOf(fitted)).toBeLessThan(heightOf(plain));
+    const rows = dumbbellRows_(chartOf(fitted));
+    expect(rows).toHaveLength(40);
+    expect(dumbbellPitch(rows)).toBe(16);
+    expectNoOverlap(rows, "dumbbell rows");
+  });
+
+  it("dot_radius 10: neighbouring rows' 20px dots never meet; the floor binds and the output is taller", () => {
+    const spec = { ...DUMBBELL, dot_radius: 10 } as ChartSpec;
+    const fitted = buildExportSvg(spec, dumbbellRows(40), { frame });
+    expect(heightOf(fitted)).toBeGreaterThan(618);
+    const rows = dumbbellRows_(chartOf(fitted));
+    expect(rows).toHaveLength(40);
+    expectNoOverlap(rows, "dumbbell rows");
+  });
+
+  it("dot_radius 7: compresses only to the dot floor, 2 x 7.5 + 3 = 18px", () => {
+    const spec = { ...DUMBBELL, dot_radius: 7 } as ChartSpec;
+    const rows = dumbbellRows_(chartOf(buildExportSvg(spec, dumbbellRows(40), { frame })));
+    expect(dumbbellPitch(rows)).toBe(18);
+    for (let i = 1; i < rows.length; i++) expect(rows[i]!.top - rows[i - 1]!.bottom).toBeGreaterThanOrEqual(3 - 0.01);
+  });
+
+  it("gap_annotation, dot_radius 10: the floor (34px) is above the natural pitch, so the chart is left as it was", () => {
+    const spec = { ...DUMBBELL, dot_radius: 10, gap_annotation: true } as ChartSpec;
+    const fitted = buildExportSvg(spec, dumbbellRows(40), { frame });
+    expect(ser(fitted)).toBe(ser(buildExportSvg(spec, dumbbellRows(40), { frame: { ...frame, fitRows: false } })));
+    // No gap label crosses the connector of the row above it.
+    const chart = chartOf(fitted);
+    const conns = [...chart.querySelectorAll("g.tbl-dumbbell-connector line")]
+      .map((l) => translateY(l, chart) + Number(l.getAttribute("y1"))).sort((x, y) => x - y);
+    const labels = [...chart.querySelectorAll("g.tbl-dumbbell-gap text")].map((t) => textBox(t, chart)).sort((x, y) => x.top - y.top);
+    expect(labels).toHaveLength(40);
+    labels.forEach((l, i) => {
+      if (i > 0) expect(l.top).toBeGreaterThan(conns[i - 1]! + 0.75);
+      expect(l.bottom).toBeLessThan(conns[i]! - 0.75);
+    });
+  });
+
+  it.each([3, 5])("gap_annotation, dot_radius %i: no gap label meets the row above's connector or dots", (r) => {
+    const spec = { ...DUMBBELL, dot_radius: r, gap_annotation: true } as ChartSpec;
+    const rows = dumbbellRows_(chartOf(buildExportSvg(spec, dumbbellRows(40), { frame })));
+    expect(rows).toHaveLength(40);
+    expectNoOverlap(rows, "dumbbell rows with gap labels");
+  });
+
+  it("gap_annotation, dot_radius 3: compresses, but only to the label's floor (20px)", () => {
+    const spec = { ...DUMBBELL, dot_radius: 3, gap_annotation: true } as ChartSpec;
+    const rows = dumbbellRows_(chartOf(buildExportSvg(spec, dumbbellRows(40), { frame })));
+    // Label em box 3 + 5 + 0.48 x 10.5 above the stem, the dot 3.5 below, 3px clear: ceil(19.54).
+    expect(dumbbellPitch(rows)).toBe(20);
+  });
+
+  it("a diverging stack's net dots (r 8, 2px outline) stop the pitch at 21px and never meet", () => {
+    const spec = { ...BARS, chartType: "stacked", columns: { x: "cat", value: "v", series: "s" } } as ChartSpec;
+    const rows = Array.from({ length: 40 }, (_, i) => [
+      { cat: `Category ${i + 1}`, s: "Up", v: String(5 + (i % 4)) },
+      { cat: `Category ${i + 1}`, s: "Down", v: String(-2 - (i % 3)) },
+    ]).flat() as unknown as TidyRow[];
+    const chart = chartOf(buildExportSvg(spec, rows, { frame }));
+    const nets = [...chart.querySelectorAll("circle.tbl-net-marker, g.tbl-net-marker circle")].map((c) => {
+      const cy = translateY(c, chart) + Number(c.getAttribute("cy") ?? 0);
+      const reach = Number(c.getAttribute("r")) + strokeOf(c) / 2;
+      return { top: cy - reach, bottom: cy + reach, text: String(cy) };
+    });
+    expect(nets).toHaveLength(40);
+    expect(pitchOf(chart)).toBe(21);
+    expectNoOverlap(nets, "net dots");
+  });
+});
+
 describe("frame option validation", () => {
   it.each([["fitRows", "yes"], ["fitRows", 1], ["fillPanes", "true"], ["fillPanes", null]])("rejects %s: %s", (key, value) => {
     const frame = { width: 1280, height: 618, [key]: value } as unknown as { width: number; height: number };

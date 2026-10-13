@@ -48,6 +48,10 @@ export const NET_DOT_CLASS = "tbl-net-marker";
 // Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.
 const NET_DOT_R = 8;
 const NET_DOT_PANE_R = 5.6;
+const NET_DOT_STROKE_W = 2;
+/** The height a standalone chart's net dot takes on its row (px): its diameter plus its outline. The
+ *  height model (figure.ts) floors a fitted row pitch on it. Row-sized charts are never panes. */
+export const NET_DOT_ROW_PX = 2 * NET_DOT_R + NET_DOT_STROKE_W;
 
 // Below this pixel height a segment value-label can't fit cleanly — drop it
 // (bar-stacked.md §7, slide half-scale 25px threshold).
@@ -346,8 +350,8 @@ export function buildStackedMarks(
     const netDotR = pane ? NET_DOT_PANE_R : NET_DOT_R;
     const net = markerInk("net", "");
     const netDot = horizontal
-      ? Plot.dot(netRows, { ...rowChannels("_xc"), x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS })
-      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: 2, className: NET_DOT_CLASS });
+      ? Plot.dot(netRows, { ...rowChannels("_xc"), x: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: NET_DOT_STROKE_W, className: NET_DOT_CLASS })
+      : Plot.dot(netRows, { x: "_xc", y: "net", r: netDotR, fill: net.fill, stroke: net.stroke, strokeWidth: NET_DOT_STROKE_W, className: NET_DOT_CLASS });
     overlay.push(netDot);
   }
 

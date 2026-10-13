@@ -366,8 +366,10 @@ export interface ExportFrame {
    * taller than the room the frame leaves it, compress its row pitch so it fits that room exactly
    * (horizontalBarChartHeight's `maxHeight`). Margins and section gaps keep their size, and a chart
    * that already fits is unchanged, never expanded. The pitch stops at a floor that keeps labels
-   * legible: 16px per category-label line (FIT_LABEL_LINE_PX) and 15px per bar in the row
-   * (FIT_MIN_PX_PER_BAR: a grouped row of three bars needs 45px), whichever is larger. When the floor
+   * legible: 16px per category-label line (FIT_LABEL_LINE_PX), 15px per bar in the row
+   * (FIT_MIN_PX_PER_BAR: a grouped row of three bars needs 45px), and the room the row's own marks
+   * reach above and below it plus 3px clear (a dumbbell's dots, connector and gap label; a diverging
+   * stack's net dot, 21px), whichever is largest. When the floor
    * binds the output comes out taller than `height`. No effect on any other chart or a figure.
    * `true`, `false` or absent; anything else throws.
    */

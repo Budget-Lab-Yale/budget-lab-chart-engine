@@ -24,9 +24,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   - `fitRows: true` fits a row-sized chart (horizontal bar or stack, horizontal dumbbell) that is
     taller than the frame by compressing its row pitch, so it fills the frame exactly. Margins and
     section gaps keep their size, and a chart that already fits is not stretched. The pitch stops at
-    16 px per category-label line and 15 px per bar in the row (12 px value-label height over the
-    band's 0.8 bar share; a grouped row of three bars needs 45 px), whichever is larger. Past that
-    floor the output comes out taller than the frame. The on-screen chart is unchanged.
+    16 px per category-label line, 15 px per bar in the row (12 px value-label height over the
+    band's 0.8 bar share; a grouped row of three bars needs 45 px), and the height of the row's own
+    marks plus 3 px clear: a horizontal dumbbell's dots (`dot_radius` and outline), connector and
+    `gap_annotation` label, and a diverging stack's net dot (21 px). The largest of these wins. Past
+    that floor the output comes out taller than the frame. The on-screen chart is unchanged.
   - A treemap's height is capped by the room the frame leaves it, not by the fixed 460 px.
   - A long x-axis title wraps to the width it is centred in.
   - A legend label wider than a whole legend row wraps (colour and shape legends).
