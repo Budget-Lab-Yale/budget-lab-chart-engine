@@ -4,7 +4,13 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.17.1] - 2026-10-14
+## [1.18.0] - 2026-10-14
+
+### Added
+- `x_ticks` on a `temporal`, `quarterly` or `numeric` x-axis: `data` puts the ticks on the data's own
+  x values (on a figure, every pane's), a list puts them on the values given in the axis' grammar.
+  Values outside the drawn range are dropped, and crowded labels thin to every k-th value from the
+  first. A validation error on a categorical axis, a histogram and a timeline.
 
 ### Fixed
 - Small multiples on a `temporal`, `quarterly` or `numeric` x-axis: the panes now share one x range,
@@ -24,6 +30,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   or band past the data on a single chart, and now every pane drawn over a shared range — the guide
   and dots landed off the points and the pointer resolved to the wrong observation. Both read the
   drawn range now.
+- The coordinated cursor no longer borrows a neighbouring point in a pane that has no data at the
+  hovered x: hovering 2001 on one pane used to show another pane's 2004 values. Outside a pane's own
+  data its guide marks the hovered x and no value is drawn.
 
 ### Removed
 - The `densityMultiplier` parameter of `temporalXTicks` / `tblTemporalXAxis` (every caller passed 1).
@@ -31,7 +40,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ### Upgrading
 - **Archive scan** (budget-lab-charts at origin/main 1afaaa5, plus the open SCF figures and the untracked
-  `charts/trackers/`): every chart rendered live with 1.17.0 and 1.17.1 and the SVG markup compared.
+  `charts/trackers/`): every chart rendered live with 1.17.0 and 1.18.0 and the SVG markup compared.
   At 760 px all 64 are byte-identical: no faceted figure there has panes with different x ranges, and
   no desktop-width temporal axis crowds. At 390 px six standalone temporal charts thin their ticks:
   `recession-indicators/yield-curve` (5 -> 10 years) and five `emp-dispersion-graphs` figures

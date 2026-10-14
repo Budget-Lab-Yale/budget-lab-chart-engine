@@ -668,6 +668,10 @@ export interface ChartSpec {
    *  order) — x_order only reorders categories WITHIN each section; it can never split a
    *  section's categories apart or reorder the sections themselves. */
   x_order?: string[];
+  /** Temporal, quarterly or numeric x-axis: where the ticks go — `"data"` (the data's own x values)
+   *  or a list in the axis' grammar (`"2001"`, `"2001-01-01"`, `"2001Q1"`, a number). Thinned to
+   *  every k-th value when the labels would overlap. Absent → the axis picks its own ticks. */
+  x_ticks?: "data" | Array<string | number>;
   /** Dumbbell charts: category render order along the categorical axis — a synonym for `x_order`
    *  (order-only, never filters). `category_order` wins when both are set. See `categoryOrderFor`. */
   category_order?: string[];

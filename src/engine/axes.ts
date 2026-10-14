@@ -141,7 +141,7 @@ export function paneTitleMark(cells: PaneTitleCell[]): Mark[] {
 // chrome collapse can keep the bottom-row copies. Left undefined for single-frame charts so
 // their output stays byte-identical (Plot omits the class attribute entirely).
 export function tblXAxis(
-  { xTickFormat }: { xTickFormat?: (d: unknown) => string } = {},
+  { xTickFormat, ticks }: { xTickFormat?: (d: unknown) => string; ticks?: number[] } = {},
   className?: string,
   /** Extra px to push the tick labels DOWN, away from the axis. The x-axis rug uses it to open a
    *  gap for its strip (the caller grows marginBottom by the same amount). Default 0. */
@@ -157,6 +157,7 @@ export function tblXAxis(
       fill: TBL.color.axis,
       fontWeight: 500,
       tickFormat: xTickFormat,
+      ...(ticks ? { ticks } : {}),
       ...(className ? { className } : {}),
     }),
   ];
@@ -222,13 +223,33 @@ function tickLabelsFit(ticks: Date[], span: number, dataWidth: number): boolean 
     const month = measuredLabelWidth(d3.timeFormat("%b")(d));
     return d.getMonth() === 0 ? Math.max(month, year) : month;
   };
-  for (let i = 1; i < ticks.length; i++) {
-    const a = ticks[i - 1] as Date;
-    const b = ticks[i] as Date;
-    const px = ((+b - +a) / span) * dataWidth;
-    if ((width(a) + width(b)) / 2 + MIN_TICK_LABEL_GAP > px) return false;
+  return labelsClear(ticks.map((d) => ((+d - +ticks[0]!) / span) * dataWidth), ticks.map(width));
+}
+
+/** Whether labels centred at `px`, `widths` wide, each have MIN_TICK_LABEL_GAP to the next. */
+export function labelsClear(px: number[], widths: number[]): boolean {
+  for (let i = 1; i < px.length; i++) {
+    if (((widths[i - 1] as number) + (widths[i] as number)) / 2 + MIN_TICK_LABEL_GAP > (px[i] as number) - (px[i - 1] as number)) {
+      return false;
+    }
   }
   return true;
+}
+
+/** `x_ticks`: every k-th of `values`, counting from the first, for the smallest k whose labels
+ *  `fit`, so a thinned axis still lands on the data's (or the listed) values. One value at worst. */
+export function everyKthThatFits<T>(values: T[], fits: (subset: T[]) => boolean): T[] {
+  for (let k = 1; k <= values.length; k++) {
+    const subset = values.filter((_, i) => i % k === 0);
+    if (fits(subset)) return subset;
+  }
+  return values.slice(0, 1);
+}
+
+/** `x_ticks` on a date axis: the candidate ticks thinned to fit `dataWidth` over a drawn `span` (ms). */
+export function thinTemporalTicks(candidates: Date[], dataWidth: number | undefined, span: number): Date[] {
+  if (!(dataWidth! > 0)) return candidates;
+  return everyKthThatFits(candidates, (subset) => tickLabelsFit(subset, span, dataWidth!));
 }
 
 function ticksAtCadence(xDomain: [Date, Date], cadence: number): Date[] {
@@ -273,8 +294,10 @@ export function tblTemporalXAxis(
   labelDy = 0,
   /** The drawn range when wider than the data — see `temporalXTicks`. */
   scaleDomain?: [number, number],
+  /** Ticks already chosen by the caller (`x_ticks`); absent → `temporalXTicks` picks them. */
+  chosen?: Date[],
 ): Mark[] {
-  const ticks = temporalXTicks(xDomain, dataWidth, scaleDomain);
+  const ticks = chosen ?? temporalXTicks(xDomain, dataWidth, scaleDomain);
   const yearTicks = ticks.filter((d) => d.getMonth() === 0);
   const allJanuary = ticks.length > 0 && yearTicks.length === ticks.length;
   const cls = className ? { className } : {};

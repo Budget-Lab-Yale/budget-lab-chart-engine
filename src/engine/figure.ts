@@ -19,7 +19,7 @@ import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, singleChartDrawsNetDots, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
+import { renderPane, paneXValues, singleChartDrawsNetDots, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
 import type { LegendItem, ShapeLegendItem, RenderOptions, PaneResult } from "./index";
 import type { SharedXDomain } from "./x-adapter";
 import { resolveValueAffixes, normalizeSpec } from "./util";
@@ -509,16 +509,26 @@ function figureSharedX(probes: PaneResult[]): SharedXDomain | undefined {
   return data && scale ? { data, scale } : undefined;
 }
 
-/** On a date axis (any chart type, histograms included), the narrowest pane's data width: every pane
- *  fits its ticks to it, so unequal pane widths cannot give panes different ticks or bottom margins.
- *  `marginLeft` is one value or one per column, as the caller renders them. Undefined off a date axis. */
-function dateAxisTickWidth(
+/** `x_ticks: data` in small multiples: every pane's x values together, so every pane draws the same
+ *  ticks, including where it has no data of its own. */
+function figureXTickValues(spec: ChartSpec, probes: PaneResult[]): number[] | undefined {
+  if (spec.x_ticks !== "data" || !probes.length) return undefined;
+  return [...new Set(probes.flatMap((p) => paneXValues(p.dataInScope)))];
+}
+
+/** The narrowest pane's data width, which every pane fits its ticks to, so unequal pane widths cannot
+ *  give panes different ticks or bottom margins: on a date axis (any chart type, histograms included),
+ *  and on a numeric axis with `x_ticks` (without it Plot picks numeric ticks itself). `marginLeft` is
+ *  one value or one per column, as the caller renders them. Undefined where ticks are not fitted. */
+function paneTickWidth(
   spec: ChartSpec,
   colWidths: number[],
   marginLeft: number | number[],
   opts: RenderOptions,
 ): number | undefined {
-  if (spec.xAxisType !== "temporal" && spec.xAxisType !== "quarterly") return undefined;
+  const fitted =
+    spec.xAxisType === "temporal" || spec.xAxisType === "quarterly" || (spec.xAxisType === "numeric" && spec.x_ticks != null);
+  if (!fitted) return undefined;
   const right = opts.marginRight ?? TBL_MARGIN_RIGHT;
   return Math.min(
     ...colWidths.map((w, c) => w - (Array.isArray(marginLeft) ? (marginLeft[c] as number) : marginLeft) - right),
@@ -829,20 +839,20 @@ export function renderFigure(
     const panePainted: Array<Map<string, SeriesHatch>> = [];
   const paneFills: Array<Map<string, string>> = [];
     // The panes share one x range (see sharesXRange), read off a probe render of each pane.
-    const sharedX = sharesXRange(spec)
-      ? figureSharedX(
-          paneValues.map((value) =>
-            renderPane(
-              spec,
-              rows.filter((r) => (r[facetField] as string) === value),
-              { ...opts, height: effHeight, pane: true, paneFacetValue: value },
-              "probe",
-            ),
+    const xProbes = sharesXRange(spec)
+      ? paneValues.map((value) =>
+          renderPane(
+            spec,
+            rows.filter((r) => (r[facetField] as string) === value),
+            { ...opts, height: effHeight, pane: true, paneFacetValue: value },
+            "probe",
           ),
         )
-      : undefined;
+      : [];
+    const sharedX = figureSharedX(xProbes);
+    const xTickValues = figureXTickValues(spec, xProbes);
     // Ticks fit the narrowest pane, measured with the margins renderPane itself subtracts.
-    const xTickWidth = dateAxisTickWidth(
+    const xTickWidth = paneTickWidth(
       spec,
       Array.from({ length: columns }, (_, c) => perPaneWidths?.[c] ?? opts.width ?? availW),
       opts.marginLeft ?? TBL_MARGIN_LEFT,
@@ -869,6 +879,7 @@ export function renderFigure(
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
           ...(sharedX ? { sharedX } : {}),
           ...(xTickWidth != null ? { xTickWidth } : {}),
+          ...(xTickValues ? { xTickValues } : {}),
         },
         `p${i}`,
       );
@@ -1012,7 +1023,8 @@ export function renderFigure(
   const { mode: forcedXLabelMode, marginBottom: forcedMarginBottom } = coordinateXLabels(colDataW);
   // 3c. Shared x range (continuous axes), from the y probes; ticks fit the narrowest column.
   const sharedX = sharesXRange(spec) ? figureSharedX(probes) : undefined;
-  const xTickWidth = dateAxisTickWidth(spec, colWidths, colMarginLeft, opts);
+  const xTickValues = figureXTickValues(spec, probes);
+  const xTickWidth = paneTickWidth(spec, colWidths, colMarginLeft, opts);
 
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
   //    the shared y-domain. Panes hide the y-tick LABELS on non-leftmost columns.
@@ -1041,6 +1053,7 @@ export function renderFigure(
         ...(binThresholds ? { binThresholds } : {}),
         ...(sharedX ? { sharedX } : {}),
         ...(xTickWidth != null ? { xTickWidth } : {}),
+        ...(xTickValues ? { xTickValues } : {}),
         width: colWidths[col],
         ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
         ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),

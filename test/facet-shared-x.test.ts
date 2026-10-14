@@ -253,3 +253,35 @@ describe("tick fitting edge cases", () => {
     expect(a!.dataset.marginBottom).toBe(b!.dataset.marginBottom);
   });
 });
+
+describe("coordinated cursor outside a pane's own data", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("hovering 2001 in the left pane puts the right pane's guide at 2001, with no value", () => {
+    const rows = [
+      ...rowsFor("Holders", SURVEYS).map((r) => ({ ...r, pane: r.facet })),
+      ...rowsFor("Balances", SURVEYS.slice(1)).map((r) => ({ ...r, pane: r.facet })),
+    ];
+    const s = {
+      title: "t",
+      data: "inline",
+      chartType: "line",
+      xAxisType: "temporal",
+      columns: { x: "time", value: "value", facet: "pane" },
+      small_multiples: { columns: 2, mode: "per-pane", pane_order: ["Holders", "Balances"] },
+    } as unknown as ChartSpec;
+    const m = mountHover(s, rows as TidyRow[], true);
+    const [a, b] = m.svgs;
+    const x2001 = (a as any).scale("x").apply(new Date(2001, 0, 1)) as number;
+    a!.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: x2001, clientY: 100, bubbles: true }),
+    );
+    expect(coordShown(b!)).toBe(true);
+    const guide = b!.querySelector<SVGLineElement>("g.tbl-coord line");
+    const want = (b as any).scale("x").apply(new Date(2001, 0, 1)) as number;
+    expect(Math.abs(+guide!.getAttribute("x1")! - want)).toBeLessThan(1);
+    expect(b!.querySelectorAll("g.tbl-coord circle").length).toBe(0);
+  });
+});

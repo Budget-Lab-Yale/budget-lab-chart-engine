@@ -2798,12 +2798,17 @@ export function attachSecondaryLineCursor(
       g.setAttribute("opacity", "0");
       return;
     }
-    // Snap to this pane's nearest x (panes may not share identical x-sets).
-    let nx = xs[0]!;
-    let best = Infinity;
-    for (const x of xs) {
-      const d = Math.abs(x - xValue);
-      if (d < best) { best = d; nx = x; }
+    // Snap to this pane's nearest x (panes may not share identical x-sets) — but only within this
+    // pane's own data. Panes share one x range, so another pane can be hovered where this one has
+    // no data at all; snapping there would show a neighbouring year's values as if they were the
+    // hovered one's. Outside, the guide marks the hovered x and no value is drawn.
+    let nx = xValue;
+    if (xValue >= xs[0]! && xValue <= xs[xs.length - 1]!) {
+      let best = Infinity;
+      for (const x of xs) {
+        const d = Math.abs(x - xValue);
+        if (d < best) { best = d; nx = x; }
+      }
     }
     const gx = xToPx(nx);
     addCoordGuide(g, doc, gx, mt, mt + plotH);
