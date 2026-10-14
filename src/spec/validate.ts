@@ -419,6 +419,33 @@ function tooltipXFormatError(spec: { xAxisType?: unknown; tooltip_x_format?: unk
   );
 }
 
+/** `x_ticks` places ticks on a continuous axis, so it needs one: temporal, quarterly or numeric. Not
+ *  supported on a histogram, and a timeline draws its own axis (TIMELINE_REJECTED_FIELDS).
+ *  A listed value must read in the axis' own grammar — a bare number is a year on a temporal axis. */
+function xTicksError(spec: { xAxisType?: unknown; chartType?: unknown; x_ticks?: unknown }): string | null {
+  const ticks = spec.x_ticks;
+  if (ticks == null) return null;
+  const axis = spec.xAxisType;
+  if (axis !== "temporal" && axis !== "quarterly" && axis !== "numeric") {
+    return `\`x_ticks\` applies only to xAxisType "temporal", "quarterly" or "numeric" (got ${JSON.stringify(axis)})`;
+  }
+  if (spec.chartType === "histogram") return "`x_ticks` is not supported on a histogram";
+  if (!Array.isArray(ticks)) return null;
+  for (const v of ticks) {
+    const s = String(v);
+    const err =
+      axis === "temporal"
+        ? temporalValueError(s)
+        : axis === "quarterly"
+          ? quarterValueError(s)
+          : s.trim() !== "" && Number.isFinite(+s)
+            ? null
+            : `expected a number, got ${JSON.stringify(v)}`;
+    if (err) return `x_ticks: ${err}`;
+  }
+  return null;
+}
+
 /**
  * Every field that takes a color, checked against what the engine can actually PAINT (see
  * color-ref.ts). An unresolvable name is not a cosmetic slip: it reaches Plot as a constant fill,
@@ -813,7 +840,7 @@ export const TIMELINE_REJECTED_FIELDS: readonly string[] = [
   "title_selectors", "value_prefix", "value_suffix", "x_axis_ticks", "y_axis_title",
   "tooltip_decimals", "tooltip_series_name", "tooltip_section", "tooltip_x_format", "tooltip_x_label", "tooltip_y_label",
   "xAxisPolicy", "yAxisPolicy", "annotations", "series_patterns", "bar_color", "category_colors",
-  "series_styles", "section_order", "section_labels", "x_order", "category_order", "x_labels",
+  "series_styles", "section_order", "section_labels", "x_order", "x_ticks", "category_order", "x_labels",
   "shape_order", "shape_labels", "shape_legend_title", "confidence_bands", "overlays", "shading",
   "rug", "points", "projected_style", "valueLabels", "barStack", "waterfall", "histogram",
   "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "value_format",
@@ -872,7 +899,7 @@ export const TREEMAP_REJECTED_FIELDS: readonly string[] = [
   "title_selectors", "x_axis_title", "x_axis_ticks", "y_axis_title", "tooltip_series_name", "tooltip_section",
   "tooltip_x_format", "tooltip_x_label", "tooltip_y_label", "xAxisPolicy", "yAxisPolicy",
   "series_patterns", "bar_color", "category_colors", "series_styles", "section_order", "section_labels",
-  "x_order", "category_order", "x_labels", "shape_order", "shape_labels", "color_legend_title",
+  "x_order", "x_ticks", "category_order", "x_labels", "shape_order", "shape_labels", "color_legend_title",
   "shape_legend_title", "confidence_bands", "shading", "rug", "points", "projected_field",
   "projected_style", "orientation", "valueLabels", "barStack", "waterfall", "histogram", "timeline",
   "series_marker", "connector", "dot_radius", "gap_annotation", "value_axis_title", "highlightSeries",
@@ -989,6 +1016,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (shadeErr) return { valid: false, errors: [shadeErr] };
   const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
   if (txfErr) return { valid: false, errors: [txfErr] };
+  const xTicksErr = xTicksError(spec as { xAxisType?: unknown; chartType?: unknown; x_ticks?: unknown });
+  if (xTicksErr) return { valid: false, errors: [xTicksErr] };
   // A texture over a ground the band deriver cannot PARSE: paintable, so `colorErrors` passes it, and
   // a hard throw at render. Checked against the AUTHORED colour — a palette default is always a hex.
   const groundErrors: string[] = [];

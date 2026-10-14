@@ -448,6 +448,14 @@ export const CHART_SPEC_SCHEMA = {
     section_order: { type: "array", items: { type: "string" } },
     section_labels: { type: "object", additionalProperties: { type: "string" } },
     x_order: { type: "array", items: { type: "string" } },
+    // Continuous x-axis tick positions: the data's own x values, or an explicit list in the axis'
+    // grammar (applicability and value grammar are checked in validate.ts).
+    x_ticks: {
+      anyOf: [
+        { const: "data" },
+        { type: "array", minItems: 1, items: { anyOf: [{ type: "string" }, { type: "number" }] } },
+      ],
+    },
     category_order: { type: "array", items: { type: "string" } },
     x_labels: { type: "object", additionalProperties: { type: "string" } },
 

@@ -33,3 +33,20 @@ export function readLinearScale(
     return null;
   }
 }
+
+/** The `[lo, hi]` domain Plot drew `axis` over (epoch ms for dates), or null on the same terms as
+ *  `readLinearScale`. For hover code that maps pixels back to data: the drawn domain can be wider than
+ *  the pane's own data (a shared small-multiples range, a marker past the data). */
+export function readScaleDomain(svgEl: SVGSVGElement, axis: "x" | "y"): [number, number] | null {
+  const scaleFn = (svgEl as unknown as { scale?: (n: string) => unknown }).scale;
+  if (typeof scaleFn !== "function") return null;
+  try {
+    const d = (scaleFn.call(svgEl, axis) as { domain?: unknown[] } | undefined)?.domain;
+    if (!d || d.length < 2) return null;
+    const lo = Number(d[0]);
+    const hi = Number(d[1]);
+    return Number.isFinite(lo) && Number.isFinite(hi) && lo !== hi ? [lo, hi] : null;
+  } catch {
+    return null;
+  }
+}

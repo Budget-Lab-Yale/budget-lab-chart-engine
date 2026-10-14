@@ -141,7 +141,7 @@ export function paneTitleMark(cells: PaneTitleCell[]): Mark[] {
 // chrome collapse can keep the bottom-row copies. Left undefined for single-frame charts so
 // their output stays byte-identical (Plot omits the class attribute entirely).
 export function tblXAxis(
-  { xTickFormat }: { xTickFormat?: (d: unknown) => string } = {},
+  { xTickFormat, ticks }: { xTickFormat?: (d: unknown) => string; ticks?: number[] } = {},
   className?: string,
   /** Extra px to push the tick labels DOWN, away from the axis. The x-axis rug uses it to open a
    *  gap for its strip (the caller grows marginBottom by the same amount). Default 0. */
@@ -157,6 +157,7 @@ export function tblXAxis(
       fill: TBL.color.axis,
       fontWeight: 500,
       tickFormat: xTickFormat,
+      ...(ticks ? { ticks } : {}),
       ...(className ? { className } : {}),
     }),
   ];
@@ -173,15 +174,116 @@ export function pickTemporalCadence(xDomain: [Date, Date]): number {
   return 120; // every 10 years
 }
 
-// `densityMultiplier` thins the ticks for narrow panes (small multiples): the base cadence
-// (months between ticks) is multiplied so a higher value yields FEWER ticks. It is the tick
-// CADENCE divisor in reverse — 1 = every tick, 2 = every other tick, 3 = every third, etc.
-// EXPECTS INTEGERS ≥ 1. Non-integer or sub-1 inputs are clamped to an integer ≥ 1 (via
-// floor then max-1), so 1.9 → 1 (not 2) and 0/0.5/negatives → 1. Default 1 = unchanged. The
-// multiplier is applied to the month cadence and re-bucketed so the yearly/sub-yearly snapping
-// below stays consistent (e.g. yearly cadence × 2 → every 2 years).
-export function temporalXTicks(xDomain: [Date, Date], densityMultiplier = 1): Date[] {
-  const cadence = pickTemporalCadence(xDomain) * Math.max(1, Math.floor(densityMultiplier));
+// Cadences (months) a crowded axis steps up through; past the last, `nextCadence` continues in
+// 1-2-5 steps of years.
+const TEMPORAL_CADENCES = [3, 6, 12, 24, 60, 120, 240, 600];
+// Minimum clear space (px) between two adjacent tick labels.
+const MIN_TICK_LABEL_GAP = 8;
+
+function nextCadence(months: number): number {
+  const listed = TEMPORAL_CADENCES.find((c) => c > months);
+  if (listed != null) return listed;
+  const years = months / 12;
+  const p = 10 ** Math.floor(Math.log10(years));
+  const m = years / p;
+  return 12 * (m < 2 ? 2 * p : m < 5 ? 5 * p : 10 * p);
+}
+
+/** Ticks for a temporal axis, placed over the data's span `xDomain`. The cadence comes from that
+ *  span (`pickTemporalCadence`); given the plot's data width, it then steps up (`nextCadence`) until
+ *  adjacent labels clear each other, so a narrow plot — a small-multiples pane, a phone-width card —
+ *  thins instead of overprinting, down to a single tick if need be. Without a width the span alone
+ *  decides. `scaleDomain` (epoch ms) is the range the plot is DRAWN over when that is wider than the
+ *  data (a marker or band past it, a shared small-multiples range): the labels sit closer together
+ *  there, so spacing is measured against it. */
+export function temporalXTicks(xDomain: [Date, Date], dataWidth?: number, scaleDomain?: [number, number]): Date[] {
+  let cadence = pickTemporalCadence(xDomain);
+  let ticks = ticksAtCadence(xDomain, cadence);
+  if (!(dataWidth! > 0)) return ticks;
+  const span = scaleDomain ? scaleDomain[1] - scaleDomain[0] : +xDomain[1] - +xDomain[0];
+  while (!tickLabelsFit(ticks, span, dataWidth!)) {
+    cadence = nextCadence(cadence);
+    const coarser = ticksAtCadence(xDomain, cadence);
+    // A coarser cadence can miss the span entirely (no multiple of 50 years inside 2015–2045):
+    // keep one label rather than none.
+    if (!coarser.length) return ticks.slice(0, 1);
+    ticks = coarser;
+  }
+  return ticks;
+}
+
+/** Whether every pair of adjacent tick labels, as `tblTemporalXAxis` draws them, has
+ *  MIN_TICK_LABEL_GAP between them at this data width. */
+function tickLabelsFit(ticks: Date[], span: number, dataWidth: number): boolean {
+  if (ticks.length < 2 || !(span > 0)) return true;
+  const allJanuary = ticks.every((d) => d.getMonth() === 0);
+  const formatYear = d3.timeFormat("%Y");
+  const formatMonth = d3.timeFormat("%b");
+  const width = (d: Date): number => {
+    const year = measuredLabelWidth(formatYear(d));
+    if (allJanuary) return year;
+    const month = measuredLabelWidth(formatMonth(d));
+    return d.getMonth() === 0 ? Math.max(month, year) : month;
+  };
+  const t0 = +ticks[0]!;
+  return labelsClear(
+    ticks.length,
+    (i) => ((+ticks[i]! - t0) / span) * dataWidth,
+    (i) => width(ticks[i]!),
+  );
+}
+
+/** Whether `count` labels, the i-th centred at `px(i)` and `width(i)` wide, each have
+ *  MIN_TICK_LABEL_GAP to the next. Stops measuring at the first collision. */
+export function labelsClear(count: number, px: (i: number) => number, width: (i: number) => number): boolean {
+  let prev = count ? width(0) : 0;
+  for (let i = 1; i < count; i++) {
+    const w = width(i);
+    if ((prev + w) / 2 + MIN_TICK_LABEL_GAP > px(i) - px(i - 1)) return false;
+    prev = w;
+  }
+  return true;
+}
+
+/** The most labels at least `narrowest` px wide that can clear each other across `dataWidth`. */
+export function maxClearLabels(dataWidth: number, narrowest: number): number {
+  return Math.floor(dataWidth / (narrowest + MIN_TICK_LABEL_GAP)) + 1;
+}
+
+/** `x_ticks`: every k-th of `values`, counting from the first, for the smallest k whose labels
+ *  `fit`, so a thinned axis still lands on the data's (or the listed) values. One value at worst.
+ *  `maxCount` (see `maxClearLabels`) skips the strides that leave more labels than could ever fit. */
+export function everyKthThatFits<T>(values: T[], fits: (subset: T[]) => boolean, maxCount = values.length): T[] {
+  for (let k = Math.max(1, Math.ceil(values.length / Math.max(1, maxCount))); k <= values.length; k++) {
+    // Stride, not a filter over every value: a long daily series in a narrow pane tries thousands of k.
+    const subset: T[] = [];
+    for (let i = 0; i < values.length; i += k) subset.push(values[i] as T);
+    if (fits(subset)) return subset;
+  }
+  return values.slice(0, 1);
+}
+
+/** `x_ticks` on a date axis: the candidate ticks thinned to fit `dataWidth` over a drawn `span` (ms). */
+export function thinTemporalTicks(candidates: Date[], dataWidth: number | undefined, span: number): Date[] {
+  if (!(dataWidth! > 0)) return candidates;
+  return everyKthThatFits(
+    candidates,
+    (subset) => tickLabelsFit(subset, span, dataWidth!),
+    // The bound holds only while the span places every candidate inside the width.
+    span > 0 ? maxClearLabels(dataWidth!, narrowestDateLabel()) : undefined,
+  );
+}
+
+/** The narrowest label a date tick can draw: a month name, or a four-digit year. */
+function narrowestDateLabel(): number {
+  const formatMonth = d3.timeFormat("%b");
+  return Math.min(
+    measuredLabelWidth("1111"),
+    ...Array.from({ length: 12 }, (_, m) => measuredLabelWidth(formatMonth(new Date(2000, m, 1)))),
+  );
+}
+
+function ticksAtCadence(xDomain: [Date, Date], cadence: number): Date[] {
   const [start, end] = xDomain;
 
   if (cadence < 12) {
@@ -216,12 +318,17 @@ export function temporalXTicks(xDomain: [Date, Date], densityMultiplier = 1): Da
 // single-frame charts so their output stays byte-identical (Plot omits the class attribute).
 export function tblTemporalXAxis(
   xDomain: [Date, Date],
-  densityMultiplier = 1,
+  /** The plot's data width (px), so crowded ticks thin — see `temporalXTicks`. */
+  dataWidth?: number,
   className?: string,
   /** Extra px to push the tick labels DOWN (see tblXAxis). Default 0. */
   labelDy = 0,
+  /** The drawn range when wider than the data — see `temporalXTicks`. */
+  scaleDomain?: [number, number],
+  /** Ticks already chosen by the caller (`x_ticks`); absent → `temporalXTicks` picks them. */
+  chosen?: Date[],
 ): Mark[] {
-  const ticks = temporalXTicks(xDomain, densityMultiplier);
+  const ticks = chosen ?? temporalXTicks(xDomain, dataWidth, scaleDomain);
   const yearTicks = ticks.filter((d) => d.getMonth() === 0);
   const allJanuary = ticks.length > 0 && yearTicks.length === ticks.length;
   const cls = className ? { className } : {};

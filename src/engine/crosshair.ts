@@ -6,7 +6,7 @@
 // which resolves the hovered category from rendered rect geometry and shows a tooltip.
 import { d3 } from "./vendor";
 import { TBL } from "./theme";
-import { readLinearScale } from "./plot-scale";
+import { readLinearScale, readScaleDomain } from "./plot-scale";
 import { escapeHtml, isAnnualSeries } from "./util";
 import { categoryText } from "../spec/section-key";
 import { symbolPathD } from "./symbols";
@@ -184,8 +184,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     if (!bySeries.has(k)) bySeries.set(k, new Map());
     bySeries.get(k)!.set(xParse!(r[xField]), +(v as number));
   }
-  const xMin = xs[0]!;
-  const xMax = xs[xs.length - 1]!;
+  // The range Plot drew, which can be wider than these rows (see readScaleDomain).
+  const [xMin, xMax] = readScaleDomain(svgEl, "x") ?? [xs[0]!, xs[xs.length - 1]!];
   const xToPx = (x: number): number => ml + ((x - xMin) / (xMax - xMin)) * plotW;
   const pxToX = (px: number): number => xMin + ((px - ml) / plotW) * (xMax - xMin);
   const bisect = d3.bisector((d: number) => d).left;
@@ -2767,8 +2767,8 @@ export function attachSecondaryLineCursor(
     if (!bySeries.has(k)) bySeries.set(k, new Map());
     bySeries.get(k)!.set(xParse!(r[xField]), +(v as number));
   }
-  const xMin = xs[0]!;
-  const xMax = xs[xs.length - 1]!;
+  // The range Plot drew, which can be wider than these rows (see readScaleDomain).
+  const [xMin, xMax] = readScaleDomain(svgEl, "x") ?? [xs[0]!, xs[xs.length - 1]!];
   const xToPx = (x: number): number => ml + (xMax > xMin ? (x - xMin) / (xMax - xMin) : 0) * plotW;
   const order =
     seriesOrder && seriesOrder.length ? seriesOrder.filter((s) => bySeries.has(s)) : [...bySeries.keys()];
@@ -2798,12 +2798,17 @@ export function attachSecondaryLineCursor(
       g.setAttribute("opacity", "0");
       return;
     }
-    // Snap to this pane's nearest x (panes may not share identical x-sets).
-    let nx = xs[0]!;
-    let best = Infinity;
-    for (const x of xs) {
-      const d = Math.abs(x - xValue);
-      if (d < best) { best = d; nx = x; }
+    // Snap to this pane's nearest x (panes may not share identical x-sets) — but only within this
+    // pane's own data. Panes share one x range, so another pane can be hovered where this one has
+    // no data at all; snapping there would show a neighbouring year's values as if they were the
+    // hovered one's. Outside, the guide marks the hovered x and no value is drawn.
+    let nx = xValue;
+    if (xValue >= xs[0]! && xValue <= xs[xs.length - 1]!) {
+      let best = Infinity;
+      for (const x of xs) {
+        const d = Math.abs(x - xValue);
+        if (d < best) { best = d; nx = x; }
+      }
     }
     const gx = xToPx(nx);
     addCoordGuide(g, doc, gx, mt, mt + plotH);
