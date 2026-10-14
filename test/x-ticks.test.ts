@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { renderChart, renderFigure } from "../src/engine/index";
-import { measuredLabelWidth } from "../src/engine/axes";
+import { measuredLabelWidth, thinTemporalTicks, everyKthThatFits } from "../src/engine/axes";
 import { validateSpec } from "../src/spec/validate";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
@@ -174,5 +174,38 @@ describe("x_ticks labels follow the chosen ticks, not the data's cadence", () =>
     const days = ["2026-07-02", "2026-07-03"];
     const { svg } = renderChart(line({ x_ticks: "data" }), rows(days), { width: 720, height: 300, document });
     expect(dateLabels(svg)).toEqual(["Jul", "Jul"]);
+  });
+});
+
+describe("x_ticks thinning cost", () => {
+  it("skips the strides that leave more labels than could fit, building each by stride", () => {
+    const values = Array.from({ length: 30000 }, (_, i) => i);
+    let calls = 0;
+    let measured = 0;
+    const kept = everyKthThatFits(
+      values,
+      (s) => {
+        calls++;
+        measured += s.length;
+        return s.length <= 4;
+      },
+      4,
+    );
+    expect(kept).toEqual([0, 7500, 15000, 22500]);
+    expect(calls).toBe(1);
+    expect(measured).toBe(4);
+  });
+
+  it("thins 30,000 daily ticks in a narrow plot to a handful, from the first", () => {
+    const days = Array.from({ length: 30000 }, (_, i) => new Date(2000, 0, 1 + i));
+    const ticks = thinTemporalTicks(days, 100, +days[days.length - 1]! - +days[0]!);
+    expect(ticks[0]).toEqual(days[0]);
+    expect(ticks.length).toBeGreaterThan(1);
+    expect(ticks.length).toBeLessThanOrEqual(5); // 100px holds at most five 16px-plus-gap labels
+  });
+
+  it("keeps every candidate when the span is degenerate", () => {
+    const same = Array.from({ length: 3 }, () => new Date(2020, 0, 1));
+    expect(thinTemporalTicks(same, 10, 0)).toHaveLength(3);
   });
 });

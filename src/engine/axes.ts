@@ -217,30 +217,47 @@ export function temporalXTicks(xDomain: [Date, Date], dataWidth?: number, scaleD
 function tickLabelsFit(ticks: Date[], span: number, dataWidth: number): boolean {
   if (ticks.length < 2 || !(span > 0)) return true;
   const allJanuary = ticks.every((d) => d.getMonth() === 0);
+  const formatYear = d3.timeFormat("%Y");
+  const formatMonth = d3.timeFormat("%b");
   const width = (d: Date): number => {
-    const year = measuredLabelWidth(d3.timeFormat("%Y")(d));
+    const year = measuredLabelWidth(formatYear(d));
     if (allJanuary) return year;
-    const month = measuredLabelWidth(d3.timeFormat("%b")(d));
+    const month = measuredLabelWidth(formatMonth(d));
     return d.getMonth() === 0 ? Math.max(month, year) : month;
   };
-  return labelsClear(ticks.map((d) => ((+d - +ticks[0]!) / span) * dataWidth), ticks.map(width));
+  const t0 = +ticks[0]!;
+  return labelsClear(
+    ticks.length,
+    (i) => ((+ticks[i]! - t0) / span) * dataWidth,
+    (i) => width(ticks[i]!),
+  );
 }
 
-/** Whether labels centred at `px`, `widths` wide, each have MIN_TICK_LABEL_GAP to the next. */
-export function labelsClear(px: number[], widths: number[]): boolean {
-  for (let i = 1; i < px.length; i++) {
-    if (((widths[i - 1] as number) + (widths[i] as number)) / 2 + MIN_TICK_LABEL_GAP > (px[i] as number) - (px[i - 1] as number)) {
-      return false;
-    }
+/** Whether `count` labels, the i-th centred at `px(i)` and `width(i)` wide, each have
+ *  MIN_TICK_LABEL_GAP to the next. Stops measuring at the first collision. */
+export function labelsClear(count: number, px: (i: number) => number, width: (i: number) => number): boolean {
+  let prev = count ? width(0) : 0;
+  for (let i = 1; i < count; i++) {
+    const w = width(i);
+    if ((prev + w) / 2 + MIN_TICK_LABEL_GAP > px(i) - px(i - 1)) return false;
+    prev = w;
   }
   return true;
 }
 
+/** The most labels at least `narrowest` px wide that can clear each other across `dataWidth`. */
+export function maxClearLabels(dataWidth: number, narrowest: number): number {
+  return Math.floor(dataWidth / (narrowest + MIN_TICK_LABEL_GAP)) + 1;
+}
+
 /** `x_ticks`: every k-th of `values`, counting from the first, for the smallest k whose labels
- *  `fit`, so a thinned axis still lands on the data's (or the listed) values. One value at worst. */
-export function everyKthThatFits<T>(values: T[], fits: (subset: T[]) => boolean): T[] {
-  for (let k = 1; k <= values.length; k++) {
-    const subset = values.filter((_, i) => i % k === 0);
+ *  `fit`, so a thinned axis still lands on the data's (or the listed) values. One value at worst.
+ *  `maxCount` (see `maxClearLabels`) skips the strides that leave more labels than could ever fit. */
+export function everyKthThatFits<T>(values: T[], fits: (subset: T[]) => boolean, maxCount = values.length): T[] {
+  for (let k = Math.max(1, Math.ceil(values.length / Math.max(1, maxCount))); k <= values.length; k++) {
+    // Stride, not a filter over every value: a long daily series in a narrow pane tries thousands of k.
+    const subset: T[] = [];
+    for (let i = 0; i < values.length; i += k) subset.push(values[i] as T);
     if (fits(subset)) return subset;
   }
   return values.slice(0, 1);
@@ -249,7 +266,21 @@ export function everyKthThatFits<T>(values: T[], fits: (subset: T[]) => boolean)
 /** `x_ticks` on a date axis: the candidate ticks thinned to fit `dataWidth` over a drawn `span` (ms). */
 export function thinTemporalTicks(candidates: Date[], dataWidth: number | undefined, span: number): Date[] {
   if (!(dataWidth! > 0)) return candidates;
-  return everyKthThatFits(candidates, (subset) => tickLabelsFit(subset, span, dataWidth!));
+  return everyKthThatFits(
+    candidates,
+    (subset) => tickLabelsFit(subset, span, dataWidth!),
+    // The bound holds only while the span places every candidate inside the width.
+    span > 0 ? maxClearLabels(dataWidth!, narrowestDateLabel()) : undefined,
+  );
+}
+
+/** The narrowest label a date tick can draw: a month name, or a four-digit year. */
+function narrowestDateLabel(): number {
+  const formatMonth = d3.timeFormat("%b");
+  return Math.min(
+    measuredLabelWidth("1111"),
+    ...Array.from({ length: 12 }, (_, m) => measuredLabelWidth(formatMonth(new Date(2000, m, 1)))),
+  );
 }
 
 function ticksAtCadence(xDomain: [Date, Date], cadence: number): Date[] {

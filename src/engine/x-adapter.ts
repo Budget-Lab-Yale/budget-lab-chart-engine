@@ -4,7 +4,7 @@
 // formatters). Generic across chart types — the line builder consumes `xField`.
 import { d3 } from "./vendor";
 import {
-  tblXAxis, tblTemporalXAxis, temporalXTicks, thinTemporalTicks, everyKthThatFits, labelsClear, measuredLabelWidth,
+  tblXAxis, tblTemporalXAxis, temporalXTicks, thinTemporalTicks, everyKthThatFits, labelsClear, maxClearLabels, measuredLabelWidth,
   tblBandXAxis, bandLabelMarginBottom, type BandLabelMode,
 } from "./axes";
 import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
@@ -160,11 +160,16 @@ export function makeXAdapter(
         if (tickValues) {
           ticks = sortedInRange(tickValues, xMin, xMax);
           if (tickWidth! > 0 && xMax > xMin) {
-            ticks = everyKthThatFits(ticks, (s) =>
-              labelsClear(
-                s.map((v) => ((v - xMin) / (xMax - xMin)) * tickWidth!),
-                s.map((v) => measuredLabelWidth(formatNumericTick(v))),
-              ),
+            ticks = everyKthThatFits(
+              ticks,
+              (s) =>
+                labelsClear(
+                  s.length,
+                  (i) => ((s[i]! - xMin) / (xMax - xMin)) * tickWidth!,
+                  (i) => measuredLabelWidth(formatNumericTick(s[i]!)),
+                ),
+              // No numeric label is narrower than one digit.
+              maxClearLabels(tickWidth!, measuredLabelWidth("1")),
             );
           }
         }
